@@ -538,7 +538,10 @@ mod tests {
             .await
             .expect("expected broadcast message")
             .expect("broadcast channel should be open");
-        assert!(matches!(broadcast_message, BusMessage::TerminalInput { .. }));
+        assert!(matches!(
+            broadcast_message,
+            BusMessage::TerminalInput { .. }
+        ));
     }
 
     #[tokio::test]
@@ -558,7 +561,10 @@ mod tests {
             )
             .await;
 
-        assert!(publish_result.is_ok(), "publish should ignore stale subscribers");
+        assert!(
+            publish_result.is_ok(),
+            "publish should ignore stale subscribers"
+        );
 
         let live_message = timeout(Duration::from_millis(200), live_rx.recv())
             .await

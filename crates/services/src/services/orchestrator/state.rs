@@ -96,10 +96,7 @@ impl OrchestratorState {
     /// Records a terminal completion for a task.
     pub fn mark_terminal_completed(&mut self, task_id: &str, terminal_id: &str, success: bool) {
         if let Some(state) = self.task_states.get_mut(task_id) {
-            let already_recorded = state
-                .completed_terminals
-                .iter()
-                .any(|id| id == terminal_id)
+            let already_recorded = state.completed_terminals.iter().any(|id| id == terminal_id)
                 || state.failed_terminals.iter().any(|id| id == terminal_id);
 
             if already_recorded {

@@ -692,10 +692,11 @@ mod tests {
             .expect("spinner-like prompt should still produce a decision");
         assert!(matches!(decision, PromptDecision::Skip { .. }));
 
-        let decision_message = tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv())
-            .await
-            .expect("expected decision broadcast")
-            .expect("broadcast channel should be open");
+        let decision_message =
+            tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv())
+                .await
+                .expect("expected decision broadcast")
+                .expect("broadcast channel should be open");
 
         assert!(matches!(
             decision_message,
@@ -705,7 +706,8 @@ mod tests {
             }
         ));
 
-        let maybe_input = tokio::time::timeout(Duration::from_millis(120), broadcast_rx.recv()).await;
+        let maybe_input =
+            tokio::time::timeout(Duration::from_millis(120), broadcast_rx.recv()).await;
         assert!(
             maybe_input.is_err(),
             "spinner-like prompt should not emit TerminalInput"
@@ -1029,14 +1031,16 @@ mod tests {
             .expect("prompt should produce auto-confirm decision");
         assert!(matches!(decision, PromptDecision::AutoConfirm { .. }));
 
-        let initial_message_1 = tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv())
-            .await
-            .expect("expected first initial broadcast")
-            .expect("broadcast channel should be open");
-        let initial_message_2 = tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv())
-            .await
-            .expect("expected second initial broadcast")
-            .expect("broadcast channel should be open");
+        let initial_message_1 =
+            tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv())
+                .await
+                .expect("expected first initial broadcast")
+                .expect("broadcast channel should be open");
+        let initial_message_2 =
+            tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv())
+                .await
+                .expect("expected second initial broadcast")
+                .expect("broadcast channel should be open");
 
         let mut saw_auto_confirm_decision = false;
         let mut saw_terminal_input = false;

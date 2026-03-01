@@ -558,7 +558,10 @@ mod tests {
         .expect("forward should not error");
 
         assert!(!should_stop);
-        assert!(rx.try_recv().is_err(), "mismatched session must not be forwarded");
+        assert!(
+            rx.try_recv().is_err(),
+            "mismatched session must not be forwarded"
+        );
     }
 
     #[tokio::test]

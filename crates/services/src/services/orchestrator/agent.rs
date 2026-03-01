@@ -1,6 +1,10 @@
 //! Orchestrator agent loop and event handling.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
 
 use anyhow::anyhow;
 use db::DBService;
@@ -10,7 +14,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use tokio::{
     sync::RwLock,
-    time::{Duration, sleep},
+    time::{Duration, MissedTickBehavior, interval, sleep},
 };
 
 use super::{
@@ -18,7 +22,8 @@ use super::{
     constants::{
         GIT_COMMIT_METADATA_SEPARATOR, TERMINAL_STATUS_COMPLETED, TERMINAL_STATUS_FAILED,
         TERMINAL_STATUS_REVIEW_PASSED, TERMINAL_STATUS_REVIEW_REJECTED, WORKFLOW_STATUS_COMPLETED,
-        WORKFLOW_STATUS_FAILED, WORKFLOW_STATUS_MERGING, WORKFLOW_TOPIC_PREFIX,
+        WORKFLOW_STATUS_FAILED, WORKFLOW_STATUS_MERGING, WORKFLOW_STATUS_RUNNING,
+        WORKFLOW_TOPIC_PREFIX,
     },
     llm::{LLMClient, build_terminal_completion_prompt, create_llm_client},
     message_bus::{BusMessage, SharedMessageBus},
@@ -58,10 +63,50 @@ struct InferredNoMetadataCompletion {
     total_terminals: usize,
 }
 
+#[derive(Debug, Default)]
+struct StallRecoveryTracker {
+    last_recoveries: HashMap<String, Instant>,
+}
+
+impl StallRecoveryTracker {
+    fn should_skip_due_to_cooldown(
+        &self,
+        terminal_id: &str,
+        now: Instant,
+        cooldown: Duration,
+    ) -> bool {
+        self.last_recoveries
+            .get(terminal_id)
+            .is_some_and(|last_recovered_at| now.duration_since(*last_recovered_at) < cooldown)
+    }
+
+    fn mark_recovered(&mut self, terminal_id: &str, now: Instant) {
+        self.last_recoveries.insert(terminal_id.to_string(), now);
+    }
+
+    fn retain_active_terminals(&mut self, active_terminal_ids: &HashSet<String>) {
+        self.last_recoveries
+            .retain(|terminal_id, _| active_terminal_ids.contains(terminal_id));
+    }
+}
+
 impl OrchestratorAgent {
     const NEXT_TERMINAL_WAIT_RETRY_ATTEMPTS: usize = 20;
     const NEXT_TERMINAL_WAIT_RETRY_INTERVAL: Duration = Duration::from_millis(500);
     const INITIAL_DISPATCH_DELAY: Duration = Duration::from_millis(2000);
+    #[cfg(not(test))]
+    const STALL_WATCHDOG_TICK: Duration = Duration::from_secs(5);
+    #[cfg(test)]
+    const STALL_WATCHDOG_TICK: Duration = Duration::from_millis(80);
+    #[cfg(not(test))]
+    const STALL_QUIET_WINDOW: Duration = Duration::from_secs(45);
+    #[cfg(test)]
+    const STALL_QUIET_WINDOW: Duration = Duration::from_millis(180);
+    #[cfg(not(test))]
+    const STALL_RECOVERY_COOLDOWN: Duration = Duration::from_secs(30);
+    #[cfg(test)]
+    const STALL_RECOVERY_COOLDOWN: Duration = Duration::from_millis(220);
+    const STALL_RECOVERY_SUFFIX: &str = "Watchdog notice: execution appears stalled. Resume this same task from current workspace state immediately and continue implementation; do not wait for a new task.";
 
     /// Builds a new orchestrator agent with a configured LLM client.
     pub fn new(
@@ -147,10 +192,34 @@ impl OrchestratorAgent {
         }
 
         // 濞存粌顑勫▎銏狀嚗椤忓棗绠?
-        while let Some(message) = rx.recv().await {
-            let should_stop = self.handle_message(message).await?;
-            if should_stop {
-                break;
+        let mut stall_recovery_tracker = StallRecoveryTracker::default();
+        let mut watchdog = interval(Self::STALL_WATCHDOG_TICK);
+        watchdog.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        watchdog.tick().await;
+
+        loop {
+            tokio::select! {
+                maybe_message = rx.recv() => {
+                    let Some(message) = maybe_message else {
+                        break;
+                    };
+                    let should_stop = self.handle_message(message).await?;
+                    if should_stop {
+                        break;
+                    }
+                }
+                _ = watchdog.tick() => {
+                    if let Err(error) = self
+                        .recover_stalled_terminals(&mut stall_recovery_tracker)
+                        .await
+                    {
+                        tracing::warn!(
+                            workflow_id = %workflow_id,
+                            error = %error,
+                            "Failed while recovering stalled terminals"
+                        );
+                    }
+                }
             }
         }
 
@@ -182,6 +251,168 @@ impl OrchestratorAgent {
             _ => {}
         }
         Ok(false)
+    }
+
+    async fn recover_stalled_terminals(
+        &self,
+        tracker: &mut StallRecoveryTracker,
+    ) -> anyhow::Result<()> {
+        let workflow_id = {
+            let state = self.state.read().await;
+            if state.run_state != OrchestratorRunState::Idle {
+                return Ok(());
+            }
+            state.workflow_id.clone()
+        };
+
+        let Some(workflow) = db::models::Workflow::find_by_id(&self.db.pool, &workflow_id).await?
+        else {
+            tracker.last_recoveries.clear();
+            return Ok(());
+        };
+
+        if workflow.status != WORKFLOW_STATUS_RUNNING {
+            tracker.last_recoveries.clear();
+            return Ok(());
+        }
+
+        let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, &workflow_id).await?;
+        if tasks.is_empty() {
+            tracker.last_recoveries.clear();
+            return Ok(());
+        }
+
+        let mut active_working_terminal_ids = HashSet::new();
+
+        for task in tasks {
+            if matches!(task.status.as_str(), "completed" | "failed" | "cancelled") {
+                continue;
+            }
+
+            let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id).await?;
+            if terminals.is_empty() {
+                continue;
+            }
+
+            for terminal in terminals
+                .iter()
+                .filter(|terminal| terminal.status == "working")
+            {
+                active_working_terminal_ids.insert(terminal.id.clone());
+
+                if self
+                    .remaining_terminal_quiet_duration(&terminal.id, Self::STALL_QUIET_WINDOW)
+                    .await?
+                    .is_some()
+                {
+                    continue;
+                }
+
+                let now = Instant::now();
+                if tracker.should_skip_due_to_cooldown(
+                    &terminal.id,
+                    now,
+                    Self::STALL_RECOVERY_COOLDOWN,
+                ) {
+                    continue;
+                }
+
+                if let Err(error) = self
+                    .redispatch_stalled_terminal_instruction(
+                        &workflow_id,
+                        &task,
+                        terminal,
+                        terminals.len(),
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        workflow_id = %workflow_id,
+                        task_id = %task.id,
+                        terminal_id = %terminal.id,
+                        error = %error,
+                        "Failed to re-dispatch stalled terminal"
+                    );
+                    continue;
+                }
+
+                tracker.mark_recovered(&terminal.id, now);
+            }
+        }
+
+        tracker.retain_active_terminals(&active_working_terminal_ids);
+        Ok(())
+    }
+
+    async fn redispatch_stalled_terminal_instruction(
+        &self,
+        workflow_id: &str,
+        task: &db::models::WorkflowTask,
+        terminal: &db::models::Terminal,
+        total_terminals: usize,
+    ) -> anyhow::Result<()> {
+        let pty_session_id = terminal
+            .pty_session_id
+            .as_deref()
+            .or(terminal.session_id.as_deref())
+            .map(str::trim)
+            .filter(|session_id| !session_id.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                anyhow!(
+                    "Terminal {} has no PTY/session binding for stall recovery",
+                    terminal.id
+                )
+            })?;
+
+        let instruction = format!(
+            "{} | {}",
+            Self::build_task_instruction(workflow_id, task, terminal, total_terminals),
+            Self::STALL_RECOVERY_SUFFIX
+        );
+
+        if Self::needs_explicit_submit(terminal) {
+            self.message_bus
+                .publish_terminal_input(&terminal.id, &pty_session_id, &instruction, None)
+                .await;
+        } else {
+            self.message_bus
+                .publish(
+                    &pty_session_id,
+                    BusMessage::TerminalMessage {
+                        message: instruction.clone(),
+                    },
+                )
+                .await
+                .map_err(|e| anyhow!("Failed to publish stalled-terminal instruction: {e}"))?;
+        }
+
+        for (attempt, delay_ms) in Self::submit_keystroke_schedule_ms(terminal, false)
+            .iter()
+            .enumerate()
+        {
+            sleep(Duration::from_millis(*delay_ms)).await;
+            self.message_bus
+                .publish_terminal_input(&terminal.id, &pty_session_id, "", None)
+                .await;
+            tracing::debug!(
+                workflow_id = %workflow_id,
+                task_id = %task.id,
+                terminal_id = %terminal.id,
+                attempt = attempt + 1,
+                delay_ms,
+                "Sent submit keystroke after stalled-terminal re-dispatch"
+            );
+        }
+
+        tracing::warn!(
+            workflow_id = %workflow_id,
+            task_id = %task.id,
+            terminal_id = %terminal.id,
+            "Recovered stalled terminal by re-dispatching current task instruction"
+        );
+
+        Ok(())
     }
 
     /// Handles terminal prompt detected events.
@@ -1211,11 +1442,7 @@ impl OrchestratorAgent {
                     .terminal_recent_logs_contain_commit_hash(&inferred.terminal_id, commit_hash)
                     .await
                 {
-                    hash_matched_candidates.push((
-                        *task_order,
-                        *terminal_order,
-                        inferred.clone(),
-                    ));
+                    hash_matched_candidates.push((*task_order, *terminal_order, inferred.clone()));
                 }
             }
 
@@ -1282,24 +1509,31 @@ impl OrchestratorAgent {
             return false;
         }
 
-        let short_hash: String = commit_hash.chars().take(8).collect::<String>().to_ascii_lowercase();
+        let short_hash: String = commit_hash
+            .chars()
+            .take(8)
+            .collect::<String>()
+            .to_ascii_lowercase();
         let full_hash = commit_hash.to_ascii_lowercase();
 
-        let recent_logs =
-            match db::models::terminal::TerminalLog::find_by_terminal(&self.db.pool, terminal_id, Some(240))
-                .await
-            {
-                Ok(logs) => logs,
-                Err(error) => {
-                    tracing::warn!(
-                        terminal_id = %terminal_id,
-                        commit_hash = %commit_hash,
-                        error = %error,
-                        "Failed to load terminal logs while resolving no-metadata commit"
-                    );
-                    return false;
-                }
-            };
+        let recent_logs = match db::models::terminal::TerminalLog::find_by_terminal(
+            &self.db.pool,
+            terminal_id,
+            Some(240),
+        )
+        .await
+        {
+            Ok(logs) => logs,
+            Err(error) => {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    commit_hash = %commit_hash,
+                    error = %error,
+                    "Failed to load terminal logs while resolving no-metadata commit"
+                );
+                return false;
+            }
+        };
 
         recent_logs.iter().any(|log| {
             let content = log.content.to_ascii_lowercase();
@@ -1573,8 +1807,7 @@ impl OrchestratorAgent {
 
                     // Fallback submit keystroke: some terminal TUIs keep pasted text in composer
                     // until an additional Enter is sent.
-                    for (attempt, delay_ms) in
-                        Self::submit_keystroke_schedule_ms(&terminal, false)
+                    for (attempt, delay_ms) in Self::submit_keystroke_schedule_ms(&terminal, false)
                         .iter()
                         .enumerate()
                     {
@@ -2737,9 +2970,17 @@ impl OrchestratorAgent {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
+    use std::{path::PathBuf, sync::Arc};
 
-    use super::OrchestratorAgent;
+    use chrono::Utc;
+    use db::DBService;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use uuid::Uuid;
+
+    use super::{OrchestratorAgent, StallRecoveryTracker};
+    use crate::services::orchestrator::{
+        BusMessage, MessageBus, MockLLMClient, OrchestratorConfig,
+    };
 
     fn make_task(description: Option<&str>) -> db::models::WorkflowTask {
         let now = Utc::now();
@@ -2845,5 +3086,211 @@ mod tests {
         ));
         assert!(!OrchestratorAgent::should_skip_completed_handoff("handoff"));
         assert!(!OrchestratorAgent::should_skip_completed_handoff(""));
+    }
+
+    async fn setup_stalled_recovery_fixture() -> (
+        OrchestratorAgent,
+        Arc<MessageBus>,
+        Arc<DBService>,
+        String,
+        String,
+    ) {
+        let pool = SqlitePoolOptions::new().connect(":memory:").await.unwrap();
+
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let migration_dir = manifest_dir
+            .ancestors()
+            .nth(1)
+            .unwrap()
+            .join("db")
+            .join("migrations");
+
+        let migrator = sqlx::migrate::Migrator::new(migration_dir).await.unwrap();
+        migrator.run(&pool).await.unwrap();
+
+        let db = Arc::new(DBService { pool: pool.clone() });
+
+        let workflow_id = Uuid::new_v4().to_string();
+        let task_id = Uuid::new_v4().to_string();
+        let terminal_id = Uuid::new_v4().to_string();
+        let pty_session_id = Uuid::new_v4().to_string();
+
+        let now = Utc::now();
+        let stale_time = now - chrono::Duration::seconds(90);
+
+        let project_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO projects (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(project_id)
+        .bind("test-project")
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r#"
+            INSERT INTO workflow (
+                id, project_id, name, status, target_branch,
+                merge_terminal_cli_id, merge_terminal_model_id,
+                created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "#,
+        )
+        .bind(&workflow_id)
+        .bind(project_id)
+        .bind("test-workflow")
+        .bind("running")
+        .bind("main")
+        .bind("cli-claude-code")
+        .bind("model-claude-sonnet")
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r#"
+            INSERT INTO workflow_task (
+                id, workflow_id, name, branch, status, order_index,
+                started_at, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "#,
+        )
+        .bind(&task_id)
+        .bind(&workflow_id)
+        .bind("test-task")
+        .bind("feature/test")
+        .bind("running")
+        .bind(0)
+        .bind(stale_time)
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r#"
+            INSERT INTO terminal (
+                id, workflow_task_id, cli_type_id, model_config_id,
+                order_index, status, pty_session_id, started_at, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            "#,
+        )
+        .bind(&terminal_id)
+        .bind(&task_id)
+        .bind("cli-claude-code")
+        .bind("model-claude-sonnet")
+        .bind(0)
+        .bind("working")
+        .bind(&pty_session_id)
+        .bind(stale_time)
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let config = OrchestratorConfig {
+            api_type: "openai".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: "sk-test".to_string(),
+            model: "gpt-4".to_string(),
+            ..Default::default()
+        };
+
+        let message_bus = Arc::new(MessageBus::new(100));
+        let agent = OrchestratorAgent::with_llm_client(
+            config,
+            workflow_id,
+            message_bus.clone(),
+            db.clone(),
+            Box::new(MockLLMClient::new()),
+        )
+        .unwrap();
+
+        (agent, message_bus, db, terminal_id, pty_session_id)
+    }
+
+    #[tokio::test]
+    async fn recover_stalled_terminals_redispatches_instruction() {
+        let (agent, message_bus, _db, terminal_id, pty_session_id) =
+            setup_stalled_recovery_fixture().await;
+        let mut terminal_rx = message_bus.subscribe(&pty_session_id).await;
+        let mut tracker = StallRecoveryTracker::default();
+
+        agent.recover_stalled_terminals(&mut tracker).await.unwrap();
+
+        let message =
+            tokio::time::timeout(std::time::Duration::from_millis(500), terminal_rx.recv())
+                .await
+                .expect("stalled terminal should receive a watchdog re-dispatch")
+                .expect("message should exist");
+
+        match message {
+            BusMessage::TerminalMessage { message } => {
+                assert!(message.contains("Watchdog notice"));
+            }
+            other => panic!("Expected TerminalMessage, got {other:?}"),
+        }
+
+        assert!(tracker.last_recoveries.contains_key(&terminal_id));
+    }
+
+    #[tokio::test]
+    async fn recover_stalled_terminals_respects_recovery_cooldown() {
+        let (agent, message_bus, _db, _terminal_id, pty_session_id) =
+            setup_stalled_recovery_fixture().await;
+        let mut terminal_rx = message_bus.subscribe(&pty_session_id).await;
+        let mut tracker = StallRecoveryTracker::default();
+
+        agent.recover_stalled_terminals(&mut tracker).await.unwrap();
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(500), terminal_rx.recv())
+            .await
+            .expect("first re-dispatch should arrive")
+            .expect("message should exist");
+
+        agent.recover_stalled_terminals(&mut tracker).await.unwrap();
+
+        let second_message =
+            tokio::time::timeout(std::time::Duration::from_millis(120), terminal_rx.recv()).await;
+        assert!(
+            second_message.is_err(),
+            "cooldown should suppress duplicate immediate re-dispatches"
+        );
+    }
+
+    #[tokio::test]
+    async fn recover_stalled_terminals_clears_marker_after_terminal_state_change() {
+        let (agent, _message_bus, db, terminal_id, _pty_session_id) =
+            setup_stalled_recovery_fixture().await;
+        let mut tracker = StallRecoveryTracker::default();
+
+        agent.recover_stalled_terminals(&mut tracker).await.unwrap();
+        assert!(tracker.last_recoveries.contains_key(&terminal_id));
+
+        let now = Utc::now();
+        sqlx::query(
+            r#"
+            UPDATE terminal
+            SET status = 'completed', completed_at = ?1, updated_at = ?1
+            WHERE id = ?2
+            "#,
+        )
+        .bind(now)
+        .bind(&terminal_id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        agent.recover_stalled_terminals(&mut tracker).await.unwrap();
+        assert!(
+            !tracker.last_recoveries.contains_key(&terminal_id),
+            "non-working terminals should be removed from cooldown tracker"
+        );
     }
 }

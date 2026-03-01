@@ -147,16 +147,14 @@ impl OrchestratorRuntime {
         // Resolve repo path: prefer project.default_agent_working_dir, then fallback to project repos
         let repo_path = match project.default_agent_working_dir.clone() {
             Some(path) if !path.trim().is_empty() => Some(path),
-            _ => {
-                db::models::project_repo::ProjectRepo::find_repos_for_project(
-                    &self.db.pool,
-                    project.id,
-                )
-                .await?
-                .into_iter()
-                .map(|repo| repo.path.to_string_lossy().into_owned())
-                .find(|path| !path.trim().is_empty())
-            }
+            _ => db::models::project_repo::ProjectRepo::find_repos_for_project(
+                &self.db.pool,
+                project.id,
+            )
+            .await?
+            .into_iter()
+            .map(|repo| repo.path.to_string_lossy().into_owned())
+            .find(|path| !path.trim().is_empty()),
         };
 
         let Some(repo_path) = repo_path else {
@@ -1038,8 +1036,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_try_start_git_watcher_falls_back_to_project_repo_when_default_dir_missing_or_blank(
-    ) {
+    async fn test_try_start_git_watcher_falls_back_to_project_repo_when_default_dir_missing_or_blank()
+     {
         let runtime = setup_runtime_for_git_watcher_path_tests().await;
 
         for default_agent_working_dir in [None, Some("   ")] {

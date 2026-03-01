@@ -1643,8 +1643,8 @@ mod orchestrator_tests {
     }
 
     #[tokio::test]
-    async fn test_execute_instruction_start_task_claude_code_retries_submit_once_on_first_dispatch(
-    ) {
+    async fn test_execute_instruction_start_task_claude_code_retries_submit_once_on_first_dispatch()
+    {
         use db::models::Terminal;
 
         let (db, workflow_id, task_id, terminals) = setup_workflow_with_terminals(1, true).await;
@@ -1699,11 +1699,10 @@ mod orchestrator_tests {
             other => panic!("Expected TerminalMessage for first dispatch, got {other:?}"),
         }
 
-        let submit =
-            tokio::time::timeout(tokio::time::Duration::from_millis(900), input_rx.recv())
-                .await
-                .expect("expected claude-code submit retry")
-                .expect("terminal input channel should stay open");
+        let submit = tokio::time::timeout(tokio::time::Duration::from_millis(900), input_rx.recv())
+            .await
+            .expect("expected claude-code submit retry")
+            .expect("terminal input channel should stay open");
 
         match submit {
             BusMessage::TerminalInput {

@@ -1,4 +1,4 @@
-﻿//! Terminal Prompt Detection Module
+//! Terminal Prompt Detection Module
 //!
 //! Detects and classifies interactive prompts from PTY output.
 //! Supports 6 prompt types with priority-based detection.
@@ -783,7 +783,10 @@ mod tests {
     fn test_normalize_text_for_detection_strips_ansi_sequences() {
         let input = "\u{1b}[2m\u{1b}[38;5;6m鈴碘彽\u{1b}[0m bypass permissions on (shift+tab to cycle)\u{1b}[0m";
         let normalized = normalize_text_for_detection(input);
-        assert_eq!(normalized, "鈴碘彽 bypass permissions on (shift+tab to cycle)");
+        assert_eq!(
+            normalized,
+            "鈴碘彽 bypass permissions on (shift+tab to cycle)"
+        );
     }
 
     #[test]

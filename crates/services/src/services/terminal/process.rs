@@ -374,7 +374,9 @@ impl ProcessManager {
             };
 
             self.terminate_tracked_child(terminal_id, existing)
-                .map_err(|e| anyhow::anyhow!("Failed to evict existing terminal {terminal_id}: {e}"))?;
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to evict existing terminal {terminal_id}: {e}")
+                })?;
 
             processes.remove(terminal_id)
         };
@@ -1789,8 +1791,11 @@ mod tests {
         assert!(!handle.session_id.is_empty());
 
         // Cleanup
-        let _ = tokio::time::timeout(Duration::from_secs(10), manager.kill_terminal("test-terminal"))
-            .await;
+        let _ = tokio::time::timeout(
+            Duration::from_secs(10),
+            manager.kill_terminal("test-terminal"),
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -1849,8 +1854,11 @@ mod tests {
         );
 
         // Cleanup
-        let _ = tokio::time::timeout(Duration::from_secs(10), manager.kill_terminal("test-terminal"))
-            .await;
+        let _ = tokio::time::timeout(
+            Duration::from_secs(10),
+            manager.kill_terminal("test-terminal"),
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -2002,8 +2010,11 @@ mod tests {
         assert!(result.is_ok());
 
         // Cleanup
-        let _ = tokio::time::timeout(Duration::from_secs(10), manager.kill_terminal("test-terminal"))
-            .await;
+        let _ = tokio::time::timeout(
+            Duration::from_secs(10),
+            manager.kill_terminal("test-terminal"),
+        )
+        .await;
     }
 
     #[tokio::test]

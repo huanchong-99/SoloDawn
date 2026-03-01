@@ -199,6 +199,8 @@ fn has_handoff_stall_clean_marker(lower: &str) -> bool {
         || lower.contains("no outstanding changes")
         || lower.contains("no staged/unstaged diffs")
         || lower.contains("no diff to review right now")
+        || lower.contains("status clean")
+        || lower.contains("no diff")
         || lower.contains("git status clean")
 }
 
@@ -217,6 +219,11 @@ fn has_handoff_stall_wait_marker(lower: &str) -> bool {
     let asks_share_what = lower.contains("share what")
         && lower.contains("like me to")
         && (lower.contains("work on") || lower.contains("implement") || lower.contains("change"));
+    let asks_describe_specific = lower.contains("could you describe")
+        && (lower.contains("specific change or feature")
+            || lower.contains("specific change")
+            || lower.contains("specific feature")
+            || lower.contains("like me to work on"));
     let asks_proceed_next = lower.contains("how would you like to proceed next")
         || (lower.contains("how would you like") && lower.contains("proceed next"))
         || (lower.contains("would you like to proceed") && lower.contains("next"));
@@ -224,6 +231,7 @@ fn has_handoff_stall_wait_marker(lower: &str) -> bool {
     asks_what_like_me_to
         || asks_let_me_know
         || asks_share_what
+        || asks_describe_specific
         || asks_proceed_next
         || lower.contains("what would you like me to work on next")
         || (lower.contains("could you clarify what") && lower.contains("work on next"))
@@ -234,7 +242,9 @@ fn has_handoff_stall_wait_marker(lower: &str) -> bool {
         || (lower.contains("let me know") && lower.contains("work on"))
         || (lower.contains("let me know") && lower.contains("do next"))
         || (lower.contains("what") && lower.contains("like me to work on"))
-        || (lower.contains("what you") && lower.contains("like me to") && lower.contains("work on next"))
+        || (lower.contains("what you")
+            && lower.contains("like me to")
+            && lower.contains("work on next"))
         || lower.contains("share the changes you want me to make")
         || lower.contains("what you'd like me to implement")
         || lower.contains("what you would like me to implement")
@@ -243,6 +253,8 @@ fn has_handoff_stall_wait_marker(lower: &str) -> bool {
         || lower.contains("what would you like me to do next")
         || lower.contains("what you'd like me to do next")
         || lower.contains("what you would like me to do next")
+        || lower.contains("you'd like me to work on")
+        || lower.contains("youd like me to work on")
 }
 
 fn has_handoff_stall_scope_gap_marker(lower: &str) -> bool {
@@ -254,6 +266,8 @@ fn has_handoff_stall_scope_gap_marker(lower: &str) -> bool {
         || lower.contains("don't have a task yet")
         || lower.contains("do not have a task yet")
         || lower.contains("no further instructions were provided")
+        || lower.contains("ready to start implementing")
+            && lower.contains("specific change or feature")
         || lower.contains("no specific requirements")
         || lower.contains("no actionable change")
         || lower.contains("no actionable changes")
@@ -470,8 +484,9 @@ impl HandoffStallContext {
             return false;
         }
 
-        self.last_updated
-            .is_some_and(|ts| ts.elapsed() <= Duration::from_secs(HANDOFF_STALL_CONTEXT_MAX_AGE_SECS))
+        self.last_updated.is_some_and(|ts| {
+            ts.elapsed() <= Duration::from_secs(HANDOFF_STALL_CONTEXT_MAX_AGE_SECS)
+        })
     }
 
     fn clear(&mut self) {
@@ -1025,8 +1040,8 @@ next_action: handoff\n"
         let has_unexpected_changes_followup_context =
             is_unexpected_changes_followup_prompt(&normalized_output)
                 || state.has_recent_unexpected_changes_context();
-        let has_handoff_stall_context = is_handoff_stall_prompt(&normalized_output)
-            || state.has_recent_handoff_stall_context();
+        let has_handoff_stall_context =
+            is_handoff_stall_prompt(&normalized_output) || state.has_recent_handoff_stall_context();
 
         if !state.should_debounce()
             && state.should_force_handoff_submit()
@@ -1379,7 +1394,8 @@ next_action: handoff\n"
                 );
 
                 drop(terminals);
-                let direct_input = Self::normalize_input_for_direct_write(&handoff_continue_response);
+                let direct_input =
+                    Self::normalize_input_for_direct_write(&handoff_continue_response);
                 let sent_direct = self
                     .try_direct_terminal_input(
                         &response_terminal_id,
@@ -1463,7 +1479,6 @@ next_action: handoff\n"
                     .await;
                 return;
             }
-
         }
 
         // Process each line
@@ -1824,7 +1839,8 @@ next_action: handoff\n"
                 );
 
                 drop(terminals);
-                let direct_input = Self::normalize_input_for_direct_write(&handoff_continue_response);
+                let direct_input =
+                    Self::normalize_input_for_direct_write(&handoff_continue_response);
                 let sent_direct = self
                     .try_direct_terminal_input(
                         &response_terminal_id,
@@ -2942,6 +2958,62 @@ Enter to confirm 路 Esc to cancel
     }
 
     #[tokio::test]
+    async fn test_process_output_handoff_stall_describe_specific_change_feature_variant_auto_continue()
+     {
+        let message_bus = Arc::new(MessageBus::new(100));
+        let process_manager = Arc::new(ProcessManager::new());
+        let watcher = PromptWatcher::new(message_bus.clone(), process_manager);
+        let mut broadcast_rx = message_bus.subscribe_broadcast();
+
+        {
+            let mut terminals = watcher.terminals.write().await;
+            terminals.insert(
+                "term-1".to_string(),
+                TerminalWatchState::new(
+                    "term-1".to_string(),
+                    "workflow-1".to_string(),
+                    "task-1".to_string(),
+                    "session-1".to_string(),
+                    true,
+                ),
+            );
+        }
+
+        watcher
+            .process_output(
+                "term-1",
+                "Ive pulled the latest repo state (status clean, no diff, recent commits listed) and Im ready to start implementing. Could you describe the specific change or feature youd like me to work on?",
+            )
+            .await;
+
+        let event = tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv())
+            .await
+            .expect("expected terminal input broadcast")
+            .expect("broadcast channel should be open");
+
+        match event {
+            BusMessage::TerminalInput {
+                terminal_id,
+                session_id,
+                input,
+                decision,
+            } => {
+                assert_eq!(terminal_id, "term-1");
+                assert_eq!(session_id, "session-1");
+                assert!(input.contains(HANDOFF_STALL_CONTINUE_RESPONSE));
+                assert!(input.contains("workflow_id: workflow-1"));
+                assert!(input.contains("task_id: task-1"));
+                assert!(input.contains("terminal_id: term-1"));
+                assert!(matches!(
+                    decision,
+                    Some(crate::services::orchestrator::types::PromptDecision::LLMDecision { .. })
+                ));
+            }
+            other => panic!("expected TerminalInput event, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn test_process_output_handoff_stall_with_bypass_status_line_sends_immediate_enter() {
         let message_bus = Arc::new(MessageBus::new(100));
         let process_manager = Arc::new(ProcessManager::new());
@@ -3040,7 +3112,10 @@ Enter to confirm 路 Esc to cancel
         }
 
         watcher
-            .process_output("term-1", "On branch main; nothing to commit, working tree clean")
+            .process_output(
+                "term-1",
+                "On branch main; nothing to commit, working tree clean",
+            )
             .await;
 
         let first_poll = tokio::time::timeout(Duration::from_millis(80), broadcast_rx.recv()).await;

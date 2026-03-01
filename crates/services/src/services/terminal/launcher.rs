@@ -23,13 +23,13 @@ use executors::{
 };
 use uuid::Uuid;
 
+#[cfg(test)]
+use super::process::SpawnCommand;
 use super::{
     bridge::TerminalBridge,
     process::{DEFAULT_COLS, DEFAULT_ROWS, ProcessHandle, ProcessManager},
     prompt_watcher::PromptWatcher,
 };
-#[cfg(test)]
-use super::process::SpawnCommand;
 use crate::services::{
     cc_switch::CCSwitchService,
     orchestrator::{BusMessage, SharedMessageBus, constants::WORKFLOW_TOPIC_PREFIX},
@@ -491,8 +491,7 @@ impl TerminalLauncher {
             }
             Err(e) => {
                 tracing::error!("Failed to start terminal {}: {}", terminal_id, e);
-                self
-                    .rollback_launch_after_spawn(&terminal_id, format!("Process spawn failed: {e}"))
+                self.rollback_launch_after_spawn(&terminal_id, format!("Process spawn failed: {e}"))
                     .await
             }
         }
