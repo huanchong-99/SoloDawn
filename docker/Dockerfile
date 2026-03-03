@@ -13,7 +13,7 @@ RUN cd frontend && pnpm build
 # ============================================================
 # Stage 2: Rust build
 # ============================================================
-FROM rust:slim AS rust-builder
+FROM rust:slim-trixie AS rust-builder
 RUN apt-get update && apt-get install -y \
     pkg-config libsqlite3-dev libgit2-dev zlib1g-dev \
     cmake ninja-build clang libclang-dev perl nasm libssl-dev \
@@ -32,10 +32,11 @@ RUN cargo build --release --locked -p server
 # ============================================================
 # Stage 3: Runtime
 # ============================================================
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
+ARG INSTALL_AI_CLIS=0
 
 RUN apt-get update && apt-get install -y \
-    libsqlite3-0 libgit2-1.5 git curl ca-certificates bash gnupg \
+    libsqlite3-0 libgit2-1.9 git curl ca-certificates bash gnupg \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
@@ -52,7 +53,11 @@ RUN apt-get update && apt-get install -y \
     && apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
 
 COPY scripts/docker/install/ /opt/gitcortex/install/
-RUN bash /opt/gitcortex/install/install-ai-clis.sh
+RUN if [ "$INSTALL_AI_CLIS" = "1" ]; then \
+        bash /opt/gitcortex/install/install-ai-clis.sh; \
+    else \
+        echo "Skipping AI CLI installation during image build (INSTALL_AI_CLIS=$INSTALL_AI_CLIS)"; \
+    fi
 
 COPY --from=rust-builder /build/target/release/server /usr/local/bin/gitcortex-server
 COPY assets/scripts/ /opt/gitcortex/assets/scripts/

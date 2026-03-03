@@ -3,6 +3,8 @@ services:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
+      args:
+        INSTALL_AI_CLIS: ${INSTALL_AI_CLIS:-0}
     ports:
       - "${PORT:-23456}:23456"
     volumes:
@@ -13,7 +15,7 @@ services:
       - HOST=0.0.0.0
       - PORT=23456
       - RUST_LOG=${RUST_LOG:-info}
-      - GITCORTEX_ENCRYPTION_KEY=${GITCORTEX_ENCRYPTION_KEY}
+      - GITCORTEX_ENCRYPTION_KEY=${GITCORTEX_ENCRYPTION_KEY:-}
       - GITCORTEX_API_TOKEN=${GITCORTEX_API_TOKEN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
