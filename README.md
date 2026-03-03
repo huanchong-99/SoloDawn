@@ -323,6 +323,40 @@ Access:
 
 **Detailed Operations Manual:** See [Operations Manual](docs/developed/ops/runbook.md) for production deployment, monitoring, upgrades, and other detailed operations.
 
+### Docker Deployment (Recommended for Clean Machines)
+
+```bash
+# Clone repository
+git clone <your-repo-url>
+cd GitCortex
+
+# Optional: install AI CLIs during image build (default is 0 for build stability)
+export INSTALL_AI_CLIS=0
+
+# Build and start
+docker compose -f docker/compose/docker-compose.yml build
+docker compose -f docker/compose/docker-compose.yml up -d
+```
+
+PowerShell example:
+
+```powershell
+$env:INSTALL_AI_CLIS="0"
+docker compose -f docker/compose/docker-compose.yml build
+docker compose -f docker/compose/docker-compose.yml up -d
+```
+
+Verify:
+
+```bash
+curl http://localhost:23456/readyz
+docker compose -f docker/compose/docker-compose.yml ps
+```
+
+For detailed operations, backup, and troubleshooting, see:
+- [Docker Deployment Guide](docs/developed/ops/docker-deployment.md)
+- [Operations Manual](docs/developed/ops/runbook.md)
+
 ### Restore from Existing Repository
 
 If you've already cloned the repository, just ensure tool versions are correct and reinstall dependencies:
@@ -428,7 +462,7 @@ GitCortex/
 > **Data Source:** `docs/undeveloped/current/TODO.md` (README progress aligns with it)
 > **Overall Status:** Completion rate **97.3%** (**288/296**), In Progress **0**, Not Started **8** (Phase 21: 2, Phase 27: 6), Optional Optimizations **5**.
 > **Current Audit Score:** **100/100 (S-tier)**
-> **Next Step:** Phase 27 - Docker containerization and one-click deployment.
+> **Next Step:** Complete deferred/optional items in Phase 18.5 and Phase 21, and keep TODO milestones aligned with current implementation.
 
 | Phase | Status (Aligned with TODO) | Notes |
 |-------|----------------------------|-------|
@@ -461,6 +495,7 @@ Detailed progress tracking: [docs/undeveloped/current/TODO.md](docs/undeveloped/
   - Claude Code terminal with `glm-4.7`
   - Claude Code terminal with `claude-opus-4.6`
   - Codex terminal with `gpt-5.3-codex-xhigh`
+- Docker single-container deployment is available and verified (`docker compose build --no-cache` + `up -d` + `readyz`).
 
 ### Not Completed / Not Fully Verified Yet
 
@@ -471,7 +506,6 @@ Detailed progress tracking: [docs/undeveloped/current/TODO.md](docs/undeveloped/
 5. Task completion notification has not been developed.
 6. Communication software integration has not been developed.
 7. Slash command system has not been fully tested (currently likely unavailable or unstable).
-8. Docker deployment has not been developed yet (open deployment documentation is already drafted).
 
 ### Tested End-to-End Demo Task
 
