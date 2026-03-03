@@ -260,6 +260,7 @@ export const workflowKeys = {
 interface UseWorkflowOptions {
   refetchInterval?: number | false;
   staleTime?: number;
+  retry?: number | boolean;
 }
 
 // ============================================================================
@@ -459,7 +460,13 @@ export function useWorkflow(
     queryFn: () => workflowsApi.getById(workflowId),
     enabled: !!workflowId,
     staleTime: options?.staleTime ?? 1000 * 60 * 5, // default 5 minutes
-    refetchInterval: options?.refetchInterval,
+    retry: options?.retry ?? 3,
+    refetchInterval: (query) => {
+      if (!options?.refetchInterval) {
+        return false;
+      }
+      return query.state.error ? false : options.refetchInterval;
+    },
   });
 }
 

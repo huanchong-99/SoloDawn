@@ -56,7 +56,22 @@ impl FilesystemService {
         if let Ok(cwd) = std::env::current_dir() {
             allowed_roots.push(cwd);
         }
+        allowed_roots.extend(Self::get_env_allowed_roots());
         Self::new_with_roots(allowed_roots)
+    }
+
+    fn get_env_allowed_roots() -> Vec<PathBuf> {
+        let mut roots = Vec::new();
+        if let Ok(raw) = std::env::var("GITCORTEX_ALLOWED_ROOTS") {
+            for item in raw.split([',', ';']) {
+                let trimmed = item.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                roots.push(PathBuf::from(trimmed));
+            }
+        }
+        roots
     }
 
     pub fn new_with_roots(allowed_roots: Vec<PathBuf>) -> Self {

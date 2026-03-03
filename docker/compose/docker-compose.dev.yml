@@ -3,17 +3,23 @@ services:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
+      args:
+        INSTALL_AI_CLIS: ${INSTALL_AI_CLIS:-0}
+    working_dir: ${GITCORTEX_WORKSPACE_ROOT:-/workspace}
     ports:
       - "23456:23456"
     volumes:
       - gitcortex-dev-data:/var/lib/gitcortex
+      - ${HOST_WORKSPACE_ROOT:-../..}:${GITCORTEX_WORKSPACE_ROOT:-/workspace}
     environment:
       - GITCORTEX_ASSET_DIR=/var/lib/gitcortex/assets
       - GITCORTEX_TEMP_DIR=/var/lib/gitcortex
+      - GITCORTEX_ALLOWED_ROOTS=${GITCORTEX_ALLOWED_ROOTS:-/workspace,/var/lib/gitcortex}
       - HOST=0.0.0.0
       - PORT=23456
       - RUST_LOG=debug
       - GITCORTEX_ENCRYPTION_KEY=${GITCORTEX_ENCRYPTION_KEY:?Set GITCORTEX_ENCRYPTION_KEY in docker/compose/.env}
+      - GITCORTEX_API_TOKEN=${GITCORTEX_DOCKER_API_TOKEN:-}
     env_file:
       - .env
 

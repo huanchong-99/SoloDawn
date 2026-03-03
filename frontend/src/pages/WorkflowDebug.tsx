@@ -107,6 +107,7 @@ export function WorkflowDebugPage() {
   const { data, isLoading, error } = useWorkflow(workflowId ?? '', {
     staleTime: 0,
     refetchInterval: 2000,
+    retry: false,
   });
 
   // Workflow control hooks
@@ -132,16 +133,16 @@ export function WorkflowDebugPage() {
     }
   };
 
-  if (isLoading) {
-    return <div className="p-8 text-center">{t('workflowDebug.loading')}</div>;
-  }
-
-  if (error !== null || !data) {
+  if (error || (!isLoading && !data)) {
     return (
       <div className="p-8 text-center text-red-500">
-        {t('workflowDebug.error')}
+        {error instanceof Error ? error.message : t('workflowDebug.error')}
       </div>
     );
+  }
+
+  if (isLoading || !data) {
+    return <div className="p-8 text-center">{t('workflowDebug.loading')}</div>;
   }
 
   const wsUrl = buildWorkflowDebugWsUrl(globalThis.location);

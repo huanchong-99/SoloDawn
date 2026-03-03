@@ -5,18 +5,21 @@ services:
       dockerfile: docker/Dockerfile
       args:
         INSTALL_AI_CLIS: ${INSTALL_AI_CLIS:-0}
+    working_dir: ${GITCORTEX_WORKSPACE_ROOT:-/workspace}
     ports:
       - "${PORT:-23456}:23456"
     volumes:
       - gitcortex-data:/var/lib/gitcortex
+      - ${HOST_WORKSPACE_ROOT:-../..}:${GITCORTEX_WORKSPACE_ROOT:-/workspace}
     environment:
       - GITCORTEX_ASSET_DIR=/var/lib/gitcortex/assets
       - GITCORTEX_TEMP_DIR=/var/lib/gitcortex
+      - GITCORTEX_ALLOWED_ROOTS=${GITCORTEX_ALLOWED_ROOTS:-/workspace,/var/lib/gitcortex}
       - HOST=0.0.0.0
       - PORT=23456
       - RUST_LOG=${RUST_LOG:-info}
       - GITCORTEX_ENCRYPTION_KEY=${GITCORTEX_ENCRYPTION_KEY:-}
-      - GITCORTEX_API_TOKEN=${GITCORTEX_API_TOKEN:-}
+      - GITCORTEX_API_TOKEN=${GITCORTEX_DOCKER_API_TOKEN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}

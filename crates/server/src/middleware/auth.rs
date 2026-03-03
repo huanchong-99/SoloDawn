@@ -51,10 +51,14 @@ use axum::{
 pub async fn require_api_token(req: Request, next: Next) -> Result<Response, StatusCode> {
     // Check if API token is configured
     let token = match std::env::var("GITCORTEX_API_TOKEN") {
-        Ok(value) => value,
+        Ok(value) if !value.trim().is_empty() => value,
         Err(_) => {
             // Development mode: no authentication required
             tracing::debug!("GITCORTEX_API_TOKEN not set; skipping API authentication");
+            return Ok(next.run(req).await);
+        }
+        _ => {
+            tracing::debug!("GITCORTEX_API_TOKEN is empty; skipping API authentication");
             return Ok(next.run(req).await);
         }
     };
@@ -125,6 +129,23 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_allows_requests_when_token_empty() {
+        unsafe { std::env::set_var("GITCORTEX_API_TOKEN", "") };
+
+        let app = build_test_app();
+
+        let response = app
+            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        unsafe { std::env::remove_var("GITCORTEX_API_TOKEN") };
     }
 
     #[tokio::test]

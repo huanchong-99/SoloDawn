@@ -332,6 +332,10 @@ cd GitCortex
 
 # Optional: install AI CLIs during image build (default is 0 for build stability)
 export INSTALL_AI_CLIS=0
+# Optional: map host repositories into container workspace
+export HOST_WORKSPACE_ROOT=../..
+# Optional: enable API bearer auth in Docker only
+export GITCORTEX_DOCKER_API_TOKEN=
 
 # Build and start
 docker compose -f docker/compose/docker-compose.yml build
@@ -342,6 +346,8 @@ PowerShell example:
 
 ```powershell
 $env:INSTALL_AI_CLIS="0"
+$env:HOST_WORKSPACE_ROOT="../.."
+$env:GITCORTEX_DOCKER_API_TOKEN=""
 docker compose -f docker/compose/docker-compose.yml build
 docker compose -f docker/compose/docker-compose.yml up -d
 ```
