@@ -360,13 +360,14 @@ pnpm run dev
 
 ```bash
 # 必需：加密密钥（32字符字符串）
-GITCORTEX_ENCRYPTION_KEY=your-32-character-key-here
+GITCORTEX_ENCRYPTION_KEY=your-32-character-key-here  # 用于加密落盘的敏感数据，服务启动必需
 
 # 可选
 BACKEND_PORT=23456           # 后端端口（默认）
 HOST=127.0.0.1               # 后端监听地址（默认）
 GITCORTEX_API_TOKEN=your-api-token   # 若设置，所有 /api/* 都需要 Authorization: Bearer <token>
 # 留空或不设置时，开发模式下会跳过这层 API 鉴权
+# 说明：GITCORTEX_ENCRYPTION_KEY（数据加密）与 GITCORTEX_API_TOKEN（接口鉴权）不是重复项
 ```
 
 ### 数据库
@@ -697,6 +698,20 @@ $env:GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
 # Linux/macOS
 export GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
 ```
+
+### Q: 创建工作流时，检测到 Git 仓库但显示“分支不可用”？
+
+常见原因是所选路径在仓库内，但不是仓库根目录，旧版本在该路径读取分支会失败。
+
+- 优先选择仓库根目录（含 `.git` 的目录）。
+- 使用最新镜像/版本（已增加仓库 discover 回退逻辑）。
+
+### Q: `/workspaces/create` 中“浏览磁盘上的仓库/在磁盘上新建仓库”弹窗显示 `No folders found`、`Path is not allowed`？
+
+这是旧版本的路径边界校验问题（Windows 更常见）。
+
+- 升级到最新镜像/版本（已修复 Windows 盘符根目录白名单 + 上级目录计算）。
+- 在 Docker 模式确认挂载根目录覆盖你的仓库所在盘符，例如 `HOST_WORKSPACE_ROOT=E:/`。
 
 ### Q: CLI 检测失败，显示未安装？
 

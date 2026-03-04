@@ -365,6 +365,16 @@ What is the "Docker API Bearer Token" prompt?
 - If set: all `/api/*` routes require `Authorization: Bearer <token>`, otherwise `401 Unauthorized`.
 - Recommended when exposing `23456` beyond localhost (LAN/public access).
 
+What is the "auto-generate 32-char encryption key" prompt?
+- It sets `GITCORTEX_ENCRYPTION_KEY` (exactly 32 chars).
+- Purpose: encrypt sensitive data at rest (stored secrets/config payloads).
+- This key is required for normal server startup.
+
+Why ask for both encryption key and API token?
+- They are different controls, not duplicates.
+- `GITCORTEX_ENCRYPTION_KEY`: data-at-rest encryption key.
+- `GITCORTEX_API_TOKEN`/`GITCORTEX_DOCKER_API_TOKEN`: request-time API access control (`Authorization: Bearer ...`).
+
 Example request when token is enabled:
 
 ```bash
@@ -434,7 +444,7 @@ Create `.env` file or set system environment variables:
 
 ```bash
 # Required: Encryption key (32-character string)
-GITCORTEX_ENCRYPTION_KEY=your-32-character-key-here
+GITCORTEX_ENCRYPTION_KEY=your-32-character-key-here  # Encrypts sensitive data at rest; required
 
 # Optional
 BACKEND_PORT=23456           # Backend port (default)
@@ -771,6 +781,20 @@ $env:GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
 # Linux/macOS
 export GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
 ```
+
+### Q: In workflow creation, Git repo is detected but branch shows unavailable?
+
+This usually happens when the selected path is inside a repository but the backend cannot open the repo at that exact path.
+
+- First make sure you selected the repository root folder (not only a nested subfolder).
+- If using an older build, upgrade to the latest image/release: recent versions add repository discovery fallback.
+
+### Q: In `/workspaces/create`, folder picker shows `No folders found` and `Path is not allowed`?
+
+This is a path-boundary validation issue in old builds (more visible on Windows).
+
+- Upgrade to the latest image/release (includes Windows drive-root allowlist + parent-path fix in folder picker).
+- Ensure your mounted workspace root in Docker matches where your repos are located (for example `HOST_WORKSPACE_ROOT=E:/`).
 
 ### Q: CLI detection fails, shows not installed?
 
