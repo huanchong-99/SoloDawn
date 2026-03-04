@@ -365,7 +365,8 @@ GITCORTEX_ENCRYPTION_KEY=your-32-character-key-here
 # 可选
 BACKEND_PORT=23456           # 后端端口（默认）
 HOST=127.0.0.1               # 后端监听地址（默认）
-GITCORTEX_API_TOKEN=your-api-token   # 开启 API Bearer 鉴权（可选）
+GITCORTEX_API_TOKEN=your-api-token   # 若设置，所有 /api/* 都需要 Authorization: Bearer <token>
+# 留空或不设置时，开发模式下会跳过这层 API 鉴权
 ```
 
 ### 数据库

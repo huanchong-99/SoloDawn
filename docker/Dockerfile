@@ -8,6 +8,7 @@ COPY frontend/package.json frontend/
 RUN corepack enable && cd frontend && pnpm install --frozen-lockfile
 COPY frontend/ frontend/
 COPY shared/ shared/
+ENV BROWSERSLIST_IGNORE_OLD_DATA=1
 RUN cd frontend && pnpm build
 
 # ============================================================
@@ -26,7 +27,8 @@ COPY assets/ assets/
 COPY shared/ shared/
 COPY --from=frontend-builder /build/frontend/dist frontend/dist
 COPY crates/db/.sqlx crates/db/.sqlx
-ENV SQLX_OFFLINE=true
+ENV SQLX_OFFLINE=true \
+    RUSTFLAGS=-Awarnings
 RUN cargo build --release --locked -p server
 
 # ============================================================

@@ -54,6 +54,9 @@ function isBenignWsProxyError(error: unknown): boolean {
   return code === "ECONNRESET" || code === "ECONNABORTED" || code === "EPIPE";
 }
 
+const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN?.trim();
+const sentryUploadEnabled = Boolean(sentryAuthToken);
+
 export default defineConfig({
   plugins: [
     react({
@@ -72,7 +75,16 @@ export default defineConfig({
         ],
       },
     }),
-    sentryVitePlugin({ org: "bloop-ai", project: "gitcortex" }),
+    ...(sentryUploadEnabled
+      ? [
+          sentryVitePlugin({
+            org: "bloop-ai",
+            project: "gitcortex",
+            authToken: sentryAuthToken,
+            telemetry: false,
+          }),
+        ]
+      : []),
     executorSchemasPlugin(),
   ],
   resolve: {
@@ -120,5 +132,8 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ["wa-sqlite"],
   },
-  build: { sourcemap: true },
+  build: {
+    sourcemap: true,
+    chunkSizeWarningLimit: 7000,
+  },
 });

@@ -11,7 +11,6 @@ import {
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/utils/date';
-import { CommandBarDialog } from '@/components/ui-new/dialogs/CommandBarDialog';
 import { RunningDots } from './RunningDots';
 
 interface WorkspaceSummaryProps {
@@ -63,10 +62,14 @@ export function WorkspaceSummary({
 
   const handleOpenCommandBar = (e: React.MouseEvent) => {
     e.stopPropagation();
-    CommandBarDialog.show({
-      page: 'workspaceActions',
-      workspaceId,
-    });
+    void import('@/components/ui-new/dialogs/CommandBarDialog').then(
+      ({ CommandBarDialog }) => {
+        CommandBarDialog.show({
+          page: 'workspaceActions',
+          workspaceId,
+        });
+      }
+    );
   };
 
   return (

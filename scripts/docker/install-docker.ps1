@@ -486,7 +486,7 @@ try {
 
     if (-not $SkipStart) {
         Write-Info (T "INFO_STARTING")
-        & docker compose --ansi never -f $composeFile --env-file $envFile up -d --force-recreate
+        & docker compose --ansi never -f $composeFile --env-file $envFile up -d --force-recreate --no-build
         if ($LASTEXITCODE -ne 0) {
             throw (T "ERR_UP_FAILED")
         }

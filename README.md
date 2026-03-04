@@ -336,7 +336,7 @@ export INSTALL_AI_CLIS=0
 export HOST_WORKSPACE_ROOT=../..
 # Optional: disable auto-creating starter projects on first launch
 export GITCORTEX_AUTO_SETUP_PROJECTS=0
-# Optional: enable API bearer auth in Docker only
+# Optional: Docker-only input var; mapped to in-container GITCORTEX_API_TOKEN
 export GITCORTEX_DOCKER_API_TOKEN=
 
 # Build and start
@@ -358,6 +358,19 @@ The script will interactively ask:
 - Port, API token, and optional API keys
 
 It then writes `docker/compose/.env`, validates compose config, builds, starts, and checks `/readyz`.
+
+What is the "Docker API Bearer Token" prompt?
+- It sets `GITCORTEX_DOCKER_API_TOKEN` in `.env`, which is mapped to container `GITCORTEX_API_TOKEN`.
+- If empty: API auth middleware is skipped (dev-friendly mode).
+- If set: all `/api/*` routes require `Authorization: Bearer <token>`, otherwise `401 Unauthorized`.
+- Recommended when exposing `23456` beyond localhost (LAN/public access).
+
+Example request when token is enabled:
+
+```bash
+curl http://localhost:23456/api/health \
+  -H "Authorization: Bearer <your-token>"
+```
 
 If you choose not to install AI CLIs during image build, you can install later in UI:
 - `Settings -> Agents -> One-click Install AI CLIs`
@@ -426,7 +439,7 @@ GITCORTEX_ENCRYPTION_KEY=your-32-character-key-here
 # Optional
 BACKEND_PORT=23456           # Backend port (default)
 HOST=127.0.0.1               # Backend listen address (default)
-GITCORTEX_API_TOKEN=your-api-token   # Enable API Bearer auth (optional)
+GITCORTEX_API_TOKEN=your-api-token   # If set, all /api/* routes require Authorization: Bearer <token>
 ```
 
 ### Database
