@@ -105,11 +105,11 @@ export function AgentSettings() {
 
     setInstallElapsedSec(0);
     const startedAt = Date.now();
-    const timer = window.setInterval(() => {
+    const timer = globalThis.setInterval(() => {
       setInstallElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
     }, 1000);
 
-    return () => window.clearInterval(timer);
+    return () => globalThis.clearInterval(timer);
   }, [installingCli]);
 
   // Sync server state to local state when not dirty
@@ -216,11 +216,23 @@ export function AgentSettings() {
 
   const parseInstalledCliNames = (output: string): string[] => {
     const names = new Set<string>();
-    const matches = output.matchAll(/\bOK\s+([^:\r\n]+):/g);
+    const lines = output.split('\n');
 
-    for (const match of matches) {
-      const name = match[1]?.trim();
-      if (name) {
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      const okIndex = line.indexOf('OK ');
+      if (okIndex < 0) {
+        continue;
+      }
+
+      const nameStart = okIndex + 3;
+      const colonIndex = line.indexOf(':', nameStart);
+      if (colonIndex < 0) {
+        continue;
+      }
+
+      const name = line.slice(nameStart, colonIndex).trim();
+      if (name.length > 0) {
         names.add(name);
       }
     }
