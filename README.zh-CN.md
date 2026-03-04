@@ -323,6 +323,90 @@ pnpm run dev
 
 **详细运维指南：** 查看 [Operations Manual](docs/developed/ops/runbook.md) 了解生产部署、监控、升级等详细操作。
 
+### Docker 部署（推荐在干净机器上使用）
+
+```bash
+# 克隆仓库
+git clone <your-repo-url>
+cd GitCortex
+
+# 可选：构建镜像时安装 AI CLI（默认 0，更稳定）
+export INSTALL_AI_CLIS=0
+# 可选：将主机仓库目录映射到容器工作目录
+export HOST_WORKSPACE_ROOT=../..
+# 可选：首次启动时不自动创建示例项目
+export GITCORTEX_AUTO_SETUP_PROJECTS=0
+# 可选：仅用于 Docker 输入；会映射为容器内 GITCORTEX_API_TOKEN
+export GITCORTEX_DOCKER_API_TOKEN=
+
+# 构建并启动
+docker compose -f docker/compose/docker-compose.yml build
+docker compose -f docker/compose/docker-compose.yml up -d
+```
+
+Windows 推荐使用一键安装脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\docker\install-docker.ps1
+```
+
+脚本会交互式询问：
+- 挂载到容器 `/workspace` 的主机目录
+- 是否在构建阶段安装 AI CLI（`INSTALL_AI_CLIS`）
+- 是否在首次启动时自动创建示例项目（`GITCORTEX_AUTO_SETUP_PROJECTS`）
+- 是否在启动前清理旧容器与数据卷
+- 端口、API Token、以及可选 API Key
+
+脚本会写入 `docker/compose/.env`，校验 compose 配置，构建并启动，然后检查 `/readyz`。
+
+“Docker API Bearer Token” 提示是什么意思？
+- 会在 `.env` 中设置 `GITCORTEX_DOCKER_API_TOKEN`，并映射到容器内 `GITCORTEX_API_TOKEN`。
+- 若为空：跳过 API 鉴权中间件（开发更方便）。
+- 若设置：所有 `/api/*` 请求都必须带 `Authorization: Bearer <token>`，否则 `401 Unauthorized`。
+- 当 `23456` 暴露到 localhost 之外（局域网/公网）时建议设置。
+
+“自动生成 32 位加密密钥” 提示是什么意思？
+- 会设置 `GITCORTEX_ENCRYPTION_KEY`（长度必须 32）。
+- 用途：加密落盘敏感数据（如配置中的密钥类内容）。
+- 该密钥是服务正常启动的必需项。
+
+为什么要同时配置加密密钥和 API Token？
+- 两者职责不同，不是重复项。
+- `GITCORTEX_ENCRYPTION_KEY`：用于数据落盘加密。
+- `GITCORTEX_API_TOKEN` / `GITCORTEX_DOCKER_API_TOKEN`：用于请求时 API 访问控制（`Authorization: Bearer ...`）。
+
+启用 token 后的请求示例：
+
+```bash
+curl http://localhost:23456/api/health \
+  -H "Authorization: Bearer <your-token>"
+```
+
+如果构建镜像时选择不安装 AI CLI，后续也可在 UI 中安装：
+- `Settings -> Agents -> One-click Install AI CLIs`
+
+PowerShell 示例：
+
+```powershell
+$env:INSTALL_AI_CLIS="0"
+$env:HOST_WORKSPACE_ROOT="../.."
+$env:GITCORTEX_AUTO_SETUP_PROJECTS="0"
+$env:GITCORTEX_DOCKER_API_TOKEN=""
+docker compose -f docker/compose/docker-compose.yml build
+docker compose -f docker/compose/docker-compose.yml up -d
+```
+
+验证：
+
+```bash
+curl http://localhost:23456/readyz
+docker compose -f docker/compose/docker-compose.yml ps
+```
+
+详细部署、备份与排障文档见：
+- [Docker Deployment Guide](docs/developed/ops/docker-deployment.md)
+- [Operations Manual](docs/developed/ops/runbook.md)
+
 ### 从现有仓库恢复
 
 如果你已经克隆过仓库，只需确保工具版本正确并重新安装依赖：
