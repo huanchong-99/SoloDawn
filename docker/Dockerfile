@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # ============================================================
 # Stage 1: Frontend build
 # ============================================================
@@ -5,7 +7,11 @@ FROM node:22-slim AS frontend-builder
 WORKDIR /build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY frontend/package.json frontend/
-RUN corepack enable && cd frontend && pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=gitcortex-pnpm-store,target=/pnpm/store,sharing=locked \
+    corepack enable \
+    && pnpm config set store-dir /pnpm/store \
+    && cd frontend \
+    && pnpm install --frozen-lockfile
 COPY frontend/ frontend/
 COPY shared/ shared/
 ENV BROWSERSLIST_IGNORE_OLD_DATA=1
@@ -20,8 +26,11 @@ RUN apt-get update && apt-get install -y \
     cmake ninja-build clang libclang-dev perl nasm libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
-COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
-RUN rustup toolchain install nightly-2025-12-04 && rustup default nightly-2025-12-04
+ARG RUST_TOOLCHAIN=nightly-2025-12-04
+COPY Cargo.toml Cargo.lock ./
+RUN rustup set profile minimal \
+    && rustup toolchain install ${RUST_TOOLCHAIN} \
+    && rustup default ${RUST_TOOLCHAIN}
 COPY crates/ crates/
 COPY assets/ assets/
 COPY shared/ shared/
@@ -29,7 +38,11 @@ COPY --from=frontend-builder /build/frontend/dist frontend/dist
 COPY crates/db/.sqlx crates/db/.sqlx
 ENV SQLX_OFFLINE=true \
     RUSTFLAGS=-Awarnings
-RUN cargo build --release --locked -p server
+RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=gitcortex-cargo-target,target=/build/target,sharing=locked \
+    cargo build --release --locked -p server \
+    && cp /build/target/release/server /tmp/gitcortex-server
 
 # ============================================================
 # Stage 3: Runtime
@@ -66,7 +79,7 @@ RUN if [ "$INSTALL_AI_CLIS" = "1" ]; then \
         echo "Skipping AI CLI installation during image build (INSTALL_AI_CLIS=$INSTALL_AI_CLIS)"; \
     fi
 
-COPY --from=rust-builder /build/target/release/server /usr/local/bin/gitcortex-server
+COPY --from=rust-builder /tmp/gitcortex-server /usr/local/bin/gitcortex-server
 COPY assets/scripts/ /opt/gitcortex/assets/scripts/
 COPY assets/sounds/ /opt/gitcortex/assets/sounds/
 

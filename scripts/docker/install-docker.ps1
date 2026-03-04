@@ -469,6 +469,8 @@ try {
 
     if (-not $SkipBuild) {
         Write-Info (T "INFO_BUILDING")
+        $env:DOCKER_BUILDKIT = "1"
+        $env:COMPOSE_DOCKER_CLI_BUILD = "1"
         & docker compose --ansi never --progress plain -f $composeFile --env-file $envFile build
         if ($LASTEXITCODE -ne 0) {
             throw (T "ERR_BUILD_FAILED")
