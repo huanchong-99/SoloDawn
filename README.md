@@ -30,6 +30,7 @@ GitCortex is an AI-driven multi-terminal task coordination platform that enables
 | **Slash Command System** | Reusable prompt presets with template variable substitution |
 | **Multi-Model Support** | Support for Claude, Gemini, OpenAI, and other AI models |
 | **Git Integration** | Deep Git integration with automatic branch and merge management |
+| **Open in Editor** | Quick-jump from Web UI to local code editor (VS Code, Cursor, Windsurf, etc.) to view or edit task worktree code |
 
 ### Architecture Overview
 
@@ -737,6 +738,47 @@ No. They are parallel entry points with different goals:
 - “Bottom dialog”: it is not a popup; it is the main creation input area.
 - “Left vs right panels”: left is workspace switching, right is creation context binding.
 - If create button is unavailable, usually task text or repository selection is missing.
+
+---
+
+## Code Editor Integration
+
+### Overview
+
+GitCortex integrates with local code editors, allowing you to jump directly from the Web UI to your preferred editor to view or edit task worktree code. This is a convenience feature — while AI Agents work in terminals automatically, you may want to manually inspect or tweak the code they produce.
+
+### Where It Appears
+
+1. **First-Time Onboarding**: When you first open GitCortex, the onboarding dialog asks you to select your default code editor. This preference is saved to global settings.
+2. **Navbar "Open in IDE" Button**: The top navigation bar includes an "Open in IDE" button. Clicking it opens the **current project directory** in your configured editor.
+3. **Task Workspace Action**: In the task action bar, the "Open in Editor" action opens the **task's git worktree directory** in your editor, so you can manually inspect or edit the code that AI Agents are writing.
+
+### How It Works
+
+When triggered, the frontend sends a request to the backend API (`POST /api/task-attempts/{id}/open-editor` or `POST /api/projects/{id}/open-editor`). The backend executes a command like `code /path/to/worktree` (for VS Code) or `cursor /path/to/worktree` (for Cursor) to launch the editor and open the corresponding directory.
+
+If the default editor fails to launch (e.g., not installed or not in PATH), a fallback dialog appears letting you select an alternative editor.
+
+### Supported Editors
+
+| Editor | Launch Command | Remote SSH Support |
+|--------|----------------|--------------------|
+| VS Code | `code` | Yes |
+| Cursor | `cursor` | Yes |
+| Windsurf | `windsurf` | Yes |
+| IntelliJ IDEA | `idea` | No |
+| Zed | `zed` | Yes |
+| Xcode | `xed` | No |
+| Google Antigravity | `antigravity` | Yes |
+| Custom | User-defined | — |
+
+### Configuration
+
+You can change the default editor at any time in **Settings → General → Code Editor**:
+
+- **Editor Type**: Select from the supported editors above
+- **Custom Command**: When "Custom" is selected, specify your own launch command (e.g., `sublime`, `vim`)
+- **Remote SSH Host / User**: For supported editors, configure remote SSH connection to open code on a remote machine
 
 ---
 
