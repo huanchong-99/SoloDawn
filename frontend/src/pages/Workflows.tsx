@@ -411,6 +411,18 @@ function mapOrchestratorMessageRole(
     });
   }
 
+  if (role === 'system') {
+    return t('management.orchestratorChat.roles.system', {
+      defaultValue: 'System',
+    });
+  }
+
+  if (role === 'tool-summary') {
+    return t('management.orchestratorChat.roles.summary', {
+      defaultValue: 'Execution Summary',
+    });
+  }
+
   return role;
 }
 
@@ -442,16 +454,19 @@ function OrchestratorChatPanel({
   workflowId,
   workflowStatus,
   orchestratorEnabled,
+  executionMode,
 }: Readonly<{
   workflowId: string;
   workflowStatus: string;
   orchestratorEnabled: boolean;
+  executionMode?: string;
 }>) {
   const { t } = useTranslation('workflow');
   const { config: userConfig } = useUserSystem();
   const [messageInput, setMessageInput] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitReceipt, setSubmitReceipt] = useState<string | null>(null);
+  const isPrimaryChannel = executionMode === 'agent_planned';
 
   const isRunning = workflowStatus === 'running';
   const hasConfiguredModels = useMemo(
@@ -476,7 +491,9 @@ function OrchestratorChatPanel({
     () =>
       (messages ?? [])
         .filter((message) =>
-          ['user', 'assistant'].includes(message.role.toLowerCase())
+          ['user', 'assistant', 'system', 'tool-summary'].includes(
+            message.role.toLowerCase()
+          )
         )
         .slice(-24),
     [messages]
@@ -544,11 +561,20 @@ function OrchestratorChatPanel({
     <Card>
       <CardContent className="pt-6 space-y-4">
         <div>
-          <h3 className="text-sm font-semibold">
-            {t('management.orchestratorChat.title', {
-              defaultValue: 'Orchestrator Chat',
-            })}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold">
+              {t('management.orchestratorChat.title', {
+                defaultValue: 'Orchestrator Chat',
+              })}
+            </h3>
+            {isPrimaryChannel ? (
+              <span className="rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-blue-700">
+                {t('management.orchestratorChat.primaryChannel', {
+                  defaultValue: 'Primary Channel',
+                })}
+              </span>
+            ) : null}
+          </div>
           <p className="text-xs text-low mt-1">
             {t('management.orchestratorChat.description', {
               defaultValue:
@@ -582,7 +608,16 @@ function OrchestratorChatPanel({
                 {visibleMessages.map((message, index) => (
                   <div
                     key={`${message.role}-${index}`}
-                    className="rounded border border-border/60 bg-panel px-3 py-2"
+                    className={cn(
+                      'rounded border px-3 py-2',
+                      message.role === 'assistant'
+                        ? 'border-blue-200/60 bg-blue-50/40'
+                        : message.role === 'user'
+                          ? 'border-border/60 bg-panel'
+                          : message.role === 'tool-summary'
+                            ? 'border-amber-300/60 bg-amber-50/40'
+                            : 'border-zinc-300/60 bg-zinc-50/60'
+                    )}
                   >
                     <div className="text-[11px] font-medium text-low mb-1">
                       {mapOrchestratorMessageRole(message.role, t)}
@@ -751,6 +786,7 @@ function SelectedWorkflowView({
         workflowId={workflow.id}
         workflowStatus={workflow.status}
         orchestratorEnabled={workflow.orchestratorEnabled}
+        executionMode={workflow.executionMode}
       />
 
       <PipelineView

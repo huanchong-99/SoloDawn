@@ -138,6 +138,14 @@ vi.mock('@/stores/wsStore', () => ({
   ),
 }));
 
+vi.mock('@/components/ConfigProvider', () => ({
+  useUserSystem: () => ({
+    config: {
+      workflow_model_library: [{ modelId: 'gpt-4.1' }],
+    },
+  }),
+}));
+
 // ============================================================================
 // Test Utilities
 // ============================================================================
@@ -394,6 +402,16 @@ const mockUnorderedWorkflowDetail: WorkflowDetailDto = {
       ],
     },
   ],
+};
+
+const mockAgentPlannedWorkflowDetail: WorkflowDetailDto = {
+  ...mockCompletedWorkflowDetail,
+  id: 'workflow-agent',
+  name: 'Agent Planned Workflow',
+  status: 'running',
+  executionMode: 'agent_planned',
+  orchestratorEnabled: true,
+  initialGoal: 'Coordinate multi-terminal implementation',
 };
 
 const basePromptDetectedPayload: TerminalPromptDetectedPayload = {
@@ -958,6 +976,100 @@ describe('Workflows Page', () => {
       expect(
         screen.getByText('Failed to submit prompt response over WebSocket')
       ).toBeInTheDocument();
+    });
+  });
+
+  describe('Orchestrator Chat Panel', () => {
+    it('shows primary-channel badge and system/summary messages for agent_planned workflow', async () => {
+      const fetchMock = createWorkflowFetchMock({
+        listData: [
+          {
+            ...mockWorkflows[0],
+            id: 'workflow-agent',
+            name: 'Agent Planned Workflow',
+            status: 'running',
+            executionMode: 'agent_planned',
+          },
+        ],
+        handlers: {
+          '/api/workflows/workflow-agent': () =>
+            createApiSuccess(mockAgentPlannedWorkflowDetail),
+          '/api/workflows/workflow-agent/orchestrator/messages?limit=80': () =>
+            createApiSuccess([
+              { role: 'user', content: 'Prioritize auth first' },
+              { role: 'system', content: 'Command accepted' },
+              { role: 'tool-summary', content: 'Execution summary: succeeded' },
+              { role: 'assistant', content: 'Done. Auth is now prioritized.' },
+            ]),
+        },
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      render(<Workflows />, { wrapper });
+      await waitFor(() => {
+        expect(screen.getByText('Agent Planned Workflow')).toBeInTheDocument();
+      });
+
+      fireEvent.click(
+        screen.getByText('Agent Planned Workflow').closest('.cursor-pointer')
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Primary Channel')).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText('Command accepted')).toBeInTheDocument();
+        expect(screen.getByText('Execution summary: succeeded')).toBeInTheDocument();
+      });
+    });
+
+    it('sends orchestrator message and shows forbidden error', async () => {
+      const fetchMock = createWorkflowFetchMock({
+        listData: [
+          {
+            ...mockWorkflows[0],
+            id: 'workflow-agent',
+            name: 'Agent Planned Workflow',
+            status: 'running',
+            executionMode: 'agent_planned',
+          },
+        ],
+        handlers: {
+          '/api/workflows/workflow-agent': () =>
+            createApiSuccess(mockAgentPlannedWorkflowDetail),
+          '/api/workflows/workflow-agent/orchestrator/messages?limit=80': () =>
+            createApiSuccess([]),
+          '/api/workflows/workflow-agent/orchestrator/chat': () =>
+            createApiFailure(
+              403,
+              'Forbidden',
+              "orchestrator role 'viewer' is not allowed to issue commands"
+            ),
+        },
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      render(<Workflows />, { wrapper });
+      await waitFor(() => {
+        expect(screen.getByText('Agent Planned Workflow')).toBeInTheDocument();
+      });
+
+      fireEvent.click(
+        screen.getByText('Agent Planned Workflow').closest('.cursor-pointer')
+      );
+
+      const input = await screen.findByPlaceholderText(
+        'For example: reprioritize tasks and complete the auth module first.'
+      );
+      fireEvent.change(input, { target: { value: 'Please prioritize auth.' } });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Send to Agent' }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("orchestrator role 'viewer' is not allowed to issue commands")
+        ).toBeInTheDocument();
+      });
     });
   });
 
