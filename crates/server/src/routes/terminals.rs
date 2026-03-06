@@ -62,6 +62,7 @@ async fn broadcast_terminal_status(
 /// For waiting/working, we check if process is actually running first.
 const STARTABLE_TERMINAL_STATUSES: [&str; 5] =
     ["not_started", "failed", "cancelled", "waiting", "working"];
+const CLOSABLE_TERMINAL_STATUSES: [&str; 3] = ["completed", "failed", "cancelled"];
 
 /// Query parameters for terminal logs retrieval
 #[derive(Debug, Deserialize)]
@@ -579,6 +580,53 @@ pub async fn stop_terminal(
     ))))
 }
 
+/// Close a completed/failed/cancelled terminal without resetting its final status.
+pub async fn close_terminal(
+    State(deployment): State<DeploymentImpl>,
+    Path(id): Path<String>,
+) -> Result<ResponseJson<ApiResponse<Terminal>>, ApiError> {
+    let terminal = Terminal::find_by_id(&deployment.db().pool, &id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("Terminal {id} not found")))?;
+
+    if !CLOSABLE_TERMINAL_STATUSES.contains(&terminal.status.as_str()) {
+        return Err(ApiError::Conflict(format!(
+            "Terminal {id} cannot be closed from status '{}'",
+            terminal.status
+        )));
+    }
+
+    if let Err(e) = deployment.process_manager().kill_terminal(&id).await {
+        tracing::warn!("Failed to kill terminal {} during close: {}", id, e);
+    }
+
+    if let Some(pty_session_id) = terminal.pty_session_id.as_deref() {
+        let terminal_bridge = TerminalBridge::new(
+            deployment.message_bus().clone(),
+            deployment.process_manager().clone(),
+        );
+        terminal_bridge.unregister(pty_session_id).await;
+    }
+
+    deployment.prompt_watcher().unregister(&id).await;
+
+    Terminal::update_process(&deployment.db().pool, &id, None, None).await?;
+
+    let terminal = Terminal::find_by_id(&deployment.db().pool, &id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("Terminal {id} not found after close")))?;
+
+    if let Err(e) = broadcast_terminal_status(&deployment, &terminal, &terminal.status).await {
+        tracing::warn!(
+            terminal_id = %id,
+            error = %e,
+            "Failed to broadcast terminal close status"
+        );
+    }
+
+    Ok(ResponseJson(ApiResponse::success(terminal)))
+}
+
 /// Terminal routes router
 ///
 /// Mounts all terminal-related API endpoints
@@ -587,4 +635,5 @@ pub fn terminal_routes() -> Router<DeploymentImpl> {
         .route("/{id}/logs", get(get_terminal_logs))
         .route("/{id}/start", post(start_terminal))
         .route("/{id}/stop", post(stop_terminal))
+        .route("/{id}/close", post(close_terminal))
 }

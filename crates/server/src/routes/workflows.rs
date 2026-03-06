@@ -26,6 +26,7 @@ use utils::{response::ApiResponse, text};
 use uuid::Uuid;
 
 // Import DTOs
+use crate::routes::terminals::start_terminal;
 use crate::routes::workflows_dto::{WorkflowDetailDto, WorkflowListItemDto};
 use crate::{DeploymentImpl, error::ApiError};
 
@@ -73,6 +74,31 @@ pub struct RecoveryResponse {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateRuntimeTaskRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub branch: Option<String>,
+    pub order_index: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateRuntimeTerminalRequest {
+    pub cli_type_id: String,
+    pub model_config_id: String,
+    pub custom_base_url: Option<String>,
+    pub custom_api_key: Option<String>,
+    pub role: Option<String>,
+    pub role_description: Option<String>,
+    pub order_index: Option<i32>,
+    #[serde(default = "default_runtime_terminal_auto_confirm")]
+    pub auto_confirm: bool,
+    #[serde(default)]
+    pub start_immediately: bool,
+}
+
 /// Merge Workflow Request
 #[derive(Debug, Deserialize)]
 pub struct MergeWorkflowRequest {
@@ -94,6 +120,8 @@ const WORKFLOW_STATUSES: [&str; 9] = [
 const WORKFLOW_EXECUTION_MODES: [&str; 2] = ["diy", "agent_planned"];
 
 const MERGE_ALLOWED_WORKFLOW_STATUSES: [&str; 2] = ["completed", "merging"];
+const RUNTIME_MUTABLE_WORKFLOW_STATUSES: [&str; 5] =
+    ["created", "starting", "ready", "running", "paused"];
 
 // ============================================================================
 // Route Definition
@@ -115,14 +143,17 @@ pub fn workflows_routes() -> Router<DeploymentImpl> {
             post(submit_prompt_response),
         )
         .route("/{workflow_id}/merge", post(merge_workflow))
-        .route("/{workflow_id}/tasks", get(list_workflow_tasks))
+        .route(
+            "/{workflow_id}/tasks",
+            get(list_workflow_tasks).post(create_runtime_task),
+        )
         .route(
             "/{workflow_id}/tasks/{task_id}/status",
             put(update_task_status),
         )
         .route(
             "/{workflow_id}/tasks/{task_id}/terminals",
-            get(list_task_terminals),
+            get(list_task_terminals).post(create_runtime_terminal),
         )
 }
 
@@ -132,6 +163,10 @@ fn is_known_workflow_status(status: &str) -> bool {
 
 fn can_merge_from_workflow_status(status: &str) -> bool {
     MERGE_ALLOWED_WORKFLOW_STATUSES.contains(&status)
+}
+
+fn default_runtime_terminal_auto_confirm() -> bool {
+    true
 }
 
 fn is_valid_workflow_status_transition(current: &str, next: &str) -> bool {
@@ -200,6 +235,68 @@ fn validate_task_workflow_scope(task: &WorkflowTask, workflow_id: &str) -> Resul
             "Task does not belong to this workflow".to_string(),
         ));
     }
+
+    Ok(())
+}
+
+fn validate_runtime_mutation_workflow_status(status: &str) -> Result<(), ApiError> {
+    if !RUNTIME_MUTABLE_WORKFLOW_STATUSES.contains(&status) {
+        return Err(ApiError::Conflict(format!(
+            "Workflow status '{}' does not allow runtime task or terminal mutations",
+            status
+        )));
+    }
+
+    Ok(())
+}
+
+async fn broadcast_task_status(
+    deployment: &DeploymentImpl,
+    task: &WorkflowTask,
+    status: &str,
+) -> anyhow::Result<()> {
+    let message = BusMessage::TaskStatusUpdate {
+        workflow_id: task.workflow_id.clone(),
+        task_id: task.id.clone(),
+        status: status.to_string(),
+    };
+    let topic = format!("workflow:{}", task.workflow_id);
+
+    deployment
+        .message_bus()
+        .publish(&topic, message.clone())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to publish task status: {e}"))?;
+    deployment
+        .message_bus()
+        .broadcast(message)
+        .map_err(|e| anyhow::anyhow!("Failed to broadcast task status: {e}"))?;
+
+    Ok(())
+}
+
+async fn broadcast_runtime_terminal_status(
+    deployment: &DeploymentImpl,
+    task: &WorkflowTask,
+    terminal_id: &str,
+    status: &str,
+) -> anyhow::Result<()> {
+    let message = BusMessage::TerminalStatusUpdate {
+        workflow_id: task.workflow_id.clone(),
+        terminal_id: terminal_id.to_string(),
+        status: status.to_string(),
+    };
+    let topic = format!("workflow:{}", task.workflow_id);
+
+    deployment
+        .message_bus()
+        .publish(&topic, message.clone())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to publish terminal status: {e}"))?;
+    deployment
+        .message_bus()
+        .broadcast(message)
+        .map_err(|e| anyhow::anyhow!("Failed to broadcast terminal status: {e}"))?;
 
     Ok(())
 }
@@ -1422,6 +1519,229 @@ async fn cleanup_workflow_terminals(
     }
 
     Ok(terminals)
+}
+
+/// POST /api/workflows/:workflow_id/tasks
+/// Create a new runtime task inside an existing workflow
+async fn create_runtime_task(
+    State(deployment): State<DeploymentImpl>,
+    Path(workflow_id): Path<String>,
+    Json(req): Json<CreateRuntimeTaskRequest>,
+) -> Result<ResponseJson<ApiResponse<WorkflowTask>>, ApiError> {
+    let workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Workflow not found".to_string()))?;
+    validate_runtime_mutation_workflow_status(&workflow.status)?;
+
+    let task_name = req.name.trim();
+    if task_name.is_empty() {
+        return Err(ApiError::BadRequest("name is required".to_string()));
+    }
+
+    let existing_tasks = WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
+    let order_index = match req.order_index {
+        Some(order_index) => {
+            if existing_tasks.iter().any(|task| task.order_index == order_index) {
+                return Err(ApiError::Conflict(format!(
+                    "Task orderIndex {} already exists in workflow {}",
+                    order_index, workflow_id
+                )));
+            }
+            order_index
+        }
+        None => existing_tasks
+            .last()
+            .map(|task| task.order_index + 1)
+            .unwrap_or(0),
+    };
+
+    let branch = if let Some(custom_branch) = req.branch {
+        if existing_tasks.iter().any(|task| task.branch == custom_branch) {
+            return Err(ApiError::Conflict(format!(
+                "Task branch '{}' already exists in workflow {}",
+                custom_branch, workflow_id
+            )));
+        }
+        custom_branch
+    } else {
+        let existing_branches: Vec<String> =
+            existing_tasks.iter().map(|task| task.branch.clone()).collect();
+        let base_branch = format!("workflow/{}/{}", workflow_id, text::git_branch_id(task_name));
+        let mut candidate = base_branch.clone();
+        let mut counter = 2;
+
+        while existing_branches.contains(&candidate) {
+            candidate = format!("{}-{}", base_branch, counter);
+            counter += 1;
+        }
+
+        candidate
+    };
+
+    let now = chrono::Utc::now();
+    let task = WorkflowTask {
+        id: Uuid::new_v4().to_string(),
+        workflow_id: workflow_id.clone(),
+        vk_task_id: None,
+        name: task_name.to_string(),
+        description: req.description,
+        branch,
+        status: "pending".to_string(),
+        order_index,
+        started_at: None,
+        completed_at: None,
+        created_at: now,
+        updated_at: now,
+    };
+
+    let created_task = WorkflowTask::create(&deployment.db().pool, &task)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to create workflow task: {e}")))?;
+
+    if let Err(e) = broadcast_task_status(&deployment, &created_task, &created_task.status).await {
+        tracing::warn!(
+            workflow_id = %workflow_id,
+            task_id = %created_task.id,
+            error = %e,
+            "Failed to broadcast runtime task creation"
+        );
+    }
+
+    Ok(ResponseJson(ApiResponse::success(created_task)))
+}
+
+/// POST /api/workflows/:workflow_id/tasks/:task_id/terminals
+/// Create a new runtime terminal inside an existing task
+async fn create_runtime_terminal(
+    State(deployment): State<DeploymentImpl>,
+    Path((workflow_id, task_id)): Path<(String, String)>,
+    Json(req): Json<CreateRuntimeTerminalRequest>,
+) -> Result<ResponseJson<ApiResponse<Terminal>>, ApiError> {
+    let workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Workflow not found".to_string()))?;
+    validate_runtime_mutation_workflow_status(&workflow.status)?;
+
+    let task = WorkflowTask::find_by_id(&deployment.db().pool, &task_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Task not found".to_string()))?;
+    validate_task_workflow_scope(&task, &workflow_id)?;
+
+    let cli_type_id = req.cli_type_id.trim();
+    if cli_type_id.is_empty() {
+        return Err(ApiError::BadRequest("cliTypeId is required".to_string()));
+    }
+
+    let model_config_id = req.model_config_id.trim();
+    if model_config_id.is_empty() {
+        return Err(ApiError::BadRequest("modelConfigId is required".to_string()));
+    }
+
+    let cli_exists = CliType::find_by_id(&deployment.db().pool, cli_type_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to validate CLI type: {e}")))?
+        .is_some();
+    if !cli_exists {
+        return Err(ApiError::BadRequest(format!(
+            "CLI type not found: {}",
+            cli_type_id
+        )));
+    }
+
+    let model_exists = ModelConfig::find_by_id(&deployment.db().pool, model_config_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to validate model config: {e}")))?
+        .is_some();
+    if !model_exists {
+        return Err(ApiError::BadRequest(format!(
+            "Model config not found: {}",
+            model_config_id
+        )));
+    }
+
+    let existing_terminals = Terminal::find_by_task(&deployment.db().pool, &task_id).await?;
+    let order_index = match req.order_index {
+        Some(order_index) => {
+            if existing_terminals
+                .iter()
+                .any(|terminal| terminal.order_index == order_index)
+            {
+                return Err(ApiError::Conflict(format!(
+                    "Terminal orderIndex {} already exists in task {}",
+                    order_index, task_id
+                )));
+            }
+            order_index
+        }
+        None => existing_terminals
+            .last()
+            .map(|terminal| terminal.order_index + 1)
+            .unwrap_or(0),
+    };
+
+    let now = chrono::Utc::now();
+    let mut terminal = Terminal {
+        id: Uuid::new_v4().to_string(),
+        workflow_task_id: task_id.clone(),
+        cli_type_id: cli_type_id.to_string(),
+        model_config_id: model_config_id.to_string(),
+        custom_base_url: req.custom_base_url,
+        custom_api_key: None,
+        role: req.role,
+        role_description: req.role_description,
+        order_index,
+        status: "not_started".to_string(),
+        process_id: None,
+        pty_session_id: None,
+        session_id: None,
+        execution_process_id: None,
+        vk_session_id: None,
+        auto_confirm: req.auto_confirm,
+        last_commit_hash: None,
+        last_commit_message: None,
+        started_at: None,
+        completed_at: None,
+        created_at: now,
+        updated_at: now,
+    };
+
+    if let Some(custom_api_key) = req.custom_api_key.as_ref() {
+        terminal.set_custom_api_key(custom_api_key).map_err(|e| {
+            ApiError::BadRequest(format!("Failed to encrypt terminal API key: {e}"))
+        })?;
+    }
+
+    let created_terminal = Terminal::create(&deployment.db().pool, &terminal)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to create terminal: {e}")))?;
+
+    let terminal = if req.start_immediately {
+        let _ = start_terminal(State(deployment.clone()), Path(created_terminal.id.clone())).await?;
+        Terminal::find_by_id(&deployment.db().pool, &created_terminal.id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound("Terminal not found after start".to_string()))?
+    } else {
+        if let Err(e) = broadcast_runtime_terminal_status(
+            &deployment,
+            &task,
+            &created_terminal.id,
+            &created_terminal.status,
+        )
+        .await
+        {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                task_id = %task_id,
+                terminal_id = %created_terminal.id,
+                error = %e,
+                "Failed to broadcast runtime terminal creation"
+            );
+        }
+
+        created_terminal
+    };
+
+    Ok(ResponseJson(ApiResponse::success(terminal)))
 }
 
 /// POST /api/workflows/recover
