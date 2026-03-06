@@ -7,6 +7,7 @@ pub use subscription_hub::SharedSubscriptionHub;
 use crate::{DeploymentImpl, middleware::require_api_token};
 
 pub mod approvals;
+pub mod chat_integrations;
 pub mod cli_types;
 pub mod config;
 pub mod containers;
@@ -59,6 +60,7 @@ pub fn router(deployment: DeploymentImpl, hub: SharedSubscriptionHub) -> IntoMak
         .merge(events::router(&deployment))
         .merge(git::router())
         .merge(approvals::router())
+        .nest("/integrations", chat_integrations::router())
         .merge(scratch::router(&deployment))
         .merge(sessions::router(&deployment))
         .nest("/images", images::routes())
