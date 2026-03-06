@@ -31,8 +31,8 @@ use super::{
     runtime_actions::{RuntimeActionService, RuntimeTaskSpec, RuntimeTerminalSpec},
     state::{OrchestratorRunState, OrchestratorState, SharedOrchestratorState},
     types::{
-        CodeIssue, OrchestratorInstruction, TerminalCompletionEvent, TerminalCompletionStatus,
-        TerminalPromptEvent,
+        CodeIssue, LLMMessage, OrchestratorInstruction, TerminalCompletionEvent,
+        TerminalCompletionStatus, TerminalPromptEvent,
     },
 };
 use crate::services::{
@@ -2065,6 +2065,54 @@ impl OrchestratorAgent {
             })
     }
 
+    fn instruction_type_name(instruction: &OrchestratorInstruction) -> &'static str {
+        match instruction {
+            OrchestratorInstruction::StartTask { .. } => "start_task",
+            OrchestratorInstruction::CreateTask { .. } => "create_task",
+            OrchestratorInstruction::CreateTerminal { .. } => "create_terminal",
+            OrchestratorInstruction::StartTerminal { .. } => "start_terminal",
+            OrchestratorInstruction::CloseTerminal { .. } => "close_terminal",
+            OrchestratorInstruction::CompleteTask { .. } => "complete_task",
+            OrchestratorInstruction::SetWorkflowPlanningComplete { .. } => {
+                "set_workflow_planning_complete"
+            }
+            OrchestratorInstruction::SendToTerminal { .. } => "send_to_terminal",
+            OrchestratorInstruction::ReviewCode { .. } => "review_code",
+            OrchestratorInstruction::FixIssues { .. } => "fix_issues",
+            OrchestratorInstruction::MergeBranch { .. } => "merge_branch",
+            OrchestratorInstruction::PauseWorkflow { .. } => "pause_workflow",
+            OrchestratorInstruction::CompleteWorkflow { .. } => "complete_workflow",
+            OrchestratorInstruction::FailWorkflow { .. } => "fail_workflow",
+        }
+    }
+
+    fn is_instruction_whitelisted(instruction: &OrchestratorInstruction) -> bool {
+        matches!(
+            instruction,
+            OrchestratorInstruction::StartTask { .. }
+                | OrchestratorInstruction::CreateTask { .. }
+                | OrchestratorInstruction::CreateTerminal { .. }
+                | OrchestratorInstruction::StartTerminal { .. }
+                | OrchestratorInstruction::CloseTerminal { .. }
+                | OrchestratorInstruction::CompleteTask { .. }
+                | OrchestratorInstruction::SetWorkflowPlanningComplete { .. }
+                | OrchestratorInstruction::SendToTerminal { .. }
+                | OrchestratorInstruction::CompleteWorkflow { .. }
+                | OrchestratorInstruction::FailWorkflow { .. }
+        )
+    }
+
+    fn validate_instruction_whitelist(instruction: &OrchestratorInstruction) -> anyhow::Result<()> {
+        if Self::is_instruction_whitelisted(instruction) {
+            return Ok(());
+        }
+
+        Err(anyhow!(
+            "Instruction '{}' is not allowed by orchestrator whitelist",
+            Self::instruction_type_name(instruction)
+        ))
+    }
+
     /// Calls the LLM with the current conversation history.
     async fn call_llm(&self, prompt: &str) -> anyhow::Result<String> {
         let mut state = self.state.write().await;
@@ -2092,6 +2140,7 @@ impl OrchestratorAgent {
         };
 
         for instruction in instructions {
+            Self::validate_instruction_whitelist(&instruction)?;
             self.execute_single_instruction(instruction).await?;
         }
 
@@ -3390,6 +3439,48 @@ impl OrchestratorAgent {
         }
 
         Ok(())
+    }
+
+    /// Handle direct user chat sent to the orchestrator.
+    ///
+    /// The message is appended to conversation history, then executed through
+    /// the same LLM + instruction pipeline used by terminal completion events.
+    pub async fn submit_orchestrator_chat_message(&self, user_message: &str) -> anyhow::Result<()> {
+        let message = user_message.trim();
+        if message.is_empty() {
+            return Err(anyhow!("Orchestrator chat message is empty"));
+        }
+
+        let workflow_id = {
+            let mut state = self.state.write().await;
+            state.run_state = OrchestratorRunState::Processing;
+            state.workflow_id.clone()
+        };
+
+        let result = async {
+            let response = self.call_llm(message).await?;
+            self.execute_instruction(&response).await
+        }
+        .await;
+
+        {
+            let mut state = self.state.write().await;
+            state.run_state = OrchestratorRunState::Idle;
+        }
+
+        result.map_err(|error| {
+            anyhow!(
+                "Failed to process orchestrator chat message for workflow {}: {}",
+                workflow_id,
+                error
+            )
+        })
+    }
+
+    /// Return a snapshot of current orchestrator conversation history.
+    pub async fn get_conversation_history(&self) -> Vec<LLMMessage> {
+        let state = self.state.read().await;
+        state.conversation_history.clone()
     }
 
     /// Execute slash commands for this workflow

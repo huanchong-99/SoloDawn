@@ -83,9 +83,9 @@
 - [x] ORCH-002 新增对话历史查询与分页（`GET /api/workflows/:id/orchestrator/messages`）。（支持 `cursor/limit`）
 - [x] ORCH-003 新增对话命令状态（queued/running/succeeded/failed/cancelled）。（基础版：提交回执）
 - [x] ORCH-004 主 Agent 对话输入接入 `OrchestratorAgent` 事件循环（非 Git 事件触发）。
-- [ ] ORCH-005 指令白名单校验（create_task/create_terminal/start_terminal/...）。
+- [x] ORCH-005 指令白名单校验（create_task/create_terminal/start_terminal/...）。
 - [x] ORCH-006 幂等去重（source/external_message_id）。
-- [ ] ORCH-007 失败回执标准化（错误码 + 重试建议 + 可读摘要）。
+- [x] ORCH-007 失败回执标准化（错误码 + 重试建议 + 可读摘要）。（基础版：`command_id/status/error/retryable`）
 
 ### 5.2 数据与持久化
 

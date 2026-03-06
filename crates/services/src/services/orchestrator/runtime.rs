@@ -17,12 +17,14 @@ use tokio::{
     time::{Duration, sleep, timeout},
 };
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use super::{
     OrchestratorAgent, OrchestratorConfig, SharedMessageBus,
     constants::{WORKFLOW_STATUS_FAILED, WORKFLOW_STATUS_READY},
     persistence::StatePersistence,
     runtime_actions::RuntimeActionService,
+    types::LLMMessage,
 };
 use crate::services::git_watcher::{GitWatcher, GitWatcherConfig};
 
@@ -45,6 +47,36 @@ impl Default for RuntimeConfig {
             git_watch_poll_interval_ms: 2000,
         }
     }
+}
+
+/// Execution status of a direct orchestrator chat command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrchestratorChatCommandStatus {
+    Queued,
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+impl OrchestratorChatCommandStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// Result snapshot of one direct orchestrator chat command.
+#[derive(Debug, Clone)]
+pub struct OrchestratorChatCommandResult {
+    pub command_id: String,
+    pub status: OrchestratorChatCommandStatus,
+    pub error: Option<String>,
 }
 
 /// Workflow agent with its task handle
@@ -72,6 +104,9 @@ pub struct OrchestratorRuntime {
     starting_workflows: Arc<Mutex<HashSet<String>>>,
     /// Git watchers for each workflow, keyed by workflow_id
     git_watchers: Arc<Mutex<HashMap<String, GitWatcherHandle>>>,
+    /// Idempotency snapshots for orchestrator chat messages, keyed by workflow_id.
+    orchestrator_chat_idempotency:
+        Arc<Mutex<HashMap<String, HashMap<String, OrchestratorChatCommandResult>>>>,
     persistence: StatePersistence,
     runtime_actions: Arc<RwLock<Option<Arc<RuntimeActionService>>>>,
 }
@@ -88,6 +123,7 @@ impl OrchestratorRuntime {
             running_workflows: Arc::new(Mutex::new(HashMap::new())),
             starting_workflows: Arc::new(Mutex::new(HashSet::new())),
             git_watchers: Arc::new(Mutex::new(HashMap::new())),
+            orchestrator_chat_idempotency: Arc::new(Mutex::new(HashMap::new())),
             persistence,
             runtime_actions: Arc::new(RwLock::new(None)),
         }
@@ -108,6 +144,7 @@ impl OrchestratorRuntime {
             running_workflows: Arc::new(Mutex::new(HashMap::new())),
             starting_workflows: Arc::new(Mutex::new(HashSet::new())),
             git_watchers: Arc::new(Mutex::new(HashMap::new())),
+            orchestrator_chat_idempotency: Arc::new(Mutex::new(HashMap::new())),
             persistence,
             runtime_actions: Arc::new(RwLock::new(None)),
         }
@@ -353,6 +390,7 @@ impl OrchestratorRuntime {
         let agent_clone = agent.clone();
         let running_workflows = self.running_workflows.clone();
         let git_watchers = self.git_watchers.clone();
+        let chat_idempotency = self.orchestrator_chat_idempotency.clone();
         let workflow_id_owned = workflow_id.to_string();
         let task_handle = tokio::spawn(async move {
             if let Err(e) = agent_clone.run().await {
@@ -383,6 +421,11 @@ impl OrchestratorRuntime {
             }
 
             if removed_running {
+                {
+                    let mut idempotency = chat_idempotency.lock().await;
+                    idempotency.remove(&workflow_id_owned);
+                }
+
                 let git_watcher_handle = {
                     let mut watchers = git_watchers.lock().await;
                     watchers.remove(&workflow_id_owned)
@@ -484,6 +527,91 @@ impl OrchestratorRuntime {
             })
     }
 
+    /// Submit a direct chat message to the orchestrator agent of a running workflow.
+    pub async fn submit_orchestrator_chat(
+        &self,
+        workflow_id: &str,
+        message: &str,
+        source: &str,
+        external_message_id: Option<&str>,
+    ) -> Result<OrchestratorChatCommandResult> {
+        let dedup_key = external_message_id.map(|value| format!("{source}:{value}"));
+        if let Some(key) = dedup_key.as_ref() {
+            let existing = {
+                let idempotency = self.orchestrator_chat_idempotency.lock().await;
+                idempotency
+                    .get(workflow_id)
+                    .and_then(|entry| entry.get(key))
+                    .cloned()
+            };
+            if let Some(existing) = existing {
+                info!(
+                    workflow_id = %workflow_id,
+                    source = %source,
+                    external_message_id = %external_message_id.unwrap_or(""),
+                    command_id = %existing.command_id,
+                    "Ignoring duplicate orchestrator chat message and returning original command snapshot"
+                );
+                return Ok(existing);
+            }
+        }
+
+        let mut command_result = OrchestratorChatCommandResult {
+            command_id: Uuid::new_v4().to_string(),
+            status: OrchestratorChatCommandStatus::Queued,
+            error: None,
+        };
+
+        let agent = {
+            let running = self.running_workflows.lock().await;
+            let running_workflow = running
+                .get(workflow_id)
+                .ok_or_else(|| anyhow!("Workflow {} is not running", workflow_id))?;
+
+            Arc::clone(&running_workflow.agent)
+        };
+
+        command_result.status = OrchestratorChatCommandStatus::Running;
+
+        match agent.submit_orchestrator_chat_message(message).await {
+            Ok(()) => {
+                command_result.status = OrchestratorChatCommandStatus::Succeeded;
+            }
+            Err(error) => {
+                command_result.status = OrchestratorChatCommandStatus::Failed;
+                command_result.error = Some(format!(
+                    "Failed to submit orchestrator chat message for workflow {}: {}",
+                    workflow_id, error
+                ));
+            }
+        }
+
+        if let Some(key) = dedup_key {
+            let mut idempotency = self.orchestrator_chat_idempotency.lock().await;
+            let entry = idempotency.entry(workflow_id.to_string()).or_default();
+            entry.insert(key, command_result.clone());
+            if entry.len() > 2048 {
+                entry.clear();
+            }
+        }
+
+        Ok(command_result)
+    }
+
+    /// Fetch orchestrator conversation history for a running workflow.
+    pub async fn get_orchestrator_messages(&self, workflow_id: &str) -> Result<Vec<LLMMessage>> {
+        let agent = {
+            let running = self.running_workflows.lock().await;
+            let running_workflow = running
+                .get(workflow_id)
+                .ok_or_else(|| anyhow!("Workflow {} is not running", workflow_id))?;
+
+            Arc::clone(&running_workflow.agent)
+        };
+
+        Ok(agent.get_conversation_history().await)
+    }
+
     /// Stop orchestrating a workflow
     ///
     /// Sends shutdown signal to the agent and waits for graceful shutdown.
@@ -491,6 +619,11 @@ impl OrchestratorRuntime {
     pub async fn stop_workflow(&self, workflow_id: &str) -> Result<()> {
         // Stop GitWatcher first (non-blocking)
         self.stop_git_watcher(workflow_id).await;
+
+        {
+            let mut idempotency = self.orchestrator_chat_idempotency.lock().await;
+            idempotency.remove(workflow_id);
+        }
 
         // Remove from running workflows
         let running_workflow = {
@@ -1054,6 +1187,146 @@ mod tests {
         );
 
         runtime.stop_workflow(&workflow_id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_submit_orchestrator_chat_returns_error_when_workflow_not_running() {
+        let (runtime, workflow_id) = setup_runtime_with_ready_workflow().await;
+
+        let result = runtime
+            .submit_orchestrator_chat(&workflow_id, "hello orchestrator", "web", None)
+            .await;
+
+        let error = result.expect_err("workflow not running should return error");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("Workflow {} is not running", workflow_id))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_submit_orchestrator_chat_updates_running_agent_conversation() {
+        let (runtime, workflow_id) = setup_runtime_with_ready_workflow().await;
+
+        let agent = Arc::new(
+            OrchestratorAgent::with_llm_client(
+                OrchestratorConfig::default(),
+                workflow_id.clone(),
+                runtime.message_bus.clone(),
+                runtime.db.clone(),
+                Box::new(MockLLMClient::new()),
+            )
+            .expect("should create test agent"),
+        );
+
+        let task_handle = tokio::spawn(async {});
+        {
+            let mut running = runtime.running_workflows.lock().await;
+            running.insert(workflow_id.clone(), RunningWorkflow { agent, task_handle });
+        }
+
+        runtime
+            .submit_orchestrator_chat(&workflow_id, "hello orchestrator", "web", None)
+            .await
+            .expect("orchestrator chat should be forwarded to running agent");
+        let command = runtime
+            .submit_orchestrator_chat(&workflow_id, "hello orchestrator 2", "web", None)
+            .await
+            .expect("second orchestrator chat should be forwarded to running agent");
+        assert_eq!(command.status, OrchestratorChatCommandStatus::Succeeded);
+
+        let messages = runtime
+            .get_orchestrator_messages(&workflow_id)
+            .await
+            .expect("should fetch conversation messages");
+
+        assert!(messages.iter().any(|message| {
+            message.role == "user" && message.content == "hello orchestrator"
+        }));
+        assert!(messages.iter().any(|message| {
+            message.role == "assistant" && message.content == "Mock response for testing"
+        }));
+
+        runtime.stop_workflow(&workflow_id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_submit_orchestrator_chat_ignores_duplicate_external_message_id() {
+        let (runtime, workflow_id) = setup_runtime_with_ready_workflow().await;
+
+        let agent = Arc::new(
+            OrchestratorAgent::with_llm_client(
+                OrchestratorConfig::default(),
+                workflow_id.clone(),
+                runtime.message_bus.clone(),
+                runtime.db.clone(),
+                Box::new(MockLLMClient::new()),
+            )
+            .expect("should create test agent"),
+        );
+
+        let task_handle = tokio::spawn(async {});
+        {
+            let mut running = runtime.running_workflows.lock().await;
+            running.insert(workflow_id.clone(), RunningWorkflow { agent, task_handle });
+        }
+
+        let first_command = runtime
+            .submit_orchestrator_chat(
+                &workflow_id,
+                "hello orchestrator",
+                "social",
+                Some("external-1"),
+            )
+            .await
+            .expect("first orchestrator chat should be forwarded");
+        assert_eq!(first_command.status, OrchestratorChatCommandStatus::Succeeded);
+
+        let duplicate_command = runtime
+            .submit_orchestrator_chat(
+                &workflow_id,
+                "hello orchestrator",
+                "social",
+                Some("external-1"),
+            )
+            .await
+            .expect("duplicate orchestrator chat should be ignored");
+        assert_eq!(
+            duplicate_command.command_id,
+            first_command.command_id
+        );
+        assert_eq!(duplicate_command.status, first_command.status);
+
+        let messages = runtime
+            .get_orchestrator_messages(&workflow_id)
+            .await
+            .expect("should fetch conversation messages");
+
+        let user_message_count = messages
+            .iter()
+            .filter(|message| {
+                message.role == "user" && message.content == "hello orchestrator"
+            })
+            .count();
+
+        assert_eq!(user_message_count, 1);
+
+        runtime.stop_workflow(&workflow_id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_get_orchestrator_messages_returns_error_when_workflow_not_running() {
+        let (runtime, workflow_id) = setup_runtime_with_ready_workflow().await;
+
+        let result = runtime.get_orchestrator_messages(&workflow_id).await;
+
+        let error = result.expect_err("workflow not running should return error");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("Workflow {} is not running", workflow_id))
+        );
     }
 
     #[tokio::test]
