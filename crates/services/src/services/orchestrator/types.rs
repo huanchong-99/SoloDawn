@@ -19,6 +19,46 @@ pub enum OrchestratorInstruction {
         task_id: String,
         instruction: String,
     },
+    /// 创建运行时任务（仅 agent_planned 模式）
+    CreateTask {
+        task_id: Option<String>,
+        name: String,
+        description: Option<String>,
+        branch: Option<String>,
+        order_index: Option<i32>,
+    },
+    /// 创建运行时终端（仅 agent_planned 模式）
+    CreateTerminal {
+        terminal_id: Option<String>,
+        task_id: String,
+        cli_type_id: String,
+        model_config_id: String,
+        custom_base_url: Option<String>,
+        custom_api_key: Option<String>,
+        role: Option<String>,
+        role_description: Option<String>,
+        order_index: Option<i32>,
+        auto_confirm: Option<bool>,
+    },
+    /// 启动运行时终端并发送首条指令（仅 agent_planned 模式）
+    StartTerminal {
+        terminal_id: String,
+        instruction: String,
+    },
+    /// 关闭终端，保留最终状态与历史
+    CloseTerminal {
+        terminal_id: String,
+        final_status: Option<String>,
+    },
+    /// 标记任务规划完成；当全部终端结束后任务将进入最终状态
+    CompleteTask {
+        task_id: String,
+        summary: String,
+    },
+    /// 标记工作流规划完成，后续不再增加任务/终端
+    SetWorkflowPlanningComplete {
+        summary: Option<String>,
+    },
     /// 发送消息到终端
     SendToTerminal {
         terminal_id: String,

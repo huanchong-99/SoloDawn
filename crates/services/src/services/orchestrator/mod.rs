@@ -10,6 +10,7 @@ pub mod message_bus;
 pub mod persistence;
 pub mod prompt_handler;
 pub mod runtime;
+pub mod runtime_actions;
 pub mod state;
 pub mod terminal_coordinator;
 pub mod types;
@@ -24,6 +25,7 @@ pub use llm::{
 pub use message_bus::{BusMessage, MessageBus, SharedMessageBus};
 pub use prompt_handler::PromptHandler;
 pub use runtime::{OrchestratorRuntime, RuntimeConfig};
+pub use runtime_actions::{RuntimeActionService, RuntimeTaskSpec, RuntimeTerminalSpec};
 pub use state::{OrchestratorRunState, OrchestratorState, SharedOrchestratorState};
 pub use terminal_coordinator::TerminalCoordinator;
 pub use types::*;

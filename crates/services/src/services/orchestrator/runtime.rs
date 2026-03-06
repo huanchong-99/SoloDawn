@@ -12,7 +12,7 @@ use anyhow::{Result, anyhow};
 use db::DBService;
 use sqlx::Row;
 use tokio::{
-    sync::Mutex,
+    sync::{Mutex, RwLock},
     task::JoinHandle,
     time::{Duration, sleep, timeout},
 };
@@ -22,6 +22,7 @@ use super::{
     OrchestratorAgent, OrchestratorConfig, SharedMessageBus,
     constants::{WORKFLOW_STATUS_FAILED, WORKFLOW_STATUS_READY},
     persistence::StatePersistence,
+    runtime_actions::RuntimeActionService,
 };
 use crate::services::git_watcher::{GitWatcher, GitWatcherConfig};
 
@@ -72,6 +73,7 @@ pub struct OrchestratorRuntime {
     /// Git watchers for each workflow, keyed by workflow_id
     git_watchers: Arc<Mutex<HashMap<String, GitWatcherHandle>>>,
     persistence: StatePersistence,
+    runtime_actions: Arc<RwLock<Option<Arc<RuntimeActionService>>>>,
 }
 
 impl OrchestratorRuntime {
@@ -87,6 +89,7 @@ impl OrchestratorRuntime {
             starting_workflows: Arc::new(Mutex::new(HashSet::new())),
             git_watchers: Arc::new(Mutex::new(HashMap::new())),
             persistence,
+            runtime_actions: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -106,7 +109,12 @@ impl OrchestratorRuntime {
             starting_workflows: Arc::new(Mutex::new(HashSet::new())),
             git_watchers: Arc::new(Mutex::new(HashMap::new())),
             persistence,
+            runtime_actions: Arc::new(RwLock::new(None)),
         }
+    }
+
+    pub async fn set_runtime_actions(&self, runtime_actions: Arc<RuntimeActionService>) {
+        *self.runtime_actions.write().await = Some(runtime_actions);
     }
 
     /// Try to start a GitWatcher for the workflow.
@@ -316,13 +324,13 @@ impl OrchestratorRuntime {
 
         // Create orchestrator agent FIRST before changing status
         let config = orchestrator_config.unwrap_or_default();
-        let agent = match OrchestratorAgent::new(
+        let mut agent = match OrchestratorAgent::new(
             config,
             workflow_id.to_string(),
             self.message_bus.clone(),
             self.db.clone(),
         ) {
-            Ok(agent) => Arc::new(agent),
+            Ok(agent) => agent,
             Err(e) => {
                 // Agent creation failed, workflow stays in ready state
                 error!(
@@ -332,6 +340,10 @@ impl OrchestratorRuntime {
                 return Err(e.context("Failed to create orchestrator agent"));
             }
         };
+        if let Some(runtime_actions) = self.runtime_actions.read().await.clone() {
+            agent.attach_runtime_actions(runtime_actions);
+        }
+        let agent = Arc::new(agent);
 
         // Update workflow status to running AFTER agent is successfully created
         db::models::Workflow::set_started(&self.db.pool, workflow_id).await?;
@@ -724,6 +736,8 @@ mod tests {
             name: "Concurrent Start Workflow".to_string(),
             description: None,
             status: WORKFLOW_STATUS_READY.to_string(),
+            execution_mode: "diy".to_string(),
+            initial_goal: None,
             use_slash_commands: false,
             orchestrator_enabled: false,
             orchestrator_api_type: None,
@@ -885,6 +899,8 @@ mod tests {
             name: "GitWatcher Path Resolution".to_string(),
             description: None,
             status: WORKFLOW_STATUS_READY.to_string(),
+            execution_mode: "diy".to_string(),
+            initial_goal: None,
             use_slash_commands: false,
             orchestrator_enabled: false,
             orchestrator_api_type: None,

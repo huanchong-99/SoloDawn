@@ -14,7 +14,7 @@ mod orchestrator_tests {
     use crate::services::orchestrator::{
         BusMessage, CommitMetadata, LLMMessage, MessageBus, MockLLMClient, OrchestratorAgent,
         OrchestratorConfig, OrchestratorInstruction, OrchestratorRunState, OrchestratorState,
-        TerminalCompletionEvent, TerminalCompletionStatus,
+        RuntimeActionService, TerminalCompletionEvent, TerminalCompletionStatus,
         constants::DEFAULT_LLM_RATE_LIMIT_PER_SECOND, create_llm_client,
     };
 
@@ -84,6 +84,40 @@ mod orchestrator_tests {
             OrchestratorInstruction::StartTask {
                 task_id: "task-1".to_string(),
                 instruction: "Build API".to_string(),
+            },
+            OrchestratorInstruction::CreateTask {
+                task_id: Some("task-runtime".to_string()),
+                name: "Runtime task".to_string(),
+                description: Some("Create work at runtime".to_string()),
+                branch: None,
+                order_index: Some(0),
+            },
+            OrchestratorInstruction::CreateTerminal {
+                terminal_id: Some("term-runtime".to_string()),
+                task_id: "task-runtime".to_string(),
+                cli_type_id: "cli-claude-code".to_string(),
+                model_config_id: "model-claude-sonnet".to_string(),
+                custom_base_url: None,
+                custom_api_key: None,
+                role: Some("coder".to_string()),
+                role_description: None,
+                order_index: Some(0),
+                auto_confirm: Some(true),
+            },
+            OrchestratorInstruction::StartTerminal {
+                terminal_id: "term-runtime".to_string(),
+                instruction: "Implement runtime feature".to_string(),
+            },
+            OrchestratorInstruction::CloseTerminal {
+                terminal_id: "term-runtime".to_string(),
+                final_status: Some("completed".to_string()),
+            },
+            OrchestratorInstruction::CompleteTask {
+                task_id: "task-runtime".to_string(),
+                summary: "Task is fully planned".to_string(),
+            },
+            OrchestratorInstruction::SetWorkflowPlanningComplete {
+                summary: Some("No more tasks required".to_string()),
             },
             OrchestratorInstruction::ReviewCode {
                 terminal_id: "terminal-1".to_string(),
@@ -215,7 +249,14 @@ mod orchestrator_tests {
     async fn test_task_init_and_tracking() {
         let mut state = OrchestratorState::new("workflow-1".to_string());
 
-        state.init_task("task-1".to_string(), 3);
+        state.init_task(
+            "task-1".to_string(),
+            vec![
+                "terminal-1".to_string(),
+                "terminal-2".to_string(),
+                "terminal-3".to_string(),
+            ],
+        );
 
         assert!(state.task_states.contains_key("task-1"));
         let task_state = state.task_states.get("task-1").unwrap();
@@ -230,7 +271,14 @@ mod orchestrator_tests {
     #[tokio::test]
     async fn test_terminal_completion_marking() {
         let mut state = OrchestratorState::new("workflow-1".to_string());
-        state.init_task("task-1".to_string(), 3);
+        state.init_task(
+            "task-1".to_string(),
+            vec![
+                "terminal-1".to_string(),
+                "terminal-2".to_string(),
+                "terminal-3".to_string(),
+            ],
+        );
 
         // Mark first terminal as completed
         state.mark_terminal_completed("task-1", "terminal-1", true);
@@ -298,8 +346,11 @@ mod orchestrator_tests {
     async fn test_all_tasks_completed() {
         let mut state = OrchestratorState::new("workflow-1".to_string());
 
-        state.init_task("task-1".to_string(), 2);
-        state.init_task("task-2".to_string(), 1);
+        state.init_task(
+            "task-1".to_string(),
+            vec!["terminal-1".to_string(), "terminal-2".to_string()],
+        );
+        state.init_task("task-2".to_string(), vec!["terminal-1".to_string()]);
 
         assert!(!state.all_tasks_completed());
 
@@ -640,6 +691,30 @@ mod orchestrator_tests {
                 "start_task",
             ),
             (
+                r#"{"type":"create_task","task_id":"task-runtime","name":"Runtime task","description":"Create work","branch":null,"order_index":0}"#,
+                "create_task",
+            ),
+            (
+                r#"{"type":"create_terminal","terminal_id":"term-runtime","task_id":"task-runtime","cli_type_id":"cli-claude-code","model_config_id":"model-claude-sonnet","custom_base_url":null,"custom_api_key":null,"role":"coder","role_description":null,"order_index":0,"auto_confirm":true}"#,
+                "create_terminal",
+            ),
+            (
+                r#"{"type":"start_terminal","terminal_id":"term-runtime","instruction":"Implement feature"}"#,
+                "start_terminal",
+            ),
+            (
+                r#"{"type":"close_terminal","terminal_id":"term-runtime","final_status":"completed"}"#,
+                "close_terminal",
+            ),
+            (
+                r#"{"type":"complete_task","task_id":"task-runtime","summary":"done"}"#,
+                "complete_task",
+            ),
+            (
+                r#"{"type":"set_workflow_planning_complete","summary":"graph closed"}"#,
+                "set_workflow_planning_complete",
+            ),
+            (
                 r#"{"type":"review_code","terminal_id":"t1","commit_hash":"abc123"}"#,
                 "review_code",
             ),
@@ -739,6 +814,117 @@ mod orchestrator_tests {
         // 2. Agent can be created with mock client
         // 3. All dependencies (DB, MessageBus, State) are properly initialized
         // Note: state field is private, so we can't inspect it directly
+    }
+
+    #[tokio::test]
+    async fn test_execute_instruction_supports_runtime_planning_array() {
+        use std::{path::PathBuf, sync::Arc};
+
+        use crate::services::terminal::{PromptWatcher, process::ProcessManager};
+        use chrono::Utc;
+        use db::{DBService, models::Workflow};
+        use sqlx::sqlite::SqlitePoolOptions;
+        use uuid::Uuid;
+
+        let pool = SqlitePoolOptions::new().connect(":memory:").await.unwrap();
+
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let migration_dir = manifest_dir
+            .ancestors()
+            .nth(1)
+            .unwrap()
+            .join("db")
+            .join("migrations");
+        let migrator = sqlx::migrate::Migrator::new(migration_dir).await.unwrap();
+        migrator.run(&pool).await.unwrap();
+
+        let db = Arc::new(DBService { pool: pool.clone() });
+        let message_bus = Arc::new(MessageBus::new(100));
+
+        let project_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO projects (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(project_id)
+        .bind("runtime-project")
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let workflow = Workflow {
+            id: Uuid::new_v4().to_string(),
+            project_id,
+            name: "Runtime Planning Workflow".to_string(),
+            description: Some("Runtime planning test".to_string()),
+            status: "running".to_string(),
+            execution_mode: "agent_planned".to_string(),
+            initial_goal: Some("Decide whether any work is required".to_string()),
+            use_slash_commands: false,
+            orchestrator_enabled: false,
+            orchestrator_api_type: None,
+            orchestrator_base_url: None,
+            orchestrator_api_key: None,
+            orchestrator_model: None,
+            error_terminal_enabled: false,
+            error_terminal_cli_id: None,
+            error_terminal_model_id: None,
+            merge_terminal_cli_id: "cli-claude-code".to_string(),
+            merge_terminal_model_id: "model-claude-sonnet".to_string(),
+            target_branch: "main".to_string(),
+            git_watcher_enabled: true,
+            ready_at: Some(Utc::now()),
+            started_at: Some(Utc::now()),
+            completed_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        Workflow::create(&pool, &workflow).await.unwrap();
+
+        let mut agent = OrchestratorAgent::with_llm_client(
+            OrchestratorConfig {
+                api_key: "test-key".to_string(),
+                ..Default::default()
+            },
+            workflow.id.clone(),
+            message_bus.clone(),
+            db.clone(),
+            Box::new(MockLLMClient::new()),
+        )
+        .expect("agent should be created");
+
+        let process_manager = Arc::new(ProcessManager::new());
+        let prompt_watcher = PromptWatcher::new(message_bus.clone(), process_manager.clone());
+        agent.attach_runtime_actions(Arc::new(RuntimeActionService::new(
+            db.clone(),
+            message_bus.clone(),
+            process_manager,
+            prompt_watcher,
+        )));
+
+        agent
+            .execute_instruction(
+                r#"[
+                    {"type":"create_task","task_id":"task-runtime","name":"Runtime Task","description":"Nothing to execute","order_index":0},
+                    {"type":"complete_task","task_id":"task-runtime","summary":"No terminals needed"},
+                    {"type":"set_workflow_planning_complete","summary":"Planning is finished"}
+                ]"#,
+            )
+            .await
+            .expect("runtime planning array should execute");
+
+        let task = db::models::WorkflowTask::find_by_id(&pool, "task-runtime")
+            .await
+            .unwrap()
+            .expect("task should be created");
+        assert_eq!(task.status, "completed");
+
+        let workflow = Workflow::find_by_id(&pool, &workflow.id)
+            .await
+            .unwrap()
+            .expect("workflow should still exist");
+        assert_eq!(workflow.status, "completed");
     }
 
     #[tokio::test]

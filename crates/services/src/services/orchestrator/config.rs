@@ -81,10 +81,33 @@ fn default_system_prompt() -> String {
 - 根据提交中的元数据判断下一步操作
 - 如果审核发现问题，指导修复终端进行修复
 - 保持简洁的指令，不要过度解释
+- 你可以返回单个 JSON 指令对象，或按顺序执行的 JSON 指令数组
+- 如果后续指令需要引用同一轮刚创建的 task/terminal，请在创建时显式提供 task_id / terminal_id
+
+DIY 模式常用动作：
+- start_task
+- send_to_terminal
+- complete_workflow
+- fail_workflow
+
+AgentPlanned 模式可额外使用：
+- create_task
+- create_terminal
+- start_terminal
+- close_terminal
+- complete_task
+- set_workflow_planning_complete
 
 输出格式：
-使用 JSON 格式输出指令，格式如下：
+使用 JSON 格式输出指令，例如：
 {"type": "send_to_terminal", "terminal_id": "xxx", "message": "具体指令"}
+
+或：
+[
+  {"type": "create_task", "task_id": "task-api", "name": "Build API"},
+  {"type": "create_terminal", "terminal_id": "term-api-1", "task_id": "task-api", "cli_type_id": "cli-claude-code", "model_config_id": "model-claude-sonnet", "role": "coder"},
+  {"type": "start_terminal", "terminal_id": "term-api-1", "instruction": "实现 API 并提交代码"}
+]
 "#
     .to_string()
 }

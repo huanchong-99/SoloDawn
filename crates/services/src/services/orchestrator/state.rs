@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn test_advance_terminal_single_terminal() {
         let mut state = OrchestratorState::new("test-workflow".to_string());
-        state.init_task("task-1".to_string(), 1);
+        state.init_task("task-1".to_string(), vec!["term-1".to_string()]);
 
         // With only 1 terminal, advance should return false (no next terminal)
         assert!(!state.advance_terminal("task-1"));
@@ -471,7 +471,14 @@ mod tests {
     #[test]
     fn test_advance_terminal_multiple_terminals() {
         let mut state = OrchestratorState::new("test-workflow".to_string());
-        state.init_task("task-1".to_string(), 3);
+        state.init_task(
+            "task-1".to_string(),
+            vec![
+                "term-1".to_string(),
+                "term-2".to_string(),
+                "term-3".to_string(),
+            ],
+        );
 
         // Initial state: index 0
         assert_eq!(state.get_next_terminal_for_task("task-1"), Some(0));
@@ -486,7 +493,7 @@ mod tests {
 
         // No more terminals to advance to
         assert!(!state.advance_terminal("task-1"));
-        assert_eq!(state.get_next_terminal_for_task("task-1"), Some(2));
+        assert_eq!(state.get_next_terminal_for_task("task-1"), None);
     }
 
     #[test]
@@ -501,7 +508,10 @@ mod tests {
     #[test]
     fn test_get_next_terminal_completed_task() {
         let mut state = OrchestratorState::new("test-workflow".to_string());
-        state.init_task("task-1".to_string(), 2);
+        state.init_task(
+            "task-1".to_string(),
+            vec!["term-1".to_string(), "term-2".to_string()],
+        );
 
         // Mark both terminals as completed
         state.mark_terminal_completed("task-1", "term-1", true);
@@ -515,7 +525,10 @@ mod tests {
     #[test]
     fn test_is_task_completed() {
         let mut state = OrchestratorState::new("test-workflow".to_string());
-        state.init_task("task-1".to_string(), 2);
+        state.init_task(
+            "task-1".to_string(),
+            vec!["term-1".to_string(), "term-2".to_string()],
+        );
 
         // Initially not completed
         assert!(!state.is_task_completed("task-1"));
@@ -538,7 +551,14 @@ mod tests {
     #[test]
     fn test_task_has_failures() {
         let mut state = OrchestratorState::new("test-workflow".to_string());
-        state.init_task("task-1".to_string(), 3);
+        state.init_task(
+            "task-1".to_string(),
+            vec![
+                "term-1".to_string(),
+                "term-2".to_string(),
+                "term-3".to_string(),
+            ],
+        );
 
         // Initially no failures
         assert!(!state.task_has_failures("task-1"));
@@ -565,7 +585,14 @@ mod tests {
     #[test]
     fn test_duplicate_terminal_completion_does_not_advance_task() {
         let mut state = OrchestratorState::new("test-workflow".to_string());
-        state.init_task("task-1".to_string(), 3);
+        state.init_task(
+            "task-1".to_string(),
+            vec![
+                "term-1".to_string(),
+                "term-2".to_string(),
+                "term-3".to_string(),
+            ],
+        );
 
         state.mark_terminal_completed("task-1", "term-1", true);
         state.mark_terminal_completed("task-1", "term-2", true);

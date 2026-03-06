@@ -28,6 +28,7 @@ use super::{
     llm::{LLMClient, build_terminal_completion_prompt, create_llm_client},
     message_bus::{BusMessage, SharedMessageBus},
     prompt_handler::PromptHandler,
+    runtime_actions::{RuntimeActionService, RuntimeTaskSpec, RuntimeTerminalSpec},
     state::{OrchestratorRunState, OrchestratorState, SharedOrchestratorState},
     types::{
         CodeIssue, OrchestratorInstruction, TerminalCompletionEvent, TerminalCompletionStatus,
@@ -48,6 +49,7 @@ pub struct OrchestratorAgent {
     db: Arc<DBService>,
     error_handler: ErrorHandler,
     prompt_handler: PromptHandler,
+    runtime_actions: Option<Arc<RuntimeActionService>>,
 }
 
 static TASK_HINT_FROM_COMMIT_RE: Lazy<Regex> = Lazy::new(|| {
@@ -129,6 +131,7 @@ impl OrchestratorAgent {
             db,
             error_handler,
             prompt_handler,
+            runtime_actions: None,
         })
     }
 
@@ -153,7 +156,275 @@ impl OrchestratorAgent {
             db,
             error_handler,
             prompt_handler,
+            runtime_actions: None,
         })
+    }
+
+    pub fn attach_runtime_actions(&mut self, runtime_actions: Arc<RuntimeActionService>) {
+        self.runtime_actions = Some(runtime_actions);
+    }
+
+    fn runtime_actions(&self) -> anyhow::Result<Arc<RuntimeActionService>> {
+        self.runtime_actions
+            .clone()
+            .ok_or_else(|| anyhow!("Runtime actions are not configured for this orchestrator"))
+    }
+
+    async fn load_workflow(&self) -> anyhow::Result<db::models::Workflow> {
+        let workflow_id = {
+            let state = self.state.read().await;
+            state.workflow_id.clone()
+        };
+        db::models::Workflow::find_by_id(&self.db.pool, &workflow_id)
+            .await
+            .map_err(|e| anyhow!("Failed to load workflow {workflow_id}: {e}"))?
+            .ok_or_else(|| anyhow!("Workflow {workflow_id} not found"))
+    }
+
+    async fn is_agent_planned_workflow(&self) -> anyhow::Result<bool> {
+        Ok(self.load_workflow().await?.execution_mode == "agent_planned")
+    }
+
+    async fn ensure_agent_planned_workflow(&self) -> anyhow::Result<()> {
+        if !self.is_agent_planned_workflow().await? {
+            return Err(anyhow!(
+                "Runtime topology mutations are only allowed for agent_planned workflows"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn initialize_workflow_mode_state(&self) -> anyhow::Result<()> {
+        if self.is_agent_planned_workflow().await? {
+            let mut state = self.state.write().await;
+            state.set_workflow_planning_complete(false);
+        }
+        Ok(())
+    }
+
+    async fn run_initial_agent_planning_if_needed(&self) -> anyhow::Result<()> {
+        let workflow = self.load_workflow().await?;
+        if workflow.execution_mode != "agent_planned" {
+            return Ok(());
+        }
+
+        let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, &workflow.id)
+            .await
+            .map_err(|e| anyhow!("Failed to load workflow tasks for {}: {e}", workflow.id))?;
+        if !tasks.is_empty() {
+            return Ok(());
+        }
+
+        let prompt = self.build_initial_planning_prompt(&workflow).await?;
+        let response = self.call_llm(&prompt).await?;
+        self.execute_instruction(&response).await
+    }
+
+    async fn build_initial_planning_prompt(
+        &self,
+        workflow: &db::models::Workflow,
+    ) -> anyhow::Result<String> {
+        let goal = workflow
+            .initial_goal
+            .as_deref()
+            .or(workflow.description.as_deref())
+            .unwrap_or(&workflow.name);
+        let context = self.build_agent_planned_context(workflow).await?;
+        Ok(format!(
+            "Workflow {} has just started in agent_planned mode with no predefined tasks.\n\nPrimary goal:\n{}\n\n{}\n\nPlan the initial execution graph now. If work should begin immediately, create tasks and terminals, then start those terminals in the same JSON array. When you are confident that no more tasks need to be created later, emit set_workflow_planning_complete.",
+            workflow.id, goal, context
+        ))
+    }
+
+    async fn build_agent_planned_context(
+        &self,
+        workflow: &db::models::Workflow,
+    ) -> anyhow::Result<String> {
+        let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, &workflow.id).await?;
+        let terminals = db::models::Terminal::find_by_workflow(&self.db.pool, &workflow.id).await?;
+        let cli_types = db::models::CliType::find_all(&self.db.pool).await?;
+        let model_configs = db::models::ModelConfig::find_all(&self.db.pool).await?;
+        let workflow_commands =
+            db::models::WorkflowCommand::find_by_workflow(&self.db.pool, &workflow.id).await?;
+
+        let planning_snapshot = {
+            let state = self.state.read().await;
+            let task_planning: HashMap<String, bool> = state
+                .task_states
+                .iter()
+                .map(|(task_id, task_state)| (task_id.clone(), task_state.planning_complete))
+                .collect();
+            (state.workflow_planning_complete, task_planning)
+        };
+
+        let task_summary = if tasks.is_empty() {
+            "Existing tasks: none".to_string()
+        } else {
+            let lines: Vec<String> = tasks
+                .iter()
+                .map(|task| {
+                    let task_terminals: Vec<String> = terminals
+                        .iter()
+                        .filter(|terminal| terminal.workflow_task_id == task.id)
+                        .map(|terminal| {
+                            format!(
+                                "{} [{}] cli={} model={} role={}",
+                                terminal.id,
+                                terminal.status,
+                                terminal.cli_type_id,
+                                terminal.model_config_id,
+                                terminal.role.as_deref().unwrap_or("none")
+                            )
+                        })
+                        .collect();
+                    format!(
+                        "- {} [{}] branch={} planning_complete={} terminals={}",
+                        task.id,
+                        task.status,
+                        task.branch,
+                        planning_snapshot
+                            .1
+                            .get(&task.id)
+                            .copied()
+                            .unwrap_or(true),
+                        if task_terminals.is_empty() {
+                            "none".to_string()
+                        } else {
+                            task_terminals.join(" | ")
+                        }
+                    )
+                })
+                .collect();
+            format!("Existing tasks:\n{}", lines.join("\n"))
+        };
+
+        let cli_summary = cli_types
+            .iter()
+            .map(|cli| {
+                let models: Vec<String> = model_configs
+                    .iter()
+                    .filter(|model| model.cli_type_id == cli.id)
+                    .map(|model| format!("{} ({})", model.id, model.display_name))
+                    .collect();
+                format!(
+                    "- {} ({}) => {}",
+                    cli.id,
+                    cli.display_name,
+                    if models.is_empty() {
+                        "no models".to_string()
+                    } else {
+                        models.join(", ")
+                    }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let command_summary = if workflow_commands.is_empty() {
+            "Workflow slash commands: none".to_string()
+        } else {
+            let mut commands = Vec::new();
+            for command in workflow_commands {
+                let label = if let Some(preset) =
+                    db::models::SlashCommandPreset::find_by_id(&self.db.pool, &command.preset_id)
+                        .await?
+                {
+                    preset.command
+                } else {
+                    command.preset_id
+                };
+                commands.push(format!(
+                    "- order={} command={} params={}",
+                    command.order_index,
+                    label,
+                    command.custom_params.as_deref().unwrap_or("{}")
+                ));
+            }
+            format!("Workflow slash commands:\n{}", commands.join("\n"))
+        };
+
+        Ok(format!(
+            "Workflow planning complete: {}\n{}\n\nAllowed CLI/model pool:\n{}\n\n{}\n\nAvailable runtime actions:\n- create_task\n- create_terminal\n- start_terminal\n- close_terminal\n- complete_task\n- set_workflow_planning_complete\n\nOnly use the listed cli_type_id/model_config_id values. Return raw JSON only. If later instructions refer to objects created in the same response, provide explicit task_id / terminal_id values in the create actions.",
+            planning_snapshot.0,
+            task_summary,
+            cli_summary,
+            command_summary
+        ))
+    }
+
+    async fn task_planning_complete(&self, task_id: &str) -> bool {
+        let state = self.state.read().await;
+        state
+            .task_states
+            .get(task_id)
+            .map(|task_state| task_state.planning_complete)
+            .unwrap_or(false)
+    }
+
+    async fn sync_task_state_from_db(
+        &self,
+        task_id: &str,
+        planning_complete: Option<bool>,
+    ) -> anyhow::Result<()> {
+        let terminals = db::models::Terminal::find_by_task(&self.db.pool, task_id)
+            .await
+            .map_err(|e| anyhow!("Failed to load terminals for task {task_id}: {e}"))?;
+        let terminal_ids: Vec<String> = terminals
+            .into_iter()
+            .map(|terminal| terminal.id)
+            .collect();
+        let planning_complete = match planning_complete {
+            Some(value) => value,
+            None => {
+                let state = self.state.read().await;
+                state
+                    .task_states
+                    .get(task_id)
+                    .map(|task_state| task_state.planning_complete)
+                    .unwrap_or(true)
+            }
+        };
+
+        let mut state = self.state.write().await;
+        state.sync_task_terminals(task_id.to_string(), terminal_ids, planning_complete);
+        Ok(())
+    }
+
+    async fn finalize_task_if_ready(&self, task_id: &str) -> anyhow::Result<()> {
+        let (planning_complete, task_completed, task_failed, workflow_id) = {
+            let state = self.state.read().await;
+            (
+                state
+                    .task_states
+                    .get(task_id)
+                    .map(|task_state| task_state.planning_complete)
+                    .unwrap_or(false),
+                state.is_task_completed(task_id),
+                state.task_has_failures(task_id),
+                state.workflow_id.clone(),
+            )
+        };
+
+        if !planning_complete || !task_completed {
+            return Ok(());
+        }
+
+        let status = if task_failed { "failed" } else { "completed" };
+        db::models::WorkflowTask::update_status(&self.db.pool, task_id, status)
+            .await
+            .map_err(|e| anyhow!("Failed to update task {} status to {}: {e}", task_id, status))?;
+        self.message_bus
+            .publish_workflow_event(
+                &workflow_id,
+                BusMessage::TaskStatusUpdate {
+                    workflow_id: workflow_id.clone(),
+                    task_id: task_id.to_string(),
+                    status: status.to_string(),
+                },
+            )
+            .await
+            .map_err(|e| anyhow!("Failed to publish task status update: {e}"))?;
+        Ok(())
     }
 
     /// Runs the orchestrator event loop until shutdown.
@@ -175,6 +446,9 @@ impl OrchestratorAgent {
             state.add_message("system", &self.config.system_prompt, &self.config);
             state.run_state = OrchestratorRunState::Idle;
         }
+        if let Err(e) = self.initialize_workflow_mode_state().await {
+            tracing::error!("Failed to initialize workflow mode state: {}", e);
+        }
 
         // Execute slash commands if enabled for this workflow
         if let Err(e) = self.execute_slash_commands().await {
@@ -190,6 +464,9 @@ impl OrchestratorAgent {
         if let Err(e) = self.auto_dispatch_initial_tasks().await {
             tracing::error!("Failed to auto-dispatch initial tasks: {}", e);
             // Don't fail the workflow, just log the error
+        }
+        if let Err(e) = self.run_initial_agent_planning_if_needed().await {
+            tracing::error!("Failed to run initial agent-planned cycle: {}", e);
         }
 
         // 濞存粌顑勫▎銏狀嚗椤忓棗绠?
@@ -743,7 +1020,7 @@ impl OrchestratorAgent {
         let should_run_completion_llm = !(success && has_next && !task_failed);
         let mut completion_response: Option<String> = None;
         if should_run_completion_llm {
-            let prompt = Self::build_completion_prompt(&event);
+            let prompt = self.build_completion_prompt(&event).await?;
             completion_response = Some(self.call_llm(&prompt).await?);
         }
 
@@ -1738,16 +2015,54 @@ impl OrchestratorAgent {
     }
 
     /// Builds the prompt for a terminal completion event.
-    fn build_completion_prompt(event: &TerminalCompletionEvent) -> String {
+    async fn build_completion_prompt(
+        &self,
+        event: &TerminalCompletionEvent,
+    ) -> anyhow::Result<String> {
         let commit_hash = event.commit_hash.as_deref().unwrap_or("N/A");
         let commit_message = event.commit_message.as_deref().unwrap_or("No message");
-
-        build_terminal_completion_prompt(
+        let mut prompt = build_terminal_completion_prompt(
             &event.terminal_id,
             &event.task_id,
             commit_hash,
             commit_message,
-        )
+        );
+        if self.is_agent_planned_workflow().await? {
+            let workflow = self.load_workflow().await?;
+            let context = self.build_agent_planned_context(&workflow).await?;
+            prompt.push_str("\n\nAgent-planned runtime context:\n");
+            prompt.push_str(&context);
+            prompt.push_str(
+                "\n\nDecide whether to add more tasks/terminals, start new terminals, close finished terminals, mark the current task complete, or mark workflow planning complete.",
+            );
+        }
+        Ok(prompt)
+    }
+
+    fn normalize_instruction_payload(response: &str) -> &str {
+        let trimmed = response.trim();
+        if trimmed.starts_with("```") && trimmed.ends_with("```") {
+            let without_opening = trimmed
+                .trim_start_matches("```json")
+                .trim_start_matches("```JSON")
+                .trim_start_matches("```");
+            return without_opening
+                .strip_suffix("```")
+                .map(str::trim)
+                .unwrap_or(without_opening.trim());
+        }
+        trimmed
+    }
+
+    fn parse_instructions(response: &str) -> Option<Vec<OrchestratorInstruction>> {
+        let normalized = Self::normalize_instruction_payload(response);
+        serde_json::from_str::<Vec<OrchestratorInstruction>>(normalized)
+            .ok()
+            .or_else(|| {
+                serde_json::from_str::<OrchestratorInstruction>(normalized)
+                    .ok()
+                    .map(|instruction| vec![instruction])
+            })
     }
 
     /// Calls the LLM with the current conversation history.
@@ -1771,205 +2086,362 @@ impl OrchestratorAgent {
 
     /// Executes orchestrator instructions returned by the LLM.
     pub async fn execute_instruction(&self, response: &str) -> anyhow::Result<()> {
-        // Try parsing JSON instruction.
-        if let Ok(instruction) = serde_json::from_str::<OrchestratorInstruction>(response) {
-            match instruction {
-                OrchestratorInstruction::SendToTerminal {
-                    terminal_id,
-                    message,
-                } => {
-                    tracing::info!("Sending to terminal {}: {}", terminal_id, message);
+        let Some(instructions) = Self::parse_instructions(response) else {
+            tracing::warn!("LLM response did not contain a valid orchestrator instruction payload");
+            return Ok(());
+        };
 
-                    // 1. Get terminal from database
-                    let terminal = db::models::Terminal::find_by_id(&self.db.pool, &terminal_id)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Failed to get terminal: {e}"))?
-                        .ok_or_else(|| anyhow::anyhow!("Terminal {terminal_id} not found"))?;
-                    // Skip stale send instructions for terminals that are no longer active.
-                    if terminal.status != "working" {
-                        tracing::info!(
+        for instruction in instructions {
+            self.execute_single_instruction(instruction).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn execute_single_instruction(
+        &self,
+        instruction: OrchestratorInstruction,
+    ) -> anyhow::Result<()> {
+        match instruction {
+            OrchestratorInstruction::CreateTask {
+                task_id,
+                name,
+                description,
+                branch,
+                order_index,
+            } => {
+                self.ensure_agent_planned_workflow().await?;
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
+                let task = self
+                    .runtime_actions()?
+                    .create_task(
+                        &workflow_id,
+                        RuntimeTaskSpec {
+                            task_id,
+                            name,
+                            description,
+                            branch,
+                            order_index,
+                        },
+                    )
+                    .await?;
+                let mut state = self.state.write().await;
+                state.sync_task_terminals(task.id.clone(), Vec::new(), false);
+            }
+            OrchestratorInstruction::CreateTerminal {
+                terminal_id,
+                task_id,
+                cli_type_id,
+                model_config_id,
+                custom_base_url,
+                custom_api_key,
+                role,
+                role_description,
+                order_index,
+                auto_confirm,
+            } => {
+                self.ensure_agent_planned_workflow().await?;
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
+                let planning_complete = self.task_planning_complete(&task_id).await;
+                self.runtime_actions()?
+                    .create_terminal(
+                        &workflow_id,
+                        RuntimeTerminalSpec {
+                            terminal_id,
+                            task_id: task_id.clone(),
+                            cli_type_id,
+                            model_config_id,
+                            custom_base_url,
+                            custom_api_key,
+                            role,
+                            role_description,
+                            order_index,
+                            auto_confirm,
+                        },
+                    )
+                    .await?;
+                self.sync_task_state_from_db(&task_id, Some(planning_complete))
+                    .await?;
+            }
+            OrchestratorInstruction::StartTerminal {
+                terminal_id,
+                instruction,
+            } => {
+                self.ensure_agent_planned_workflow().await?;
+                let terminal = self.runtime_actions()?.start_terminal(&terminal_id).await?;
+                let task_id = terminal.workflow_task_id.clone();
+                let planning_complete = self.task_planning_complete(&task_id).await;
+                self.sync_task_state_from_db(&task_id, Some(planning_complete))
+                    .await?;
+                self.dispatch_terminal(&task_id, &terminal, &instruction).await?;
+            }
+            OrchestratorInstruction::CloseTerminal {
+                terminal_id,
+                final_status,
+            } => {
+                let terminal = self
+                    .runtime_actions()?
+                    .close_terminal(&terminal_id, final_status.as_deref())
+                    .await?;
+                let task_id = terminal.workflow_task_id.clone();
+                let planning_complete = self.task_planning_complete(&task_id).await;
+                self.sync_task_state_from_db(&task_id, Some(planning_complete))
+                    .await?;
+                let mark_success = matches!(terminal.status.as_str(), "completed" | "cancelled");
+                {
+                    let mut state = self.state.write().await;
+                    state.mark_terminal_completed(&task_id, &terminal.id, mark_success);
+                }
+                self.finalize_task_if_ready(&task_id).await?;
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
+                self.auto_sync_workflow_completion(&workflow_id).await?;
+            }
+            OrchestratorInstruction::CompleteTask { task_id, summary } => {
+                self.ensure_agent_planned_workflow().await?;
+                tracing::info!("Marking task {} planning complete: {}", task_id, summary);
+                {
+                    let mut state = self.state.write().await;
+                    state.set_task_planning_complete(&task_id, true);
+                }
+                self.sync_task_state_from_db(&task_id, Some(true)).await?;
+                self.finalize_task_if_ready(&task_id).await?;
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
+                self.auto_sync_workflow_completion(&workflow_id).await?;
+            }
+            OrchestratorInstruction::SetWorkflowPlanningComplete { summary } => {
+                self.ensure_agent_planned_workflow().await?;
+                tracing::info!(
+                    "Workflow planning completed{}",
+                    summary
+                        .as_deref()
+                        .map(|text| format!(": {text}"))
+                        .unwrap_or_default()
+                );
+                {
+                    let mut state = self.state.write().await;
+                    state.set_workflow_planning_complete(true);
+                }
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
+                self.auto_sync_workflow_completion(&workflow_id).await?;
+            }
+            OrchestratorInstruction::SendToTerminal {
+                terminal_id,
+                message,
+            } => {
+                tracing::info!("Sending to terminal {}: {}", terminal_id, message);
+
+                // 1. Get terminal from database
+                let terminal = db::models::Terminal::find_by_id(&self.db.pool, &terminal_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to get terminal: {e}"))?
+                    .ok_or_else(|| anyhow::anyhow!("Terminal {terminal_id} not found"))?;
+                // Skip stale send instructions for terminals that are no longer active.
+                if terminal.status != "working" {
+                    tracing::info!(
+                        terminal_id = %terminal.id,
+                        status = %terminal.status,
+                        "Skipping SendToTerminal instruction because terminal is not in working state"
+                    );
+                    return Ok(());
+                }
+
+                // 2. Get PTY session ID. Missing PTY can happen after process teardown;
+                // skip this advisory message instead of crashing the orchestrator runtime.
+                let pty_session_id = match terminal.pty_session_id.clone() {
+                    Some(session_id) => session_id,
+                    None => {
+                        tracing::warn!(
                             terminal_id = %terminal.id,
                             status = %terminal.status,
-                            "Skipping SendToTerminal instruction because terminal is not in working state"
+                            "Skipping SendToTerminal instruction because terminal has no PTY session"
                         );
                         return Ok(());
                     }
+                };
 
-                    // 2. Get PTY session ID. Missing PTY can happen after process teardown;
-                    // skip this advisory message instead of crashing the orchestrator runtime.
-                    let pty_session_id = match terminal.pty_session_id.clone() {
-                        Some(session_id) => session_id,
-                        None => {
-                            tracing::warn!(
-                                terminal_id = %terminal.id,
-                                status = %terminal.status,
-                                "Skipping SendToTerminal instruction because terminal has no PTY session"
-                            );
-                            return Ok(());
-                        }
-                    };
+                // 3. Send message via message bus
+                self.message_bus
+                    .publish(
+                        &pty_session_id,
+                        BusMessage::TerminalMessage {
+                            message: message.clone(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to send message: {e}"))?;
 
-                    // 3. Send message via message bus
+                // Fallback submit keystroke: some terminal TUIs keep pasted text in composer
+                // until an additional Enter is sent.
+                for (attempt, delay_ms) in Self::submit_keystroke_schedule_ms(&terminal, false)
+                    .iter()
+                    .enumerate()
+                {
+                    sleep(Duration::from_millis(*delay_ms)).await;
                     self.message_bus
-                        .publish(
-                            &pty_session_id,
-                            BusMessage::TerminalMessage {
-                                message: message.clone(),
-                            },
-                        )
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Failed to send message: {e}"))?;
+                        .publish_terminal_input(&terminal.id, &pty_session_id, "", None)
+                        .await;
+                    tracing::debug!(
+                        terminal_id = %terminal.id,
+                        attempt = attempt + 1,
+                        delay_ms,
+                        "Sent submit keystroke after SendToTerminal dispatch"
+                    );
+                }
 
-                    // Fallback submit keystroke: some terminal TUIs keep pasted text in composer
-                    // until an additional Enter is sent.
-                    for (attempt, delay_ms) in Self::submit_keystroke_schedule_ms(&terminal, false)
-                        .iter()
-                        .enumerate()
-                    {
-                        sleep(Duration::from_millis(*delay_ms)).await;
-                        self.message_bus
-                            .publish_terminal_input(&terminal.id, &pty_session_id, "", None)
-                            .await;
-                        tracing::debug!(
-                            terminal_id = %terminal.id,
-                            attempt = attempt + 1,
-                            delay_ms,
-                            "Sent submit keystroke after SendToTerminal dispatch"
+                tracing::debug!("Message sent to terminal {}", terminal_id);
+            }
+            OrchestratorInstruction::CompleteWorkflow { summary } => {
+                tracing::info!("Completing workflow: {}", summary);
+
+                // Get workflow ID from state
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
+
+                // Update workflow status to completed
+                db::models::Workflow::update_status(
+                    &self.db.pool,
+                    &workflow_id,
+                    WORKFLOW_STATUS_COMPLETED,
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to update workflow status: {e}"))?;
+
+                // Publish completion event
+                self.message_bus
+                    .publish_workflow_event(
+                        &workflow_id,
+                        BusMessage::StatusUpdate {
+                            workflow_id: workflow_id.clone(),
+                            status: WORKFLOW_STATUS_COMPLETED.to_string(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to publish completion event: {e}"))?;
+
+                // Transition to Idle
+                self.state.write().await.run_state = OrchestratorRunState::Idle;
+
+                tracing::info!("Workflow {} completed successfully", workflow_id);
+            }
+            OrchestratorInstruction::FailWorkflow { reason } => {
+                tracing::error!("Failing workflow: {}", reason);
+
+                // Get workflow ID from state
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
+
+                // Update workflow status to failed
+                db::models::Workflow::update_status(
+                    &self.db.pool,
+                    &workflow_id,
+                    WORKFLOW_STATUS_FAILED,
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to update workflow status: {e}"))?;
+
+                // Publish failure event
+                self.message_bus
+                    .publish_workflow_event(
+                        &workflow_id,
+                        BusMessage::Error {
+                            workflow_id: workflow_id.clone(),
+                            error: reason.clone(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to publish failure event: {e}"))?;
+
+                // Transition to Idle
+                self.state.write().await.run_state = OrchestratorRunState::Idle;
+
+                tracing::error!("Workflow {} failed: {}", workflow_id, reason);
+            }
+            OrchestratorInstruction::StartTask {
+                task_id,
+                instruction,
+            } => {
+                tracing::info!("Starting task {}: {}", task_id, instruction);
+
+                // 1. Get task from database
+                let task = db::models::WorkflowTask::find_by_id(&self.db.pool, &task_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to get task: {e}"))?
+                    .ok_or_else(|| anyhow::anyhow!("Task {task_id} not found"))?;
+
+                // 2. Get terminals for this task
+                let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to get terminals: {e}"))?;
+
+                if terminals.is_empty() {
+                    return Err(anyhow::anyhow!("No terminals found for task {task_id}"));
+                }
+
+                // 3. Initialize task state if not already done
+                {
+                    let mut state = self.state.write().await;
+                    if !state.task_states.contains_key(&task_id) {
+                        state.init_task(
+                            task_id.clone(),
+                            terminals.iter().map(|terminal| terminal.id.clone()).collect(),
+                        );
+                    } else {
+                        state.sync_task_terminals(
+                            task_id.clone(),
+                            terminals.iter().map(|terminal| terminal.id.clone()).collect(),
+                            true,
                         );
                     }
-
-                    tracing::debug!("Message sent to terminal {}", terminal_id);
                 }
-                OrchestratorInstruction::CompleteWorkflow { summary } => {
-                    tracing::info!("Completing workflow: {}", summary);
 
-                    // Get workflow ID from state
-                    let workflow_id = {
-                        let state = self.state.read().await;
-                        state.workflow_id.clone()
-                    };
+                // 4. Get next terminal index
+                let next_index = {
+                    let state = self.state.read().await;
+                    state.get_next_terminal_for_task(&task_id)
+                };
 
-                    // Update workflow status to completed
-                    db::models::Workflow::update_status(
-                        &self.db.pool,
-                        &workflow_id,
-                        WORKFLOW_STATUS_COMPLETED,
-                    )
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to update workflow status: {e}"))?;
-
-                    // Publish completion event
-                    self.message_bus
-                        .publish_workflow_event(
-                            &workflow_id,
-                            BusMessage::StatusUpdate {
-                                workflow_id: workflow_id.clone(),
-                                status: WORKFLOW_STATUS_COMPLETED.to_string(),
-                            },
+                // 5. Dispatch the terminal
+                if let Some(index) = next_index {
+                    let terminal = terminals.get(index).cloned().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Terminal index {index} out of range for task {task_id}"
                         )
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Failed to publish completion event: {e}"))?;
-
-                    // Transition to Idle
-                    self.state.write().await.run_state = OrchestratorRunState::Idle;
-
-                    tracing::info!("Workflow {} completed successfully", workflow_id);
+                    })?;
+                    self.dispatch_terminal(&task.id, &terminal, &instruction)
+                        .await?;
+                } else {
+                    tracing::info!("No pending terminals for task {task_id}");
                 }
-                OrchestratorInstruction::FailWorkflow { reason } => {
-                    tracing::error!("Failing workflow: {}", reason);
-
-                    // Get workflow ID from state
-                    let workflow_id = {
-                        let state = self.state.read().await;
-                        state.workflow_id.clone()
-                    };
-
-                    // Update workflow status to failed
-                    db::models::Workflow::update_status(
-                        &self.db.pool,
-                        &workflow_id,
-                        WORKFLOW_STATUS_FAILED,
-                    )
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to update workflow status: {e}"))?;
-
-                    // Publish failure event
-                    self.message_bus
-                        .publish_workflow_event(
-                            &workflow_id,
-                            BusMessage::Error {
-                                workflow_id: workflow_id.clone(),
-                                error: reason.clone(),
-                            },
-                        )
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Failed to publish failure event: {e}"))?;
-
-                    // Transition to Idle
-                    self.state.write().await.run_state = OrchestratorRunState::Idle;
-
-                    tracing::error!("Workflow {} failed: {}", workflow_id, reason);
-                }
-                OrchestratorInstruction::StartTask {
-                    task_id,
-                    instruction,
-                } => {
-                    tracing::info!("Starting task {}: {}", task_id, instruction);
-
-                    // 1. Get task from database
-                    let task = db::models::WorkflowTask::find_by_id(&self.db.pool, &task_id)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Failed to get task: {e}"))?
-                        .ok_or_else(|| anyhow::anyhow!("Task {task_id} not found"))?;
-
-                    // 2. Get terminals for this task
-                    let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task_id)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Failed to get terminals: {e}"))?;
-
-                    if terminals.is_empty() {
-                        return Err(anyhow::anyhow!("No terminals found for task {task_id}"));
-                    }
-
-                    // 3. Initialize task state if not already done
-                    {
-                        let mut state = self.state.write().await;
-                        if !state.task_states.contains_key(&task_id) {
-                            state.init_task(
-                                task_id.clone(),
-                                terminals.iter().map(|terminal| terminal.id.clone()).collect(),
-                            );
-                        } else {
-                            state.sync_task_terminals(
-                                task_id.clone(),
-                                terminals.iter().map(|terminal| terminal.id.clone()).collect(),
-                                true,
-                            );
-                        }
-                    }
-
-                    // 4. Get next terminal index
-                    let next_index = {
-                        let state = self.state.read().await;
-                        state.get_next_terminal_for_task(&task_id)
-                    };
-
-                    // 5. Dispatch the terminal
-                    if let Some(index) = next_index {
-                        let terminal = terminals.get(index).cloned().ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "Terminal index {index} out of range for task {task_id}"
-                            )
-                        })?;
-                        self.dispatch_terminal(&task.id, &terminal, &instruction)
-                            .await?;
-                    } else {
-                        tracing::info!("No pending terminals for task {task_id}");
-                    }
-                }
-                _ => {}
+            }
+            OrchestratorInstruction::ReviewCode { .. }
+            | OrchestratorInstruction::FixIssues { .. }
+            | OrchestratorInstruction::MergeBranch { .. }
+            | OrchestratorInstruction::PauseWorkflow { .. } => {
+                tracing::warn!(
+                    "Instruction variant is parsed but not yet implemented in execute_single_instruction"
+                );
             }
         }
+
         Ok(())
     }
 
@@ -2652,10 +3124,6 @@ impl OrchestratorAgent {
         }
 
         let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, workflow_id).await?;
-        if tasks.is_empty() || tasks.iter().any(|task| task.status != "completed") {
-            return Ok(());
-        }
-
         let terminals = db::models::Terminal::find_by_workflow(&self.db.pool, workflow_id).await?;
         let has_runnable_terminals = terminals.iter().any(|terminal| {
             matches!(
@@ -2664,6 +3132,9 @@ impl OrchestratorAgent {
             )
         });
         if has_runnable_terminals {
+            return Ok(());
+        }
+        if !tasks.is_empty() && tasks.iter().any(|task| task.status != "completed") {
             return Ok(());
         }
 

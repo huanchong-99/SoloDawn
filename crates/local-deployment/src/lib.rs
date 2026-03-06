@@ -27,7 +27,7 @@ use services::services::{
     git::GitService,
     image::ImageService,
     oauth_credentials::OAuthCredentials,
-    orchestrator::{MessageBus, OrchestratorRuntime, SharedMessageBus},
+    orchestrator::{MessageBus, OrchestratorRuntime, RuntimeActionService, SharedMessageBus},
     project::ProjectService,
     queued_message::QueuedMessageService,
     repo::RepoService,
@@ -178,6 +178,14 @@ impl Deployment for LocalDeployment {
             OrchestratorRuntime::new(Arc::new(db.clone()), message_bus.clone());
         let process_manager = Arc::new(ProcessManager::new());
         let prompt_watcher = PromptWatcher::new(message_bus.clone(), process_manager.clone());
+        orchestrator_runtime
+            .set_runtime_actions(Arc::new(RuntimeActionService::new(
+                Arc::new(db.clone()),
+                message_bus.clone(),
+                process_manager.clone(),
+                prompt_watcher.clone(),
+            )))
+            .await;
 
         // Reconcile terminal statuses on startup
         // Reset any terminals that are marked as running but have no actual process
