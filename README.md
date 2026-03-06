@@ -2,919 +2,145 @@
   <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-<p align="center">
-  <strong>AI Agent Cross-Terminal Task Coordination Platform</strong>
-</p>
+# GitCortex
 
-<p align="center">
-  Based on <a href="https://github.com/BloopAI/vibe-kanban">Vibe Kanban</a>, integrated with <a href="https://github.com/farion1231/cc-switch">CC-Switch</a> model switching capabilities
-</p>
+AI orchestration layer for coordinating multiple coding CLIs (Claude Code, Codex, Gemini CLI, etc.) in one workflow.
 
----
+## Why GitCortex
 
-## Overview
+- One orchestrator agent schedules all terminals with a single state machine.
+- Multi-task parallelism (across tasks) + serial quality gates (inside each task).
+- Native CLI execution, so existing CLI slash commands / plugins / MCP / skills remain usable.
+- Git-driven event loop for handoff, recovery, and traceable history.
 
-GitCortex is an AI-driven multi-terminal task coordination platform that enables multiple AI coding agents (Claude Code, Gemini CLI, Codex, etc.) to collaborate in parallel on complex software development tasks.
+## What's New (March 2026)
 
-### Core Features
+### Orchestrator and Chat
 
-| Feature | Description |
-|---------|-------------|
-| **Main Agent Coordination** | AI-driven central controller responsible for task distribution, progress monitoring, and result review |
-| **Multi-Task Parallelism** | Multiple Tasks execute simultaneously, each with independent Git branches |
-| **Intra-Task Serial Execution** | Terminals within each Task execute sequentially (coding→review→fix) |
-| **cc-switch Integration** | One-click model configuration switching for any CLI |
-| **Event-Driven** | Workflow progression based on Git commits and message bus events, reducing unnecessary polling and context repetition |
-| **Terminal Debug View** | Native terminal access for environment configuration verification after startup |
-| **Workflow Persistence** | Complete three-layer data model: Workflow/Task/Terminal |
-| **Slash Command System** | Reusable prompt presets with template variable substitution |
-| **Multi-Model Support** | Support for Claude, Gemini, OpenAI, and other AI models |
-| **Git Integration** | Deep Git integration with automatic branch and merge management |
-| **Open in Editor** | Quick-jump from Web UI to local code editor (VS Code, Cursor, Windsurf, etc.) to view or edit task worktree code |
+- Added workflow-level orchestrator chat pagination and query params (`cursor/limit`) (`ec8ad4ec2`).
+- Added orchestrator message persistence and command snapshot persistence (`8ccf0f3d1`).
+- Enforced instruction allowlist and command status flow (`1a1b153a3`).
+- Added command recovery, governance controls, and audit flow (`3a177d5d9`).
+- Added Telegram connector ingress with conversation binding and replay protection (`95c4afc81`).
+- Enhanced frontend orchestrator panel stream and interaction coverage tests (`fb642c5fc`).
 
-### Architecture Overview
+### Docker and Installer
 
-```
-╔═══════════════════════════════════════════════════════════════════╗
-║                     Orchestrator (Main Agent)                      ║
-║      User Config: API Type + Base URL + API Key + Model           ║
-╚═══════════════════════════════════════════════════════════════════╝
-         │                      │                      │
-         ▼                      ▼                      ▼
-  ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
-  │   Task 1    │       │   Task 2    │       │   Task 3    │
-  │ branch:login│       │ branch:i18n │       │ branch:theme│
-  │  T1→T2→T3   │       │   TA→TB     │       │   TX→TY     │
-  └─────────────┘       └─────────────┘       └─────────────┘
-         ║                      ║                      ║
-         ╚══════════════════════╩══════════════════════╝
-                    Parallel Task Execution
-                              │
-                              ▼
-  ┌─────────────────────────────────────────────────────────────────┐
-  │                   Global Merge Terminal                          │
-  └─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                          [ main ]
-```
+- Docker adaptation has been updated (`679e5cf54`, `7af0e7d17`, `35f17ecda`).
+- Better workspace path handling for Docker and local runtime.
+- Runtime-aware update flow for existing Docker deployments.
+- `.env` and API-token wiring improvements.
+- One-click installer has been updated (`07ef09911`, `35f17ecda`).
+- Installer can reuse existing `.env` and hand off to update flow automatically.
+- Installer supports install/update mode, language selection, non-interactive flags, optional volume reset, and readiness checks.
 
-### Key Collaboration Mechanisms (Critical)
+## Current Status
 
-> This section explains GitCortex's core value: **a single Orchestrator Agent coordinating multiple CLI terminals to complete complex tasks collaboratively**.
+- Source of truth: `docs/undeveloped/current/TODO-pending.md`
+- Completed: 44
+- Pending: 5 (all are low/medium-priority backlog)
 
-#### 1) Why "One Orchestrator" Instead of "Multiple Orchestrators"
+See also:
 
-In GitCortex, the Orchestrator is the sole global scheduler responsible for unified decision-making and progression, avoiding conflicts from multiple controllers issuing simultaneous commands.
-
-It performs four main functions:
-
-1. **Task Decomposition & Distribution**: Allocate workflow goals to different tasks.
-2. **Terminal Serial Progression**: Launch next terminal within each task by `orderIndex`.
-3. **State Machine Convergence**: Maintain unified three-layer state (workflow/task/terminal).
-4. **Event Loop Closure**: Consume Git events, Prompt events, WS events and decide subsequent actions.
-
-This means the "multi-terminal collaboration" you see is not chaotic concurrency, but **centralized orchestration + observable state machine**.
-
-#### 2) Multi-CLI Collaboration Model (Horizontal)
-
-GitCortex supports placing different CLIs in the same workflow:
-
-- `claude-code` handles main development
-- `codex` handles audit/fix suggestions
-- `gemini-cli` handles documentation or test completion
-
-They can operate in:
-
-- **Task-level parallelism** (Task A / B / C run simultaneously)
-- **Intra-task serial execution** (Terminal 1 → Terminal 2 → Terminal 3)
-
-Achieving a combination strategy of "parallel acceleration + serial quality control".
-
-#### 3) Multi-Model Collaboration with Same CLI (Vertical)
-
-GitCortex doesn't require "one CLI corresponds to one model only".
-
-You can use **the same AI CLI + different models** within the same task for role division, for example all using `claude-code`:
-
-| Terminal | CLI | Model | Typical Role |
-|---|---|---|---|
-| T1 | `claude-code` | `glm-4.7` | Frontend implementation |
-| T2 | `claude-code` | `claude-opus-4.6` | Backend implementation |
-| T3 | `codex` | `gpt-5.3-codex-xhigh` | Code audit/convergence |
-
-The value of this approach:
-
-- Retain the same CLI's operational habits and context style
-- Leverage different models' strengths in code generation, reasoning depth, and audit capabilities
-- Ensure handoff order and state consistency through Orchestrator
-
-#### 4) cc-switch's Role in Collaboration
-
-`cc-switch` decouples "terminal instances" from "model configurations", allowing flexible model switching within the same CLI ecosystem:
-
-- Write target model configuration before startup
-- Maintain consistent model semantics for that terminal session after startup
-- Support different terminals binding different models without mutual contamination
-
-Therefore GitCortex supports two types of collaboration:
-
-- **Cross-CLI collaboration** (Claude + Codex + Gemini)
-- **Same-CLI multi-model collaboration** (e.g., multiple Claude Code terminals each bound to different models)
-
-#### 5) How Complex Tasks Are Stably Advanced
-
-In real development scenarios, a "complex task" is usually not generated in one pass, but through multiple closed loops:
-
-1. Terminal A implements main logic first
-2. Terminal B reviews and adds tests
-3. Terminal C performs audit and risk convergence
-4. Merge Terminal unifies merge to target branch
-
-GitCortex's focus is not "single response quality", but making this closed-loop process repeatable, monitorable, replayable, and recoverable.
-
-In other words, GitCortex provides **Agent collaboration pipeline capabilities**, not just "calling a certain model".
-
----
-
-## Tech Stack
-
-### Backend
-
-- **Language & Runtime**: Rust + Tokio
-- **Web Framework**: Axum (REST + WebSocket)
-- **Data Layer**: SQLx + SQLite
-- **Project Structure**: Rust Workspace (`crates/server`, `crates/services`, `crates/db`, `crates/cc-switch`, etc.)
-
-### Frontend
-
-- **Framework**: React 18 + TypeScript
-- **Build Tool**: Vite
-- **State & Data**: TanStack Query + WebSocket Store
-- **Terminal Rendering**: xterm.js (terminal debugging and output display)
-
-### Collaboration Runtime Components (Core)
-
-- `OrchestratorRuntime`: Unified workflow lifecycle scheduling
-- `OrchestratorAgent`: Execute orchestration decisions and state progression
-- `MessageBus`: Cross-terminal/cross-module event bus
-- `TerminalCoordinator`: Terminal preparation and serial progression coordination
-- `TerminalLauncher`: Terminal process startup and lifecycle management
-- `GitWatcher`: Monitor Git commits and trigger events
-- `CCSwitchService`: CLI/model configuration switching and isolation
-
-The above components can be found in `crates/services/src/services/` and `crates/server/src/routes/`.
-
----
-
-## Deployment Guide
-
-### Deployment Modes
-
-- **Development Mode (Dual Service)**: Frontend dev server + backend API service run separately
-  - Frontend: `23457`
-  - Backend: `23456`
-- **Production Mode (Single Service)**: Run backend binary only, backend serves both `/api` and frontend static resources
-
-### Development Mode Deployment (Recommended for Local Development)
-
-```bash
-pnpm install
-
-# Required: Set 32-character encryption key
-# Windows PowerShell
-$env:GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
-
-# Linux/macOS
-export GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
-
-# Prepare SQLx query cache as needed
-npm run prepare-db
-
-# Start frontend and backend
-pnpm run dev
-```
-
-Access URLs:
-
-- Frontend: `http://localhost:23457`
-- Backend: `http://localhost:23456/api`
-
-### Production Mode Deployment (Single Machine)
-
-```bash
-# 1) Install dependencies
-pnpm install
-
-# 2) Build frontend (for backend static resource embedding)
-cd frontend && pnpm install && pnpm build && cd ..
-
-# 3) Build backend
-cargo build --release -p server
-
-# 4) Set runtime environment variables
-# Windows PowerShell
-$env:GITCORTEX_ENCRYPTION_KEY="your-32-character-key"
-$env:BACKEND_PORT="23456"   # Optional
-$env:HOST="127.0.0.1"       # Optional, set to 0.0.0.0 for external access
-
-# 5) Start service
-# Windows
-.\target\release\server.exe
-
-# Linux/macOS
-./target/release/server
-```
-
-Health check:
-
-```bash
-# When GITCORTEX_API_TOKEN is not enabled
-curl http://127.0.0.1:23456/api/health
-
-# When GITCORTEX_API_TOKEN is enabled (all /api routes require Bearer)
-curl http://127.0.0.1:23456/api/health \
-  -H "Authorization: Bearer <your-token>"
-```
-
-> For more complete operations, backup, upgrade, and rollback procedures, see: `docs/developed/ops/runbook.md` and `docs/developed/ops/troubleshooting.md`.
-
----
+- `docs/undeveloped/current/TODO.md`
+- `docs/undeveloped/current/orchestrator-chat-verification-report.md`
+- `docs/undeveloped/current/orchestrator-chat-rollback-runbook.md`
 
 ## Quick Start
 
-### Prerequisites
-
-| Tool | Version Requirement | Description |
-|------|---------------------|-------------|
-| **Rust** | nightly-2025-12-04 | Defined in `rust-toolchain.toml` |
-| **Node.js** | >= 18 (recommend 20) | Frontend runtime |
-| **pnpm** | 10.13.1 | Package manager |
-| **CMake** | Latest | Build tool (required on some systems) |
-| **SQLite** | 3.x | Database (usually built-in) |
-
-### Installation
-
-#### 1. Install Rust Toolchain
+### Local Development
 
 ```bash
-# Install Rustup
-# Download: https://rustup.rs/ or use winget
-winget install Rustlang.Rustup
-
-# Install project-specified version
-rustup install nightly-2025-12-04
-rustup default nightly-2025-12-04
-
-# Install Cargo tools
-cargo install cargo-watch
-cargo install sqlx-cli --features sqlite
-
-# Verify installation
-rustc --version
-# Should output: rustc 1.85.0-nightly (2025-12-04)
-```
-
-#### 2. Install Node.js and pnpm
-
-```bash
-# Recommend using nvm-windows
-# Download: https://github.com/coreybutler/nvm-windows
-nvm install 20
-nvm use 20
-
-# Install specified pnpm version
-npm install -g pnpm@10.13.1
-
-# Verify installation
-pnpm --version
-# Should output: 10.13.1
-```
-
-#### 3. Clone and Start Project
-
-```bash
-# Clone repository
-git clone <your-repo-url>
-cd GitCortex
-
-# Install dependencies
 pnpm install
 
-# Set environment variable (required)
-# Windows PowerShell
+# Required: exactly 32 chars
+# Windows PowerShell:
 $env:GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
-
-# Linux/macOS
+# Linux/macOS:
 export GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
 
-# Generate/verify SQLx query cache (as needed)
 npm run prepare-db
-
-# Build backend (Rust)
-cargo build --release
-
-# Start development servers (frontend + backend)
 pnpm run dev
 ```
 
-Access:
-- Frontend: http://localhost:23457
-- Backend API: http://localhost:23456/api
+Default URLs:
 
-**Detailed Operations Manual:** See [Operations Manual](docs/developed/ops/runbook.md) for production deployment, monitoring, upgrades, and other detailed operations.
+- Frontend: `http://localhost:23457`
+- Backend API: `http://localhost:23456/api`
 
-### Docker Deployment (Recommended for Clean Machines)
-
-```bash
-# Clone repository
-git clone <your-repo-url>
-cd GitCortex
-
-# Optional: install AI CLIs during image build (default is 0 for build stability)
-export INSTALL_AI_CLIS=0
-# Optional: map host repositories into container workspace
-export HOST_WORKSPACE_ROOT=../..
-# Optional: disable auto-creating starter projects on first launch
-export GITCORTEX_AUTO_SETUP_PROJECTS=0
-# Optional: Docker-only input var; mapped to in-container GITCORTEX_API_TOKEN
-export GITCORTEX_DOCKER_API_TOKEN=
-
-# Build and start
-docker compose -f docker/compose/docker-compose.yml build
-docker compose -f docker/compose/docker-compose.yml up -d
-```
-
-One-click installer (recommended on Windows):
+### Docker (One-Click Install)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\docker\install-docker.ps1
 ```
 
-If `docker/compose/.env` already exists, the installer can now reuse it and switch into update flow automatically.
+The installer supports:
 
-The script will interactively ask:
-- Which host folder to mount into container `/workspace`
-- Whether to install AI CLIs during build (`INSTALL_AI_CLIS`)
-- Whether to auto-create starter projects on first launch (`GITCORTEX_AUTO_SETUP_PROJECTS`)
-- Whether to clean old containers and data volume before startup
-- Port, API token, and optional API keys
+- Interactive setup (mount path, keys, port, optional AI CLI install)
+- Existing `.env` reuse
+- Automatic handoff to update flow when appropriate
 
-It then writes `docker/compose/.env`, validates compose config, builds, starts, and checks `/readyz`.
-
-What is the "Docker API Bearer Token" prompt?
-- It sets `GITCORTEX_DOCKER_API_TOKEN` in `.env`, which is mapped to container `GITCORTEX_API_TOKEN`.
-- If empty: API auth middleware is skipped (dev-friendly mode).
-- If set: all `/api/*` routes require `Authorization: Bearer <token>`, otherwise `401 Unauthorized`.
-- Recommended when exposing `23456` beyond localhost (LAN/public access).
-
-What is the "auto-generate 32-char encryption key" prompt?
-- It sets `GITCORTEX_ENCRYPTION_KEY` (exactly 32 chars).
-- Purpose: encrypt sensitive data at rest (stored secrets/config payloads).
-- This key is required for normal server startup.
-
-Why ask for both encryption key and API token?
-- They are different controls, not duplicates.
-- `GITCORTEX_ENCRYPTION_KEY`: data-at-rest encryption key.
-- `GITCORTEX_API_TOKEN`/`GITCORTEX_DOCKER_API_TOKEN`: request-time API access control (`Authorization: Bearer ...`).
-
-Example request when token is enabled:
-
-```bash
-curl http://localhost:23456/api/health \
-  -H "Authorization: Bearer <your-token>"
-```
-
-If you choose not to install AI CLIs during image build, you can install later in UI:
-- `Settings -> Agents -> One-click Install AI CLIs`
-
-PowerShell example:
-
-```powershell
-$env:INSTALL_AI_CLIS="0"
-$env:HOST_WORKSPACE_ROOT="../.."
-$env:GITCORTEX_AUTO_SETUP_PROJECTS="0"
-$env:GITCORTEX_DOCKER_API_TOKEN=""
-docker compose -f docker/compose/docker-compose.yml build
-docker compose -f docker/compose/docker-compose.yml up -d
-```
-
-Verify:
-
-```bash
-curl http://localhost:23456/readyz
-docker compose -f docker/compose/docker-compose.yml ps
-```
-
-Docker/runtime path note:
-- In Docker mode, workflow repo browsing now prefers `GITCORTEX_WORKSPACE_ROOT` (default `/workspace`).
-- In direct local mode, the same picker falls back to the backend-selected local browse root instead of assuming Docker-only paths exist.
-
-Update an existing Docker deployment:
+### Docker Update
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\docker\update-docker.ps1 -PullLatest
 ```
 
-Manual update flow:
+Common options:
+
+- `-AllowDirty`
+- `-PullBaseImages`
+- `-SkipBuild`
+- `-SkipReadyCheck`
+
+## Verification
 
 ```bash
-git pull --ff-only
-docker compose -f docker/compose/docker-compose.yml --env-file docker/compose/.env build --pull
-docker compose -f docker/compose/docker-compose.yml --env-file docker/compose/.env up -d --force-recreate --remove-orphans --no-build
 curl http://localhost:23456/readyz
+curl http://localhost:23456/api/health
 ```
 
-For detailed operations, backup, and troubleshooting, see:
-- [Docker Deployment Guide](docs/developed/ops/docker-deployment.md)
-- [Operations Manual](docs/developed/ops/runbook.md)
-
-### Restore from Existing Repository
-
-If you've already cloned the repository, just ensure tool versions are correct and reinstall dependencies:
+If API token is enabled:
 
 ```bash
-cd GitCortex
-
-# Check Rust version
-rustc --version
-# If version is incorrect, run:
-rustup default nightly-2025-12-04
-
-# Reinstall dependencies
-pnpm install
-
-# Set environment variable and start
-$env:GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
-pnpm run dev
+curl http://localhost:23456/api/health -H "Authorization: Bearer <token>"
 ```
 
----
+## Architecture at a Glance
 
-## Development Environment Configuration
+- `OrchestratorAgent`: decision and scheduling core.
+- `OrchestratorRuntime`: workflow lifecycle orchestration.
+- `MessageBus`: event routing across modules and terminals.
+- `TerminalLauncher`: process lifecycle management.
+- `GitWatcher`: Git-event-driven orchestration progression.
 
-### IDE Recommendations
+Main code locations:
 
-- **VS Code** + Extensions:
-  - `rust-analyzer` (Rust language server)
-  - `ESLint` (Frontend linting)
-  - `Prettier` (Code formatting)
+- `crates/services/src/services/orchestrator/`
+- `crates/server/src/routes/workflows.rs`
+- `frontend/src/pages/Workflows.tsx`
 
-### Environment Variables
+## Docs
 
-Create `.env` file or set system environment variables:
-
-```bash
-# Required: Encryption key (32-character string)
-GITCORTEX_ENCRYPTION_KEY=your-32-character-key-here  # Encrypts sensitive data at rest; required
-
-# Optional
-BACKEND_PORT=23456           # Backend port (default)
-HOST=127.0.0.1               # Backend listen address (default)
-GITCORTEX_API_TOKEN=your-api-token   # If set, all /api/* routes require Authorization: Bearer <token>
-```
-
-### Database
-
-Project uses SQLite (embedded), no database server installation required:
-- Development default location: `dev_assets/db.sqlite`
-- Migration files: `crates/db/migrations/`
-
-### Verify Installation
-
-```bash
-# Backend compilation check
-cargo check --workspace
-
-# Frontend compilation check
-cd frontend && npm run check && cd ..
-
-# Run tests
-cargo test --workspace
-cd frontend && npm run test:run && cd ..
-```
-
----
-
-## Project Structure
-
-```
-GitCortex/
-├── crates/                    # Rust workspace
-│   ├── db/                    # Database layer (models + DAO + migrations)
-│   ├── server/                # Axum backend server
-│   ├── services/              # Business logic layer
-│   │   ├── orchestrator/      # Main Agent orchestration logic
-│   │   ├── terminal/          # Terminal process management
-│   │   └── ...                # git_watcher.rs / cc_switch.rs etc.
-│   └── utils/                 # Utility functions
-├── frontend/                  # React + TypeScript frontend
-│   ├── src/
-│   │   ├── components/        # UI components
-│   │   │   ├── workflow/      # Workflow wizard components
-│   │   │   └── terminal/      # Terminal debug components
-│   │   ├── hooks/             # React Hooks
-│   │   ├── pages/             # Page components
-│   │   └── i18n/              # Internationalization config
-│   └── package.json
-├── shared/                    # Frontend-backend shared types (auto-generated)
-├── docs/                      # Documentation
-│   ├── 已开发/                # Completed and stable documentation
-│   └── 未开发/                # Pending and in-progress documentation
-├── Cargo.toml                 # Workspace configuration
-├── rust-toolchain.toml        # Rust version lock
-├── package.json               # Root package.json
-└── pnpm-workspace.yaml        # pnpm workspace config
-```
-
----
-
-## Development Progress
-
-> **Data Source:** `git log` (2026-03-06 to 2026-03-07) + `docs/undeveloped/current/TODO-pending.md`
-> **Snapshot Date:** 2026-03-07
-> **Current Status:** **44 completed**, **5 pending** (all pending items are low/medium-priority backlog).
-
-### Recently Delivered (Merged to `main`)
-
-- `ec8ad4ec2`: Added orchestrator message pagination and query params (`cursor/limit`).
-- `8ccf0f3d1`: Persisted orchestrator chat messages and command snapshots (migration + models + API route integration).
-- `1a1b153a3`: Enforced instruction allowlist and command status flow in orchestrator pipeline.
-- `3a177d5d9`: Added command recovery, governance controls, and audit flow.
-- `95c4afc81`: Added Telegram connector ingress with conversation binding and replay protection.
-- `fb642c5fc`: Enhanced frontend orchestrator panel stream and interaction coverage tests.
-- `c473ee470`: Finalized orchestrator checklist and added verification/rollback guides.
-- `35f17ecda`: Added runtime-aware Docker update flow (`install-docker.ps1` / `update-docker.ps1`).
-
-### Current Pending Backlog (Non-blocking)
-
-1. Docker deployment abstraction crate (`crates/docker-deployment`) and `Deployment` trait.
-2. Runner container split between control plane and execution plane.
-3. CLI install status API (`/api/cli_install`) query/retry flow.
-4. Kubernetes deployment support (Helm, multi-replica, high availability).
-5. Image size optimization (layer cache, on-demand CLI install, distroless base image).
-
-### Status References
-
-- Current board: [docs/undeveloped/current/TODO-pending.md](docs/undeveloped/current/TODO-pending.md)
-- TODO index: [docs/undeveloped/current/TODO.md](docs/undeveloped/current/TODO.md)
-- Verification report: [docs/undeveloped/current/orchestrator-chat-verification-report.md](docs/undeveloped/current/orchestrator-chat-verification-report.md)
-- Rollback runbook: [docs/undeveloped/current/orchestrator-chat-rollback-runbook.md](docs/undeveloped/current/orchestrator-chat-rollback-runbook.md)
-
----
-
-## Current Real-World Validation Status
-
-### Delivered and Integrated
-
-- Workflow-level orchestrator chat entry + history query are available in API and UI.
-- Orchestrator chat persistence is implemented with restart-time recovery support.
-- Instruction allowlist, command status tracking, governance controls, and audit trail are connected to the orchestration flow.
-- Telegram ingress can map external conversations to workflows with replay-protection checks.
-- Frontend orchestrator panel supports richer stream rendering and interaction coverage.
-- Docker deployment supports update flow for existing `.env`-based installations.
-
-### Current Validation Baseline
-
-- Baseline CI workflow passed on `main` for commit `db7986a1b`.
-- Completion/pending split is maintained in TODO docs and updated per delivery phase.
-
-### Remaining Validation Focus
-
-1. High-concurrency stress for large parallel workflow sets.
-2. Upper-bound stress testing for terminal count per workflow.
-3. Production-grade Kubernetes rollout and observability hardening (backlog scope).
-
----
-
-## Architecture Design
-
-### Data Model
-
-GitCortex uses a three-layer model:
-
-1. **Workflow** - Top-level container
-   - Contains multiple Tasks
-   - Configures Orchestrator (main Agent)
-   - Configures Merge Terminal
-   - Optional Error Terminal
-
-2. **WorkflowTask** - Mid-level unit
-   - Each Task corresponds to a Git branch
-   - Contains multiple Terminals
-   - Independent state: pending → running → completed
-
-3. **Terminal** - Bottom-level execution unit
-   - Bound to specific CLI type (Claude/Gemini/Codex)
-   - Bound to specific model configuration
-   - Serial execution: not_started → starting → waiting → working → completed (can reach failed/cancelled on exception)
-
-### State Machine
-
-**Workflow State Transitions:**
-```
-created → starting → ready → running → (paused) → merging → completed/failed
-                                              ↓
-                                          cancelled
-```
-
-**Terminal State Transitions:**
-```
-not_started → starting → waiting → working → completed
-                                         ↓
-                                      failed/cancelled
-```
-
-### Core Services
-
-| Service | Responsibility |
-|---------|----------------|
-| **OrchestratorAgent** | Main Agent, responsible for task distribution, progress monitoring, result review |
-| **MessageBus** | Cross-terminal message routing |
-| **TerminalLauncher** | Terminal process startup and management |
-| **GitWatcher** | Monitor Git events (.git/refs/heads changes) |
-| **CCSwitchService** | Model configuration switching (atomic config file writes) |
-| **Workflow API + DB Models** | Workflow CRUD and state management (`routes/workflows.rs` + `db/models/workflow*.rs`) |
-
----
-
-## Supported CLIs
-
-| CLI | Name | Detection Command | Config File Path |
-|-----|------|-------------------|------------------|
-| Claude Code | Claude Code | `claude --version` | `~/.claude/settings.json` |
-| Gemini CLI | Gemini | `gemini --version` | `~/.gemini/.env` |
-| Codex | Codex | `codex --version` | `~/.codex/auth.json`, `~/.codex/config.toml` |
-| Amp | Amp | `amp --version` | - |
-| Cursor Agent | Cursor | `cursor --version` | - |
-| Qwen Code | Qwen | `qwen --version` | - |
-| GitHub Copilot | Copilot | `gh copilot --version` | - |
-| Droid | Droid | `droid --version` | - |
-| Opencode | Opencode | `opencode --version` | - |
-
-### Model Switching
-
-CC-Switch provides atomic write mechanism for safe CLI model configuration switching:
-
-- ✅ Support configuring multiple CLIs simultaneously
-- ✅ Temporary switching (single workflow)
-- ✅ Permanent switching (modify config files)
-- ✅ Automatic config backup
-- ✅ Model availability verification
-
----
-
-## Usage Guide
-
-### Create Workflow
-
-1. Click "New Workflow"
-2. Select project
-3. Configure basic information
-4. Add tasks and terminals
-5. Select models and CLIs
-6. Start workflow
-
-### Operations
-
-For production deployment, database management, monitoring, and troubleshooting, see:
-
-- **Operations Manual:** [docs/developed/ops/runbook.md](docs/developed/ops/runbook.md)
-  - Start server (development/production mode)
-  - Database management (backup/restore/migration)
-  - Monitoring and performance tuning
-  - Upgrade and rollback procedures
-
-- **Troubleshooting:** [docs/developed/ops/troubleshooting.md](docs/developed/ops/troubleshooting.md)
-  - Server won't start
-  - Workflow stuck
-  - API key issues
-  - Terminal no output
-  - Database locked
-
-### Testing & Building
-
-```bash
-# Run tests
-cargo test --workspace
-cd frontend && npm run test:run && cd ..
-
-# Build production version (frontend + backend)
-cd frontend && npm run build && cd ..
-cargo build --release -p server
-
-# Type generation
-pnpm run generate-types
-pnpm run generate-types:check
-```
-
----
-
-## Workspace Create Page Manual (`/workspaces/create`)
-
-### What this page is for
-
-This page is the **quick-start entry for execution**.  
-You provide task intent, bind repositories/branches, and create a runnable workspace directly.
-
-### How to read the page layout (left / middle / right)
-
-1. **Left: Workspaces**
-   - Existing workspaces list (active/history).
-   - Used for context switching, not for creation config.
-2. **Middle: Task input box**
-   - Input the task description (chat-style form).
-   - Select executor/model variant and optionally attach images.
-   - Click create to start a new workspace.
-3. **Right: Project / Repositories / Add repositories**
-   - Select project.
-   - Add repositories for this run.
-   - Select target branch per repository.
-
-### Does it conflict with `/wizard`?
-
-No. They are parallel entry points with different goals:
-
-- `/workspaces/create`: fast single-workspace creation and immediate execution.
-- `/wizard`: workflow orchestration and staged pipeline management.
-
-### Minimal operation flow
-
-1. Select project on the right panel.
-2. Add at least one repository and confirm target branch.
-3. Enter task description in the middle input.
-4. Click **Create Workspace**.
-
-### Common confusion and clarification
-
-- “Bottom dialog”: it is not a popup; it is the main creation input area.
-- “Left vs right panels”: left is workspace switching, right is creation context binding.
-- If create button is unavailable, usually task text or repository selection is missing.
-
----
-
-## Code Editor Integration
-
-### Overview
-
-GitCortex integrates with local code editors, allowing you to jump directly from the Web UI to your preferred editor to view or edit task worktree code. This is a convenience feature — while AI Agents work in terminals automatically, you may want to manually inspect or tweak the code they produce.
-
-### Where It Appears
-
-1. **First-Time Onboarding**: When you first open GitCortex, the onboarding dialog asks you to select your default code editor. This preference is saved to global settings.
-2. **Navbar "Open in IDE" Button**: The top navigation bar includes an "Open in IDE" button. Clicking it opens the **current project directory** in your configured editor.
-3. **Task Workspace Action**: In the task action bar, the "Open in Editor" action opens the **task's git worktree directory** in your editor, so you can manually inspect or edit the code that AI Agents are writing.
-
-### How It Works
-
-When triggered, the frontend sends a request to the backend API (`POST /api/task-attempts/{id}/open-editor` or `POST /api/projects/{id}/open-editor`). The backend executes a command like `code /path/to/worktree` (for VS Code) or `cursor /path/to/worktree` (for Cursor) to launch the editor and open the corresponding directory.
-
-If the default editor fails to launch (e.g., not installed or not in PATH), a fallback dialog appears letting you select an alternative editor.
-
-### Supported Editors
-
-| Editor | Launch Command | Remote SSH Support |
-|--------|----------------|--------------------|
-| VS Code | `code` | Yes |
-| Cursor | `cursor` | Yes |
-| Windsurf | `windsurf` | Yes |
-| IntelliJ IDEA | `idea` | No |
-| Zed | `zed` | Yes |
-| Xcode | `xed` | No |
-| Google Antigravity | `antigravity` | Yes |
-| Custom | User-defined | — |
-
-### Configuration
-
-You can change the default editor at any time in **Settings → General → Code Editor**:
-
-- **Editor Type**: Select from the supported editors above
-- **Custom Command**: When "Custom" is selected, specify your own launch command (e.g., `sublime`, `vim`)
-- **Remote SSH Host / User**: For supported editors, configure remote SSH connection to open code on a remote machine
-
----
-
-## Documentation
-
-### Implementation Plans
-
-- [Overall Overview](docs/developed/plans/00-overview.md)
-- [未开发目录](docs/未开发)
-- [Latest Progress Tracking (authoritative)](docs/undeveloped/current/TODO.md)
-
-### Core Design Documents
-
-- [Orchestrator Architecture Design](docs/developed/plans/2026-01-16-orchestrator-design.md)
-- [GitCortex Detailed Implementation Plan](docs/developed/plans/2026-01-16-gitcortex-implementation.md)
-
-### Progress Tracking
-
-- [Development Progress Tracker](docs/undeveloped/current/TODO.md)
-
----
-
-## FAQ
-
-### Q: Compilation fails, can't find nightly version?
-
-Ensure correct Rust version is installed:
-
-```bash
-rustup install nightly-2025-12-04
-rustup default nightly-2025-12-04
-```
-
-### Q: Workflow creation fails, encryption key error?
-
-Ensure environment variable is set:
-
-```bash
-# Windows PowerShell
-$env:GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
-
-# Linux/macOS
-export GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
-```
-
-### Q: In workflow creation, Git repo is detected but branch shows unavailable?
-
-This usually happens when the selected path is inside a repository but the backend cannot open the repo at that exact path.
-
-- First make sure you selected the repository root folder (not only a nested subfolder).
-- If using an older build, upgrade to the latest image/release: recent versions add repository discovery fallback.
-
-### Q: In `/workspaces/create`, folder picker shows `No folders found` and `Path is not allowed`?
-
-This is a path-boundary validation issue in old builds (more visible on Windows).
-
-- Upgrade to the latest image/release (includes Windows drive-root allowlist + parent-path fix in folder picker).
-- Ensure your mounted workspace root in Docker matches where your repos are located (for example `HOST_WORKSPACE_ROOT=E:/`).
-
-### Q: CLI detection fails, shows not installed?
-
-Ensure CLI is installed and findable in PATH:
-
-```bash
-claude --version
-gemini --version
-codex --version
-```
-
-### Q: Browserslist warning during testing?
-
-Update Browserslist database:
-
-```bash
-pnpm dlx browserslist@latest --update-db
-```
-
----
+- Development tracker: `docs/undeveloped/current/TODO.md`
+- Docker deployment guide: `docs/developed/ops/docker-deployment.md`
+- Operations runbook: `docs/developed/ops/runbook.md`
+- Troubleshooting: `docs/developed/ops/troubleshooting.md`
 
 ## Contributing
 
-Issues and Pull Requests are welcome!
+- Open an issue first for large changes.
+- Keep commits small and reviewable.
+- Run checks before PR:
 
-### Development Standards
-
-- **Rust Code**: Follow `cargo fmt` and `cargo clippy` standards
-- **Frontend Code**: Use ESLint + Prettier, strict mode
-- **Commit Messages**: Use Conventional Commits
-
-### Code Quality Standards
-
-Current quality status per `docs/undeveloped/current/TODO.md`: **100/100 (S-tier)**.
-
-Recommended before each release:
-
-- `cargo check --workspace`
-- `cargo test --workspace`
-- `npm run check`
-- `cd frontend && npm run test:run`
-
----
-
-## Acknowledgments
-
-This project is based on the following excellent open source projects:
-
-- **[Vibe Kanban](https://github.com/BloopAI/vibe-kanban)** - AI coding agent task management platform (Apache 2.0)
-- **[CC-Switch](https://github.com/farion1231/cc-switch)** - Claude Code/Codex/Gemini CLI configuration switching tool (MIT)
-
-Thanks to the authors and contributors of these projects!
-
----
+```bash
+cargo check --workspace
+cargo test --workspace
+cd frontend && npm run test:run && cd ..
+```
 
 ## License
 
-This project follows the open source licenses of upstream projects:
-
-- Vibe Kanban portion: Apache License 2.0
-- CC-Switch portion: MIT License
-
-See [LICENSE](LICENSE) file for details.
-
----
-
-<p align="center">
-  <em>GitCortex - Making AI Agents Work Together</em>
-</p>
+- Vibe Kanban derived parts: Apache-2.0
+- CC-Switch derived parts: MIT
+- See `LICENSE`

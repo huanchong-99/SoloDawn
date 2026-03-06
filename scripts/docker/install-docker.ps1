@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("install", "update")]
     [string]$Mode = "",
     [string]$HostWorkspaceRoot,
@@ -385,26 +385,26 @@ if ($Mode -eq "update") {
     }
 
     Write-Info (T "INFO_HANDOFF_UPDATE")
-    $updateArgs = @(
-        "-ComposeFile", $composeFile,
-        "-EnvFile", $envFile,
-        "-Lang", $script:CurrentLang
-    )
+    $updateArgs = @{
+        ComposeFile = $composeFile
+        EnvFile = $envFile
+        Lang = $script:CurrentLang
+    }
 
     if ($PSBoundParameters.ContainsKey("Port") -and -not [string]::IsNullOrWhiteSpace($Port)) {
-        $updateArgs += @("-Port", $Port)
+        $updateArgs.Port = $Port
     }
     if ($PullLatest) {
-        $updateArgs += "-PullLatest"
+        $updateArgs.PullLatest = $true
     }
     if ($PullBaseImages) {
-        $updateArgs += "-PullBaseImages"
+        $updateArgs.PullBaseImages = $true
     }
     if ($SkipBuild) {
-        $updateArgs += "-SkipBuild"
+        $updateArgs.SkipBuild = $true
     }
     if ($AllowDirty) {
-        $updateArgs += "-AllowDirty"
+        $updateArgs.AllowDirty = $true
     }
 
     & $updateScript @updateArgs
