@@ -533,67 +533,59 @@ GitCortex/
 
 ## 开发进度
 
-> **数据来源：** `docs/undeveloped/current/TODO.md`（README 进度与其保持一致）
-> **总体状态：** 完成率 **97.3%**（**288/296**），进行中 **0**，未开始 **8**（Phase 21: 2 个，Phase 27: 6 个），可选优化 **5**。
-> **当前审计分数：** **100/100 (S级)**
-> **下一步：** 完成 Phase 18.5 与 Phase 21 的延期/可选项，并保持 TODO 里程碑与当前实现一致。
+> **数据来源：** `git log`（2026-03-06 至 2026-03-07） + `docs/undeveloped/current/TODO-pending.md`
+> **快照时间：** 2026-03-07
+> **当前状态：** **已完成 44 项**，**未完成 5 项**（全部为低/中优先级 backlog）。
 
-| 阶段 | 状态（与 TODO 对齐） | 备注 |
-|------|----------------------|------|
-| Phase 0 - Phase 18 | ✅ 已完成 | 核心链路已打通 |
-| Phase 18.1 | ✅ 已完成 | 测试技术债务清理完成 |
-| Phase 18.5 | 🚧 进行中 | P0 已完成，P1/P2 存在延后项（含可选优化） |
-| Phase 20 | ✅ 已完成 | 自动化协调核心（自动派发） |
-| Phase 21 | ✅ 已完成（含 2 项未开始） | 21.10 延后、21.12 可选 |
-| Phase 22 | ✅ 已完成 | WebSocket 事件广播完善 |
-| Phase 23 | ✅ 已完成 | 终端进程隔离修复 |
-| Phase 24 | ✅ 已完成 | 终端自动确认与消息桥接 |
-| Phase 25 | ✅ 已完成 | 自动确认可靠性修复 |
-| Phase 26 | ✅ 已完成 | 联合审计问题全量修复 |
-| Phase 27 | 📋 待实施 | 6 项任务未开始 |
+### 最近已交付（已合并到 `main`）
 
-**总体进度：** 288/296 任务完成（97.3%，以 `docs/undeveloped/current/TODO.md` 为准）
+- `ec8ad4ec2`：补充 orchestrator 对话消息分页与查询参数（`cursor/limit`）。
+- `8ccf0f3d1`：落地 orchestrator 对话消息与命令快照持久化（迁移 + 模型 + API 路由集成）。
+- `1a1b153a3`：在 orchestrator 链路中落地指令白名单与命令状态流转。
+- `3a177d5d9`：补充命令恢复、治理控制与审计流。
+- `95c4afc81`：新增 Telegram Connector 入站、会话绑定与重放防护。
+- `fb642c5fc`：增强前端主 Agent 面板消息流与交互覆盖测试。
+- `c473ee470`：完成 orchestrator 清单收口，并补齐验证报告与回滚手册。
+- `35f17ecda`：新增 Docker 运行态更新流程（`install-docker.ps1` / `update-docker.ps1`）。
 
-详细进度追踪：[docs/undeveloped/current/TODO.md](docs/undeveloped/current/TODO.md)
+### 当前未完成 backlog（非阻塞）
 
-**质量状态：** 以 `docs/undeveloped/current/TODO.md` 为准，当前记录为 S 级（100/100）。
+1. Docker 部署抽象层（`crates/docker-deployment` + `Deployment` trait）。
+2. Runner 容器分离（控制面 / 执行面解耦）。
+3. CLI 安装状态 API（`/api/cli_install`）查询与重试流程。
+4. Kubernetes 部署支持（Helm、多副本、高可用）。
+5. 镜像体积优化（分层缓存、按需安装 CLI、distroless 基础镜像）。
+
+### 状态参考
+
+- 当前执行看板：[docs/undeveloped/current/TODO-pending.md](docs/undeveloped/current/TODO-pending.md)
+- TODO 索引：[docs/undeveloped/current/TODO.md](docs/undeveloped/current/TODO.md)
+- 验证报告：[docs/undeveloped/current/orchestrator-chat-verification-report.md](docs/undeveloped/current/orchestrator-chat-verification-report.md)
+- 回滚手册：[docs/undeveloped/current/orchestrator-chat-rollback-runbook.md](docs/undeveloped/current/orchestrator-chat-rollback-runbook.md)
 
 ---
 
 ## 当前实测验证状态
 
-### 已完成开发（已验证）
+### 已交付并集成
 
-- 主 Agent 已可在单个工作流中协同调用多个 AI CLI。
-- 当前已跑通并验证的测试组合为 3 个终端：
-  - Claude Code（模型：`glm-4.7`）
-  - Claude Code（模型：`claude-opus-4.6`）
-  - Codex（模型：`gpt-5.3-codex-xhigh`）
+- 工作流级主 Agent 对话入口与消息历史查询已在 API 与前端可用。
+- orchestrator 对话持久化已落地，并具备重启恢复能力。
+- 指令白名单、命令状态追踪、治理控制、审计链路已接入主编排流程。
+- Telegram 入站可完成外部会话到 workflow 的映射，并带有重放防护校验。
+- 前端主 Agent 面板已支持更完整的消息流展示与交互覆盖。
+- Docker 部署已支持对现有 `.env` 安装的更新流程。
 
-### 未完成 / 未充分验证项
+### 当前验证基线
 
-1. 多任务并行尚未充分测试。
-2. 终端数量极限尚未测试（支持自定义数量）。
-3. 前端 UI 不合理问题尚未修复。
-4. 合并终端与错误解决终端流程尚未充分测试。
-5. 任务完成通知功能尚未开发。
-6. 集成通讯软件尚未开发。
-7. 斜杠命令系统尚未充分测试（当前大概率不可用或不稳定）。
+- `main` 分支提交 `db7986a1b` 对应的 Baseline CI 已通过。
+- README 的已完成/未完成口径与 TODO 文档保持同步维护。
 
-### 已测试的端到端示例任务
+### 后续验证重点
 
-当前用于验证流程跑通的是一个本地迷你留言板（前后端分离）的简单任务：
-
-- 后端：Python
-- 前端：单 HTML 文件
-- 功能：用户在网页输入文字并点击保存后，内容写入本地 `.json` 文件，并在下方列表实时显示。
-
-### 项目现状与共建说明
-
-- 这个示例任务刻意保持简单，目标是证明全流程已经跑通。
-- 复杂任务与长期稳定性仍需继续验证。
-- 当前代码库为 AI 生成代码。
-- 欢迎提交 PR。建议先提 Issue 说明正在开发的功能，避免多人重复开发同一项任务。
+1. 大规模并行 workflow 的高并发压测。
+2. 单 workflow 终端数量上限压测。
+3. 生产级 Kubernetes 发布链路与可观测性加固（backlog 范围）。
 
 ---
 

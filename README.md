@@ -531,68 +531,59 @@ GitCortex/
 
 ## Development Progress
 
-> **Data Source:** `docs/undeveloped/current/TODO.md` (README progress aligns with it)
-> **Overall Status:** Completion rate **97.3%** (**288/296**), In Progress **0**, Not Started **8** (Phase 21: 2, Phase 27: 6), Optional Optimizations **5**.
-> **Current Audit Score:** **100/100 (S-tier)**
-> **Next Step:** Complete deferred/optional items in Phase 18.5 and Phase 21, and keep TODO milestones aligned with current implementation.
+> **Data Source:** `git log` (2026-03-06 to 2026-03-07) + `docs/undeveloped/current/TODO-pending.md`
+> **Snapshot Date:** 2026-03-07
+> **Current Status:** **44 completed**, **5 pending** (all pending items are low/medium-priority backlog).
 
-| Phase | Status (Aligned with TODO) | Notes |
-|-------|----------------------------|-------|
-| Phase 0 - Phase 18 | ✅ Completed | Core pipeline established |
-| Phase 18.1 | ✅ Completed | Test technical debt cleanup complete |
-| Phase 18.5 | 🚧 In Progress | P0 complete, P1/P2 have deferred items (including optional optimizations) |
-| Phase 20 | ✅ Completed | Automated coordination core (auto-dispatch) |
-| Phase 21 | ✅ Completed (with 2 not started) | 21.10 deferred, 21.12 optional |
-| Phase 22 | ✅ Completed | WebSocket event broadcast improvements |
-| Phase 23 | ✅ Completed | Terminal process isolation fix |
-| Phase 24 | ✅ Completed | Terminal auto-confirm and message bridging |
-| Phase 25 | ✅ Completed | Auto-confirm reliability fix |
-| Phase 26 | ✅ Completed | Joint audit issue full fix |
-| Phase 27 | 📋 To Implement | 6 tasks not started |
+### Recently Delivered (Merged to `main`)
 
-**Overall Progress:** 288/296 tasks completed (97.3%, per `docs/undeveloped/current/TODO.md`)
+- `ec8ad4ec2`: Added orchestrator message pagination and query params (`cursor/limit`).
+- `8ccf0f3d1`: Persisted orchestrator chat messages and command snapshots (migration + models + API route integration).
+- `1a1b153a3`: Enforced instruction allowlist and command status flow in orchestrator pipeline.
+- `3a177d5d9`: Added command recovery, governance controls, and audit flow.
+- `95c4afc81`: Added Telegram connector ingress with conversation binding and replay protection.
+- `fb642c5fc`: Enhanced frontend orchestrator panel stream and interaction coverage tests.
+- `c473ee470`: Finalized orchestrator checklist and added verification/rollback guides.
+- `35f17ecda`: Added runtime-aware Docker update flow (`install-docker.ps1` / `update-docker.ps1`).
 
-Detailed progress tracking: [docs/undeveloped/current/TODO.md](docs/undeveloped/current/TODO.md)
+### Current Pending Backlog (Non-blocking)
 
-**Quality Status:** Per `docs/undeveloped/current/TODO.md`, currently recorded as S-tier (100/100).
+1. Docker deployment abstraction crate (`crates/docker-deployment`) and `Deployment` trait.
+2. Runner container split between control plane and execution plane.
+3. CLI install status API (`/api/cli_install`) query/retry flow.
+4. Kubernetes deployment support (Helm, multi-replica, high availability).
+5. Image size optimization (layer cache, on-demand CLI install, distroless base image).
+
+### Status References
+
+- Current board: [docs/undeveloped/current/TODO-pending.md](docs/undeveloped/current/TODO-pending.md)
+- TODO index: [docs/undeveloped/current/TODO.md](docs/undeveloped/current/TODO.md)
+- Verification report: [docs/undeveloped/current/orchestrator-chat-verification-report.md](docs/undeveloped/current/orchestrator-chat-verification-report.md)
+- Rollback runbook: [docs/undeveloped/current/orchestrator-chat-rollback-runbook.md](docs/undeveloped/current/orchestrator-chat-rollback-runbook.md)
 
 ---
 
 ## Current Real-World Validation Status
 
-### Completed Development (Verified)
+### Delivered and Integrated
 
-- The main agent can orchestrate and call multiple AI CLIs in one workflow.
-- The current verified test setup uses three AI terminals:
-  - Claude Code terminal with `glm-4.7`
-  - Claude Code terminal with `claude-opus-4.6`
-  - Codex terminal with `gpt-5.3-codex-xhigh`
-- Docker single-container deployment is available and verified (`docker compose build --no-cache` + `up -d` + `readyz`).
+- Workflow-level orchestrator chat entry + history query are available in API and UI.
+- Orchestrator chat persistence is implemented with restart-time recovery support.
+- Instruction allowlist, command status tracking, governance controls, and audit trail are connected to the orchestration flow.
+- Telegram ingress can map external conversations to workflows with replay-protection checks.
+- Frontend orchestrator panel supports richer stream rendering and interaction coverage.
+- Docker deployment supports update flow for existing `.env`-based installations.
 
-### Not Completed / Not Fully Verified Yet
+### Current Validation Baseline
 
-1. Multi-task parallel execution has not been fully tested.
-2. Terminal count stress limit has not been tested yet (custom terminal count is supported).
-3. Frontend UI issues are known and not fixed yet.
-4. Merge terminal and error-resolution terminal flow has not been fully tested.
-5. Task completion notification has not been developed.
-6. Communication software integration has not been developed.
-7. Slash command system has not been fully tested (currently likely unavailable or unstable).
+- Baseline CI workflow passed on `main` for commit `db7986a1b`.
+- Completion/pending split is maintained in TODO docs and updated per delivery phase.
 
-### Tested End-to-End Demo Task
+### Remaining Validation Focus
 
-The validated demo task is a very simple local mini message board with separated frontend and backend:
-
-- Backend: Python
-- Frontend: Single HTML file
-- Behavior: users input text on the page, click save, content is written into a local `.json` file, and the saved messages are displayed in a live-updated list below.
-
-### Project Positioning and Collaboration
-
-- This demo is intentionally simple and mainly proves that the full workflow can run through end-to-end.
-- Complex tasks and long-run stability still need more validation.
-- Current codebase is fully AI-generated.
-- Community PRs are welcome. To avoid duplicated work, please open an issue before submitting a PR to claim the feature/task.
+1. High-concurrency stress for large parallel workflow sets.
+2. Upper-bound stress testing for terminal count per workflow.
+3. Production-grade Kubernetes rollout and observability hardening (backlog scope).
 
 ---
 
