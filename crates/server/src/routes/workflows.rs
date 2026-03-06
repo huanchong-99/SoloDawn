@@ -10,7 +10,8 @@ use axum::{
 };
 use db::models::{
     CliType, CreateWorkflowRequest, InlineModelConfig, ModelConfig, SlashCommandPreset, Terminal,
-    Workflow, WorkflowCommand, WorkflowTask,
+    Workflow, WorkflowCommand, WorkflowOrchestratorCommand, WorkflowOrchestratorMessage,
+    WorkflowTask,
     project::Project,
 };
 use deployment::Deployment;
@@ -2071,6 +2072,25 @@ async fn submit_orchestrator_chat(
         )));
     }
 
+    if let Some(external_id) = external_message_id
+        && let Some(existing_command) = WorkflowOrchestratorCommand::find_by_external_message(
+            &deployment.db().pool,
+            &workflow_id,
+            source,
+            external_id,
+        )
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to query orchestrator command: {e}")))?
+    {
+        let response = SubmitOrchestratorChatResponse {
+            command_id: existing_command.id,
+            status: existing_command.status,
+            error: existing_command.error,
+            retryable: existing_command.retryable,
+        };
+        return Ok(ResponseJson(ApiResponse::success(response)));
+    }
+
     let command_result = runtime
         .submit_orchestrator_chat(&workflow_id, message, source, external_message_id)
         .await
@@ -2084,14 +2104,58 @@ async fn submit_orchestrator_chat(
         })?;
 
     let response = SubmitOrchestratorChatResponse {
-        command_id: command_result.command_id,
+        command_id: command_result.command_id.clone(),
         status: command_result.status.as_str().to_string(),
         retryable: matches!(
             command_result.status.as_str(),
             "failed" | "cancelled"
         ),
-        error: command_result.error,
+        error: command_result.error.clone(),
     };
+
+    let persisted_command = WorkflowOrchestratorCommand::new(
+        &response.command_id,
+        &workflow_id,
+        source,
+        external_message_id,
+        message,
+        &response.status,
+        response.error.as_deref(),
+        response.retryable,
+    );
+    WorkflowOrchestratorCommand::insert(&deployment.db().pool, &persisted_command)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to persist orchestrator command: {e}")))?;
+
+    let user_message = WorkflowOrchestratorMessage::new(
+        &workflow_id,
+        Some(&response.command_id),
+        "user",
+        message,
+        source,
+        external_message_id,
+    );
+    WorkflowOrchestratorMessage::insert(&deployment.db().pool, &user_message)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to persist user message: {e}")))?;
+
+    if response.status == "succeeded" {
+        if let Ok(messages) = runtime.get_orchestrator_messages(&workflow_id).await
+            && let Some(last_assistant) =
+                messages.iter().rev().find(|entry| entry.role == "assistant")
+        {
+            let assistant_message = WorkflowOrchestratorMessage::new(
+                &workflow_id,
+                Some(&response.command_id),
+                "assistant",
+                &last_assistant.content,
+                "orchestrator",
+                None,
+            );
+            let _ =
+                WorkflowOrchestratorMessage::insert(&deployment.db().pool, &assistant_message).await;
+        }
+    }
 
     tracing::info!(
         workflow_id = %workflow_id,
@@ -2130,15 +2194,35 @@ async fn list_orchestrator_messages(
         ));
     }
 
-    let runtime = deployment.orchestrator_runtime();
-    if !runtime.is_running(&workflow_id).await {
-        return Err(ApiError::Conflict(format!(
-            "Cannot list orchestrator messages: workflow '{}' is not running",
-            workflow_id
-        )));
+    let limit = params.limit.unwrap_or(50).clamp(1, 200);
+    let cursor = params.cursor.unwrap_or(0);
+
+    let persisted_messages = WorkflowOrchestratorMessage::list_by_workflow_paginated(
+        &deployment.db().pool,
+        &workflow_id,
+        cursor,
+        limit,
+    )
+    .await
+    .map_err(|e| ApiError::Internal(format!("Failed to query orchestrator messages: {e}")))?;
+
+    if !persisted_messages.is_empty() {
+        let response = persisted_messages
+            .into_iter()
+            .map(|message| OrchestratorChatMessageResponse {
+                role: message.role,
+                content: message.content,
+            })
+            .collect();
+        return Ok(ResponseJson(ApiResponse::success(response)));
     }
 
-    let messages = runtime
+    let runtime = deployment.orchestrator_runtime();
+    if !runtime.is_running(&workflow_id).await {
+        return Ok(ResponseJson(ApiResponse::success(Vec::new())));
+    }
+
+    let runtime_messages = runtime
         .get_orchestrator_messages(&workflow_id)
         .await
         .map_err(|e| {
@@ -2150,8 +2234,12 @@ async fn list_orchestrator_messages(
             ApiError::BadRequest(format!("Failed to list orchestrator messages: {e}"))
         })?;
 
-    let (start, end) = paginate_orchestrator_messages(messages.len(), params.cursor, params.limit);
-    let response = messages
+    let (start, end) = paginate_orchestrator_messages(
+        runtime_messages.len(),
+        params.cursor,
+        params.limit,
+    );
+    let response = runtime_messages
         .into_iter()
         .skip(start)
         .take(end.saturating_sub(start))

@@ -89,9 +89,9 @@
 
 ### 5.2 数据与持久化
 
-- [ ] DATA-001 新增 `workflow_orchestrator_message` 表（入站/出站消息）。
-- [ ] DATA-002 新增 `workflow_orchestrator_command` 表（执行状态/耗时/错误）。
-- [ ] DATA-003 新增 `external_conversation_binding` 表（外部会话映射）。
+- [x] DATA-001 新增 `workflow_orchestrator_message` 表（入站/出站消息）。
+- [x] DATA-002 新增 `workflow_orchestrator_command` 表（执行状态/耗时/错误）。
+- [x] DATA-003 新增 `external_conversation_binding` 表（外部会话映射）。
 - [ ] DATA-004 持久化恢复策略：服务重启后可恢复未完成编排命令。
 - [ ] DATA-005 脱敏策略：API key、token、敏感 prompt 片段日志脱敏。
 
