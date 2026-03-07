@@ -256,12 +256,15 @@ export const Step4Terminals: React.FC<Step4TerminalsProps> = ({
     detectCliTypes(true);
   };
 
-  const updateTerminal = (terminalId: string, updates: Partial<TerminalConfig>) => {
-    const newTerminals = config.terminals.map((t) =>
-      t.id === terminalId ? { ...t, ...updates } : t
-    );
-    onUpdate({ terminals: newTerminals });
-  };
+  const updateTerminal = useCallback(
+    (terminalId: string, updates: Partial<TerminalConfig>) => {
+      const newTerminals = config.terminals.map((t) =>
+        t.id === terminalId ? { ...t, ...updates } : t
+      );
+      onUpdate({ terminals: newTerminals });
+    },
+    [config.terminals, onUpdate]
+  );
 
   const getModelsForCli = useCallback(
     (cliTypeId: string) =>
@@ -275,33 +278,44 @@ export const Step4Terminals: React.FC<Step4TerminalsProps> = ({
     [config.models]
   );
 
-  // Keep terminal model selection compatible with CLI binding.
+  const getCompatibleModelIds = useCallback(
+    (cliTypeId: string): Set<string> =>
+      new Set(getModelsForCli(cliTypeId).map((m) => m.id)),
+    [getModelsForCli]
+  );
+
+  const handleCliSelect = useCallback(
+    (terminalId: string, currentModelConfigId: string, cliId: string) => {
+      const compatible = getCompatibleModelIds(cliId);
+      updateTerminal(terminalId, {
+        cliTypeId: cliId,
+        modelConfigId: compatible.has(currentModelConfigId) ? currentModelConfigId : '',
+      });
+    },
+    [getCompatibleModelIds, updateTerminal]
+  );
+
   useEffect(() => {
     const normalizedTerminals = config.terminals.map((terminal) => {
       if (!terminal.modelConfigId.trim()) {
         return terminal;
       }
 
-      const compatibleModelIds = new Set(
-        terminal.cliTypeId
-          ? getModelsForCli(terminal.cliTypeId).map((model) => model.id)
-          : config.models.map((model) => model.id)
-      );
+      const compatible = terminal.cliTypeId
+        ? getCompatibleModelIds(terminal.cliTypeId)
+        : new Set(config.models.map((m) => m.id));
 
-      if (compatibleModelIds.has(terminal.modelConfigId)) {
+      if (compatible.has(terminal.modelConfigId)) {
         return terminal;
       }
 
-      return {
-        ...terminal,
-        modelConfigId: '',
-      };
+      return { ...terminal, modelConfigId: '' };
     });
 
     if (!terminalConfigListEquals(config.terminals, normalizedTerminals)) {
       onUpdate({ terminals: normalizedTerminals });
     }
-  }, [config.models, config.terminals, getModelsForCli, onUpdate]);
+  }, [config.models, config.terminals, getCompatibleModelIds, onUpdate]);
 
   const goToPreviousTask = () => {
     if (currentTaskIndex > 0) {
@@ -479,20 +493,7 @@ export const Step4Terminals: React.FC<Step4TerminalsProps> = ({
                     <button
                       key={cli.id}
                       type="button"
-                      onClick={() => {
-                        const compatibleModelIds = new Set(
-                          getModelsForCli(cli.id).map((model) => model.id)
-                        );
-                        const nextModelConfigId = compatibleModelIds.has(
-                          terminal.modelConfigId
-                        )
-                          ? terminal.modelConfigId
-                          : '';
-                        updateTerminal(terminal.id, {
-                          cliTypeId: cli.id,
-                          modelConfigId: nextModelConfigId,
-                        });
-                      }}
+                      onClick={() => handleCliSelect(terminal.id, terminal.modelConfigId, cli.id)}
                       disabled={!cli.installed}
                       className={cn(
                         'flex items-center gap-half px-base py-half rounded-sm border text-base transition-colors',
@@ -520,11 +521,6 @@ export const Step4Terminals: React.FC<Step4TerminalsProps> = ({
               {/* Model Selection */}
               <Field>
                 <FieldLabel>{t('step4.modelLabel')}</FieldLabel>
-                {(() => {
-                  const compatibleModels = terminal.cliTypeId
-                    ? getModelsForCli(terminal.cliTypeId)
-                    : [];
-                  return (
                 <select
                   value={terminal.modelConfigId}
                   onChange={(e) => {
@@ -539,14 +535,12 @@ export const Step4Terminals: React.FC<Step4TerminalsProps> = ({
                   )}
                 >
                   <option value="">{t('step4.modelPlaceholder')}</option>
-                  {compatibleModels.map((model) => (
+                  {(terminal.cliTypeId ? getModelsForCli(terminal.cliTypeId) : []).map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.displayName}
                     </option>
                   ))}
                 </select>
-                  );
-                })()}
                 {errors[buildTerminalErrorKey(terminal.id, 'model')] && (
                   <FieldError>{t(errors[buildTerminalErrorKey(terminal.id, 'model')])}</FieldError>
                 )}
