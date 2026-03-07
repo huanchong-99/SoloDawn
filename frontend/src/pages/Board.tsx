@@ -9,15 +9,44 @@ import { useWorkflowEvents } from '@/stores/wsStore';
 import { useQueryClient } from '@tanstack/react-query';
 import { workflowKeys } from '@/hooks/useWorkflows';
 import { useSearchParams } from 'react-router-dom';
+import { useProjects } from '@/hooks/useProjects';
 
 export function Board() {
   const { t } = useTranslation('workflow');
   const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+
+  const { projects } = useProjects();
+
+  const projectIdFromUrl = searchParams.get('projectId');
+  const validProjectId =
+    projectIdFromUrl && projects.some((p) => p.id === projectIdFromUrl)
+      ? projectIdFromUrl
+      : projects[0]?.id ?? '';
+
+  useEffect(() => {
+    if (projects.length > 0 && projectIdFromUrl !== validProjectId) {
+      const next = new URLSearchParams(searchParams);
+      next.set('projectId', validProjectId);
+      setSearchParams(next, { replace: true });
+    }
+  }, [projectIdFromUrl, validProjectId, projects.length, searchParams, setSearchParams]);
+
+  const handleProjectChange = useCallback(
+    (newProjectId: string) => {
+      const next = new URLSearchParams(searchParams);
+      next.set('projectId', newProjectId);
+      next.delete('workflowId');
+      setSearchParams(next, { replace: true });
+      setSelectedWorkflowId(null);
+    },
+    [searchParams, setSearchParams]
+  );
+
   const workflowIdFromUrl = searchParams.get('workflowId');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
     workflowIdFromUrl
   );
-  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (selectedWorkflowId === workflowIdFromUrl) {
@@ -61,6 +90,9 @@ export function Board() {
   return (
     <div className="app-canvas flex h-full min-h-0 w-full">
       <WorkflowSidebar
+        projects={projects}
+        activeProjectId={validProjectId}
+        onProjectChange={handleProjectChange}
         selectedWorkflowId={selectedWorkflowId}
         onSelectWorkflow={setSelectedWorkflowId}
       />

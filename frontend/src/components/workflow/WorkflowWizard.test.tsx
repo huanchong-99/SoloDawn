@@ -76,7 +76,7 @@ describe('WorkflowWizard', () => {
     });
   });
 
-  it('skips task and terminal steps in agent-planned mode', async () => {
+  it('always shows task and terminal steps in manual wizard', () => {
     renderWithI18n(
       <WorkflowWizard
         onComplete={vi.fn()}
@@ -84,38 +84,7 @@ describe('WorkflowWizard', () => {
       />
     );
 
-    fireEvent.change(screen.getByPlaceholderText(i18n.t('workflow:step0.placeholder')), {
-      target: { value: 'E:/GitCortex' },
-    });
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled();
-    });
-
-    fireEvent.click(screen.getByText(i18n.t('workflow:wizard.buttons.next')));
-
-    await waitFor(() => {
-      expect(screen.getByText(i18n.t('workflow:step1.modeLabel'))).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText(i18n.t('workflow:step1.agentPlannedTitle')));
-
-    await waitFor(() => {
-      expect(screen.queryByText(i18n.t('workflow:steps.tasks.name'))).not.toBeInTheDocument();
-      expect(screen.queryByText(i18n.t('workflow:steps.terminals.name'))).not.toBeInTheDocument();
-    });
-
-    fireEvent.change(screen.getByPlaceholderText(i18n.t('workflow:step1.namePlaceholder')), {
-      target: { value: 'Autonomous Recovery Workflow' },
-    });
-    fireEvent.change(screen.getByPlaceholderText(i18n.t('workflow:step1.initialGoalPlaceholder')), {
-      target: { value: 'Plan the runtime topology after startup recovery' },
-    });
-
-    fireEvent.click(screen.getByText(i18n.t('workflow:wizard.buttons.next')));
-
-    await waitFor(() => {
-      expect(screen.getByText(i18n.t('workflow:step3.title'))).toBeInTheDocument();
-    });
+    expect(screen.getByText(i18n.t('workflow:steps.tasks.name'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('workflow:steps.terminals.name'))).toBeInTheDocument();
   });
 });

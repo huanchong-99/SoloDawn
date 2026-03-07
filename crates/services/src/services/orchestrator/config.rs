@@ -67,6 +67,67 @@ fn default_max_history() -> usize {
     DEFAULT_MAX_CONVERSATION_HISTORY
 }
 
+/// Prompt profile identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptProfile {
+    /// Used during workspace planning phase — requirement discovery conversation.
+    WorkspacePlanning,
+    /// Used during workflow runtime — task/terminal coordination.
+    RuntimeOrchestrator,
+}
+
+/// Returns the system prompt for the requested profile.
+pub fn system_prompt_for_profile(profile: PromptProfile) -> String {
+    match profile {
+        PromptProfile::WorkspacePlanning => workspace_planning_prompt(),
+        PromptProfile::RuntimeOrchestrator => default_system_prompt(),
+    }
+}
+
+fn workspace_planning_prompt() -> String {
+    r#"You are the GitCortex Workspace Planner — a friendly project requirements analyst.
+
+Your goal is to understand what the user wants to build, then produce a precise
+technical specification that the backend can use to create an execution workflow.
+
+## Conversation rules
+
+1. Always speak in the user's language.  If they write in Chinese, reply in Chinese.
+2. Ask business-level follow-up questions.  Examples:
+   - "Does your blog need a comment system?"
+   - "Should users be able to sign up and log in?"
+   - "Do you need an admin panel to manage content?"
+3. NEVER ask about framework choices, stack decisions, or internal architecture
+   unless the user brings it up first.
+4. Keep each round to 1-3 focused questions.  Do not dump a long checklist.
+5. When you have gathered enough information, summarise the requirements in plain
+   language and ask the user to confirm.
+6. After confirmation, output a single JSON block labelled `PLANNING_SPEC`:
+
+```json
+{
+  "productGoal": "...",
+  "requiredFeatures": ["...", "..."],
+  "optionalFeatures": ["..."],
+  "repositories": ["..."],
+  "suggestedWorkerRoles": [
+    {"role": "...", "cliTypeId": "...", "count": 1}
+  ],
+  "mergeStrategy": "orchestrator",
+  "reviewStrategy": "dedicated_terminal"
+}
+```
+
+## Strict boundaries
+
+- You must NOT write, read, or review any code yourself.
+- You must NOT suggest specific file structures or implementation details.
+- You are only responsible for understanding the product vision and
+  producing a structured planning specification.
+"#
+    .to_string()
+}
+
 fn default_system_prompt() -> String {
     r#"你是 GitCortex 的主协调 Agent，负责协调多个 AI 编码代理完成软件开发任务。
 
@@ -161,5 +222,43 @@ impl OrchestratorConfig {
             return Err("Rate limit must be greater than 0".to_string());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn planning_prompt_does_not_contain_json_instructions() {
+        let prompt = system_prompt_for_profile(PromptProfile::WorkspacePlanning);
+        assert!(
+            !prompt.contains("send_to_terminal"),
+            "planning prompt must not reference runtime actions"
+        );
+        assert!(
+            !prompt.contains("start_task"),
+            "planning prompt must not reference runtime actions"
+        );
+    }
+
+    #[test]
+    fn runtime_prompt_contains_json_instructions() {
+        let prompt = system_prompt_for_profile(PromptProfile::RuntimeOrchestrator);
+        assert!(prompt.contains("send_to_terminal"));
+        assert!(prompt.contains("create_task"));
+    }
+
+    #[test]
+    fn prompt_profiles_are_distinct() {
+        let planning = system_prompt_for_profile(PromptProfile::WorkspacePlanning);
+        let runtime = system_prompt_for_profile(PromptProfile::RuntimeOrchestrator);
+        assert_ne!(planning, runtime);
+    }
+
+    #[test]
+    fn planning_prompt_enforces_no_code_boundary() {
+        let prompt = system_prompt_for_profile(PromptProfile::WorkspacePlanning);
+        assert!(prompt.contains("must NOT write, read, or review any code"));
     }
 }

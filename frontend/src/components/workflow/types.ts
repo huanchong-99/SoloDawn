@@ -60,11 +60,6 @@ export const WIZARD_STEPS: readonly WizardStepMeta[] = [
   },
 ] as const;
 
-const AGENT_PLANNED_HIDDEN_STEPS = new Set<WizardStep>([
-  WizardStep.Tasks,
-  WizardStep.Terminals,
-]);
-
 export function isAgentPlannedMode(
   executionMode: WorkflowExecutionMode | undefined
 ): executionMode is 'agent_planned' {
@@ -74,13 +69,12 @@ export function isAgentPlannedMode(
 export function getVisibleWizardSteps(
   executionMode: WorkflowExecutionMode = 'diy'
 ): WizardStepMeta[] {
-  if (!isAgentPlannedMode(executionMode)) {
-    return [...WIZARD_STEPS];
+  if (isAgentPlannedMode(executionMode)) {
+    return WIZARD_STEPS.filter(
+      (s) => s.step !== WizardStep.Tasks && s.step !== WizardStep.Terminals
+    );
   }
-
-  return WIZARD_STEPS.filter(
-    (stepMeta) => !AGENT_PLANNED_HIDDEN_STEPS.has(stepMeta.step)
-  );
+  return [...WIZARD_STEPS];
 }
 
 export function getVisibleWizardStepIds(

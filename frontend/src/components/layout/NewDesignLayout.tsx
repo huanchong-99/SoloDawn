@@ -9,6 +9,7 @@ import { LayoutGrid, GitBranch, Bug, Settings } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { LanguageToggleButton } from './LanguageToggleButton';
+import { ProductModeSwitch } from './ProductModeSwitch';
 
 type ViewType = 'kanban' | 'pipeline' | 'debug';
 
@@ -90,11 +91,13 @@ export function NewDesignLayout() {
     navigate(view.path(workflowId));
   };
 
-  // Show view switcher on board, pipeline, and debug pages
   const showViewSwitcher =
     location.pathname === '/board' ||
     location.pathname.startsWith('/pipeline/') ||
-    location.pathname.startsWith('/debug/');
+    location.pathname.startsWith('/debug/') ||
+    location.pathname.startsWith('/workspaces') ||
+    location.pathname.startsWith('/wizard') ||
+    location.pathname.startsWith('/workflows');
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
@@ -126,7 +129,9 @@ export function NewDesignLayout() {
               );
             })}
           </div>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-1.5">
+            <ProductModeSwitch />
+            <div className="w-px h-4 bg-border" />
             <button
               type="button"
               onClick={() => navigate('/wizard')}
@@ -134,14 +139,6 @@ export function NewDesignLayout() {
               title={t('viewSwitcher.workflowManagement')}
             >
               {t('viewSwitcher.workflowManagement')}
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate('/workspaces/create')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm text-low hover:text-high hover:bg-secondary"
-              title={t('viewSwitcher.createWorkspace')}
-            >
-              {t('viewSwitcher.createWorkspace')}
             </button>
             <LanguageToggleButton className="h-auto min-w-0 px-3 py-1.5 rounded text-sm" />
             <button

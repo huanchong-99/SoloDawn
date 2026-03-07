@@ -325,5 +325,10 @@
     "unableToLoad": "Unable to load release notes",
     "unableToLoadDescription": "We couldn't display the release notes in this window. Click below to view them in your browser.",
     "openInBrowser": "Open Release Notes in Browser"
+  },
+  "workspace": {
+    "selectProjectTitle": "Select a Project",
+    "selectProjectHint": "Choose an existing project or create a new one to get started.",
+    "currentProject": "Project:"
   }
 }

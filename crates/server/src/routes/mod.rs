@@ -23,6 +23,7 @@ pub mod images;
 pub mod models;
 pub mod oauth;
 pub mod organizations;
+pub mod planning_drafts;
 pub mod projects;
 pub mod repo;
 pub mod scratch;
@@ -66,6 +67,7 @@ pub fn router(deployment: DeploymentImpl, hub: SharedSubscriptionHub) -> IntoMak
         .nest("/images", images::routes())
         .nest("/models", models::router())
         .nest("/cli_types", cli_types::cli_types_routes())
+        .nest("/planning-drafts", planning_drafts::planning_draft_routes())
         .nest("/workflows", workflows::workflows_routes())
         .nest("/workflows", slash_commands::slash_commands_routes())
         .nest("/terminal", terminal_ws::terminal_ws_routes())

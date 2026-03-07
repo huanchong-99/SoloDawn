@@ -2,12 +2,15 @@ import { useMemo, useCallback, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useCreateMode } from '@/contexts/CreateModeContext';
 import { useUserSystem } from '@/components/ConfigProvider';
+import { useProjects } from '@/hooks/useProjects';
 import { useCreateWorkspace } from '@/hooks/useCreateWorkspace';
 import { useCreateAttachments } from '@/hooks/useCreateAttachments';
 import { getVariantOptions, areProfilesEqual } from '@/utils/executor';
 import { splitMessageToTitleDescription } from '@/utils/string';
 import type { ExecutorProfileId, BaseCodingAgent } from 'shared/types';
 import { CreateChatBox } from '../primitives/CreateChatBox';
+import { ProjectSelectorContainer } from './ProjectSelectorContainer';
+import { CreateProjectDialog } from '@/components/ui-new/dialogs/CreateProjectDialog';
 
 export function CreateChatBoxContainer() {
   const { t } = useTranslation('common');
@@ -20,6 +23,7 @@ export function CreateChatBoxContainer() {
     message,
     setMessage,
     selectedProjectId,
+    setSelectedProjectId,
     clearDraft,
     hasInitialValue,
   } = useCreateMode();
@@ -78,10 +82,14 @@ export function CreateChatBoxContainer() {
     }
   }, [hasChangedFromDefault]);
 
-  // Get project ID from context
+  const { projects } = useProjects();
   const projectId = selectedProjectId;
+  const selectedProject = projects.find((p) => p.id === projectId);
 
-  // Determine if we can submit
+  const handleCreateProjectNoAutoSelect = useCallback(async () => {
+    await CreateProjectDialog.show({});
+  }, []);
+
   const canSubmit =
     repos.length > 0 &&
     message.trim().length > 0 &&
@@ -206,15 +214,22 @@ export function CreateChatBoxContainer() {
     return null;
   }
 
-  // Handle case where no project exists
   if (!projectId) {
     return (
       <div className="flex h-full w-full items-center justify-center">
-        <div className="text-center max-w-md">
+        <div className="text-center max-w-sm">
           <h2 className="text-lg font-medium text-high mb-2">
-            {t('projects.noProjectFound')}
+            {t('workspace.selectProjectTitle')}
           </h2>
-          <p className="text-sm text-low">{t('projects.createFirstPrompt')}</p>
+          <p className="text-sm text-low mb-4">
+            {t('workspace.selectProjectHint')}
+          </p>
+          <ProjectSelectorContainer
+            projects={projects}
+            selectedProjectId={null}
+            onProjectSelect={(p) => setSelectedProjectId(p.id)}
+            onCreateProject={handleCreateProjectNoAutoSelect}
+          />
         </div>
       </div>
     );
@@ -224,6 +239,18 @@ export function CreateChatBoxContainer() {
     <div className="relative flex flex-1 flex-col bg-primary h-full">
       <div className="flex-1" />
       <div className="flex justify-center @container">
+        <div className="w-full max-w-3xl px-4 mb-2">
+          <div className="flex items-center gap-2 text-xs text-low">
+            <span>{t('workspace.currentProject')}</span>
+            <ProjectSelectorContainer
+              projects={projects}
+              selectedProjectId={projectId}
+              selectedProjectName={selectedProject?.name}
+              onProjectSelect={(p) => setSelectedProjectId(p.id)}
+              onCreateProject={handleCreateProjectNoAutoSelect}
+            />
+          </div>
+        </div>
         <CreateChatBox
           editor={{
             value: message,

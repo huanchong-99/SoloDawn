@@ -33,7 +33,7 @@ describe('Step1Basic', () => {
     expect(screen.getByText(i18n.t('workflow:step1.taskCountLabel'))).toBeInTheDocument();
   });
 
-  it('should allow switching execution modes', () => {
+  it('should always show task count and import controls', () => {
     renderWithI18n(
       <Step1Basic
         config={defaultConfig}
@@ -42,30 +42,8 @@ describe('Step1Basic', () => {
       />
     );
 
-    fireEvent.click(screen.getByText(i18n.t('workflow:step1.agentPlannedTitle')));
-
-    expect(mockOnChange).toHaveBeenCalledWith(
-      expect.objectContaining({ executionMode: 'agent_planned' })
-    );
-  });
-
-  it('should show agent-planned fields and hide DIY-only controls', () => {
-    renderWithI18n(
-      <Step1Basic
-        config={{
-          ...defaultConfig,
-          executionMode: 'agent_planned',
-          initialGoal: 'Plan the full workflow automatically',
-        }}
-        onChange={mockOnChange}
-        errors={{}}
-      />
-    );
-
-    expect(screen.getByText(i18n.t('workflow:step1.initialGoalLabel'))).toBeInTheDocument();
-    expect(screen.getByText(i18n.t('workflow:step1.planningHintsLabel'))).toBeInTheDocument();
-    expect(screen.queryByText(i18n.t('workflow:step1.taskCountLabel'))).not.toBeInTheDocument();
-    expect(screen.queryByText(i18n.t('workflow:step1.importLabel'))).not.toBeInTheDocument();
+    expect(screen.getByText(i18n.t('workflow:step1.taskCountLabel'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('workflow:step1.importLabel'))).toBeInTheDocument();
   });
 
   it('should display error when name is empty', () => {
@@ -132,27 +110,16 @@ describe('Step1Basic', () => {
     ).toBeInTheDocument();
   });
 
-  it('should handle initial goal input change in agent-planned mode', () => {
+  it('should not show execution mode selector in manual wizard', () => {
     renderWithI18n(
       <Step1Basic
-        config={{
-          ...defaultConfig,
-          executionMode: 'agent_planned',
-          initialGoal: '',
-        }}
+        config={defaultConfig}
         onChange={mockOnChange}
         errors={{}}
       />
     );
 
-    const initialGoalInput = screen.getByPlaceholderText(
-      i18n.t('workflow:step1.initialGoalPlaceholder')
-    );
-    fireEvent.change(initialGoalInput, { target: { value: 'Ship a resilient dual-mode runtime' } });
-
-    expect(mockOnChange).toHaveBeenCalledWith(
-      expect.objectContaining({ initialGoal: 'Ship a resilient dual-mode runtime' })
-    );
+    expect(screen.queryByText(i18n.t('workflow:step1.modeLabel'))).not.toBeInTheDocument();
   });
 
   it('should render task count selection buttons', () => {

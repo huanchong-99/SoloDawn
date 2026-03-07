@@ -325,5 +325,10 @@
     "unableToLoad": "无法加载更新日志",
     "unableToLoadDescription": "我们无法在此窗口中显示更新日志。请点击下方按钮在浏览器中查看。",
     "openInBrowser": "在浏览器中打开更新日志"
+  },
+  "workspace": {
+    "selectProjectTitle": "选择项目",
+    "selectProjectHint": "选择已有项目或创建新项目以开始。",
+    "currentProject": "项目："
   }
 }

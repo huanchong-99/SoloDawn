@@ -48,6 +48,15 @@ if [[ "$HTTP_CODE" != "200" ]]; then
 fi
 echo "OK frontend 200"
 
+echo "Checking planning-drafts API..."
+PD_CODE=$(curl -so /dev/null -w "%{http_code}" "$BASE_URL/api/planning-drafts?project_id=00000000-0000-0000-0000-000000000000")
+if [[ "$PD_CODE" != "200" ]]; then
+    echo "FAIL: planning-drafts API returned $PD_CODE"
+    docker compose -f "$COMPOSE_FILE" logs
+    exit 1
+fi
+echo "OK planning-drafts API 200"
+
 echo "Testing restart persistence..."
 docker compose -f "$COMPOSE_FILE" restart
 elapsed=0

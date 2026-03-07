@@ -18,6 +18,7 @@ pub mod workspace_repo;
 pub mod cli_type;
 pub mod git_event;
 pub mod orchestrator_message;
+pub mod planning_draft;
 pub mod terminal;
 pub mod workflow;
 

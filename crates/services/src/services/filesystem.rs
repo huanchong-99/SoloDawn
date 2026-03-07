@@ -195,7 +195,7 @@ impl FilesystemService {
             if root.as_os_str().is_empty() {
                 continue;
             }
-            let canonical = fs::canonicalize(&root).unwrap_or(root);
+            let canonical = dunce::canonicalize(&root).unwrap_or(root);
             if !normalized.iter().any(|existing| existing == &canonical) {
                 normalized.push(canonical);
             }
@@ -511,7 +511,7 @@ impl FilesystemService {
     }
 
     fn resolve_path(&self, path: &Path) -> Result<PathBuf, FilesystemError> {
-        let canonical_path = fs::canonicalize(path)?;
+        let canonical_path = dunce::canonicalize(path)?;
         let allowed = self
             .allowed_roots
             .iter()

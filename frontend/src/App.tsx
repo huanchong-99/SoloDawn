@@ -121,12 +121,18 @@ function AppContent() {
                 </NewDesignScope>
               }
             >
+              {/* Manual Workflow mode */}
               <Route index element={<Navigate to="/board" replace />} />
               <Route path="board" element={<Board />} />
               <Route path="wizard" element={<Workflows />} />
               <Route path="workflows" element={<Workflows />} />
               <Route path="pipeline/:workflowId" element={<Pipeline />} />
               <Route path="debug/:workflowId" element={<WorkflowDebugPage />} />
+
+              {/* Orchestrated Workspace mode */}
+              <Route path="workspaces" element={<WorkspacesLanding />} />
+              <Route path="workspaces/create" element={<Workspaces />} />
+              <Route path="workspaces/:workspaceId" element={<Workspaces />} />
             </Route>
 
             {/* ========== LEGACY DESIGN ROUTES (Settings) ========== */}
@@ -161,20 +167,6 @@ function AppContent() {
                 path="/projects"
                 element={<Navigate to="/board" replace />}
               />
-            </Route>
-
-            {/* ========== NEW DESIGN ROUTES (Workspaces) ========== */}
-            <Route
-              path="/workspaces"
-              element={
-                <NewDesignScope>
-                  <NewDesignLayout />
-                </NewDesignScope>
-              }
-            >
-              <Route index element={<WorkspacesLanding />} />
-              <Route path="create" element={<Workspaces />} />
-              <Route path=":workspaceId" element={<Workspaces />} />
             </Route>
           </SentryRoutes>
         </SearchProvider>

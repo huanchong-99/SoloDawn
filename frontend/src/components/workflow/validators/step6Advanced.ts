@@ -39,7 +39,7 @@ export function validateStep6Advanced(config: WizardConfig): Record<string, stri
         config.advanced.errorTerminal.cliTypeId
       )
     ) {
-      errors.errorTerminalModel = 'validation.terminals.modelRequired';
+      errors.errorTerminalModel = 'validation.terminals.modelCliMismatch';
     }
   }
 
@@ -54,7 +54,7 @@ export function validateStep6Advanced(config: WizardConfig): Record<string, stri
       config.advanced.mergeTerminal.cliTypeId
     )
   ) {
-    errors.mergeModel = 'validation.advanced.mergeModelRequired';
+    errors.mergeModel = 'validation.terminals.modelCliMismatch';
   }
 
   return errors;

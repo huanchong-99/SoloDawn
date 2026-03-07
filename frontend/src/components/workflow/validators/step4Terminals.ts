@@ -36,7 +36,7 @@ export function validateStep4Terminals(config: WizardConfig): Record<string, str
 
     const boundCliTypeId = model.cliTypeId?.trim();
     if (boundCliTypeId && cliTypeId && boundCliTypeId !== cliTypeId) {
-      errors[`terminal-${terminalKey}-model`] = 'validation.terminals.modelRequired';
+      errors[`terminal-${terminalKey}-model`] = 'validation.terminals.modelCliMismatch';
     }
   });
 

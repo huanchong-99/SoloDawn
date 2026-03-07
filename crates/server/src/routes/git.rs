@@ -93,7 +93,7 @@ fn allowed_git_roots() -> Result<Vec<PathBuf>, ApiError> {
 
     let mut normalized_roots = Vec::new();
     for root in roots {
-        let canonical_root = std::fs::canonicalize(&root).unwrap_or(root);
+        let canonical_root = dunce::canonicalize(&root).unwrap_or(root);
         if !normalized_roots
             .iter()
             .any(|existing| existing == &canonical_root)
@@ -107,7 +107,7 @@ fn allowed_git_roots() -> Result<Vec<PathBuf>, ApiError> {
 
 fn canonicalize_with_existing_ancestor(path: &Path) -> Result<PathBuf, ApiError> {
     if path.exists() {
-        return Ok(std::fs::canonicalize(path)?);
+        return Ok(dunce::canonicalize(path)?);
     }
 
     let mut current = path.to_path_buf();
@@ -115,7 +115,7 @@ fn canonicalize_with_existing_ancestor(path: &Path) -> Result<PathBuf, ApiError>
 
     loop {
         if current.exists() {
-            let mut canonical = std::fs::canonicalize(&current)?;
+            let mut canonical = dunce::canonicalize(&current)?;
             for component in missing_components.iter().rev() {
                 canonical.push(component);
             }
@@ -138,7 +138,7 @@ fn normalize_allowed_roots(allowed_roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut normalized_roots = Vec::new();
 
     for root in allowed_roots {
-        let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+        let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.clone());
         if !normalized_roots
             .iter()
             .any(|existing| existing == &canonical_root)
@@ -463,7 +463,7 @@ mod path_boundary_tests {
 
         assert_eq!(
             canonical,
-            std::fs::canonicalize(outside_root.path())
+            dunce::canonicalize(outside_root.path())
                 .expect("failed to canonicalize outside root")
         );
 

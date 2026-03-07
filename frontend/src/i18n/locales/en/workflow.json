@@ -3,6 +3,7 @@
     "eyebrow": "Kanban",
     "title": "Workflow board",
     "description": "Drag tasks between columns to track progress.",
+    "selectProject": "Select Project",
     "focus": {
       "active": "Viewing active workflow",
       "none": "No workflow selected"
@@ -337,7 +338,8 @@
     "terminals": {
       "required": "At least one terminal is required",
       "cliRequired": "Select a CLI type",
-      "modelRequired": "Select a model"
+      "modelRequired": "Select a model",
+      "modelCliMismatch": "Selected model is bound to a different CLI type"
     },
     "advanced": {
       "orchestratorModelRequired": "Select the primary agent model",
@@ -435,6 +437,10 @@
       "pipeline": "Pipeline view",
       "terminals": "Terminal debug"
     }
+  },
+  "modeSwitch": {
+    "manual": "Manual Workflow",
+    "orchestrated": "Orchestrated Workspace"
   },
   "viewSwitcher": {
     "kanban": "Kanban",

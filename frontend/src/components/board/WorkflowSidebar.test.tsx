@@ -3,31 +3,20 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { WorkflowSidebar } from './WorkflowSidebar';
 
-vi.mock('@/hooks/useProjects', () => ({
-  useProjects: vi.fn(),
-}));
-
 vi.mock('@/hooks/useWorkflows', () => ({
   useWorkflows: vi.fn(),
 }));
 
-import { useProjects } from '@/hooks/useProjects';
 import { useWorkflows } from '@/hooks/useWorkflows';
 
 const renderWithRouter = (ui: React.ReactElement) => {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
 };
 
+const defaultProjects = [{ id: 'proj-1', name: 'Project One' }] as any[];
+
 describe('WorkflowSidebar', () => {
   it('renders workflows list', () => {
-    vi.mocked(useProjects).mockReturnValue({
-      projects: [{ id: 'proj-1', name: 'Project One' }],
-      projectsById: {},
-      isLoading: false,
-      isConnected: true,
-      error: null,
-    });
-
     vi.mocked(useWorkflows).mockReturnValue({
       data: [
         {
@@ -48,6 +37,9 @@ describe('WorkflowSidebar', () => {
 
     renderWithRouter(
       <WorkflowSidebar
+        projects={defaultProjects}
+        activeProjectId="proj-1"
+        onProjectChange={() => {}}
         selectedWorkflowId={null}
         onSelectWorkflow={() => {}}
       />
@@ -57,14 +49,6 @@ describe('WorkflowSidebar', () => {
   });
 
   it('shows loading state', () => {
-    vi.mocked(useProjects).mockReturnValue({
-      projects: [{ id: 'proj-1', name: 'Project One' }],
-      projectsById: {},
-      isLoading: false,
-      isConnected: true,
-      error: null,
-    });
-
     vi.mocked(useWorkflows).mockReturnValue({
       data: [],
       isLoading: true,
@@ -73,11 +57,39 @@ describe('WorkflowSidebar', () => {
 
     renderWithRouter(
       <WorkflowSidebar
+        projects={defaultProjects}
+        activeProjectId="proj-1"
+        onProjectChange={() => {}}
         selectedWorkflowId={null}
         onSelectWorkflow={() => {}}
       />
     );
 
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+  });
+
+  it('shows project selector when multiple projects exist', () => {
+    const multipleProjects = [
+      { id: 'proj-1', name: 'Project One' },
+      { id: 'proj-2', name: 'Project Two' },
+    ] as any[];
+
+    vi.mocked(useWorkflows).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderWithRouter(
+      <WorkflowSidebar
+        projects={multipleProjects}
+        activeProjectId="proj-1"
+        onProjectChange={() => {}}
+        selectedWorkflowId={null}
+        onSelectWorkflow={() => {}}
+      />
+    );
+
+    expect(screen.getByText('Project One')).toBeInTheDocument();
   });
 });

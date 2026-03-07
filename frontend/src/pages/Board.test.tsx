@@ -15,6 +15,16 @@ vi.mock('@/stores/wsStore', () => ({
   useWorkflowEvents: vi.fn(),
 }));
 
+vi.mock('@/hooks/useProjects', () => ({
+  useProjects: () => ({
+    projects: [{ id: 'proj-1', name: 'Test Project' }],
+    projectsById: { 'proj-1': { id: 'proj-1', name: 'Test Project' } },
+    isLoading: false,
+    isConnected: true,
+    error: null,
+  }),
+}));
+
 vi.mock('@/components/board/WorkflowSidebar', () => ({
   WorkflowSidebar: ({
     onSelectWorkflow,

@@ -3,6 +3,7 @@
     "eyebrow": "看板",
     "title": "工作流看板",
     "description": "在列之间拖动任务以跟踪进度。",
+    "selectProject": "选择项目",
     "focus": {
       "active": "正在查看活动工作流",
       "none": "未选择工作流"
@@ -336,7 +337,8 @@
     "terminals": {
       "required": "至少添加一个终端",
       "cliRequired": "请选择 CLI 类型",
-      "modelRequired": "请选择模型"
+      "modelRequired": "请选择模型",
+      "modelCliMismatch": "所选模型绑定了不同的 CLI 类型"
     },
     "advanced": {
       "orchestratorModelRequired": "请选择主 Agent 模型",
@@ -434,6 +436,10 @@
       "pipeline": "流水线视图",
       "terminals": "终端调试"
     }
+  },
+  "modeSwitch": {
+    "manual": "手动工作流",
+    "orchestrated": "编排工作区"
   },
   "viewSwitcher": {
     "kanban": "看板",
