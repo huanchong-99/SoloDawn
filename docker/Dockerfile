@@ -59,7 +59,7 @@ RUN set -eux; \
         > /etc/apt/apt.conf.d/80gitcortex-retries; \
     apt-get update && apt-get install -y --no-install-recommends \
         git pkg-config libsqlite3-dev libgit2-dev zlib1g-dev \
-        cmake ninja-build clang libclang-dev perl nasm libssl-dev \
+        cmake make ninja-build clang libclang-dev perl nasm libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Layer 2: Rust toolchain — changes only when RUST_TOOLCHAIN arg changes
