@@ -652,6 +652,7 @@ mod tests {
     use serial_test::serial;
 
     use super::*;
+    use crate::models::workflow::CreateTerminalRequest;
 
     fn with_var<F>(key: &str, value: Option<&str>, f: F)
     where
@@ -672,7 +673,8 @@ mod tests {
     fn test_create_terminal_request_auto_confirm_defaults_to_true() {
         let request: CreateTerminalRequest = serde_json::from_value(json!({
             "cliTypeId": "claude-code",
-            "modelConfigId": "model-1"
+            "modelConfigId": "model-1",
+            "orderIndex": 0
         }))
         .expect("deserialization should succeed");
 
@@ -687,6 +689,7 @@ mod tests {
         let request: CreateTerminalRequest = serde_json::from_value(json!({
             "cliTypeId": "claude-code",
             "modelConfigId": "model-1",
+            "orderIndex": 0,
             "autoConfirm": false
         }))
         .expect("deserialization should succeed");
@@ -702,6 +705,7 @@ mod tests {
         let request: CreateTerminalRequest = serde_json::from_value(json!({
             "cliTypeId": "claude-code",
             "modelConfigId": "model-1",
+            "orderIndex": 0,
             "autoConfirm": true
         }))
         .expect("deserialization should succeed");
