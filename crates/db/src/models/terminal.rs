@@ -186,27 +186,6 @@ pub struct TerminalDetail {
     pub model_config: super::cli_type::ModelConfig,
 }
 
-/// Default function for auto_confirm field - defaults to true for safety
-fn default_auto_confirm_true() -> bool {
-    true
-}
-
-/// Create Terminal Request
-#[derive(Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export)]
-pub struct CreateTerminalRequest {
-    pub cli_type_id: String,
-    pub model_config_id: String,
-    pub custom_base_url: Option<String>,
-    pub custom_api_key: Option<String>,
-    pub role: Option<String>,
-    pub role_description: Option<String>,
-    /// Auto-confirm mode: skip CLI permission prompts (defaults to true)
-    #[serde(default = "default_auto_confirm_true")]
-    pub auto_confirm: bool,
-}
-
 impl Terminal {
     const ENCRYPTION_KEY_ENV: &str = "GITCORTEX_ENCRYPTION_KEY";
 
