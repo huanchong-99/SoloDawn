@@ -1,12 +1,15 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::Type;
 use ts_rs::TS;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, TS)]
+#[cfg(feature = "sqlx")]
+use sqlx::Type;
+
+#[cfg_attr(feature = "sqlx", derive(Type))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[sqlx(type_name = "member_role", rename_all = "lowercase")]
+#[cfg_attr(feature = "sqlx", sqlx(type_name = "member_role", rename_all = "lowercase"))]
 #[ts(export)]
 #[ts(use_ts_enum)]
 #[ts(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -15,9 +18,10 @@ pub enum MemberRole {
     Member,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, TS)]
+#[cfg_attr(feature = "sqlx", derive(Type))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[sqlx(type_name = "invitation_status", rename_all = "lowercase")]
+#[cfg_attr(feature = "sqlx", sqlx(type_name = "invitation_status", rename_all = "lowercase"))]
 #[ts(use_ts_enum)]
 #[ts(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum InvitationStatus {
