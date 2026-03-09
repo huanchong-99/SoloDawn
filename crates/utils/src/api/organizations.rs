@@ -3,13 +3,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-#[cfg(feature = "sqlx")]
-use sqlx::Type;
-
-#[cfg_attr(feature = "sqlx", derive(Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[cfg_attr(feature = "sqlx", sqlx(type_name = "member_role", rename_all = "lowercase"))]
 #[ts(export)]
 #[ts(use_ts_enum)]
 #[ts(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -18,10 +13,8 @@ pub enum MemberRole {
     Member,
 }
 
-#[cfg_attr(feature = "sqlx", derive(Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[cfg_attr(feature = "sqlx", sqlx(type_name = "invitation_status", rename_all = "lowercase"))]
 #[ts(use_ts_enum)]
 #[ts(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum InvitationStatus {
