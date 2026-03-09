@@ -98,9 +98,7 @@ COPY assets/ assets/
 COPY shared/ shared/
 COPY --from=frontend-builder /build/frontend/dist frontend/dist
 
-RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    cargo build --release --locked -p server \
+RUN cargo build --release --locked -p server \
     && cp /build/target/release/server /tmp/gitcortex-server
 
 # ============================================================
