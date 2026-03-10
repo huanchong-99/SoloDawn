@@ -1974,33 +1974,49 @@ impl OrchestratorAgent {
     }
 
     /// Handle terminal failed status from git event
+    ///
+    /// Delegates to [`ErrorHandler::handle_terminal_failure`] which updates
+    /// workflow status, activates an error terminal (when configured), and
+    /// broadcasts the failure event.  Falls back to basic status update if
+    /// the error handler itself errors.
     async fn handle_git_terminal_failed(
         &self,
         terminal_id: &str,
         task_id: &str,
         error_message: &str,
     ) -> anyhow::Result<()> {
-        tracing::error!(
-            "Terminal {} failed task {}: {}",
+        tracing::warn!(
             terminal_id,
             task_id,
-            error_message
+            "Terminal reported failure via git commit"
         );
 
-        // 1. Update terminal status
+        // 1. Update terminal status to failed
         db::models::Terminal::update_status(&self.db.pool, terminal_id, TERMINAL_STATUS_FAILED)
             .await?;
 
-        // 2. Publish failure event
-        let workflow_id = self.state.read().await.workflow_id.clone();
-        let event = BusMessage::Error {
-            workflow_id: workflow_id.clone(),
-            error: error_message.to_string(),
-        };
-
-        self.message_bus
-            .publish_workflow_event(&workflow_id, event)
-            .await?;
+        // 2. Delegate to error_handler for sophisticated failure handling
+        //    (error terminal activation, workflow status update, etc.)
+        if let Err(e) = self
+            .handle_terminal_failure(task_id, terminal_id, error_message)
+            .await
+        {
+            tracing::error!(
+                terminal_id,
+                task_id,
+                error = %e,
+                "Error handler failed, falling back to basic failure event"
+            );
+            // Fallback: publish error event directly
+            let workflow_id = self.state.read().await.workflow_id.clone();
+            let event = BusMessage::Error {
+                workflow_id: workflow_id.clone(),
+                error: error_message.to_string(),
+            };
+            self.message_bus
+                .publish_workflow_event(&workflow_id, event)
+                .await?;
+        }
 
         // 3. Awaken orchestrator to process the event
         self.awaken().await;
@@ -3273,7 +3289,66 @@ impl OrchestratorAgent {
             "Workflow auto-synced to completed after all tasks completed"
         );
 
+        // Auto-merge completed task branches
+        if self.config.auto_merge_on_completion {
+            match self.execute_auto_merge().await {
+                Ok(()) => {
+                    tracing::info!(
+                        workflow_id = %workflow_id,
+                        "Auto-merge completed successfully"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        workflow_id = %workflow_id,
+                        error = %e,
+                        "Auto-merge failed, workflow remains completed but branches not merged"
+                    );
+                    let _ = self
+                        .message_bus
+                        .publish_workflow_event(
+                            workflow_id,
+                            BusMessage::Error {
+                                workflow_id: workflow_id.to_string(),
+                                error: format!("Auto-merge failed: {e}"),
+                            },
+                        )
+                        .await;
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    /// Auto-merge all completed task branches after workflow completion.
+    /// Collects completed task branches and delegates to `trigger_merge`.
+    async fn execute_auto_merge(&self) -> anyhow::Result<()> {
+        let workflow = self.load_workflow().await?;
+        let tasks =
+            db::models::WorkflowTask::find_by_workflow(&self.db.pool, &workflow.id).await?;
+
+        let task_branches: HashMap<String, String> = tasks
+            .into_iter()
+            .filter(|task| task.status == "completed" && !task.branch.is_empty())
+            .map(|task| (task.id.clone(), task.branch.clone()))
+            .collect();
+
+        if task_branches.is_empty() {
+            tracing::info!(
+                workflow_id = %workflow.id,
+                "No completed task branches to merge"
+            );
+            return Ok(());
+        }
+
+        let base_repo_path = self.resolve_project_working_dir().await?;
+        self.trigger_merge(
+            task_branches,
+            &base_repo_path.to_string_lossy(),
+            &workflow.target_branch,
+        )
+        .await
     }
 
     /// Triggers merge of all completed task branches into the target branch.

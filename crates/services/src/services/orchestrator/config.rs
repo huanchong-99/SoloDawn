@@ -45,6 +45,10 @@ pub struct OrchestratorConfig {
     /// 系统提示词
     #[serde(default = "default_system_prompt")]
     pub system_prompt: String,
+
+    /// Auto-merge completed task branches when workflow completes
+    #[serde(default = "default_auto_merge_on_completion")]
+    pub auto_merge_on_completion: bool,
 }
 
 fn default_max_retries() -> u32 {
@@ -65,6 +69,10 @@ fn default_rate_limit_requests_per_second() -> u32 {
 
 fn default_max_history() -> usize {
     DEFAULT_MAX_CONVERSATION_HISTORY
+}
+
+fn default_auto_merge_on_completion() -> bool {
+    true
 }
 
 /// Prompt profile identifier.
@@ -186,6 +194,7 @@ impl Default for OrchestratorConfig {
             rate_limit_requests_per_second: default_rate_limit_requests_per_second(),
             max_conversation_history: default_max_history(),
             system_prompt: default_system_prompt(),
+            auto_merge_on_completion: default_auto_merge_on_completion(),
         }
     }
 }
