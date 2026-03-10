@@ -11,6 +11,10 @@ use axum::{
 use db::models::planning_draft::{PlanningDraft, PlanningDraftMessage, PLANNING_DRAFT_STATUSES};
 use deployment::Deployment;
 use serde::{Deserialize, Serialize};
+use services::services::orchestrator::{
+    LLMMessage, OrchestratorConfig, create_llm_client,
+    config::{PromptProfile, system_prompt_for_profile},
+};
 use utils::response::ApiResponse;
 use uuid::Uuid;
 
@@ -238,7 +242,7 @@ async fn send_message(
     State(deployment): State<DeploymentImpl>,
     Path(draft_id): Path<String>,
     Json(req): Json<SendMessageRequest>,
-) -> Result<ResponseJson<ApiResponse<MessageResponse>>, ApiError> {
+) -> Result<ResponseJson<ApiResponse<Vec<MessageResponse>>>, ApiError> {
     let draft = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
         .await
         .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
@@ -257,12 +261,76 @@ async fn send_message(
         ));
     }
 
-    let message = PlanningDraftMessage::new(&draft_id, "user", req.message.trim());
-    PlanningDraftMessage::insert(&deployment.db().pool, &message)
+    // 1. Store user message
+    let user_msg = PlanningDraftMessage::new(&draft_id, "user", req.message.trim());
+    PlanningDraftMessage::insert(&deployment.db().pool, &user_msg)
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to save message: {e}")))?;
 
-    Ok(Json(ApiResponse::success(MessageResponse::from(message))))
+    let mut result = vec![MessageResponse::from(user_msg)];
+
+    // 2. Try to call LLM and store assistant reply
+    if let Some(llm_client) = build_llm_client_from_draft(&draft) {
+        let all_messages = PlanningDraftMessage::list_by_draft(&deployment.db().pool, &draft_id)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
+
+        let system_prompt = system_prompt_for_profile(PromptProfile::WorkspacePlanning);
+        let mut llm_messages = vec![LLMMessage {
+            role: "system".to_string(),
+            content: system_prompt,
+        }];
+        for m in &all_messages {
+            llm_messages.push(LLMMessage {
+                role: m.role.clone(),
+                content: m.content.clone(),
+            });
+        }
+
+        match llm_client.chat(llm_messages).await {
+            Ok(response) => {
+                let assistant_msg =
+                    PlanningDraftMessage::new(&draft_id, "assistant", &response.content);
+                if let Err(e) =
+                    PlanningDraftMessage::insert(&deployment.db().pool, &assistant_msg).await
+                {
+                    tracing::warn!(draft_id = %draft_id, "Failed to save assistant reply: {e}");
+                } else {
+                    result.push(MessageResponse::from(assistant_msg));
+                }
+            }
+            Err(e) => {
+                tracing::warn!(draft_id = %draft_id, "LLM call failed for planning draft: {e}");
+            }
+        }
+    } else {
+        tracing::debug!(
+            draft_id = %draft_id,
+            "No LLM config on planning draft, skipping assistant reply"
+        );
+    }
+
+    Ok(Json(ApiResponse::success(result)))
+}
+
+/// Build an LLM client from the draft's planner configuration.
+/// Returns `None` when required fields (api_type, base_url, api_key, model) are missing.
+fn build_llm_client_from_draft(
+    draft: &PlanningDraft,
+) -> Option<Box<dyn services::services::orchestrator::LLMClient>> {
+    let config = OrchestratorConfig::from_workflow(
+        draft.planner_api_type.as_deref(),
+        draft.planner_base_url.as_deref(),
+        draft.planner_api_key.as_deref(),
+        draft.planner_model_id.as_deref(),
+    )?;
+    match create_llm_client(&config) {
+        Ok(client) => Some(client),
+        Err(e) => {
+            tracing::warn!("Failed to create LLM client for planning draft: {e}");
+            None
+        }
+    }
 }
 
 async fn list_messages(

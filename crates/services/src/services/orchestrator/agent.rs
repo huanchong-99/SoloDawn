@@ -1926,7 +1926,10 @@ impl OrchestratorAgent {
             .publish_workflow_event(&workflow_id, event)
             .await?;
 
-        // 3. Awaken orchestrator to process the event
+        // 3. Check if all terminals in the task are done and auto-sync workflow
+        self.auto_sync_workflow_completion(&workflow_id).await?;
+
+        // 4. Awaken orchestrator to process the event
         self.awaken().await;
 
         Ok(())
@@ -1946,6 +1949,20 @@ impl OrchestratorAgent {
             reviewed_terminal_id,
             issues.len()
         );
+
+        // Log individual issues for debugging
+        for (i, issue) in issues.iter().enumerate() {
+            tracing::info!(
+                reviewer = %reviewer_terminal_id,
+                reviewed = %reviewed_terminal_id,
+                issue_index = i,
+                severity = %issue.severity,
+                file = %issue.file,
+                line = ?issue.line,
+                message = %issue.message,
+                "Review issue"
+            );
+        }
 
         // 1. Update reviewed terminal status
         db::models::Terminal::update_status(
@@ -2172,6 +2189,9 @@ impl OrchestratorAgent {
                 | OrchestratorInstruction::CompleteTask { .. }
                 | OrchestratorInstruction::SetWorkflowPlanningComplete { .. }
                 | OrchestratorInstruction::SendToTerminal { .. }
+                | OrchestratorInstruction::ReviewCode { .. }
+                | OrchestratorInstruction::FixIssues { .. }
+                | OrchestratorInstruction::MergeBranch { .. }
                 | OrchestratorInstruction::CompleteWorkflow { .. }
                 | OrchestratorInstruction::FailWorkflow { .. }
         )
@@ -2556,12 +2576,101 @@ impl OrchestratorAgent {
                     tracing::info!("No pending terminals for task {task_id}");
                 }
             }
-            OrchestratorInstruction::ReviewCode { .. }
-            | OrchestratorInstruction::FixIssues { .. }
-            | OrchestratorInstruction::MergeBranch { .. }
-            | OrchestratorInstruction::PauseWorkflow { .. } => {
+            OrchestratorInstruction::ReviewCode {
+                terminal_id,
+                commit_hash,
+            } => {
+                let terminal = db::models::Terminal::find_by_id(&self.db.pool, &terminal_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to get terminal: {e}"))?
+                    .ok_or_else(|| anyhow::anyhow!("Terminal {terminal_id} not found"))?;
+
+                let task_id = terminal.workflow_task_id.clone();
+                tracing::info!(
+                    terminal_id = %terminal_id,
+                    task_id = %task_id,
+                    commit_hash = %commit_hash,
+                    "ReviewCode requested for terminal commit"
+                );
+
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
+
+                self.message_bus
+                    .publish_workflow_event(
+                        &workflow_id,
+                        BusMessage::TerminalStatusUpdate {
+                            workflow_id: workflow_id.clone(),
+                            terminal_id: terminal_id.clone(),
+                            status: "review_requested".to_string(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to publish review event: {e}"))?;
+            }
+            OrchestratorInstruction::FixIssues {
+                terminal_id,
+                issues,
+            } => {
+                let terminal = db::models::Terminal::find_by_id(&self.db.pool, &terminal_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to get terminal: {e}"))?
+                    .ok_or_else(|| anyhow::anyhow!("Terminal {terminal_id} not found"))?;
+
+                let task_id = terminal.workflow_task_id.clone();
+                tracing::info!(
+                    terminal_id = %terminal_id,
+                    task_id = %task_id,
+                    issue_count = issues.len(),
+                    "FixIssues requested for terminal"
+                );
+
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
+
+                self.message_bus
+                    .publish_workflow_event(
+                        &workflow_id,
+                        BusMessage::TerminalStatusUpdate {
+                            workflow_id: workflow_id.clone(),
+                            terminal_id: terminal_id.clone(),
+                            status: "fix_requested".to_string(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to publish fix event: {e}"))?;
+            }
+            OrchestratorInstruction::MergeBranch {
+                source_branch,
+                target_branch,
+            } => {
+                tracing::info!(
+                    source_branch = %source_branch,
+                    target_branch = %target_branch,
+                    "MergeBranch requested"
+                );
+
+                let workflow = self.load_workflow().await?;
+
+                // Build a single-entry task_branches map using the workflow ID as key
+                let task_branches: HashMap<String, String> =
+                    [(workflow.id.clone(), source_branch.clone())].into_iter().collect();
+
+                let base_repo_path = self.resolve_project_working_dir().await?;
+                self.trigger_merge(
+                    task_branches,
+                    &base_repo_path.to_string_lossy(),
+                    &target_branch,
+                )
+                .await?;
+            }
+            OrchestratorInstruction::PauseWorkflow { .. } => {
                 tracing::warn!(
-                    "Instruction variant is parsed but not yet implemented in execute_single_instruction"
+                    "Instruction variant PauseWorkflow is parsed but not yet implemented"
                 );
             }
         }

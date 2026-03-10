@@ -16,6 +16,7 @@ pub mod workspace_repo;
 
 // GitCortex Workflow models
 pub mod cli_type;
+pub mod feishu_config;
 pub mod git_event;
 pub mod orchestrator_message;
 pub mod planning_draft;
