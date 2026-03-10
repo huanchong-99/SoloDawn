@@ -15,7 +15,7 @@
 - 当前执行看板（已完成/未完成）：docs/undeveloped/current/TODO-pending.md
 - 已交付沉淀（历史完成项）：docs/developed/misc/TODO-completed.md
 - 历史全量快照（只读）：docs/developed/misc/TODO-legacy-full-2026-02-23.md
-- Phase 28 计划文档：docs/developed/plans/2026-03-11-phase-28-orchestrator-evolution.md
+- Phase 28 计划文档：docs/undeveloped/current/2026-03-11-phase-28-orchestrator-evolution.md
 
 ## 维护规则
 

@@ -53,4 +53,4 @@
 ### 当前结论
 
 - Phase 28 共 18 个任务（S:4, M:7, L:5, XL:1）+ 5 个 Backlog 保留项
-- 计划文档：docs/developed/plans/2026-03-11-phase-28-orchestrator-evolution.md
+- 计划文档：docs/undeveloped/current/2026-03-11-phase-28-orchestrator-evolution.md
