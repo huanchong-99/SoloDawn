@@ -413,6 +413,30 @@ impl TerminalPromptStateMachine {
     }
 }
 
+/// Context from a previous terminal in the same task, for handoff to the next terminal
+#[derive(Debug, Clone, Default)]
+pub struct PreviousTerminalContext {
+    /// Role of the previous terminal
+    pub role: String,
+    /// Completion status (completed/failed)
+    pub status: String,
+    /// Last commit message from the previous terminal, truncated
+    pub commit_message: String,
+    /// Handoff notes extracted from commit body, truncated
+    pub handoff_notes: String,
+}
+
+/// Context collected from a completed terminal for LLM prompt enrichment
+#[derive(Debug, Clone, Default)]
+pub struct TerminalCompletionContext {
+    /// Last N lines of terminal log, truncated to max chars
+    pub log_summary: String,
+    /// git diff --stat output, truncated to max chars
+    pub diff_stat: String,
+    /// Full commit message body, truncated to max chars
+    pub commit_body: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

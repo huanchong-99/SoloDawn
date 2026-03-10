@@ -36,6 +36,17 @@ pub const WORKFLOW_STATUS_COMPLETED: &str = "completed";
 pub const WORKFLOW_STATUS_FAILED: &str = "failed";
 pub const WORKFLOW_STATUS_MERGING: &str = "merging";
 
+// Phase 28A: Terminal completion context limits
+pub const COMPLETION_CONTEXT_LOG_LINES: usize = 50;
+pub const COMPLETION_CONTEXT_LOG_MAX_CHARS: usize = 2000;
+pub const COMPLETION_CONTEXT_DIFF_MAX_CHARS: usize = 1000;
+pub const COMPLETION_CONTEXT_BODY_MAX_CHARS: usize = 500;
+
+// Phase 28A: Handoff context limits
+pub const HANDOFF_CONTEXT_MAX_CHARS: usize = 1500;
+pub const HANDOFF_COMMIT_MAX_CHARS: usize = 500;
+pub const HANDOFF_NOTES_MAX_CHARS: usize = 800;
+
 #[cfg(test)]
 mod tests {
     use super::*;

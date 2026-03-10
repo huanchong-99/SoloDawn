@@ -2,6 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
     sync::Arc,
     time::Instant,
 };
@@ -20,10 +21,12 @@ use tokio::{
 use super::{
     config::OrchestratorConfig,
     constants::{
-        GIT_COMMIT_METADATA_SEPARATOR, TERMINAL_STATUS_COMPLETED, TERMINAL_STATUS_FAILED,
-        TERMINAL_STATUS_REVIEW_PASSED, TERMINAL_STATUS_REVIEW_REJECTED, WORKFLOW_STATUS_COMPLETED,
-        WORKFLOW_STATUS_FAILED, WORKFLOW_STATUS_MERGING, WORKFLOW_STATUS_RUNNING,
-        WORKFLOW_TOPIC_PREFIX,
+        COMPLETION_CONTEXT_BODY_MAX_CHARS, COMPLETION_CONTEXT_DIFF_MAX_CHARS,
+        COMPLETION_CONTEXT_LOG_LINES, COMPLETION_CONTEXT_LOG_MAX_CHARS,
+        GIT_COMMIT_METADATA_SEPARATOR, HANDOFF_COMMIT_MAX_CHARS, HANDOFF_NOTES_MAX_CHARS,
+        TERMINAL_STATUS_COMPLETED, TERMINAL_STATUS_FAILED, TERMINAL_STATUS_REVIEW_PASSED,
+        TERMINAL_STATUS_REVIEW_REJECTED, WORKFLOW_STATUS_COMPLETED, WORKFLOW_STATUS_FAILED,
+        WORKFLOW_STATUS_MERGING, WORKFLOW_STATUS_RUNNING, WORKFLOW_TOPIC_PREFIX,
     },
     llm::{LLMClient, build_terminal_completion_prompt, create_llm_client},
     message_bus::{BusMessage, SharedMessageBus},
@@ -31,8 +34,9 @@ use super::{
     runtime_actions::{RuntimeActionService, RuntimeTaskSpec, RuntimeTerminalSpec},
     state::{OrchestratorRunState, OrchestratorState, SharedOrchestratorState},
     types::{
-        CodeIssue, LLMMessage, OrchestratorInstruction, TerminalCompletionEvent,
-        TerminalCompletionStatus, TerminalPromptEvent,
+        CodeIssue, LLMMessage, OrchestratorInstruction, PreviousTerminalContext,
+        TerminalCompletionContext, TerminalCompletionEvent, TerminalCompletionStatus,
+        TerminalPromptEvent,
     },
 };
 use crate::services::{
@@ -645,7 +649,7 @@ impl OrchestratorAgent {
 
         let instruction = format!(
             "{} | {}",
-            Self::build_task_instruction(workflow_id, task, terminal, total_terminals),
+            Self::build_task_instruction(workflow_id, task, terminal, total_terminals, None),
             Self::STALL_RECOVERY_SUFFIX
         );
 
@@ -1330,8 +1334,11 @@ impl OrchestratorAgent {
         };
 
         // Build and dispatch instruction
+        let prev_context = fetch_previous_terminal_context(
+            &self.db, &task.id, active_terminal.order_index,
+        ).await.unwrap_or(None);
         let instruction =
-            Self::build_task_instruction(&workflow_id, &task, &active_terminal, terminals.len());
+            Self::build_task_instruction(&workflow_id, &task, &active_terminal, terminals.len(), prev_context.as_ref());
         self.dispatch_terminal(task_id, &active_terminal, &instruction)
             .await
     }
@@ -2014,6 +2021,32 @@ impl OrchestratorAgent {
         // any messages we published to the message bus
     }
 
+    /// Resolve the project working directory from the workflow's project.
+    /// Prefers `project.default_agent_working_dir`, falls back to the first project repo path.
+    async fn resolve_project_working_dir(&self) -> anyhow::Result<PathBuf> {
+        let workflow = self.load_workflow().await?;
+        let project =
+            db::models::project::Project::find_by_id(&self.db.pool, workflow.project_id)
+                .await?
+                .ok_or_else(|| anyhow!("Project {} not found", workflow.project_id))?;
+
+        let repo_path = match project.default_agent_working_dir {
+            Some(ref path) if !path.trim().is_empty() => Some(path.clone()),
+            _ => db::models::project_repo::ProjectRepo::find_repos_for_project(
+                &self.db.pool,
+                project.id,
+            )
+            .await?
+            .into_iter()
+            .map(|repo| repo.path.to_string_lossy().into_owned())
+            .find(|path| !path.trim().is_empty()),
+        };
+
+        repo_path
+            .map(PathBuf::from)
+            .ok_or_else(|| anyhow!("No working directory found for project {}", project.id))
+    }
+
     /// Builds the prompt for a terminal completion event.
     async fn build_completion_prompt(
         &self,
@@ -2027,6 +2060,32 @@ impl OrchestratorAgent {
             commit_hash,
             commit_message,
         );
+
+        // Inject terminal completion context (silent degradation on failure)
+        if let Ok(working_dir) = self.resolve_project_working_dir().await {
+            if let Ok(ctx) = fetch_terminal_completion_context(
+                &self.db,
+                &event.terminal_id,
+                commit_hash,
+                &working_dir,
+            )
+            .await
+            {
+                if !ctx.log_summary.is_empty() {
+                    prompt.push_str("\n\n--- Terminal Output Summary ---\n");
+                    prompt.push_str(&ctx.log_summary);
+                }
+                if !ctx.diff_stat.is_empty() {
+                    prompt.push_str("\n\n--- Changes Summary ---\n");
+                    prompt.push_str(&ctx.diff_stat);
+                }
+                if !ctx.commit_body.is_empty() {
+                    prompt.push_str("\n\n--- Commit Details ---\n");
+                    prompt.push_str(&ctx.commit_body);
+                }
+            }
+        }
+
         if self.is_agent_planned_workflow().await? {
             let workflow = self.load_workflow().await?;
             let context = self.build_agent_planned_context(&workflow).await?;
@@ -2864,6 +2923,7 @@ impl OrchestratorAgent {
         task: &db::models::WorkflowTask,
         terminal: &db::models::Terminal,
         total_terminals: usize,
+        prev_context: Option<&PreviousTerminalContext>,
     ) -> String {
         let mut parts = vec![format!("Start task: {} ({})", task.name, task.id)];
 
@@ -2933,6 +2993,13 @@ impl OrchestratorAgent {
             "If the current branch is already the integration branch, commit directly and do not create an extra branch or redundant self-merge."
                 .to_string(),
         );
+
+        if let Some(ctx) = prev_context {
+            parts.push(format!(
+                "--- Previous Terminal Context ---\nRole: {} | Status: {}\nLast Commit: {}\nHandoff Notes: {}",
+                ctx.role, ctx.status, ctx.commit_message, ctx.handoff_notes
+            ));
+        }
 
         parts.push("Please start implementing immediately.".to_string());
 
@@ -3043,7 +3110,7 @@ impl OrchestratorAgent {
 
             // Build and dispatch instruction
             let instruction =
-                Self::build_task_instruction(&workflow_id, &task, &terminal, terminals.len());
+                Self::build_task_instruction(&workflow_id, &task, &terminal, terminals.len(), None);
             if let Err(e) = self
                 .dispatch_terminal(&task.id, &terminal, &instruction)
                 .await
@@ -3600,6 +3667,180 @@ impl OrchestratorAgent {
     }
 }
 
+/// Truncate a string to `max_chars`, appending a marker if truncated.
+fn truncate_with_marker(s: &str, max_chars: usize) -> String {
+    if s.len() <= max_chars {
+        s.to_string()
+    } else {
+        let truncated = &s[..s.floor_char_boundary(max_chars.saturating_sub(16))];
+        format!("{}\n[...truncated]", truncated)
+    }
+}
+
+/// Collect terminal completion context (log summary, diff stat, commit body)
+/// for injection into LLM completion prompts.
+async fn fetch_terminal_completion_context(
+    db: &DBService,
+    terminal_id: &str,
+    commit_hash: &str,
+    working_dir: &Path,
+) -> anyhow::Result<TerminalCompletionContext> {
+    // 1. Query terminal logs (returned in DESC order, reverse for chronological)
+    let log_summary = match db::models::terminal::TerminalLog::find_by_terminal(
+        &db.pool,
+        terminal_id,
+        Some(COMPLETION_CONTEXT_LOG_LINES as i32),
+    )
+    .await
+    {
+        Ok(mut logs) => {
+            logs.reverse();
+            let joined = logs
+                .iter()
+                .map(|l| l.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            truncate_with_marker(&joined, COMPLETION_CONTEXT_LOG_MAX_CHARS)
+        }
+        Err(e) => {
+            tracing::warn!(terminal_id = %terminal_id, error = %e, "Failed to fetch terminal logs for completion context");
+            String::new()
+        }
+    };
+
+    // 2. Get diff stat via git
+    let diff_stat = match tokio::process::Command::new("git")
+        .args(["diff", "--stat", "HEAD~1..HEAD"])
+        .current_dir(working_dir)
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            truncate_with_marker(&stdout, COMPLETION_CONTEXT_DIFF_MAX_CHARS)
+        }
+        Ok(_) => String::new(),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to run git diff --stat for completion context");
+            String::new()
+        }
+    };
+
+    // 3. Get commit body
+    let commit_body = if commit_hash == "N/A" {
+        String::new()
+    } else {
+        match tokio::process::Command::new("git")
+            .args(["show", "-s", "--format=%B", commit_hash])
+            .current_dir(working_dir)
+            .output()
+            .await
+        {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                truncate_with_marker(&stdout, COMPLETION_CONTEXT_BODY_MAX_CHARS)
+            }
+            Ok(_) => String::new(),
+            Err(e) => {
+                tracing::warn!(commit_hash = %commit_hash, error = %e, "Failed to get commit body for completion context");
+                String::new()
+            }
+        }
+    };
+
+    Ok(TerminalCompletionContext {
+        log_summary,
+        diff_stat,
+        commit_body,
+    })
+}
+
+/// Fetch context from the previous completed terminal in the same task.
+/// Returns None if this is the first terminal or no previous terminal has completed.
+async fn fetch_previous_terminal_context(
+    db: &DBService,
+    task_id: &str,
+    current_terminal_order: i32,
+) -> anyhow::Result<Option<PreviousTerminalContext>> {
+    let prev_order = current_terminal_order - 1;
+    if prev_order < 0 {
+        return Ok(None);
+    }
+
+    // 1. Query all terminals for the task
+    let terminals = db::models::Terminal::find_by_task(&db.pool, task_id).await?;
+
+    // 2. Find the terminal with order_index == prev_order
+    let prev_terminal = match terminals.iter().find(|t| t.order_index == prev_order) {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+
+    // 3. Only use completed or failed terminals
+    if prev_terminal.status != TERMINAL_STATUS_COMPLETED
+        && prev_terminal.status != TERMINAL_STATUS_FAILED
+    {
+        return Ok(None);
+    }
+
+    // 4. Get commit message: prefer last_commit_message on the terminal, fall back to git_event
+    let commit_message = if let Some(ref msg) = prev_terminal.last_commit_message {
+        msg.clone()
+    } else {
+        // Fall back to git_events for this workflow
+        let events =
+            db::models::git_event::GitEvent::find_by_workflow(&db.pool, &prev_terminal.workflow_task_id)
+                .await
+                .unwrap_or_default();
+        events
+            .iter()
+            .find(|e| e.terminal_id.as_deref() == Some(&prev_terminal.id))
+            .map(|e| e.commit_message.clone())
+            .unwrap_or_default()
+    };
+
+    // 5. Extract handoff notes from the commit message
+    let handoff_notes = extract_handoff_notes(&commit_message);
+
+    // 6. Truncate fields
+    let commit_message = truncate_with_marker(&commit_message, HANDOFF_COMMIT_MAX_CHARS);
+    let handoff_notes = truncate_with_marker(&handoff_notes, HANDOFF_NOTES_MAX_CHARS);
+
+    Ok(Some(PreviousTerminalContext {
+        role: prev_terminal.role.clone().unwrap_or_default(),
+        status: prev_terminal.status.clone(),
+        commit_message,
+        handoff_notes,
+    }))
+}
+
+/// Extract handoff notes from a commit message.
+///
+/// Looks for "HANDOFF:" or "Handoff Notes:" markers. If not found, returns
+/// the commit message with the METADATA block stripped.
+fn extract_handoff_notes(commit_message: &str) -> String {
+    // Look for handoff markers (case-insensitive)
+    let lower = commit_message.to_lowercase();
+    for marker in &["handoff:", "handoff notes:"] {
+        if let Some(pos) = lower.find(marker) {
+            let start = pos + marker.len();
+            let notes = commit_message[start..].trim();
+            // Stop at METADATA separator if present
+            if let Some(meta_pos) = notes.find(GIT_COMMIT_METADATA_SEPARATOR) {
+                return notes[..meta_pos].trim().to_string();
+            }
+            return notes.to_string();
+        }
+    }
+
+    // No handoff marker found: strip METADATA block and return the rest
+    if let Some(meta_pos) = commit_message.find(GIT_COMMIT_METADATA_SEPARATOR) {
+        commit_message[..meta_pos].trim().to_string()
+    } else {
+        commit_message.trim().to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{path::PathBuf, sync::Arc};
@@ -3669,7 +3910,7 @@ mod tests {
         let terminal = make_terminal(0);
 
         let instruction =
-            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 3);
+            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 3, None);
 
         assert!(instruction.contains("Task objective:"));
         assert!(!instruction.contains("Task description:"));
@@ -3691,7 +3932,7 @@ mod tests {
         let terminal = make_terminal(0);
 
         let instruction =
-            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 1);
+            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 1, None);
 
         assert!(instruction.contains("Task description: Complete full implementation end-to-end"));
         assert!(!instruction.contains("Task objective:"));
