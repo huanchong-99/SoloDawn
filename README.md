@@ -34,10 +34,29 @@ AI orchestration layer for coordinating multiple coding CLIs (Claude Code, Codex
 - Installer can reuse existing `.env` and hand off to update flow automatically.
 - Installer supports install/update mode, language selection, non-interactive flags, optional volume reset, and readiness checks.
 
+### Phase 28: Orchestrator Evolution (March 2026)
+
+- Terminal completion context injection: LLM decisions now include terminal log summaries, diff stats, and commit bodies.
+- Cross-terminal handoff notes: previous terminal context (role, status, commit, handoff notes) is passed to the next terminal.
+- ReviewCode / FixIssues / MergeBranch instructions now spawn dedicated reviewer and fixer terminals instead of just publishing events.
+- Review reject auto-triggers fix terminal creation; review pass auto-checks workflow completion.
+- Auto-merge on workflow completion with conflict detection and status tracking.
+- Error handler wired into the agent event loop for terminal failure delegation.
+- LLM fault tolerance: `call_llm_safe` wrapper with consecutive failure tracking and graceful degradation.
+- State persistence with 5-second debounce at key checkpoints; crash recovery rebuilds agent state from DB.
+- Planning Draft now supports multi-turn LLM conversation with the WorkspacePlanning prompt profile.
+- Feishu (Lark) long-lived WebSocket connector with tenant token management, message routing, `/bind` and `/unbind` commands.
+- ChatConnector trait abstracting Telegram and Feishu outbound messaging behind a unified interface.
+- Feishu server integration: conditional startup via `GITCORTEX_FEISHU_ENABLED`, management API, health check extension.
+- ResilientLLMClient: multi-provider round-robin with 5-failure circuit breaker and 60-second probe recovery.
+- Terminal-level provider failover: automatic replacement terminal spawning with alternative CLI/model config.
+- Provider health monitoring API with live circuit-breaker data, manual reset, and WebSocket events (`provider.switched`, `provider.exhausted`, `provider.recovered`).
+
 ## Current Status
 
 - Source of truth: `docs/undeveloped/current/TODO-pending.md`
-- Completed: 44
+- Phase 28 (Orchestrator Evolution): 18/18 tasks completed
+- Total completed: 62
 - Pending: 5 (all are low/medium-priority backlog)
 
 See also:
@@ -119,12 +138,18 @@ curl http://localhost:23456/api/health -H "Authorization: Bearer <token>"
 - `MessageBus`: event routing across modules and terminals.
 - `TerminalLauncher`: process lifecycle management.
 - `GitWatcher`: Git-event-driven orchestration progression.
+- `ResilientLLMClient`: multi-provider LLM client with circuit breaking and failover.
+- `FeishuService`: Feishu (Lark) WebSocket connector with message routing and slash commands.
+- `ChatConnector`: unified trait for outbound messaging across chat platforms.
 
 Main code locations:
 
 - `crates/services/src/services/orchestrator/`
 - `crates/server/src/routes/workflows.rs`
 - `frontend/src/pages/Workflows.tsx`
+- `crates/feishu-connector/`
+- `crates/services/src/services/chat_connector.rs`
+- `crates/server/src/routes/provider_health.rs`
 
 ## Docs
 
@@ -132,6 +157,7 @@ Main code locations:
 - Docker deployment guide: `docs/developed/ops/docker-deployment.md`
 - Operations runbook: `docs/developed/ops/runbook.md`
 - Troubleshooting: `docs/developed/ops/troubleshooting.md`
+- Phase 28 plan: `docs/undeveloped/current/2026-03-11-phase-28-orchestrator-evolution.md`
 
 ## Contributing
 

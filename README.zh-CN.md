@@ -34,10 +34,29 @@
 - 支持复用已有 `.env` 并自动切换到更新流程。
 - 支持 install/update 模式、语言选择、非交互参数、可选数据卷清理和就绪检查。
 
+### Phase 28：编排层进化（2026 年 3 月）
+
+- 终端完成上下文注入：LLM 决策现在包含终端日志摘要、diff 统计和 commit 内容。
+- 跨终端交接备注：前序终端上下文（角色、状态、提交、交接备注）传递给下一终端。
+- ReviewCode / FixIssues / MergeBranch 指令现在会创建专用的审查和修复终端，而非仅发布事件。
+- Review reject 自动触发修复终端创建；review pass 自动检查工作流完成状态。
+- 工作流完成后自动合并，支持冲突检测和状态追踪。
+- Error Handler 接入 Agent 事件循环，终端失败自动委托处理。
+- LLM 容错：`call_llm_safe` 包装器，连续失败计数 + 优雅降级。
+- 状态持久化：5 秒防抖 + 关键检查点保存；崩溃恢复从 DB 重建 Agent 状态。
+- Planning Draft 支持多轮 LLM 对话，激活 WorkspacePlanning 提示词配置。
+- 飞书长连接 WebSocket 连接器：租户 Token 管理、消息路由、`/bind` `/unbind` 命令。
+- ChatConnector Trait 统一抽象 Telegram 和飞书出站消息接口。
+- 飞书 Server 集成：通过 `GITCORTEX_FEISHU_ENABLED` 条件启动、管理 API、健康检查扩展。
+- ResilientLLMClient：多提供商 round-robin 轮转，5 次熔断 + 60 秒探活恢复。
+- 终端级提供商故障转移：自动拉起替代终端，使用备选 CLI/模型配置。
+- 提供商健康监控 API：实时熔断器数据、手动重置、WebSocket 事件推送（`provider.switched`、`provider.exhausted`、`provider.recovered`）。
+
 ## 当前状态
 
 - 以 `docs/undeveloped/current/TODO-pending.md` 为准
-- 已完成：44
+- Phase 28（编排层进化）：18/18 任务已完成
+- 累计完成：62
 - 未完成：5（均为低/中优先级 backlog）
 
 相关文档：
@@ -119,12 +138,18 @@ curl http://localhost:23456/api/health -H "Authorization: Bearer <token>"
 - `MessageBus`：跨模块/终端事件路由。
 - `TerminalLauncher`：终端进程生命周期管理。
 - `GitWatcher`：基于 Git 事件驱动编排推进。
+- `ResilientLLMClient`：多提供商 LLM 客户端，内置熔断与故障转移。
+- `FeishuService`：飞书 WebSocket 连接器，消息路由与斜杠命令。
+- `ChatConnector`：跨聊天平台出站消息统一 Trait。
 
 主要代码位置：
 
 - `crates/services/src/services/orchestrator/`
 - `crates/server/src/routes/workflows.rs`
 - `frontend/src/pages/Workflows.tsx`
+- `crates/feishu-connector/`
+- `crates/services/src/services/chat_connector.rs`
+- `crates/server/src/routes/provider_health.rs`
 
 ## 文档
 
@@ -132,6 +157,7 @@ curl http://localhost:23456/api/health -H "Authorization: Bearer <token>"
 - Docker 部署：`docs/developed/ops/docker-deployment.md`
 - 运维手册：`docs/developed/ops/runbook.md`
 - 故障排查：`docs/developed/ops/troubleshooting.md`
+- Phase 28 计划：`docs/undeveloped/current/2026-03-11-phase-28-orchestrator-evolution.md`
 
 ## 贡献
 
