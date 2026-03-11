@@ -4,86 +4,182 @@
 
 # GitCortex
 
-AI orchestration layer for coordinating multiple coding CLIs (Claude Code, Codex, Gemini CLI, etc.) in one workflow.
+**Complete complex, production-grade projects through a simple conversation.**
+
+GitCortex is an upper-layer orchestration Agent that automatically commands multiple professional AI CLIs (Claude Code, Gemini CLI, Codex, Amp, Cursor Agent, etc.) to develop software in parallel. It does not write code itself — it acts as a fully autonomous project manager: assigning tasks, monitoring progress, coordinating Git branches, handling errors, and merging results, until the entire project is delivered.
+
+> Think of it this way: you describe what you want to build, and GitCortex dispatches 5–10 AI terminals working simultaneously on different features, each on its own Git branch, with a central orchestrator keeping everything on track — automatically.
+
+---
 
 ## Why GitCortex
 
-- One orchestrator agent schedules all terminals with a single state machine.
-- Multi-task parallelism (across tasks) + serial quality gates (inside each task).
-- Native CLI execution, so existing CLI slash commands / plugins / MCP / skills remain usable.
-- Git-driven event loop for handoff, recovery, and traceable history.
+### The Problem
 
-## What's New (March 2026)
+During continuous AI-assisted coding, several pain points remain unsolved:
 
-### Orchestrator and Chat
+- You cannot use different providers' models within the same AI CLI session.
+- Multi-CLI collaboration solutions (MCP, skills, etc.) have limitations and break with every update.
+- Workflow plugins become obsolete within months as the ecosystem evolves.
+- Single-terminal AI coding is inherently sequential — one task at a time.
 
-- Added workflow-level orchestrator chat pagination and query params (`cursor/limit`) (`ec8ad4ec2`).
-- Added orchestrator message persistence and command snapshot persistence (`8ccf0f3d1`).
-- Enforced instruction allowlist and command status flow (`1a1b153a3`).
-- Added command recovery, governance controls, and audit flow (`3a177d5d9`).
-- Added Telegram connector ingress with conversation binding and replay protection (`95c4afc81`).
-- Enhanced frontend orchestrator panel stream and interaction coverage tests (`fb642c5fc`).
+### The Solution
 
-### Docker and Installer
+GitCortex takes a fundamentally different approach: **one orchestrator Agent commanding all professional CLIs**.
 
-- Docker adaptation has been updated (`679e5cf54`, `7af0e7d17`, `35f17ecda`).
-- Better workspace path handling for Docker and local runtime.
-- Runtime-aware update flow for existing Docker deployments.
-- `.env` and API-token wiring improvements.
-- One-click installer has been updated (`07ef09911`, `35f17ecda`).
-- Installer can reuse existing `.env` and hand off to update flow automatically.
-- Installer supports install/update mode, language selection, non-interactive flags, optional volume reset, and readiness checks.
+| Capability | Description |
+|---|---|
+| **Upper-Layer Orchestration** | A central Agent automatically dispatches instructions, monitors task progress, handles branch merging and error recovery — zero human intervention required during execution. |
+| **5–10× Development Efficiency** | Multi-task parallelism: the orchestrator runs 5–10 tasks simultaneously, each on its own Git branch. Tasks are serial internally (quality gates), but parallel across the workflow. |
+| **Non-Invasive Ecosystem Compatibility** | Calls native CLI terminals directly. Any slash command, plugin, skill, or MCP that works in your terminal works here — forever. Switch from one AI workflow to another (e.g. Superpower, SDD) with zero migration cost. |
+| **Mixed CLI & Model per Task** | Different CLIs and different providers' models can work within the same task. Claude Code with Sonnet for coding, Gemini for review, GPT for fixing — all orchestrated automatically. |
+| **Git-Driven Event Loop** | Terminals signal completion via Git commits. The orchestrator sleeps between events, consuming near-zero tokens when idle. Saves 98%+ tokens compared to polling. |
+| **Chat-to-Ship (Vision)** | The ultimate goal: connect to a chat platform (Telegram, Feishu/Lark), describe your project in conversation, and GitCortex handles everything — task decomposition, terminal allocation, execution, and delivery. Not a toy demo, but real production-grade output. |
 
-### Phase 28: Orchestrator Evolution (March 2026)
+---
 
-- Terminal completion context injection: LLM decisions now include terminal log summaries, diff stats, and commit bodies.
-- Cross-terminal handoff notes: previous terminal context (role, status, commit, handoff notes) is passed to the next terminal.
-- ReviewCode / FixIssues / MergeBranch instructions now spawn dedicated reviewer and fixer terminals instead of just publishing events.
-- Review reject auto-triggers fix terminal creation; review pass auto-checks workflow completion.
-- Auto-merge on workflow completion with conflict detection and status tracking.
-- Error handler wired into the agent event loop for terminal failure delegation.
-- LLM fault tolerance: `call_llm_safe` wrapper with consecutive failure tracking and graceful degradation.
-- State persistence with 5-second debounce at key checkpoints; crash recovery rebuilds agent state from DB.
-- Planning Draft now supports multi-turn LLM conversation with the WorkspacePlanning prompt profile.
-- Feishu (Lark) long-lived WebSocket connector with tenant token management, message routing, `/bind` and `/unbind` commands.
-- ChatConnector trait abstracting Telegram and Feishu outbound messaging behind a unified interface.
-- Feishu server integration: conditional startup via `GITCORTEX_FEISHU_ENABLED`, management API, health check extension.
-- ResilientLLMClient: multi-provider round-robin with 5-failure circuit breaker and 60-second probe recovery.
-- Terminal-level provider failover: automatic replacement terminal spawning with alternative CLI/model config.
-- Provider health monitoring API with live circuit-breaker data, manual reset, and WebSocket events (`provider.switched`, `provider.exhausted`, `provider.recovered`).
+## How It Differs from CCG / OMO / CCW
 
-## Current Status
+GitCortex is **not** another multi-CLI collaboration tool. The core design goal is fundamentally different:
 
-- Source of truth: `docs/undeveloped/current/TODO-pending.md`
-- Phase 28 (Orchestrator Evolution): 18/18 tasks completed
-- Total completed: 62
-- Pending: 5 (all are low/medium-priority backlog)
+| Aspect | Multi-CLI Tools (CCG, OMO, CCW) | GitCortex |
+|---|---|---|
+| Focus | CLI-to-CLI communication | Upper-layer Agent commanding all CLIs |
+| Execution | Manual or semi-automated | Fully autonomous orchestration |
+| Parallelism | Limited | 5–10 tasks in parallel by design |
+| Plugin Ecosystem | Often builds its own | Inherits all native CLI ecosystems |
+| Longevity | Tied to specific tool versions | Non-invasive — survives ecosystem churn |
+| Goal | Better CLI interop | "Developer not present" long-running autonomous development |
 
-See also:
+GitCortex doesn't define tools — it commands the best tools to complete tasks most efficiently.
 
-- `docs/undeveloped/current/TODO.md`
-- `docs/undeveloped/current/orchestrator-chat-verification-report.md`
-- `docs/undeveloped/current/orchestrator-chat-rollback-runbook.md`
+---
+
+## Architecture
+
+```
+                    ┌─────────────────────────────────┐
+                    │   Orchestrator Agent (LLM-driven)│
+                    │   Dispatches · Monitors · Merges │
+                    └──────────┬──────────────────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+     ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+     │   Task 1     │ │   Task 2     │ │   Task 3     │
+     │ branch: auth │ │ branch: i18n │ │ branch: theme│
+     │              │ │              │ │              │
+     │ T1 → T2 → T3│ │ TA → TB     │ │ TX → TY     │
+     │  (serial)    │ │  (serial)    │ │  (serial)    │
+     └──────────────┘ └──────────────┘ └──────────────┘
+              │                │                │
+              └────────────────┼────────────────┘
+                               ▼
+                         Auto-Merge → main
+```
+
+**Three-Layer Execution Model:**
+
+- **Workflow** → The orchestrator Agent manages the entire lifecycle
+- **Task** → Independent Git branch, runs in parallel with other tasks
+- **Terminal** → A native AI CLI process (PTY), runs serially within its task
+
+**Key Components:**
+
+| Component | Role |
+|---|---|
+| `OrchestratorAgent` | LLM-driven decision core: dispatches terminals, parses Git events, routes review/fix cycles |
+| `OrchestratorRuntime` | Workflow lifecycle management, slot reservation, crash recovery |
+| `MessageBus` | Event routing across all modules (workflow-scoped topics) |
+| `TerminalLauncher` | Spawns native PTY processes with per-terminal environment isolation |
+| `GitWatcher` | Detects Git commits → publishes events → wakes the orchestrator |
+| `ResilientLLMClient` | Multi-provider round-robin with 5-failure circuit breaker and 60s probe recovery |
+| `ChatConnector` | Unified outbound messaging trait (Telegram, Feishu/Lark) |
+
+---
+
+## Features
+
+### Implemented
+
+- ✅ Upper-layer orchestrator Agent commanding full workflow lifecycle
+- ✅ Multi-task parallel execution (5–10 tasks simultaneously)
+- ✅ Serial quality gates within each task (code → review → fix)
+- ✅ Mixed CLI types within the same task (Claude Code + Gemini + Codex + more)
+- ✅ Mixed providers/models within the same CLI via CC-Switch integration
+- ✅ Native slash command system — supports all official and custom commands
+- ✅ Full native plugin/skill/MCP compatibility (whatever your CLI supports, GitCortex supports)
+- ✅ Git-driven event loop (98%+ token savings vs polling)
+- ✅ Web-based pseudo-terminal for real-time debugging and interaction
+- ✅ Cross-terminal context handoff (previous terminal's work passed to the next)
+- ✅ Automatic branch merging on workflow completion
+- ✅ ReviewCode / FixIssues / MergeBranch instruction execution
+- ✅ LLM fault tolerance with graceful degradation (agent survives provider outages)
+- ✅ State persistence with crash recovery (agent resumes from DB after restart)
+- ✅ Multi-provider circuit breaker with automatic failover
+- ✅ Terminal-level provider failover (auto-spawns replacement terminal)
+- ✅ Telegram connector with conversation binding
+- ✅ Feishu (Lark) long-lived WebSocket connector
+- ✅ Planning Draft with multi-turn LLM conversation
+- ✅ Docker one-click deployment with installer/update scripts
+- ✅ Provider health monitoring API with WebSocket events
+
+### Roadmap
+
+- 🔜 Full conversational task decomposition (Agent decides task count and terminal allocation)
+- 🔜 Deeper chat platform integration (describe project → auto-execute → deliver)
+- 📋 Kubernetes deployment support
+- 📋 Container image size optimization
+
+---
+
+## Supported AI CLIs
+
+| CLI | Status | Model Switching |
+|---|---|---|
+| Claude Code | ✅ Supported | ✅ Via CC-Switch |
+| Gemini CLI | ✅ Supported | ✅ Via CC-Switch |
+| Codex | ✅ Supported | ✅ Via CC-Switch |
+| Amp | ✅ Supported | — |
+| Cursor Agent | ✅ Supported | — |
+| Qwen Code | ✅ Supported | — |
+| GitHub Copilot | ✅ Supported | — |
+
+Any CLI that runs in a terminal and supports slash commands can be integrated.
+
+---
 
 ## Quick Start
+
+### Prerequisites
+
+| Tool | Version | Check |
+|---|---|---|
+| Rust | nightly-2025-12-04 | `rustc --version` |
+| Node.js | ≥ 18 (recommend 20) | `node --version` |
+| pnpm | 10.13.1 | `pnpm --version` |
+| Git | Any recent | `git --version` |
 
 ### Local Development
 
 ```bash
+# 1. Install dependencies
 pnpm install
 
-# Required: exactly 32 chars
+# 2. Set encryption key (required, exactly 32 characters)
 # Windows PowerShell:
 $env:GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
 # Linux/macOS:
 export GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
 
-npm run prepare-db
+# 3. Initialize database
+pnpm run prepare-db
+
+# 4. Start dev servers (frontend + backend)
 pnpm run dev
 ```
 
 Default URLs:
-
 - Frontend: `http://localhost:23457`
 - Backend API: `http://localhost:23456/api`
 
@@ -93,11 +189,7 @@ Default URLs:
 powershell -ExecutionPolicy Bypass -File .\scripts\docker\install-docker.ps1
 ```
 
-The installer supports:
-
-- Interactive setup (mount path, keys, port, optional AI CLI install)
-- Existing `.env` reuse
-- Automatic handoff to update flow when appropriate
+The installer supports interactive setup (mount path, keys, port, optional AI CLI install), `.env` reuse, and automatic handoff to update flow.
 
 ### Docker Update
 
@@ -105,59 +197,114 @@ The installer supports:
 powershell -ExecutionPolicy Bypass -File .\scripts\docker\update-docker.ps1 -PullLatest
 ```
 
-Common options:
+Options: `-AllowDirty`, `-PullBaseImages`, `-SkipBuild`, `-SkipReadyCheck`
 
-- `-AllowDirty`
-- `-PullBaseImages`
-- `-SkipBuild`
-- `-SkipReadyCheck`
+---
 
-## Verification
+## How It Works
+
+### 1. Create a Workflow
+
+Through the web UI wizard, you:
+- Select a Git repository
+- Define parallel tasks (e.g. "auth module", "i18n", "dark theme")
+- Assign terminals to each task (choose CLI type + model for each)
+- Optionally configure slash commands for execution order
+- Configure the orchestrator Agent's LLM
+
+### 2. Prepare & Debug
+
+GitCortex spawns all terminal PTY processes and enters a **Ready** state. You can:
+- Verify CLI environments in the web-based pseudo-terminal
+- Test slash commands and plugin availability
+- Install missing dependencies
+
+Zero token consumption during this phase.
+
+### 3. Execute
+
+Click **Start** and the orchestrator takes over:
+- Dispatches instructions to each task's first terminal
+- Monitors Git commits for completion signals
+- Passes context from completed terminals to the next one (handoff notes)
+- Handles review cycles (ReviewCode → FixIssues → re-review)
+- Manages errors and retries automatically
+- Merges all task branches when the workflow completes
+
+The orchestrator sleeps between Git events — it only wakes and consumes tokens when there's actual work to process.
+
+### 4. Deliver
+
+All task branches are automatically merged to the target branch. The workflow is complete.
+
+---
+
+## Data Safety
+
+- **Deleting a project** only removes database records. Repository files on disk are never touched.
+- **Unbinding a repository** only removes the database link. The Git repository remains intact.
+- **Project-repo binding** stores a reference path only. No file system operations on bind/unbind.
+
+---
+
+## Health Check
 
 ```bash
 curl http://localhost:23456/readyz
 curl http://localhost:23456/api/health
 ```
 
-If API token is enabled:
+With API token enabled:
 
 ```bash
 curl http://localhost:23456/api/health -H "Authorization: Bearer <token>"
 ```
 
-## Data Safety
+---
 
-- **Deleting a project does not delete local files.** Only database records (project metadata, project-repo associations) are removed. Repository files on disk are never touched.
-- **Deleting a repository association** only removes the database link between the project and the repo. The actual Git repository on disk remains intact.
-- **Project-repo binding** (`defaultAgentWorkingDir`) stores a reference path. Unbinding or rebinding does not move or delete any files.
+## Tech Stack
 
-## Architecture at a Glance
+| Layer | Technology |
+|---|---|
+| Backend | Rust (Axum, SQLx, Tokio) |
+| Frontend | React 18, TypeScript, Tailwind CSS, Zustand, React Query |
+| Database | SQLite (encrypted API key storage via AES-256-GCM) |
+| Terminal | xterm.js + native PTY (WebSocket bridge) |
+| Real-time | WebSocket (workflow events + terminal streams) |
+| Type Safety | Rust → TypeScript auto-generation via `ts-rs` |
 
-- `OrchestratorAgent`: decision and scheduling core.
-- `OrchestratorRuntime`: workflow lifecycle orchestration.
-- `MessageBus`: event routing across modules and terminals.
-- `TerminalLauncher`: process lifecycle management.
-- `GitWatcher`: Git-event-driven orchestration progression.
-- `ResilientLLMClient`: multi-provider LLM client with circuit breaking and failover.
-- `FeishuService`: Feishu (Lark) WebSocket connector with message routing and slash commands.
-- `ChatConnector`: unified trait for outbound messaging across chat platforms.
+---
 
-Main code locations:
+## Project Structure
 
-- `crates/services/src/services/orchestrator/`
-- `crates/server/src/routes/workflows.rs`
-- `frontend/src/pages/Workflows.tsx`
-- `crates/feishu-connector/`
-- `crates/services/src/services/chat_connector.rs`
-- `crates/server/src/routes/provider_health.rs`
+```
+GitCortex/
+├── crates/                    # Rust workspace
+│   ├── db/                    # Database layer (models, migrations, DAO)
+│   ├── server/                # Axum HTTP/WebSocket server
+│   ├── services/              # Business logic
+│   │   ├── orchestrator/      # Agent, Runtime, State, Error handling
+│   │   ├── terminal/          # Launcher, Bridge, Prompt watcher
+│   │   ├── git_watcher.rs     # Git commit monitoring
+│   │   ├── cc_switch.rs       # CLI/model configuration switching
+│   │   ├── message_bus.rs     # Event routing
+│   │   ├── feishu.rs          # Feishu service integration
+│   │   └── chat_connector.rs  # Unified chat trait
+│   ├── executors/             # CLI integrations
+│   └── feishu-connector/      # Feishu WebSocket client
+├── frontend/                  # React application
+│   ├── src/
+│   │   ├── components/        # UI components (board, workflow, ui-new)
+│   │   ├── hooks/             # React Query hooks
+│   │   ├── stores/            # Zustand stores (WebSocket, UI state)
+│   │   └── pages/             # Route components
+│   └── CLAUDE.md              # Frontend design guidelines
+├── shared/                    # Auto-generated TypeScript types
+├── scripts/                   # Dev and Docker scripts
+└── docs/                      # Documentation
+```
 
-## Docs
-
-- Development tracker: `docs/undeveloped/current/TODO.md`
-- Docker deployment guide: `docs/developed/ops/docker-deployment.md`
-- Operations runbook: `docs/developed/ops/runbook.md`
-- Troubleshooting: `docs/developed/ops/troubleshooting.md`
-- Phase 28 plan: `docs/undeveloped/current/2026-03-11-phase-28-orchestrator-evolution.md`
+---
 
 ## Contributing
 
@@ -168,11 +315,13 @@ Main code locations:
 ```bash
 cargo check --workspace
 cargo test --workspace
-cd frontend && npm run test:run && cd ..
+cd frontend && pnpm test:run && cd ..
 ```
+
+---
 
 ## License
 
 - Vibe Kanban derived parts: Apache-2.0
 - CC-Switch derived parts: MIT
-- See `LICENSE`
+- See `LICENSE` for details.
