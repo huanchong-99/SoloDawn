@@ -282,7 +282,7 @@ mod tests {
         #[cfg(unix)]
         {
             // Skip on Unix
-            assert!(true);
+            
         }
     }
 
