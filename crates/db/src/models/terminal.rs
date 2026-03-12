@@ -988,14 +988,14 @@ mod tests {
     async fn test_update_status_cas_transitions_and_miss() {
         let pool = SqlitePool::connect(":memory:").await.unwrap();
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE terminal (
                 id TEXT PRIMARY KEY,
                 status TEXT NOT NULL,
                 updated_at TEXT,
                 completed_at TEXT
             )
-            "#,
+            ",
         )
         .execute(&pool)
         .await
@@ -1038,14 +1038,14 @@ mod tests {
     async fn test_set_completed_cas_sets_completed_at() {
         let pool = SqlitePool::connect(":memory:").await.unwrap();
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE terminal (
                 id TEXT PRIMARY KEY,
                 status TEXT NOT NULL,
                 updated_at TEXT,
                 completed_at TEXT
             )
-            "#,
+            ",
         )
         .execute(&pool)
         .await
@@ -1089,14 +1089,14 @@ mod tests {
     async fn test_set_completed_if_unfinished_respects_final_states() {
         let pool = SqlitePool::connect(":memory:").await.unwrap();
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE terminal (
                 id TEXT PRIMARY KEY,
                 status TEXT NOT NULL,
                 updated_at TEXT,
                 completed_at TEXT
             )
-            "#,
+            ",
         )
         .execute(&pool)
         .await
