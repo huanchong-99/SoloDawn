@@ -71,6 +71,7 @@ pub async fn run_cursor_setup(
     Ok(execution_process)
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn get_setup_helper_action() -> Result<ExecutorAction, ApiError> {
     #[cfg(unix)]
     {

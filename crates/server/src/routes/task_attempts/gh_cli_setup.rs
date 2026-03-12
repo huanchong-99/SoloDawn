@@ -101,11 +101,11 @@ fi"#
     };
 
     // Auth script
-    let auth_script = r#"#!/bin/bash
+    let auth_script = r"#!/bin/bash
 set -e
 export GH_PROMPT_DISABLED=1
 gh auth login --web --git-protocol https --skip-ssh-key
-"#
+"
     .to_string();
 
     let auth_request = ScriptRequest {
