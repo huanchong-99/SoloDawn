@@ -1,5 +1,4 @@
 import type { RefObject } from 'react';
-import { useCallback } from 'react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { cn } from '@/lib/utils';
 import {
@@ -77,7 +76,7 @@ export function SearchableDropdown<T>({
   emptyMessage = 'No items found',
   getItemBadge,
 }: SearchableDropdownProps<T>) {
-  const renderItem = useCallback((idx: number) => {
+  const renderItem = (idx: number) => {
     const item = filteredItems[idx];
     const key = getItemKey(item);
     const isHighlighted = idx === highlightedIndex;
@@ -96,7 +95,7 @@ export function SearchableDropdown<T>({
         {getItemLabel(item)}
       </DropdownMenuItem>
     );
-  }, [filteredItems, getItemKey, highlightedIndex, selectedValue, onSelect, onHighlightedIndexChange, getItemBadge, getItemLabel]);
+  };
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>

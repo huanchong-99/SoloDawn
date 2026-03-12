@@ -18,10 +18,11 @@ export function useAuthStatus(options: UseAuthStatusOptions) {
   });
 
   const { isSignedIn } = useAuth();
+  const { refetch } = query;
   useEffect(() => {
     if (!options.enabled) return;
-    query.refetch();
-  }, [isSignedIn, options.enabled, query.refetch]);
+    refetch();
+  }, [isSignedIn, options.enabled, refetch]);
 
   return query;
 }

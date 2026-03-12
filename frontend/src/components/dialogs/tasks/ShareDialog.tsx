@@ -21,6 +21,7 @@ import { LoginRequiredPrompt } from '@/components/dialogs/shared/LoginRequiredPr
 import { useAuth } from '@/hooks';
 import { useProject } from '@/contexts/ProjectContext';
 import { useTaskMutations } from '@/hooks/useTaskMutations';
+import type { TFunction } from 'i18next';
 
 export interface ShareDialogProps {
   task: TaskWithAttemptStatus;
@@ -40,11 +41,11 @@ function StatusContent({
   isRemoteDisabled: boolean;
   isSignedIn: boolean;
   isProjectLinked: boolean;
-  shareTask: any;
+  shareTask: ReturnType<typeof useTaskMutations>['shareTask'];
   shareError: string | null;
   remoteDisabledMessage: string;
   handleLinkProject: () => void;
-  t: any;
+  t: TFunction;
 }>) {
   if (isRemoteDisabled) {
     return (

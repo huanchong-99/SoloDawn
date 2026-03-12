@@ -26,7 +26,8 @@ import { defineModal } from '@/lib/modals';
 import { repoApi, attemptsApi } from '@/lib/api';
 import { useLogStream } from '@/hooks/useLogStream';
 import { useExecutionProcesses } from '@/hooks/useExecutionProcesses';
-import type { RepoWithTargetBranch, PatchType, UpdateRepo, ExecutionProcess } from 'shared/types';
+import type { Repo, RepoWithTargetBranch, PatchType, UpdateRepo, ExecutionProcess } from 'shared/types';
+import type { TFunction } from 'i18next';
 
 export type ScriptType = 'setup' | 'cleanup' | 'dev_server';
 
@@ -69,7 +70,7 @@ async function runScriptByType(scriptType: ScriptType, workspaceId: string) {
 }
 
 // Helper to get dialog title
-function getDialogTitle(scriptType: ScriptType, t: any): string {
+function getDialogTitle(scriptType: ScriptType, t: TFunction): string {
   if (scriptType === 'setup') {
     return t('scriptFixer.setupScriptTitle');
   }
@@ -91,7 +92,7 @@ function getPlaceholderText(scriptType: ScriptType): string {
 }
 
 // Helper to get script content from repo
-function getScriptContent(repo: any, scriptType: ScriptType): string {
+function getScriptContent(repo: Repo | RepoWithTargetBranch, scriptType: ScriptType): string {
   if (scriptType === 'setup') {
     return repo.setupScript ?? '';
   }
@@ -126,7 +127,7 @@ function ProcessStatusIndicator({
   hasProcessError: boolean;
   isProcessKilled: boolean;
   exitCode: number | bigint | null | undefined;
-  t: any;
+  t: TFunction;
 }>) {
   if (isProcessRunning) {
     return (

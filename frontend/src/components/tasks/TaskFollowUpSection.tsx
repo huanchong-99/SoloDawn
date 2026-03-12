@@ -31,6 +31,7 @@ import {
   type DraftFollowUpData,
   ExecutorProfileId,
   type QueueStatus,
+  type QueuedMessage,
   type Session
 } from 'shared/types';
 import { useBranchStatus } from '@/hooks';
@@ -39,7 +40,7 @@ import { useAttemptExecution } from '@/hooks/useAttemptExecution';
 import { useUserSystem } from '@/components/ConfigProvider';
 import { cn } from '@/lib/utils';
 //
-import { useReview } from '@/contexts/ReviewProvider';
+import { useReview, type ReviewComment } from '@/contexts/ReviewProvider';
 import { useClickedElements } from '@/contexts/ClickedElementsProvider';
 import { useEntries } from '@/contexts/EntriesContext';
 import { useKeySubmitFollowUp, Scope } from '@/keyboard';
@@ -62,6 +63,7 @@ import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { queueApi, imagesApi, attemptsApi } from '@/lib/api';
 import { PrCommentsDialog } from '@/components/dialogs/tasks/PrCommentsDialog';
+import type { TFunction } from 'i18next';
 import type { NormalizedComment } from '@/components/ui/wysiwyg/nodes/pr-comment-node';
 
 interface TaskFollowUpSectionProps {
@@ -90,9 +92,9 @@ function insertMarkdownIntoMessage(
 // Helper to handle queued message cancellation and update
 function handleQueuedMessageUpdate(
   isQueued: boolean,
-  queuedMessage: any,
+  queuedMessage: QueuedMessage | null,
   newContent: string,
-  cancelMutation: any,
+  cancelMutation: { mutate: () => void },
   setLocalMessage: (msg: string) => void,
   setFollowUpMessageRef: React.MutableRefObject<(value: string) => void>
 ): boolean {
@@ -125,7 +127,7 @@ function RunningActionButtons({
   queueDisabled: boolean;
   stopExecution: () => void;
   isStopping: boolean;
-  t: any;
+  t: TFunction;
 }>) {
   return (
     <div className="flex items-center gap-2">
@@ -177,14 +179,14 @@ function IdleActionButtons({
   conflictResolutionInstructions,
   t,
 }: Readonly<{
-  comments: any[];
+  comments: ReviewComment[];
   clearComments: () => void;
   isEditable: boolean;
   onSendFollowUp: () => void;
   canSendFollowUp: boolean;
   isSendingFollowUp: boolean;
   conflictResolutionInstructions: string | null;
-  t: any;
+  t: TFunction;
 }>) {
   return (
     <div className="flex items-center gap-2">
@@ -223,7 +225,7 @@ function ScriptsDropdown({
   isAttemptRunning: boolean;
   handleRunSetupScript: () => void;
   handleRunCleanupScript: () => void;
-  t: any;
+  t: TFunction;
 }>) {
   return (
     <DropdownMenu>

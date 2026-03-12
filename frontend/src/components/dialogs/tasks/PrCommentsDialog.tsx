@@ -16,6 +16,7 @@ import { MessageSquare, AlertCircle, Loader2 } from 'lucide-react';
 import { usePrComments } from '@/hooks/usePrComments';
 import { PrCommentCard } from '@/components/ui/pr-comment-card';
 import type { UnifiedPrComment } from 'shared/types';
+import type { TFunction } from 'i18next';
 
 export interface PrCommentsDialogProps {
   attemptId: string;
@@ -67,7 +68,7 @@ function DialogContentRenderer({
   selectAll: () => void;
   deselectAll: () => void;
   toggleSelection: (id: string) => void;
-  t: any;
+  t: TFunction;
 }>) {
   if (errorMessage) {
     return (

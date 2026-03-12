@@ -28,8 +28,10 @@ import {
   BaseAgentCapability,
   type BaseCodingAgent,
   type EditorType,
+  type ExecutionProcess,
   type TaskWithAttemptStatus,
 } from 'shared/types';
+import type { TFunction } from 'i18next';
 import {
   Tooltip,
   TooltipContent,
@@ -158,8 +160,8 @@ function FileActionToolbar({
   isStopping: boolean;
   start: () => void;
   stop: () => void;
-  devServerProcesses: any[];
-  t: any;
+  devServerProcesses: ExecutionProcess[];
+  t: TFunction;
 }>) {
   return (
     <div className="flex items-center gap-1 shrink-0 sm:ml-auto">

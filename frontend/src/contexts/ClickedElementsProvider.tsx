@@ -427,7 +427,7 @@ export function ClickedElementsProvider({
     setElements([]);
   }, [attempt?.id]);
 
-  const addElement = (payload: OpenInEditorPayload) => {
+  const addElement = useCallback((payload: OpenInEditorPayload) => {
     const sanitized = stripHeavyProps(payload);
     const dedupeKey = makeDedupeKey(sanitized, workspaceRoot || undefined);
 
@@ -447,23 +447,23 @@ export function ClickedElementsProvider({
         ? updated.slice(-MAX_ELEMENTS)
         : updated;
     });
-  };
+  }, [workspaceRoot]);
 
-  const removeElement = (id: string) => {
+  const removeElement = useCallback((id: string) => {
     setElements((prev) => prev.filter((e) => e.id !== id));
-  };
+  }, []);
 
-  const clearElements = () => {
+  const clearElements = useCallback(() => {
     setElements([]);
-  };
+  }, []);
 
-  const selectComponent = (id: string, depthFromInner: number) => {
+  const selectComponent = useCallback((id: string, depthFromInner: number) => {
     setElements((prev) =>
       prev.map((e) =>
         e.id === id ? { ...e, selectedDepth: depthFromInner } : e
       )
     );
-  };
+  }, []);
 
   const generateMarkdown = useCallback(() => {
     if (elements.length === 0) return '';

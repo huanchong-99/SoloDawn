@@ -13,6 +13,7 @@ import {
   PauseIcon,
 } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { cn } from '@/lib/utils';
 import { PrimaryButton } from '../primitives/PrimaryButton';
 import {
@@ -114,7 +115,7 @@ function EmptyStateContent({
   onStart: () => void;
   handleEditDevScript: () => void;
   handleFixDevScript?: () => void;
-  t: any;
+  t: TFunction;
 }>) {
   if (isLoading) {
     return (

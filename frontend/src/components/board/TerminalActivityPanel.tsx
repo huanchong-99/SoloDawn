@@ -106,7 +106,7 @@ export function TerminalActivityPanel({ workflowId }: Readonly<TerminalActivityP
   const { t } = useTranslation('workflow');
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { data: workflow, isLoading } = useWorkflow(workflowId ?? '');
-  const workflowTasks = workflow?.tasks ?? [];
+  const workflowTasks = useMemo(() => workflow?.tasks ?? [], [workflow?.tasks]);
   const totalTerminalCount = workflowTasks.reduce(
     (count, task) => count + task.terminals.length,
     0

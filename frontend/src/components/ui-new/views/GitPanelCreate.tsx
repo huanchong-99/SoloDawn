@@ -6,7 +6,7 @@ import { ProjectSelectorContainer } from '@/components/ui-new/containers/Project
 import { RecentReposListContainer } from '@/components/ui-new/containers/RecentReposListContainer';
 import { BrowseRepoButtonContainer } from '@/components/ui-new/containers/BrowseRepoButtonContainer';
 import { CreateRepoButtonContainer } from '@/components/ui-new/containers/CreateRepoButtonContainer';
-import { WarningIcon, LinkSimple } from '@phosphor-icons/react';
+import { WarningIcon, LinkSimpleIcon } from '@phosphor-icons/react';
 import { PERSIST_KEYS } from '@/stores/useUiPreferencesStore';
 import type { Project, GitBranch, Repo } from 'shared/types';
 
@@ -97,7 +97,7 @@ export function GitPanelCreate({
             />
             {isBound && (
               <div className="flex items-center gap-1.5 text-xs text-success px-1">
-                <LinkSimple className="h-3 w-3 shrink-0" />
+                <LinkSimpleIcon className="h-3 w-3 shrink-0" />
                 <span>
                   {t('common:workspace.repoBoundTo', {
                     project: selectedProjectName ?? '',
@@ -117,7 +117,7 @@ export function GitPanelCreate({
                   'disabled:opacity-50 disabled:cursor-not-allowed'
                 )}
               >
-                <LinkSimple className="h-3 w-3 shrink-0" />
+                <LinkSimpleIcon className="h-3 w-3 shrink-0" />
                 {isBinding
                   ? t('common:states.saving')
                   : t('common:workspace.bindRepoTo', {

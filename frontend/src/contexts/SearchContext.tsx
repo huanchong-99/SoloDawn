@@ -48,11 +48,11 @@ export function SearchProvider({ children }: Readonly<SearchProviderProps>) {
 
   const clear = () => setQuery('');
 
-  const focusInput = () => {
+  const focusInput = useCallback(() => {
     if (inputRef.current && isTasksRoute) {
       inputRef.current.focus();
     }
-  };
+  }, [isTasksRoute]);
 
   const registerInputRef = useCallback((ref: HTMLInputElement | null) => {
     inputRef.current = ref;
@@ -67,7 +67,7 @@ export function SearchProvider({ children }: Readonly<SearchProviderProps>) {
       focusInput,
       registerInputRef,
     }),
-    [query, isTasksRoute, registerInputRef]
+    [query, isTasksRoute, registerInputRef, focusInput]
   );
 
   return (

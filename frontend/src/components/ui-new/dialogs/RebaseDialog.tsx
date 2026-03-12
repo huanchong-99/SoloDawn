@@ -11,8 +11,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import BranchSelector from '@/components/tasks/BranchSelector';
-import type { GitBranch, GitOperationError } from 'shared/types';
-import NiceModal, { useModal } from '@ebay/nice-modal-react';
+import type { GitBranch, GitOperationError, Workspace } from 'shared/types';
+import NiceModal, { useModal, type NiceModalHandler } from '@ebay/nice-modal-react';
 import { defineModal } from '@/lib/modals';
 import { GitOperationsProvider } from '@/contexts/GitOperationsContext';
 import { useGitOperations } from '@/hooks/useGitOperations';
@@ -83,8 +83,8 @@ function extractErrorMessage(err: unknown): string {
 async function handleConflictError(
   attemptId: string,
   repoId: string,
-  workspace: any,
-  modal: any
+  workspace: Workspace | undefined,
+  modal: NiceModalHandler
 ): Promise<void> {
   modal.hide();
 

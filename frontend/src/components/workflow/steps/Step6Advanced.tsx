@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Field, FieldLabel, FieldError } from '../../ui-new/primitives/Field';
 import { CollapsibleSection } from '../../ui-new/primitives/CollapsibleSection';
 import { cn } from '@/lib/utils';
@@ -23,7 +23,7 @@ export const Step6Advanced: React.FC<Step6AdvancedProps> = ({
   const { t } = useTranslation('workflow');
   const advancedConfig = config.advanced;
 
-  const getModelsForCli = (cliTypeId?: string) => {
+  const getModelsForCli = useCallback((cliTypeId?: string) => {
     if (!cliTypeId) {
       return [];
     }
@@ -34,9 +34,9 @@ export const Step6Advanced: React.FC<Step6AdvancedProps> = ({
       }
       return boundCliTypeId === cliTypeId;
     });
-  };
+  }, [config.models]);
 
-  const isModelCompatibleWithCli = (
+  const isModelCompatibleWithCli = useCallback((
     modelConfigId: string | undefined,
     cliTypeId: string | undefined
   ): boolean => {
@@ -47,7 +47,7 @@ export const Step6Advanced: React.FC<Step6AdvancedProps> = ({
       return false;
     }
     return getModelsForCli(cliTypeId).some((model) => model.id === modelConfigId);
-  };
+  }, [getModelsForCli]);
 
   const updateOrchestrator = (updates: Partial<AdvancedConfig['orchestrator']>) => {
     onUpdate({
@@ -185,7 +185,7 @@ export const Step6Advanced: React.FC<Step6AdvancedProps> = ({
         },
       },
     });
-  }, [advancedConfig, config.models, onUpdate]);
+  }, [advancedConfig, onUpdate, isModelCompatibleWithCli]);
 
   return (
     <div className="flex flex-col gap-base">

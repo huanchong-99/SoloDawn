@@ -1,16 +1,16 @@
 import i18next, { type TFunction } from 'i18next';
-import type { LucideIcon } from 'lucide-react';
+import type { Icon } from '@phosphor-icons/react';
 import {
-  AlertTriangle,
-  CheckCircle,
-  Circle,
-  Clock,
-  Loader2,
-  Pause,
-  Play,
-  XCircle,
-  ShieldQuestion,
-} from 'lucide-react';
+  WarningIcon,
+  CheckCircleIcon,
+  CircleIcon,
+  ClockIcon,
+  SpinnerIcon,
+  PauseIcon,
+  PlayIcon,
+  XCircleIcon,
+  SealQuestionIcon,
+} from '@phosphor-icons/react';
 
 export type StatusTone =
   | 'success'
@@ -23,14 +23,14 @@ export type StatusTone =
 export interface StatusMeta {
   label: string;
   tone: StatusTone;
-  icon: LucideIcon;
+  icon: Icon;
   spin?: boolean;
 }
 
 type StatusConfig = {
   key: string;
   tone: StatusTone;
-  icon: LucideIcon;
+  icon: Icon;
   spin?: boolean;
 };
 
@@ -38,64 +38,64 @@ const WORKFLOW_STATUS_CONFIG: Record<string, StatusConfig> = {
   created: {
     key: 'workflow:status.created',
     tone: 'neutral',
-    icon: Circle,
+    icon: CircleIcon,
   },
   ready: {
     key: 'workflow:status.ready',
     tone: 'info',
-    icon: Play,
+    icon: PlayIcon,
   },
   starting: {
     key: 'workflow:status.starting',
     tone: 'info',
-    icon: Loader2,
+    icon: SpinnerIcon,
     spin: true,
   },
   running: {
     key: 'workflow:status.running',
     tone: 'brand',
-    icon: Play,
+    icon: PlayIcon,
   },
   merging: {
     key: 'workflow:status.merging',
     tone: 'brand',
-    icon: Loader2,
+    icon: SpinnerIcon,
     spin: true,
   },
   paused: {
     key: 'workflow:status.paused',
     tone: 'warning',
-    icon: Pause,
+    icon: PauseIcon,
   },
   completed: {
     key: 'workflow:status.completed',
     tone: 'success',
-    icon: CheckCircle,
+    icon: CheckCircleIcon,
   },
   failed: {
     key: 'workflow:status.failed',
     tone: 'danger',
-    icon: XCircle,
+    icon: XCircleIcon,
   },
   cancelled: {
     key: 'workflow:status.cancelled',
     tone: 'neutral',
-    icon: XCircle,
+    icon: XCircleIcon,
   },
   idle: {
     key: 'workflow:status.idle',
     tone: 'neutral',
-    icon: Circle,
+    icon: CircleIcon,
   },
   queued: {
     key: 'workflow:status.queued',
     tone: 'info',
-    icon: Clock,
+    icon: ClockIcon,
   },
   unknown: {
     key: 'workflow:status.unknown',
     tone: 'neutral',
-    icon: Circle,
+    icon: CircleIcon,
   },
 };
 
@@ -103,73 +103,73 @@ const TERMINAL_STATUS_CONFIG: Record<string, StatusConfig> = {
   not_started: {
     key: 'workflow:terminalDebug.status.not_started',
     tone: 'neutral',
-    icon: Circle,
+    icon: CircleIcon,
   },
   starting: {
     key: 'workflow:terminalDebug.status.starting',
     tone: 'info',
-    icon: Loader2,
+    icon: SpinnerIcon,
     spin: true,
   },
   waiting: {
     key: 'workflow:terminalDebug.status.waiting',
     tone: 'info',
-    icon: Clock,
+    icon: ClockIcon,
   },
   working: {
     key: 'workflow:terminalDebug.status.working',
     tone: 'brand',
-    icon: Play,
+    icon: PlayIcon,
   },
   running: {
     key: 'workflow:terminalDebug.status.running',
     tone: 'brand',
-    icon: Play,
+    icon: PlayIcon,
   },
   active: {
     key: 'workflow:terminalDebug.status.active',
     tone: 'brand',
-    icon: Play,
+    icon: PlayIcon,
   },
   paused: {
     key: 'workflow:terminalDebug.status.paused',
     tone: 'warning',
-    icon: Pause,
+    icon: PauseIcon,
   },
   completed: {
     key: 'workflow:terminalDebug.status.completed',
     tone: 'success',
-    icon: CheckCircle,
+    icon: CheckCircleIcon,
   },
   failed: {
     key: 'workflow:terminalDebug.status.failed',
     tone: 'danger',
-    icon: XCircle,
+    icon: XCircleIcon,
   },
   killed: {
     key: 'workflow:terminalDebug.status.killed',
     tone: 'danger',
-    icon: AlertTriangle,
+    icon: WarningIcon,
   },
   idle: {
     key: 'workflow:terminalDebug.status.idle',
     tone: 'neutral',
-    icon: Circle,
+    icon: CircleIcon,
   },
   waiting_for_approval: {
     key: 'workflow:terminalDebug.status.waiting_for_approval',
     tone: 'warning',
-    icon: ShieldQuestion,
+    icon: SealQuestionIcon,
   },
   stalled: {
     key: 'workflow:terminalDebug.status.stalled',
     tone: 'warning',
-    icon: AlertTriangle,
+    icon: WarningIcon,
   },
   unknown: {
     key: 'workflow:terminalDebug.status.unknown',
     tone: 'neutral',
-    icon: Circle,
+    icon: CircleIcon,
   },
 };
 

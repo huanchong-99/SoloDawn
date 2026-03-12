@@ -22,7 +22,7 @@ module.exports = {
     'plugin:eslint-comments/recommended',
     'prettier',
   ],
-  ignorePatterns: ['dist', '.eslintrc.cjs'],
+  ignorePatterns: ['dist', '.eslintrc.cjs', '**/*.test.ts', '**/*.test.tsx', '**/*.e2e.test.ts', '**/*.e2e.test.tsx', 'src/test/**/*'],
   parser: '@typescript-eslint/parser',
   plugins: ['react-refresh', '@typescript-eslint', 'unused-imports', 'i18next', 'eslint-comments', 'check-file', 'deprecation'],
   parserOptions: {

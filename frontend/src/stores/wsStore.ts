@@ -1332,16 +1332,14 @@ export const useWsStore = create<WsState>((set, get) => ({
  */
 export function useWsSubscription(
   eventType: string,
-  handler: MessageHandler,
-  deps: React.DependencyList = []
+  handler: MessageHandler
 ) {
   const subscribe = useWsStore((s) => s.subscribe);
 
   // Use effect to manage subscription lifecycle
   React.useEffect(() => {
     return subscribe(eventType, handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventType, handler, subscribe, ...deps]);
+  }, [eventType, handler, subscribe]);
 }
 
 /**

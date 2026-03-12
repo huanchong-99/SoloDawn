@@ -34,9 +34,10 @@ import type {
 import { MemberListItem } from '@/components/org/MemberListItem';
 import { PendingInvitationItem } from '@/components/org/PendingInvitationItem';
 import { RemoteProjectItem } from '@/components/org/RemoteProjectItem';
-import type { MemberRole } from 'shared/types';
+import type { MemberRole, Invitation, OrganizationMemberWithProfile, RemoteProject, Project } from 'shared/types';
 import { MemberRole as MemberRoleEnum } from 'shared/types';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useProjects } from '@/hooks/useProjects';
 import { useOrganizationProjects } from '@/hooks/useOrganizationProjects';
 import { useProjectMutations } from '@/hooks/useProjectMutations';
@@ -54,10 +55,10 @@ function InvitationListContent({
   t,
 }: Readonly<{
   loadingInvitations: boolean;
-  invitations: any[];
+  invitations: Invitation[];
   onRevoke: (id: string) => void;
   isRevoking: boolean;
-  t: any;
+  t: TFunction;
 }>) {
   if (loadingInvitations) {
     return (
@@ -103,14 +104,14 @@ function MemberListContent({
   t,
 }: Readonly<{
   loadingMembers: boolean;
-  members: any[];
+  members: OrganizationMemberWithProfile[];
   currentUserId: string | null;
   isAdmin: boolean;
   onRemove: (userId: string) => void;
   onRoleChange: (userId: string, role: MemberRole) => void;
   isRemoving: boolean;
   isRoleChanging: boolean;
-  t: any;
+  t: TFunction;
 }>) {
   if (loadingMembers) {
     return (
@@ -167,17 +168,17 @@ function RemoteProjectsContent({
   loadingProjects: boolean;
   loadingRemoteProjects: boolean;
   isRemoteProjectUnsupported: boolean;
-  remoteProjectsError: any;
-  remoteProjects: any[];
-  allProjects: any[];
-  availableLocalProjects: any[];
+  remoteProjectsError: unknown;
+  remoteProjects: RemoteProject[];
+  allProjects: Project[];
+  availableLocalProjects: Project[];
   onLink: (remoteId: string, localId: string) => void;
   onUnlink: (projectId: string) => void;
   isLinking: boolean;
   isUnlinking: boolean;
   remoteProjectUnsupportedMessage: string;
   loadRemoteProjectsErrorMessage: string;
-  t: any;
+  t: TFunction;
 }>) {
   if (loadingProjects || loadingRemoteProjects) {
     return (

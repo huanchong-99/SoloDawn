@@ -33,6 +33,8 @@ import type {
 import type { GhCliSetupError, PrError } from 'shared/types';
 import { useUserSystem } from '@/components/ConfigProvider';
 import { defineModal } from '@/lib/modals';
+import type { TFunction } from 'i18next';
+import type { Err } from '@/lib/api';
 
 interface CreatePRDialogProps {
   attempt: Workspace;
@@ -89,8 +91,8 @@ function handleCliError(
 // Helper to handle git CLI errors
 function handleGitCliError(
   error: PrError,
-  result: any,
-  t: any,
+  result: Err<PrError>,
+  t: TFunction,
   setError: (error: string) => void,
   setGhCliHelp: (help: GhCliSupportContent | null) => void
 ): boolean {
@@ -114,7 +116,7 @@ function handleGitCliError(
 // Helper to handle target branch not found error
 function handleTargetBranchError(
   error: PrError,
-  t: any,
+  t: TFunction,
   setError: (error: string) => void,
   setGhCliHelp: (help: GhCliSupportContent | null) => void
 ): boolean {

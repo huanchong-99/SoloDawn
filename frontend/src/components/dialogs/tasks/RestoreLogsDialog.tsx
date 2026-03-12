@@ -24,6 +24,7 @@ import type {
   ExecutionProcess,
   ExecutionProcessRepoState,
 } from 'shared/types';
+import type { TFunction } from 'i18next';
 
 export interface RestoreLogsDialogProps {
   executionProcessId: string;
@@ -62,7 +63,7 @@ function getResetIconClassName(worktreeResetOn: boolean, hasRisk: boolean): stri
 }
 
 // Helper to get toggle label text
-function getToggleLabelText(forceReset: boolean, worktreeResetOn: boolean, t: any): string {
+function getToggleLabelText(forceReset: boolean, worktreeResetOn: boolean, t: TFunction): string {
   if (forceReset) {
     return worktreeResetOn
       ? t('restoreLogsDialog.resetWorktree.enabled')
@@ -147,7 +148,7 @@ function HistoryChangeWarning({
   laterCoding: number;
   laterSetup: number;
   laterCleanup: number;
-  t: any;
+  t: TFunction;
 }>) {
   if (!hasLater) return null;
 
@@ -217,7 +218,7 @@ function UncommittedChangesWarning({
   totalUntracked: number;
   acknowledgeUncommitted: boolean;
   setAcknowledgeUncommitted: (v: boolean) => void;
-  t: any;
+  t: TFunction;
 }>) {
   if (!anyDirty) return null;
 
@@ -281,7 +282,7 @@ function ResetWorktreeCanReset({
   }>;
   totalUncommitted: number;
   totalUntracked: number;
-  t: any;
+  t: TFunction;
 }>) {
   if (!(needGitReset && canGitReset)) return null;
 
@@ -361,7 +362,7 @@ function ResetWorktreeCannotReset({
     repoName: string;
     targetSha: string | null;
   }>;
-  t: any;
+  t: TFunction;
 }>) {
   if (!(needGitReset && !canGitReset)) return null;
 

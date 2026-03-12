@@ -78,7 +78,7 @@ export const useProjectTasks = (projectId: string): UseProjectTasksResult => {
           )
           .where(({ sharedTasks }) => isNull(sharedTasks.deleted_at));
       },
-      [remoteProjectId, isSignedIn, sharedTasksEnabled]
+    [remoteProjectId, sharedTasksEnabled]
     ),
     [remoteProjectId, isSignedIn, sharedTasksEnabled]
   );
