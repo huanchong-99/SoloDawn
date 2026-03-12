@@ -108,8 +108,8 @@ fn build_log_replay_script(log_file: &Path) -> String {
     #[cfg(not(windows))]
     {
         let quoted_path = shlex::try_quote(log_file.to_string_lossy().as_ref())
-            .map(|quoted| quoted.to_string())
-            .unwrap_or_else(|_| format!("\"{}\"", log_file.display()));
+            .map_or_else(|_| format!("\"{}\"", log_file.display()), |quoted| quoted.to_string());
+
         format!(
             "while IFS= read -r line; do printf '%s\\n' \"$line\"; sleep 1; done < {quoted_path}; rm -f {quoted_path}"
         )
@@ -129,7 +129,7 @@ async fn perform_file_operations(dir: &Path) {
     let uuid = uuid::Uuid::new_v4();
     let new_file = dir.join(format!("qa_created_{uuid}.txt"));
     match tokio::fs::write(&new_file, "QA mode created this file\n").await {
-        Ok(_) => info!("QA Mock: created file {new_file:?}"),
+        Ok(()) => info!("QA Mock: created file {new_file:?}"),
         Err(e) => warn!("QA Mock: failed to create file: {e}"),
     }
 
@@ -137,7 +137,7 @@ async fn perform_file_operations(dir: &Path) {
     let files: Vec<_> = walkdir::WalkDir::new(dir)
         .max_depth(3) // Limit depth to avoid long walks
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.file_type().is_file())
         .filter(|e| !e.path().to_string_lossy().contains(".git"))
         .filter(|e| {
@@ -163,7 +163,7 @@ async fn perform_file_operations(dir: &Path) {
             // Don't remove the file we just created
             if file_to_remove != new_file {
                 match tokio::fs::remove_file(&file_to_remove).await {
-                    Ok(_) => info!("QA Mock: removed file {file_to_remove:?}"),
+                    Ok(()) => info!("QA Mock: removed file {file_to_remove:?}"),
                     Err(e) => warn!("QA Mock: failed to remove file: {e}"),
                 }
             }
@@ -181,7 +181,7 @@ async fn perform_file_operations(dir: &Path) {
                             chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
                         );
                         match tokio::fs::write(&file_to_modify, modified).await {
-                            Ok(_) => info!("QA Mock: modified file {file_to_modify:?}"),
+                            Ok(()) => info!("QA Mock: modified file {file_to_modify:?}"),
                             Err(e) => warn!("QA Mock: failed to write modified file: {e}"),
                         }
                     }
