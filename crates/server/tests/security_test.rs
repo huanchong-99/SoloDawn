@@ -46,14 +46,14 @@ fn get_test_api_key() -> String {
 
 /// Set encryption key for tests
 fn ensure_encryption_key() {
-    std::env::set_var("GITCORTEX_ENCRYPTION_KEY", ENCRYPTION_KEY);
+    unsafe { std::env::set_var("GITCORTEX_ENCRYPTION_KEY", ENCRYPTION_KEY) };
 }
 
 /// Ensure server is running before executing tests
 async fn ensure_server_running() {
     let client = client();
     let response = client
-        .get(&format!("{}/cli_types", API_BASE))
+        .get(format!("{}/cli_types", API_BASE))
         .timeout(Duration::from_secs(5))
         .send()
         .await;
@@ -69,7 +69,7 @@ async fn ensure_server_running() {
 /// Helper: Get first CLI type ID from the API
 async fn get_first_cli_type(client: &Client) -> String {
     let cli_response = client
-        .get(&format!("{}/cli_types", API_BASE))
+        .get(format!("{}/cli_types", API_BASE))
         .send()
         .await
         .expect("Failed to GET /cli_types - server may not be running");
@@ -100,12 +100,12 @@ async fn get_first_cli_type(client: &Client) -> String {
 /// Helper: Get first model ID for a given CLI type
 async fn get_first_model(client: &Client, cli_type_id: &str) -> String {
     let models_response = client
-        .get(&format!("{}/cli_types/{}/models", API_BASE, cli_type_id))
+        .get(format!("{}/cli_types/{}/models", API_BASE, cli_type_id))
         .send()
         .await
-        .expect(&format!(
-            "Failed to GET /cli_types/{}/models - server may not be running",
-            cli_type_id
+        .unwrap_or_else(|e| panic!(
+            "Failed to GET /cli_types/{}/models - server may not be running: {}",
+            cli_type_id, e
         ));
 
     assert_eq!(
@@ -191,7 +191,7 @@ async fn test_api_key_not_exposed_in_api_response() {
     });
 
     let response = client
-        .post(&format!("{}/workflows", API_BASE))
+        .post(format!("{}/workflows", API_BASE))
         .json(&payload)
         .send()
         .await
@@ -227,7 +227,7 @@ async fn test_api_key_not_exposed_in_api_response() {
 
     // Verify GET request also doesn't expose the key
     let get_response = client
-        .get(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .get(format!("{}/workflows/{}", API_BASE, workflow_id))
         .send()
         .await
         .expect("Failed to get workflow");
@@ -251,7 +251,7 @@ async fn test_api_key_not_exposed_in_api_response() {
 
     // Cleanup
     let _ = client
-        .delete(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .delete(format!("{}/workflows/{}", API_BASE, workflow_id))
         .send()
         .await;
 }
@@ -300,7 +300,7 @@ async fn test_api_key_encrypted_in_database() {
     });
 
     let response = client
-        .post(&format!("{}/workflows", API_BASE))
+        .post(format!("{}/workflows", API_BASE))
         .json(&payload)
         .send()
         .await
@@ -352,7 +352,7 @@ async fn test_api_key_encrypted_in_database() {
 
     // Cleanup
     let _ = client
-        .delete(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .delete(format!("{}/workflows/{}", API_BASE, workflow_id))
         .send()
         .await;
 }
@@ -396,7 +396,7 @@ async fn test_terminal_api_key_encrypted_in_database() {
     });
 
     let response = client
-        .post(&format!("{}/workflows", API_BASE))
+        .post(format!("{}/workflows", API_BASE))
         .json(&payload)
         .send()
         .await
@@ -472,7 +472,7 @@ async fn test_terminal_api_key_encrypted_in_database() {
 
     // Verify GET request also doesn't expose terminal API keys
     let get_response = client
-        .get(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .get(format!("{}/workflows/{}", API_BASE, workflow_id))
         .send()
         .await
         .expect("Failed to get workflow");
@@ -488,7 +488,7 @@ async fn test_terminal_api_key_encrypted_in_database() {
 
     // Cleanup
     let _ = client
-        .delete(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .delete(format!("{}/workflows/{}", API_BASE, workflow_id))
         .send()
         .await;
 }
@@ -531,7 +531,7 @@ async fn test_terminal_api_key_not_exposed_in_dto() {
     });
 
     let response = client
-        .post(&format!("{}/workflows", API_BASE))
+        .post(format!("{}/workflows", API_BASE))
         .json(&payload)
         .send()
         .await
@@ -567,7 +567,7 @@ async fn test_terminal_api_key_not_exposed_in_dto() {
     // Cleanup
     if let Some(workflow_id) = extract_workflow_id(&response_json) {
         let _ = client
-            .delete(&format!("{}/workflows/{}", API_BASE, workflow_id))
+            .delete(format!("{}/workflows/{}", API_BASE, workflow_id))
             .send()
             .await;
     }

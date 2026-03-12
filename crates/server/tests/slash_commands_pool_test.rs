@@ -4,7 +4,7 @@
 //! through deployment.db().pool instead of the non-existent deployment.pool field.
 
 use local_deployment::LocalDeployment;
-use server::DeploymentImpl;
+use server::Deployment;
 
 #[tokio::test]
 async fn test_slash_commands_pool_access() {
@@ -12,7 +12,7 @@ async fn test_slash_commands_pool_access() {
     // Before the fix, this would fail with "no field named `pool` on type `DeploymentImpl`"
 
     // Create a deployment instance
-    let deployment = LocalDeployment::new()
+    let deployment: LocalDeployment = LocalDeployment::new()
         .await
         .expect("Failed to create deployment");
 
@@ -20,16 +20,15 @@ async fn test_slash_commands_pool_access() {
     let _pool = &deployment.db().pool;
 
     // If we got here without compilation errors, the fix is working
-    assert!(
-        true,
-        "Successfully accessed pool through deployment.db().pool"
-    );
+    // Verify pool reference is valid by checking it's not null-like
+    let pool_ref = &deployment.db().pool;
+    let _size = pool_ref.size();
 }
 
 #[tokio::test]
 async fn test_slash_commands_pool_is_accessible() {
     // Verify that the pool is actually accessible and functional
-    let deployment = LocalDeployment::new()
+    let deployment: LocalDeployment = LocalDeployment::new()
         .await
         .expect("Failed to create deployment");
 

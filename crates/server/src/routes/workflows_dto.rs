@@ -439,7 +439,7 @@ mod tests {
 #[cfg(test)]
 mod conversion_tests {
     use chrono::Utc;
-    use db::models::{Terminal, Workflow, WorkflowTask};
+    use db::models::Workflow;
     use uuid::Uuid;
 
     use super::*;
@@ -475,7 +475,7 @@ mod conversion_tests {
             updated_at: Utc::now(),
         };
 
-        let dto = WorkflowDetailDto::from_workflow(&workflow, &vec![], &vec![]);
+        let dto = WorkflowDetailDto::from_workflow(&workflow, &[], &[]);
 
         assert_eq!(dto.name, "Test Workflow");
         assert_eq!(dto.status, "created");

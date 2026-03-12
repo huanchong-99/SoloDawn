@@ -20,7 +20,7 @@ use db::{
 };
 use services::services::{
     cc_switch::CCSwitchService,
-    terminal::{CliDetector, ProcessManager, TerminalLauncher},
+    terminal::{ProcessManager, TerminalLauncher},
 };
 use uuid::Uuid;
 
@@ -180,7 +180,7 @@ async fn test_terminal_full_lifecycle() {
     );
 
     // Create test data
-    let (workflow_id, workflow_task_id, _workspace_id) = create_test_terminal_data(&db).await;
+    let (_workflow_id, workflow_task_id, _workspace_id) = create_test_terminal_data(&db).await;
 
     // Use pre-seeded cli_type and model_config from migrations
     let cli_type_id = "cli-claude-code";
@@ -304,7 +304,7 @@ async fn test_terminal_full_lifecycle() {
 #[tokio::test]
 async fn test_terminal_lifecycle_cleanup() {
     // Test cleanup verification independently
-    let db = setup_test_db().await;
+    let _db = setup_test_db().await;
 
     let process_manager = Arc::new(ProcessManager::new());
     let temp_dir = tempfile::tempdir().unwrap();

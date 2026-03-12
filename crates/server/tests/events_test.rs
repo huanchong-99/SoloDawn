@@ -48,6 +48,8 @@ async fn create_minimal_workflow(deployment: &DeploymentImpl, project_id: Uuid) 
         name: "Test Workflow".to_string(),
         description: Some("Test description".to_string()),
         status: "ready".to_string(),
+        execution_mode: "diy".to_string(),
+        initial_goal: None,
         use_slash_commands: false,
         orchestrator_enabled: true,
         orchestrator_api_type: Some("openai-compatible".to_string()),
@@ -87,6 +89,9 @@ fn test_agent_config() -> AgentConfig {
         max_retries: 3,
         retry_delay_ms: 1000,
         rate_limit_requests_per_second: 10,
+        auto_merge_on_completion: false,
+        fallback_providers: vec![],
+        quality_gate_mode: "off".to_string(),
     }
 }
 

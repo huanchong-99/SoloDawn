@@ -2,7 +2,7 @@
 //!
 //! Tests for monitoring git repositories and parsing commit metadata.
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use services::services::{
     git_watcher::{CommitMetadata, GitWatcher, GitWatcherConfig},
@@ -30,9 +30,7 @@ fn create_test_commit_message(
 
 /// Helper to create a test commit message with all fields
 fn create_full_commit_message() -> String {
-    format!(
-        "feat(14.5): create GitWatcher service\n\nImplementation of GitWatcher for commit monitoring.\n\n---METADATA---\nworkflow_id: wf-123\ntask_id: task-456\nterminal_id: terminal-789\nterminal_order: 0\ncli: claude-code\nmodel: sonnet-4.5\nstatus: completed\nnext_action: continue"
-    )
+    "feat(14.5): create GitWatcher service\n\nImplementation of GitWatcher for commit monitoring.\n\n---METADATA---\nworkflow_id: wf-123\ntask_id: task-456\nterminal_id: terminal-789\nterminal_order: 0\ncli: claude-code\nmodel: sonnet-4.5\nstatus: completed\nnext_action: continue".to_string()
 }
 
 #[cfg(test)]
@@ -69,9 +67,7 @@ mod commit_metadata_tests {
 
     #[test]
     fn test_parse_commit_with_issues() {
-        let message = format!(
-            "Fix authentication bug\n\n---METADATA---\nworkflow_id: wf-123\ntask_id: task-456\nterminal_id: terminal-789\nstatus: failed\nseverity: error\nissues: [{{\"severity\":\"error\",\"file\":\"src/auth.rs\",\"line\":42,\"message\":\"Null pointer dereference\",\"suggestion\":\"Add null check\"}}]\nnext_action: retry"
-        );
+        let message = "Fix authentication bug\n\n---METADATA---\nworkflow_id: wf-123\ntask_id: task-456\nterminal_id: terminal-789\nstatus: failed\nseverity: error\nissues: [{\"severity\":\"error\",\"file\":\"src/auth.rs\",\"line\":42,\"message\":\"Null pointer dereference\",\"suggestion\":\"Add null check\"}]\nnext_action: retry".to_string();
 
         let metadata = CommitMetadata::parse(&message).expect("Failed to parse metadata");
 
@@ -109,9 +105,7 @@ mod commit_metadata_tests {
 
     #[test]
     fn test_parse_commit_with_optional_fields() {
-        let message = format!(
-            "Implement feature\n\n---METADATA---\nworkflow_id: wf-123\ntask_id: task-456\nterminal_id: terminal-789\nstatus: completed\nreviewed_terminal: terminal-001\nnext_action: review"
-        );
+        let message = "Implement feature\n\n---METADATA---\nworkflow_id: wf-123\ntask_id: task-456\nterminal_id: terminal-789\nstatus: completed\nreviewed_terminal: terminal-001\nnext_action: review".to_string();
 
         let metadata = CommitMetadata::parse(&message).expect("Failed to parse metadata");
 
@@ -227,7 +221,7 @@ mod git_watcher_tests {
         // Subscribe to messages before creating watcher (which consumes message_bus)
         let mut receiver = message_bus.subscribe_broadcast();
 
-        let mut watcher =
+        let watcher =
             GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
         // Start watching in background
@@ -276,7 +270,7 @@ mod git_watcher_tests {
         // Subscribe to messages before creating watcher
         let mut receiver = message_bus.subscribe_broadcast();
 
-        let mut watcher =
+        let watcher =
             GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
         // Start watching in background
@@ -316,7 +310,7 @@ mod git_watcher_tests {
         // Subscribe to messages before creating watcher
         let mut receiver = message_bus.subscribe_broadcast();
 
-        let mut watcher =
+        let watcher =
             GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
         // Start watching in background
@@ -372,7 +366,7 @@ mod git_watcher_tests {
         };
 
         let mut receiver = message_bus.subscribe_broadcast();
-        let mut watcher =
+        let watcher =
             GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
         let watcher_handle = tokio::spawn(async move {
@@ -428,7 +422,7 @@ mod git_watcher_tests {
             poll_interval_ms: 50,
         };
 
-        let mut watcher =
+        let watcher =
             GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
         // Start watching

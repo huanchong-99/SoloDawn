@@ -467,12 +467,12 @@ mod tests {
         let model_id = format!("test-model-{}", Uuid::new_v4().simple());
         let workflow_id = Uuid::new_v4().to_string();
         sqlx::query(
-            r#"
+            r"
             INSERT INTO cli_type (
                 id, name, display_name, detect_command, install_command,
                 install_guide_url, config_file_path, is_system, created_at
             ) VALUES (?1, ?2, ?3, ?4, NULL, NULL, NULL, 0, ?5)
-            "#,
+            ",
         )
         .bind(&cli_id)
         .bind(&cli_id)
@@ -483,12 +483,12 @@ mod tests {
         .await
         .expect("cli type should be inserted");
         sqlx::query(
-            r#"
+            r"
             INSERT INTO model_config (
                 id, cli_type_id, name, display_name, api_model_id,
                 is_default, is_official, created_at, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 1, ?6, ?7)
-            "#,
+            ",
         )
         .bind(&model_id)
         .bind(&cli_id)

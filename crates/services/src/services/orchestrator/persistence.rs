@@ -326,6 +326,5 @@ impl StatePersistence {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     // Note: Integration tests are in persistence_test.rs
 }

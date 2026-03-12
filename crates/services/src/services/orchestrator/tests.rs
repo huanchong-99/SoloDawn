@@ -982,7 +982,7 @@ mod orchestrator_tests {
             ",
         )
         .bind(&workflow_id)
-        .bind(&project_id)
+        .bind(project_id)
         .bind("test-workflow")
         .bind("main")
         .bind("cli-claude-code") // From migration
@@ -1137,7 +1137,7 @@ mod orchestrator_tests {
             ",
         )
         .bind(&workflow_id)
-        .bind(&project_id)
+        .bind(project_id)
         .bind("test-workflow")
         .bind("main")
         .bind("cli-claude-code")
@@ -1262,7 +1262,7 @@ mod orchestrator_tests {
             ",
         )
         .bind(&workflow_id)
-        .bind(&project_id)
+        .bind(project_id)
         .bind("test-workflow")
         .bind("main")
         .bind("cli-claude-code")
@@ -1372,7 +1372,7 @@ mod orchestrator_tests {
             ",
         )
         .bind(&workflow_id)
-        .bind(&project_id)
+        .bind(project_id)
         .bind("test-workflow")
         .bind("main")
         .bind("cli-claude-code")
@@ -2130,7 +2130,7 @@ mod orchestrator_tests {
             ",
         )
         .bind(&workflow_id)
-        .bind(&project_id)
+        .bind(project_id)
         .bind("test-workflow")
         .bind("main")
         .bind("cli-claude-code") // From migration
@@ -2202,11 +2202,11 @@ mod orchestrator_tests {
 
         // Simulate a terminal that has been quiet for >40s so completion can proceed immediately.
         sqlx::query(
-            r#"
+            r"
             UPDATE terminal
             SET status = 'working', started_at = ?1, updated_at = ?1
             WHERE id = ?2
-            "#,
+            ",
         )
         .bind(chrono::Utc::now() - chrono::Duration::seconds(90))
         .bind(&terminal.id)
@@ -2252,14 +2252,14 @@ mod orchestrator_tests {
 
         // Create valid commit message (KV format, not JSON)
         let commit_message = format!(
-            r#"Terminal completed
+            r"Terminal completed
 
 ---METADATA---
 workflow_id: {}
 task_id: {}
 terminal_id: {}
 status: completed
-next_action: handoff"#,
+next_action: handoff",
             workflow.id, terminal.workflow_task_id, terminal.id
         );
 
@@ -2294,11 +2294,11 @@ next_action: handoff"#,
 
         // Terminal is currently executing but still within quiet window.
         sqlx::query(
-            r#"
+            r"
             UPDATE terminal
             SET status = 'working', started_at = ?1, updated_at = ?1
             WHERE id = ?2
-            "#,
+            ",
         )
         .bind(chrono::Utc::now())
         .bind(&terminal.id)
@@ -2342,14 +2342,14 @@ next_action: handoff"#,
             .await;
 
         let commit_message = format!(
-            r#"Terminal completed
+            r"Terminal completed
 
 ---METADATA---
 workflow_id: {}
 task_id: {}
 terminal_id: {}
 status: completed
-next_action: handoff"#,
+next_action: handoff",
             workflow.id, terminal.workflow_task_id, terminal.id
         );
 
@@ -2380,11 +2380,11 @@ next_action: handoff"#,
         let (db, workflow, terminal) = setup_test_workflow().await;
 
         sqlx::query(
-            r#"
+            r"
             UPDATE terminal
             SET status = 'working', started_at = ?1, updated_at = ?1
             WHERE id = ?2
-            "#,
+            ",
         )
         .bind(chrono::Utc::now())
         .bind(&terminal.id)
@@ -2428,14 +2428,14 @@ next_action: handoff"#,
             .await;
 
         let commit_message = format!(
-            r#"Terminal completed
+            r"Terminal completed
 
 ---METADATA---
 workflow_id: {}
 task_id: {}
 terminal_id: {}
 status: completed
-next_action: handoff"#,
+next_action: handoff",
             workflow.id, terminal.workflow_task_id, terminal.id
         );
 
@@ -2482,11 +2482,11 @@ next_action: handoff"#,
         let (db, workflow, terminal) = setup_test_workflow().await;
 
         sqlx::query(
-            r#"
+            r"
             UPDATE terminal
             SET status = 'waiting', started_at = ?1, updated_at = ?1
             WHERE id = ?2
-            "#,
+            ",
         )
         .bind(chrono::Utc::now() - chrono::Duration::seconds(90))
         .bind(&terminal.id)
@@ -2526,14 +2526,14 @@ next_action: handoff"#,
         .unwrap();
 
         let commit_message = format!(
-            r#"Terminal completed
+            r"Terminal completed
 
 ---METADATA---
 workflow_id: {}
 task_id: {}
 terminal_id: {}
 status: completed
-next_action: handoff"#,
+next_action: handoff",
             workflow.id, terminal.workflow_task_id, terminal.id
         );
 
@@ -2558,11 +2558,11 @@ next_action: handoff"#,
         let second_terminal_id = terminals[1].0.clone();
 
         sqlx::query(
-            r#"
+            r"
             UPDATE terminal
             SET status = 'waiting', started_at = ?1, updated_at = ?1
             WHERE workflow_task_id = ?2
-            "#,
+            ",
         )
         .bind(chrono::Utc::now() - chrono::Duration::seconds(90))
         .bind(&task_id)
@@ -2602,14 +2602,14 @@ next_action: handoff"#,
         .unwrap();
 
         let commit_message = format!(
-            r#"Terminal completed
+            r"Terminal completed
 
 ---METADATA---
 workflow_id: {}
 task_id: {}
 terminal_id: {}
 status: completed
-next_action: handoff"#,
+next_action: handoff",
             workflow_id, task_id, second_terminal_id
         );
 
@@ -2645,11 +2645,11 @@ next_action: handoff"#,
 
         // Make first terminal actively working and old enough to satisfy quiet-window checks.
         sqlx::query(
-            r#"
+            r"
             UPDATE terminal
             SET status = 'working', started_at = ?1, updated_at = ?1
             WHERE id = ?2
-            "#,
+            ",
         )
         .bind(chrono::Utc::now() - chrono::Duration::seconds(90))
         .bind(&first_terminal_id)
@@ -2691,14 +2691,14 @@ next_action: handoff"#,
         let mut second_terminal_rx = message_bus.subscribe(&second_pty_session_id).await;
 
         let commit_message = format!(
-            r#"Terminal completed
+            r"Terminal completed
 
 ---METADATA---
 workflow_id: {}
 task_id: {}
 terminal_id: {}
 status: completed
-next_action: handoff"#,
+next_action: handoff",
             workflow_id, task_id, first_terminal_id
         );
 
@@ -2778,14 +2778,14 @@ next_action: handoff"#,
             .await;
 
         let commit_message = format!(
-            r#"Review passed
+            r"Review passed
 
 ---METADATA---
 workflow_id: {}
 task_id: {}
 terminal_id: reviewer-1
 status: review_pass
-reviewed_terminal: {}"#,
+reviewed_terminal: {}",
             workflow.id, terminal.workflow_task_id, terminal.id
         );
 
@@ -2849,14 +2849,14 @@ reviewed_terminal: {}"#,
         .unwrap();
 
         // Create commit with different workflow ID (KV format)
-        let commit_message = r#"Terminal completed
+        let commit_message = r"Terminal completed
 
 ---METADATA---
 workflow_id: different-workflow
 task_id: task-1
 terminal_id: term-1
 status: completed
-next_action: handoff"#;
+next_action: handoff";
 
         // Should succeed but do nothing (workflow mismatch)
         let result = agent
@@ -3012,11 +3012,11 @@ next_action: handoff"#;
 
         // Ensure terminal is already quiet long enough to satisfy completion gate.
         sqlx::query(
-            r#"
+            r"
             UPDATE terminal
             SET status = 'working', started_at = ?1, updated_at = ?1
             WHERE id = ?2
-            "#,
+            ",
         )
         .bind(chrono::Utc::now() - chrono::Duration::seconds(90))
         .bind(&terminal.id)
@@ -3057,14 +3057,14 @@ next_action: handoff"#;
 
         // Create valid commit message
         let commit_message = format!(
-            r#"Terminal completed
+            r"Terminal completed
 
 ---METADATA---
 workflow_id: {}
 task_id: {}
 terminal_id: {}
 status: completed
-next_action: handoff"#,
+next_action: handoff",
             workflow.id, terminal.workflow_task_id, terminal.id
         );
 
@@ -3101,11 +3101,11 @@ next_action: handoff"#,
 
         // Mark first terminal as actively working and old enough to pass quiet-window checks.
         sqlx::query(
-            r#"
+            r"
             UPDATE terminal
             SET status = 'working', started_at = ?1, updated_at = ?1
             WHERE id = ?2
-            "#,
+            ",
         )
         .bind(chrono::Utc::now() - chrono::Duration::seconds(90))
         .bind(&first_terminal_id)
@@ -3206,12 +3206,12 @@ next_action: handoff"#,
         let started_at = chrono::Utc::now() - chrono::Duration::seconds(90);
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO workflow_task (
                 id, workflow_id, name, branch, order_index,
                 created_at, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-            "#,
+            ",
         )
         .bind(&second_task_id)
         .bind(&workflow.id)
@@ -3225,12 +3225,12 @@ next_action: handoff"#,
         .unwrap();
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO terminal (
                 id, workflow_task_id, cli_type_id, model_config_id,
                 order_index, status, pty_session_id, started_at, created_at, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-            "#,
+            ",
         )
         .bind(&second_terminal_id)
         .bind(&second_task_id)
@@ -3247,11 +3247,11 @@ next_action: handoff"#,
         .unwrap();
 
         sqlx::query(
-            r#"
+            r"
             UPDATE terminal
             SET status = 'working', started_at = ?1, updated_at = ?1
             WHERE id = ?2
-            "#,
+            ",
         )
         .bind(started_at)
         .bind(&first_terminal.id)
@@ -3360,11 +3360,11 @@ next_action: handoff"#,
         let (db, workflow, terminal) = setup_test_workflow().await;
 
         sqlx::query(
-            r#"
+            r"
             UPDATE terminal
             SET status = 'working', started_at = ?1, updated_at = ?1
             WHERE id = ?2
-            "#,
+            ",
         )
         .bind(chrono::Utc::now() - chrono::Duration::seconds(90))
         .bind(&terminal.id)

@@ -190,6 +190,5 @@ impl ErrorHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     // Note: Integration tests are in error_handler_test.rs
 }

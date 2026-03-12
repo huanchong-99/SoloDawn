@@ -8,7 +8,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, 
 
 /// Benchmark database query performance
 fn bench_db_queries(c: &mut Criterion) {
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _rt = tokio::runtime::Runtime::new().unwrap();
 
     let mut group = c.benchmark_group("database_queries");
     group.measurement_time(Duration::from_secs(10));

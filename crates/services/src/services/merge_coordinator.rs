@@ -272,12 +272,9 @@ impl MergeCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_merge_coordinator_creation() {
         // This is a placeholder test to verify the module compiles
         // Real tests are in merge_coordinator_test.rs
-        assert!(true);
     }
 }

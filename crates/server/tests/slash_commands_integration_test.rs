@@ -7,63 +7,57 @@
 //! - End-to-end command execution flow
 
 use db::models::{
-    CliType, CreateTerminalRequest, CreateWorkflowRequest, CreateWorkflowTaskRequest,
-    ModelConfig, SlashCommandPreset, TerminalConfig, Workflow,
+    CreateWorkflowRequest, SlashCommandPreset, TerminalConfig, Workflow,
     WorkflowCommand, WorkflowCommandRequest,
 };
-use serde_json::json;
-use server::DeploymentImpl;
+use server::{Deployment, DeploymentImpl};
 use uuid::Uuid;
 
 /// Helper: Setup test environment
 async fn setup_test() -> (DeploymentImpl, String) {
-    let deployment = DeploymentImpl::new()
+    let deployment: DeploymentImpl = DeploymentImpl::new()
         .await
         .expect("Failed to create deployment");
 
-    // Create a test project
-    let project_id = Uuid::new_v4().to_string();
-    db::models::Project::create(
-        &deployment.db().pool,
-        &db::models::Project {
-            id: project_id.clone(),
-            name: "Test Project".to_string(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        },
+    // Create a test project via raw SQL (Project struct uses Uuid, not String)
+    let project_id = Uuid::new_v4();
+    let project_id_str = project_id.to_string();
+    sqlx::query(
+        "INSERT INTO projects (id, name) VALUES (?1, ?2)"
     )
+    .bind(project_id)
+    .bind("Test Project")
+    .execute(&deployment.db().pool)
     .await
     .expect("Failed to create project");
 
-    // Create CLI type
-    let cli_type = CliType {
-        id: "test-cli".to_string(),
-        name: "Test CLI".to_string(),
-        command: "echo".to_string(),
-        args_template: None,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    };
-    CliType::create(&deployment.db().pool, &cli_type)
-        .await
-        .expect("Failed to create CLI type");
+    // Create CLI type via raw SQL (CliType has no create method)
+    sqlx::query(
+        r"INSERT INTO cli_type (id, name, display_name, detect_command, is_system, created_at)
+          VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))"
+    )
+    .bind("test-cli")
+    .bind("test-cli")
+    .bind("Test CLI")
+    .bind("echo test")
+    .execute(&deployment.db().pool)
+    .await
+    .expect("Failed to create CLI type");
 
-    // Create model config
-    let model_config = ModelConfig {
-        id: "test-model".to_string(),
-        cli_type_id: "test-cli".to_string(),
-        name: "Test Model".to_string(),
-        api_base_url: None,
-        api_key: None,
-        model: None,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    };
-    ModelConfig::create(&deployment.db().pool, &model_config)
-        .await
-        .expect("Failed to create model config");
+    // Create model config via raw SQL (ModelConfig has no create method)
+    sqlx::query(
+        r"INSERT INTO model_config (id, cli_type_id, name, display_name, is_default, is_official, created_at, updated_at)
+          VALUES (?1, ?2, ?3, ?4, 0, 0, datetime('now'), datetime('now'))"
+    )
+    .bind("test-model")
+    .bind("test-cli")
+    .bind("test-model")
+    .bind("Test Model")
+    .execute(&deployment.db().pool)
+    .await
+    .expect("Failed to create model config");
 
-    (deployment, project_id)
+    (deployment, project_id_str)
 }
 
 /// Helper: Create a slash command preset
@@ -73,133 +67,127 @@ async fn create_test_preset(
     description: &str,
     template: &str,
 ) -> SlashCommandPreset {
-    let preset = SlashCommandPreset {
-        id: Uuid::new_v4().to_string(),
-        command: command.to_string(),
-        description: description.to_string(),
-        prompt_template: Some(template.to_string()),
-        is_system: false,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    };
-
-    sqlx::query(
-        r"
-        INSERT INTO slash_command_preset (id, command, description, prompt_template, is_system, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-        "
-    )
-    .bind(&preset.id)
-    .bind(&preset.command)
-    .bind(&preset.description)
-    .bind(&preset.prompt_template)
-    .bind(preset.is_system)
-    .bind(preset.created_at)
-    .bind(preset.updated_at)
-    .execute(pool)
-    .await
-    .expect("Failed to create preset");
-
-    preset
-}
-
-// ============================================================================
-// Tests
-// ============================================================================
-
-#[tokio::test]
-async fn test_list_all_presets() {
-    let (deployment, _) = setup_test().await;
-
-    // Create test presets
-    create_test_preset(
-        &deployment.db().pool,
-        "/test1",
-        "Test command 1",
-        "Template 1 with {{var}}",
-    )
-    .await;
-
-    create_test_preset(
-        &deployment.db().pool,
-        "/test2",
-        "Test command 2",
-        "Template 2",
-    )
-    .await;
-
-    // List all presets
-    let presets = SlashCommandPreset::find_all(&deployment.db().pool)
+    SlashCommandPreset::create(pool, command, description, Some(template))
         .await
-        .expect("Failed to list presets");
-
-    assert!(presets.len() >= 2, "Should have at least 2 presets");
-
-    // Verify ordering: system presets first, then alphabetically by command
-    let user_presets: Vec<_> = presets.iter().filter(|p| !p.is_system).collect();
-    assert_eq!(user_presets.len(), 2, "Should have 2 user presets");
+        .expect("Failed to create test preset")
 }
 
 #[tokio::test]
-async fn test_create_preset() {
+async fn test_crud_slash_command_presets() {
     let (deployment, _) = setup_test().await;
+    let pool = &deployment.db().pool;
 
+    // Create
     let preset = create_test_preset(
-        &deployment.db().pool,
-        "/custom",
-        "Custom command",
-        "Custom {{param}} template",
+        pool,
+        "/test-crud",
+        "Test CRUD command",
+        "Template for {{action}}",
     )
     .await;
 
-    // Verify preset was created
-    let all_presets = SlashCommandPreset::find_all(&deployment.db().pool)
-        .await
-        .expect("Failed to list presets");
-
-    let found = all_presets.iter().find(|p| p.id == preset.id);
-    assert!(found.is_some(), "Preset should exist");
-    let found = found.unwrap();
-
-    assert_eq!(found.command, "/custom");
-    assert_eq!(found.description, "Custom command");
+    assert_eq!(preset.command, "/test-crud");
+    assert_eq!(preset.description, "Test CRUD command");
     assert_eq!(
-        found.prompt_template,
-        Some("Custom {{param}} template".to_string())
+        preset.prompt_template,
+        Some("Template for {{action}}".to_string())
     );
-    assert!(!found.is_system);
+    assert!(!preset.is_system);
+
+    // Read
+    let found = SlashCommandPreset::find_by_id(pool, &preset.id)
+        .await
+        .expect("Failed to find preset")
+        .expect("Preset not found");
+    assert_eq!(found.id, preset.id);
+
+    // Update
+    let updated = SlashCommandPreset::update(
+        pool,
+        &preset.id,
+        Some("/test-crud-updated"),
+        Some("Updated description"),
+        Some("Updated template"),
+    )
+    .await
+    .expect("Failed to update preset");
+    assert_eq!(updated.command, "/test-crud-updated");
+    assert_eq!(updated.description, "Updated description");
+
+    // Delete
+    SlashCommandPreset::delete(pool, &preset.id)
+        .await
+        .expect("Failed to delete preset");
+
+    let deleted = SlashCommandPreset::find_by_id(pool, &preset.id)
+        .await
+        .expect("Failed to query after delete");
+    assert!(deleted.is_none(), "Preset should be deleted");
 }
 
 #[tokio::test]
-async fn test_workflow_with_commands() {
-    let (deployment, project_id) = setup_test().await;
+async fn test_multiple_presets() {
+    let (deployment, _) = setup_test().await;
+    let pool = &deployment.db().pool;
 
-    // Create test presets
+    let _preset1 = create_test_preset(
+        pool,
+        "/multi-cmd-1",
+        "First command",
+        "Template 1: {{var1}}",
+    )
+    .await;
+
+    let _preset2 = create_test_preset(
+        pool,
+        "/multi-cmd-2",
+        "Second command",
+        "Template 2: {{var2}}",
+    )
+    .await;
+
+    let all = SlashCommandPreset::find_all(pool)
+        .await
+        .expect("Failed to list presets");
+
+    let test_presets: Vec<_> = all
+        .iter()
+        .filter(|p| p.command.starts_with("/multi-cmd"))
+        .collect();
+    assert_eq!(test_presets.len(), 2, "Should have 2 test presets");
+}
+
+#[tokio::test]
+async fn test_workflow_commands_with_presets() {
+    let (deployment, project_id) = setup_test().await;
+    let pool = &deployment.db().pool;
+
+    // Create presets
     let preset1 = create_test_preset(
-        &deployment.db().pool,
-        "/review",
-        "Review code",
-        "Please review the following code:\n{{code_path}}",
+        pool,
+        "/wf-cmd-write",
+        "Write code",
+        "Write code at {{code_path}}",
     )
     .await;
 
     let preset2 = create_test_preset(
-        &deployment.db().pool,
-        "/test",
+        pool,
+        "/wf-cmd-test",
         "Run tests",
-        "Run tests for {{module}} with coverage {{coverage}}",
+        "Test {{module}} with {{coverage}} coverage",
     )
     .await;
 
-    // Create workflow with commands
+    // Create workflow
     let workflow_id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now();
 
     let workflow = Workflow {
         id: workflow_id.clone(),
         project_id: Uuid::parse_str(&project_id).expect("valid project id"),
-        name: "Test Workflow".to_string(),
-        description: Some("Test".to_string()),
+        name: "Commands Workflow".to_string(),
+        description: Some("Workflow with commands".to_string()),
         status: "created".to_string(),
         execution_mode: "diy".to_string(),
         initial_goal: None,
@@ -223,35 +211,35 @@ async fn test_workflow_with_commands() {
         updated_at: now,
     };
 
-    Workflow::create(&deployment.db().pool, &workflow)
+    Workflow::create(pool, &workflow)
         .await
         .expect("Failed to create workflow");
 
-    // Create workflow commands with custom params
-    let cmd1 = WorkflowCommand::create(
-        &deployment.db().pool,
+    // Create workflow commands
+    WorkflowCommand::create(
+        pool,
         &workflow_id,
         &preset1.id,
         0,
         Some(r#"{"code_path": "src/main.rs"}"#),
     )
     .await
-    .expect("Failed to create command 1");
+    .expect("Failed to create workflow command 1");
 
-    let cmd2 = WorkflowCommand::create(
-        &deployment.db().pool,
+    WorkflowCommand::create(
+        pool,
         &workflow_id,
         &preset2.id,
         1,
         Some(r#"{"module": "auth", "coverage": "80%"}"#),
     )
     .await
-    .expect("Failed to create command 2");
+    .expect("Failed to create workflow command 2");
 
-    // Retrieve commands for workflow
-    let commands = WorkflowCommand::find_by_workflow(&deployment.db().pool, &workflow_id)
+    // Verify commands
+    let commands = WorkflowCommand::find_by_workflow(pool, &workflow_id)
         .await
-        .expect("Failed to fetch workflow commands");
+        .expect("Failed to fetch commands");
 
     assert_eq!(commands.len(), 2, "Should have 2 commands");
 
@@ -274,7 +262,7 @@ async fn test_workflow_with_commands() {
 
 #[tokio::test]
 async fn test_template_rendering() {
-    use services::template_renderer::{TemplateRenderer, WorkflowContext};
+    use services::services::template_renderer::{TemplateRenderer, WorkflowContext};
 
     let renderer = TemplateRenderer::new();
 
@@ -324,10 +312,11 @@ async fn test_template_rendering() {
 #[tokio::test]
 async fn test_full_workflow_with_commands_api() {
     let (deployment, project_id) = setup_test().await;
+    let pool = &deployment.db().pool;
 
     // Create test preset
     let preset = create_test_preset(
-        &deployment.db().pool,
+        pool,
         "/deploy",
         "Deploy to production",
         "Deploy {{service}} to {{env}} with {{strategy}} strategy",
@@ -408,7 +397,7 @@ async fn test_full_workflow_with_commands_api() {
         updated_at: now,
     };
 
-    Workflow::create(&deployment.db().pool, &workflow)
+    Workflow::create(pool, &workflow)
         .await
         .expect("Failed to create workflow");
 
@@ -416,7 +405,7 @@ async fn test_full_workflow_with_commands_api() {
     if let Some(commands) = request.commands {
         for (index, cmd_req) in commands.iter().enumerate() {
             WorkflowCommand::create(
-                &deployment.db().pool,
+                pool,
                 &workflow_id,
                 &cmd_req.preset_id,
                 index as i32,
@@ -428,7 +417,7 @@ async fn test_full_workflow_with_commands_api() {
     }
 
     // Verify workflow was created with commands
-    let commands = WorkflowCommand::find_by_workflow(&deployment.db().pool, &workflow_id)
+    let commands = WorkflowCommand::find_by_workflow(pool, &workflow_id)
         .await
         .expect("Failed to fetch commands");
 
@@ -443,6 +432,7 @@ async fn test_full_workflow_with_commands_api() {
 #[tokio::test]
 async fn test_workflow_without_commands() {
     let (deployment, project_id) = setup_test().await;
+    let pool = &deployment.db().pool;
 
     // Create workflow without commands
     let workflow_id = Uuid::new_v4().to_string();
@@ -476,12 +466,12 @@ async fn test_workflow_without_commands() {
         updated_at: now,
     };
 
-    Workflow::create(&deployment.db().pool, &workflow)
+    Workflow::create(pool, &workflow)
         .await
         .expect("Failed to create workflow");
 
     // Verify no commands
-    let commands = WorkflowCommand::find_by_workflow(&deployment.db().pool, &workflow_id)
+    let commands = WorkflowCommand::find_by_workflow(pool, &workflow_id)
         .await
         .expect("Failed to fetch commands");
 
@@ -491,37 +481,24 @@ async fn test_workflow_without_commands() {
 #[tokio::test]
 async fn test_system_preset_protection() {
     let (deployment, _) = setup_test().await;
+    let pool = &deployment.db().pool;
 
-    // Create a system preset
-    let system_preset = SlashCommandPreset {
-        id: Uuid::new_v4().to_string(),
-        command: "/system-cmd".to_string(),
-        description: "System command".to_string(),
-        prompt_template: Some("System template".to_string()),
-        is_system: true,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    };
-
+    // Create a system preset via raw SQL
+    let system_id = Uuid::new_v4().to_string();
     sqlx::query(
-        r"
-        INSERT INTO slash_command_preset (id, command, description, prompt_template, is_system, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-        "
+        r"INSERT INTO slash_command_preset (id, command, description, prompt_template, is_system, created_at, updated_at)
+          VALUES (?1, ?2, ?3, ?4, 1, datetime('now'), datetime('now'))"
     )
-    .bind(&system_preset.id)
-    .bind(&system_preset.command)
-    .bind(&system_preset.description)
-    .bind(&system_preset.prompt_template)
-    .bind(system_preset.is_system)
-    .bind(system_preset.created_at)
-    .bind(system_preset.updated_at)
-    .execute(&deployment.db().pool)
+    .bind(&system_id)
+    .bind("/system-cmd")
+    .bind("System command")
+    .bind("System template")
+    .execute(pool)
     .await
     .expect("Failed to create system preset");
 
     // List all presets - system presets should be included
-    let presets = SlashCommandPreset::find_all(&deployment.db().pool)
+    let presets = SlashCommandPreset::find_all(pool)
         .await
         .expect("Failed to list presets");
 
@@ -532,7 +509,7 @@ async fn test_system_preset_protection() {
 
 #[tokio::test]
 async fn test_complex_template_rendering() {
-    use services::template_renderer::{TemplateRenderer, WorkflowContext};
+    use services::services::template_renderer::TemplateRenderer;
 
     let renderer = TemplateRenderer::new();
 

@@ -240,7 +240,7 @@ async fn test_workflow_status_transition_created_to_ready() {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&workflow_id)
-    .bind(&project_id)
+    .bind(project_id)
     .bind("Test Workflow")
     .bind("created")
     .bind("cli-claude-code")

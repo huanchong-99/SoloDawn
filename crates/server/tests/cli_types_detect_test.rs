@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use server::DeploymentImpl;
+use server::{Deployment, DeploymentImpl};
 
 #[tokio::test]
 async fn test_cli_detector_arc_creation() {

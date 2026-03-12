@@ -1158,6 +1158,7 @@ mod tests {
 
         // Verify method exists (compile-time check)
         let terminals: Vec<db::models::Terminal> = vec![];
+        #[allow(deprecated)]
         let _ = service.switch_for_terminals(&terminals).await;
     }
 

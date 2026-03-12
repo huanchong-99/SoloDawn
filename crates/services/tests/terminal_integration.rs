@@ -156,30 +156,27 @@ async fn test_process_manager_cleanup() {
     let manager = ProcessManager::new();
     let temp_dir = tempfile::tempdir().unwrap();
 
-    // Spawn multiple processes
+    // Spawn multiple processes using PTY
+    #[cfg(unix)]
+    let shell = "sh";
+    #[cfg(windows)]
+    let shell = "cmd.exe";
+
     for i in 0..3 {
-        #[cfg(unix)]
-        let mut cmd = tokio::process::Command::new("sleep");
-        #[cfg(unix)]
-        cmd.arg("1");
-
-        #[cfg(windows)]
-        let mut cmd = tokio::process::Command::new("timeout");
-        #[cfg(windows)]
-        cmd.args(["/t", "1"]);
-
+        let terminal_id = format!("test-{}", i);
         let _ = manager
-            .spawn(&format!("test-{}", i), cmd, temp_dir.path())
+            .spawn_pty(&terminal_id, shell, temp_dir.path(), 80, 24)
             .await;
     }
 
     let running: Vec<_> = manager.list_running().await;
     assert_eq!(running.len(), 3);
 
-    // Wait for processes to exit
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-    manager.cleanup().await;
+    // Kill all terminals to clean up
+    for i in 0..3 {
+        let terminal_id = format!("test-{}", i);
+        let _ = manager.kill_terminal(&terminal_id).await;
+    }
 
     let running_after: Vec<_> = manager.list_running().await;
     assert_eq!(running_after.len(), 0);

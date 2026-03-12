@@ -4987,13 +4987,13 @@ mod tests {
         .unwrap();
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO workflow (
                 id, project_id, name, status, target_branch,
                 merge_terminal_cli_id, merge_terminal_model_id,
                 created_at, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-            "#,
+            ",
         )
         .bind(&workflow_id)
         .bind(project_id)
@@ -5009,12 +5009,12 @@ mod tests {
         .unwrap();
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO workflow_task (
                 id, workflow_id, name, branch, status, order_index,
                 started_at, created_at, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-            "#,
+            ",
         )
         .bind(&task_id)
         .bind(&workflow_id)
@@ -5030,12 +5030,12 @@ mod tests {
         .unwrap();
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO terminal (
                 id, workflow_task_id, cli_type_id, model_config_id,
                 order_index, status, pty_session_id, started_at, created_at, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-            "#,
+            ",
         )
         .bind(&terminal_id)
         .bind(&task_id)
@@ -5186,11 +5186,11 @@ mod tests {
 
         let now = Utc::now();
         sqlx::query(
-            r#"
+            r"
             UPDATE terminal
             SET status = 'completed', completed_at = ?1, updated_at = ?1
             WHERE id = ?2
-            "#,
+            ",
         )
         .bind(now)
         .bind(&terminal_id)

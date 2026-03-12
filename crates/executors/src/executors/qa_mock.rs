@@ -96,6 +96,7 @@ impl StandardCodingAgentExecutor for QaMockExecutor {
     }
 }
 
+#[allow(clippy::needless_return)]
 fn build_log_replay_script(log_file: &Path) -> String {
     #[cfg(windows)]
     {

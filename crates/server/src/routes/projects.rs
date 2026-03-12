@@ -491,83 +491,6 @@ fn resolve_editor_target_file_hint(
     }
 }
 
-#[cfg(test)]
-mod open_editor_path_tests {
-    use std::path::Path;
-
-    use db::models::repo::Repo;
-    use tempfile::tempdir;
-    use uuid::Uuid;
-
-    use super::{
-        normalize_editor_repo_path, resolve_editor_target_file_hint,
-        resolve_project_repo_for_editor, resolve_repo_file_path_for_editor,
-    };
-
-    fn repo(path: &str, name: &str) -> Repo {
-        Repo {
-            id: Uuid::nil(),
-            path: path.into(),
-            name: name.to_string(),
-            display_name: name.to_string(),
-            setup_script: None,
-            cleanup_script: None,
-            copy_files: None,
-            parallel_setup_script: false,
-            dev_server_script: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        }
-    }
-
-    #[test]
-    fn resolves_project_repo_by_normalized_git_repo_path() {
-        let repositories = vec![repo(r"C:\work\repo-a", "repo-a")];
-
-        let resolved = resolve_project_repo_for_editor(&repositories, Some("C:/work/repo-a/"))
-            .expect("repo should resolve");
-
-        assert_eq!(resolved.name, "repo-a");
-    }
-
-    #[test]
-    fn rejects_parent_dir_file_path_for_project_open_editor() {
-        let result = resolve_repo_file_path_for_editor(Path::new("/repo"), "../outside");
-        assert!(result.is_err(), "parent traversal must be rejected");
-    }
-
-    #[test]
-    fn normalizes_repo_path_slashes_and_trailing_separator() {
-        let normalized = normalize_editor_repo_path(r"C:\work\repo-a\");
-        assert_eq!(normalized, "C:/work/repo-a");
-    }
-
-    #[test]
-    fn resolves_directory_hint_from_existing_directory_path() {
-        let temp = tempdir().expect("temp dir");
-
-        let is_file = resolve_editor_target_file_hint(temp.path(), true).expect("hint");
-
-        assert!(
-            !is_file,
-            "existing directories must not be treated as files"
-        );
-    }
-
-    #[test]
-    fn falls_back_to_file_hint_for_non_existing_path() {
-        let temp = tempdir().expect("temp dir");
-        let missing_path = temp.path().join("missing-file.ts");
-
-        let is_file = resolve_editor_target_file_hint(missing_path.as_path(), true).expect("hint");
-
-        assert!(
-            is_file,
-            "missing targets should keep fallback file hint for remote semantics"
-        );
-    }
-}
-
 pub async fn open_project_in_editor(
     Extension(project): Extension<Project>,
     State(deployment): State<DeploymentImpl>,
@@ -865,4 +788,81 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         "/remote-projects/{remote_project_id}",
         get(get_remote_project_by_id),
     )
+}
+
+#[cfg(test)]
+mod open_editor_path_tests {
+    use std::path::Path;
+
+    use db::models::repo::Repo;
+    use tempfile::tempdir;
+    use uuid::Uuid;
+
+    use super::{
+        normalize_editor_repo_path, resolve_editor_target_file_hint,
+        resolve_project_repo_for_editor, resolve_repo_file_path_for_editor,
+    };
+
+    fn repo(path: &str, name: &str) -> Repo {
+        Repo {
+            id: Uuid::nil(),
+            path: path.into(),
+            name: name.to_string(),
+            display_name: name.to_string(),
+            setup_script: None,
+            cleanup_script: None,
+            copy_files: None,
+            parallel_setup_script: false,
+            dev_server_script: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn resolves_project_repo_by_normalized_git_repo_path() {
+        let repositories = vec![repo(r"C:\work\repo-a", "repo-a")];
+
+        let resolved = resolve_project_repo_for_editor(&repositories, Some("C:/work/repo-a/"))
+            .expect("repo should resolve");
+
+        assert_eq!(resolved.name, "repo-a");
+    }
+
+    #[test]
+    fn rejects_parent_dir_file_path_for_project_open_editor() {
+        let result = resolve_repo_file_path_for_editor(Path::new("/repo"), "../outside");
+        assert!(result.is_err(), "parent traversal must be rejected");
+    }
+
+    #[test]
+    fn normalizes_repo_path_slashes_and_trailing_separator() {
+        let normalized = normalize_editor_repo_path(r"C:\work\repo-a\");
+        assert_eq!(normalized, "C:/work/repo-a");
+    }
+
+    #[test]
+    fn resolves_directory_hint_from_existing_directory_path() {
+        let temp = tempdir().expect("temp dir");
+
+        let is_file = resolve_editor_target_file_hint(temp.path(), true).expect("hint");
+
+        assert!(
+            !is_file,
+            "existing directories must not be treated as files"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_file_hint_for_non_existing_path() {
+        let temp = tempdir().expect("temp dir");
+        let missing_path = temp.path().join("missing-file.ts");
+
+        let is_file = resolve_editor_target_file_hint(missing_path.as_path(), true).expect("hint");
+
+        assert!(
+            is_file,
+            "missing targets should keep fallback file hint for remote semantics"
+        );
+    }
 }

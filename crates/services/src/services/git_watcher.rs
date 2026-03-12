@@ -574,13 +574,13 @@ mod tests {
 
     #[test]
     fn test_parse_commit_metadata_basic() {
-        let message = r#"Complete feature implementation
+        let message = r"Complete feature implementation
 
 ---METADATA---
 workflow_id: abc-123
 task_id: task-456
 terminal_id: terminal-789
-status: completed"#;
+status: completed";
 
         let metadata = CommitMetadata::parse(message).expect("Should parse metadata");
 
@@ -592,7 +592,7 @@ status: completed"#;
 
     #[test]
     fn test_parse_commit_metadata_full() {
-        let message = r#"feat(14.5): create GitWatcher service
+        let message = r"feat(14.5): create GitWatcher service
 
 Implementation details here.
 
@@ -606,7 +606,7 @@ model: sonnet-4.5
 status: completed
 severity: info
 reviewed_terminal: terminal-001
-next_action: continue"#;
+next_action: continue";
 
         let metadata = CommitMetadata::parse(message).expect("Should parse metadata");
 
@@ -645,12 +645,12 @@ next_action: retry"#;
 
     #[test]
     fn test_parse_commit_metadata_missing_required_fields() {
-        let message = r#"Incomplete commit
+        let message = r"Incomplete commit
 
 ---METADATA---
 workflow_id: wf-123
 task_id: task-456
-# missing terminal_id and status"#;
+# missing terminal_id and status";
 
         let metadata = CommitMetadata::parse(message);
         assert!(
@@ -673,13 +673,13 @@ task_id: task-456
     // Tests for the standalone parse_commit_metadata function
     #[test]
     fn test_parse_commit_metadata_standalone_valid() {
-        let message = r#"Complete feature implementation
+        let message = r"Complete feature implementation
 
 ---METADATA---
 workflow_id: abc-123
 task_id: task-456
 terminal_id: terminal-789
-status: completed"#;
+status: completed";
 
         let result = parse_commit_metadata(message);
         assert!(result.is_ok());
@@ -699,12 +699,12 @@ status: completed"#;
 
     #[test]
     fn test_parse_commit_metadata_standalone_missing_required_fields() {
-        let message = r#"Incomplete commit
+        let message = r"Incomplete commit
 
 ---METADATA---
 workflow_id: wf-123
 task_id: task-456
-# missing terminal_id and status"#;
+# missing terminal_id and status";
 
         let result = parse_commit_metadata(message);
         assert!(result.is_err());
@@ -712,7 +712,7 @@ task_id: task-456
 
     #[test]
     fn test_parse_commit_metadata_standalone_with_optional_fields() {
-        let message = r#"Complete with all fields
+        let message = r"Complete with all fields
 
 ---METADATA---
 workflow_id: wf-123
@@ -724,7 +724,7 @@ model: sonnet-4.5
 status: completed
 severity: info
 reviewed_terminal: terminal-001
-next_action: continue"#;
+next_action: continue";
 
         let result = parse_commit_metadata(message);
         assert!(result.is_ok());

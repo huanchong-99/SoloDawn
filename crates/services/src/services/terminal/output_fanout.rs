@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn test_publish_empty_returns_none() {
         let fanout = OutputFanout::new(OutputFanoutConfig::default());
-        let result = fanout.publish("".to_string(), 0);
+        let result = fanout.publish(String::new(), 0);
         assert!(result.is_none());
     }
 

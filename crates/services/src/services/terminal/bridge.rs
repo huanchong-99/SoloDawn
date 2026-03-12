@@ -573,7 +573,7 @@ mod tests {
             "session-1",
             Some(BusMessage::TerminalInput {
                 terminal_id: "term-1".to_string(),
-                session_id: "".to_string(),
+                session_id: String::new(),
                 input: "hello".to_string(),
                 decision: None,
             }),

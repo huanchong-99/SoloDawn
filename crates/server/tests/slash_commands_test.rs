@@ -9,11 +9,9 @@
 
 use std::sync::Arc;
 
-use chrono::Utc;
-use db::models::SlashCommandPreset;
+use http_body_util::BodyExt;
 use serde_json::json;
-use server::{DeploymentImpl, routes::subscription_hub::SubscriptionHub};
-use uuid::Uuid;
+use server::{Deployment, DeploymentImpl, routes::subscription_hub::SubscriptionHub};
 
 /// Helper: Create a test subscription hub
 fn create_test_hub() -> server::routes::SharedSubscriptionHub {
@@ -22,25 +20,28 @@ fn create_test_hub() -> server::routes::SharedSubscriptionHub {
 
 /// Helper: Setup test environment
 async fn setup_test() -> DeploymentImpl {
-    let deployment = DeploymentImpl::new()
+    DeploymentImpl::new()
         .await
-        .expect("Failed to create deployment");
+        .expect("Failed to create deployment")
+}
 
-    deployment
+/// Helper: collect response body bytes
+async fn body_bytes(body: axum::body::Body) -> Vec<u8> {
+    let collected = body.collect().await.unwrap().to_bytes();
+    collected.to_vec()
 }
 
 #[tokio::test]
 async fn test_list_command_presets() {
     let deployment = setup_test().await;
 
-    // List all command presets (should include system presets)
     use axum::{
         body::Body,
         http::{Request, StatusCode},
     };
     use tower::ServiceExt;
 
-    let app = server::routes::router(deployment, create_test_hub());
+    let app = server::routes::build_router(deployment, create_test_hub());
 
     let response = app
         .oneshot(
@@ -55,7 +56,7 @@ async fn test_list_command_presets() {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Parse response body
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = body_bytes(response.into_body()).await;
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
     // Should be a successful response with data array
@@ -77,7 +78,7 @@ async fn test_create_command_preset_success() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::router(deployment, create_test_hub());
+    let app = server::routes::build_router(deployment, create_test_hub());
 
     let new_command = json!({
         "command": "/test-command",
@@ -86,7 +87,6 @@ async fn test_create_command_preset_success() {
     });
 
     let response = app
-        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -101,7 +101,7 @@ async fn test_create_command_preset_success() {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Parse response
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = body_bytes(response.into_body()).await;
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(value["success"], true);
@@ -125,7 +125,7 @@ async fn test_create_command_preset_missing_leading_slash() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::router(deployment, create_test_hub());
+    let app = server::routes::build_router(deployment, create_test_hub());
 
     let new_command = json!({
         "command": "test-command",  // Missing leading slash
@@ -133,7 +133,6 @@ async fn test_create_command_preset_missing_leading_slash() {
     });
 
     let response = app
-        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -148,7 +147,7 @@ async fn test_create_command_preset_missing_leading_slash() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     // Parse response
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = body_bytes(response.into_body()).await;
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(value["success"], false);
@@ -165,16 +164,14 @@ async fn test_create_command_preset_duplicate_command() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::router(deployment, create_test_hub());
-
     let new_command = json!({
         "command": "/duplicate-test",
         "description": "Test command description"
     });
 
     // Create first command - should succeed
+    let app = server::routes::build_router(deployment.clone(), create_test_hub());
     let response1 = app
-        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -189,8 +186,8 @@ async fn test_create_command_preset_duplicate_command() {
     assert_eq!(response1.status(), StatusCode::OK);
 
     // Try to create duplicate - should fail
+    let app = server::routes::build_router(deployment, create_test_hub());
     let response2 = app
-        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -215,7 +212,7 @@ async fn test_create_command_preset_missing_description() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::router(deployment, create_test_hub());
+    let app = server::routes::build_router(deployment, create_test_hub());
 
     let new_command = json!({
         "command": "/test-command"
@@ -223,7 +220,6 @@ async fn test_create_command_preset_missing_description() {
     });
 
     let response = app
-        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -248,8 +244,6 @@ async fn test_update_command_preset() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::router(deployment, create_test_hub());
-
     // First create a command
     let new_command = json!({
         "command": "/update-test",
@@ -257,8 +251,8 @@ async fn test_update_command_preset() {
         "promptTemplate": "Original template"
     });
 
+    let app = server::routes::build_router(deployment.clone(), create_test_hub());
     let create_response = app
-        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -270,11 +264,9 @@ async fn test_update_command_preset() {
         .await
         .unwrap();
 
-    let body = hyper::body::to_bytes(create_response.into_body())
-        .await
-        .unwrap();
+    let body = body_bytes(create_response.into_body()).await;
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let command_id = value["data"]["id"].as_str().unwrap();
+    let command_id = value["data"]["id"].as_str().unwrap().to_string();
 
     // Update the command
     let update_command = json!({
@@ -282,12 +274,12 @@ async fn test_update_command_preset() {
         "promptTemplate": "Updated template"
     });
 
+    let app = server::routes::build_router(deployment.clone(), create_test_hub());
     let update_response = app
-        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
-                .uri(&format!("/api/workflows/presets/commands/{}", command_id))
+                .uri(format!("/api/workflows/presets/commands/{}", command_id))
                 .header("content-type", "application/json")
                 .body(Body::from(update_command.to_string()))
                 .unwrap(),
@@ -298,13 +290,11 @@ async fn test_update_command_preset() {
     assert_eq!(update_response.status(), StatusCode::OK);
 
     // Parse response
-    let body = hyper::body::to_bytes(update_response.into_body())
-        .await
-        .unwrap();
+    let body = body_bytes(update_response.into_body()).await;
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(value["success"], true);
-    assert_eq!(value["data"]["id"], command_id);
+    assert_eq!(value["data"]["id"], command_id.as_str());
     assert_eq!(value["data"]["command"], "/update-test");
     assert_eq!(value["data"]["description"], "Updated description");
     assert_eq!(value["data"]["promptTemplate"], "Updated template");
@@ -320,16 +310,14 @@ async fn test_delete_command_preset() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::router(deployment, create_test_hub());
-
     // First create a command
     let new_command = json!({
         "command": "/delete-test",
         "description": "Command to be deleted"
     });
 
+    let app = server::routes::build_router(deployment.clone(), create_test_hub());
     let create_response = app
-        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -341,19 +329,17 @@ async fn test_delete_command_preset() {
         .await
         .unwrap();
 
-    let body = hyper::body::to_bytes(create_response.into_body())
-        .await
-        .unwrap();
+    let body = body_bytes(create_response.into_body()).await;
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let command_id = value["data"]["id"].as_str().unwrap();
+    let command_id = value["data"]["id"].as_str().unwrap().to_string();
 
     // Delete the command
+    let app = server::routes::build_router(deployment.clone(), create_test_hub());
     let delete_response = app
-        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
-                .uri(&format!("/api/workflows/presets/commands/{}", command_id))
+                .uri(format!("/api/workflows/presets/commands/{}", command_id))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -363,8 +349,8 @@ async fn test_delete_command_preset() {
     assert_eq!(delete_response.status(), StatusCode::OK);
 
     // Verify it's deleted by trying to list
+    let app = server::routes::build_router(deployment, create_test_hub());
     let list_response = app
-        .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/workflows/presets/commands")
@@ -374,9 +360,7 @@ async fn test_delete_command_preset() {
         .await
         .unwrap();
 
-    let body = hyper::body::to_bytes(list_response.into_body())
-        .await
-        .unwrap();
+    let body = body_bytes(list_response.into_body()).await;
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
     // The deleted command should not be in the list

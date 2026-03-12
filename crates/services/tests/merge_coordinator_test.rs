@@ -2,12 +2,11 @@
 //!
 //! Test merge coordinator functionality for merging task branches into base branch.
 
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use services::{
     git::GitService,
-    merge_coordinator::MergeCoordinator,
-    orchestrator::message_bus::{BusMessage, MessageBus},
+    orchestrator::message_bus::MessageBus,
 };
 
 #[test]
@@ -30,7 +29,7 @@ fn test_merge_coordinator_struct_fields() {
     // If this compiles, the struct definition is correct
     use db::DBService;
     use services::{
-        git::GitService, merge_coordinator::MergeCoordinator,
+        merge_coordinator::MergeCoordinator,
         orchestrator::message_bus::SharedMessageBus,
     };
 
@@ -38,9 +37,7 @@ fn test_merge_coordinator_struct_fields() {
     let _message_bus: Option<SharedMessageBus> = None;
     let _git_service: Option<GitService> = None;
     let _db: Option<Arc<DBService>> = None;
-
-    // If we get here, all types compile correctly
-    assert!(true);
+    let _coordinator: Option<MergeCoordinator> = None;
 }
 
 #[tokio::test]
@@ -71,8 +68,7 @@ fn test_merge_coordinator_methods_exist() {
 
     // We can't call the methods without a real instance, but we can verify
     // the method signatures by checking they compile (which they do if this file compiles)
-
-    assert!(true);
+    let _coordinator: Option<MergeCoordinator> = None;
 }
 
 // Note: Full integration tests requiring database and git repository setup

@@ -1009,7 +1009,7 @@ mod tests {
     async fn setup_runtime_with_ready_workflow() -> (Arc<OrchestratorRuntime>, String) {
         let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE workflow (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
@@ -1038,7 +1038,7 @@ mod tests {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
-            "#,
+            ",
         )
         .execute(&pool)
         .await
@@ -1084,7 +1084,7 @@ mod tests {
     async fn setup_runtime_for_git_watcher_path_tests() -> Arc<OrchestratorRuntime> {
         let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE projects (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -1093,14 +1093,14 @@ mod tests {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
-            "#,
+            ",
         )
         .execute(&pool)
         .await
         .unwrap();
 
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE repos (
                 id TEXT PRIMARY KEY,
                 path TEXT NOT NULL UNIQUE,
@@ -1114,20 +1114,20 @@ mod tests {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
-            "#,
+            ",
         )
         .execute(&pool)
         .await
         .unwrap();
 
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE project_repos (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
                 repo_id TEXT NOT NULL
             )
-            "#,
+            ",
         )
         .execute(&pool)
         .await
@@ -1152,7 +1152,7 @@ mod tests {
         let repo_id = Uuid::new_v4();
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO projects (
                 id,
                 name,
@@ -1162,7 +1162,7 @@ mod tests {
                 updated_at
             )
             VALUES ($1, $2, $3, NULL, datetime('now'), datetime('now'))
-            "#,
+            ",
         )
         .bind(project_id)
         .bind(format!("Project-{project_id}"))
@@ -1172,7 +1172,7 @@ mod tests {
         .unwrap();
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO repos (
                 id,
                 path,
@@ -1187,7 +1187,7 @@ mod tests {
                 updated_at
             )
             VALUES ($1, $2, $3, $4, NULL, NULL, NULL, 0, NULL, datetime('now'), datetime('now'))
-            "#,
+            ",
         )
         .bind(repo_id)
         .bind(repo_path)
@@ -1198,10 +1198,10 @@ mod tests {
         .unwrap();
 
         sqlx::query(
-            r#"
+            r"
             INSERT INTO project_repos (id, project_id, repo_id)
             VALUES ($1, $2, $3)
-            "#,
+            ",
         )
         .bind(Uuid::new_v4())
         .bind(project_id)

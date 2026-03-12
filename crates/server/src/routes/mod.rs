@@ -45,6 +45,10 @@ pub mod workflows;
 pub mod workflows_dto;
 
 pub fn router(deployment: DeploymentImpl, hub: SharedSubscriptionHub) -> IntoMakeService<Router> {
+    build_router(deployment, hub).into_make_service()
+}
+
+pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub) -> Router {
     let outer_deployment = deployment.clone();
 
     // Create routers with different middleware layers
@@ -93,5 +97,4 @@ pub fn router(deployment: DeploymentImpl, hub: SharedSubscriptionHub) -> IntoMak
         .route("/{*path}", get(frontend::serve_frontend))
         .nest("/api", base_routes)
         .with_state(outer_deployment)
-        .into_make_service()
 }

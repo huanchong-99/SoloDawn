@@ -48,7 +48,7 @@ pub fn get_qa_repos() -> Result<Vec<DirectoryEntry>, FilesystemError> {
                     .map(|t| t.elapsed().unwrap_or_default().as_secs());
 
                 Some(DirectoryEntry {
-                    name: name.to_string(),
+                    name: (*name).to_string(),
                     path: repo_path,
                     is_directory: true,
                     is_git_repo: true,

@@ -920,7 +920,7 @@ mod tests {
             let event = WsEvent::new(event_type, json!({}));
             let json = serde_json::to_string(&event).unwrap();
             assert!(
-                json.contains("."),
+                json.contains('.'),
                 "Event type should contain dot: {:?}",
                 event_type
             );

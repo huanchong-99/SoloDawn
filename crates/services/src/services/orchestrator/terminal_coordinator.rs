@@ -162,8 +162,6 @@ impl TerminalCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Tests are in terminal_coordinator_test.rs
     // This module is for any unit tests that don't need full database setup
 }

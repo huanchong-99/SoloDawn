@@ -2749,9 +2749,6 @@ async fn merge_workflow(
 
 #[cfg(test)]
 mod dto_tests {
-    use super::*;
-    use crate::routes::workflows_dto::WorkflowDetailDto;
-
     #[test]
     fn test_list_workflows_returns_camelcase() {
         // This test validates the expected format
@@ -3060,7 +3057,7 @@ mod recovery_response_tests {
     async fn setup_runtime_with_running_workflow() -> (OrchestratorRuntime, String, sqlx::SqlitePool) {
         let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
         sqlx::query(
-            r#"
+            r"
             CREATE TABLE workflow (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
@@ -3089,7 +3086,7 @@ mod recovery_response_tests {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
-            "#,
+            ",
         )
         .execute(&pool)
         .await

@@ -91,7 +91,7 @@ async fn test_git_watcher_detects_commit_with_metadata() {
     // Subscribe before creating watcher
     let mut receiver = message_bus.subscribe_broadcast();
 
-    let mut watcher = GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
+    let watcher = GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
     // Start watching in background
     let watcher_handle = tokio::spawn(async move {
@@ -144,7 +144,7 @@ async fn test_git_watcher_ignores_commits_without_metadata() {
 
     let mut receiver = message_bus.subscribe_broadcast();
 
-    let mut watcher = GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
+    let watcher = GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
     let watcher_handle = tokio::spawn(async move {
         watcher.watch().await.unwrap();
@@ -182,7 +182,7 @@ async fn test_git_watcher_handles_failed_status() {
 
     let mut receiver = message_bus.subscribe_broadcast();
 
-    let mut watcher = GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
+    let watcher = GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
     let watcher_handle = tokio::spawn(async move {
         watcher.watch().await.unwrap();

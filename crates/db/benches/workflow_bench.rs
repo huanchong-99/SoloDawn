@@ -8,14 +8,26 @@ use db::models::workflow::{Workflow, WorkflowStatus};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
+/// Create a deterministic UUID from a project name string (for benchmarking)
+fn project_uuid(name: &str) -> Uuid {
+    // Pad or truncate name bytes to fill 16 bytes for a deterministic UUID
+    let mut bytes = [0u8; 16];
+    for (i, b) in name.as_bytes().iter().enumerate().take(16) {
+        bytes[i] = *b;
+    }
+    Uuid::from_bytes(bytes)
+}
+
 /// Create a test workflow for benchmarking
 fn create_test_workflow(project_id: &str) -> Workflow {
     Workflow {
         id: Uuid::new_v4().to_string(),
-        project_id: project_id.to_string(),
+        project_id: project_uuid(project_id),
         name: format!("Benchmark Workflow {}", Uuid::new_v4()),
         description: Some("A test workflow for performance benchmarking".to_string()),
         status: WorkflowStatus::Created.to_string(),
+        execution_mode: "diy".to_string(),
+        initial_goal: None,
         use_slash_commands: false,
         orchestrator_enabled: false,
         orchestrator_api_type: None,
@@ -54,6 +66,8 @@ fn bench_find_by_id(c: &mut Criterion) {
                 name TEXT NOT NULL,
                 description TEXT,
                 status TEXT NOT NULL DEFAULT 'created',
+                execution_mode TEXT NOT NULL DEFAULT 'diy',
+                initial_goal TEXT,
                 use_slash_commands INTEGER NOT NULL DEFAULT 0,
                 orchestrator_enabled INTEGER NOT NULL DEFAULT 1,
                 orchestrator_api_type TEXT,
@@ -85,6 +99,7 @@ fn bench_find_by_id(c: &mut Criterion) {
             r#"
             INSERT INTO workflow (
                 id, project_id, name, description, status,
+                execution_mode, initial_goal,
                 use_slash_commands, orchestrator_enabled,
                 orchestrator_api_type, orchestrator_base_url,
                 orchestrator_api_key, orchestrator_model,
@@ -92,14 +107,16 @@ fn bench_find_by_id(c: &mut Criterion) {
                 merge_terminal_cli_id, merge_terminal_model_id,
                 target_branch, ready_at, started_at, completed_at,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
             "#
         )
         .bind(&workflow.id)
-        .bind(&workflow.project_id)
+        .bind(workflow.project_id)
         .bind(&workflow.name)
         .bind(&workflow.description)
         .bind(&workflow.status)
+        .bind(&workflow.execution_mode)
+        .bind(&workflow.initial_goal)
         .bind(workflow.use_slash_commands)
         .bind(workflow.orchestrator_enabled)
         .bind(&workflow.orchestrator_api_type)
@@ -203,6 +220,7 @@ fn bench_find_by_project(c: &mut Criterion) {
                     r#"
                     INSERT INTO workflow (
                         id, project_id, name, description, status,
+                        execution_mode, initial_goal,
                         use_slash_commands, orchestrator_enabled,
                         orchestrator_api_type, orchestrator_base_url,
                         orchestrator_api_key, orchestrator_model,
@@ -210,14 +228,16 @@ fn bench_find_by_project(c: &mut Criterion) {
                         merge_terminal_cli_id, merge_terminal_model_id,
                         target_branch, ready_at, started_at, completed_at,
                         created_at, updated_at
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
                     "#
                 )
                 .bind(&workflow.id)
-                .bind(&workflow.project_id)
+                .bind(workflow.project_id)
                 .bind(&workflow.name)
                 .bind(&workflow.description)
                 .bind(&workflow.status)
+                .bind(&workflow.execution_mode)
+                .bind(&workflow.initial_goal)
                 .bind(workflow.use_slash_commands)
                 .bind(workflow.orchestrator_enabled)
                 .bind(&workflow.orchestrator_api_type)
@@ -247,7 +267,7 @@ fn bench_find_by_project(c: &mut Criterion) {
             b.iter(|| {
                 let pool = pool.clone();
                 rt.block_on(async move {
-                    let result = Workflow::find_by_project(&pool, black_box("project-0")).await;
+                    let result = Workflow::find_by_project(&pool, black_box(project_uuid("project-0"))).await;
                     let _ = black_box(result);
                 });
             });
@@ -274,6 +294,8 @@ fn bench_find_by_project_with_status(c: &mut Criterion) {
                 name TEXT NOT NULL,
                 description TEXT,
                 status TEXT NOT NULL DEFAULT 'created',
+                execution_mode TEXT NOT NULL DEFAULT 'diy',
+                initial_goal TEXT,
                 use_slash_commands INTEGER NOT NULL DEFAULT 0,
                 orchestrator_enabled INTEGER NOT NULL DEFAULT 1,
                 orchestrator_api_type TEXT,
@@ -317,6 +339,7 @@ fn bench_find_by_project_with_status(c: &mut Criterion) {
                 r#"
                 INSERT INTO workflow (
                     id, project_id, name, description, status,
+                    execution_mode, initial_goal,
                     use_slash_commands, orchestrator_enabled,
                     orchestrator_api_type, orchestrator_base_url,
                     orchestrator_api_key, orchestrator_model,
@@ -324,14 +347,16 @@ fn bench_find_by_project_with_status(c: &mut Criterion) {
                     merge_terminal_cli_id, merge_terminal_model_id,
                     target_branch, ready_at, started_at, completed_at,
                     created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
                 "#
             )
             .bind(&workflow.id)
-            .bind(&workflow.project_id)
+            .bind(workflow.project_id)
             .bind(&workflow.name)
             .bind(&workflow.description)
             .bind(&workflow.status)
+            .bind(&workflow.execution_mode)
+            .bind(&workflow.initial_goal)
             .bind(workflow.use_slash_commands)
             .bind(workflow.orchestrator_enabled)
             .bind(&workflow.orchestrator_api_type)
@@ -369,7 +394,7 @@ fn bench_find_by_project_with_status(c: &mut Criterion) {
                     ORDER BY created_at DESC
                     ",
                 )
-                .bind(black_box("test-project"))
+                .bind(black_box(project_uuid("test-project")))
                 .fetch_all(&pool)
                 .await;
                 let _ = black_box(result);

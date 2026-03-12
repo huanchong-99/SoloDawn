@@ -2571,12 +2571,12 @@ mod tests {
             );
         }
 
-        let prompt = r#"
+        let prompt = r"
 WARNING: Claude Code running in Bypass Permissions mode
 1. No, exit
 2. Yes, I accept
 Enter to confirm 路 Esc to cancel
-"#;
+";
 
         watcher.process_output("term-1", prompt).await;
 
@@ -2686,11 +2686,11 @@ Enter to confirm 路 Esc to cancel
 
         // Newer Claude prompt variants may omit the explicit
         // "Enter to confirm" footer.
-        let prompt = r#"
+        let prompt = r"
 WARNING: Claude Code running in Bypass Permissions mode
 1. No, exit
 2. Yes, I accept
-"#;
+";
 
         watcher.process_output("term-1", prompt).await;
 

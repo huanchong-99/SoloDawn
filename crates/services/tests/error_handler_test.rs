@@ -2,12 +2,7 @@
 
 use std::sync::Arc;
 
-use db::DBService;
-use services::{
-    orchestrator::message_bus::{BusMessage, MessageBus},
-    services::error_handler::ErrorHandler,
-};
-use tokio::sync::broadcast;
+use services::orchestrator::message_bus::{BusMessage, MessageBus};
 
 #[cfg(test)]
 mod tests {
@@ -19,12 +14,10 @@ mod tests {
         // This is a placeholder test
         // Real integration tests require a test database setup
 
-        // Create a mock message bus
-        let message_bus = Arc::new(MessageBus::new(100));
+        // Create a mock message bus to verify it compiles
+        let _message_bus = Arc::new(MessageBus::new(100));
 
         // Note: Cannot fully test without DB connection
-        // This test verifies the code compiles
-        assert!(true);
     }
 
     /// Test error message broadcasting
