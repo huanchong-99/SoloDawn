@@ -28,16 +28,7 @@ export type WsEventType =
   | 'system.error'
   | 'terminal.prompt_detected'
   | 'terminal.prompt_decision'
-  | 'terminal.quality_gate_result';
-
-export interface TerminalQualityGateResultPayload {
-  workflowId: string;
-  taskId: string;
-  terminalId: string;
-  isPassed: boolean;
-  mode: string;
-  fixInstructions: string | null;
-}
+  | 'quality.gate_result';
 
 type ConnectionStatus =
   | 'disconnected'

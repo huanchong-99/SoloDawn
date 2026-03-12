@@ -227,6 +227,11 @@ fn generate_types_content() -> String {
         executors::logs::ToolStatus::decl(),
         executors::logs::utils::patch::PatchType::decl(),
         serde_json::Value::decl(),
+        db::models::quality_run::QualityRun::decl(),
+        db::models::quality_issue::QualityIssueRecord::decl(),
+        db::models::quality_issue::SeverityCount::decl(),
+        server::routes::quality::QualityRunSummary::decl(),
+        server::routes::quality::QualityRunDetail::decl(),
     ];
 
     let body = decls

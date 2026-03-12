@@ -8,7 +8,8 @@ use super::{
     constants::WORKFLOW_TOPIC_PREFIX,
     resilient_llm::ProviderEvent,
     types::{
-        OrchestratorInstruction, PromptDecision, TerminalCompletionEvent, TerminalPromptEvent,
+        OrchestratorInstruction, PromptDecision, QualityGateResultEvent,
+        TerminalCompletionEvent, TerminalPromptEvent,
     },
 };
 
@@ -70,8 +71,8 @@ pub enum BusMessage {
         workflow_id: String,
         event: ProviderEvent,
     },
-    /// Terminal quality gate result
-    TerminalQualityGateResult(super::types::TerminalQualityGateResultEvent),
+    /// Quality gate result for a terminal checkpoint
+    TerminalQualityGateResult(QualityGateResultEvent),
     Shutdown,
 }
 
@@ -227,14 +228,6 @@ impl MessageBus {
         let workflow_id = event.workflow_id.clone();
         let _ = self
             .publish_workflow_event(&workflow_id, BusMessage::TerminalCompleted(event))
-            .await;
-    }
-
-    /// Publishes a terminal quality gate result event.
-    pub async fn publish_terminal_quality_gate_result(&self, event: super::types::TerminalQualityGateResultEvent) {
-        let workflow_id = event.original_event.workflow_id.clone();
-        let _ = self
-            .publish_workflow_event(&workflow_id, BusMessage::TerminalQualityGateResult(event))
             .await;
     }
 
@@ -412,6 +405,19 @@ impl MessageBus {
             decision,
         };
         let _ = self.publish_workflow_event(workflow_id, message).await;
+    }
+
+    /// Publishes a quality gate result event.
+    ///
+    /// Called after quality gate evaluation completes for a terminal checkpoint.
+    pub async fn publish_quality_gate_result(&self, event: QualityGateResultEvent) {
+        let workflow_id = event.workflow_id.clone();
+        let _ = self
+            .publish_workflow_event(
+                &workflow_id,
+                BusMessage::TerminalQualityGateResult(event),
+            )
+            .await;
     }
 }
 

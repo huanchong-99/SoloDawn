@@ -546,6 +546,7 @@ impl GitWatcher {
                     Some(TerminalCompletionStatus::Completed)
                 }
             }
+            "checkpoint" => Some(TerminalCompletionStatus::Checkpoint),
             "review_pass" => Some(TerminalCompletionStatus::ReviewPass),
             "review_reject" => Some(TerminalCompletionStatus::ReviewReject),
             "failed" => Some(TerminalCompletionStatus::Failed),

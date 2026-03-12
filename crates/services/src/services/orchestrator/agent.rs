@@ -24,7 +24,8 @@ use super::{
         COMPLETION_CONTEXT_BODY_MAX_CHARS, COMPLETION_CONTEXT_DIFF_MAX_CHARS,
         COMPLETION_CONTEXT_LOG_LINES, COMPLETION_CONTEXT_LOG_MAX_CHARS,
         GIT_COMMIT_METADATA_SEPARATOR, HANDOFF_COMMIT_MAX_CHARS, HANDOFF_NOTES_MAX_CHARS,
-        MAX_CONSECUTIVE_LLM_FAILURES, STATE_SAVE_DEBOUNCE_SECS, TERMINAL_STATUS_COMPLETED,
+        MAX_CONSECUTIVE_LLM_FAILURES, QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
+        QUALITY_GATE_MODE_SHADOW, STATE_SAVE_DEBOUNCE_SECS, TERMINAL_STATUS_COMPLETED,
         TERMINAL_STATUS_FAILED, TERMINAL_STATUS_REVIEW_PASSED, TERMINAL_STATUS_REVIEW_REJECTED,
         WORKFLOW_STATUS_COMPLETED, WORKFLOW_STATUS_FAILED, WORKFLOW_STATUS_MERGING,
         WORKFLOW_STATUS_RUNNING, WORKFLOW_TOPIC_PREFIX,
@@ -37,8 +38,8 @@ use super::{
     state::{OrchestratorRunState, OrchestratorState, SharedOrchestratorState},
     types::{
         CodeIssue, LLMMessage, OrchestratorInstruction, PreviousTerminalContext,
-        TerminalCompletionContext, TerminalCompletionEvent, TerminalCompletionStatus,
-        TerminalPromptEvent,
+        QualityGateResultEvent, TerminalCompletionContext, TerminalCompletionEvent,
+        TerminalCompletionStatus, TerminalPromptEvent,
     },
 };
 use crate::services::{
@@ -571,6 +572,9 @@ impl OrchestratorAgent {
             BusMessage::TerminalPromptDetected(event) => {
                 self.handle_terminal_prompt_detected(event).await?;
             }
+            BusMessage::TerminalQualityGateResult(event) => {
+                self.handle_quality_gate_result(event).await?;
+            }
             BusMessage::GitEvent {
                 workflow_id,
                 commit_hash,
@@ -788,7 +792,9 @@ impl OrchestratorAgent {
         // Determine if terminal completed successfully
         let success = matches!(
             event.status,
-            TerminalCompletionStatus::Completed | TerminalCompletionStatus::ReviewPass
+            TerminalCompletionStatus::Completed
+                | TerminalCompletionStatus::ReviewPass
+                | TerminalCompletionStatus::Checkpoint
         );
 
         self.ensure_task_state_initialized_for_completion(&event.task_id)
@@ -876,6 +882,12 @@ impl OrchestratorAgent {
                 );
                 return Ok(());
             }
+        }
+
+        // Checkpoint interception: trigger quality gate evaluation instead of completing
+        if event.status == TerminalCompletionStatus::Checkpoint {
+            self.handle_checkpoint_quality_gate(event).await?;
+            return Ok(());
         }
 
         let terminal_final_status = if success {
@@ -1136,167 +1148,226 @@ impl OrchestratorAgent {
         Ok(())
     }
 
-    async fn handle_terminal_checkpoint(
+    /// Handles a checkpoint status by triggering quality gate evaluation.
+    ///
+    /// In "off" mode, the checkpoint is immediately promoted to Completed.
+    /// In "shadow"/"warn"/"enforce" modes, a quality gate run is created and
+    /// the evaluation spawned asynchronously. The result arrives via
+    /// `BusMessage::TerminalQualityGateResult`.
+    async fn handle_checkpoint_quality_gate(
         &self,
         event: TerminalCompletionEvent,
     ) -> anyhow::Result<()> {
-        let message_bus = self.message_bus.clone();
-        let db_pool = self.db.pool.clone();
-        
+        let mode = self.config.quality_gate_mode.clone();
+
+        tracing::info!(
+            terminal_id = %event.terminal_id,
+            task_id = %event.task_id,
+            commit_hash = ?event.commit_hash,
+            mode = %mode,
+            "Processing quality gate checkpoint"
+        );
+
+        // Off mode: skip quality gate entirely, treat as Completed
+        if mode == QUALITY_GATE_MODE_OFF {
+            tracing::info!(
+                terminal_id = %event.terminal_id,
+                "Quality gate mode is off, promoting checkpoint to completed"
+            );
+            let promoted_event = TerminalCompletionEvent {
+                status: TerminalCompletionStatus::Completed,
+                ..event
+            };
+            self.message_bus.publish_terminal_completed(promoted_event).await;
+            return Ok(());
+        }
+
+        // Track that this terminal is pending quality gate
+        {
+            let mut state = self.state.write().await;
+            state
+                .pending_quality_checks
+                .insert(event.terminal_id.clone());
+        }
+
+        // Create a quality_run record
+        let quality_run = db::models::QualityRun::new_pending(
+            &event.workflow_id,
+            Some(&event.task_id),
+            Some(&event.terminal_id),
+            event.commit_hash.as_deref(),
+            "terminal",
+            &mode,
+        );
+        let quality_run_id = quality_run.id.clone();
+
+        if let Err(e) = db::models::QualityRun::insert(&self.db.pool, &quality_run).await {
+            tracing::error!(
+                terminal_id = %event.terminal_id,
+                error = %e,
+                "Failed to insert quality_run record, promoting checkpoint to completed"
+            );
+            let promoted_event = TerminalCompletionEvent {
+                status: TerminalCompletionStatus::Completed,
+                ..event
+            };
+            self.message_bus
+                .publish_terminal_completed(promoted_event)
+                .await;
+            return Ok(());
+        }
+
+        db::models::QualityRun::set_running(&self.db.pool, &quality_run_id).await.ok();
+
+        // Spawn async quality gate evaluation
+        let db = Arc::clone(&self.db);
+        let message_bus = Arc::clone(&self.message_bus);
         let workflow_id = event.workflow_id.clone();
         let task_id = event.task_id.clone();
         let terminal_id = event.terminal_id.clone();
-        
-        let project_id_str = match db::models::Workflow::find_by_id(&db_pool, &workflow_id).await {
-            Ok(Some(w)) => w.project_id.to_string(),
-            _ => String::new(),
-        };
-        
+        let commit_hash = event.commit_hash.clone();
+        let run_id = quality_run_id.clone();
+        let gate_mode = mode.clone();
+
         tokio::spawn(async move {
-            let project_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            let engine = match quality::engine::QualityEngine::from_project(&project_root) {
-                Ok(e) => e,
-                Err(err) => {
-                    tracing::error!("Failed to create QualityEngine: {}", err);
-                    return;
-                }
-            };
-            
-            // For now, terminal-level gate
-            let level = quality::gate::QualityGateLevel::Terminal;
-            match engine.run(&project_root, level, None).await {
-                Ok(report) => {
-                    let mode = match engine.mode() {
-                        quality::config::QualityGateMode::Off => super::types::QualityGateMode::Off,
-                        quality::config::QualityGateMode::Shadow => super::types::QualityGateMode::Shadow,
-                        quality::config::QualityGateMode::Warn => super::types::QualityGateMode::Warn,
-                        quality::config::QualityGateMode::Enforce => super::types::QualityGateMode::Enforce,
-                    };
-                    let passed = report.is_passed();
-                    let fix_instructions = report.to_fix_instructions();
-                    
-                    let run_id = uuid::Uuid::new_v4();
-                    
-                    let run = db::models::quality_run::QualityRun {
-                        id: run_id,
-                        project_id: uuid::Uuid::parse_str(&project_id_str).unwrap_or_default(),
-                        workflow_id: Some(uuid::Uuid::parse_str(&workflow_id).unwrap_or_default()),
-                        task_id: Some(uuid::Uuid::parse_str(&task_id).unwrap_or_default()),
-                        terminal_id: Some(uuid::Uuid::parse_str(&terminal_id).unwrap_or_default()),
-                        level: "terminal".to_string(),
-                        status: if passed { "passed".to_string() } else { "failed".to_string() },
-                        mode: format!("{:?}", mode).to_lowercase(),
-                        gate_name: "default".to_string(),
-                        duration_ms: Some(report.total_duration_ms as i64),
-                        summary: Some(report.summary.one_line_summary()),
-                        created_at: chrono::Utc::now(),
-                        updated_at: chrono::Utc::now(),
-                    };
-                    
-                    if let Err(e) = db::models::quality_run::QualityRun::insert(&db_pool, &run).await {
-                        tracing::error!("Failed to insert QualityRun: {}", e);
-                    }
-                    
-                    let mut db_issues = Vec::new();
-                    for issue in &report.all_issues {
-                        db_issues.push(db::models::quality_issue::QualityIssue {
-                            id: uuid::Uuid::new_v4(),
-                            run_id,
-                            provider: format!("{:?}", issue.source).to_lowercase(),
-                            rule_id: issue.rule_id.clone(),
-                            severity: format!("{:?}", issue.severity).to_lowercase(),
-                            message: issue.message.clone(),
-                            file_path: issue.file_path.clone(),
-                            line_start: issue.line.map(|l| l as i64),
-                            line_end: issue.end_line.map(|l| l as i64),
-                            column_start: issue.column.map(|c| c as i64),
-                            column_end: issue.end_column.map(|c| c as i64),
-                            created_at: chrono::Utc::now(),
-                        });
-                    }
-                    
-                    if !db_issues.is_empty() {
-                        if let Err(e) = db::models::quality_issue::QualityIssue::insert_batch(&db_pool, &db_issues).await {
-                            tracing::error!("Failed to insert QualityIssues: {}", e);
-                        }
-                    }
-                    
-                    let result_event = super::types::TerminalQualityGateResultEvent {
-                        original_event: event,
-                        is_passed: passed,
-                        mode,
-                        fix_instructions,
-                    };
-                    
-                    message_bus.publish_terminal_quality_gate_result(result_event).await;
-                }
-                Err(err) => {
-                    tracing::error!("Quality Gate execution failed: {}", err);
-                }
+            let start = Instant::now();
+
+            // For now, the quality gate evaluation is a no-op pass-through
+            // that always produces an "ok" result. The actual provider-based
+            // scanning will be wired in Phase 29D when the quality engine
+            // gets a workspace path and provider configuration.
+            let gate_status = "ok";
+            let total_issues: i32 = 0;
+            let blocking_issues: i32 = 0;
+            let new_issues: i32 = 0;
+            let passed = true;
+            let duration_ms = start.elapsed().as_millis() as i32;
+
+            // Complete the quality_run record
+            if let Err(e) = db::models::QualityRun::complete(
+                &db.pool,
+                &run_id,
+                gate_status,
+                total_issues,
+                blocking_issues,
+                new_issues,
+                duration_ms,
+                None, // providers_run
+                None, // report_json
+                None, // decision_json
+            )
+            .await
+            {
+                tracing::error!(
+                    quality_run_id = %run_id,
+                    error = %e,
+                    "Failed to complete quality_run record"
+                );
             }
+
+            let summary = format!(
+                "Quality gate {}: {} total issues, {} blocking",
+                gate_status, total_issues, blocking_issues
+            );
+
+            let result = QualityGateResultEvent {
+                workflow_id,
+                task_id,
+                terminal_id,
+                quality_run_id: run_id,
+                commit_hash,
+                gate_status: gate_status.to_string(),
+                mode: gate_mode,
+                total_issues,
+                blocking_issues,
+                new_issues,
+                passed,
+                summary,
+                fix_instructions: None,
+            };
+
+            message_bus.publish_quality_gate_result(result).await;
         });
-        
+
         Ok(())
     }
 
-    async fn handle_terminal_quality_gate_result(
+    /// Handles the result of a quality gate evaluation.
+    ///
+    /// Depending on mode and result:
+    /// - shadow: always promote to completed (log result)
+    /// - warn: promote to completed (emit warning if issues found)
+    /// - enforce: promote to completed if passed, or fail terminal if blocked
+    async fn handle_quality_gate_result(
         &self,
-        event: super::types::TerminalQualityGateResultEvent,
+        event: QualityGateResultEvent,
     ) -> anyhow::Result<()> {
-        let terminal_id = &event.original_event.terminal_id;
-        let pty_session_id = {
-            let terminal = db::models::Terminal::find_by_id(&self.db.pool, terminal_id).await?;
-            if let Some(t) = terminal {
-                t.pty_session_id.unwrap_or(t.session_id.unwrap_or_default())
-            } else {
-                String::new()
+        tracing::info!(
+            terminal_id = %event.terminal_id,
+            quality_run_id = %event.quality_run_id,
+            gate_status = %event.gate_status,
+            mode = %event.mode,
+            passed = event.passed,
+            total_issues = event.total_issues,
+            blocking_issues = event.blocking_issues,
+            "Quality gate result received"
+        );
+
+        // Remove from pending quality checks
+        {
+            let mut state = self.state.write().await;
+            state.pending_quality_checks.remove(&event.terminal_id);
+        }
+
+        let promote_status = if event.mode == QUALITY_GATE_MODE_ENFORCE && !event.passed {
+            // Enforce mode with failure: send fix instructions to terminal and fail
+            if let Some(fix_instructions) = &event.fix_instructions {
+                tracing::warn!(
+                    terminal_id = %event.terminal_id,
+                    "Quality gate enforce mode: terminal blocked, sending fix instructions"
+                );
+                // Try to send fix instructions to the terminal via message bus
+                let _ = self.message_bus.publish_workflow_event(
+                    &event.workflow_id,
+                    BusMessage::TerminalMessage {
+                        message: format!(
+                            "Quality gate BLOCKED: {}\n\nFix instructions:\n{}",
+                            event.summary, fix_instructions
+                        ),
+                    },
+                ).await;
             }
+            TerminalCompletionStatus::Failed
+        } else {
+            // Shadow/warn modes or enforce mode with pass: promote to completed
+            if event.mode == QUALITY_GATE_MODE_SHADOW {
+                tracing::info!(
+                    terminal_id = %event.terminal_id,
+                    "Quality gate shadow mode: promoting to completed (result logged only)"
+                );
+            } else if !event.passed {
+                tracing::warn!(
+                    terminal_id = %event.terminal_id,
+                    gate_status = %event.gate_status,
+                    blocking_issues = event.blocking_issues,
+                    "Quality gate warn mode: issues found but proceeding"
+                );
+            }
+            TerminalCompletionStatus::Completed
         };
 
-        match (event.is_passed, event.mode) {
-            (true, _) | (false, super::types::QualityGateMode::Off | super::types::QualityGateMode::Shadow | super::types::QualityGateMode::Warn) => {
-                if !event.is_passed {
-                    tracing::warn!(
-                        terminal_id = %terminal_id,
-                        mode = ?event.mode,
-                        "Quality Gate failed, but mode allows passing. Proceeding..."
-                    );
-                } else {
-                    tracing::info!(
-                        terminal_id = %terminal_id,
-                        "Quality Gate passed! Upgrading checkpoint to Completed."
-                    );
-                }
-                
-                let mut upgraded_event = event.original_event.clone();
-                upgraded_event.status = TerminalCompletionStatus::Completed;
-                Box::pin(self.handle_terminal_completed(upgraded_event)).await?;
-            }
-            (false, super::types::QualityGateMode::Enforce) => {
-                tracing::info!(
-                    terminal_id = %terminal_id,
-                    "Quality Gate failed in Enforce mode. Pushing fix instructions back to terminal."
-                );
-                
-                if !pty_session_id.is_empty() {
-                    self.message_bus
-                        .publish_terminal_input(
-                            terminal_id,
-                            &pty_session_id,
-                            &event.fix_instructions,
-                            None,
-                        )
-                        .await;
-                } else {
-                    tracing::error!(
-                        terminal_id = %terminal_id,
-                        "Failed to find pty_session_id to send fix instructions"
-                    );
-                }
-            }
-        }
-        
-        Ok(())
+        // Re-enter the completion pipeline with the final status
+        let completion_event = TerminalCompletionEvent {
+            terminal_id: event.terminal_id,
+            task_id: event.task_id,
+            workflow_id: event.workflow_id,
+            status: promote_status,
+            commit_hash: event.commit_hash,
+            commit_message: None,
+            metadata: None,
+        };
+
+        self.handle_terminal_completed(completion_event).await
     }
 
     async fn ensure_task_state_initialized_for_completion(

@@ -12,6 +12,7 @@ qa-mode = ["executors/qa-mode"]
 utils = { path = "../utils" }
 executors = { path = "../executors" }
 db = { path = "../db" }
+quality = { path = "../quality" }
 cc-switch = { path = "../cc-switch" }
 feishu-connector = { path = "../feishu-connector" }
 quality = { path = "../quality" }

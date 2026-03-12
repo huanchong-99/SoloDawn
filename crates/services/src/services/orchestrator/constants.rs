@@ -51,6 +51,14 @@ pub const HANDOFF_CONTEXT_MAX_CHARS: usize = 1500;
 pub const HANDOFF_COMMIT_MAX_CHARS: usize = 500;
 pub const HANDOFF_NOTES_MAX_CHARS: usize = 800;
 
+// Phase 29C: Quality Gate constants
+pub const TERMINAL_STATUS_QUALITY_PENDING: &str = "quality_pending";
+pub const QUALITY_GATE_MODE_OFF: &str = "off";
+pub const QUALITY_GATE_MODE_SHADOW: &str = "shadow";
+pub const QUALITY_GATE_MODE_WARN: &str = "warn";
+pub const QUALITY_GATE_MODE_ENFORCE: &str = "enforce";
+pub const QUALITY_GATE_DEFAULT_MODE: &str = QUALITY_GATE_MODE_SHADOW;
+
 #[cfg(test)]
 mod tests {
     use super::*;

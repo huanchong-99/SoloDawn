@@ -66,6 +66,9 @@ pub struct OrchestratorState {
 
     /// Terminals currently waiting for quiet-window completion checks.
     pub pending_quiet_completion_checks: HashSet<String>,
+
+    /// Terminals currently waiting for quality gate evaluation.
+    pub pending_quality_checks: HashSet<String>,
 }
 
 impl OrchestratorState {
@@ -81,6 +84,7 @@ impl OrchestratorState {
             error_count: 0,
             processed_commits: HashSet::new(),
             pending_quiet_completion_checks: HashSet::new(),
+            pending_quality_checks: HashSet::new(),
         }
     }
 

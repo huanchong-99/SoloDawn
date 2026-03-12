@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::constants::{
     DEFAULT_LLM_RATE_LIMIT_PER_SECOND, DEFAULT_LLM_TIMEOUT_SECS, DEFAULT_MAX_CONVERSATION_HISTORY,
-    DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY_MS,
+    DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY_MS, QUALITY_GATE_DEFAULT_MODE,
 };
 
 /// Configuration for a fallback LLM provider
@@ -70,6 +70,10 @@ pub struct OrchestratorConfig {
     /// Fallback LLM providers for multi-provider failover
     #[serde(default)]
     pub fallback_providers: Vec<ProviderConfig>,
+
+    /// Quality gate mode: off | shadow | warn | enforce
+    #[serde(default = "default_quality_gate_mode")]
+    pub quality_gate_mode: String,
 }
 
 fn default_max_retries() -> u32 {
@@ -94,6 +98,10 @@ fn default_max_history() -> usize {
 
 fn default_auto_merge_on_completion() -> bool {
     true
+}
+
+fn default_quality_gate_mode() -> String {
+    QUALITY_GATE_DEFAULT_MODE.to_string()
 }
 
 /// Prompt profile identifier.
@@ -217,6 +225,7 @@ impl Default for OrchestratorConfig {
             system_prompt: default_system_prompt(),
             auto_merge_on_completion: default_auto_merge_on_completion(),
             fallback_providers: Vec::new(),
+            quality_gate_mode: default_quality_gate_mode(),
         }
     }
 }

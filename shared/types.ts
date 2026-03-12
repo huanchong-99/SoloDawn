@@ -597,6 +597,56 @@ export type PatchType = { "type": "NORMALIZED_ENTRY", "content": NormalizedEntry
 
 export type JsonValue = number | string | boolean | Array<JsonValue> | { [key in string]?: JsonValue } | null;
 
+export type QualityRun = { id: string, workflowId: string, taskId: string | null, terminalId: string | null, commitHash: string | null, 
+/**
+ * terminal | branch | repo
+ */
+gateLevel: string, 
+/**
+ * pending | running | ok | warn | error | skipped
+ */
+gateStatus: string, 
+/**
+ * off | shadow | warn | enforce
+ */
+mode: string, totalIssues: number, blockingIssues: number, newIssues: number, durationMs: number, 
+/**
+ * JSON array of provider names
+ */
+providersRun: string | null, 
+/**
+ * Full serialized QualityReport
+ */
+reportJson: string | null, 
+/**
+ * Serialized QualityGateDecision
+ */
+decisionJson: string | null, 
+/**
+ * Error message if the run itself failed
+ */
+errorMessage: string | null, createdAt: string, completedAt: string | null, };
+
+export type QualityIssueRecord = { id: string, qualityRunId: string, ruleId: string, 
+/**
+ * BUG | VULNERABILITY | CODE_SMELL | SECURITY_HOTSPOT
+ */
+ruleType: string, 
+/**
+ * INFO | MINOR | MAJOR | CRITICAL | BLOCKER
+ */
+severity: string, 
+/**
+ * clippy | cargo-check | eslint | sonarqube | ...
+ */
+source: string, message: string, filePath: string | null, line: number | null, endLine: number | null, columnStart: number | null, columnEnd: number | null, isNew: boolean, isBlocking: boolean, effortMinutes: number | null, context: string | null, createdAt: string, };
+
+export type SeverityCount = { severity: string, count: number, };
+
+export type QualityRunSummary = { id: string, workflowId: string, taskId: string | null, terminalId: string | null, commitHash: string | null, gateLevel: string, gateStatus: string, mode: string, totalIssues: number, blockingIssues: number, newIssues: number, durationMs: number, errorMessage: string | null, createdAt: string, completedAt: string | null, };
+
+export type QualityRunDetail = { providersRun: JsonValue | null, reportJson: JsonValue | null, decisionJson: JsonValue | null, id: string, workflowId: string, taskId: string | null, terminalId: string | null, commitHash: string | null, gateLevel: string, gateStatus: string, mode: string, totalIssues: number, blockingIssues: number, newIssues: number, durationMs: number, errorMessage: string | null, createdAt: string, completedAt: string | null, };
+
 export const DEFAULT_PR_DESCRIPTION_PROMPT = `Update the PR that was just created with a better title and description.
 The PR number is #{pr_number} and the URL is {pr_url}.
 

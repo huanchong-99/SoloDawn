@@ -111,32 +111,8 @@ pub enum TerminalCompletionStatus {
     ReviewReject,
     /// 失败
     Failed,
-    /// 阶段性提交（需走质量门检查）
+    /// 质量门检查点 — 终端提交了代码但需要先通过质量门再标记完成
     Checkpoint,
-}
-
-/// 质量门模式
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum QualityGateMode {
-    /// 关闭质量门（无检查）
-    Off,
-    /// 影子模式（检查但仅记录，不阻断）
-    #[default]
-    Shadow,
-    /// 警告模式（检查并记录，非严重错误仍放行）
-    Warn,
-    /// 强制模式（强制阻断并回流终端要求修复）
-    Enforce,
-}
-
-/// 终端质量门检查结果事件
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerminalQualityGateResultEvent {
-    pub original_event: TerminalCompletionEvent,
-    pub is_passed: bool,
-    pub mode: QualityGateMode,
-    pub fix_instructions: String,
 }
 
 /// Git 提交元数据
@@ -461,6 +437,29 @@ pub struct TerminalCompletionContext {
     pub diff_stat: String,
     /// Full commit message body, truncated to max chars
     pub commit_body: String,
+}
+
+/// Result of a quality gate evaluation for a terminal checkpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityGateResultEvent {
+    pub workflow_id: String,
+    pub task_id: String,
+    pub terminal_id: String,
+    pub quality_run_id: String,
+    pub commit_hash: Option<String>,
+    /// ok | warn | error
+    pub gate_status: String,
+    /// off | shadow | warn | enforce
+    pub mode: String,
+    pub total_issues: i32,
+    pub blocking_issues: i32,
+    pub new_issues: i32,
+    /// Whether the gate passed (gate_status is ok or warn, or mode is shadow)
+    pub passed: bool,
+    /// Human-readable summary for LLM prompt
+    pub summary: String,
+    /// Fix instructions for terminals that failed quality gate
+    pub fix_instructions: Option<String>,
 }
 
 #[cfg(test)]

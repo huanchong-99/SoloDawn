@@ -58,3 +58,10 @@ export type {
   CliModel,
   CliDetectionResult,
 } from './useCliTypes';
+export {
+  useQualityRuns,
+  useQualityRunDetail,
+  useQualityIssues,
+  useTerminalLatestQuality,
+  qualityKeys,
+} from './useQualityGate';
