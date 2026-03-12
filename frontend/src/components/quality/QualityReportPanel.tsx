@@ -44,12 +44,22 @@ export function QualityReportPanel({ terminalId, className, onRefresh }: Quality
   }
 
   const issues = issuesData || [];
-  let metrics: any = {};
-  if (latestRun?.summary) {
-    try {
-      const parsed = JSON.parse(latestRun.summary);
-      metrics = parsed.issues_summary || parsed;
-    } catch(e) {}
+  const metrics = {
+    total: latestRun?.totalIssues ?? 0,
+    blocker: 0,
+    critical: 0,
+    major: 0,
+    minor: 0,
+    info: 0,
+  };
+  // Derive metrics from issues if available
+  for (const issue of issues) {
+    const sev = issue.severity?.toLowerCase();
+    if (sev === 'blocker') metrics.blocker++;
+    else if (sev === 'critical') metrics.critical++;
+    else if (sev === 'major') metrics.major++;
+    else if (sev === 'minor') metrics.minor++;
+    else metrics.info++;
   }
 
   return (
@@ -67,7 +77,7 @@ export function QualityReportPanel({ terminalId, className, onRefresh }: Quality
           <Button variant="outline" size="sm" onClick={() => { refetch(); onRefresh?.(); }}>
             Refresh
           </Button>
-          <QualityGateStatusBadge status={latestRun?.status === 'Running' ? 'running' : latestRun?.status.toLowerCase() as any} terminalId={terminalId} />
+          <QualityGateStatusBadge status={latestRun?.gateStatus === 'running' ? 'running' : (latestRun?.gateStatus?.toLowerCase() as any)} terminalId={terminalId} />
         </div>
       </div>
 

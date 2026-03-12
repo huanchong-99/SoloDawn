@@ -297,14 +297,20 @@ impl WsEvent {
             }
 
             BusMessage::TerminalQualityGateResult(event) => {
-                let workflow_id = event.original_event.workflow_id;
+                let workflow_id = event.workflow_id.clone();
                 let payload = json!({
-                    "workflowId": workflow_id,
-                    "taskId": event.original_event.task_id,
-                    "terminalId": event.original_event.terminal_id,
-                    "isPassed": event.is_passed,
-                    "mode": format!("{:?}", event.mode).to_lowercase(),
-                    "fixInstructions": event.fix_instructions,
+                    "workflowId": &event.workflow_id,
+                    "taskId": &event.task_id,
+                    "terminalId": &event.terminal_id,
+                    "qualityRunId": &event.quality_run_id,
+                    "gateStatus": &event.gate_status,
+                    "isPassed": event.passed,
+                    "mode": &event.mode,
+                    "totalIssues": event.total_issues,
+                    "blockingIssues": event.blocking_issues,
+                    "newIssues": event.new_issues,
+                    "summary": &event.summary,
+                    "fixInstructions": &event.fix_instructions,
                 });
                 Some((
                     workflow_id,

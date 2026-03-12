@@ -567,13 +567,10 @@ impl OrchestratorAgent {
                 self.handle_terminal_completed(event).await?;
             }
             BusMessage::TerminalQualityGateResult(event) => {
-                self.handle_terminal_quality_gate_result(event).await?;
+                self.handle_quality_gate_result(event).await?;
             }
             BusMessage::TerminalPromptDetected(event) => {
                 self.handle_terminal_prompt_detected(event).await?;
-            }
-            BusMessage::TerminalQualityGateResult(event) => {
-                self.handle_quality_gate_result(event).await?;
             }
             BusMessage::GitEvent {
                 workflow_id,
@@ -780,7 +777,7 @@ impl OrchestratorAgent {
                 terminal_id = %event.terminal_id,
                 "Terminal checkpoint detected. Triggering Quality Gate..."
             );
-            return self.handle_terminal_checkpoint(event).await;
+            return self.handle_checkpoint_quality_gate(event).await;
         }
 
         tracing::info!(

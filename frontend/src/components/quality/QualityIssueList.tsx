@@ -1,11 +1,11 @@
-import { QualityIssue } from 'shared/types';
+import { QualityIssueRecord } from 'shared/types';
 import { CheckCircle, AlertTriangle, StopCircle, Info, Bug, ChevronRight, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
 export interface QualityIssueListProps {
-  issues: QualityIssue[];
+  issues: QualityIssueRecord[];
   className?: string;
   maxHeight?: string;
 }
@@ -25,7 +25,7 @@ const SeverityIcon = ({ severity, className }: { severity: string, className?: s
   }
 };
 
-const IssueItem = ({ issue }: { issue: QualityIssue }) => {
+const IssueItem = ({ issue }: { issue: QualityIssueRecord }) => {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -44,17 +44,17 @@ const IssueItem = ({ issue }: { issue: QualityIssue }) => {
             </h4>
             <div className="flex-shrink-0 flex items-center gap-1.5 text-xs font-mono text-slate-500">
               <span className="font-medium text-slate-800 dark:text-slate-200">
-                {issue.rule_id}
+                {issue.ruleId}
               </span>
             </div>
           </div>
           <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
-            <span className="truncate max-w-[200px] md:maxw-xs">{issue.file_path || 'Unknown file'}</span>
-            {issue.line_start !== null && issue.line_start !== undefined && (
-              <span>Line {issue.line_start.toString()}</span>
+            <span className="truncate max-w-[200px] md:maxw-xs">{issue.filePath || 'Unknown file'}</span>
+            {issue.line !== null && issue.line !== undefined && (
+              <span>Line {issue.line.toString()}</span>
             )}
             <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded capitalize text-[10px]">
-              {issue.provider}
+              {issue.source}
             </span>
           </div>
         </div>

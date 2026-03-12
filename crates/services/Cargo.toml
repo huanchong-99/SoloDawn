@@ -15,7 +15,6 @@ db = { path = "../db" }
 quality = { path = "../quality" }
 cc-switch = { path = "../cc-switch" }
 feishu-connector = { path = "../feishu-connector" }
-quality = { path = "../quality" }
 tokio = { workspace = true }
 tokio-util = { version = "0.7", features = ["io"] }
 axum = { workspace = true }

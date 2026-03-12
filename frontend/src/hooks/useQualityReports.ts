@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { handleApiResponse } from '@/lib/api';
-import type { 
+import type {
   QualityRun,
-  QualityIssue
+  QualityIssueRecord
 } from 'shared/types';
 
 export const qualityKeys = {
@@ -21,9 +21,9 @@ const qualityApi = {
     const response = await fetch(`/api/terminals/${encodeURIComponent(terminalId)}/quality`);
     return handleApiResponse<QualityRun[]>(response);
   },
-  getQualityIssues: async (runId: string): Promise<QualityIssue[]> => {
-    const response = await fetch(`/api/quality-runs/${encodeURIComponent(runId)}/issues`);
-    return handleApiResponse<QualityIssue[]>(response);
+  getQualityIssues: async (runId: string): Promise<QualityIssueRecord[]> => {
+    const response = await fetch(`/api/quality/runs/${encodeURIComponent(runId)}/issues`);
+    return handleApiResponse<QualityIssueRecord[]>(response);
   }
 };
 

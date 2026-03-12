@@ -19,11 +19,11 @@ export function QualityTimeline({ runs, className }: QualityTimelineProps) {
   
   if (runs && runs.length > 0) {
     const latestRun = runs[0];
-    if (latestRun.status === 'Running' || latestRun.status === 'Pending') {
+    if (latestRun.gateStatus === 'running' || latestRun.gateStatus === 'pending') {
       currentStep = 'analysis';
-    } else if (latestRun.status === 'Error' || latestRun.status === 'Warn') {
+    } else if (latestRun.gateStatus === 'error' || latestRun.gateStatus === 'warn') {
       currentStep = 'feedback';
-    } else if (latestRun.status === 'Ok') {
+    } else if (latestRun.gateStatus === 'ok') {
       currentStep = 'passed';
     }
   }

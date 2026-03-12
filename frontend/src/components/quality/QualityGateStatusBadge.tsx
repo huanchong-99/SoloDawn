@@ -39,28 +39,28 @@ export function QualityGateStatusBadge({
 
   if (terminalId && terminalQualityQuery.data && terminalQualityQuery.data.length > 0) {
     const latestRun = terminalQualityQuery.data[0];
-    const runStatus = latestRun.status;
-    
-    if (runStatus === 'Running' || runStatus === 'Pending') {
+    const runStatus = latestRun.gateStatus;
+
+    if (runStatus === 'running' || runStatus === 'pending') {
       derivedStatus = 'running';
-    } else if (runStatus === 'Ok') {
+    } else if (runStatus === 'ok') {
       derivedStatus = 'passed';
-    } else if (runStatus === 'Error') {
+    } else if (runStatus === 'error') {
       derivedStatus = 'failed';
-    } else if (runStatus === 'Warn') {
+    } else if (runStatus === 'warn') {
       derivedStatus = 'warn';
     }
   } else if (workflowId && workflowQualityQuery.data && workflowQualityQuery.data.length > 0) {
     const latestRun = workflowQualityQuery.data[0];
-    const runStatus = latestRun.status;
+    const runStatus = latestRun.gateStatus;
 
-    if (runStatus === 'Running' || runStatus === 'Pending') {
+    if (runStatus === 'running' || runStatus === 'pending') {
       derivedStatus = 'running';
-    } else if (runStatus === 'Ok') {
+    } else if (runStatus === 'ok') {
       derivedStatus = 'passed';
-    } else if (runStatus === 'Error') {
+    } else if (runStatus === 'error') {
       derivedStatus = 'failed';
-    } else if (runStatus === 'Warn') {
+    } else if (runStatus === 'warn') {
       derivedStatus = 'warn';
     }
   }

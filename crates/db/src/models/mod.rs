@@ -24,8 +24,6 @@ pub mod quality_issue;
 pub mod quality_run;
 pub mod terminal;
 pub mod workflow;
-pub mod quality_run;
-pub mod quality_issue;
 
 pub use cli_type::*;
 pub use git_event::*;
