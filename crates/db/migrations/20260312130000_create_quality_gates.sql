@@ -36,6 +36,6 @@ CREATE TABLE quality_issues (
     line_end      INTEGER,
     column_start  INTEGER,
     column_end    INTEGER,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now', 'subsec')),
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),
     FOREIGN KEY (run_id) REFERENCES quality_runs(id) ON DELETE CASCADE
 );
