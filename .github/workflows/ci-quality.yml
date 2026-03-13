@@ -21,14 +21,14 @@ jobs:
     timeout-minutes: 30
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         fetch-depth: 0 # Full history for better blame/analysis
 
     # Usually SonarQube would be run here using the official action
     # Note: Requires SONAR_TOKEN secret to be configured in GitHub repository
     - name: SonarScan
-      uses: SonarSource/sonarcloud-github-action@master
+      uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8 # v5.0.0
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -47,7 +47,7 @@ jobs:
       LIBGIT2_SYS_USE_PKG_CONFIG: "1"
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
     - name: Install system dependencies
       run: |
@@ -66,12 +66,12 @@ jobs:
           libssl-dev
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
       with:
         toolchain: nightly-2025-12-04
 
     - name: Cache dependencies
-      uses: actions/cache@v4
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: |
           ~/.cargo/registry

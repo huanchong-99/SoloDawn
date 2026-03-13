@@ -18,20 +18,20 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
-      echo "Unknown argument: $1"
-      echo "Usage: $0 --working-dir <dir> --changed-files <files>"
+      echo "Unknown argument: $1" >&2
+      echo "Usage: $0 --working-dir <dir> --changed-files <files>" >&2
       exit 1
       ;;
   esac
 done
 
 if [[ -z "$WORKING_DIR" ]]; then
-  echo "Error: --working-dir is required"
+  echo "Error: --working-dir is required" >&2
   exit 1
 fi
 
 if [[ -z "$CHANGED_FILES" ]]; then
-  echo "Error: --changed-files is required"
+  echo "Error: --changed-files is required" >&2
   exit 1
 fi
 
@@ -56,7 +56,7 @@ if [[ $EXIT_CODE -eq 0 ]]; then
   echo "Terminal quality gate passed."
 else
   echo ""
-  echo "Terminal quality gate failed."
+  echo "Terminal quality gate failed." >&2
 fi
 
 exit $EXIT_CODE

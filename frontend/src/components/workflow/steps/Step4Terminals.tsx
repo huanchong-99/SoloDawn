@@ -117,6 +117,46 @@ const terminalConfigListEquals = (
   return left.every((item, index) => terminalConfigEquals(item, right[index]));
 };
 
+/** Create a normalized terminal config for a given task and order index. */
+const createNormalizedTerminal = (
+  task: { id: string },
+  orderIndex: number,
+  existingTerminal?: TerminalConfig
+): TerminalConfig => {
+  if (existingTerminal) {
+    return {
+      ...existingTerminal,
+      id: existingTerminal.id || `terminal-${task.id}-${orderIndex}`,
+      taskId: task.id,
+      orderIndex,
+    };
+  }
+
+  return {
+    id: `terminal-${task.id}-${orderIndex}`,
+    taskId: task.id,
+    orderIndex,
+    cliTypeId: '',
+    modelConfigId: '',
+    role: '',
+  };
+};
+
+/** Normalize terminals for a single task to match its terminalCount. */
+const normalizeTerminalsForTask = (
+  task: { id: string; terminalCount: number },
+  existingTerminals: TerminalConfig[]
+): TerminalConfig[] => {
+  const sortedExisting = existingTerminals
+    .filter((terminal) => terminal.taskId === task.id)
+    .sort((a, b) => a.orderIndex - b.orderIndex);
+
+  return Array.from({ length: task.terminalCount }, (_, orderIndex) => {
+    const byOrderIndex = sortedExisting.find((terminal) => terminal.orderIndex === orderIndex);
+    return createNormalizedTerminal(task, orderIndex, byOrderIndex);
+  });
+};
+
 /**
  * Step 4: Assigns terminals and CLI/model settings for each task.
  */
@@ -156,46 +196,6 @@ export const Step4Terminals: React.FC<Step4TerminalsProps> = ({
     if (!hasTasks) {
       return;
     }
-
-    // Helper: Create normalized terminal config
-    const createNormalizedTerminal = (
-      task: { id: string },
-      orderIndex: number,
-      existingTerminal?: TerminalConfig
-    ): TerminalConfig => {
-      if (existingTerminal) {
-        return {
-          ...existingTerminal,
-          id: existingTerminal.id || `terminal-${task.id}-${orderIndex}`,
-          taskId: task.id,
-          orderIndex,
-        };
-      }
-
-      return {
-        id: `terminal-${task.id}-${orderIndex}`,
-        taskId: task.id,
-        orderIndex,
-        cliTypeId: '',
-        modelConfigId: '',
-        role: '',
-      };
-    };
-
-    // Helper: Normalize terminals for a single task
-    const normalizeTerminalsForTask = (
-      task: { id: string; terminalCount: number },
-      existingTerminals: TerminalConfig[]
-    ): TerminalConfig[] => {
-      const sortedExisting = existingTerminals
-        .filter((terminal) => terminal.taskId === task.id)
-        .sort((a, b) => a.orderIndex - b.orderIndex);
-
-      return Array.from({ length: task.terminalCount }, (_, orderIndex) => {
-        const byOrderIndex = sortedExisting.find((terminal) => terminal.orderIndex === orderIndex);
-        return createNormalizedTerminal(task, orderIndex, byOrderIndex);
-      });
-    };
 
     const normalizedTerminals: TerminalConfig[] = config.tasks.flatMap((task) =>
       normalizeTerminalsForTask(task, config.terminals)

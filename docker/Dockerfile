@@ -129,37 +129,33 @@ RUN set -eux; \
         > /etc/apt/apt.conf.d/80gitcortex-retries; \
     apt-get update && apt-get install -y --no-install-recommends \
         libsqlite3-0 libgit2-1.9 git curl ca-certificates bash gnupg xz-utils \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN set -eux; \
-    if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+    && rm -rf /var/lib/apt/lists/* \
+    && if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
         NODE_DIST_URL="https://npmmirror.com/mirrors/node"; \
     else \
         NODE_DIST_URL="https://nodejs.org/dist"; \
-    fi; \
-    ARCH="$(dpkg --print-architecture)"; \
-    case "$ARCH" in \
+    fi \
+    && ARCH="$(dpkg --print-architecture)" \
+    && case "$ARCH" in \
         amd64) NODE_ARCH="x64" ;; \
         arm64) NODE_ARCH="arm64" ;; \
         *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;; \
-    esac; \
-    NODE_VERSION="$(curl -fsSL \
+    esac \
+    && NODE_VERSION="$(curl -fsSL \
         "${NODE_DIST_URL}/latest-v${NODE_MAJOR}.x/" \
         | grep -oP 'node-v\K[0-9]+\.[0-9]+\.[0-9]+' \
-        | head -1)"; \
-    curl -fsSL "${NODE_DIST_URL}/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
-        | tar -xJ --strip-components=1 -C /usr/local; \
-    node --version && npm --version
-
-RUN set -eux; \
-    npm config --global set fetch-retries 5; \
-    npm config --global set fetch-retry-mintimeout 20000; \
-    npm config --global set fetch-retry-maxtimeout 120000; \
-    npm config --global set fetch-timeout 300000; \
-    if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+        | head -1)" \
+    && curl -fsSL "${NODE_DIST_URL}/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
+        | tar -xJ --strip-components=1 -C /usr/local \
+    && node --version && npm --version \
+    && npm config --global set fetch-retries 5 \
+    && npm config --global set fetch-retry-mintimeout 20000 \
+    && npm config --global set fetch-retry-maxtimeout 120000 \
+    && npm config --global set fetch-timeout 300000 \
+    && if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
         npm config --global set registry https://registry.npmmirror.com; \
-    fi; \
-    if [ "$INSTALL_AI_CLIS" = "1" ]; then \
+    fi \
+    && if [ "$INSTALL_AI_CLIS" = "1" ]; then \
         mkdir -p /etc/apt/keyrings; \
         if curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
             | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
