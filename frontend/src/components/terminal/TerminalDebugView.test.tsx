@@ -48,10 +48,6 @@ vi.mock('@xterm/addon-fit', () => {
   return { FitAddon: MockFitAddon };
 });
 
-vi.mock('@/components/quality/QualityGateStatusBadge', () => ({
-  QualityGateStatusBadge: () => null,
-}));
-
 vi.mock('@/hooks/useQualityGate', () => ({
   useTerminalLatestQuality: () => ({ data: null, isLoading: false }),
   useQualityIssues: () => ({ data: [], isLoading: false }),
