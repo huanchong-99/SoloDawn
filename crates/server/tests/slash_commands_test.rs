@@ -41,7 +41,7 @@ async fn test_list_command_presets() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::build_router(deployment, create_test_hub());
+    let app = server::routes::build_router(deployment, create_test_hub(), server::feishu_handle::new_shared_handle());
 
     let response = app
         .oneshot(
@@ -78,7 +78,7 @@ async fn test_create_command_preset_success() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::build_router(deployment, create_test_hub());
+    let app = server::routes::build_router(deployment, create_test_hub(), server::feishu_handle::new_shared_handle());
 
     let new_command = json!({
         "command": "/test-command",
@@ -125,7 +125,7 @@ async fn test_create_command_preset_missing_leading_slash() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::build_router(deployment, create_test_hub());
+    let app = server::routes::build_router(deployment, create_test_hub(), server::feishu_handle::new_shared_handle());
 
     let new_command = json!({
         "command": "test-command",  // Missing leading slash
@@ -170,7 +170,7 @@ async fn test_create_command_preset_duplicate_command() {
     });
 
     // Create first command - should succeed
-    let app = server::routes::build_router(deployment.clone(), create_test_hub());
+    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle());
     let response1 = app
         .oneshot(
             Request::builder()
@@ -186,7 +186,7 @@ async fn test_create_command_preset_duplicate_command() {
     assert_eq!(response1.status(), StatusCode::OK);
 
     // Try to create duplicate - should fail
-    let app = server::routes::build_router(deployment, create_test_hub());
+    let app = server::routes::build_router(deployment, create_test_hub(), server::feishu_handle::new_shared_handle());
     let response2 = app
         .oneshot(
             Request::builder()
@@ -212,7 +212,7 @@ async fn test_create_command_preset_missing_description() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::build_router(deployment, create_test_hub());
+    let app = server::routes::build_router(deployment, create_test_hub(), server::feishu_handle::new_shared_handle());
 
     let new_command = json!({
         "command": "/test-command"
@@ -251,7 +251,7 @@ async fn test_update_command_preset() {
         "promptTemplate": "Original template"
     });
 
-    let app = server::routes::build_router(deployment.clone(), create_test_hub());
+    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle());
     let create_response = app
         .oneshot(
             Request::builder()
@@ -274,7 +274,7 @@ async fn test_update_command_preset() {
         "promptTemplate": "Updated template"
     });
 
-    let app = server::routes::build_router(deployment.clone(), create_test_hub());
+    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle());
     let update_response = app
         .oneshot(
             Request::builder()
@@ -316,7 +316,7 @@ async fn test_delete_command_preset() {
         "description": "Command to be deleted"
     });
 
-    let app = server::routes::build_router(deployment.clone(), create_test_hub());
+    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle());
     let create_response = app
         .oneshot(
             Request::builder()
@@ -334,7 +334,7 @@ async fn test_delete_command_preset() {
     let command_id = value["data"]["id"].as_str().unwrap().to_string();
 
     // Delete the command
-    let app = server::routes::build_router(deployment.clone(), create_test_hub());
+    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle());
     let delete_response = app
         .oneshot(
             Request::builder()
@@ -349,7 +349,7 @@ async fn test_delete_command_preset() {
     assert_eq!(delete_response.status(), StatusCode::OK);
 
     // Verify it's deleted by trying to list
-    let app = server::routes::build_router(deployment, create_test_hub());
+    let app = server::routes::build_router(deployment, create_test_hub(), server::feishu_handle::new_shared_handle());
     let list_response = app
         .oneshot(
             Request::builder()

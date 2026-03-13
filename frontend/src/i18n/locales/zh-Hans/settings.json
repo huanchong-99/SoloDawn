@@ -14,7 +14,9 @@
         "mcp": "MCP 服务器",
         "mcpDesc": "模型上下文协议服务器",
         "organizations": "组织设置",
-        "organizationsDesc": "管理组织成员和权限"
+        "organizationsDesc": "管理组织成员和权限",
+        "feishu": "飞书",
+        "feishuDesc": "飞书机器人集成"
       }
     },
     "general": {
@@ -262,7 +264,7 @@
       "installAiCli": "一键安装 AI CLI",
       "refreshAvailability": "刷新可用性",
       "installAiCliSuccess": "AI CLI 安装完成。",
-      "installAiCliInstalledList": "\u5df2\u5b89\u88c5\u6210\u529f\uff1a{{names}}",
+      "installAiCliInstalledList": "已安装成功：{{names}}",
       "installAiCliFailed": "AI CLI 安装失败。",
       "installAiCliExitCode": "退出码：{{code}}",
       "installAiCliInProgress": "正在安装 AI CLI，已耗时 {{seconds}} 秒",
@@ -414,6 +416,36 @@
         "unsavedChanges": "您有未保存的更改",
         "discard": "放弃",
         "confirmSwitch": "您有未保存的更改。您确定要切换仓库吗？您的更改将丢失。"
+      }
+    },
+    "feishu": {
+      "loadError": "加载飞书配置失败。",
+      "reconnectSuccess": "重连请求已发送。",
+      "reconnectError": "发送重连请求失败。",
+      "status": {
+        "title": "连接状态",
+        "description": "当前飞书 WebSocket 连接状态。",
+        "featureDisabled": "飞书集成已禁用。设置 GITCORTEX_FEISHU_ENABLED=true 以启用。",
+        "connected": "已连接",
+        "disconnected": "已断开",
+        "notConfigured": "未配置",
+        "reconnect": "重新连接"
+      },
+      "form": {
+        "title": "配置",
+        "description": "配置飞书应用凭据以启用机器人集成。",
+        "appId": "应用 ID",
+        "appIdPlaceholder": "cli_xxxxxxxxxx",
+        "appSecret": "应用密钥",
+        "secretPlaceholderNew": "输入应用密钥",
+        "secretPlaceholderExisting": "输入新密钥以更新",
+        "tenantKey": "租户密钥（可选）",
+        "tenantKeyPlaceholder": "留空使用默认租户",
+        "baseUrl": "API 基础 URL",
+        "save": "保存配置",
+        "saveSuccess": "飞书配置保存成功。",
+        "saveError": "保存飞书配置失败。",
+        "requiredFields": "应用 ID 和应用密钥为必填项。"
       }
     }
   },

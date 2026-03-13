@@ -142,7 +142,7 @@ async fn test_start_workflow_requires_ready_status() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::build_router(deployment.clone(), create_test_hub());
+    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle());
 
     let request = Request::builder()
         .method("POST")
@@ -226,7 +226,7 @@ async fn test_start_workflow_without_orchestrator() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::build_router(deployment.clone(), create_test_hub());
+    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle());
 
     let request = Request::builder()
         .method("POST")

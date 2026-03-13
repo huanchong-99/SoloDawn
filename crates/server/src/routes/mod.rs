@@ -4,7 +4,7 @@ use axum::{
 };
 pub use subscription_hub::SharedSubscriptionHub;
 
-use crate::{DeploymentImpl, middleware::require_api_token};
+use crate::{DeploymentImpl, feishu_handle::SharedFeishuHandle, middleware::require_api_token};
 
 pub mod approvals;
 pub mod chat_integrations;
@@ -44,11 +44,11 @@ pub mod workflow_ws;
 pub mod workflows;
 pub mod workflows_dto;
 
-pub fn router(deployment: DeploymentImpl, hub: SharedSubscriptionHub) -> IntoMakeService<Router> {
-    build_router(deployment, hub).into_make_service()
+pub fn router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feishu_handle: SharedFeishuHandle) -> IntoMakeService<Router> {
+    build_router(deployment, hub, feishu_handle).into_make_service()
 }
 
-pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub) -> Router {
+pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feishu_handle: SharedFeishuHandle) -> Router {
     let outer_deployment = deployment.clone();
 
     // Create routers with different middleware layers
@@ -87,6 +87,7 @@ pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub) -> R
         // WebSocket routes for workflow events (requires Extension layer for hub)
         .nest("/ws", workflow_ws::workflow_ws_routes())
         .layer(Extension(hub))
+        .layer(Extension(feishu_handle))
         .layer(axum::middleware::from_fn(require_api_token))
         .with_state(deployment);
 

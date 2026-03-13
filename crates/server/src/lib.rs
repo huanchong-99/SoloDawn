@@ -35,6 +35,7 @@
 )]
 
 pub mod error;
+pub mod feishu_handle;
 pub mod mcp;
 pub mod middleware;
 pub mod routes;

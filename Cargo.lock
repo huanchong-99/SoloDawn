@@ -5302,8 +5302,10 @@ dependencies = [
 name = "server"
 version = "0.0.153"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "axum",
+ "base64 0.21.7",
  "chrono",
  "criterion",
  "db",
@@ -5311,6 +5313,7 @@ dependencies = [
  "dotenv",
  "dunce",
  "executors",
+ "feishu-connector",
  "futures-util",
  "git2",
  "http-body-util",

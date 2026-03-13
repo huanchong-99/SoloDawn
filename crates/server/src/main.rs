@@ -15,6 +15,7 @@ use anyhow::{self, Error as AnyhowError};
 use deployment::{Deployment, DeploymentError};
 use server::{
     DeploymentImpl, routes,
+    feishu_handle::{FeishuHandle, SharedFeishuHandle},
     routes::{SharedSubscriptionHub, event_bridge::EventBridge, subscription_hub::SubscriptionHub},
 };
 use services::services::container::ContainerService;
@@ -133,8 +134,9 @@ async fn main() -> Result<(), GitCortexError> {
     tracing::info!("WebSocket event bridge started");
 
     // Conditional Feishu connector startup
+    let feishu_handle = server::feishu_handle::new_shared_handle();
     if is_feishu_enabled() {
-        match start_feishu_connector(&deployment).await {
+        match start_feishu_connector(&deployment, &feishu_handle).await {
             Ok(()) => tracing::info!("Feishu connector started"),
             Err(e) => tracing::warn!("Feishu connector startup skipped: {e}"),
         }
@@ -142,7 +144,7 @@ async fn main() -> Result<(), GitCortexError> {
         tracing::debug!("Feishu integration disabled (GITCORTEX_FEISHU_ENABLED not set)");
     }
 
-    let app_router = routes::router(deployment.clone(), subscription_hub);
+    let app_router = routes::router(deployment.clone(), subscription_hub, feishu_handle);
 
     let port = std::env::var("BACKEND_PORT")
         .or_else(|_| std::env::var("PORT"))
@@ -248,41 +250,103 @@ fn is_feishu_enabled() -> bool {
         .is_some_and(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
 }
 
+/// Decrypt an AES-256-GCM encrypted secret stored as base64 (nonce || ciphertext).
+fn decrypt_feishu_secret(encrypted: &str) -> anyhow::Result<String> {
+    use aes_gcm::{
+        Aes256Gcm, Nonce,
+        aead::{Aead, KeyInit},
+    };
+    use base64::{Engine as _, engine::general_purpose};
+
+    let key_str = std::env::var("GITCORTEX_ENCRYPTION_KEY")
+        .map_err(|_| anyhow::anyhow!("GITCORTEX_ENCRYPTION_KEY not set"))?;
+    if key_str.len() != 32 {
+        return Err(anyhow::anyhow!("Invalid encryption key length"));
+    }
+    let key_bytes: [u8; 32] = key_str
+        .as_bytes()
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid encryption key format"))?;
+
+    let combined = general_purpose::STANDARD
+        .decode(encrypted)
+        .map_err(|e| anyhow::anyhow!("Base64 decode failed: {e}"))?;
+    if combined.len() < 12 {
+        return Err(anyhow::anyhow!("Invalid encrypted data length"));
+    }
+    let (nonce_bytes, ciphertext) = combined.split_at(12);
+    #[allow(deprecated)]
+    let nonce = Nonce::from_slice(nonce_bytes);
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+        .map_err(|e| anyhow::anyhow!("Cipher init failed: {e}"))?;
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| anyhow::anyhow!("Decryption failed: {e}"))?;
+    String::from_utf8(plaintext).map_err(|e| anyhow::anyhow!("Invalid UTF-8: {e}"))
+}
+
 /// Attempt to start the Feishu connector by loading config from the database.
 ///
-/// If no enabled config exists, this returns an informational error without
-/// crashing the server. Once `FeishuService` is fully implemented by another
-/// agent, this function should create the service, start the WebSocket
-/// connection, and store the handle in `AppState` for route access.
-async fn start_feishu_connector(deployment: &DeploymentImpl) -> Result<(), AnyhowError> {
-    use db::models::feishu_config::FeishuAppConfig;
-    use deployment::Deployment;
+/// Creates a `FeishuService` from the enabled DB config, spawns a reconnect
+/// loop, and stores the handle in the shared state for route access.
+async fn start_feishu_connector(
+    deployment: &DeploymentImpl,
+    feishu_handle: &SharedFeishuHandle,
+) -> Result<(), AnyhowError> {
+    use feishu_connector::{reconnect::ReconnectPolicy, types::ClientConfig};
+    use services::services::feishu::FeishuService;
 
-    let config = FeishuAppConfig::find_enabled(&deployment.db().pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to query feishu_app_config: {e}"))?;
+    let service = FeishuService::from_db(
+        deployment.db().pool.clone(),
+        deployment.message_bus().clone(),
+        decrypt_feishu_secret,
+    )
+    .await?;
 
-    let Some(config) = config else {
+    let Some(mut service) = service else {
         return Err(anyhow::anyhow!(
             "No enabled Feishu config found in database; skipping connector startup"
         ));
     };
 
-    tracing::info!(
-        app_id = %config.app_id,
-        base_url = %config.base_url,
-        "Feishu config loaded from database"
-    );
+    let (reconnect_tx, mut reconnect_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let connected = Arc::new(tokio::sync::RwLock::new(false));
 
-    // TODO: Wire up FeishuService once it is available:
-    //
-    // 1. Decrypt config.app_secret_encrypted using GITCORTEX_ENCRYPTION_KEY
-    // 2. Create FeishuConfig { app_id, app_secret, base_url }
-    // 3. Create FeishuClient::new(feishu_config)
-    // 4. Spawn the client.connect() loop with reconnect policy
-    // 5. Store the FeishuService handle in AppState for route access
-    //
-    // For now, the connector is acknowledged but not connected.
+    let handle = FeishuHandle {
+        connected: connected.clone(),
+        reconnect_tx,
+    };
+
+    // Store the handle so route handlers can access it
+    *feishu_handle.write().await = Some(handle);
+
+    let connected_flag = connected;
+    tokio::spawn(async move {
+        let mut policy = ReconnectPolicy::new(ClientConfig::default());
+        loop {
+            *connected_flag.write().await = true;
+            if let Err(e) = service.start().await {
+                tracing::warn!(error = %e, "Feishu service disconnected");
+            }
+            *connected_flag.write().await = false;
+
+            tokio::select! {
+                delay = std::future::ready(policy.next_delay()) => {
+                    if let Some(d) = delay {
+                        tracing::info!(delay_ms = d.as_millis(), "Reconnecting Feishu...");
+                        tokio::time::sleep(d).await;
+                    } else {
+                        tracing::error!("Feishu max reconnect attempts reached");
+                        break;
+                    }
+                }
+                _ = reconnect_rx.recv() => {
+                    tracing::info!("Manual Feishu reconnect requested");
+                    policy.reset();
+                }
+            }
+        }
+    });
 
     Ok(())
 }

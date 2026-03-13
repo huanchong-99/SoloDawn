@@ -15,6 +15,7 @@ import {
   OrganizationSettings,
   ProjectSettings,
   ReposSettings,
+  FeishuSettings,
   SettingsLayout,
 } from '@/pages/settings/';
 import { UserSystemProvider, useUserSystem } from '@/components/ConfigProvider';
@@ -158,6 +159,7 @@ function AppContent() {
                 <Route path="agents" element={<AgentSettings />} />
                 <Route path="models" element={<ModelsSettings />} />
                 <Route path="mcp" element={<McpSettings />} />
+                <Route path="feishu" element={<FeishuSettings />} />
               </Route>
               <Route
                 path="/mcp-servers"

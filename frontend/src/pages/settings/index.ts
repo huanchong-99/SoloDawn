@@ -6,3 +6,4 @@ export { OrganizationSettings } from './OrganizationSettings';
 export { AgentSettings } from './AgentSettings';
 export { ModelsSettings } from './ModelsSettings';
 export { McpSettings } from './McpSettings';
+export { FeishuSettings } from './FeishuSettings';

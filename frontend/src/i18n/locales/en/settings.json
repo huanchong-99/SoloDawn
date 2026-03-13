@@ -14,7 +14,9 @@
         "mcp": "MCP Servers",
         "mcpDesc": "Model Context Protocol servers",
         "organizations": "Organization Settings",
-        "organizationsDesc": "Manage organization members and permissions"
+        "organizationsDesc": "Manage organization members and permissions",
+        "feishu": "Feishu",
+        "feishuDesc": "Feishu (Lark) bot integration"
       }
     },
     "general": {
@@ -414,6 +416,36 @@
         "unsavedChanges": "You have unsaved changes",
         "discard": "Discard",
         "confirmSwitch": "You have unsaved changes. Are you sure you want to switch repositories? Your changes will be lost."
+      }
+    },
+    "feishu": {
+      "loadError": "Failed to load Feishu configuration.",
+      "reconnectSuccess": "Reconnect request sent successfully.",
+      "reconnectError": "Failed to send reconnect request.",
+      "status": {
+        "title": "Connection Status",
+        "description": "Current Feishu WebSocket connection state.",
+        "featureDisabled": "Feishu integration is disabled. Set GITCORTEX_FEISHU_ENABLED=true to enable.",
+        "connected": "Connected",
+        "disconnected": "Disconnected",
+        "notConfigured": "Not configured",
+        "reconnect": "Reconnect"
+      },
+      "form": {
+        "title": "Configuration",
+        "description": "Configure your Feishu app credentials for bot integration.",
+        "appId": "App ID",
+        "appIdPlaceholder": "cli_xxxxxxxxxx",
+        "appSecret": "App Secret",
+        "secretPlaceholderNew": "Enter app secret",
+        "secretPlaceholderExisting": "Enter new secret to update",
+        "tenantKey": "Tenant Key (optional)",
+        "tenantKeyPlaceholder": "Leave empty for default tenant",
+        "baseUrl": "API Base URL",
+        "save": "Save Configuration",
+        "saveSuccess": "Feishu configuration saved successfully.",
+        "saveError": "Failed to save Feishu configuration.",
+        "requiredFields": "App ID and App Secret are required."
       }
     }
   },

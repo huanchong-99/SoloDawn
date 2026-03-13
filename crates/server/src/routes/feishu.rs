@@ -6,7 +6,7 @@
 //! - POST /api/integrations/feishu/reconnect   — Trigger reconnection
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::State,
     routing::{get, post, put},
 };
@@ -16,7 +16,7 @@ use deployment::Deployment;
 use serde::{Deserialize, Serialize};
 use utils::response::ApiResponse;
 
-use crate::{DeploymentImpl, error::ApiError};
+use crate::{DeploymentImpl, error::ApiError, feishu_handle::SharedFeishuHandle};
 
 /// Whether the Feishu integration feature is enabled via environment variable.
 fn is_feishu_enabled() -> bool {
@@ -102,6 +102,7 @@ fn config_to_summary(cfg: &FeishuAppConfig) -> FeishuConfigSummary {
 /// config state, and connection status.
 async fn get_status(
     State(deployment): State<DeploymentImpl>,
+    Extension(feishu_handle): Extension<SharedFeishuHandle>,
 ) -> Result<Json<ApiResponse<FeishuStatusResponse>>, ApiError> {
     let feature_enabled = is_feishu_enabled();
 
@@ -111,10 +112,18 @@ async fn get_status(
 
     let (config_enabled, connection_status, config_summary) = match config {
         Some(ref cfg) if cfg.enabled => {
-            // TODO: Once FeishuService is wired into AppState, query its
-            // actual WebSocket connection status here instead of returning
-            // "disconnected" as the default.
-            (true, "disconnected".to_string(), Some(config_to_summary(cfg)))
+            let handle_guard = feishu_handle.read().await;
+            let status = match &*handle_guard {
+                Some(h) => {
+                    if *h.connected.read().await {
+                        "connected"
+                    } else {
+                        "disconnected"
+                    }
+                }
+                None => "disconnected",
+            };
+            (true, status.to_string(), Some(config_to_summary(cfg)))
         }
         Some(ref cfg) => (false, "not_configured".to_string(), Some(config_to_summary(cfg))),
         None => (false, "not_configured".to_string(), None),
@@ -217,6 +226,7 @@ async fn update_config(
 /// Triggers a manual reconnection of the Feishu WebSocket client.
 async fn reconnect(
     State(deployment): State<DeploymentImpl>,
+    Extension(feishu_handle): Extension<SharedFeishuHandle>,
 ) -> Result<Json<ApiResponse<ReconnectResponse>>, ApiError> {
     if !is_feishu_enabled() {
         return Err(ApiError::Conflict(
@@ -234,13 +244,23 @@ async fn reconnect(
         ));
     }
 
-    // TODO: Once FeishuService is wired into AppState, call its reconnect()
-    // method here. For now, acknowledge the request.
-    tracing::info!("Feishu reconnect requested (service not yet wired)");
+    let handle_guard = feishu_handle.read().await;
+    if let Some(ref h) = *handle_guard {
+        if let Err(e) = h.reconnect_tx.try_send(()) {
+            tracing::warn!(error = %e, "Failed to send Feishu reconnect signal");
+        }
+    } else {
+        return Err(ApiError::Conflict(
+            "Feishu connector is not running. Restart the server with GITCORTEX_FEISHU_ENABLED=true.".to_string(),
+        ));
+    }
+    drop(handle_guard);
+
+    tracing::info!("Feishu reconnect requested via API");
 
     Ok(Json(ApiResponse::success(ReconnectResponse {
-        status: "acknowledged".to_string(),
-        message: "Reconnect request acknowledged. FeishuService integration pending.".to_string(),
+        status: "reconnecting".to_string(),
+        message: "Reconnect signal sent to Feishu connector.".to_string(),
     })))
 }
 

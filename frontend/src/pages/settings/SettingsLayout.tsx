@@ -5,6 +5,7 @@ import {
   Cpu,
   Bot,
   Server,
+  MessageSquare,
   X,
   FolderOpen,
   Building2,
@@ -47,6 +48,10 @@ const settingsNavigation = [
   {
     path: 'mcp',
     icon: Server,
+  },
+  {
+    path: 'feishu',
+    icon: MessageSquare,
   },
 ];
 

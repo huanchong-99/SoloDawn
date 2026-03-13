@@ -1438,3 +1438,44 @@ export const queueApi = {
     return handleApiResponse<QueueStatus>(response);
   },
 };
+
+// Feishu Integration API
+export const feishuApi = {
+  getStatus: async (): Promise<{
+    featureEnabled: boolean;
+    configEnabled: boolean;
+    connectionStatus: string;
+    configSummary: {
+      id: string;
+      appId: string;
+      baseUrl: string;
+      tenantKey: string | null;
+      enabled: boolean;
+      updatedAt: string;
+    } | null;
+  }> => {
+    const response = await makeRequest('/api/integrations/feishu/status');
+    return handleApiResponse(response);
+  },
+
+  updateConfig: async (data: {
+    appId: string;
+    appSecret: string;
+    tenantKey?: string;
+    baseUrl?: string;
+    enabled?: boolean;
+  }): Promise<{ id: string; message: string }> => {
+    const response = await makeRequest('/api/integrations/feishu/config', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    return handleApiResponse(response);
+  },
+
+  reconnect: async (): Promise<{ status: string; message: string }> => {
+    const response = await makeRequest('/api/integrations/feishu/reconnect', {
+      method: 'POST',
+    });
+    return handleApiResponse(response);
+  },
+};
