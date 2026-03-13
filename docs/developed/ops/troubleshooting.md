@@ -454,6 +454,91 @@ chown <server_user>:<server_group> crates/db/data.db
 
 ---
 
+## Quality Gate Issues
+
+### Symptom
+
+Quality gate not running, always passing, or blocking unexpectedly.
+
+### Possible Causes & Solutions
+
+#### 1. Quality Gate Not Running
+
+Check the current mode:
+```bash
+# Check quality-gate.yaml
+cat quality/quality-gate.yaml | head -15
+
+# Check environment override
+echo $QUALITY_GATE_MODE
+```
+
+If mode is `off`, the gate is disabled. Set to `shadow`, `warn`, or `enforce` to enable.
+
+#### 2. SonarQube Connection Failed
+
+```bash
+# Check SonarQube is running
+curl -s http://localhost:9000/api/system/status
+
+# Check token is set
+echo $SONAR_TOKEN
+
+# Test scanner manually
+./scripts/quality/run-sonar-scanner.sh
+```
+
+If SonarQube is unreachable, the sonar provider is skipped automatically. Local checks (cargo, eslint, tsc) still run.
+
+#### 3. Quality Gate Always Passing
+
+In `shadow` mode, the gate logs results but never blocks. Check the mode:
+```yaml
+# quality/quality-gate.yaml
+mode: shadow  # Change to "warn" or "enforce" to enable blocking
+```
+
+Also verify providers are enabled:
+```yaml
+providers:
+  rust: true
+  frontend: true
+  repo: true
+  security: true
+  sonar: true
+```
+
+#### 4. Quality Gate Blocking Unexpectedly
+
+If mode is `enforce` and terminals are stuck in quality loops:
+
+**Quick fix** — switch to shadow mode:
+```yaml
+mode: shadow
+```
+
+**Investigate** — check the quality run results:
+```bash
+curl http://localhost:23456/api/terminals/<terminal_id>/quality/latest
+```
+
+Common causes:
+- Clippy warnings treated as errors (check `clippy_warnings` threshold in YAML)
+- Pre-existing test failures (quality gate checks ALL tests, not just changed ones)
+- SonarQube rules too strict (adjust thresholds or disable sonar provider)
+
+#### 5. Quality Results Not Showing in UI
+
+Check WebSocket connection:
+- Open browser DevTools → Network → WS tab
+- Look for `quality.gate_result` events
+
+If events are missing, check the backend logs for `TerminalQualityGateResult` bus message errors.
+
+If events arrive but UI doesn't update, the React Query cache may not be invalidating. Check `wsStore.ts` handler for `quality.gate_result`.
+
+---
+
 ## Getting Help
 
 ### Diagnostic Information Collection

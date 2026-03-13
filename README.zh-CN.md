@@ -272,6 +272,61 @@ curl http://localhost:23456/api/health -H "Authorization: Bearer <token>"
 
 ---
 
+## 质量门
+
+GitCortex 内建质量门引擎，在三个层级自动验证代码质量：
+
+| 质量门 | 触发时机 | 检查范围 |
+|--------|---------|---------|
+| **终端级** | 每次 checkpoint 提交 | 仅变更文件 — cargo check、clippy、tsc、测试 |
+| **分支级** | 任务最后一个终端通过后 | 整个任务分支 — 全部检查 + lint |
+| **仓库级** | 合并主分支前 / CI | 整个仓库 — 全部检查 + SonarQube 分析 |
+
+### 模式
+
+在 `quality/quality-gate.yaml` 中配置：
+
+```yaml
+mode: shadow  # off | shadow | warn | enforce
+```
+
+| 模式 | 行为 |
+|------|------|
+| `off` | 关闭质量门，走旧流程 |
+| `shadow` | 运行分析并记录结果，但不阻断（默认） |
+| `warn` | 运行分析，通过 UI 通知，不阻断合并 |
+| `enforce` | 硬性门禁 — 不通过则阻断终端交接 |
+
+### 工作原理
+
+1. 终端提交代码 → 编排器拦截为 **checkpoint**（非最终完成）
+2. 质量引擎对终端工作目录运行配置的检查项
+3. **通过** → 终端升格为已完成 → 调度下一个终端
+4. **失败** → 结构化修复指令回传给同一终端 → 终端修复后重新提交
+
+### 手动运行
+
+```bash
+# 完整质量门（仓库级，shadow 模式）
+pnpm run quality
+
+# 试运行检查
+pnpm run quality:check
+
+# 仅 SonarCloud 分析
+pnpm run quality:sonar
+```
+
+### 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `QUALITY_GATE_MODE` | 覆盖 YAML 模式（off/shadow/warn/enforce） |
+| `SONAR_TOKEN` | SonarQube/SonarCloud 认证令牌 |
+| `SONAR_HOST_URL` | SonarQube 服务器地址（默认：http://localhost:9000） |
+
+---
+
 ## 技术栈
 
 | 层级 | 技术 |

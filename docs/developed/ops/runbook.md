@@ -420,6 +420,111 @@ export GITCORTEX_WS_TIMEOUT_SECONDS=300
 - [ ] Regular backups are automated
 - [ ] Audit logs are enabled and monitored
 
+## Quality Gate Operations
+
+### Configuration
+
+The quality gate is configured via `quality/quality-gate.yaml` at the repository root.
+
+**Modes:**
+| Mode | Behavior |
+|------|----------|
+| `off` | Quality gate disabled, legacy workflow semantics |
+| `shadow` | Runs analysis and logs results, never blocks (default) |
+| `warn` | Runs analysis, publishes results to UI, does not block merge |
+| `enforce` | Hard gate — blocks terminal handoff on failure |
+
+To change mode, edit `quality/quality-gate.yaml`:
+```yaml
+mode: enforce  # off | shadow | warn | enforce
+```
+
+Or override via environment variable:
+```bash
+# Windows PowerShell
+$env:QUALITY_GATE_MODE="enforce"
+
+# Linux/macOS
+export QUALITY_GATE_MODE=enforce
+```
+
+### SonarQube Setup
+
+1. Start SonarQube (Docker):
+```bash
+docker run -d --name sonarqube -p 9000:9000 sonarqube:community
+```
+
+2. Create a project and generate a token at `http://localhost:9000`
+
+3. Set environment variables:
+```bash
+export SONAR_TOKEN=<your-token>
+export SONAR_HOST_URL=http://localhost:9000
+```
+
+4. Update `quality/quality-gate.yaml`:
+```yaml
+sonar:
+  host_url: "http://localhost:9000"
+  project_key: "gitcortex"
+```
+
+5. Sync quality profile:
+```bash
+./scripts/quality/sync-quality-profile.sh
+```
+
+### Running Quality Gate Manually
+
+```bash
+# Full repo-level gate (shadow mode)
+pnpm run quality
+
+# Dry-run check
+pnpm run quality:check
+
+# SonarCloud analysis
+pnpm run quality:sonar
+```
+
+### Terminal Quality Feedback Loop
+
+When quality gate is enabled (`warn` or `enforce` mode):
+
+1. Terminal commits code with `status: checkpoint` metadata
+2. Orchestrator intercepts the checkpoint and runs `QualityEngine`
+3. If quality passes → terminal promoted to completed → next terminal dispatched
+4. If quality fails → structured fix instructions injected to original terminal via PTY stdin
+5. Terminal fixes issues and re-commits → cycle repeats
+
+The orchestrator does NOT create a new fixer terminal. The original terminal retains full task context.
+
+### Quality Data Cleanup
+
+Quality run records accumulate over time. To clean up old records:
+
+```sql
+-- Delete quality runs older than 30 days
+DELETE FROM quality_run WHERE created_at < datetime('now', '-30 days');
+
+-- Delete orphaned quality issues
+DELETE FROM quality_issue WHERE run_id NOT IN (SELECT id FROM quality_run);
+```
+
+### Monitoring Quality Gate
+
+Check quality gate status via API:
+```bash
+# Latest quality run for a terminal
+curl http://localhost:23456/api/terminals/<terminal_id>/quality/latest
+
+# All quality runs for a workflow
+curl http://localhost:23456/api/workflows/<workflow_id>/quality/runs
+```
+
+WebSocket event `quality.gate_result` is pushed to all workflow subscribers when a quality run completes.
+
 ## Support Resources
 
 - Documentation: `README.md`, `docs/developed/plans/`

@@ -1,6 +1,6 @@
 # GitCortex TODO
 
-> 更新时间：2026-03-11
+> 更新时间：2026-03-13
 > 目的：把 `docs/undeveloped/current/TODO.md` 升级为当前唯一的未完成总计划入口。
 > 当前最高优先级：Phase 29 — 全栈代码质量门 / Sonar 化改造（P0）
 
@@ -82,107 +82,107 @@
 
 ### 29A. 架构与协议定型
 
-- [ ] P29-A01 编写质量门 ADR，明确 `checkpoint -> quality gate -> handoff` 的新状态语义。
-- [ ] P29-A02 设计新的 commit metadata 协议。
+- [x] P29-A01 编写质量门 ADR，明确 `checkpoint -> quality gate -> handoff` 的新状态语义。
+- [x] P29-A02 设计新的 commit metadata 协议。
 说明：质量门开启时，代码 terminal 改用 `status: checkpoint`；保留对历史 `completed` metadata 的兼容解析。
-- [ ] P29-A03 设计 `QualityRun`, `QualityIssue`, `QualityGateDecision`, `QualityProvider`, `QualitySummary` 数据模型。
-- [ ] P29-A04 设计仓库级 `quality/quality-gate.yaml` 结构。
-- [ ] P29-A05 设计本地 gate 与 Sonar gate 的先后顺序、超时、重试与降级策略。
-- [ ] P29-A06 设计“质量失败回流原 terminal”的系统 prompt 模板、终端停等契约与重提交流程。
+- [x] P29-A03 设计 `QualityRun`, `QualityIssue`, `QualityGateDecision`, `QualityProvider`, `QualitySummary` 数据模型。
+- [x] P29-A04 设计仓库级 `quality/quality-gate.yaml` 结构。
+- [x] P29-A05 设计本地 gate 与 Sonar gate 的先后顺序、超时、重试与降级策略。
+- [x] P29-A06 设计“质量失败回流原 terminal”的系统 prompt 模板、终端停等契约与重提交流程。
 
 ### 29B. 数据库与领域模型
 
-- [ ] P29-B01 新增质量运行表：`quality_run`
-- [ ] P29-B02 新增质量问题表：`quality_issue`
+- [x] P29-B01 新增质量运行表：`quality_run`
+- [x] P29-B02 新增质量问题表：`quality_issue`
 - [ ] P29-B03 新增质量策略/配置快照表：`quality_policy_snapshot`
-- [ ] P29-B04 为 workflow/task/terminal 增加 quality 聚合字段或视图。
+- [x] P29-B04 为 workflow/task/terminal 增加 quality 聚合字段或视图。
 - [ ] P29-B05 设计旧 workflow 的兼容迁移与回填逻辑。
 - [ ] P29-B06 增加数据清理/归档策略，避免历史质量报告无限膨胀。
 
 ### 29C. Orchestrator 核心改造
 
-- [ ] P29-C01 在 `git_watcher` 中新增 checkpoint metadata 解析与路由。
-- [ ] P29-C02 在 orchestrator 中引入 `quality_pending / quality_pass / quality_fail` 分支处理。
-- [ ] P29-C03 阻断 `handle_terminal_completed()` 直接推进逻辑，改为“先等 quality gate 决策”。
-- [ ] P29-C04 将“质量失败 -> 新建 fixer terminal”改成“质量失败 -> 回写原 terminal”。
-- [ ] P29-C05 保留 `ReviewCode / FixIssues`，但调整触发点为“质量门通过之后”。
-- [ ] P29-C06 改造 `prompt_watcher` 与 terminal completion 模板，禁止在质量门未通过前 handoff。
+- [x] P29-C01 在 `git_watcher` 中新增 checkpoint metadata 解析与路由。
+- [x] P29-C02 在 orchestrator 中引入 `quality_pending / quality_pass / quality_fail` 分支处理。
+- [x] P29-C03 阻断 `handle_terminal_completed()` 直接推进逻辑，改为“先等 quality gate 决策”。
+- [x] P29-C04 将“质量失败 -> 新建 fixer terminal”改成“质量失败 -> 回写原 terminal”。
+- [x] P29-C05 保留 `ReviewCode / FixIssues`，但调整触发点为“质量门通过之后”。
+- [x] P29-C06 改造 `prompt_watcher` 与 terminal completion 模板，禁止在质量门未通过前 handoff。
 - [ ] P29-C07 增加 checkpoint 去重、重放、幂等、防乱序保护。
-- [ ] P29-C08 增加 quality timeout、provider down、scanner crash、partial report 的恢复机制。
-- [ ] P29-C09 增加 feature flag：`QUALITY_GATE_MODE=off|shadow|warn|enforce`
-- [ ] P29-C10 保证关闭质量门时，旧 workflow 语义完全不变。
+- [x] P29-C08 增加 quality timeout、provider down、scanner crash、partial report 的恢复机制。
+- [x] P29-C09 增加 feature flag：`QUALITY_GATE_MODE=off|shadow|warn|enforce`
+- [x] P29-C10 保证关闭质量门时，旧 workflow 语义完全不变。
 
 ### 29D. 质量执行引擎
 
-- [ ] P29-D01 新建 `quality` 服务模块，统一封装 provider 接口。
+- [x] P29-D01 新建 `quality` 服务模块，统一封装 provider 接口。
 - [ ] P29-D02 实现 changed-files 采样与 analyzer 选择策略。
-- [ ] P29-D03 实现 Rust analyzer adapter。
-- [ ] P29-D04 实现 Frontend analyzer adapter。
-- [ ] P29-D05 实现 Repo/Infra analyzer adapter。
-- [ ] P29-D06 实现 Sonar provider adapter。
-- [ ] P29-D07 实现报告聚合器，把 stdout/stderr/SARIF/JSON 统一转成内部报告模型。
-- [ ] P29-D08 实现 severity 映射与 blocking/non-blocking 判定。
+- [x] P29-D03 实现 Rust analyzer adapter。
+- [x] P29-D04 实现 Frontend analyzer adapter。
+- [x] P29-D05 实现 Repo/Infra analyzer adapter。
+- [x] P29-D06 实现 Sonar provider adapter。
+- [x] P29-D07 实现报告聚合器，把 stdout/stderr/SARIF/JSON 统一转成内部报告模型。
+- [x] P29-D08 实现 severity 映射与 blocking/non-blocking 判定。
 - [ ] P29-D09 实现 baseline 对比与“只阻断新问题”策略。
 - [ ] P29-D10 实现手动重跑与自动重跑策略。
 
 ### 29E. SonarQube / SonarCloud 集成
 
-- [ ] P29-E01 选定首发模式：`SonarQube Server`、`SonarQube Community Build` 或 `SonarCloud`。
+- [x] P29-E01 选定首发模式：`SonarQube Server`、`SonarQube Community Build` 或 `SonarCloud`。
 说明：实施前必须先核对 Rust 覆盖边界；若远端 Sonar 对 Rust 规则不足，本地 `clippy` 仍作为 Rust 阻断真相源。
-- [ ] P29-E02 新增仓库内 `sonar-project.properties` 与路径包含/排除策略。
-- [ ] P29-E03 建立 Sonar token / host / project key / org key 的环境变量规范。
-- [ ] P29-E04 打通 branch / PR / main 三类分析模式。
-- [ ] P29-E05 设计并实现 Quality Profile 导出备份机制，定期同步到 `quality/sonar/profiles/`。
+- [x] P29-E02 新增仓库内 `sonar-project.properties` 与路径包含/排除策略。
+- [x] P29-E03 建立 Sonar token / host / project key / org key 的环境变量规范。
+- [x] P29-E04 打通 branch / PR / main 三类分析模式。
+- [x] P29-E05 设计并实现 Quality Profile 导出备份机制，定期同步到 `quality/sonar/profiles/`。
 - [ ] P29-E06 设计并实现 Sonar 规则变更的 code review 流程。
 - [ ] P29-E07 实现外部问题/SARIF 导入方案，用于统一展示本地 analyzer 结果。
-- [ ] P29-E08 明确 Quality Gate 阈值。
+- [x] P29-E08 明确 Quality Gate 阈值。
 说明：首发先拦 new code 的 blocker/critical/coverage/duplication，不直接用全量历史债务卡死仓库。
-- [ ] P29-E09 设计 Sonar 故障时的降级路径。
+- [x] P29-E09 设计 Sonar 故障时的降级路径。
 说明：`shadow/warn` 模式可放行但必须落日志；`enforce` 模式仅在配置明确允许时才降级到本地 gate 真相源。
 - [ ] P29-E10 规范旧 `docs/developed/issues/sonarcloud-*.md` 的归档与迁移。
 
 ### 29F. 脚本与命令入口
 
-- [ ] P29-F01 统一根 `package.json` 的 `lint/check/test/quality` 命名。
+- [x] P29-F01 统一根 `package.json` 的 `lint/check/test/quality` 命名。
 - [ ] P29-F02 为 frontend 增加稳定的 `quality` 聚合命令。
-- [ ] P29-F03 新增 `scripts/quality/run-quality-gate.*`
+- [x] P29-F03 新增 `scripts/quality/run-quality-gate.*`
 - [ ] P29-F04 新增 `scripts/quality/run-terminal-gate.*`
 - [ ] P29-F05 新增 `scripts/quality/run-branch-gate.*`
 - [ ] P29-F06 新增 `scripts/quality/collect-report.*`
-- [ ] P29-F07 新增 `scripts/quality/sync-sonar-profile.*`
+- [x] P29-F07 新增 `scripts/quality/sync-sonar-profile.*`
 - [ ] P29-F08 把 `scripts/verify-baseline.sh` 与 `scripts/audit-security.sh` 并入统一质量入口。
-- [ ] P29-F09 为 Windows/PowerShell 与 Linux/macOS 都提供等价入口。
-- [ ] P29-F10 保证所有脚本都能在 orchestrator 调用链中被安全复用。
+- [x] P29-F09 为 Windows/PowerShell 与 Linux/macOS 都提供等价入口。
+- [x] P29-F10 保证所有脚本都能在 orchestrator 调用链中被安全复用。
 
 ### 29G. API、事件总线与共享类型
 
-- [ ] P29-G01 新增 `quality.*` workflow event 类型。
+- [x] P29-G01 新增 `quality.*` workflow event 类型。
 建议事件：`quality.run.started`, `quality.run.updated`, `quality.run.completed`, `quality.gate.blocked`, `quality.gate.passed`
-- [ ] P29-G02 新增 REST API：查询 workflow/task/terminal 的最新质量报告、重跑质量门、获取详细 issue 列表。
-- [ ] P29-G03 扩展 shared DTO：`WorkflowQualityGateDto`, `QualityRunDto`, `QualityIssueDto`, `TerminalQualitySummaryDto`
+- [x] P29-G02 新增 REST API：查询 workflow/task/terminal 的最新质量报告、重跑质量门、获取详细 issue 列表。
+- [x] P29-G03 扩展 shared DTO：`WorkflowQualityGateDto`, `QualityRunDto`, `QualityIssueDto`, `TerminalQualitySummaryDto`
 - [ ] P29-G04 明确 execution process 是否要承载质量扫描进程；若承载，扩展 run reason 和前端标签映射。
-- [ ] P29-G05 保证 workflow event 与 execution process log 双写不冲突、可追踪。
-- [ ] P29-G06 为 API/WS 设计版本兼容层，避免前端部署顺序导致崩溃。
+- [x] P29-G05 保证 workflow event 与 execution process log 双写不冲突、可追踪。
+- [x] P29-G06 为 API/WS 设计版本兼容层，避免前端部署顺序导致崩溃。
 
 ### 29H. 前端 Workflow / Debug / 日志 UI
 
-- [ ] P29-H01 在工作流详情页显示“当前质量门状态、最近一次报告、阻断原因、重跑入口”。
-- [ ] P29-H02 在 `WorkflowDebug` / `TerminalDebugView` 中增加质量摘要面板。
-- [ ] P29-H03 在 pipeline/board 视图中给 terminal 增加质量徽标、问题数和阻断态。
-- [ ] P29-H04 在伪终端界面可见“分析已开始 / 已完成 / 已回传 terminal”状态。
-- [ ] P29-H05 在日志面板复用 `tool` 内容或新增 `quality report` 视图，保证详细报告可展开阅读。
-- [ ] P29-H06 扩展 `wsStore` 的 payload normalize 与事件订阅。
-- [ ] P29-H07 保持 React Query + workflow events 的现有数据刷新模式，不额外引入新的全局 workflow store。
-- [ ] P29-H08 提供失败回流链路的时间线。
+- [x] P29-H01 在工作流详情页显示“当前质量门状态、最近一次报告、阻断原因、重跑入口”。
+- [x] P29-H02 在 `WorkflowDebug` / `TerminalDebugView` 中增加质量摘要面板。
+- [x] P29-H03 在 pipeline/board 视图中给 terminal 增加质量徽标、问题数和阻断态。
+- [x] P29-H04 在伪终端界面可见“分析已开始 / 已完成 / 已回传 terminal”状态。
+- [x] P29-H05 在日志面板复用 `tool` 内容或新增 `quality report` 视图，保证详细报告可展开阅读。
+- [x] P29-H06 扩展 `wsStore` 的 payload normalize 与事件订阅。
+- [x] P29-H07 保持 React Query + workflow events 的现有数据刷新模式，不额外引入新的全局 workflow store。
+- [x] P29-H08 提供失败回流链路的时间线。
 说明：用户要看到“checkpoint 提交 -> 质量失败 -> 回传终端 -> 再次提交 -> 通过”的全过程。
-- [ ] P29-H09 支持历史终端查看对应的最后一次质量报告。
+- [x] P29-H09 支持历史终端查看对应的最后一次质量报告。
 - [ ] P29-H10 处理前后端版本不一致时的 UI 容错与 placeholder。
 
 ### 29I. GitHub Actions / 分支保护 / 合并策略
 
-- [ ] P29-I01 拆分现有 `baseline-check.yml`，形成基础检查、质量扫描、Docker 检查三层 workflow。
-- [ ] P29-I02 补齐前端 lint/check/test 到 GitHub Actions。
-- [ ] P29-I03 增加 Sonar 分析 job 与 Quality Gate 等待逻辑。
+- [x] P29-I01 拆分现有 `baseline-check.yml`，形成基础检查、质量扫描、Docker 检查三层 workflow。
+- [x] P29-I02 补齐前端 lint/check/test 到 GitHub Actions。
+- [x] P29-I03 增加 Sonar 分析 job 与 Quality Gate 等待逻辑。
 - [ ] P29-I04 为 PR、main、release 分别定义 required checks。
 - [ ] P29-I05 将 GitHub workflow 结果回写到 orchestrator 可消费的状态源。
 - [ ] P29-I06 明确“合并到主分支后主动 push 并等待 workflow 完成”的自动化流程如何与新质量门联动。
@@ -192,7 +192,7 @@
 
 ### 29J. Docker / 部署 / 运维
 
-- [ ] P29-J01 决定 Sonar 服务部署方式：外部托管 or 内嵌 compose profile。
+- [x] P29-J01 决定 Sonar 服务部署方式：外部托管 or 内嵌 compose profile。
 - [ ] P29-J02 若自托管，补齐 Docker Compose、持久化卷、初始化脚本、升级脚本。
 - [ ] P29-J03 将 Sonar/quality env 写入 Docker 安装与更新流程。
 - [ ] P29-J04 补齐启动顺序、健康检查、重试与 readiness。
@@ -202,22 +202,22 @@
 
 ### 29K. 文档与知识资产全量更新
 
-- [ ] P29-K01 更新 `README.md`
-- [ ] P29-K02 更新 `README.zh-CN.md`
-- [ ] P29-K03 更新 `docs/undeveloped/README.md`
-- [ ] P29-K04 新增/更新用户如何启用质量门、查看报告、处理失败的用户文档。
-- [ ] P29-K05 新增/更新运维文档：Sonar 部署、token 配置、profile 同步、故障排查、数据清理。
-- [ ] P29-K06 更新 `git-watcher` 相关文档，写清 checkpoint metadata 与质量门语义。
-- [ ] P29-K07 更新 orchestrator/manual/runbook，写清终端质量回流机制。
-- [ ] P29-K08 更新历史 SonarCloud 报告归档策略与命名规范。
-- [ ] P29-K09 写一份“质量门设计说明 + 故障降级矩阵 + 回滚方案”。
-- [ ] P29-K10 所有新增 env、脚本、CI job、UI 状态都必须在双语文档可查。
+- [x] P29-K01 更新 `README.md`
+- [x] P29-K02 更新 `README.zh-CN.md`
+- [x] P29-K03 更新 `docs/undeveloped/README.md`
+- [x] P29-K04 新增/更新用户如何启用质量门、查看报告、处理失败的用户文档。
+- [x] P29-K05 新增/更新运维文档：Sonar 部署、token 配置、profile 同步、故障排查、数据清理。
+- [x] P29-K06 更新 `git-watcher` 相关文档，写清 checkpoint metadata 与质量门语义。
+- [x] P29-K07 更新 orchestrator/manual/runbook，写清终端质量回流机制。
+- [x] P29-K08 更新历史 SonarCloud 报告归档策略与命名规范。
+- [x] P29-K09 写一份“质量门设计说明 + 故障降级矩阵 + 回滚方案”。
+- [x] P29-K10 所有新增 env、脚本、CI job、UI 状态都必须在双语文档可查。
 
 ### 29L. 测试、灰度与发布
 
-- [ ] P29-L01 为 checkpoint -> quality gate -> original terminal fix loop 写端到端集成测试。
-- [ ] P29-L02 为 legacy workflow 写兼容回归测试。
-- [ ] P29-L03 为 WebSocket `quality.*` 事件写合同测试。
+- [x] P29-L01 为 checkpoint -> quality gate -> original terminal fix loop 写端到端集成测试。
+- [x] P29-L02 为 legacy workflow 写兼容回归测试。
+- [x] P29-L03 为 WebSocket `quality.*` 事件写合同测试。
 - [ ] P29-L04 为前端 `WorkflowDebug` / `Workflows` / logs 面板补齐质量门 UI 测试。
 - [ ] P29-L05 为 Sonar 故障、token 错误、scanner timeout、部分结果、重复提交写异常场景测试。
 - [ ] P29-L06 先上线 `shadow` 模式，记录一周基线。

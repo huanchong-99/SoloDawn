@@ -272,6 +272,61 @@ curl http://localhost:23456/api/health -H "Authorization: Bearer <token>"
 
 ---
 
+## Quality Gate
+
+GitCortex includes a built-in quality gate engine that automatically verifies code quality at three levels:
+
+| Gate | Trigger | Scope |
+|------|---------|-------|
+| **Terminal Gate** | Each checkpoint commit | Changed files only — cargo check, clippy, tsc, tests |
+| **Branch Gate** | Last terminal in a task passes | Full task branch — all checks + lint |
+| **Repo Gate** | Before merge to main / CI | Full repo — all checks + SonarQube analysis |
+
+### Modes
+
+Configure in `quality/quality-gate.yaml`:
+
+```yaml
+mode: shadow  # off | shadow | warn | enforce
+```
+
+| Mode | Behavior |
+|------|----------|
+| `off` | Disabled, legacy workflow semantics |
+| `shadow` | Runs analysis, logs results, never blocks (default) |
+| `warn` | Runs analysis, notifies via UI, does not block |
+| `enforce` | Hard gate — blocks terminal handoff on failure |
+
+### How It Works
+
+1. Terminal commits code → orchestrator intercepts as **checkpoint** (not final completion)
+2. Quality engine runs configured checks against the terminal's working directory
+3. **Pass** → terminal promoted to completed → next terminal dispatched
+4. **Fail** → structured fix instructions sent back to the same terminal → terminal fixes and re-commits
+
+### Running Manually
+
+```bash
+# Full quality gate (repo level, shadow mode)
+pnpm run quality
+
+# Dry-run check
+pnpm run quality:check
+
+# SonarCloud analysis only
+pnpm run quality:sonar
+```
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `QUALITY_GATE_MODE` | Override YAML mode (off/shadow/warn/enforce) |
+| `SONAR_TOKEN` | SonarQube/SonarCloud authentication token |
+| `SONAR_HOST_URL` | SonarQube server URL (default: http://localhost:9000) |
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
