@@ -38,11 +38,14 @@ module.exports = {
       'error',
       {
         vars: 'all',
+        varsIgnorePattern: '^_',
         args: 'after-used',
+        argsIgnorePattern: '^_',
         ignoreRestSiblings: false,
       },
     ],
     '@typescript-eslint/no-explicit-any': 'warn',
+    '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_', argsIgnorePattern: '^_' }],
     '@typescript-eslint/switch-exhaustiveness-check': 'error',
     // Enforce typesafe modal pattern
     'no-restricted-imports': [

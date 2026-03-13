@@ -15,18 +15,12 @@ interface KanbanCardProps extends React.HTMLAttributes<HTMLDivElement> {
 export function KanbanCard({
   children,
   className,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   id: _id,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   name: _name,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   index: _index,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   parent: _parent,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   isOpen: _isOpen,
   forwardedRef,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   dragDisabled: _dragDisabled,
   ...props
 }: Readonly<KanbanCardProps>) {
