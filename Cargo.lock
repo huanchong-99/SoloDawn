@@ -6639,6 +6639,7 @@ dependencies = [
  "git2",
  "json-patch",
  "jsonwebtoken",
+ "once_cell",
  "open",
  "regex",
  "reqwest",
