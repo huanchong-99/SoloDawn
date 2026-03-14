@@ -3331,7 +3331,7 @@ mod prompt_response_route_tests {
 
         let request = Request::builder()
             .method("POST")
-            .uri("/wf-test/prompts/respond")
+            .uri("/00000000-0000-0000-0000-000000000000/prompts/respond")
             .header("content-type", "application/json")
             .body(Body::from(payload))
             .expect("Failed to build request");
@@ -3363,14 +3363,14 @@ mod prompt_response_route_tests {
 
         let app = workflows_routes().with_state(deployment);
         let payload = json!({
-            "terminalId": "terminal-1",
+            "terminalId": "00000000-0000-0000-0000-000000000001",
             "response": ""
         })
         .to_string();
 
         let request = Request::builder()
             .method("POST")
-            .uri("/wf-test/prompts/respond")
+            .uri("/00000000-0000-0000-0000-000000000000/prompts/respond")
             .header("content-type", "application/json")
             .body(Body::from(payload))
             .expect("Failed to build request");
@@ -3402,13 +3402,13 @@ mod prompt_response_route_tests {
 
         let app = workflows_routes().with_state(deployment);
         let payload = json!({
-            "terminalId": "terminal-1"
+            "terminalId": "00000000-0000-0000-0000-000000000001"
         })
         .to_string();
 
         let request = Request::builder()
             .method("POST")
-            .uri("/wf-test/prompts/respond")
+            .uri("/00000000-0000-0000-0000-000000000000/prompts/respond")
             .header("content-type", "application/json")
             .body(Body::from(payload))
             .expect("Failed to build request");
@@ -3449,7 +3449,7 @@ mod orchestrator_chat_route_tests {
 
         let request = Request::builder()
             .method("POST")
-            .uri("/wf-test/orchestrator/chat")
+            .uri("/00000000-0000-0000-0000-000000000000/orchestrator/chat")
             .header("content-type", "application/json")
             .body(Body::from(payload))
             .expect("Failed to build request");
@@ -3488,7 +3488,7 @@ mod orchestrator_chat_route_tests {
 
         let request = Request::builder()
             .method("POST")
-            .uri("/wf-test/orchestrator/chat")
+            .uri("/00000000-0000-0000-0000-000000000000/orchestrator/chat")
             .header("content-type", "application/json")
             .body(Body::from(payload))
             .expect("Failed to build request");
@@ -3527,7 +3527,7 @@ mod orchestrator_chat_route_tests {
 
         let request = Request::builder()
             .method("POST")
-            .uri("/wf-test/orchestrator/chat")
+            .uri("/00000000-0000-0000-0000-000000000000/orchestrator/chat")
             .header("content-type", "application/json")
             .body(Body::from(payload))
             .expect("Failed to build request");
@@ -3565,7 +3565,7 @@ mod orchestrator_chat_route_tests {
 
         let request = Request::builder()
             .method("POST")
-            .uri("/wf-test/orchestrator/chat")
+            .uri("/00000000-0000-0000-0000-000000000000/orchestrator/chat")
             .header("content-type", "application/json")
             .body(Body::from(payload))
             .expect("Failed to build request");
@@ -3588,7 +3588,7 @@ mod orchestrator_chat_route_tests {
 
         let request = Request::builder()
             .method("GET")
-            .uri("/wf-test/orchestrator/messages")
+            .uri("/00000000-0000-0000-0000-000000000000/orchestrator/messages")
             .body(Body::empty())
             .expect("Failed to build request");
 
