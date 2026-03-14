@@ -445,7 +445,6 @@ describe('useMergeWorkflow', () => {
       '/api/workflows/workflow-1/merge',
       expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ merge_strategy: 'squash' }),
       })
     );
@@ -482,7 +481,6 @@ describe('useSubmitWorkflowPromptResponse', () => {
       '/api/workflows/workflow-1/prompts/respond',
       expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           terminal_id: 'terminal-1',
           response: 'yes',
@@ -517,12 +515,12 @@ describe('useSubmitWorkflowPromptResponse', () => {
 });
 
 describe('getWorkflowActions', () => {
-  it('should allow merge for merging and completed workflows', () => {
-    expect(getWorkflowActions('merging').canMerge).toBe(true);
+  it('should allow merge for completed workflows', () => {
     expect(getWorkflowActions('completed').canMerge).toBe(true);
   });
 
-  it('should disallow merge for running and draft workflows', () => {
+  it('should disallow merge for merging, running, and draft workflows', () => {
+    expect(getWorkflowActions('merging').canMerge).toBe(false);
     expect(getWorkflowActions('running').canMerge).toBe(false);
     expect(getWorkflowActions('cancelled').canMerge).toBe(false);
     expect(getWorkflowActions('draft').canMerge).toBe(false);
