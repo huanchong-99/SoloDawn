@@ -1884,12 +1884,64 @@ impl OrchestratorAgent {
             tracing::warn!("Failed to persist git_event: {}", e);
         }
 
-        // G10-002/G04-007: The `message` parameter is the commit subject line only
-        // (git --format=%s), which never contains METADATA (that lives in the commit body).
-        // Commits reaching handle_git_event are already filtered by git_watcher as
-        // having no metadata, so we go directly to the no-metadata handler.
+        // G10-002/G04-007: The `message` parameter is typically the commit subject line only
+        // (git --format=%s), which usually does not contain METADATA (that lives in the commit body).
+        // However, in some code paths (e.g., tests, direct calls), the full message may be passed.
+        // We attempt metadata parsing as a defensive check before falling through to no-metadata handler.
+        if let Ok(metadata) = crate::services::git_watcher::parse_commit_metadata(message) {
+            tracing::info!(
+                "Commit {} has METADATA in message, processing via metadata path",
+                commit_hash
+            );
+            let terminal_id = &metadata.terminal_id;
+            let status_str = &metadata.status;
+            let task_id = &metadata.task_id;
+
+            match status_str.as_str() {
+                "review_pass" | "review_passed" => {
+                    if let Some(reviewed_id) = &metadata.reviewed_terminal {
+                        self.handle_git_review_pass(
+                            terminal_id,
+                            task_id,
+                            reviewed_id,
+                        )
+                        .await?;
+                    }
+                }
+                "review_reject" | "review_rejected" => {
+                    if let Some(reviewed_id) = &metadata.reviewed_terminal {
+                        let issues = metadata.issues.unwrap_or_default();
+                        self.handle_git_review_reject(
+                            terminal_id,
+                            task_id,
+                            reviewed_id,
+                            &issues,
+                        )
+                        .await?;
+                    }
+                }
+                _ => {
+                    self.handle_git_terminal_completed(
+                        terminal_id,
+                        task_id,
+                        commit_hash,
+                        message,
+                    )
+                    .await?;
+                }
+            }
+
+            // Mark commit as processed
+            {
+                let mut state = self.state.write().await;
+                state.processed_commits.insert(commit_hash.to_string());
+            }
+            self.maybe_save_state().await;
+            return Ok(());
+        }
+
         tracing::info!(
-            "Commit {} has no METADATA (subject-only message), waking orchestrator for decision",
+            "Commit {} has no METADATA, waking orchestrator for decision",
             commit_hash
         );
         self.handle_git_event_no_metadata(
@@ -2322,7 +2374,6 @@ impl OrchestratorAgent {
     }
 
     /// Handle review passed status from git event
-    #[allow(dead_code)]
     async fn handle_git_review_pass(
         &self,
         reviewer_terminal_id: &str,
@@ -2365,7 +2416,6 @@ impl OrchestratorAgent {
     }
 
     /// Handle review rejected status from git event
-    #[allow(dead_code)]
     async fn handle_git_review_reject(
         &self,
         reviewer_terminal_id: &str,

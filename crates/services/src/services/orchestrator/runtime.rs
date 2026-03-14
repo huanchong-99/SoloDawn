@@ -391,7 +391,7 @@ impl OrchestratorRuntime {
         let chat_idempotency = self.orchestrator_chat_idempotency.clone();
         let workflow_id_owned = workflow_id.to_string();
         let task_handle = tokio::spawn(async move {
-            if let Err(e) = agent_clone.run().await {
+            if let Err(e) = Box::pin(agent_clone.run()).await {
                 error!(
                     "Orchestrator agent failed for workflow {}: {}",
                     workflow_id_owned, e
@@ -954,7 +954,7 @@ impl OrchestratorRuntime {
         let chat_idempotency = self.orchestrator_chat_idempotency.clone();
         let workflow_id_owned = workflow_id.to_string();
         let task_handle = tokio::spawn(async move {
-            if let Err(e) = agent_clone.run().await {
+            if let Err(e) = Box::pin(agent_clone.run()).await {
                 error!(
                     "Recovered orchestrator agent failed for workflow {}: {}",
                     workflow_id_owned, e
