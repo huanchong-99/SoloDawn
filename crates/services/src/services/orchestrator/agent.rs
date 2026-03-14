@@ -1884,10 +1884,11 @@ impl OrchestratorAgent {
             tracing::warn!("Failed to persist git_event: {}", e);
         }
 
-        // G10-002/G04-007: The `message` parameter is typically the commit subject line only
+        // G10-002/G04-007: Single metadata parse attempt.
+        // The `message` parameter is typically the commit subject line only
         // (git --format=%s), which usually does not contain METADATA (that lives in the commit body).
         // However, in some code paths (e.g., tests, direct calls), the full message may be passed.
-        // We attempt metadata parsing as a defensive check before falling through to no-metadata handler.
+        // This is the ONLY metadata parse — there is no redundant second parse.
         if let Ok(metadata) = crate::services::git_watcher::parse_commit_metadata(message) {
             tracing::info!(
                 "Commit {} has METADATA in message, processing via metadata path",
@@ -1934,7 +1935,7 @@ impl OrchestratorAgent {
             // Mark commit as processed
             {
                 let mut state = self.state.write().await;
-                state.processed_commits.insert(commit_hash.to_string());
+                state.record_processed_commit(commit_hash.to_string());
             }
             self.maybe_save_state().await;
             return Ok(());
@@ -1956,7 +1957,7 @@ impl OrchestratorAgent {
         // Mark commit as processed
         {
             let mut state = self.state.write().await;
-            state.processed_commits.insert(commit_hash.to_string());
+            state.record_processed_commit(commit_hash.to_string());
         }
 
         self.maybe_save_state().await;
@@ -2079,7 +2080,7 @@ impl OrchestratorAgent {
 
         {
             let mut state = self.state.write().await;
-            state.processed_commits.insert(commit_hash.to_string());
+            state.record_processed_commit(commit_hash.to_string());
         }
 
         if let Err(e) = db::models::git_event::GitEvent::update_status(
@@ -4140,6 +4141,16 @@ impl OrchestratorAgent {
     ///
     /// This method is called after the workflow enters running state to automatically
     /// start execution of all tasks by dispatching their first terminals.
+    ///
+    /// # TODO (G03-005)
+    /// Tasks are dispatched sequentially. Using `futures::future::join_all` for
+    /// parallel dispatch could reduce startup latency for workflows with many tasks.
+    /// However, this is risky because:
+    ///   1. SQLite single-writer means DB writes are serialized anyway.
+    ///   2. Concurrent PTY input could cause race conditions in the message bus.
+    ///   3. Error handling becomes more complex with parallel futures.
+    /// Sequential dispatch is safe and the startup delay is bounded by the number
+    /// of tasks (typically < 10).
     async fn auto_dispatch_initial_tasks(&self) -> anyhow::Result<()> {
         let workflow_id = {
             let state = self.state.read().await;
@@ -4516,6 +4527,14 @@ impl OrchestratorAgent {
     /// # Returns
     /// * `Ok(())` - All merges completed successfully
     /// * `Err(anyhow::Error)` - If any merge fails
+    ///
+    /// # TODO (G06-003/G06-008)
+    /// - The worktree path is currently hardcoded as `base_repo_path/worktrees/<branch>`.
+    ///   This should use `WorktreeManager::resolve_worktree_path()` to support
+    ///   custom worktree layouts.
+    /// - This method creates a new `GitService` instance on each call. It should
+    ///   use `MergeCoordinator` (when available) for centralized merge orchestration
+    ///   with conflict resolution strategies and retry logic.
     pub async fn trigger_merge(
         &self,
         task_branches: HashMap<String, String>,
@@ -4569,7 +4588,11 @@ impl OrchestratorAgent {
                         commit_sha
                     );
 
-                    // Broadcast merge success for this task
+                    // G06-007: Broadcast merge progress for this individual task.
+                    // TODO: Only set workflow to completed after ALL task branches
+                    // have been merged successfully. Currently each successful merge
+                    // broadcasts COMPLETED, which is misleading when multiple tasks
+                    // are being merged sequentially.
                     let message = BusMessage::StatusUpdate {
                         workflow_id: workflow_id.clone(),
                         status: WORKFLOW_STATUS_COMPLETED.to_string(),

@@ -183,9 +183,10 @@ export function WorkflowWizard({
     }
     setCompletedSteps(newCompletedSteps);
 
+    // G25-018: Navigate first, then clear errors to avoid stale error flash
     if (navigation.canGoNext()) {
-      validation.clearErrors();
       navigation.next();
+      validation.clearErrors();
     } else {
       validation.clearErrors();
     }
@@ -227,7 +228,8 @@ export function WorkflowWizard({
     onCancel();
   };
 
-  const handleUpdateConfig = (updates: Partial<WizardConfig>) => {
+  // G25-012: Wrap in useCallback to stabilize reference for Step4Terminals useEffect deps
+  const handleUpdateConfig = useCallback((updates: Partial<WizardConfig>) => {
     setState((prevState) => ({
       ...prevState,
       config: {
@@ -235,7 +237,7 @@ export function WorkflowWizard({
         ...updates,
       },
     }));
-  };
+  }, []);
 
   const renderStep = () => {
     switch (currentStep) {

@@ -212,6 +212,10 @@ static PASSWORD_RE: Lazy<Option<Regex>> = Lazy::new(|| {
 });
 
 /// Input field detection (free-form text input)
+/// [G07-009] TODO: Add negative lookahead to exclude password-like prompts
+/// (e.g., `(?!.*password)`) directly in the regex instead of relying on the
+/// two-step check in `detect_input()`. This would simplify the detection logic
+/// and prevent edge cases where password prompts slip through.
 static INPUT_FIELD_RE: Lazy<Option<Regex>> = Lazy::new(|| {
     compile_regex(
         r"(?i)\b(enter|provide|input|type|specify)\b\s+.{0,30}(:|>\s*$)",

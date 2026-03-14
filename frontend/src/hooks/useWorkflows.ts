@@ -18,6 +18,11 @@ export type Workflow = WorkflowDetailDto;
 // Create Request Types (not in generated types yet)
 // ============================================================================
 
+// G02-007 / G14-003: 'draft' is a client-only status used in the wizard before
+// the workflow is persisted to the backend.  The backend WorkflowStatus enum
+// (crates/db/src/models/workflow.rs) does NOT include 'draft'.
+// TODO: Consider splitting into BackendWorkflowStatus (without draft) and
+// WizardWorkflowStatus (with draft) once shared/types.ts exports the enum.
 export type WorkflowStatusEnum =
   | 'draft'
   | 'created'
@@ -561,8 +566,12 @@ export function useCreateWorkflow() {
       // Add the new workflow to the cache
       queryClient.setQueryData(workflowKeys.byId(newWorkflow.id), newWorkflow);
     },
-    onError: (error) => {
+    onError: (error, variables) => {
       logApiError('Failed to create workflow:', error);
+      // G26-006: Invalidate cache on error to ensure consistency
+      queryClient.invalidateQueries({
+        queryKey: workflowKeys.forProject(variables.projectId),
+      });
     },
   });
 }
@@ -576,17 +585,31 @@ export function usePrepareWorkflow() {
 
   return useMutation({
     mutationFn: (workflowId: string) => workflowsApi.prepare(workflowId),
+    // G26-003: Optimistic update — immediately reflect 'starting' status
+    onMutate: async (workflowId) => {
+      await queryClient.cancelQueries({ queryKey: workflowKeys.byId(workflowId) });
+      const previous = queryClient.getQueryData<Workflow>(workflowKeys.byId(workflowId));
+      if (previous) {
+        queryClient.setQueryData<Workflow>(workflowKeys.byId(workflowId), {
+          ...previous,
+          status: 'starting',
+        });
+      }
+      return { previous };
+    },
     onSuccess: (_result, workflowId) => {
-      // Invalidate the workflow detail to reflect the new status
+      // G26-012: Narrow invalidation — only the specific workflow, not all
       queryClient.invalidateQueries({
         queryKey: workflowKeys.byId(workflowId),
       });
-      queryClient.invalidateQueries({
-        queryKey: workflowKeys.all,
-      });
     },
-    onError: (error) => {
+    // G02-004 / G26-005 / G26-006: Rollback + invalidate on error
+    onError: (error, workflowId, context) => {
       logApiError('Failed to prepare workflow:', error);
+      if (context?.previous) {
+        queryClient.setQueryData(workflowKeys.byId(workflowId), context.previous);
+      }
+      queryClient.invalidateQueries({ queryKey: workflowKeys.byId(workflowId) });
     },
   });
 }
@@ -600,8 +623,19 @@ export function useStartWorkflow() {
 
   return useMutation({
     mutationFn: (data: StartWorkflowRequest) => workflowsApi.start(data),
+    // G26-003: Optimistic update — immediately reflect 'running' status
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
+      const previous = queryClient.getQueryData<Workflow>(workflowKeys.byId(variables.workflow_id));
+      if (previous) {
+        queryClient.setQueryData<Workflow>(workflowKeys.byId(variables.workflow_id), {
+          ...previous,
+          status: 'running',
+        });
+      }
+      return { previous };
+    },
     onSuccess: (_result, variables) => {
-      // Invalidate the workflow detail to reflect the new status
       queryClient.invalidateQueries({
         queryKey: workflowKeys.byId(variables.workflow_id),
       });
@@ -609,8 +643,13 @@ export function useStartWorkflow() {
         queryKey: workflowKeys.all,
       });
     },
-    onError: (error) => {
+    // G26-006: Rollback + invalidate on error
+    onError: (error, variables, context) => {
       logApiError('Failed to start workflow:', error);
+      if (context?.previous) {
+        queryClient.setQueryData(workflowKeys.byId(variables.workflow_id), context.previous);
+      }
+      queryClient.invalidateQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
     },
   });
 }
@@ -624,6 +663,18 @@ export function usePauseWorkflow() {
 
   return useMutation({
     mutationFn: (data: PauseWorkflowRequest) => workflowsApi.pause(data),
+    // G05-009 / G26-003: Optimistic update — immediately reflect 'paused' status
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
+      const previous = queryClient.getQueryData<Workflow>(workflowKeys.byId(variables.workflow_id));
+      if (previous) {
+        queryClient.setQueryData<Workflow>(workflowKeys.byId(variables.workflow_id), {
+          ...previous,
+          status: 'paused',
+        });
+      }
+      return { previous };
+    },
     onSuccess: (_result, variables) => {
       queryClient.invalidateQueries({
         queryKey: workflowKeys.byId(variables.workflow_id),
@@ -632,8 +683,13 @@ export function usePauseWorkflow() {
         queryKey: workflowKeys.all,
       });
     },
-    onError: (error) => {
+    // G26-006: Rollback + invalidate on error
+    onError: (error, variables, context) => {
       logApiError('Failed to pause workflow:', error);
+      if (context?.previous) {
+        queryClient.setQueryData(workflowKeys.byId(variables.workflow_id), context.previous);
+      }
+      queryClient.invalidateQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
     },
   });
 }
@@ -647,6 +703,18 @@ export function useStopWorkflow() {
 
   return useMutation({
     mutationFn: (data: StopWorkflowRequest) => workflowsApi.stop(data),
+    // G05-009 / G26-003: Optimistic update — immediately reflect 'cancelled' status
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
+      const previous = queryClient.getQueryData<Workflow>(workflowKeys.byId(variables.workflow_id));
+      if (previous) {
+        queryClient.setQueryData<Workflow>(workflowKeys.byId(variables.workflow_id), {
+          ...previous,
+          status: 'cancelled',
+        });
+      }
+      return { previous };
+    },
     onSuccess: (_result, variables) => {
       queryClient.invalidateQueries({
         queryKey: workflowKeys.byId(variables.workflow_id),
@@ -655,8 +723,13 @@ export function useStopWorkflow() {
         queryKey: workflowKeys.all,
       });
     },
-    onError: (error) => {
+    // G26-006: Rollback + invalidate on error
+    onError: (error, variables, context) => {
       logApiError('Failed to stop workflow:', error);
+      if (context?.previous) {
+        queryClient.setQueryData(workflowKeys.byId(variables.workflow_id), context.previous);
+      }
+      queryClient.invalidateQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
     },
   });
 }
@@ -676,8 +749,12 @@ export function useSubmitWorkflowPromptResponse() {
         queryKey: workflowKeys.byId(variables.workflow_id),
       });
     },
-    onError: (error) => {
+    // G26-006 / G30-004: Invalidate cache on error
+    onError: (error, variables) => {
       logApiError('Failed to submit workflow prompt response:', error);
+      queryClient.invalidateQueries({
+        queryKey: workflowKeys.byId(variables.workflow_id),
+      });
     },
   });
 }
@@ -697,8 +774,12 @@ export function useSubmitOrchestratorChat() {
         queryKey: workflowKeys.byId(variables.workflow_id),
       });
     },
-    onError: (error) => {
+    // G26-006 / G30-004: Invalidate cache on error
+    onError: (error, variables) => {
       logApiError('Failed to submit orchestrator chat message:', error);
+      queryClient.invalidateQueries({
+        queryKey: workflowKeys.byId(variables.workflow_id),
+      });
     },
   });
 }
@@ -744,7 +825,20 @@ export function useMergeWorkflow() {
 
   return useMutation({
     mutationFn: (data: MergeWorkflowRequest) => workflowsApi.merge(data),
+    // G06-010 / G26-003: Optimistic update — immediately reflect 'merging' status
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
+      const previous = queryClient.getQueryData<Workflow>(workflowKeys.byId(variables.workflow_id));
+      if (previous) {
+        queryClient.setQueryData<Workflow>(workflowKeys.byId(variables.workflow_id), {
+          ...previous,
+          status: 'merging',
+        });
+      }
+      return { previous };
+    },
     onSuccess: (_result, variables) => {
+      // TODO: G26-007 — subscribe to task-level merge progress events when backend emits them
       queryClient.invalidateQueries({
         queryKey: workflowKeys.byId(variables.workflow_id),
       });
@@ -752,8 +846,13 @@ export function useMergeWorkflow() {
         queryKey: workflowKeys.all,
       });
     },
-    onError: (error) => {
+    // G26-006: Rollback + invalidate on error
+    onError: (error, variables, context) => {
       logApiError('Failed to merge workflow:', error);
+      if (context?.previous) {
+        queryClient.setQueryData(workflowKeys.byId(variables.workflow_id), context.previous);
+      }
+      queryClient.invalidateQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
     },
   });
 }
@@ -777,8 +876,11 @@ export function useDeleteWorkflow() {
         queryKey: workflowKeys.all,
       });
     },
-    onError: (error) => {
+    // G26-006 / G30-004: Invalidate cache on error
+    onError: (error, workflowId) => {
       logApiError('Failed to delete workflow:', error);
+      queryClient.invalidateQueries({ queryKey: workflowKeys.byId(workflowId) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.all });
     },
   });
 }

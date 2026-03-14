@@ -67,6 +67,14 @@ pub const HANDOFF_CONTEXT_MAX_CHARS: usize = 1500;
 pub const HANDOFF_COMMIT_MAX_CHARS: usize = 500;
 pub const HANDOFF_NOTES_MAX_CHARS: usize = 800;
 
+/// Startable terminal statuses — terminals in these states can be dispatched.
+///
+/// [G15-007] This list intentionally includes only `waiting`. A terminal must
+/// have completed the PTY spawn lifecycle (not_started → starting → waiting)
+/// before it can receive instructions. `not_started` and `starting` are
+/// excluded because the PTY is not yet ready to accept input.
+pub const STARTABLE_TERMINAL_STATUSES: &[&str] = &[TERMINAL_STATUS_WAITING];
+
 // Phase 29C: Quality Gate constants
 pub const TERMINAL_STATUS_QUALITY_PENDING: &str = "quality_pending";
 pub const QUALITY_GATE_MODE_OFF: &str = "off";
@@ -100,6 +108,11 @@ mod tests {
         let _ = TASK_STATUS_COMPLETED;
         let _ = TASK_STATUS_FAILED;
         let _ = TASK_STATUS_CANCELLED;
+    }
+
+    #[test]
+    fn test_startable_terminal_statuses() {
+        assert_eq!(STARTABLE_TERMINAL_STATUSES, &[TERMINAL_STATUS_WAITING]);
     }
 
     #[test]

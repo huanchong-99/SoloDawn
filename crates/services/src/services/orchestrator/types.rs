@@ -299,8 +299,14 @@ pub enum PromptState {
     /// Decision made, waiting for response to be sent
     Deciding,
     /// Response sent, waiting for terminal to process
+    /// [G07-002] TODO: Add a timeout mechanism so that the state machine auto-resets
+    /// to Idle if the terminal does not acknowledge the response within a configurable
+    /// duration (e.g., 30s). Currently relies on `check_and_reset_stale()` in PromptWatcher.
     Responding,
     /// Waiting for user approval (Password prompts)
+    /// [G07-008] TODO: Add a configurable timeout (e.g., 5 minutes) for user approval.
+    /// If the user does not respond within the timeout, auto-reset to Idle and log a
+    /// warning. This prevents terminals from being stuck indefinitely waiting for input.
     WaitingForApproval,
 }
 

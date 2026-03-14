@@ -367,11 +367,6 @@ describe('useStartWorkflow', () => {
 describe('status mutations cache invalidation', () => {
   it.each([
     {
-      name: 'prepare',
-      useHook: usePrepareWorkflow,
-      variables: 'workflow-1',
-    },
-    {
       name: 'start',
       useHook: useStartWorkflow,
       variables: { workflow_id: 'workflow-1' },
@@ -398,6 +393,25 @@ describe('status mutations cache invalidation', () => {
       );
     }
   );
+
+  // G26-012: prepare uses narrowed invalidation (byId only, not all)
+  it('prepare invalidates detail cache only', async () => {
+    const { queryClient, scopedWrapper } = createScopedWrapper();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    vi.stubGlobal('fetch', vi.fn(() => createSuccessResponse(undefined)));
+
+    const { result } = renderHook(usePrepareWorkflow, {
+      wrapper: scopedWrapper,
+    });
+
+    result.current.mutate('workflow-1');
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: workflowKeys.byId('workflow-1'),
+    });
+  });
 });
 
 describe('useDeleteWorkflow', () => {

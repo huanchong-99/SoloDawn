@@ -34,6 +34,29 @@ const DEV_DEFAULT_ENCRYPTION_KEY: &str = "12345678901234567890123456789012";
 
 fn ensure_dev_encryption_key() {
     if !cfg!(debug_assertions) {
+        // G18-003: In release mode, require a valid encryption key — do not silently proceed
+        match std::env::var("GITCORTEX_ENCRYPTION_KEY") {
+            Ok(value) if value.len() == 32 => {}
+            Ok(value) => {
+                panic!(
+                    "GITCORTEX_ENCRYPTION_KEY has invalid length {} (expected 32 bytes). \
+                     Set a valid 32-byte key before starting in release mode.",
+                    value.len()
+                );
+            }
+            Err(std::env::VarError::NotPresent) => {
+                panic!(
+                    "GITCORTEX_ENCRYPTION_KEY is not set. \
+                     A 32-byte encryption key is required in release mode."
+                );
+            }
+            Err(e) => {
+                panic!(
+                    "GITCORTEX_ENCRYPTION_KEY is not valid: {e}. \
+                     A 32-byte encryption key is required in release mode."
+                );
+            }
+        }
         return;
     }
 

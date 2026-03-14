@@ -61,6 +61,8 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
   // that only matters for imperative logic (API calls, terminal launch decisions),
   // not for rendering. Converting them to useState would cause render cascades
   // on every terminal start/stop cycle without any visible UI benefit.
+  // TODO: G28-006 — Consider consolidating these refs into a single useReducer
+  // or a ref-backed state machine to reduce the number of independent mutable refs.
   const readyTerminalIdsRef = useRef<Set<string>>(new Set());
   const startingTerminalIdsRef = useRef<Set<string>>(new Set());
   const terminalRef = useRef<TerminalEmulatorRef>(null);
@@ -70,6 +72,9 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
   const MAX_RESTART_ATTEMPTS = 3;
   const defaultRoleLabel = t('terminalCard.defaultRole');
 
+  // G28-009: tasks is a new array reference on every parent render. Consider
+  // memoizing the parent's tasks prop or using a stable selector to avoid
+  // unnecessary recomputation here.
   const allTerminals = useMemo(
     () => tasks.flatMap((task) =>
       task.terminals.map((terminal) => ({ ...terminal, taskName: task.name }))

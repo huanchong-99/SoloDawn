@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { CaretDown, CaretUp } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { useWorkflow } from '@/hooks/useWorkflows';
 import { useRecentTerminalOutput } from '@/stores/terminalStore';
@@ -151,9 +151,9 @@ export function TerminalActivityPanel({ workflowId }: Readonly<TerminalActivityP
           )}
         </span>
         {isCollapsed ? (
-          <ChevronUp className="w-4 h-4 text-low" />
+          <CaretUp className="w-4 h-4 text-low" />
         ) : (
-          <ChevronDown className="w-4 h-4 text-low" />
+          <CaretDown className="w-4 h-4 text-low" />
         )}
       </button>
 

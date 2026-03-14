@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { RefreshCw, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { ArrowsClockwiseIcon, CheckCircleIcon, XCircleIcon, SpinnerGapIcon } from '@phosphor-icons/react';
 import { feishuApi } from '@/lib/api';
 import {
   Card,
@@ -95,7 +95,7 @@ export function FeishuSettings() {
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-muted-foreground py-8">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <SpinnerGapIcon className="h-4 w-4 animate-spin" />
         {t('settings.general.loading')}
       </div>
     );
@@ -125,9 +125,9 @@ export function FeishuSettings() {
 
           <div className="flex items-center gap-3">
             {isConnected ? (
-              <CheckCircle2 className="h-5 w-5 text-green-500" />
+              <CheckCircleIcon className="h-5 w-5 text-green-500" />
             ) : (
-              <XCircle className="h-5 w-5 text-destructive" />
+              <XCircleIcon className="h-5 w-5 text-destructive" />
             )}
             <span className="text-sm font-medium">
               {(() => {
@@ -146,9 +146,9 @@ export function FeishuSettings() {
               disabled={reconnecting || !status?.featureEnabled}
             >
               {reconnecting ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                <SpinnerGapIcon className="h-4 w-4 animate-spin mr-2" />
               ) : (
-                <RefreshCw className="h-4 w-4 mr-2" />
+                <ArrowsClockwiseIcon className="h-4 w-4 mr-2" />
               )}
               {t('settings.feishu.status.reconnect')}
             </Button>
@@ -230,7 +230,7 @@ export function FeishuSettings() {
           </div>
 
           <Button onClick={handleSave} disabled={saving}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            {saving && <SpinnerGapIcon className="h-4 w-4 animate-spin mr-2" />}
             {t('settings.feishu.form.save')}
           </Button>
         </CardContent>

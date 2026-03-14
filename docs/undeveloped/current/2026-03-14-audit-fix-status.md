@@ -1,8 +1,8 @@
 # GitCortex 全量审计修复 — 当前状态报告
 
-> 更新时间: 2026-03-14 16:30
+> 更新时间: 2026-03-14 (verified)
 > 分支: main
-> 最新 commit: 0b9b02135
+> CI 状态: ✅ 全绿（最近 3 次运行均 success）
 
 ---
 
@@ -17,10 +17,10 @@
 | Batch 5: 后端辅助模块 | ✅ 完成 | ~35 个问题 |
 | Batch 6: 后端安全/WS/DTO | ✅ 完成 | ~30 个问题 |
 | Batch 7: DB 模型 + constants | ✅ 完成 | ~15 个问题 |
-| Batch 8: 前端核心 3 大文件 | ⚠️ 部分完成 | Board 组件完成，Workflows.tsx/useWorkflows.ts/wsStore.ts 部分完成 |
-| Batch 9: 前端组件 | ⚠️ 部分完成 | Board 组件完成，Debug 视图/Wizard 步骤待完成 |
-| Batch 10: 辅助+集成 | ⏳ 待完成 | Feishu/Quality/i18n/TaskAttempts/api.ts |
-| CI 验证 | ❌ 2 个测试失败 | 需修复后重新推送 |
+| Batch 8: 前端核心 3 大文件 | ⚠️ 部分完成 | 23项中 1 FIXED / 3 PARTIALLY / 19 NOT FIXED |
+| Batch 9: 前端组件 | ⚠️ 部分完成 | 25项中 2 FIXED / 1 PARTIALLY / 22 NOT FIXED |
+| Batch 10: 辅助+集成 | ⏳ 待完成 | Feishu/Quality/i18n/TaskAttempts/api.ts 大部分未修复 |
+| CI 验证 | ✅ 已通过 | 2 个测试失败已修复，CI 全绿 |
 
 ---
 
@@ -72,25 +72,19 @@
 
 ---
 
-## 三、当前 CI 失败（需立即修复）
+## 三、CI 状态
 
-2 个 Rust 测试失败：
-
-1. `test_handle_git_event_no_metadata_marks_failed_when_task_cannot_be_inferred`
-   - 期望 terminal status = "working"，实际 = "completed"
-   - 原因：agent.rs 中 defer_terminal_completion 或 git_watcher 的修改影响了测试预期
-
-2. `test_handle_git_event_review_pass_publishes_terminal_status_update`
-   - 超时等待 workflow message
-   - 原因：agent.rs 中 handle_git_review_pass 被标记 #[allow(dead_code)]，可能影响了测试路径
+✅ CI 全绿。最近 3 次运行均为 success（2026-03-14）。此前的 2 个 Rust 测试失败已修复：
+- `test_handle_git_event_no_metadata_marks_failed_when_task_cannot_be_inferred`
+- `test_handle_git_event_review_pass_publishes_terminal_status_update`
 
 ---
 
 ## 四、待完成的修复（按优先级）
 
-### 优先级 1：CI 修复（阻塞交付）
-- [ ] 修复上述 2 个测试失败
-- [ ] 推送并确认 CI 全绿
+### 优先级 1：CI 修复（~~阻塞交付~~ ✅ 已完成）
+- [x] 修复 2 个测试失败
+- [x] 推送并确认 CI 全绿
 
 ### 优先级 2：前端核心文件剩余问题（Batch 8 未完成部分）
 - [ ] `Workflows.tsx`: G07-004/007/011, G08-003/006, G26-004-009, G27-003-008
@@ -125,8 +119,8 @@
 | 指标 | 数值 |
 |------|------|
 | 审计发现总数 | 373 |
-| 已修复（代码已提交） | ~180 |
-| 待修复（代码未写） | ~193 |
+| 已修复（代码已提交） | ~183 |
+| 待修复（代码未写） | ~190 |
 | 已修改文件数 | 44 |
 | 新增/修改行数 | ~1800 |
-| CI 状态 | ❌ 2 测试失败 |
+| CI 状态 | ✅ 全绿 |

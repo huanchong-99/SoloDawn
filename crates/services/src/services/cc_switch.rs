@@ -84,6 +84,11 @@ fn resolve_codex_wire_api() -> String {
 }
 
 /// Creates Codex config.toml in CODEX_HOME to skip authentication
+///
+/// [G22-010] TODO: The `api_key` field appears both in `[model_providers.<key>]` and
+/// is also injected via `OPENAI_API_KEY` env var. If Codex reads both, the config.toml
+/// key may shadow or conflict with the env var. Verify Codex precedence rules and
+/// consider removing the duplicate to avoid confusion.
 fn create_codex_config(
     codex_home: &Path,
     base_url: Option<&str>,
@@ -456,6 +461,12 @@ impl CCSwitch for CCSwitchService {
     ///
     /// This method modifies global configuration files. Use `build_launch_config` instead
     /// for process-level isolation.
+    ///
+    /// [G22-002] WARNING: This method writes to global config files and is NOT safe for
+    /// concurrent use across multiple terminals/workflows. It is kept only for backward
+    /// compatibility. All new code paths MUST use `build_launch_config` which provides
+    /// per-process environment variable isolation. TODO: Add a compile-time gate
+    /// (e.g., `#[cfg(feature = "legacy-global-switch")]`) to prevent accidental use.
     #[allow(deprecated)]
     async fn switch_for_terminal(&self, terminal: &Terminal) -> anyhow::Result<()> {
         // 获取 CLI 类型信息
@@ -649,6 +660,15 @@ impl CCSwitchService {
                 }
 
                 // Set CLAUDE_HOME to isolated directory
+                // [G19-006] TODO: CLAUDE_HOME directories are cleaned up only for Codex
+                // (via CodexHomeGuard in process.rs). Claude and Gemini isolated home dirs
+                // are not cleaned up on terminal lifecycle end, causing disk leakage and
+                // potential API key residue. Add similar cleanup logic for CLAUDE_HOME and
+                // GEMINI_HOME in ProcessManager::finalize_terminated_process().
+                // [G22-005] TODO: Register all temp isolation dirs (CLAUDE_HOME, GEMINI_HOME,
+                // CODEX_HOME) for cleanup on process exit. Consider a unified TempDirGuard.
+                // [G22-006] TODO: On Windows, temp dir permissions cannot be set via Unix
+                // chmod. Investigate Windows ACL APIs for restricting access to isolated dirs.
                 env.set.insert(
                     "CLAUDE_HOME".to_string(),
                     claude_home.to_string_lossy().to_string(),
@@ -928,24 +948,33 @@ impl CCSwitchService {
                 );
             }
             CcCliType::Gemini => {
-                // Gemini requires API key
-                let api_key = terminal
-                    .get_custom_api_key()?
-                    .ok_or_else(|| anyhow::anyhow!("Gemini requires API key"))?;
+                // Gemini requires API key.
+                // Prefer terminal-level key, then fallback to workflow orchestrator config.
+                // [G20-002/G22-007] Gemini now supports orchestrator API key fallback,
+                // matching the pattern used by Claude Code and Codex.
+                let custom_api_key = terminal.get_custom_api_key()?;
+                let mut fallback_api_key = None;
+
+                if custom_api_key.is_none() {
+                    let (_base_url, orch_api_key) = self
+                        .resolve_workflow_orchestrator_fallback(&terminal.workflow_task_id)
+                        .await?;
+                    fallback_api_key = orch_api_key;
+                    if fallback_api_key.is_some() {
+                        tracing::info!(
+                            terminal_id = %terminal.id,
+                            workflow_task_id = %terminal.workflow_task_id,
+                            "Using workflow orchestrator API key as Gemini terminal fallback"
+                        );
+                    }
+                }
+
+                let api_key = custom_api_key.or(fallback_api_key)
+                    .ok_or_else(|| anyhow::anyhow!("Gemini requires API key (set terminal.custom_api_key or workflow.orchestrator_config.api_key)"))?;
 
                 // Create isolated Gemini home directory
-                let safe_id: String = terminal
-                    .id
-                    .chars()
-                    .map(|c| {
-                        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                            c
-                        } else {
-                            '_'
-                        }
-                    })
-                    .take(64)
-                    .collect();
+                // [G20-013/G22-008] Use shared sanitize_terminal_id instead of inline logic
+                let safe_id = sanitize_terminal_id(&terminal.id);
                 let base_dir = std::env::temp_dir().join("gitcortex");
                 std::fs::create_dir_all(&base_dir).map_err(|e| {
                     anyhow::anyhow!(

@@ -1,6 +1,9 @@
 //! WebSocket event model for workflow event broadcasting.
 //!
 //! Defines the event structure and types for real-time workflow updates.
+// TODO(G17-001): WsEvent and WsEventType derive TS but are not yet included in
+// the generate_types binary output. Add them to `shared/types.ts` so the frontend
+// can import typed event definitions instead of duplicating string literals.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

@@ -61,6 +61,14 @@ function mapTerminalStatus(status: string): Terminal['status'] {
       return 'completed';
     case 'failed':
       return 'failed';
+    // G28-001: Map cancelled to cancelled (not not_started)
+    case 'cancelled':
+      return 'cancelled';
+    // G28-008: Add review status mappings
+    case 'review_passed':
+      return 'review_passed';
+    case 'review_rejected':
+      return 'review_rejected';
     default:
       return 'not_started';
   }

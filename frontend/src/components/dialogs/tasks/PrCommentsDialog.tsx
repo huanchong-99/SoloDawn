@@ -12,7 +12,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { MessageSquare, AlertCircle, Loader2 } from 'lucide-react';
+import { ChatCircleIcon, WarningCircleIcon, SpinnerGapIcon } from '@phosphor-icons/react';
 import { usePrComments } from '@/hooks/usePrComments';
 import { PrCommentCard } from '@/components/ui/pr-comment-card';
 import type { UnifiedPrComment } from 'shared/types';
@@ -73,7 +73,7 @@ function DialogContentRenderer({
   if (errorMessage) {
     return (
       <Alert variant="destructive">
-        <AlertCircle className="h-4 w-4" />
+        <WarningCircleIcon className="h-4 w-4" />
         <AlertDescription>{errorMessage}</AlertDescription>
       </Alert>
     );
@@ -82,7 +82,7 @@ function DialogContentRenderer({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <SpinnerGapIcon className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -201,7 +201,7 @@ const PrCommentsDialogImpl = NiceModal.create<PrCommentsDialogProps>(
     };
 
     // Check for specific error types from the API
-    const errorMessage = isError ? getErrorMessage(error) : null;
+    const errorMessage = isError ? getErrorMessage(error, t) : null;
 
     return (
       <Dialog
@@ -221,7 +221,7 @@ const PrCommentsDialogImpl = NiceModal.create<PrCommentsDialogProps>(
         >
           <DialogHeader className="px-4 py-3 border-b">
             <DialogTitle className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5" />
+              <ChatCircleIcon className="h-5 w-5" />
               {t('tasks:prComments.dialog.title')}
             </DialogTitle>
           </DialogHeader>
@@ -259,21 +259,21 @@ const PrCommentsDialogImpl = NiceModal.create<PrCommentsDialogProps>(
   }
 );
 
-function getErrorMessage(error: unknown): string {
+function getErrorMessage(error: unknown, t: TFunction): string {
   // Check if it's an API error with error_data
   if (error && typeof error === 'object' && 'error_data' in error) {
     const errorData = (error as { error_data?: { type?: string } }).error_data;
     if (errorData?.type === 'no_pr_attached') {
-      return 'No PR is attached to this task attempt. Create a PR first to see comments.';
+      return t('tasks:prComments.errors.noPrAttached');
     }
     if (errorData?.type === 'cli_not_installed') {
-      return 'CLI is not installed. Please install it to fetch PR comments.';
+      return t('tasks:prComments.errors.cliNotInstalled');
     }
     if (errorData?.type === 'cli_not_logged_in') {
-      return 'CLI is not logged in. Please authenticate to fetch PR comments.';
+      return t('tasks:prComments.errors.cliNotLoggedIn');
     }
   }
-  return 'Failed to load PR comments. Please try again.';
+  return t('tasks:prComments.errors.loadFailed');
 }
 
 export const PrCommentsDialog = defineModal<

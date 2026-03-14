@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Plus } from 'lucide-react';
+import { Plus } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { WorkflowCard } from './WorkflowCard';
@@ -28,6 +28,10 @@ interface WorkflowSidebarProps {
  * Freshness is guaranteed by React Query's staleTime (5 min) combined with
  * cache invalidations triggered by the parent Board component's WS handlers
  * (which invalidate both `workflowKeys.byId` and `workflowKeys.forProject`).
+ *
+ * TODO: G29-010 — Consider subscribing to workflow.status_changed events
+ * directly to update the sidebar status badges in real-time without waiting
+ * for the parent Board's invalidation cycle.
  */
 export function WorkflowSidebar({
   projects,

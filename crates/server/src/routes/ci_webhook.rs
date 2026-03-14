@@ -18,6 +18,8 @@ pub struct CiWebhookPayload {
 /// Accepts CI workflow completion notifications from GitHub Actions.
 /// This is a stub route - future phases will route results to the
 /// orchestrator for automated status updates and failure handling.
+// TODO(G35-009): Validate a shared webhook secret (e.g. HMAC signature) before
+// accepting payloads. Without this, any caller can forge CI notifications.
 pub async fn ci_webhook(
     Json(payload): Json<CiWebhookPayload>,
 ) -> (StatusCode, Json<Value>) {

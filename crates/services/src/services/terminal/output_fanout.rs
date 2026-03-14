@@ -66,6 +66,15 @@ pub struct OutputFanout {
 }
 
 /// Subscriber handle with replay + live stream and built-in dedupe by `seq`.
+///
+/// [G09-003] TODO: Support sequence-based resume for WebSocket reconnections.
+/// When a WS client reconnects, it should pass its last-seen `seq` to
+/// `OutputFanout::subscribe(Some(last_seq))` so only missed chunks are replayed.
+/// This requires the frontend to track and send `last_seq` on reconnect.
+///
+/// [G09-004] TODO: Make replay buffer limits configurable at runtime (e.g., via
+/// environment variables or server config) instead of compile-time constants.
+/// This would allow operators to tune memory usage per deployment.
 pub struct OutputSubscription {
     replay: VecDeque<OutputChunk>,
     rx: broadcast::Receiver<OutputChunk>,

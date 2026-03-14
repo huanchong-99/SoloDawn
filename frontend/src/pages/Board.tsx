@@ -69,6 +69,8 @@ export function Board() {
   ]);
 
   // G29-008: Debounced WS invalidation to avoid rapid-fire cache busting
+  // TODO: G11-006 — Consider batching multiple rapid status changes into a single
+  // invalidation cycle to further reduce React Query refetch storms.
   const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleRealtimeWorkflowSignal = useCallback(() => {

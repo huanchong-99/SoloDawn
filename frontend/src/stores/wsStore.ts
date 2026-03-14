@@ -314,8 +314,8 @@ function normalizePromptOptions(payload: JsonRecord): {
 
 function extractPromptEventContext(
   payload: JsonRecord
-): Pick<PromptEventContext, 'taskId' | 'sessionId'> {
-  const context: Pick<PromptEventContext, 'taskId' | 'sessionId'> = {};
+): Pick<PromptEventContext, 'taskId' | 'sessionId' | 'autoConfirm'> {
+  const context: Pick<PromptEventContext, 'taskId' | 'sessionId' | 'autoConfirm'> = {};
 
   const taskId = getStringField(payload, 'taskId', 'task_id');
   if (taskId) {
@@ -325,6 +325,12 @@ function extractPromptEventContext(
   const sessionId = getStringField(payload, 'sessionId', 'session_id');
   if (sessionId) {
     context.sessionId = sessionId;
+  }
+
+  // G27-001: Extract autoConfirm field from prompt payload
+  const autoConfirm = getBooleanField(payload, 'autoConfirm', 'auto_confirm');
+  if (autoConfirm !== undefined) {
+    context.autoConfirm = autoConfirm;
   }
 
   return context;
@@ -728,6 +734,12 @@ export const useWsStore = create<WsState>((set, get) => ({
 
   // Internal state
   _ws: null,
+  // G12-001: _handlers is a Map<eventType, Set<handler>> that is mutated in-place
+  // by subscribe(). This is intentional — Zustand's set() is only used for
+  // top-level state that drives React re-renders. Handler registration is a
+  // side-channel concern that should NOT trigger component re-renders, so we
+  // mutate the Map directly and rely on the closure captured by the WS message
+  // handler to always read the latest reference via get()._handlers.
   _handlers: new Map(),
   _workflowHandlers: new Map(),
   _workflowConnections: new Map(),
@@ -836,6 +848,8 @@ export const useWsStore = create<WsState>((set, get) => ({
 
   connectToWorkflow: (workflowId: string) => {
     // Helper: Create heartbeat interval handler
+    // TODO: G12-008 — Track server heartbeat acknowledgement (pong) and trigger
+    // reconnect if no pong is received within 2x the heartbeat interval.
     const createHeartbeatHandler = (targetWorkflowId: string) => {
       return () => {
         const latest = get()._workflowConnections.get(targetWorkflowId);
@@ -1357,10 +1371,13 @@ export const useWsStore = create<WsState>((set, get) => ({
   },
 
   // Send a response for terminal interactive prompts via workflow-scoped WebSocket.
+  // G27-007: workflowId is included both at the top-level (for routing) and
+  // inside payload (for backward compatibility with existing backend handlers).
   sendPromptResponse: (payload: TerminalPromptResponsePayload) => {
     const { workflowId, terminalId, response } = payload;
     return get().send({
       type: 'terminal.prompt_response',
+      workflowId,
       payload: {
         workflowId,
         terminalId,
@@ -1368,7 +1385,7 @@ export const useWsStore = create<WsState>((set, get) => ({
       },
       timestamp: new Date().toISOString(),
       id: generateMessageId(),
-    });
+    } as WsMessage);
   },
 
   // Design decision: _handlers and _workflowHandlers are mutated directly
@@ -1547,6 +1564,29 @@ export interface TerminalPromptDecisionPayload extends PromptEventContext {
   [key: string]: unknown;
 }
 
+// G08-002: Provider event payload types
+// TODO: Refine these payload types once the backend provider event schema stabilizes
+export interface ProviderSwitchedPayload {
+  workflowId: string;
+  terminalId?: string;
+  fromProvider?: string;
+  toProvider?: string;
+  reason?: string;
+}
+
+export interface ProviderExhaustedPayload {
+  workflowId: string;
+  terminalId?: string;
+  provider?: string;
+  error?: string;
+}
+
+export interface ProviderRecoveredPayload {
+  workflowId: string;
+  terminalId?: string;
+  provider?: string;
+}
+
 export type WorkflowEventHandlers = {
   onWorkflowStatusChanged?: (payload: WorkflowStatusPayload) => void;
   onTerminalStatusChanged?: (payload: TerminalStatusPayload) => void;
@@ -1558,6 +1598,10 @@ export type WorkflowEventHandlers = {
   onQualityGateResult?: (payload: QualityGateResultPayload) => void;
   onSystemError?: (payload: SystemErrorPayload) => void;
   onSystemLagged?: (payload: SystemLaggedPayload) => void;
+  // G08-002 / G08-008: Provider failover event handlers
+  onProviderSwitched?: (payload: ProviderSwitchedPayload) => void;
+  onProviderExhausted?: (payload: ProviderExhaustedPayload) => void;
+  onProviderRecovered?: (payload: ProviderRecoveredPayload) => void;
 } & Record<string, unknown>;
 
 /**
@@ -1616,6 +1660,10 @@ export function useWorkflowEvents(
       ['onQualityGateResult', 'quality.gate_result'],
       ['onSystemError', 'system.error'],
       ['onSystemLagged', 'system.lagged'],
+      // G08-008 / G17-002: Provider failover events
+      ['onProviderSwitched', 'provider.switched'],
+      ['onProviderExhausted', 'provider.exhausted'],
+      ['onProviderRecovered', 'provider.recovered'],
     ];
 
     for (const [handlerKey, eventType] of eventMap) {

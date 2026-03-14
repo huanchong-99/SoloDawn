@@ -354,6 +354,11 @@ pub struct SlashCommandPreset {
 /// Workflow Command Association
 ///
 /// Corresponds to database table: workflow_command
+///
+/// [G15-010] TODO: The `preset_id` column references `slash_command_preset.id`
+/// but the FK has no ON DELETE CASCADE. Deleting a preset while workflow_command
+/// rows reference it will cause a foreign-key violation. A future migration
+/// should add `ON DELETE CASCADE` or `ON DELETE SET NULL` to this FK.
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -677,21 +682,42 @@ impl Workflow {
     /// once a workflow reaches one of these states it cannot be overwritten by a
     /// concurrent update. The WHERE clause excludes these final states so the UPDATE
     /// is a no-op if the workflow has already been finalized.
+    ///
+    /// When transitioning to a terminal state, `completed_at` is set automatically
+    /// to prevent dangling incomplete records.
     pub async fn update_status(pool: &SqlitePool, id: &str, status: &str) -> sqlx::Result<()> {
         let now = Utc::now();
-        sqlx::query(
-            r"
-            UPDATE workflow
-            SET status = ?, updated_at = ?
-            WHERE id = ?
-              AND status NOT IN ('completed', 'failed', 'cancelled')
-            ",
-        )
-        .bind(status)
-        .bind(now)
-        .bind(id)
-        .execute(pool)
-        .await?;
+        let is_terminal_state = matches!(status, "completed" | "failed" | "cancelled");
+        if is_terminal_state {
+            sqlx::query(
+                r"
+                UPDATE workflow
+                SET status = ?, completed_at = COALESCE(completed_at, ?), updated_at = ?
+                WHERE id = ?
+                  AND status NOT IN ('completed', 'failed', 'cancelled')
+                ",
+            )
+            .bind(status)
+            .bind(now)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        } else {
+            sqlx::query(
+                r"
+                UPDATE workflow
+                SET status = ?, updated_at = ?
+                WHERE id = ?
+                  AND status NOT IN ('completed', 'failed', 'cancelled')
+                ",
+            )
+            .bind(status)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        }
         Ok(())
     }
 
@@ -964,21 +990,43 @@ impl WorkflowTask {
     /// [G15-003] Terminal states (`completed`, `failed`, `cancelled`) are protected:
     /// once a task reaches one of these states it cannot be overwritten by a
     /// concurrent update.
+    ///
+    /// [G15-009] When transitioning to a terminal state (`completed`, `failed`,
+    /// `cancelled`), `completed_at` is set automatically to prevent dangling
+    /// incomplete records.
     pub async fn update_status(pool: &SqlitePool, id: &str, status: &str) -> sqlx::Result<()> {
         let now = Utc::now();
-        sqlx::query(
-            r"
-            UPDATE workflow_task
-            SET status = ?, updated_at = ?
-            WHERE id = ?
-              AND status NOT IN ('completed', 'failed', 'cancelled')
-            ",
-        )
-        .bind(status)
-        .bind(now)
-        .bind(id)
-        .execute(pool)
-        .await?;
+        let is_terminal_state = matches!(status, "completed" | "failed" | "cancelled");
+        if is_terminal_state {
+            sqlx::query(
+                r"
+                UPDATE workflow_task
+                SET status = ?, completed_at = COALESCE(completed_at, ?), updated_at = ?
+                WHERE id = ?
+                  AND status NOT IN ('completed', 'failed', 'cancelled')
+                ",
+            )
+            .bind(status)
+            .bind(now)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        } else {
+            sqlx::query(
+                r"
+                UPDATE workflow_task
+                SET status = ?, updated_at = ?
+                WHERE id = ?
+                  AND status NOT IN ('completed', 'failed', 'cancelled')
+                ",
+            )
+            .bind(status)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        }
         Ok(())
     }
 

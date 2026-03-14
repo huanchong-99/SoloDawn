@@ -29,6 +29,9 @@ pub struct WorkflowDetailDto {
     pub error_terminal_model_id: Option<String>,
     /// Wrapped in Option for backward compatibility with older API clients that
     /// may not send these fields. The underlying DB column is NOT NULL with a default.
+    // TODO(G01-005/G17-006): The DB column `merge_terminal_cli_id` is NOT NULL, so this
+    // should be `String` not `Option<String>`. Kept as Option for backward compat with
+    // older frontend clients that may omit the field. Migrate once all clients are updated.
     pub merge_terminal_cli_id: Option<String>,
     /// See `merge_terminal_cli_id` — same backward-compat rationale.
     pub merge_terminal_model_id: Option<String>,
@@ -68,6 +71,7 @@ pub struct WorkflowTaskDto {
 }
 
 /// Terminal DTO
+// TODO(G17-003): Migrate `status` from String to a typed enum once frontend consumers are updated.
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -84,6 +88,12 @@ pub struct TerminalDto {
     pub role_description: Option<String>,
     pub order_index: i32,
     pub status: String,
+    // G17-005: Key fields added to DTO for frontend visibility
+    pub auto_confirm: bool,
+    pub last_commit_hash: Option<String>,
+    pub last_commit_message: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -267,6 +277,12 @@ impl TerminalDto {
             role_description: terminal.role_description.clone(),
             order_index: terminal.order_index,
             status: terminal.status.clone(),
+            // G17-005: Key fields for frontend visibility
+            auto_confirm: terminal.auto_confirm,
+            last_commit_hash: terminal.last_commit_hash.clone(),
+            last_commit_message: terminal.last_commit_message.clone(),
+            started_at: terminal.started_at.map(|dt| dt.to_rfc3339()),
+            completed_at: terminal.completed_at.map(|dt| dt.to_rfc3339()),
             created_at: terminal.created_at.to_rfc3339(),
             updated_at: terminal.updated_at.to_rfc3339(),
         }

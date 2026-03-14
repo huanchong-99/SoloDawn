@@ -294,6 +294,10 @@ impl TaskServer {
         }
     }
 
+    // TODO(G35-008): When GITCORTEX_API_TOKEN is unset, apply_api_token silently skips auth.
+    // The HTTP auth middleware (require_api_token) also skips when the env var is absent,
+    // but the MCP server should align: either both enforce or both skip. Consider a
+    // startup check that warns when the token is unset in production.
     fn apply_api_token(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         match &self.api_token {
             Some(token) => request.bearer_auth(token),

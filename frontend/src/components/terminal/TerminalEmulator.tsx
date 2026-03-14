@@ -166,6 +166,9 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
     );
 
     // Initialize terminal
+    // TODO: G28-011 — The dependency array includes handleData and handleResize which
+    // are recreated when onData/onResize props change. Consider using refs for these
+    // callbacks to avoid tearing down and recreating the Terminal instance.
     useEffect(() => {
       if (!containerRef.current) return;
 

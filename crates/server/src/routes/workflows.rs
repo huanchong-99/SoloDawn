@@ -352,6 +352,9 @@ fn ensure_orchestrator_permission(
     Ok(())
 }
 
+// TODO(G16-013): Rate-limit state grows unboundedly as workflows accumulate.
+// Add a periodic cleanup task (or LRU eviction) to prune stale entries from
+// ORCHESTRATOR_GOVERNANCE_STATE.rate_windows for workflows that are no longer active.
 async fn enforce_orchestrator_rate_limit(
     workflow_id: &str,
     source: &str,
@@ -854,6 +857,9 @@ async fn create_workflow(
     let mut existing_branches: Vec<String> = Vec::new();
 
     // Collect existing branch names for conflict detection
+    // TODO(G23-003): Query the actual git repository for existing branch names
+    // (e.g. via `git branch --list`) to detect conflicts with remote/local branches,
+    // not just within the current batch.
     // In a real scenario, we'd query the git repository for existing branches
     // For now, we collect branches that will be created in this batch
     for task_req in &req.tasks {
@@ -1164,6 +1170,15 @@ async fn rollback_prepare_failure(deployment: &DeploymentImpl, workflow_id: &str
 
         deployment.prompt_watcher().unregister(&terminal.id).await;
 
+        // G02-001: Unregister terminal bridge to stop MessageBus → PTY forwarding
+        if let Some(session_id) = terminal.pty_session_id.as_deref() {
+            let terminal_bridge = services::services::terminal::bridge::TerminalBridge::new(
+                deployment.message_bus().clone(),
+                deployment.process_manager().clone(),
+            );
+            terminal_bridge.unregister(session_id).await;
+        }
+
         if let Err(e) =
             Terminal::update_process(&deployment.db().pool, &terminal.id, None, None).await
         {
@@ -1233,6 +1248,9 @@ async fn rollback_prepare_failure(deployment: &DeploymentImpl, workflow_id: &str
     }
 }
 
+// TODO(G23-006): When worktrees are active, this should resolve to the task-specific
+// worktree path (via WorktreeManager) instead of the project root. Currently all
+// terminals share the same base repo path, which may cause conflicts.
 async fn resolve_workflow_working_dir(
     deployment: &DeploymentImpl,
     workflow: &Workflow,
@@ -1586,6 +1604,8 @@ async fn start_workflow(
 
     // Self-heal for restarted backend: a workflow may still be `ready` while terminals were
     // reconciled to `not_started` (missing active PTY/session). Re-prepare before starting.
+    // TODO(G16-008): Extract this re-prepare block into a dedicated `re_prepare_if_needed()`
+    // function to reduce start_workflow complexity and improve testability.
     if workflow.status == "ready" || workflow.status == "paused" {
         let terminals =
             db::models::Terminal::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
@@ -1752,6 +1772,9 @@ async fn pause_workflow(
 
 /// POST /api/workflows/:workflow_id/stop
 /// Stop a workflow and mark as cancelled
+// TODO(G23-004): After stopping terminals, clean up associated worktrees via
+// WorktreeManager::batch_cleanup_worktrees to free disk space. Same applies to
+// delete_workflow above.
 async fn stop_workflow(
     State(deployment): State<DeploymentImpl>,
     Path(workflow_id): Path<Uuid>,
@@ -2815,6 +2838,12 @@ async fn merge_workflow(
     }
 
     let mut merged_tasks = Vec::new();
+    // TODO(G06-004): Record HEAD SHA before merge loop so multi-task merge failures
+    // can be rolled back to a known-good state.
+    // TODO(G06-005): Check if task branch is already merged into target_branch before
+    // attempting merge (idempotency). Use `git merge-base --is-ancestor` or equivalent.
+    // TODO(G06-009): Inspect stderr from merge_squash_commit for conflict markers and
+    // surface structured conflict info to the caller instead of a generic error.
     for task in tasks {
         let task_id = task.id.clone();
         let task_branch = task.branch.trim();
@@ -2825,15 +2854,26 @@ async fn merge_workflow(
             )));
         }
 
-        let task_worktree_path = base_repo_path.join("worktrees").join(task_branch);
-        if !task_worktree_path.exists() {
-            let _ = Workflow::set_merge_completed(&deployment.db().pool, &workflow_id).await;
-            return Err(ApiError::BadRequest(format!(
-                "Cannot merge task {}: worktree path does not exist ({})",
-                task_id,
-                task_worktree_path.display()
-            )));
-        }
+        // G23-002: Use WorktreeManager base dir instead of hardcoded "worktrees" subpath
+        let task_worktree_path = services::services::worktree_manager::WorktreeManager::get_worktree_base_dir()
+            .join(task_branch);
+        // Fallback: if the managed path doesn't exist, try the legacy repo-relative path
+        let task_worktree_path = if task_worktree_path.exists() {
+            task_worktree_path
+        } else {
+            let legacy_path = base_repo_path.join("worktrees").join(task_branch);
+            if legacy_path.exists() {
+                legacy_path
+            } else {
+                let _ = Workflow::set_merge_completed(&deployment.db().pool, &workflow_id).await;
+                return Err(ApiError::BadRequest(format!(
+                    "Cannot merge task {}: worktree path does not exist (tried {} and {})",
+                    task_id,
+                    task_worktree_path.display(),
+                    base_repo_path.join("worktrees").join(task_branch).display()
+                )));
+            }
+        };
 
         let commit_message = format!("Merge task {task_id} ({task_branch})");
         match deployment.git().merge_changes(
@@ -2881,6 +2921,30 @@ async fn merge_workflow(
 
     Workflow::set_merge_completed(&deployment.db().pool, &workflow_id).await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    // G06-006: Clean up worktree directories after successful merge
+    let worktree_cleanups: Vec<services::services::worktree_manager::WorktreeCleanup> = merged_tasks
+        .iter()
+        .filter_map(|t| {
+            let branch = t.get("branch")?.as_str()?;
+            let managed_path = services::services::worktree_manager::WorktreeManager::get_worktree_base_dir().join(branch);
+            let legacy_path = base_repo_path.join("worktrees").join(branch);
+            let worktree_path = if managed_path.exists() { managed_path } else { legacy_path };
+            Some(services::services::worktree_manager::WorktreeCleanup::new(
+                worktree_path,
+                Some(base_repo_path.clone()),
+            ))
+        })
+        .collect();
+    if !worktree_cleanups.is_empty() {
+        if let Err(e) = services::services::worktree_manager::WorktreeManager::batch_cleanup_worktrees(&worktree_cleanups).await {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                error = %e,
+                "Failed to clean up worktrees after merge (non-fatal)"
+            );
+        }
+    }
 
     // Return success response
     let result = json!({

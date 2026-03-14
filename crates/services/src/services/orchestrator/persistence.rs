@@ -281,11 +281,13 @@ impl StatePersistence {
 
     /// Save task execution progress
     ///
-    /// Reserved interface for future incremental task-level persistence.
-    /// Currently a no-op — full state is persisted via `save_state()` which
-    /// includes all task states. When a dedicated `task_progress` table is
-    /// introduced, this method will perform incremental upserts.
+    /// **Deprecated / placeholder** — this method is a no-op.
+    /// Full state is persisted via `save_state()` which includes all task
+    /// states. When a dedicated `task_progress` table is introduced, this
+    /// method will perform incremental upserts. Do not rely on it for
+    /// correctness; it exists only to reserve the API surface.
     #[allow(unused)]
+    #[deprecated(note = "no-op placeholder; use save_state() for full persistence")]
     pub async fn save_task_progress(
         &self,
         workflow_id: &str,

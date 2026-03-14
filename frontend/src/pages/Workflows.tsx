@@ -78,8 +78,11 @@ interface WorkflowPromptQueueItem {
   decision: TerminalPromptDecisionPayload | null;
 }
 
-const PROMPT_DUPLICATE_WINDOW_MS = 1500;
+// G07-004: Reduce dedup window to 800ms to align closer to backend 500ms quiet window
+const PROMPT_DUPLICATE_WINDOW_MS = 800;
 const PROMPT_HISTORY_TTL_MS = 60_000;
+// G27-005: Auto-cleanup stale prompts that have not been responded to within 120s
+const PROMPT_QUEUE_TIMEOUT_MS = 120_000;
 
 function getPromptContextKey(
   payload:
@@ -117,11 +120,18 @@ function isSamePromptContext(
   if (prompt.terminalId !== decision.terminalId) {
     return false;
   }
+  // G07-007: Also match on sessionId when both are present
   if (prompt.sessionId && decision.sessionId) {
     return prompt.sessionId === decision.sessionId;
   }
   return true;
 }
+
+// G27-003: Generate a unique prompt queue item ID that includes a timestamp
+// component to distinguish re-detections of the same prompt text.
+// TODO: Integrate this into handleTerminalPromptDetected once the backend
+// reliably provides detectedAt in prompt events.
+// Implementation: `${getPromptQueueItemId(payload)}::${payload.detectedAt ?? new Date().toISOString()}`
 
 function getExecutionModeLabel(
   mode: string | undefined,
@@ -185,6 +195,8 @@ function WorkflowDetailActions({
     pausePending: boolean;
     stopPending: boolean;
     mergePending: boolean;
+    // G26-004: Aggregate flag to prevent quick successive clicks
+    anyPending: boolean;
   };
   handlers: {
     onPrepare: (id: string) => void;
@@ -200,7 +212,7 @@ function WorkflowDetailActions({
   return (
     <div className="flex gap-2">
       {actions.canPrepare && (
-        <Button onClick={() => handlers.onPrepare(workflowId)} disabled={mutations.preparePending}>
+        <Button onClick={() => handlers.onPrepare(workflowId)} disabled={mutations.anyPending}>
           <Rocket className="w-4 h-4 mr-2" />
           {mutations.preparePending
             ? t('management.actions.preparing')
@@ -208,25 +220,25 @@ function WorkflowDetailActions({
         </Button>
       )}
       {actions.canStart && (
-        <Button onClick={() => handlers.onStart(workflowId)} disabled={mutations.startPending}>
+        <Button onClick={() => handlers.onStart(workflowId)} disabled={mutations.anyPending}>
           <Play className="w-4 h-4 mr-2" />
           {t('management.actions.start')}
         </Button>
       )}
       {actions.canPause && (
-        <Button variant="outline" onClick={() => handlers.onPause(workflowId)} disabled={mutations.pausePending}>
+        <Button variant="outline" onClick={() => handlers.onPause(workflowId)} disabled={mutations.anyPending}>
           <Pause className="w-4 h-4 mr-2" />
           {t('management.actions.pause')}
         </Button>
       )}
       {actions.canStop && (
-        <Button variant="destructive" onClick={() => handlers.onStop(workflowId)} disabled={mutations.stopPending}>
+        <Button variant="destructive" onClick={() => handlers.onStop(workflowId)} disabled={mutations.anyPending}>
           <Square className="w-4 h-4 mr-2" />
           {t('management.actions.stop')}
         </Button>
       )}
       {actions.canMerge && (
-        <Button onClick={() => handlers.onMerge(workflowId)} disabled={!hasCompletedAllTasks || mutations.mergePending}>
+        <Button onClick={() => handlers.onMerge(workflowId)} disabled={!hasCompletedAllTasks || mutations.anyPending}>
           <GitMerge className="w-4 h-4 mr-2" />
           {mutations.mergePending
             ? t('management.actions.merging')
@@ -234,7 +246,7 @@ function WorkflowDetailActions({
         </Button>
       )}
       {actions.canDelete && (
-        <Button variant="outline" onClick={() => handlers.onDelete(workflowId)}>
+        <Button variant="outline" onClick={() => handlers.onDelete(workflowId)} disabled={mutations.anyPending}>
           <Trash2 className="w-4 h-4 mr-2" />
           {t('management.actions.delete')}
         </Button>
@@ -324,6 +336,8 @@ function renderBlockingView({
   return null;
 }
 
+// G14-007: 'draft' is a client-only status (not in backend WorkflowStatus enum).
+// It is included here so the wizard's unsaved state maps to a valid display status.
 const WORKFLOW_STATUS_MAP: Record<string, WorkflowStatus> = {
   created: 'idle',
   starting: 'running',
@@ -334,7 +348,7 @@ const WORKFLOW_STATUS_MAP: Record<string, WorkflowStatus> = {
   completed: 'completed',
   failed: 'failed',
   cancelled: 'idle',
-  draft: 'idle',
+  draft: 'idle', // client-only
 };
 
 const WORKFLOW_STATUS_BADGE_CLASSES: Record<string, string> = {
@@ -356,6 +370,22 @@ function mapWorkflowStatus(status: string): WorkflowStatus {
 
 function getWorkflowStatusBadgeClass(status: string): string {
   return WORKFLOW_STATUS_BADGE_CLASSES[status] ?? 'bg-gray-100 text-gray-800';
+}
+
+// G13-010: Safe terminal status mapping — avoids unsafe `as TerminalStatus` cast
+const TERMINAL_STATUS_SET = new Set<TerminalStatus>([
+  'not_started', 'starting', 'waiting', 'working',
+  'completed', 'failed', 'cancelled', 'review_passed', 'review_rejected',
+]);
+
+function mapTerminalStatusSafe(status: string): TerminalStatus {
+  if (TERMINAL_STATUS_SET.has(status as TerminalStatus)) {
+    return status as TerminalStatus;
+  }
+  // Map common backend aliases
+  if (status === 'running') return 'working';
+  if (status === 'idle') return 'not_started';
+  return 'not_started';
 }
 
 function mapMergeTerminalStatus(status: string): TerminalStatus {
@@ -391,7 +421,7 @@ function mapWorkflowTasks(
           modelConfigId: terminal.modelConfigId,
           role: terminal.role || undefined,
           orderIndex: terminal.orderIndex,
-          status: terminal.status as TerminalStatus,
+          status: mapTerminalStatusSafe(terminal.status),
         })),
     }));
 }
@@ -592,6 +622,8 @@ function OrchestratorChatPanel({
     isLoading,
     error,
     refetch,
+  // TODO: G28-004 — Replace 2s polling with WebSocket-driven invalidation
+  // (subscribe to orchestrator.decision / orchestrator.awakened events).
   } = useOrchestratorMessages(workflowId, {
     enabled: canSendMessage,
     refetchInterval: canSendMessage ? 2000 : false,
@@ -766,6 +798,7 @@ function SelectedWorkflowView({
     pausePending: boolean;
     stopPending: boolean;
     mergePending: boolean;
+    anyPending: boolean;
   };
   onBack: () => void;
   onPrepare: (workflowId: string) => Promise<void>;
@@ -1172,6 +1205,8 @@ export function Workflows() {
       onTaskStatusChanged: handleRealtimeWorkflowSignal,
       onTerminalStatusChanged: handleRealtimeWorkflowSignal,
       onTerminalCompleted: handleRealtimeWorkflowSignal,
+      // G08-003 / G11-008: Subscribe to git commit events for cache invalidation
+      onGitCommitDetected: handleRealtimeWorkflowSignal,
       onQualityGateResult: handleQualityGateResult,
     }),
     [
@@ -1184,7 +1219,44 @@ export function Workflows() {
 
   useWorkflowEvents(selectedWorkflowId, workflowEventHandlers);
 
+  // TODO: G26-008 — Show a warning banner when the WebSocket connection is
+  // disconnected or reconnecting, so the user knows real-time updates are stale.
+  // Use useWsStore(s => s.getWorkflowConnectionStatus(selectedWorkflowId)) to
+  // detect 'disconnected' | 'reconnecting' states.
+
+  // G26-004: Aggregate mutation pending flag to prevent quick successive clicks
+  const isAnyMutationPending =
+    createMutation.isPending ||
+    prepareMutation.isPending ||
+    startMutation.isPending ||
+    pauseMutation.isPending ||
+    stopMutation.isPending ||
+    mergeMutation.isPending ||
+    deleteMutation.isPending;
+
   const activePrompt = useMemo(() => promptQueue[0] ?? null, [promptQueue]);
+
+  // G07-011 / G27-008: Prompt queue depth — expose for future queue count indicator in UI
+  // TODO: Display promptQueue.length in the WorkflowPromptDialog or as a badge on the prompt button
+
+  // G27-005: Auto-cleanup stale prompts that have not been responded to within 120s
+  useEffect(() => {
+    if (promptQueue.length === 0) return;
+
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setPromptQueue((prev) =>
+        prev.filter((item) => {
+          const detectedAt = item.detected.detectedAt
+            ? new Date(item.detected.detectedAt).getTime()
+            : now;
+          return now - detectedAt < PROMPT_QUEUE_TIMEOUT_MS;
+        })
+      );
+    }, 30_000); // Check every 30s
+
+    return () => clearInterval(timer);
+  }, [promptQueue.length]);
 
   useEffect(() => {
     if (
@@ -1210,6 +1282,10 @@ export function Workflows() {
   );
 
   // Helper to handle prompt submission error with WebSocket fallback
+  // G27-006: When the REST prompt-response endpoint fails for an enter_confirm
+  // prompt, we fall back to sending an empty string ('') over the workflow
+  // WebSocket. The backend TerminalBridge normalizes empty payloads to '\r'
+  // (carriage return), which is the PTY equivalent of pressing Enter.
   const handlePromptSubmitErrorWithFallback = useCallback(
     (
       currentPrompt: WorkflowPromptQueueItem,
@@ -1240,6 +1316,8 @@ export function Workflows() {
   );
 
   // Helper to handle general prompt submission error
+  // TODO: G27-004 — Add retry logic for transient failures (e.g. network timeout).
+  // Consider exponential backoff with max 2 retries before surfacing the error.
   const handlePromptSubmitError = useCallback(
     (currentPrompt: WorkflowPromptQueueItem, error: unknown) => {
       promptSubmittedHistoryRef.current.delete(currentPrompt.id);
@@ -1496,6 +1574,12 @@ export function Workflows() {
 
     if (result === 'confirmed') {
       await stopMutation.mutateAsync({ workflow_id: workflowId });
+      // G26-009: Clear prompt queue after stop — prompts are no longer relevant
+      setPromptQueue([]);
+      setSubmittingPromptId(null);
+      submittingPromptRef.current = null;
+      setPromptSubmitError(null);
+      pendingPromptDecisionsRef.current.clear();
     }
   };
 
@@ -1530,6 +1614,8 @@ export function Workflows() {
           pausePending: pauseMutation.isPending,
           stopPending: stopMutation.isPending,
           mergePending: mergeMutation.isPending,
+          // G26-004: Aggregate flag to prevent quick successive clicks
+          anyPending: isAnyMutationPending,
         }}
         onBack={() => setSelectedWorkflowId(null)}
         onPrepare={handlePrepareWorkflow}

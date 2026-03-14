@@ -1,6 +1,6 @@
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { Terminal } from 'lucide-react';
+import { Terminal } from '@phosphor-icons/react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { CSSProperties, PointerEvent, MouseEvent } from 'react';

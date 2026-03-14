@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronUp, GripVertical, Plus, X, Edit, Check } from 'lucide-react';
+import { CaretDownIcon, CaretUpIcon, DotsSixVerticalIcon, PlusIcon, XIcon, PencilSimpleIcon, CheckIcon } from '@phosphor-icons/react';
 import { Field, FieldLabel, FieldError } from '../../ui-new/primitives/Field';
 import { cn } from '@/lib/utils';
 import type { CommandConfig } from '../types';
@@ -163,7 +163,7 @@ const PresetEditorModal: React.FC<PresetEditorModalProps> = ({
             className="flex items-center justify-center p-half rounded text-low hover:text-normal"
             aria-label={t('step5.params.cancel')}
           >
-            <X className="size-icon-sm" />
+            <XIcon className="size-icon-sm" />
           </button>
         </div>
 
@@ -218,7 +218,7 @@ const PresetEditorModal: React.FC<PresetEditorModalProps> = ({
             onClick={() => setShowAdvanced(!showAdvanced)}
             className="flex items-center gap-half text-sm text-low hover:text-normal"
           >
-            {showAdvanced ? <ChevronUp className="size-icon-sm" /> : <ChevronDown className="size-icon-sm" />}
+            {showAdvanced ? <CaretUpIcon className="size-icon-sm" /> : <CaretDownIcon className="size-icon-sm" />}
             {t('step5.params.advancedTitle')}
           </button>
 
@@ -280,7 +280,7 @@ const PresetEditorModal: React.FC<PresetEditorModalProps> = ({
                 'flex items-center gap-half'
               )}
             >
-              <Check className="size-icon-sm" />
+              <CheckIcon className="size-icon-sm" />
               {t('step5.params.save')}
             </button>
           </div>
@@ -525,7 +525,7 @@ export const Step5Commands: React.FC<Step5CommandsProps> = ({
                     className="flex items-center gap-base bg-secondary rounded-sm border px-base py-half"
                   >
                     {/* Drag Handle */}
-                    <GripVertical className="size-icon-sm text-low shrink-0" />
+                    <DotsSixVerticalIcon className="size-icon-sm text-low shrink-0" />
 
                     {/* Command Info */}
                     <div className="flex-1 min-w-0">
@@ -563,7 +563,7 @@ export const Step5Commands: React.FC<Step5CommandsProps> = ({
                       aria-label={t('step5.edit')}
                       title={t('step5.edit')}
                     >
-                      <Edit className="size-icon-sm" />
+                      <PencilSimpleIcon className="size-icon-sm" />
                     </button>
 
                     {/* Move Buttons */}
@@ -580,7 +580,7 @@ export const Step5Commands: React.FC<Step5CommandsProps> = ({
                         )}
                         aria-label={t('step5.moveUp')}
                       >
-                        <ChevronUp className="size-icon-sm" />
+                        <CaretUpIcon className="size-icon-sm" />
                       </button>
                       <button
                         type="button"
@@ -594,7 +594,7 @@ export const Step5Commands: React.FC<Step5CommandsProps> = ({
                         )}
                         aria-label={t('step5.moveDown')}
                       >
-                        <ChevronDown className="size-icon-sm" />
+                        <CaretDownIcon className="size-icon-sm" />
                       </button>
                     </div>
 
@@ -610,7 +610,7 @@ export const Step5Commands: React.FC<Step5CommandsProps> = ({
                       )}
                       aria-label={t('step5.remove')}
                     >
-                      <X className="size-icon-sm" />
+                      <XIcon className="size-icon-sm" />
                     </button>
                   </div>
                 ))}
@@ -683,7 +683,7 @@ export const Step5Commands: React.FC<Step5CommandsProps> = ({
                         )}
                         aria-label={t('step5.add')}
                       >
-                        <Plus className="size-icon-sm" />
+                        <PlusIcon className="size-icon-sm" />
                       </button>
                     </div>
                   );
@@ -727,7 +727,7 @@ export const Step5Commands: React.FC<Step5CommandsProps> = ({
                           )}
                           aria-label={t('step5.add')}
                         >
-                          <Plus className="size-icon-sm" />
+                          <PlusIcon className="size-icon-sm" />
                         </button>
                       </div>
                     );

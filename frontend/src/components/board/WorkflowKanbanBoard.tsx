@@ -61,6 +61,9 @@ function KanbanColumn({ column, tasks, workflowId }: Readonly<KanbanColumnProps>
   );
 }
 
+// TODO: G29-006 — This component calls useWorkflow independently from Board.tsx
+// and TerminalActivityPanel. Consider lifting the workflow data to a shared
+// context or passing it as a prop to avoid redundant fetches.
 export function WorkflowKanbanBoard({ workflowId }: Readonly<WorkflowKanbanBoardProps>) {
   const { t } = useTranslation('workflow');
   const { data: workflow, isLoading } = useWorkflow(workflowId ?? '');
@@ -84,6 +87,8 @@ export function WorkflowKanbanBoard({ workflowId }: Readonly<WorkflowKanbanBoard
     // Note: State transition legality is validated server-side.
     // The backend will reject invalid transitions and return an error,
     // which the mutation's onError handler will process.
+    // TODO: G29-005 — Add a client-side whitelist of valid status transitions
+    // to prevent unnecessary API calls for obviously invalid drags.
     // Trigger the mutation (optimistic update handled in the hook)
     updateTaskStatus.mutate({
       workflowId,

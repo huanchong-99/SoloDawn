@@ -96,10 +96,12 @@ impl ClaudeCode {
         let plan = self.plan.unwrap_or(false);
         let approvals = self.approvals.unwrap_or(false);
         if plan && approvals {
-            // When both plan and approvals are enabled, plan mode takes precedence.
+            // [G19-007] When both plan and approvals are enabled, plan mode takes precedence.
             // In plan mode, tools auto-approve except ExitPlanMode (which triggers approval).
             // After ExitPlanMode, permission mode switches to BypassPermissions.
             // The approvals hooks are NOT applied because get_hooks() checks plan first.
+            // TODO: Add validation at construction time to reject this combination, or
+            // document the precedence behavior clearly in the API/UI.
             tracing::warn!("Both plan and approvals are enabled. Plan will take precedence.");
         }
         if plan || approvals {
@@ -192,6 +194,10 @@ impl StandardCodingAgentExecutor for ClaudeCode {
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
         let command_builder = self.build_command_builder();
+        // [G19-005] TODO: `--fork-session` and `--resume` may be mutually exclusive
+        // in future Claude CLI versions. `--fork-session` creates a new session branching
+        // from the given one, while `--resume` continues the same session. Verify
+        // compatibility with each Claude CLI release and consider using only `--resume`.
         let command_parts = command_builder.build_follow_up(&[
             "--fork-session".to_string(),
             "--resume".to_string(),

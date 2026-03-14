@@ -2,6 +2,7 @@ use axum::{
     Extension, Router,
     routing::{IntoMakeService, get},
 };
+use tower_http::cors::{Any, CorsLayer};
 pub use subscription_hub::SharedSubscriptionHub;
 
 use crate::{DeploymentImpl, feishu_handle::SharedFeishuHandle, middleware::require_api_token};
@@ -91,6 +92,14 @@ pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feis
         .layer(Extension(hub))
         .layer(Extension(feishu_handle))
         .layer(axum::middleware::from_fn(require_api_token))
+        // G18-005: Restrict CORS in production. Currently permissive for local dev;
+        // TODO(G18-005): tighten allowed origins/methods/headers for production deployments.
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .with_state(deployment);
 
     Router::new()

@@ -345,6 +345,10 @@ fn is_claude_bypass_accept_prompt(text: &str) -> bool {
     has_claude_bypass_accept_menu_text(&lower)
 }
 
+/// [G19-010] The numeric shortcut "2\r" assumes "Yes, I accept" is always the
+/// second menu item. If Claude CLI reorders the menu in a future version this
+/// will break. TODO: implement regex-based matching that scans the rendered
+/// menu lines for the "Yes" option index instead of hardcoding the position.
 fn claude_bypass_accept_response(_text: &str) -> (&'static str, &'static str, &'static str) {
     (
         "2\r",
@@ -740,6 +744,11 @@ struct WatchTaskHandle {
 }
 
 /// Watches PTY output for interactive prompts and publishes events
+///
+/// [G07-001] The `terminals` map uses a single RwLock for all terminals. Under
+/// high terminal counts this could become a contention point. TODO: consider
+/// refactoring to per-terminal Mutex (e.g., `DashMap<String, Mutex<TerminalWatchState>>`)
+/// to allow concurrent processing of different terminals.
 #[derive(Clone)]
 pub struct PromptWatcher {
     /// Message bus for publishing events
@@ -1069,6 +1078,10 @@ next_action: handoff\n"
         active.to_string()
     }
 
+    /// [G07-006] NOTE: `publish_terminal_input` returns a bool indicating delivery success.
+    /// If delivery fails (no subscribers), the state machine remains in Responding state
+    /// and the prompt may be silently dropped. TODO: Check the return value and reset the
+    /// state machine to Idle on delivery failure so the prompt can be re-detected.
     async fn publish_terminal_input_with_active_session(
         &self,
         terminal_id: &str,
@@ -1119,6 +1132,12 @@ next_action: handoff\n"
     ///
     /// Call this method with each line of PTY output.
     /// If a prompt is detected, publishes a `TerminalPromptDetected` event.
+    ///
+    /// [G07-003] NOTE: Several special prompt paths (Claude bypass, unexpected-changes,
+    /// handoff-stall) bypass the `auto_confirm` guard and always auto-respond. This is
+    /// intentional for orchestrated workflows but may surprise users who set auto_confirm=false
+    /// expecting full manual control. TODO: Add a strict mode that respects auto_confirm
+    /// for all prompt paths, or document the bypass behavior clearly in user-facing docs.
     pub async fn process_output(&self, terminal_id: &str, output: &str) {
         let mut terminals = self.terminals.write().await;
 

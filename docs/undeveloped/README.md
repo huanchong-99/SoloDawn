@@ -5,18 +5,23 @@ This repository uses two top-level documentation folders:
 - `docs/developed/`: completed and stable documentation
 - `docs/undeveloped/`: pending or in-progress documentation
 
-Current `docs/undeveloped/` structure:
+## Current `docs/undeveloped/` structure
 
-- `docs/undeveloped/current/`: active unfinished work (entry point is `TODO.md`)
+- `docs/undeveloped/current/`: active unfinished work
+  - `TODO.md` — single source of truth for all active unfinished tasks
+  - `2026-03-14-audit-fix-status.md` — audit fix progress tracker (partially complete)
+- `docs/undeveloped/misc/`: auxiliary data used during development
+  - `TEST_DATA.md` — test workflow configuration and API credentials
 
-Current `docs/developed/` structure:
+## Current `docs/developed/` structure
 
-- `docs/developed/plans/`: completed phase plans and design documents
-- `docs/developed/issues/`: resolved audit reports and issue analyses
+- `docs/developed/plans/`: completed phase plans and design documents (Phase 0-29)
+- `docs/developed/issues/`: resolved audit reports, SonarCloud reports, and issue analyses
 - `docs/developed/ops/`: operations runbook, troubleshooting, deployment guides
 - `docs/developed/misc/`: archived TODO lists, user guide, operations manual, and other reference docs
+- `docs/developed/quality/`: quality gate documentation
 
-Maintenance rules:
+## Maintenance rules
 
 1. Add new work-in-progress docs under `docs/undeveloped/current/`.
 2. Move docs to `docs/developed/` after work is complete.
