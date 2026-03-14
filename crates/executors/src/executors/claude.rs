@@ -90,7 +90,7 @@ impl ClaudeCode {
         }
 
         let mut builder =
-            CommandBuilder::new(&base_command(self.claude_code_router.unwrap_or(false)))
+            CommandBuilder::new(base_command(self.claude_code_router.unwrap_or(false)))
                 .params(["-p"]);
 
         let plan = self.plan.unwrap_or(false);
@@ -1204,8 +1204,7 @@ impl ClaudeLogProcessor {
                     timestamp: None,
                     entry_type: NormalizedEntryType::SystemMessage,
                     content: format!(
-                        "Unrecognized JSON message: {}",
-                        raw_json
+                        "Unrecognized JSON message: {raw_json}"
                     ),
                     metadata: None,
                 };

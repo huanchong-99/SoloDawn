@@ -260,7 +260,7 @@ impl Codex {
     }
 
     fn build_command_builder(&self) -> CommandBuilder {
-        let mut builder = CommandBuilder::new(&Self::base_command());
+        let mut builder = CommandBuilder::new(Self::base_command());
         builder = builder.extend_params(["app-server"]);
         if self.oss.unwrap_or(false) {
             builder = builder.extend_params(["--oss"]);

@@ -1,11 +1,11 @@
-use std::sync::LazyLock;
+use once_cell::sync::Lazy;
 
 use regex::Regex;
 use uuid::Uuid;
 
 /// [G36-007] Compiled once and reused across calls.
-static GIT_BRANCH_SLUG_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[^a-z0-9]+").expect("GIT_BRANCH_SLUG_RE must compile"));
+static GIT_BRANCH_SLUG_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"[^a-z0-9]+").expect("GIT_BRANCH_SLUG_RE must compile"));
 
 pub fn git_branch_id(input: &str) -> String {
     // 1. lowercase

@@ -106,7 +106,7 @@ impl CliDetector {
             "claude", "gemini", "codex", "amp", "cursor", "cursor-agent",
             "qwen", "gh", "opencode", "droid",
         ];
-        if !ALLOWED_CLI_COMMANDS.iter().any(|&allowed| cmd == allowed) {
+        if !ALLOWED_CLI_COMMANDS.contains(&cmd) {
             tracing::warn!(
                 cmd = cmd,
                 cli_type_id = %cli_type.id,
