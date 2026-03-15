@@ -13,7 +13,7 @@ type ChangeTargetBranchParams = {
 
 export function useChangeTargetBranch(
   attemptId: string | undefined,
-  repoId: string | undefined,
+  _repoId: string | undefined,
   onSuccess?: (data: ChangeTargetBranchResponse) => void,
   onError?: (err: unknown) => void
 ) {
@@ -35,7 +35,7 @@ export function useChangeTargetBranch(
       };
       return attemptsApi.change_target_branch(attemptId, payload);
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       if (attemptId) {
         queryClient.invalidateQueries({
           queryKey: ['branchStatus', attemptId],
@@ -50,9 +50,9 @@ export function useChangeTargetBranch(
         });
       }
 
-      if (repoId) {
+      if (variables.repoId) {
         queryClient.invalidateQueries({
-          queryKey: repoBranchKeys.byRepo(repoId),
+          queryKey: repoBranchKeys.byRepo(variables.repoId),
         });
       }
 

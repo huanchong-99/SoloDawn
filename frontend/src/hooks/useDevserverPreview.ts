@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useExecutionProcessesContext } from '@/contexts/ExecutionProcessesContext';
 
 export interface DevserverPreviewState {
@@ -38,6 +38,8 @@ export function useDevserverPreview(
     scheme: 'http',
   });
 
+  const prevAttemptIdRef = useRef(attemptId);
+
   const selectedProcess = useMemo(() => {
     const devserverProcesses = executionProcesses.filter(
       (process) =>
@@ -54,6 +56,17 @@ export function useDevserverPreview(
   }, [executionProcesses]);
 
   useEffect(() => {
+    if (prevAttemptIdRef.current !== attemptId) {
+      prevAttemptIdRef.current = attemptId;
+      setState({
+        status: 'idle',
+        scheme: 'http',
+        url: undefined,
+        port: undefined,
+      });
+      return;
+    }
+
     if (processesError) {
       setState((prev) => ({ ...prev, status: 'error' }));
       return;
@@ -96,16 +109,7 @@ export function useDevserverPreview(
       url: undefined,
       port: undefined,
     }));
-  }, [processesError, selectedProcess, lastKnownUrl, projectHasDevScript]);
-
-  useEffect(() => {
-    setState({
-      status: 'idle',
-      scheme: 'http',
-      url: undefined,
-      port: undefined,
-    });
-  }, [attemptId]);
+  }, [processesError, selectedProcess, lastKnownUrl, projectHasDevScript, attemptId]);
 
   return state;
 }

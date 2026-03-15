@@ -255,7 +255,6 @@ pub struct GetTaskResponse {
 pub struct TaskServer {
     client: reqwest::Client,
     base_url: String,
-    api_token: Option<String>,
     tool_router: ToolRouter<TaskServer>,
     context: Option<McpContext>,
 }
@@ -288,7 +287,6 @@ impl TaskServer {
         Self {
             client: reqwest::Client::new(),
             base_url: base_url.to_string(),
-            api_token: std::env::var("GITCORTEX_API_TOKEN").ok(),
             tool_router: Self::tool_router(),
             context: None,
         }
@@ -299,7 +297,7 @@ impl TaskServer {
     // but the MCP server should align: either both enforce or both skip. Consider a
     // startup check that warns when the token is unset in production.
     fn apply_api_token(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        match &self.api_token {
+        match std::env::var("GITCORTEX_API_TOKEN").ok() {
             Some(token) => request.bearer_auth(token),
             None => request,
         }

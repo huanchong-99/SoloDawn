@@ -438,6 +438,55 @@ impl StandardCodingAgentExecutor for CursorAgent {
                                 };
                             }
 
+                            let status = match &tool_call {
+                                CursorToolCall::Shell { result, .. } => {
+                                    if let Some(res) = result {
+                                        match serde_json::from_value::<CursorShellResult>(res.clone()) {
+                                            Ok(CursorShellResult::Wrapped(ref w)) if w.failure.is_some() && w.success.is_none() => {
+                                                ToolStatus::Failed
+                                            }
+                                            Ok(r) => {
+                                                if let Some(outcome) = r.into_outcome() {
+                                                    if outcome.exit_code.is_some_and(|c| c != 0) {
+                                                        ToolStatus::Failed
+                                                    } else {
+                                                        ToolStatus::Success
+                                                    }
+                                                } else {
+                                                    ToolStatus::Success
+                                                }
+                                            }
+                                            Err(_) => ToolStatus::Success,
+                                        }
+                                    } else {
+                                        ToolStatus::Success
+                                    }
+                                }
+                                CursorToolCall::Mcp { result, .. } => {
+                                    if let Some(res) = result {
+                                        match serde_json::from_value::<CursorMcpResult>(res.clone()) {
+                                            Ok(CursorMcpResult::Wrapped(ref w)) if w.failure.is_some() && w.success.is_none() => {
+                                                ToolStatus::Failed
+                                            }
+                                            Ok(CursorMcpResult::Flat(ref o)) if o.is_error.unwrap_or(false) => {
+                                                ToolStatus::Failed
+                                            }
+                                            Ok(CursorMcpResult::Wrapped(ref w)) => {
+                                                let is_err = w.success.as_ref()
+                                                    .or(w.failure.as_ref())
+                                                    .and_then(|o| o.is_error)
+                                                    .unwrap_or(false);
+                                                if is_err { ToolStatus::Failed } else { ToolStatus::Success }
+                                            }
+                                            _ => ToolStatus::Success,
+                                        }
+                                    } else {
+                                        ToolStatus::Success
+                                    }
+                                }
+                                _ => ToolStatus::Success,
+                            };
+
                             let entry = NormalizedEntry {
                                 timestamp: None,
                                 entry_type: NormalizedEntryType::ToolUse {
@@ -454,7 +503,7 @@ impl StandardCodingAgentExecutor for CursorAgent {
                                         _ => tool_call.get_name().to_string(),
                                     },
                                     action_type: new_action,
-                                    status: ToolStatus::Success,
+                                    status,
                                 },
                                 content: content_str,
                                 metadata: None,

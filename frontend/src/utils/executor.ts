@@ -14,7 +14,7 @@ export function areProfilesEqual(
   a: ExecutorProfileId | null | undefined,
   b: ExecutorProfileId | null | undefined
 ): boolean {
-  if (!a || !b) return a === b;
+  if (!a || !b) return !a && !b;
   if (a.executor !== b.executor) return false;
   // Normalize variants: null/undefined -> 'DEFAULT'
   const variantA = a.variant ?? 'DEFAULT';

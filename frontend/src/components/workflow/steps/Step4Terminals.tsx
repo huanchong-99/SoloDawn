@@ -246,6 +246,8 @@ export const Step4Terminals: React.FC<Step4TerminalsProps> = ({
           }));
           setCliTypes(cliList);
         }
+      } else {
+        notifyError(new Error(`CLI detection failed with status ${response.status}`), 'detectCliTypes');
       }
     } catch (error) {
       notifyError(error, 'detectCliTypes');

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BaseCodingAgent } from 'shared/types';
 import { configApi } from '../lib/api';
 import {
@@ -25,6 +25,9 @@ export function useAgentAvailability(
     context: options.context ?? 'AgentAvailability',
   });
 
+  const notifyErrorRef = useRef(notifyError);
+  notifyErrorRef.current = notifyError;
+
   useEffect(() => {
     if (!agent) {
       setAvailability(null);
@@ -49,13 +52,13 @@ export function useAgentAvailability(
             break;
         }
       } catch (error) {
-        notifyError(error);
+        notifyErrorRef.current(error);
         setAvailability(null);
       }
     };
 
     checkAvailability();
-  }, [agent, notifyError, refreshToken]);
+  }, [agent, refreshToken]);
 
   return availability;
 }

@@ -926,8 +926,15 @@ impl ProcessManager {
 
     /// Lists all currently tracked terminal IDs
     pub async fn list_running(&self) -> Vec<String> {
-        let processes = self.processes.read().await;
-        processes.keys().cloned().collect()
+        let mut processes = self.processes.write().await;
+        let mut running = Vec::new();
+        for (id, tracked) in processes.iter_mut() {
+            match tracked.child.try_wait() {
+                Ok(Some(_)) => {} // exited
+                _ => running.push(id.clone()),
+            }
+        }
+        running
     }
 
     /// Removes dead processes from tracking

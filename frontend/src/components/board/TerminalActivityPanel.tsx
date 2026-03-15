@@ -151,9 +151,9 @@ export function TerminalActivityPanel({ workflowId }: Readonly<TerminalActivityP
           )}
         </span>
         {isCollapsed ? (
-          <CaretUp className="w-4 h-4 text-low" />
-        ) : (
           <CaretDown className="w-4 h-4 text-low" />
+        ) : (
+          <CaretUp className="w-4 h-4 text-low" />
         )}
       </button>
 

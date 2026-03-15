@@ -242,7 +242,9 @@ function normalizeTerminalCompletedStatus(
       return 'failed';
     case 'cancelled':
     case 'canceled':
-      return 'unknown';
+      return 'failed';
+    case 'checkpoint':
+      return 'checkpoint';
     case 'review_pass':
     case 'review_passed':
       return 'review_pass';
@@ -1282,6 +1284,8 @@ export const useWsStore = create<WsState>((set, get) => ({
         ...existingConnection,
         refCount: existingConnection.refCount + 1,
         manualDisconnect: false,
+        reconnectAttempts: 0,
+        status: existingConnection.status === 'failed' ? 'disconnected' : existingConnection.status,
       });
     } else {
       nextConnections.set(workflowId, {

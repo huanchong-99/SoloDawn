@@ -64,26 +64,24 @@ impl SubscriptionHub {
     ///
     /// Returns a receiver that will receive all events published to this workflow.
     pub async fn subscribe(&self, workflow_id: &str) -> broadcast::Receiver<WsEvent> {
-        let (sender, receiver, should_replay_pending) = {
-            let mut senders = self.senders.write().await;
-            let sender = if let Some(sender) = senders.get(workflow_id).cloned() {
-                sender
-            } else {
-                let (sender, _) = broadcast::channel(self.capacity);
-                senders.insert(workflow_id.to_string(), sender.clone());
-                tracing::debug!("Created new channel for workflow: {}", workflow_id);
-                sender
-            };
-
-            let should_replay_pending = sender.receiver_count() == 0;
-            let receiver = sender.subscribe();
-
-            (sender, receiver, should_replay_pending)
+        let mut senders = self.senders.write().await;
+        let sender = if let Some(sender) = senders.get(workflow_id).cloned() {
+            sender
+        } else {
+            let (sender, _) = broadcast::channel(self.capacity);
+            senders.insert(workflow_id.to_string(), sender.clone());
+            tracing::debug!("Created new channel for workflow: {}", workflow_id);
+            sender
         };
+
+        let should_replay_pending = sender.receiver_count() == 0;
+        let receiver = sender.subscribe();
 
         if should_replay_pending {
             self.replay_pending_events(workflow_id, &sender).await;
         }
+
+        drop(senders);
 
         receiver
     }

@@ -42,8 +42,8 @@ export const useTodos = (entries: PatchTypeWithKey[]): UseTodosResult => {
             (!!currentTimestamp && currentTimestamp >= lastUpdatedTime);
 
           if (
-            hasMeaningfulTodos ||
-            (isNewerThanLatest && latestTodos.length === 0)
+            isNewerThanLatest &&
+            (hasMeaningfulTodos || latestTodos.length === 0)
           ) {
             latestTodos = partialTodos;
             lastUpdatedTime = currentTimestamp;

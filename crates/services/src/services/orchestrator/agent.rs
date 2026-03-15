@@ -821,9 +821,8 @@ impl OrchestratorAgent {
                     terminal_id = %event.terminal_id,
                     expected_terminal_id = %expected_terminal_id,
                     status = ?event.status,
-                    "Ignoring out-of-order terminal completion event"
+                    "Processing out-of-order terminal completion event"
                 );
-                return Ok(());
             }
         }
 
@@ -1979,7 +1978,7 @@ impl OrchestratorAgent {
 
         // Build and dispatch instruction
         let prev_context = fetch_previous_terminal_context(
-            &self.db, &task.id, active_terminal.order_index,
+            &self.db, &task.id, &workflow_id, active_terminal.order_index,
         ).await.unwrap_or(None);
         let instruction =
             Self::build_task_instruction(&workflow_id, &task, &active_terminal, terminals.len(), prev_context.as_ref());
@@ -2772,6 +2771,7 @@ impl OrchestratorAgent {
         let prev_context = fetch_previous_terminal_context(
             &self.db,
             task_id,
+            &workflow_id,
             started_terminal.order_index,
         )
         .await
@@ -3300,7 +3300,7 @@ impl OrchestratorAgent {
                 let planning_complete = self.task_planning_complete(&task_id).await;
                 self.sync_task_state_from_db(&task_id, Some(planning_complete))
                     .await?;
-                let mark_success = matches!(terminal.status.as_str(), TERMINAL_STATUS_COMPLETED | TERMINAL_STATUS_CANCELLED);
+                let mark_success = terminal.status.as_str() == TERMINAL_STATUS_COMPLETED;
                 {
                     let mut state = self.state.write().await;
                     state.mark_terminal_completed(&task_id, &terminal.id, mark_success);
@@ -5250,6 +5250,7 @@ async fn fetch_terminal_completion_context(
 async fn fetch_previous_terminal_context(
     db: &DBService,
     task_id: &str,
+    workflow_id: &str,
     current_terminal_order: i32,
 ) -> anyhow::Result<Option<PreviousTerminalContext>> {
     let prev_order = current_terminal_order - 1;
@@ -5279,7 +5280,7 @@ async fn fetch_previous_terminal_context(
     } else {
         // Fall back to git_events for this workflow
         let events =
-            db::models::git_event::GitEvent::find_by_workflow(&db.pool, &prev_terminal.workflow_task_id)
+            db::models::git_event::GitEvent::find_by_workflow(&db.pool, workflow_id)
                 .await
                 .unwrap_or_default();
         events

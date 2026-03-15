@@ -348,26 +348,23 @@ async fn start_feishu_connector(
     tokio::spawn(async move {
         let mut policy = ReconnectPolicy::new(ClientConfig::default());
         loop {
-            *connected_flag.write().await = true;
             if let Err(e) = service.start().await {
                 tracing::warn!(error = %e, "Feishu service disconnected");
             }
             *connected_flag.write().await = false;
 
-            tokio::select! {
-                delay = std::future::ready(policy.next_delay()) => {
-                    if let Some(d) = delay {
-                        tracing::info!(delay_ms = d.as_millis(), "Reconnecting Feishu...");
-                        tokio::time::sleep(d).await;
-                    } else {
-                        tracing::error!("Feishu max reconnect attempts reached");
-                        break;
+            if let Some(d) = policy.next_delay() {
+                tracing::info!(delay_ms = d.as_millis(), "Reconnecting Feishu...");
+                tokio::select! {
+                    () = tokio::time::sleep(d) => {}
+                    _ = reconnect_rx.recv() => {
+                        tracing::info!("Manual Feishu reconnect requested");
+                        policy.reset();
                     }
                 }
-                _ = reconnect_rx.recv() => {
-                    tracing::info!("Manual Feishu reconnect requested");
-                    policy.reset();
-                }
+            } else {
+                tracing::error!("Feishu max reconnect attempts reached");
+                break;
             }
         }
     });

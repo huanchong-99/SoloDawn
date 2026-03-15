@@ -363,6 +363,7 @@ impl LogState {
                         "Skipping tool part with empty call_id for message_id {}",
                         part.message_id
                     );
+                    return;
                 }
 
                 let tool_state = self

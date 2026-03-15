@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useState,
+  useEffect,
   useCallback,
   useMemo,
   ReactNode,
@@ -53,9 +54,15 @@ export function ApprovalFeedbackProvider({
   );
   const { denyAsync, isDenying, denyError, reset } = useApprovalMutation();
 
-  const isTimedOut = activeApproval
-    ? new Date() > new Date(activeApproval.timeoutAt)
-    : false;
+  const [isTimedOut, setIsTimedOut] = useState(false);
+  useEffect(() => {
+    if (!activeApproval) { setIsTimedOut(false); return; }
+    const timeoutMs = new Date(activeApproval.timeoutAt).getTime() - Date.now();
+    if (timeoutMs <= 0) { setIsTimedOut(true); return; }
+    setIsTimedOut(false);
+    const timer = setTimeout(() => setIsTimedOut(true), timeoutMs);
+    return () => clearTimeout(timer);
+  }, [activeApproval]);
 
   const enterFeedbackMode = useCallback(
     (approval: ActiveApproval) => {

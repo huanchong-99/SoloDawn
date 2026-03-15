@@ -58,7 +58,7 @@ export function PreviewControlsContainer({
   }, []);
 
   const hasDevScript = repos.some(
-    (repo) => repo.devServerScript?.trim() !== ''
+    (repo) => !!repo.devServerScript?.trim()
   );
 
   // Don't render if no repos have dev server scripts configured

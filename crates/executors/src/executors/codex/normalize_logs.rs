@@ -560,21 +560,20 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     if command_text.is_empty() {
                         continue;
                     }
-                    state.commands.insert(
-                        call_id.clone(),
-                        CommandState {
-                            index: None,
-                            command: command_text,
-                            stdout: String::new(),
-                            stderr: String::new(),
-                            formatted_output: None,
-                            status: ToolStatus::Created,
-                            exit_code: None,
-                            awaiting_approval: false,
-                            call_id: call_id.clone(),
-                        },
-                    );
-                    let command_state = state.commands.get_mut(&call_id).unwrap();
+                    let command_state = state.commands.entry(call_id.clone()).or_insert_with(|| CommandState {
+                        index: None,
+                        command: command_text.clone(),
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        formatted_output: None,
+                        status: ToolStatus::Created,
+                        exit_code: None,
+                        awaiting_approval: false,
+                        call_id: call_id.clone(),
+                    });
+                    command_state.command = command_text;
+                    command_state.awaiting_approval = false;
+                    command_state.status = ToolStatus::Created;
                     let index = add_normalized_entry(
                         &msg_store,
                         &entry_index,
@@ -765,6 +764,7 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     state.thinking = None;
                     let normalized = normalize_file_changes(&worktree_path_str, &changes);
                     if let Some(patch_state) = state.patches.get_mut(&call_id) {
+                        let normalized_len = normalized.len();
                         let mut iter = normalized.into_iter();
                         for entry in &mut patch_state.entries {
                             if let Some((path, file_changes)) = iter.next() {
@@ -805,6 +805,7 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                             entry.index = Some(index);
                             patch_state.entries.push(entry);
                         }
+                        patch_state.entries.truncate(normalized_len);
                     } else {
                         let mut patch_state = PatchState::default();
                         for (path, file_changes) in normalized {

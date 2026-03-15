@@ -185,7 +185,8 @@ export const Step2Tasks: React.FC<Step2TasksProps> = ({
       <div className="flex gap-half">
         {Array.from({ length: taskCount }, (_, i) => i).map((index) => {
           const getIndicatorClass = (): string => {
-            if (index < completedTasks) {
+            const task = config[index];
+            if (task && task.name && task.description && task.branch) {
               return 'bg-brand';
             }
             if (index === currentTaskIndex) {

@@ -28,6 +28,7 @@ export function PreviewPanel() {
   const [showLogs, setShowLogs] = useState(false);
   const [customUrl, setCustomUrl] = useState<string | null>(null);
   const listenerRef = useRef<ClickToComponentListener | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { t } = useTranslation('tasks');
   const { project, projectId } = useProject();
@@ -104,13 +105,22 @@ export function PreviewPanel() {
 
   function startTimer() {
     setLoadingTimeFinished(false);
-    setTimeout(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+    timerRef.current = setTimeout(() => {
       setLoadingTimeFinished(true);
+      timerRef.current = null;
     }, 5000);
   }
 
   useEffect(() => {
     startTimer();
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
   }, []);
 
   const hasRunningDevServer = runningDevServers.length > 0;

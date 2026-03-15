@@ -283,6 +283,7 @@ impl OrchestratorState {
                 .conversation_history
                 .iter()
                 .rev()
+                .filter(|m| m.role != "system")
                 .take(config.max_conversation_history - system_msgs.len())
                 .cloned()
                 .collect();

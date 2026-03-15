@@ -252,10 +252,30 @@ impl FileSearchCache {
                     }
                 }
 
+                // Determine match type at query time based on what the query matched
+                let file_name = std::path::Path::new(&*indexed_file.path_lowercase)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+
+                let match_type = if !file_name.is_empty() && file_name.contains(&query_lower) {
+                    SearchMatchType::FileName
+                } else if std::path::Path::new(&*indexed_file.path_lowercase)
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .map(|name| name.to_string_lossy().to_lowercase())
+                    .unwrap_or_default()
+                    .contains(&query_lower)
+                {
+                    SearchMatchType::DirectoryName
+                } else {
+                    SearchMatchType::FullPath
+                };
+
                 results.push(SearchResult {
                     path: indexed_file.path.clone(),
                     is_file: indexed_file.is_file,
-                    match_type: indexed_file.match_type.clone(),
+                    match_type,
                     score: 0,
                 });
             }

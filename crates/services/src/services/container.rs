@@ -136,24 +136,24 @@ pub trait ContainerService {
             return false;
         }
 
+        // Always finalize failed or killed executions, regardless of next action
+        let action = ctx.execution_process.executor_action().unwrap();
+        if matches!(
+            ctx.execution_process.status,
+            ExecutionProcessStatus::Failed | ExecutionProcessStatus::Killed
+        ) {
+            return true;
+        }
+
         // Never finalize setup scripts without a next_action (parallel mode).
         // In sequential mode, setup scripts have next_action pointing to coding agent,
         // so they won't finalize anyway (handled by next_action.is_none() check below).
-        let action = ctx.execution_process.executor_action().unwrap();
         if matches!(
             ctx.execution_process.run_reason,
             ExecutionProcessRunReason::SetupScript
         ) && action.next_action.is_none()
         {
             return false;
-        }
-
-        // Always finalize failed or killed executions, regardless of next action
-        if matches!(
-            ctx.execution_process.status,
-            ExecutionProcessStatus::Failed | ExecutionProcessStatus::Killed
-        ) {
-            return true;
         }
 
         // Otherwise, finalize only if no next action
@@ -750,7 +750,7 @@ pub trait ContainerService {
                 ExecutorActionType::ReviewRequest(request) => {
                     let executor = ExecutorConfigs::get_cached()
                         .get_coding_agent_or_default(&request.executor_profile_id);
-                    executor.normalize_logs(temp_store.clone(), &current_dir);
+                    executor.normalize_logs(temp_store.clone(), &request.effective_dir(&current_dir));
                 }
                 _ => {
                     tracing::debug!(
@@ -1110,16 +1110,9 @@ pub trait ContainerService {
             }
             #[cfg(not(feature = "qa-mode"))]
             {
-                if let Some(executor) =
-                    ExecutorConfigs::get_cached().get_coding_agent(executor_profile_id)
-                {
-                    executor.normalize_logs(msg_store, &working_dir);
-                } else {
-                    tracing::error!(
-                        "Failed to resolve profile '{:?}' for normalization",
-                        executor_profile_id
-                    );
-                }
+                let executor = ExecutorConfigs::get_cached()
+                    .get_coding_agent_or_default(executor_profile_id);
+                executor.normalize_logs(msg_store, &working_dir);
             }
         }
 

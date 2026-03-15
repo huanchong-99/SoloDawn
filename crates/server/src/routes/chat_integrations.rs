@@ -94,7 +94,7 @@ fn ensure_supported_provider(provider: &str) -> Result<(), ApiError> {
 fn is_chat_connector_feature_enabled() -> bool {
     std::env::var("GITCORTEX_CHAT_CONNECTOR_ENABLED")
         .ok()
-        .map_or(true, |value| value.trim().eq_ignore_ascii_case("true"))
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
 }
 
 fn read_chat_webhook_secret() -> Result<String, ApiError> {
@@ -449,6 +449,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn bind_and_unbind_conversation_succeeds_for_agent_planned_workflow() {
+        unsafe { std::env::set_var("GITCORTEX_CHAT_CONNECTOR_ENABLED", "true"); }
         let deployment = DeploymentImpl::new().await.expect("deployment should start");
         let app = router().with_state(deployment.clone());
 
@@ -559,6 +560,7 @@ mod tests {
     #[serial]
     async fn handle_chat_event_rejects_invalid_signature() {
         unsafe {
+            std::env::set_var("GITCORTEX_CHAT_CONNECTOR_ENABLED", "true");
             std::env::set_var("GITCORTEX_CHAT_WEBHOOK_SECRET", "secret-1");
         }
 

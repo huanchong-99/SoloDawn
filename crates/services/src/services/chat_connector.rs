@@ -80,10 +80,14 @@ impl ChatConnector for TelegramConnector {
             .json::<serde_json::Value>()
             .await?;
 
+        if resp["ok"].as_bool() != Some(true) {
+            let desc = resp["description"].as_str().unwrap_or("unknown error");
+            anyhow::bail!("Telegram API error: {}", desc);
+        }
         let message_id = resp["result"]["message_id"]
             .as_i64()
-            .map(|id| id.to_string())
-            .unwrap_or_default();
+            .ok_or_else(|| anyhow::anyhow!("No message_id in response"))?
+            .to_string();
         Ok(message_id)
     }
 

@@ -154,6 +154,8 @@ export const Step6Advanced: React.FC<Step6AdvancedProps> = ({
   useEffect(() => {
     const errorTerminalModelIncompatible =
       advancedConfig.errorTerminal.enabled &&
+      !!advancedConfig.errorTerminal.cliTypeId?.trim() &&
+      !!advancedConfig.errorTerminal.modelConfigId?.trim() &&
       !isModelCompatibleWithCli(
         advancedConfig.errorTerminal.modelConfigId,
         advancedConfig.errorTerminal.cliTypeId

@@ -91,7 +91,7 @@ impl Config {
             notifications: NotificationConfig::from(old_config_clone),
             editor: EditorConfig::from(old_config.editor),
             github: GitHubConfig::from(old_config.github),
-            analytics_enabled: None,
+            analytics_enabled: old_config.analytics_enabled,
             workspace_dir: None,
         })
     }

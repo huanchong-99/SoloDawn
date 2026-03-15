@@ -887,8 +887,9 @@ impl DroidJson {
             DroidJson::Message { session_id, .. }
             | DroidJson::ToolCall { session_id, .. }
             | DroidJson::ToolResult { session_id, .. }
-            | DroidJson::Completion { session_id, .. } => Some(session_id),
-            DroidJson::System { .. } | DroidJson::Error { .. } => None, // session might not have been initialized yet
+            | DroidJson::Completion { session_id, .. }
+            | DroidJson::System { session_id, .. } => Some(session_id),
+            DroidJson::Error { .. } => None, // session might not have been initialized yet
         }
     }
 }

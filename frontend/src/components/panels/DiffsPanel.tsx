@@ -55,6 +55,12 @@ export function DiffsPanel({ selectedAttempt, gitOps }: Readonly<DiffsPanelProps
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [processedIds, setProcessedIds] = useState<Set<string>>(new Set());
   const { diffs, error } = useDiffStream(selectedAttempt?.id ?? null, true);
+
+  const attemptId = selectedAttempt?.id;
+  useEffect(() => {
+    setCollapsedIds(new Set());
+    setProcessedIds(new Set());
+  }, [attemptId]);
   const { fileCount, added, deleted } = useDiffSummary(
     selectedAttempt?.id ?? null
   );
@@ -109,7 +115,7 @@ export function DiffsPanel({ selectedAttempt, gitOps }: Readonly<DiffsPanelProps
     });
   }, []);
 
-  const allCollapsed = collapsedIds.size === diffs.length;
+  const allCollapsed = diffs.length > 0 && diffs.every((d, i) => collapsedIds.has(getDiffId({ diff: d, index: i })));
   const handleCollapseAll = useCallback(() => {
     setCollapsedIds(allCollapsed ? new Set() : new Set(ids));
   }, [allCollapsed, ids]);

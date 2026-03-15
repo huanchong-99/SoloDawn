@@ -339,7 +339,7 @@ impl EventService {
                     match msg_result {
                         Ok(LogMsg::JsonPatch(patch)) => {
                             if let Some(patch_op) = patch.0.first()
-                                && patch_op.path().starts_with("/projects")
+                                && (patch_op.path().starts_with("/projects/") || patch_op.path() == "/projects")
                             {
                                 return Some(Ok(LogMsg::JsonPatch(patch)));
                             }
@@ -807,7 +807,7 @@ impl EventService {
                 match msg_result {
                     Ok(LogMsg::JsonPatch(patch)) => {
                         if let Some(op) = patch.0.first()
-                            && op.path().starts_with("/workspaces")
+                            && (op.path().starts_with("/workspaces/") || op.path() == "/workspaces")
                         {
                             // If archived filter is set, handle state transitions
                             if let Some(archived_filter) = archived {

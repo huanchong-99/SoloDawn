@@ -75,7 +75,7 @@ const ProjectFormDialogImpl = NiceModal.create<ProjectFormDialogProps>(() => {
 
   return (
     <Dialog
-      open={modal.visible && createProject.isPending}
+      open={modal.visible && (createProject.isPending || createProject.isError)}
       onOpenChange={handleOpenChange}
     >
       <DialogContent className="sm:max-w-[400px]">

@@ -34,6 +34,7 @@ export function useWorkspaceMutations(options?: UseWorkspaceMutationsOptions) {
   };
 
   const toggleArchive = useMutation({
+    // `archived` is the current state; negate it to toggle
     mutationFn: ({ workspaceId, archived }: ToggleArchiveParams) =>
       attemptsApi.update(workspaceId, { archived: !archived }),
     onSuccess: (_, params) => {
@@ -48,6 +49,7 @@ export function useWorkspaceMutations(options?: UseWorkspaceMutationsOptions) {
   });
 
   const togglePin = useMutation({
+    // `pinned` is the current state; negate it to toggle
     mutationFn: ({ workspaceId, pinned }: TogglePinParams) =>
       attemptsApi.update(workspaceId, { pinned: !pinned }),
     onSuccess: (_, { workspaceId }) => {

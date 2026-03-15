@@ -182,10 +182,11 @@ const CreatePRDialogImpl = NiceModal.create<CreatePRDialogProps>(
           setPrBaseBranch(targetBranch);
           return;
         }
-        // Fallback: use the current branch
-        const currentBranch = branches.find((b) => b.is_current);
-        if (currentBranch) {
-          setPrBaseBranch(currentBranch.name);
+        // Fallback: use the default branch (main or master), then first non-current branch
+        const defaultBranch = branches.find((b) => b.name === 'main' || b.name === 'master');
+        const fallbackBranch = defaultBranch ?? branches.find((b) => !b.is_current);
+        if (fallbackBranch) {
+          setPrBaseBranch(fallbackBranch.name);
         }
       }
     }, [branches, prBaseBranch, targetBranch]);

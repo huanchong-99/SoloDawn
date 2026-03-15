@@ -106,6 +106,9 @@ pub async fn require_api_token(req: Request, next: Next) -> Result<Response, Res
 ///
 /// Returns `true` if both slices are equal, `false` otherwise.
 /// Always compares all bytes regardless of where a mismatch occurs.
+///
+/// Note: The early return on length mismatch leaks the token length via timing,
+/// which is acceptable for fixed-format API tokens (similar to HMAC comparison).
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;

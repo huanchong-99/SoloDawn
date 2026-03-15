@@ -172,10 +172,14 @@ impl GitService {
         let cfg = repo.config()?;
         let has_name = cfg.get_string("user.name").is_ok();
         let has_email = cfg.get_string("user.email").is_ok();
-        if !(has_name && has_email) {
+        if !has_name || !has_email {
             let mut cfg = repo.config()?;
-            cfg.set_str("user.name", "GitCortex")?;
-            cfg.set_str("user.email", "noreply@gitcortex.com")?;
+            if !has_name {
+                cfg.set_str("user.name", "GitCortex")?;
+            }
+            if !has_email {
+                cfg.set_str("user.email", "noreply@gitcortex.com")?;
+            }
         }
         Ok(())
     }

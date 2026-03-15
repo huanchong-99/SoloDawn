@@ -24,18 +24,17 @@ describe('useAgentAvailability', () => {
     mockCheckAgentAvailability.mockRejectedValue(new Error('check failed'));
   });
 
-  it('rechecks with latest error notifier when options change', async () => {
+  it('uses latest error notifier via ref without re-triggering effect', async () => {
     const onErrorA = vi.fn();
     const onErrorB = vi.fn();
 
     const { rerender } = renderHook(
-      ({ onError }) =>
-        useAgentAvailability(BaseCodingAgent.CODEX, {
-          onError,
-        }),
+      ({ onError, refreshToken }) =>
+        useAgentAvailability(BaseCodingAgent.CODEX, { onError }, refreshToken),
       {
         initialProps: {
           onError: onErrorA,
+          refreshToken: 0,
         },
       }
     );
@@ -43,8 +42,14 @@ describe('useAgentAvailability', () => {
     await waitFor(() => {
       expect(onErrorA).toHaveBeenCalledTimes(1);
     });
+    expect(mockCheckAgentAvailability).toHaveBeenCalledTimes(1);
 
-    rerender({ onError: onErrorB });
+    // Changing onError alone should NOT re-trigger the effect (no infinite loop)
+    rerender({ onError: onErrorB, refreshToken: 0 });
+    expect(mockCheckAgentAvailability).toHaveBeenCalledTimes(1);
+
+    // Trigger recheck via refreshToken - should use latest error handler (onErrorB)
+    rerender({ onError: onErrorB, refreshToken: 1 });
 
     await waitFor(() => {
       expect(onErrorB).toHaveBeenCalledTimes(1);

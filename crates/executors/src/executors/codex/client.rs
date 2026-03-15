@@ -314,11 +314,7 @@ impl AppServerClient {
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
                     .map(ToString::to_string);
-                if feedback.is_some() {
-                    (ReviewDecision::Abort, feedback)
-                } else {
-                    (ReviewDecision::Denied, None)
-                }
+                (ReviewDecision::Denied, feedback)
             }
             ApprovalStatus::TimedOut | ApprovalStatus::Pending => (ReviewDecision::Denied, None),
         }

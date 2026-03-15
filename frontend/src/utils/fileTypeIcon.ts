@@ -99,7 +99,7 @@ const extToIcon: Record<string, IconMapping> = {
 
   // Languages
   py: icon(Python),
-  rs: iconWithVariants(RustDark, RustLight),
+  rs: iconWithVariants(RustLight, RustDark),
   go: icon(Go),
   java: icon(Java),
   c: icon(C),

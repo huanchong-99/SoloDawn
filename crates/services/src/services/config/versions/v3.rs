@@ -40,7 +40,7 @@ impl Config {
             disclaimer_acknowledged: old_config.disclaimer_acknowledged,
             onboarding_acknowledged: old_config.onboarding_acknowledged,
             github_login_acknowledged: old_config.github_login_acknowledged,
-            telemetry_acknowledged: false,
+            telemetry_acknowledged: old_config.telemetry_acknowledged,
             notifications: old_config.notifications,
             editor: old_config.editor,
             github: old_config.github,

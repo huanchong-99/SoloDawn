@@ -90,6 +90,8 @@ export function ConversationList({ attempt, task }: Readonly<ConversationListPro
   const [channelData, setChannelData] =
     useState<DataWithScrollModifier<PatchTypeWithKey> | null>(null);
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
   const { setEntries, reset } = useEntries();
   const pendingUpdateRef = useRef<{
     entries: PatchTypeWithKey[];
@@ -133,16 +135,16 @@ export function ConversationList({ attempt, task }: Readonly<ConversationListPro
 
       let scrollModifier: ScrollModifier = InitialDataScrollModifier;
 
-      if (pending.addType === 'plan' && !loading) {
+      if (pending.addType === 'plan' && !loadingRef.current) {
         scrollModifier = ScrollToTopOfLastItem;
-      } else if (pending.addType === 'running' && !loading) {
+      } else if (pending.addType === 'running' && !loadingRef.current) {
         scrollModifier = AutoScrollToBottom;
       }
 
       setChannelData({ data: pending.entries, scrollModifier });
       setEntries(pending.entries);
 
-      if (loading) {
+      if (loadingRef.current) {
         setLoading(pending.loading);
       }
     }, 100);

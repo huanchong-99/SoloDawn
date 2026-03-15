@@ -19,17 +19,17 @@ export function ToolStatusDot({ status, className }: Readonly<ToolStatusDotProps
     statusType === 'created' || statusType === 'pending_approval';
 
   return (
-    <span className={cn('inline-flex', className)}>
+    <span className={cn('relative inline-flex', className)}>
       <span
         className={cn(
           'size-1.5 rounded-full',
           isSuccess && 'bg-success',
           isError && 'bg-error',
-          isPending && 'bg-text-low'
+          isPending && 'bg-low'
         )}
       />
       {isPending && (
-        <span className="absolute inset-0 size-1.5 rounded-full bg-text-low animate-ping" />
+        <span className="absolute inset-0 size-1.5 rounded-full bg-low animate-ping" />
       )}
     </span>
   );

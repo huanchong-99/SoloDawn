@@ -24,6 +24,8 @@ if [[ -f "${DB_PATH}" ]]; then
     cutoff=$(date -u -d "-${RETENTION_DAYS} days" +"%Y-%m-%dT%H:%M:%S" 2>/dev/null \
         || date -u -v-${RETENTION_DAYS}d +"%Y-%m-%dT%H:%M:%S")
 
+    sqlite3 "${DB_PATH}" "DELETE FROM quality_issue WHERE quality_run_id IN (SELECT id FROM quality_run WHERE created_at < '${cutoff}');"
+
     deleted=$(sqlite3 "${DB_PATH}" <<SQL
 DELETE FROM quality_run WHERE created_at < '${cutoff}';
 SELECT changes();

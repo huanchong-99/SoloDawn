@@ -16,10 +16,12 @@ const BetaWorkspacesDialogImpl = NiceModal.create<NoProps>(() => {
 
   const handleJoinBeta = () => {
     modal.resolve(true);
+    modal.hide();
   };
 
   const handleMaybeLater = () => {
     modal.resolve(false);
+    modal.hide();
   };
 
   return (

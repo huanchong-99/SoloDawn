@@ -109,8 +109,8 @@ impl NotificationService {
     fn send_macos_notification(title: &str, message: &str) {
         let script = format!(
             r#"display notification "{message}" with title "{title}" sound name "Glass""#,
-            message = message.replace('"', r#"\""#),
-            title = title.replace('"', r#"\""#)
+            message = message.replace('\\', "\\\\").replace('"', r#"\""#),
+            title = title.replace('\\', "\\\\").replace('"', r#"\""#)
         );
 
         let _ = tokio::process::Command::new("osascript")

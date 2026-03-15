@@ -54,15 +54,16 @@ export function Board() {
       return;
     }
 
-    const nextSearchParams = new URLSearchParams(searchParams);
-    if (selectedWorkflowId) {
-      nextSearchParams.set('workflowId', selectedWorkflowId);
-    } else {
-      nextSearchParams.delete('workflowId');
-    }
-    setSearchParams(nextSearchParams, { replace: true });
+    setSearchParams((prev) => {
+      const nextSearchParams = new URLSearchParams(prev);
+      if (selectedWorkflowId) {
+        nextSearchParams.set('workflowId', selectedWorkflowId);
+      } else {
+        nextSearchParams.delete('workflowId');
+      }
+      return nextSearchParams;
+    }, { replace: true });
   }, [
-    searchParams,
     selectedWorkflowId,
     setSearchParams,
     workflowIdFromUrl,

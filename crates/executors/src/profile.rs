@@ -391,12 +391,11 @@ impl ExecutorConfigs {
         self.executors
             .get(&executor_profile_id.executor)
             .and_then(|executor| {
-                executor.get_variant(
-                    &executor_profile_id
-                        .variant
-                        .clone()
-                        .unwrap_or("DEFAULT".to_string()),
-                )
+                let variant_key = match executor_profile_id.variant.as_deref() {
+                    Some(v) => canonical_variant_key(v),
+                    None => "DEFAULT".to_string(),
+                };
+                executor.get_variant(&variant_key)
             })
             .cloned()
     }

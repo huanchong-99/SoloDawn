@@ -518,7 +518,7 @@ async fn send_abort(client: &reqwest::Client, base_url: &str, directory: &str, s
 fn parse_model(model: &str) -> ModelSpec {
     let (provider_id, model_id) = match model.split_once('/') {
         Some((provider, rest)) => (provider.to_string(), rest.to_string()),
-        None => (model.to_string(), String::new()),
+        None => (String::new(), model.to_string()),
     };
 
     ModelSpec {

@@ -319,7 +319,11 @@ impl AzCli {
             AzCliError::UnexpectedOutput(format!("Could not parse Azure DevOps PR URL: {pr_url}"))
         })?;
 
-        let org_url = format!("https://dev.azure.com/{organization}");
+        let org_url = if pr_url.to_lowercase().contains(".visualstudio.com") {
+            format!("https://{organization}.visualstudio.com")
+        } else {
+            format!("https://dev.azure.com/{organization}")
+        };
 
         let raw = Self::run(
             [

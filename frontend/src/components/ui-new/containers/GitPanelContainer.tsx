@@ -184,7 +184,7 @@ export function GitPanelContainer({
         const isInPushFlow = state !== 'idle';
         return {
           ...repo,
-          showPushButton: hasUnpushedCommits && !isInPushFlow,
+          showPushButton: hasUnpushedCommits || isInPushFlow,
           isPushPending: state === 'pending',
           isPushSuccess: state === 'success',
           isPushError: state === 'error',

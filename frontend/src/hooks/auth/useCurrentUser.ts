@@ -8,6 +8,7 @@ export function useCurrentUser() {
   const query = useQuery({
     queryKey: ['auth', 'user'],
     queryFn: () => oauthApi.getCurrentUser(),
+    enabled: isSignedIn,
     retry: 2,
     staleTime: 5 * 60 * 1000, // 5 minutes
     refetchOnWindowFocus: false,
@@ -16,7 +17,11 @@ export function useCurrentUser() {
 
   const queryClient = useQueryClient();
   useEffect(() => {
-    queryClient.invalidateQueries({ queryKey: ['auth', 'user'] });
+    if (!isSignedIn) {
+      queryClient.removeQueries({ queryKey: ['auth', 'user'] });
+    } else {
+      queryClient.invalidateQueries({ queryKey: ['auth', 'user'] });
+    }
   }, [queryClient, isSignedIn]);
 
   return query;

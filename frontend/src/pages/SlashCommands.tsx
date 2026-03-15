@@ -50,7 +50,7 @@ export function SlashCommands() {
 
   const handleDeleteCommand = async (command: SlashCommandPresetDto) => {
     const result = await ConfirmDialog.show({
-      title: t('errors.deleteFailed'),
+      title: 'Delete Command',
       message: t('errors.deleteConfirm', { command: command.command }),
       confirmText: 'Delete',
       cancelText: 'Cancel',

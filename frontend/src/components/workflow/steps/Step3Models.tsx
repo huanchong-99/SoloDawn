@@ -104,6 +104,7 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
     });
     setAvailableModels([]);
     setFormErrors({});
+    setIsFormVerified(false);
     setIsDialogOpen(true);
   };
 

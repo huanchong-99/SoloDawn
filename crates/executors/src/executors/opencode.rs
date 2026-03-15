@@ -227,7 +227,7 @@ impl StandardCodingAgentExecutor for Opencode {
     fn default_mcp_config_path(&self) -> Option<std::path::PathBuf> {
         #[cfg(unix)]
         {
-            xdg::BaseDirectories::with_prefix("opencode").get_config_file("opencode.json")
+            xdg::BaseDirectories::with_prefix("opencode").get_config_home().map(|p| p.join("opencode.json"))
         }
         #[cfg(not(unix))]
         {

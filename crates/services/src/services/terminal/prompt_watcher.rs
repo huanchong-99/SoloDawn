@@ -308,8 +308,8 @@ fn has_handoff_stall_scope_gap_marker(lower: &str) -> bool {
         || lower.contains("don't have a task yet")
         || lower.contains("do not have a task yet")
         || lower.contains("no further instructions were provided")
-        || lower.contains("ready to start implementing")
-            && lower.contains("specific change or feature")
+        || (lower.contains("ready to start implementing")
+            && lower.contains("specific change or feature"))
         || lower.contains("no specific requirements")
         || lower.contains("no actionable change")
         || lower.contains("no actionable changes")
@@ -2229,8 +2229,7 @@ next_action: handoff\n"
                 // Direct fallback for EnterConfirm prompts when auto_confirm is enabled.
                 // This keeps terminals responsive even when Orchestrator is not running
                 // (e.g. workflow in ready/prepare stage).
-                let skip_enter_confirm_fallback = has_claude_custom_api_key_context
-                    || has_claude_bypass_accept_context
+                let skip_enter_confirm_fallback = has_claude_bypass_accept_context
                     || bypass_needs_enter_context
                     || normalized_output_lower.contains("interrupted")
                     || normalized_output_lower.contains("custom api key");

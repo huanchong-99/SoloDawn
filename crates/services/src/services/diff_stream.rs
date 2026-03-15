@@ -488,11 +488,7 @@ fn process_file_changes(
 
         apply_stream_omit_policy(&mut diff, cumulative_bytes, stats_only);
 
-        if diff.content_omitted {
-            if full_sent_paths.read().unwrap().contains(&raw_file_path) {
-                continue;
-            }
-        } else {
+        if !diff.content_omitted {
             let mut guard = full_sent_paths.write().unwrap();
             guard.insert(raw_file_path.clone());
         }

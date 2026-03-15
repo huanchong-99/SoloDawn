@@ -650,6 +650,14 @@ pub async fn stop_terminal(
     // Ensure prompt watcher state/task is cleaned up for this terminal
     deployment.prompt_watcher().unregister(&id).await;
 
+    if let Some(pty_session_id) = terminal.pty_session_id.as_deref() {
+        let terminal_bridge = TerminalBridge::new(
+            deployment.message_bus().clone(),
+            deployment.process_manager().clone(),
+        );
+        terminal_bridge.unregister(pty_session_id).await;
+    }
+
     // Reset terminal runtime/completion fields so next workflow round can run cleanly.
     Terminal::reset_for_restart(&deployment.db().pool, &id).await?;
     if let Err(e) = broadcast_terminal_status(&deployment, &terminal, "not_started").await {

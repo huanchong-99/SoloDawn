@@ -591,6 +591,9 @@ export const useConversationHistory = ({
             patchWithKey
           );
           mergeCodingAgentResult(aggregation, result);
+          if (!result.processFailedOrKilled && !result.isProcessRunning) {
+            aggregation.lastProcessFailedOrKilled = false;
+          }
           continue;
         }
 
@@ -606,6 +609,9 @@ export const useConversationHistory = ({
           patchWithKey
         );
         mergeScriptProcessResult(aggregation, result);
+        if (!result.processFailedOrKilled && !result.isProcessRunning) {
+          aggregation.lastProcessFailedOrKilled = false;
+        }
       }
 
       if (!aggregation.hasRunningProcess && !aggregation.hasPendingApproval) {
@@ -804,6 +810,9 @@ export const useConversationHistory = ({
 
   // Initial load when attempt changes
   useEffect(() => {
+    displayedExecutionProcesses.current = {};
+    loadedInitialEntries.current = false;
+    streamingProcessIdsRef.current.clear();
     let cancelled = false;
     (async () => {
       // Waiting for execution processes to load
@@ -895,13 +904,6 @@ export const useConversationHistory = ({
     }
   }, [attempt.id, idListKey, executionProcessesRaw]);
 
-  // Reset state when attempt changes
-  useEffect(() => {
-    displayedExecutionProcesses.current = {};
-    loadedInitialEntries.current = false;
-    streamingProcessIdsRef.current.clear();
-    emitEntries(displayedExecutionProcesses.current, 'initial', true);
-  }, [attempt.id, emitEntries]);
 
   return {};
 };

@@ -415,14 +415,12 @@ const workflowsApi = {
   submitPromptResponse: async (
     data: SubmitWorkflowPromptResponseRequest
   ): Promise<void> => {
+    const { workflow_id, ...body } = data;
     const response = await makeRequest(
-      `/api/workflows/${encodeURIComponent(data.workflow_id)}/prompts/respond`,
+      `/api/workflows/${encodeURIComponent(workflow_id)}/prompts/respond`,
       {
         method: 'POST',
-        body: JSON.stringify({
-          terminal_id: data.terminal_id,
-          response: data.response,
-        }),
+        body: JSON.stringify(body),
       }
     );
     return handleApiResponse<void>(response);

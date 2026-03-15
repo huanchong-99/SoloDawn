@@ -31,6 +31,9 @@ export function useAttemptExecution(attemptId?: string, taskId?: string) {
     })),
   });
 
+  // Extract data from queries so useMemo has a stable dependency
+  const processDetailData = processDetailQueries.map((q) => q.data);
+
   // Build attempt data combining processes and details
   const attemptData: AttemptData = useMemo(() => {
     if (!executionProcesses.length) {
@@ -41,9 +44,9 @@ export function useAttemptExecution(attemptId?: string, taskId?: string) {
     const runningProcessDetails: Record<string, ExecutionProcess> = {};
 
     setupProcesses.forEach((process, index) => {
-      const detailQuery = processDetailQueries[index];
-      if (detailQuery?.data) {
-        runningProcessDetails[process.id] = detailQuery.data;
+      const detail = processDetailData[index];
+      if (detail) {
+        runningProcessDetails[process.id] = detail;
       }
     });
 
@@ -51,7 +54,7 @@ export function useAttemptExecution(attemptId?: string, taskId?: string) {
       processes: executionProcesses,
       runningProcessDetails,
     };
-  }, [executionProcesses, setupProcesses, processDetailQueries]);
+  }, [executionProcesses, setupProcesses, processDetailData]);
 
   // Stop execution function
   const stopExecution = useCallback(async () => {

@@ -61,8 +61,8 @@ const extToLang: Record<string, string> = {
  * Normalises the extension and looks it up.
  */
 export function getHighlightLanguage(ext: string): string | null {
-  ext = ext.toLowerCase();
-  return extToLang[ext];
+  const normalized = ext.startsWith('.') ? ext.slice(1) : ext;
+  return extToLang[normalized.toLowerCase()] ?? null;
 }
 
 export function getHighLightLanguageFromPath(path: string): string | null {

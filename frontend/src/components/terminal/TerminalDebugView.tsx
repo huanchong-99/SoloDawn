@@ -120,7 +120,7 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
 
   const getTerminalLabel = (terminal: Terminal) => {
     const role = terminal.role?.trim();
-    return role ?? `${defaultRoleLabel} ${terminal.orderIndex + 1}`;
+    return role || `${defaultRoleLabel} ${terminal.orderIndex + 1}`;
   };
 
   const getStatusLabel = (status: Terminal['status']) =>

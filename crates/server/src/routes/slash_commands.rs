@@ -170,9 +170,12 @@ pub async fn update_command_preset(
     let description = req
         .description
         .unwrap_or_else(|| existing.description.clone());
-    let prompt_template = req
-        .prompt_template
-        .or_else(|| existing.prompt_template.clone());
+    // `None` preserves the existing value; sending an empty string clears the field.
+    let prompt_template = match req.prompt_template {
+        Some(s) if s.trim().is_empty() => None,
+        Some(s) => Some(s),
+        None => existing.prompt_template.clone(),
+    };
 
     sqlx::query(
         r"

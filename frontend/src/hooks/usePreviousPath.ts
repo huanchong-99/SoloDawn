@@ -73,8 +73,9 @@ export function usePreviousPath() {
 
   return useCallback(() => {
     const scopedVisited = getVisitedPaths(scopeKey);
-    // Find last non-settings route in history
-    const lastNonSettingsPath = [...scopedVisited]
+    // Find last non-settings route in history, skipping the current (last) entry
+    const history = scopedVisited.slice(0, -1);
+    const lastNonSettingsPath = [...history]
       .reverse()
       .find((p) => !p.startsWith('/settings'));
     navigate(lastNonSettingsPath || '/');

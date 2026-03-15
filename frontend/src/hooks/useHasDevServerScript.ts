@@ -9,7 +9,7 @@ export function useHasDevServerScript(projectId?: string) {
 
       const repos = await projectsApi.getRepositories(projectId);
       return repos.some(
-        (repo) => repo.devServerScript?.trim() !== ''
+        (repo) => !!repo.devServerScript?.trim()
       );
     },
     enabled: !!projectId,

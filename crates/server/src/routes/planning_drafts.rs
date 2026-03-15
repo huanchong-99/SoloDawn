@@ -186,6 +186,12 @@ async fn update_spec(
                 "Invalid status: {new_status}"
             )));
         }
+        if new_status == "materialized" {
+            return Err(ApiError::BadRequest(
+                "Cannot set status to 'materialized' directly; use the materialize endpoint"
+                    .to_string(),
+            ));
+        }
     }
 
     PlanningDraft::update_spec(
@@ -419,7 +425,7 @@ async fn materialize_draft(
     };
 
     if let Some(ref api_key) = draft.planner_api_key {
-        let _ = workflow.set_api_key(api_key);
+        workflow.set_api_key(api_key).map_err(|e| ApiError::Internal(format!("Failed to encrypt API key: {e}")))?;
     }
 
     Workflow::create(&deployment.db().pool, &workflow)

@@ -1820,6 +1820,7 @@ async fn pause_workflow(
             "working" | "waiting" | "starting" => {
                 Terminal::update_status(&deployment.db().pool, &terminal.id, "not_started").await?;
                 Terminal::update_process(&deployment.db().pool, &terminal.id, None, None).await?;
+                Terminal::update_session(&deployment.db().pool, &terminal.id, None, None).await?;
             }
             _ => {}
         }
@@ -1856,6 +1857,54 @@ async fn resume_workflow(
             "Cannot resume workflow: current status is '{}', expected 'paused'",
             workflow.status
         )));
+    }
+
+    // Check terminal readiness before resuming (mirrors start_workflow self-heal logic)
+    {
+        let terminals =
+            db::models::Terminal::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
+
+        let needs_reprepare = terminals.iter().any(|terminal| {
+            terminal.status != "waiting"
+                || terminal
+                    .pty_session_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|session| !session.is_empty())
+                    .is_none()
+        });
+
+        if needs_reprepare {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                "Workflow terminals are not launch-ready; re-preparing before resume"
+            );
+
+            Workflow::update_status(&deployment.db().pool, &workflow_id, "created").await?;
+
+            let _ = prepare_workflow(State(deployment.clone()), Path(Uuid::parse_str(&workflow_id).map_err(|e| ApiError::BadRequest(format!("Invalid workflow ID: {e}")))?))
+                .await
+                .map_err(|e| {
+                    ApiError::Internal(format!(
+                        "Resume-phase re-prepare failed for workflow {workflow_id}: {e}"
+                    ))
+                })?;
+
+            // Verify workflow status is back to "ready" after re-prepare, then
+            // transition to paused so the runtime resume CAS (paused -> ready) succeeds.
+            let refreshed = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
+                .await?
+                .ok_or_else(|| ApiError::NotFound("Workflow not found".to_string()))?;
+
+            if refreshed.status != "ready" {
+                return Err(ApiError::Internal(format!(
+                    "Re-prepare did not restore workflow to 'ready' status (current: '{}')",
+                    refreshed.status
+                )));
+            }
+
+            Workflow::update_status(&deployment.db().pool, &workflow_id, WORKFLOW_STATUS_PAUSED).await?;
+        }
     }
 
     // Delegate to the runtime which performs paused -> ready CAS and agent creation
@@ -1984,6 +2033,15 @@ async fn cleanup_workflow_terminals(
         }
 
         deployment.prompt_watcher().unregister(&terminal.id).await;
+
+        // G02-001: Unregister terminal bridge to stop MessageBus → PTY forwarding
+        if let Some(session_id) = terminal.pty_session_id.as_deref() {
+            let terminal_bridge = services::services::terminal::bridge::TerminalBridge::new(
+                deployment.message_bus().clone(),
+                deployment.process_manager().clone(),
+            );
+            terminal_bridge.unregister(session_id).await;
+        }
     }
 
     Ok(terminals)
@@ -2894,7 +2952,19 @@ async fn list_orchestrator_messages(
     }
 
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
-    let cursor = params.cursor.unwrap_or(0);
+    let cursor = match params.cursor {
+        Some(c) => c,
+        None => {
+            let total: (i64,) = sqlx::query_as(
+                "SELECT COUNT(*) FROM workflow_orchestrator_message WHERE workflow_id = ?1",
+            )
+            .bind(&workflow_id)
+            .fetch_one(&deployment.db().pool)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to count orchestrator messages: {e}")))?;
+            (total.0 as usize).saturating_sub(limit)
+        }
+    };
 
     let persisted_messages = WorkflowOrchestratorMessage::list_by_workflow_paginated(
         &deployment.db().pool,

@@ -813,15 +813,14 @@ impl CCSwitchService {
                 // This prevents global ~/.claude/settings.json from overriding isolated auth config.
                 // Use effective_base_url (which considers orchestrator fallback) instead of just
                 // terminal-level URL, so the settings file reflects the actual endpoint in use.
-                if let Ok(settings_path) = create_claude_settings(
+                let settings_path = create_claude_settings(
                     &claude_home,
                     &api_key,
                     effective_base_url.as_deref(),
                     &model,
-                ) {
-                    args.push("--settings".to_string());
-                    args.push(settings_path.to_string_lossy().to_string());
-                }
+                )?;
+                args.push("--settings".to_string());
+                args.push(settings_path.to_string_lossy().to_string());
 
                 // Inject auth env var based on key format:
                 // - sk- prefix → direct API key, use ANTHROPIC_API_KEY only
@@ -931,11 +930,13 @@ impl CCSwitchService {
                 // matching the pattern used by Claude Code and Codex.
                 let custom_api_key = terminal.get_custom_api_key()?;
                 let mut fallback_api_key = None;
+                let mut fallback_base_url = None;
 
                 if custom_api_key.is_none() {
-                    let (_base_url, orch_api_key) = self
+                    let (fb_base_url, orch_api_key) = self
                         .resolve_workflow_orchestrator_fallback(&terminal.workflow_task_id)
                         .await?;
+                    fallback_base_url = fb_base_url;
                     fallback_api_key = orch_api_key;
                     if fallback_api_key.is_some() {
                         tracing::info!(
@@ -983,7 +984,8 @@ impl CCSwitchService {
                 );
 
                 // Handle base URL
-                if let Some(base_url) = &terminal.custom_base_url {
+                let effective_base_url = terminal.custom_base_url.clone().or(fallback_base_url);
+                if let Some(base_url) = &effective_base_url {
                     env.set
                         .insert("GOOGLE_GEMINI_BASE_URL".to_string(), base_url.clone());
                 } else {

@@ -122,6 +122,9 @@ pub fn tee_stdout_with_appender(
     // Create injector channel
     let (inj_tx, mut inj_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
+    // Clone dup_tx for Task 2 before Task 1 moves it
+    let dup_tx2 = dup_tx.clone();
+
     // Task 1: forward original stdout to child stdout and duplicate stream
     {
         let shared_writer = shared_writer.clone();
@@ -145,7 +148,7 @@ pub fn tee_stdout_with_appender(
         });
     }
 
-    // Task 2: write injected lines to child stdout
+    // Task 2: write injected lines to child stdout and duplicate stream
     {
         let shared_writer = shared_writer.clone();
         tokio::spawn(async move {
@@ -154,6 +157,8 @@ pub fn tee_stdout_with_appender(
                 data.push(b'\n');
                 let mut w = shared_writer.lock().await;
                 let _ = w.write_all(&data).await;
+                let string_chunk = String::from_utf8_lossy(&data).into_owned();
+                let _ = dup_tx2.send(Ok(string_chunk));
             }
         });
     }
