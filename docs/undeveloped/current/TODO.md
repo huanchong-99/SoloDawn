@@ -31,10 +31,10 @@
 
 ## 既有 Backlog
 
-| ID | 描述 | 优先级 |
-|----|------|--------|
-| BACKLOG-002 | Runner 容器分离 | 中 |
-| BACKLOG-003 | CLI 安装状态 API | 中 |
+| ID | 描述 | 优先级 | 详细计划 |
+|----|------|--------|---------|
+| BACKLOG-002 | Runner 容器分离 | 中 | `BACKLOG-002-runner-container-separation.md` |
+| BACKLOG-003 | CLI 安装状态 API 增强 | 中 | `BACKLOG-003-cli-installation-status-api.md` |
 
 ## 文档入口
 
