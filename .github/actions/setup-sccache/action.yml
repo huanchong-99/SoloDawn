@@ -10,7 +10,7 @@ inputs:
   version:
     description: 'sccache version to use'
     required: false
-    default: '0.8.2'
+    default: '0.14.0'
   enabled:
     description: 'Whether to enable sccache (set to false to skip all steps)'
     required: false
