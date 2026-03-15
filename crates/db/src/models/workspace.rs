@@ -350,7 +350,7 @@ impl Workspace {
                     WHERE ep2.completed_at IS NULL
                 )
             GROUP BY w.id, w.container_ref, w.updated_at
-            HAVING datetime('now', 'localtime',
+            HAVING datetime('now',
                 CASE
                     WHEN w.archived = 1 OR t.status NOT IN ('inprogress', 'inreview')
                     THEN '-1 hours'

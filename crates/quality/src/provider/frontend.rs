@@ -123,12 +123,28 @@ fn parse_eslint_output(output: &str) -> (i64, i64, Vec<QualityIssue>) {
     let mut warnings = 0i64;
     let mut issues = Vec::new();
 
+    // First pass: look for the summary line to get accurate counts
     for line in output.lines() {
         let trimmed = line.trim();
+        if trimmed.contains("problems") {
+            if let Some(summary) = parse_eslint_summary(trimmed) {
+                errors = summary.0;
+                warnings = summary.1;
+            }
+        }
+    }
 
-        // 解析 ESLint 默认输出格式: "file:line:col severity message rule"
+    // Second pass: parse actual ESLint issue lines (indented lines with "error"/"warning")
+    for line in output.lines() {
+        let trimmed = line.trim();
+        // ESLint issue lines are indented and start with "line:col  severity  message  rule"
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            continue;
+        }
+        if trimmed.contains("problems") {
+            continue;
+        }
         if trimmed.contains("error") {
-            errors += 1;
             issues.push(QualityIssue::new(
                 "eslint::error",
                 RuleType::Bug,
@@ -137,7 +153,6 @@ fn parse_eslint_output(output: &str) -> (i64, i64, Vec<QualityIssue>) {
                 trimmed,
             ));
         } else if trimmed.contains("warning") {
-            warnings += 1;
             issues.push(QualityIssue::new(
                 "eslint::warning",
                 RuleType::CodeSmell,
@@ -146,14 +161,12 @@ fn parse_eslint_output(output: &str) -> (i64, i64, Vec<QualityIssue>) {
                 trimmed,
             ));
         }
+    }
 
-        // 解析汇总行: "X problems (Y errors, Z warnings)"
-        if trimmed.contains("problems") {
-            if let Some(summary) = parse_eslint_summary(trimmed) {
-                errors = summary.0;
-                warnings = summary.1;
-            }
-        }
+    // If no summary line was found, count from parsed issues
+    if errors == 0 && warnings == 0 {
+        errors = issues.iter().filter(|i| i.rule_id == "eslint::error").count() as i64;
+        warnings = issues.iter().filter(|i| i.rule_id == "eslint::warning").count() as i64;
     }
 
     (errors, warnings, issues)

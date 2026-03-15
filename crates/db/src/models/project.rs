@@ -87,24 +87,24 @@ impl Project {
 
     /// Find the most actively used projects based on recent task activity
     pub async fn find_most_active(pool: &SqlitePool, limit: i32) -> Result<Vec<Self>, sqlx::Error> {
-        sqlx::query_as!(
-            Project,
-            r#"
-            SELECT p.id as "id!: Uuid", p.name,
+        sqlx::query_as::<_, Project>(
+            "
+            SELECT p.id, p.name,
                    p.default_agent_working_dir,
-                   p.remote_project_id as "remote_project_id: Uuid",
-                   p.created_at as "created_at!: DateTime<Utc>", p.updated_at as "updated_at!: DateTime<Utc>"
+                   p.remote_project_id,
+                   p.created_at, p.updated_at
             FROM projects p
-            WHERE p.id IN (
-                SELECT DISTINCT t.project_id
+            INNER JOIN (
+                SELECT t.project_id, MAX(w.updated_at) as last_activity
                 FROM tasks t
                 INNER JOIN workspaces w ON w.task_id = t.id
-                ORDER BY w.updated_at DESC
-            )
+                GROUP BY t.project_id
+            ) recent ON p.id = recent.project_id
+            ORDER BY recent.last_activity DESC
             LIMIT $1
-            "#,
-            limit
+            ",
         )
+        .bind(limit)
         .fetch_all(pool)
         .await
     }
