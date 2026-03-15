@@ -1,9 +1,11 @@
 use std::time::Duration;
 
+use rand::Rng;
+
 use crate::types::ClientConfig;
 
-/// Maximum backoff cap to prevent unbounded delays (5 minutes).
-const MAX_BACKOFF_SECS: u64 = 300;
+/// Maximum backoff cap to prevent unbounded delays (120 seconds).
+const MAX_BACKOFF_SECS: u64 = 120;
 
 pub struct ReconnectPolicy {
     config: ClientConfig,
@@ -46,15 +48,10 @@ impl ReconnectPolicy {
     }
 }
 
-/// Jitter using mixed bits from system time for better distribution.
+/// G32-010: Jitter using rand crate for proper randomness.
 fn rand_jitter(max_ms: u64) -> u64 {
     if max_ms == 0 {
         return 0;
     }
-    let dur = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    // Mix subsec_nanos with lower bits of seconds for better entropy
-    let mixed = (dur.subsec_nanos() as u64) ^ (dur.as_secs().wrapping_mul(6364136223846793005));
-    mixed % max_ms
+    rand::thread_rng().gen_range(0..max_ms)
 }

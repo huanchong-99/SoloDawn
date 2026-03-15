@@ -99,6 +99,18 @@ impl FeishuAppConfig {
         .await
     }
 
+    /// G32-007: Find the first feishu app config regardless of enabled status.
+    ///
+    /// Used by upsert flows (e.g. PUT /config) where a disabled config should
+    /// still be found and updated rather than creating a duplicate row.
+    pub async fn find_first(pool: &SqlitePool) -> sqlx::Result<Option<Self>> {
+        sqlx::query_as::<_, Self>(
+            "SELECT * FROM feishu_app_config ORDER BY created_at ASC LIMIT 1",
+        )
+        .fetch_optional(pool)
+        .await
+    }
+
     /// List all feishu app configs
     pub async fn find_all(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, Self>(

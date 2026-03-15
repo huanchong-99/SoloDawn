@@ -92,6 +92,11 @@ const WORKFLOW_STATUS_CONFIG: Record<string, StatusConfig> = {
     tone: 'neutral',
     icon: XCircleIcon,
   },
+  merge_partial_failed: {
+    key: 'workflow:status.merge_partial_failed',
+    tone: 'danger',
+    icon: WarningIcon,
+  },
   idle: {
     key: 'workflow:status.idle',
     tone: 'neutral',

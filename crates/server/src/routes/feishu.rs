@@ -168,8 +168,9 @@ async fn update_config(
 
     let pool = &deployment.db().pool;
 
-    // Upsert: update existing or insert new
-    let existing = FeishuAppConfig::find_enabled(pool)
+    // G32-007: Use find_first() instead of find_enabled() so that a disabled
+    // config can still be found and updated (upsert semantics).
+    let existing = FeishuAppConfig::find_first(pool)
         .await
         .map_err(|e| ApiError::Internal(format!("DB query failed: {e}")))?;
 
@@ -249,9 +250,17 @@ async fn reconnect(
         if let Err(e) = h.reconnect_tx.try_send(()) {
             tracing::warn!(error = %e, "Failed to send Feishu reconnect signal");
             drop(handle_guard);
-            return Err(ApiError::Internal(format!(
-                "Failed to send reconnect signal: {e}"
-            )));
+            // G32-009: Distinguish channel-full (a reconnect is already in
+            // progress) from other send failures so the caller gets an
+            // actionable status code instead of a misleading 200 OK.
+            return match e {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => Err(ApiError::Conflict(
+                    "A reconnect is already in progress. Please wait and try again.".to_string(),
+                )),
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => Err(ApiError::Internal(
+                    "Feishu reconnect channel is closed. The connector may have shut down.".to_string(),
+                )),
+            };
         }
     } else {
         return Err(ApiError::Conflict(

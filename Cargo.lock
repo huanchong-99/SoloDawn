@@ -1823,11 +1823,13 @@ dependencies = [
  "bytes",
  "flate2",
  "futures-util",
+ "rand 0.8.5",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite 0.26.2",
+ "tokio-util",
  "tracing",
  "uuid",
 ]

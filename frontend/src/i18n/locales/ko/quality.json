@@ -1,1 +1,33 @@
-{}
+{
+  "panel": {
+    "title": "Quality Gate Report",
+    "runId": "Run ID",
+    "refresh": "Refresh",
+    "loading": "Loading quality report...",
+    "error": "Failed to load quality report.",
+    "empty": "No quality report available for this terminal yet.",
+    "detectedIssues": "Detected Issues"
+  },
+  "metrics": {
+    "totalIssues": "Total Issues",
+    "blockers": "Blockers",
+    "criticalMajor": "Critical/Major",
+    "minorInfo": "Minor/Info"
+  },
+  "status": {
+    "ok": "Passed",
+    "warn": "Warning",
+    "warnCount": "{{count}} warnings",
+    "error": "Failed",
+    "errorCount": "{{count}} blocking",
+    "running": "Scanning...",
+    "pending": "Pending",
+    "skipped": "Skipped"
+  },
+  "mode": {
+    "off": "Off",
+    "shadow": "Shadow",
+    "warn": "Warn",
+    "enforce": "Enforce"
+  }
+}

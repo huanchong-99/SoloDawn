@@ -4,6 +4,7 @@
 //! slash commands), and forwards chat messages to the orchestrator.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -11,7 +12,7 @@ use sqlx::SqlitePool;
 use tokio::sync::mpsc;
 use tracing;
 
-use db::models::{ExternalConversationBinding, feishu_config::FeishuAppConfig};
+use db::models::{ExternalConversationBinding, Workflow, feishu_config::FeishuAppConfig};
 use feishu_connector::{
     client::FeishuClient,
     events::{self, FeishuEvent, ReceivedMessage},
@@ -185,6 +186,10 @@ impl FeishuService {
     }
 
     /// `/bind <workflow_id>` -- create or update a conversation binding.
+    ///
+    /// G32-006: Validates that `workflow_id` is a well-formed UUID and that the
+    /// referenced workflow actually exists in the database before creating the
+    /// binding. This prevents dangling bindings to non-existent workflows.
     async fn handle_bind_inner(
         msg: &ReceivedMessage,
         workflow_id: &str,
@@ -194,6 +199,29 @@ impl FeishuService {
         if workflow_id.is_empty() {
             messenger
                 .reply_text(&msg.message_id, "Usage: /bind <workflow_id>")
+                .await?;
+            return Ok(());
+        }
+
+        // G32-006: Validate UUID format
+        if uuid::Uuid::parse_str(workflow_id).is_err() {
+            messenger
+                .reply_text(
+                    &msg.message_id,
+                    "Invalid workflow_id format. Expected a UUID (e.g. 550e8400-e29b-41d4-a716-446655440000).",
+                )
+                .await?;
+            return Ok(());
+        }
+
+        // G32-006: Verify workflow exists in database
+        let workflow = Workflow::find_by_id(pool, workflow_id).await?;
+        if workflow.is_none() {
+            messenger
+                .reply_text(
+                    &msg.message_id,
+                    &format!("Workflow {workflow_id} not found."),
+                )
                 .await?;
             return Ok(());
         }
@@ -257,7 +285,13 @@ impl FeishuService {
             return Ok(());
         };
 
-        // Publish a chat instruction to the workflow's message bus topic.
+        // G32-016: Semantic mapping note — `BusMessage::TerminalMessage` is reused
+        // here to carry external chat messages into the orchestrator's event loop.
+        // The variant name refers to its original purpose (terminal stdin), but the
+        // orchestrator treats the `message` field as opaque text. The `[feishu:...]`
+        // prefix lets the orchestrator distinguish the source. A dedicated
+        // `ExternalChatMessage` variant would be cleaner but requires coordinated
+        // changes across the orchestrator agent, so we document the mapping instead.
         use super::orchestrator::message_bus::BusMessage;
         let instruction_msg = BusMessage::TerminalMessage {
             message: format!(
@@ -289,7 +323,9 @@ impl FeishuService {
 /// Wraps [`FeishuMessenger`] to implement the [`ChatConnector`] trait.
 pub struct FeishuConnector {
     messenger: Arc<FeishuMessenger>,
-    connected: Arc<tokio::sync::RwLock<bool>>,
+    /// G32-017: Use AtomicBool instead of RwLock<bool> to eliminate lock
+    /// contention in the synchronous `is_connected()` trait method.
+    connected: Arc<AtomicBool>,
 }
 
 impl FeishuConnector {
@@ -297,13 +333,13 @@ impl FeishuConnector {
     pub fn new(messenger: Arc<FeishuMessenger>) -> Self {
         Self {
             messenger,
-            connected: Arc::new(tokio::sync::RwLock::new(false)),
+            connected: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// Mark the connector as connected (called after WebSocket is established).
-    pub async fn set_connected(&self, value: bool) {
-        *self.connected.write().await = value;
+    pub fn set_connected(&self, value: bool) {
+        self.connected.store(value, Ordering::Release);
     }
 }
 
@@ -327,16 +363,8 @@ impl ChatConnector for FeishuConnector {
     }
 
     fn is_connected(&self) -> bool {
-        // G32-017: `try_read` is intentional here — `is_connected` is called from
-        // synchronous trait methods (ChatConnector) and must not block. If the
-        // RwLock is write-locked (i.e. connection state is being updated), we
-        // conservatively return `false` rather than waiting. An AtomicBool would
-        // be simpler but the RwLock is shared with `set_connected` which is async
-        // and already uses the write lock; switching would require changing the
-        // FeishuConnector struct layout for minimal benefit.
-        self.connected
-            .try_read()
-            .map(|guard| *guard)
-            .unwrap_or(false)
+        // G32-017: AtomicBool provides lock-free reads — no contention with
+        // concurrent `set_connected` calls.
+        self.connected.load(Ordering::Acquire)
     }
 }

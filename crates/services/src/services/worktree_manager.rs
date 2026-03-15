@@ -553,6 +553,42 @@ impl WorktreeManager {
         utils::path::get_gitcortex_temp_dir().join("worktrees")
     }
 
+    /// G23-003: Ensure a branch name does not collide with any existing git branch.
+    ///
+    /// Checks both local and remote branches via `GitService::check_branch_exists`.
+    /// If `candidate` already exists, appends `-2`, `-3`, ... until a free name is found.
+    pub async fn ensure_unique_branch_name(
+        repo_path: &Path,
+        candidate: &str,
+    ) -> Result<String, WorktreeError> {
+        let repo_path_owned = repo_path.to_path_buf();
+        let candidate_owned = candidate.to_string();
+
+        tokio::task::spawn_blocking(move || -> Result<String, WorktreeError> {
+            let git_service = GitService::new();
+            let base = candidate_owned.clone();
+            let mut name = candidate_owned;
+            let mut counter: u32 = 2;
+
+            loop {
+                match git_service.check_branch_exists(&repo_path_owned, &name) {
+                    Ok(true) => {
+                        debug!(
+                            "Branch '{}' already exists in git, trying suffix -{}",
+                            name, counter
+                        );
+                        name = format!("{base}-{counter}");
+                        counter += 1;
+                    }
+                    Ok(false) => return Ok(name),
+                    Err(e) => return Err(WorktreeError::GitService(e)),
+                }
+            }
+        })
+        .await
+        .map_err(|e| WorktreeError::TaskJoin(format!("Task join error: {e}")))?
+    }
+
     pub async fn cleanup_suspected_worktree(path: &Path) -> Result<bool, WorktreeError> {
         let git_marker = path.join(".git");
         if !git_marker.exists() || !git_marker.is_file() {

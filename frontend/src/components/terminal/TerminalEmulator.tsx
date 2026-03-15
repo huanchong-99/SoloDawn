@@ -165,13 +165,15 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
       [onError]
     );
 
-    // Initialize terminal
-    // G28-011: The dependency array includes handleData and handleResize which are
-    // recreated when onData/onResize props change, causing the Terminal instance to
-    // tear down and reinitialize. Wrapping these handlers in useCallback (above)
-    // mitigates this by keeping stable references as long as the callback props
-    // themselves don't change. If further stability is needed, consider using refs
-    // for these callbacks to fully decouple Terminal lifecycle from prop changes.
+    // G28-011: Use refs for callback props to decouple Terminal lifecycle from
+    // prop changes. The Terminal init effect below uses these refs instead of the
+    // callbacks directly, so it only runs once on mount.
+    const handleDataRef = useRef(handleData);
+    handleDataRef.current = handleData;
+    const handleResizeRef = useRef(handleResize);
+    handleResizeRef.current = handleResize;
+
+    // Initialize terminal — runs once on mount thanks to stable ref-based handlers.
     useEffect(() => {
       if (!containerRef.current) return;
 
@@ -199,14 +201,14 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
       fitAddonRef.current = fitAddon;
       terminalReadyRef.current = true;
 
-      // Handle user input
-      terminal.onData(handleData);
+      // Handle user input via ref to avoid re-subscribing on prop changes
+      terminal.onData((data) => handleDataRef.current(data));
 
       // Handle window resize
       const handleWindowResize = () => {
         fitAddon.fit();
         const { cols, rows } = terminal;
-        handleResize(cols, rows);
+        handleResizeRef.current(cols, rows);
       };
 
       globalThis.addEventListener('resize', handleWindowResize);
@@ -216,7 +218,8 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
         terminalReadyRef.current = false;
         terminal.dispose();
       };
-    }, [handleData, handleResize]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // WebSocket connection
     useEffect(() => {

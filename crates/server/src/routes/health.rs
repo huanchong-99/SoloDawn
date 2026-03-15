@@ -1,10 +1,11 @@
-use axum::{extract::State, http::StatusCode, response::Json};
+use axum::{Extension, extract::State, http::StatusCode, response::Json};
 use db::models::feishu_config::FeishuAppConfig;
 use deployment::Deployment;
 use serde_json::{json, Value};
 use utils::response::ApiResponse;
 
 use crate::DeploymentImpl;
+use crate::feishu_handle::SharedFeishuHandle;
 
 pub async fn health_check() -> Json<ApiResponse<String>> {
     Json(ApiResponse::success("OK".to_string()))
@@ -19,6 +20,7 @@ pub async fn healthz() -> Json<Value> {
 /// optional Feishu integration health.
 pub async fn readyz(
     State(deployment): State<DeploymentImpl>,
+    Extension(feishu_handle): Extension<SharedFeishuHandle>,
 ) -> (StatusCode, Json<Value>) {
     let db_ok = sqlx::query("SELECT 1")
         .fetch_one(&deployment.db().pool)
@@ -31,7 +33,7 @@ pub async fn readyz(
     };
 
     // Feishu integration status (non-blocking, does not affect overall readiness)
-    let feishu_status = resolve_feishu_health(&deployment).await;
+    let feishu_status = resolve_feishu_health(&deployment, &feishu_handle).await;
 
     let ready = db_ok && asset_ok && temp_ok;
     let status = if ready { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
@@ -43,9 +45,15 @@ pub async fn readyz(
 
 /// Resolve Feishu health information for the readiness probe.
 ///
-/// Returns a JSON object with `enabled` and `connection_status` fields.
+/// G32-015: Queries the actual WebSocket connection status from the shared
+/// `FeishuHandle` instead of hardcoding "disconnected".
+///
+/// Returns a JSON object with `enabled` and `connectionStatus` fields.
 /// This is informational only and does not gate overall readiness.
-async fn resolve_feishu_health(deployment: &DeploymentImpl) -> Value {
+async fn resolve_feishu_health(
+    deployment: &DeploymentImpl,
+    feishu_handle: &SharedFeishuHandle,
+) -> Value {
     let feature_enabled = std::env::var("GITCORTEX_FEISHU_ENABLED")
         .ok()
         .is_some_and(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1");
@@ -57,10 +65,21 @@ async fn resolve_feishu_health(deployment: &DeploymentImpl) -> Value {
     let config = FeishuAppConfig::find_enabled(&deployment.db().pool).await;
     match config {
         Ok(Some(_)) => {
-            // TODO: Once FeishuService is in AppState, query actual WS connection status.
+            // G32-015: Query actual connection status from the shared handle.
+            let handle_guard = feishu_handle.read().await;
+            let conn_status = match &*handle_guard {
+                Some(h) => {
+                    if *h.connected.read().await {
+                        "connected"
+                    } else {
+                        "disconnected"
+                    }
+                }
+                None => "disconnected",
+            };
             json!({
                 "enabled": true,
-                "connectionStatus": "disconnected",
+                "connectionStatus": conn_status,
             })
         }
         Ok(None) => json!({ "enabled": true, "connectionStatus": "not_configured" }),

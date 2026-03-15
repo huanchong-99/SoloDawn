@@ -70,6 +70,12 @@ export function FeishuSettings() {
       });
       setSuccess(t('settings.feishu.form.saveSuccess'));
       setAppSecret('');
+      // Trigger backend reconnect with new config
+      try {
+        await feishuApi.reconnect();
+      } catch {
+        // Reconnect failure is non-fatal; status refresh will show actual state
+      }
       await fetchStatus();
     } catch {
       setError(t('settings.feishu.form.saveError'));

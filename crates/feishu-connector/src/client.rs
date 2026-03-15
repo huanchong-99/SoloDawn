@@ -2,7 +2,9 @@ use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_util::sync::CancellationToken;
 use tracing;
 
 use crate::auth::FeishuAuth;
@@ -14,6 +16,10 @@ pub struct FeishuClient {
     config: Arc<RwLock<ClientConfig>>,
     event_tx: mpsc::Sender<FeishuEvent>,
     connected: Arc<RwLock<bool>>,
+    /// G32-004: Saved ping task handle for cleanup on disconnect.
+    ping_handle: Mutex<Option<JoinHandle<()>>>,
+    /// G32-003: Token to cancel the ping loop immediately on disconnect.
+    cancel_token: CancellationToken,
 }
 
 impl FeishuClient {
@@ -25,6 +31,8 @@ impl FeishuClient {
             config: Arc::new(RwLock::new(ClientConfig::default())),
             event_tx: tx,
             connected: Arc::new(RwLock::new(false)),
+            ping_handle: Mutex::new(None),
+            cancel_token: CancellationToken::new(),
         };
         (client, rx)
     }
@@ -48,21 +56,28 @@ impl FeishuClient {
         tracing::info!(url = %data.url, "Connecting to Feishu WebSocket");
 
         let (ws_stream, _) = tokio_tungstenite::connect_async(&data.url).await?;
+        // G32-002: Set connected=true only after connect_async succeeds
         *self.connected.write().await = true;
 
         let (write, mut read) = ws_stream.split();
         let write = Arc::new(Mutex::new(write));
 
-        // Spawn ping loop
+        // G32-003: Create a new cancellation token for this connection
+        let cancel = self.cancel_token.child_token();
+
+        // Spawn ping loop with CancellationToken
         let ping_config = self.config.clone();
         let ping_write = write.clone();
-        let ping_connected = self.connected.clone();
-        tokio::spawn(async move {
+        let ping_cancel = cancel.clone();
+        let handle = tokio::spawn(async move {
             loop {
                 let interval = ping_config.read().await.ping_interval;
-                tokio::time::sleep(tokio::time::Duration::from_secs(interval)).await;
-                if !*ping_connected.read().await {
-                    break;
+                // G32-003: Use select! so cancellation breaks out immediately
+                tokio::select! {
+                    () = tokio::time::sleep(tokio::time::Duration::from_secs(interval)) => {}
+                    () = ping_cancel.cancelled() => {
+                        break;
+                    }
                 }
                 let mut w = ping_write.lock().await;
                 if w.send(Message::Ping(vec![].into())).await.is_err() {
@@ -70,6 +85,9 @@ impl FeishuClient {
                 }
             }
         });
+
+        // G32-004: Save the ping task handle for cleanup
+        *self.ping_handle.lock().await = Some(handle);
 
         // Message receive loop
         let event_tx = self.event_tx.clone();
@@ -113,6 +131,12 @@ impl FeishuClient {
         }
 
         *self.connected.write().await = false;
+        // G32-003 + G32-004: Cancel ping loop and await its handle
+        self.cancel_token.cancel();
+        if let Some(handle) = self.ping_handle.lock().await.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
         Ok(())
     }
 

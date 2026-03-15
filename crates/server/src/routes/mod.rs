@@ -52,6 +52,8 @@ pub fn router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feishu_han
 
 pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feishu_handle: SharedFeishuHandle) -> Router {
     let outer_deployment = deployment.clone();
+    // G32-015: Clone before moving into base_routes so we can also attach to outer router.
+    let outer_feishu_handle = feishu_handle.clone();
 
     // Create routers with different middleware layers
     let base_routes = Router::new()
@@ -108,5 +110,8 @@ pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feis
         .route("/", get(frontend::serve_frontend_root))
         .route("/{*path}", get(frontend::serve_frontend))
         .nest("/api", base_routes)
+        // G32-015: Expose FeishuHandle to outer routes (readyz) so the health
+        // endpoint can query actual WebSocket connection status.
+        .layer(Extension(outer_feishu_handle))
         .with_state(outer_deployment)
 }

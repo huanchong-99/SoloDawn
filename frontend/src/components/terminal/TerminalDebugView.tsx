@@ -29,6 +29,7 @@ interface TerminalHistoryState {
 }
 
 const TERMINAL_HISTORY_LIMIT = 1000;
+const HISTORY_PAGE_SIZE = 200;
 
 const stripControlCharacters = (value: string): string =>
   Array.from(value)
@@ -56,19 +57,18 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const [isQualityPanelOpen, setIsQualityPanelOpen] = useState(false);
   const [historyByTerminalId, setHistoryByTerminalId] = useState<Record<string, TerminalHistoryState>>({});
-  // Refs are used intentionally here instead of useState to avoid unnecessary re-renders.
-  // These track transient process lifecycle state (ready, starting, autoStarted, needsRestart)
-  // that only matters for imperative logic (API calls, terminal launch decisions),
-  // not for rendering. Converting them to useState would cause render cascades
-  // on every terminal start/stop cycle without any visible UI benefit.
-  // TODO: G28-006 — Consider consolidating these refs into a single useReducer
-  // or a ref-backed state machine to reduce the number of independent mutable refs.
-  const readyTerminalIdsRef = useRef<Set<string>>(new Set());
-  const startingTerminalIdsRef = useRef<Set<string>>(new Set());
-  const terminalRef = useRef<TerminalEmulatorRef>(null);
+  // G28-006: readyTerminalIds, startingTerminalIds, and needsRestartIds affect
+  // shouldRenderLiveTerminal which drives rendering. Promote to useState so the
+  // UI re-renders when these change. autoStartedRef and restartAttemptsRef remain
+  // refs because they only gate imperative logic (API calls), not rendering.
+  const [readyTerminalIds, setReadyTerminalIds] = useState<Set<string>>(new Set());
+  const [startingTerminalIds, setStartingTerminalIds] = useState<Set<string>>(new Set());
+  const [needsRestartIds, setNeedsRestartIds] = useState<Set<string>>(new Set());
+  const terminalRef = useRef<TerminalEmulatorRef | null>(null);
+  const prevTerminalIdRef = useRef<string | null>(null);
   const autoStartedRef = useRef<Set<string>>(new Set());
-  const needsRestartRef = useRef<Set<string>>(new Set());
   const restartAttemptsRef = useRef<Map<string, number>>(new Map());
+  const [historyPage, setHistoryPage] = useState(0);
   const MAX_RESTART_ATTEMPTS = 3;
   const defaultRoleLabel = t('terminalCard.defaultRole');
 
@@ -102,6 +102,19 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
       setSelectedTerminalId(allTerminals[0].id);
     }
   }, [allTerminals, selectedTerminalId]);
+
+  // G28-005: Explicitly close the previous terminal's WS connection before
+  // switching to avoid race conditions where the old connection lingers.
+  useEffect(() => {
+    if (prevTerminalIdRef.current && prevTerminalIdRef.current !== selectedTerminalId) {
+      // The TerminalEmulator unmounts via key change, but we also reset the ref
+      // to ensure no stale reference is held.
+      terminalRef.current = null;
+    }
+    prevTerminalIdRef.current = selectedTerminalId;
+    // Reset history page when switching terminals
+    setHistoryPage(0);
+  }, [selectedTerminalId]);
 
   const selectedTerminal = allTerminals.find((terminal) => terminal.id === selectedTerminalId);
 
@@ -138,24 +151,23 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
         return true;
       }
 
-      if (needsRestartRef.current.has(terminal.id)) {
+      if (needsRestartIds.has(terminal.id)) {
         return false;
       }
 
-      if (startingTerminalIdsRef.current.has(terminal.id)) {
+      if (startingTerminalIds.has(terminal.id)) {
         return false;
       }
 
-      if (readyTerminalIdsRef.current.has(terminal.id)) {
+      if (readyTerminalIds.has(terminal.id)) {
         return true;
       }
 
-      // G28-002: After filtering out historical, waiting, needsRestart, starting,
-      // and ready states above, only 'working' and 'not_started' remain.
-      // 'not_started' terminals should not render live (they haven't launched yet).
+      // G09-002 / G28-002: Only 'working' terminals should render live.
+      // 'not_started' terminals haven't launched yet.
       return terminal.status === 'working';
     },
-    [isHistoricalTerminalStatus]
+    [isHistoricalTerminalStatus, needsRestartIds, startingTerminalIds, readyTerminalIds]
   );
 
   const loadTerminalHistory = useCallback(
@@ -235,8 +247,12 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
 
   const startTerminal = useCallback(async (terminalId: string, retryAfterStop = false) => {
     // Allow multiple terminals to start in parallel
-    if (startingTerminalIdsRef.current.has(terminalId)) return;
-    startingTerminalIdsRef.current.add(terminalId);
+    setStartingTerminalIds((prev) => {
+      if (prev.has(terminalId)) return prev;
+      const next = new Set(prev);
+      next.add(terminalId);
+      return next;
+    });
     // Mark as auto-started only after confirming we can start
     autoStartedRef.current.add(terminalId);
     try {
@@ -247,8 +263,18 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
       if (response.ok) {
         console.log('Terminal started successfully');
         // Mark this terminal as ready and clear restart flag
-        needsRestartRef.current.delete(terminalId);
-        readyTerminalIdsRef.current.add(terminalId);
+        setNeedsRestartIds((prev) => {
+          if (!prev.has(terminalId)) return prev;
+          const next = new Set(prev);
+          next.delete(terminalId);
+          return next;
+        });
+        setReadyTerminalIds((prev) => {
+          if (prev.has(terminalId)) return prev;
+          const next = new Set(prev);
+          next.add(terminalId);
+          return next;
+        });
         // Note: Don't reset restart attempts here - only reset on manual restart
         // This prevents infinite loops when API succeeds but process doesn't actually start
       } else {
@@ -257,7 +283,12 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
         // Handle 409 Conflict by stopping first, then retrying
         if (response.status === 409 && !retryAfterStop) {
           console.log('Terminal conflict, stopping and retrying...');
-          startingTerminalIdsRef.current.delete(terminalId);
+          setStartingTerminalIds((prev) => {
+            if (!prev.has(terminalId)) return prev;
+            const next = new Set(prev);
+            next.delete(terminalId);
+            return next;
+          });
           try {
             await fetch(`/api/terminals/${terminalId}/stop`, { method: 'POST' });
           } catch {
@@ -270,15 +301,30 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
         console.error('Failed to start terminal:', error);
         resetAutoStart(terminalId);
         // Clear ready state on failure
-        readyTerminalIdsRef.current.delete(terminalId);
+        setReadyTerminalIds((prev) => {
+          if (!prev.has(terminalId)) return prev;
+          const next = new Set(prev);
+          next.delete(terminalId);
+          return next;
+        });
       }
     } catch (error) {
       console.error('Failed to start terminal:', error);
       resetAutoStart(terminalId);
       // Clear ready state on failure
-      readyTerminalIdsRef.current.delete(terminalId);
+      setReadyTerminalIds((prev) => {
+        if (!prev.has(terminalId)) return prev;
+        const next = new Set(prev);
+        next.delete(terminalId);
+        return next;
+      });
     } finally {
-      startingTerminalIdsRef.current.delete(terminalId);
+      setStartingTerminalIds((prev) => {
+        if (!prev.has(terminalId)) return prev;
+        const next = new Set(prev);
+        next.delete(terminalId);
+        return next;
+      });
     }
   }, [resetAutoStart]);
 
@@ -299,7 +345,7 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
       return true;
     }
 
-    if (startingTerminalIdsRef.current.has(terminalId)) {
+    if (startingTerminalIds.has(terminalId)) {
       console.info(
         `Skip auto-restart for terminal ${terminalId} because restart is already in progress`
       );
@@ -307,21 +353,41 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
     }
 
     return false;
-  }, [shouldAutoRecoverTerminal]);
+  }, [shouldAutoRecoverTerminal, startingTerminalIds]);
 
   // Helper to handle max restart attempts reached
   const handleMaxRestartAttemptsReached = useCallback((terminalId: string) => {
     console.error(`Max restart attempts (${MAX_RESTART_ATTEMPTS}) reached for terminal ${terminalId}`);
-    needsRestartRef.current.add(terminalId);
-    readyTerminalIdsRef.current.delete(terminalId);
+    setNeedsRestartIds((prev) => {
+      if (prev.has(terminalId)) return prev;
+      const next = new Set(prev);
+      next.add(terminalId);
+      return next;
+    });
+    setReadyTerminalIds((prev) => {
+      if (!prev.has(terminalId)) return prev;
+      const next = new Set(prev);
+      next.delete(terminalId);
+      return next;
+    });
   }, []);
 
   // Helper to perform terminal restart
   const performTerminalRestart = useCallback((terminalId: string, attempts: number) => {
     console.log(`Terminal process not running, auto-restarting... (attempt ${attempts + 1}/${MAX_RESTART_ATTEMPTS})`);
     restartAttemptsRef.current.set(terminalId, attempts + 1);
-    needsRestartRef.current.add(terminalId);
-    readyTerminalIdsRef.current.delete(terminalId);
+    setNeedsRestartIds((prev) => {
+      if (prev.has(terminalId)) return prev;
+      const next = new Set(prev);
+      next.add(terminalId);
+      return next;
+    });
+    setReadyTerminalIds((prev) => {
+      if (!prev.has(terminalId)) return prev;
+      const next = new Set(prev);
+      next.delete(terminalId);
+      return next;
+    });
     autoStartedRef.current.delete(terminalId);
     startTerminal(terminalId);
   }, [startTerminal]);
@@ -362,9 +428,12 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
     if (!selectedTerminalId || !selectedTerminal?.status) return;
 
     if (['failed', 'not_started'].includes(selectedTerminal.status)) {
-      if (readyTerminalIdsRef.current.has(selectedTerminalId)) {
-        readyTerminalIdsRef.current.delete(selectedTerminalId);
-      }
+      setReadyTerminalIds((prev) => {
+        if (!prev.has(selectedTerminalId)) return prev;
+        const next = new Set(prev);
+        next.delete(selectedTerminalId);
+        return next;
+      });
       // Allow re-auto-start when status returns to not_started
       if (selectedTerminal.status === 'not_started') {
         autoStartedRef.current.delete(selectedTerminalId);
@@ -404,9 +473,19 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
 
   const isHistoricalTerminal = isHistoricalTerminalStatus(selectedTerminal?.status);
   const currentHistory = selectedTerminalId ? historyByTerminalId[selectedTerminalId] : undefined;
-  const currentHistoryText = currentHistory?.lines.length
-    ? sanitizeTerminalHistoryContent(currentHistory.lines.join(''))
-    : '';
+
+  // G09-012 / G28-007: Paginate history lines instead of rendering all at once.
+  // Sanitize each line individually for segmented rendering.
+  const sanitizedHistoryLines = useMemo(() => {
+    if (!currentHistory?.lines.length) return [];
+    return currentHistory.lines.map((line) => sanitizeTerminalHistoryContent(line));
+  }, [currentHistory?.lines]);
+
+  const totalHistoryPages = Math.max(1, Math.ceil(sanitizedHistoryLines.length / HISTORY_PAGE_SIZE));
+  const pagedHistoryLines = useMemo(() => {
+    const start = historyPage * HISTORY_PAGE_SIZE;
+    return sanitizedHistoryLines.slice(start, start + HISTORY_PAGE_SIZE);
+  }, [sanitizedHistoryLines, historyPage]);
 
   return (
     <div className="flex h-full">
@@ -549,13 +628,42 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
                             </div>
                           );
                         } else if (currentHistory?.lines.length) {
-                          // TODO: Use virtualization (e.g., react-window) for large terminal logs
-                          // to avoid rendering thousands of lines into a single <pre> element.
+                          // G09-012 / G28-007: Render paginated segments instead of a single <pre>
                           return (
-                            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto pr-1">
-                              <pre className="text-xs leading-5 whitespace-pre-wrap break-words text-foreground">
-                                {currentHistoryText}
-                              </pre>
+                            <div className="flex-1 min-h-0 flex flex-col">
+                              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto pr-1">
+                                {pagedHistoryLines.map((line, idx) => (
+                                  <pre
+                                    key={historyPage * HISTORY_PAGE_SIZE + idx}
+                                    className="text-xs leading-5 whitespace-pre-wrap break-words text-foreground"
+                                  >
+                                    {line}
+                                  </pre>
+                                ))}
+                              </div>
+                              {totalHistoryPages > 1 && (
+                                <div className="flex items-center justify-between pt-2 border-t mt-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={historyPage === 0}
+                                    onClick={() => setHistoryPage((p) => Math.max(0, p - 1))}
+                                  >
+                                    {t('terminalDebug.historyPrev', { defaultValue: 'Previous' })}
+                                  </Button>
+                                  <span className="text-xs text-muted-foreground">
+                                    {historyPage + 1} / {totalHistoryPages}
+                                  </span>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={historyPage >= totalHistoryPages - 1}
+                                    onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages - 1, p + 1))}
+                                  >
+                                    {t('terminalDebug.historyNext', { defaultValue: 'Next' })}
+                                  </Button>
+                                </div>
+                              )}
                             </div>
                           );
                         } else {

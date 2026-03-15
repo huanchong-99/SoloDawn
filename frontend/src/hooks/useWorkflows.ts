@@ -5,6 +5,7 @@ import {
   UseQueryResult,
 } from '@tanstack/react-query';
 import { handleApiResponse, logApiError, makeRequest, ApiError } from '@/lib/api';
+import { useToast } from '@/components/ui/toast';
 import type {
   WorkflowDetailDto,
   WorkflowListItemDto,
@@ -27,13 +28,11 @@ function shouldRetryOnServerError(failureCount: number, error: Error): boolean {
 // Create Request Types (not in generated types yet)
 // ============================================================================
 
-// G02-007 / G14-003: 'draft' is a client-only status used in the wizard before
-// the workflow is persisted to the backend.  The backend WorkflowStatus enum
-// (crates/db/src/models/workflow.rs) does NOT include 'draft'.
-// TODO: Consider splitting into BackendWorkflowStatus (without draft) and
-// WizardWorkflowStatus (with draft) once shared/types.ts exports the enum.
-export type WorkflowStatusEnum =
-  | 'draft'
+// G02-007: Backend WorkflowStatus enum does NOT include 'draft'.
+// 'draft' is a client-only status used in the wizard before the workflow is
+// persisted.  We split the types so callers that talk to the backend never
+// accidentally send 'draft'.
+export type BackendWorkflowStatus =
   | 'created'
   | 'ready'
   | 'starting'
@@ -43,6 +42,9 @@ export type WorkflowStatusEnum =
   | 'completed'
   | 'failed'
   | 'cancelled';
+
+/** Client-side superset that adds the wizard-only 'draft' status. */
+export type WorkflowStatusEnum = BackendWorkflowStatus | 'draft';
 
 export interface WorkflowActions {
   canPrepare: boolean; // created → starting → ready (启动终端)
@@ -515,6 +517,18 @@ const workflowsApi = {
 };
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/** Extract a user-facing message from an API or generic error. */
+function errorMessage(error: Error): string {
+  if (error instanceof ApiError && error.message) {
+    return error.message;
+  }
+  return error.message || 'An unexpected error occurred';
+}
+
+// ============================================================================
 // Hooks
 // ============================================================================
 
@@ -564,6 +578,7 @@ export function useWorkflow(
  */
 export function useCreateWorkflow() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   return useMutation({
     mutationFn: (data: CreateWorkflowRequest) => workflowsApi.create(data),
@@ -575,8 +590,9 @@ export function useCreateWorkflow() {
       // Add the new workflow to the cache
       queryClient.setQueryData(workflowKeys.byId(newWorkflow.id), newWorkflow);
     },
-    onError: (error, variables) => {
+    onError: (error: Error, variables) => {
       logApiError('Failed to create workflow:', error);
+      showToast(errorMessage(error), 'error');
       // G26-006: Invalidate cache on error to ensure consistency
       queryClient.invalidateQueries({
         queryKey: workflowKeys.forProject(variables.projectId),
@@ -591,6 +607,7 @@ export function useCreateWorkflow() {
  */
 export function usePrepareWorkflow() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   return useMutation({
     mutationFn: (workflowId: string) => workflowsApi.prepare(workflowId),
@@ -606,18 +623,16 @@ export function usePrepareWorkflow() {
       }
       return { previous };
     },
-    onSuccess: (_result, workflowId) => {
-      // G26-012: Narrow invalidation — only the specific workflow, not all
-      queryClient.invalidateQueries({
-        queryKey: workflowKeys.byId(workflowId),
-      });
-    },
-    // G02-004 / G26-005 / G26-006: Rollback + invalidate on error
-    onError: (error, workflowId, context) => {
+    // G02-004 / G26-005 / G26-006: Rollback + invalidate + toast on error
+    onError: (error: Error, workflowId, context) => {
       logApiError('Failed to prepare workflow:', error);
+      showToast(errorMessage(error), 'error');
       if (context?.previous) {
         queryClient.setQueryData(workflowKeys.byId(workflowId), context.previous);
       }
+    },
+    // G26-012: Invalidate only the specific workflow detail on settle
+    onSettled: (_data, _error, workflowId) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.byId(workflowId) });
     },
   });
@@ -629,6 +644,7 @@ export function usePrepareWorkflow() {
  */
 export function useStartWorkflow() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   return useMutation({
     mutationFn: (data: StartWorkflowRequest) => workflowsApi.start(data),
@@ -644,21 +660,17 @@ export function useStartWorkflow() {
       }
       return { previous };
     },
-    onSuccess: (_result, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: workflowKeys.byId(variables.workflow_id),
-      });
-      queryClient.invalidateQueries({
-        queryKey: workflowKeys.all,
-      });
-    },
-    // G26-006: Rollback + invalidate on error
-    onError: (error, variables, context) => {
+    // G26-006: Rollback + toast on error
+    onError: (error: Error, variables, context) => {
       logApiError('Failed to start workflow:', error);
+      showToast(errorMessage(error), 'error');
       if (context?.previous) {
         queryClient.setQueryData(workflowKeys.byId(variables.workflow_id), context.previous);
       }
+    },
+    onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.all });
     },
   });
 }
@@ -669,6 +681,7 @@ export function useStartWorkflow() {
  */
 export function usePauseWorkflow() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   return useMutation({
     mutationFn: (data: PauseWorkflowRequest) => workflowsApi.pause(data),
@@ -684,21 +697,17 @@ export function usePauseWorkflow() {
       }
       return { previous };
     },
-    onSuccess: (_result, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: workflowKeys.byId(variables.workflow_id),
-      });
-      queryClient.invalidateQueries({
-        queryKey: workflowKeys.all,
-      });
-    },
-    // G26-006: Rollback + invalidate on error
-    onError: (error, variables, context) => {
+    // G26-006: Rollback + toast on error
+    onError: (error: Error, variables, context) => {
       logApiError('Failed to pause workflow:', error);
+      showToast(errorMessage(error), 'error');
       if (context?.previous) {
         queryClient.setQueryData(workflowKeys.byId(variables.workflow_id), context.previous);
       }
+    },
+    onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.all });
     },
   });
 }
@@ -709,6 +718,7 @@ export function usePauseWorkflow() {
  */
 export function useStopWorkflow() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   return useMutation({
     mutationFn: (data: StopWorkflowRequest) => workflowsApi.stop(data),
@@ -724,21 +734,17 @@ export function useStopWorkflow() {
       }
       return { previous };
     },
-    onSuccess: (_result, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: workflowKeys.byId(variables.workflow_id),
-      });
-      queryClient.invalidateQueries({
-        queryKey: workflowKeys.all,
-      });
-    },
-    // G26-006: Rollback + invalidate on error
-    onError: (error, variables, context) => {
+    // G26-006: Rollback + toast on error
+    onError: (error: Error, variables, context) => {
       logApiError('Failed to stop workflow:', error);
+      showToast(errorMessage(error), 'error');
       if (context?.previous) {
         queryClient.setQueryData(workflowKeys.byId(variables.workflow_id), context.previous);
       }
+    },
+    onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.all });
     },
   });
 }
@@ -749,18 +755,20 @@ export function useStopWorkflow() {
  */
 export function useSubmitWorkflowPromptResponse() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   return useMutation({
     mutationFn: (data: SubmitWorkflowPromptResponseRequest) =>
       workflowsApi.submitPromptResponse(data),
-    onSuccess: (_result, variables) => {
+    // G26-006 / G30-004: Invalidate cache + toast on error
+    onError: (error: Error, variables) => {
+      logApiError('Failed to submit workflow prompt response:', error);
+      showToast(errorMessage(error), 'error');
       queryClient.invalidateQueries({
         queryKey: workflowKeys.byId(variables.workflow_id),
       });
     },
-    // G26-006 / G30-004: Invalidate cache on error
-    onError: (error, variables) => {
-      logApiError('Failed to submit workflow prompt response:', error);
+    onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({
         queryKey: workflowKeys.byId(variables.workflow_id),
       });
@@ -774,18 +782,20 @@ export function useSubmitWorkflowPromptResponse() {
  */
 export function useSubmitOrchestratorChat() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   return useMutation({
     mutationFn: (data: SubmitOrchestratorChatRequest) =>
       workflowsApi.submitOrchestratorChat(data),
-    onSuccess: (_result, variables) => {
+    // G26-006 / G30-004: Invalidate cache + toast on error
+    onError: (error: Error, variables) => {
+      logApiError('Failed to submit orchestrator chat message:', error);
+      showToast(errorMessage(error), 'error');
       queryClient.invalidateQueries({
         queryKey: workflowKeys.byId(variables.workflow_id),
       });
     },
-    // G26-006 / G30-004: Invalidate cache on error
-    onError: (error, variables) => {
-      logApiError('Failed to submit orchestrator chat message:', error);
+    onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({
         queryKey: workflowKeys.byId(variables.workflow_id),
       });
@@ -831,6 +841,7 @@ export function useOrchestratorMessages(
  */
 export function useMergeWorkflow() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   return useMutation({
     mutationFn: (data: MergeWorkflowRequest) => workflowsApi.merge(data),
@@ -846,22 +857,17 @@ export function useMergeWorkflow() {
       }
       return { previous };
     },
-    onSuccess: (_result, variables) => {
-      // TODO: G26-007 — subscribe to task-level merge progress events when backend emits them
-      queryClient.invalidateQueries({
-        queryKey: workflowKeys.byId(variables.workflow_id),
-      });
-      queryClient.invalidateQueries({
-        queryKey: workflowKeys.all,
-      });
-    },
-    // G26-006: Rollback + invalidate on error
-    onError: (error, variables, context) => {
+    // G26-006: Rollback + toast on error
+    onError: (error: Error, variables, context) => {
       logApiError('Failed to merge workflow:', error);
+      showToast(errorMessage(error), 'error');
       if (context?.previous) {
         queryClient.setQueryData(workflowKeys.byId(variables.workflow_id), context.previous);
       }
+    },
+    onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.byId(variables.workflow_id) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.all });
     },
   });
 }
@@ -872,6 +878,7 @@ export function useMergeWorkflow() {
  */
 export function useDeleteWorkflow() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   return useMutation({
     mutationFn: (workflowId: string) => workflowsApi.delete(workflowId),
@@ -880,15 +887,15 @@ export function useDeleteWorkflow() {
       queryClient.removeQueries({
         queryKey: workflowKeys.byId(workflowId),
       });
-      // Invalidate all workflows queries (we don't have project_id here)
-      queryClient.invalidateQueries({
-        queryKey: workflowKeys.all,
-      });
     },
-    // G26-006 / G30-004: Invalidate cache on error
-    onError: (error, workflowId) => {
+    // G26-006 / G30-004: Invalidate cache + toast on error
+    onError: (error: Error, workflowId) => {
       logApiError('Failed to delete workflow:', error);
+      showToast(errorMessage(error), 'error');
       queryClient.invalidateQueries({ queryKey: workflowKeys.byId(workflowId) });
+    },
+    onSettled: () => {
+      // Invalidate all workflows queries (we don't have project_id here)
       queryClient.invalidateQueries({ queryKey: workflowKeys.all });
     },
   });
@@ -900,6 +907,7 @@ export function useDeleteWorkflow() {
  */
 export function useUpdateTaskStatus() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   return useMutation({
     mutationFn: ({
@@ -934,7 +942,7 @@ export function useUpdateTaskStatus() {
 
       return { previousWorkflow };
     },
-    onError: (error, { workflowId }, context) => {
+    onError: (error: Error, { workflowId }, context) => {
       // Rollback on error
       if (context?.previousWorkflow) {
         queryClient.setQueryData(
@@ -943,6 +951,7 @@ export function useUpdateTaskStatus() {
         );
       }
       logApiError('Failed to update task status:', error);
+      showToast(errorMessage(error), 'error');
     },
     onSettled: (_, __, { workflowId }) => {
       // Refetch to ensure consistency

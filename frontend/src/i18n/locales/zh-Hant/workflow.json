@@ -1,1 +1,537 @@
-{}
+{
+  "board": {
+    "eyebrow": "Kanban",
+    "title": "Workflow board",
+    "description": "Drag tasks between columns to track progress.",
+    "selectProject": "Select Project",
+    "focus": {
+      "active": "Viewing active workflow",
+      "none": "No workflow selected"
+    }
+  },
+  "status": {
+    "created": "Created",
+    "ready": "Ready",
+    "starting": "Starting",
+    "running": "Running",
+    "merging": "Merging",
+    "paused": "Paused",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "idle": "Idle",
+    "queued": "Queued",
+    "unknown": "Unknown"
+  },
+  "wizard": {
+    "title": "Create Workflow",
+    "buttons": {
+      "next": "Next",
+      "back": "Back",
+      "cancel": "Cancel",
+      "submit": "Create Workflow",
+      "submitting": "Creating..."
+    },
+    "errors": {
+      "submitUnknown": "Unknown error",
+      "submitFailedTitle": "Workflow creation failed",
+      "validationTitle": "Please fix the following"
+    }
+  },
+  "steps": {
+    "project": {
+      "name": "Project",
+      "description": "Select a working directory"
+    },
+    "basic": {
+      "name": "Basics",
+      "description": "Workflow name and task count"
+    },
+    "tasks": {
+      "name": "Tasks",
+      "description": "Define task branches and goals"
+    },
+    "models": {
+      "name": "Models",
+      "description": "Configure AI models"
+    },
+    "terminals": {
+      "name": "Terminals",
+      "description": "Assign terminals to tasks"
+    },
+    "commands": {
+      "name": "Commands",
+      "description": "Select command presets"
+    },
+    "advanced": {
+      "name": "Advanced",
+      "description": "Orchestrator and merge settings"
+    }
+  },
+  "step0": {
+    "fieldLabel": "Working directory",
+    "placeholder": "Enter a project path",
+    "browse": "Browse",
+    "containerHint": "Docker mode detected. Choose a repository inside {{path}} or another mounted workspace path.",
+    "refreshLabel": "Refresh git status",
+    "branchLabel": "Branch",
+    "remoteLabel": "Remote",
+    "dirtyLabel": "Uncommitted changes",
+    "dirtyFiles": "{{count}} files",
+    "initGit": "Initialize Git",
+    "notAvailable": "N/A",
+    "status": {
+      "gitDetected": "Git repo detected",
+      "gitNotDetected": "Not a git repo"
+    },
+    "errors": {
+      "gitStatus": "Failed to check git status",
+      "gitInit": "Failed to initialize git",
+      "gitNetwork": "Network error. Please try again.",
+      "folderPicker": "Failed to open folder picker. Please try again."
+    }
+  },
+  "step1": {
+    "nameLabel": "Workflow name",
+    "namePlaceholder": "e.g. Refactor authentication",
+    "modeLabel": "Execution mode",
+    "modeHint": "Choose whether you want to predefine the workflow graph or let the orchestrator plan it at runtime.",
+    "diyTitle": "DIY",
+    "diyDescription": "Predefine tasks, terminals, CLI selection, and terminal roles before the workflow starts.",
+    "agentPlannedTitle": "Agent Planned",
+    "agentPlannedDescription": "Start from a goal and let the orchestrator create tasks and terminals dynamically while the workflow runs.",
+    "initialGoalLabel": "Initial goal",
+    "initialGoalPlaceholder": "Describe the outcome the orchestrator should achieve...",
+    "initialGoalHint": "This becomes the first planning objective for agent-planned workflows.",
+    "descriptionLabel": "Workflow description (optional)",
+    "descriptionPlaceholder": "Briefly describe the goal and scope...",
+    "planningHintsLabel": "Planning hints (optional)",
+    "planningHintsPlaceholder": "Add constraints, implementation notes, or priorities for the orchestrator...",
+    "taskCountLabel": "How many parallel tasks?",
+    "taskCountOption_one": "{{count}} task",
+    "taskCountOption_other": "{{count}} tasks",
+    "customCountLabel": "Custom",
+    "customCountPlaceholder": "5-10",
+    "importLabel": "Task source",
+    "importNew": "Create new tasks",
+    "importKanban": "Import from kanban (pick existing cards)"
+  },
+  "step2": {
+    "header": "Configure {{count}} parallel tasks",
+    "progress": "{{completed}} / {{total}} completed",
+    "previousTask": "Previous task",
+    "nextTask": "Next task",
+    "taskIndicator": "Task {{current}} of {{total}}",
+    "nameLabel": "Task name",
+    "namePlaceholder": "e.g. Login flow",
+    "branchLabel": "Git branch name",
+    "branchPlaceholder": "e.g. feat/login-flow",
+    "descriptionLabel": "Task description",
+    "descriptionPlaceholder": "Describe what this task should do...",
+    "terminalCountLabel": "How many sequential terminals?",
+    "terminalCountOption_one": "{{count}} terminal",
+    "terminalCountOption_other": "{{count}} terminals"
+  },
+  "step3": {
+    "title": "Configure AI models",
+    "addModel": "Add model",
+    "emptyTitle": "No models configured yet",
+    "emptyDescription": "Click the button above to add your first model.",
+    "editLabel": "Edit",
+    "deleteLabel": "Delete",
+    "dialog": {
+      "addTitle": "Add model",
+      "editTitle": "Edit model",
+      "description": "Provide model details and verify access."
+    },
+    "fields": {
+      "displayName": {
+        "label": "Model name",
+        "placeholder": "e.g. Claude 3.5 Sonnet"
+      },
+      "apiType": {
+        "label": "API type"
+      },
+      "baseUrl": {
+        "label": "Base URL",
+        "placeholder": "API endpoint URL"
+      },
+      "apiKey": {
+        "label": "API key",
+        "placeholder": "Enter API key"
+      },
+      "modelId": {
+        "label": "Model ID",
+        "placeholder": "Enter model ID, e.g. claude-3-5-sonnet-20241022",
+        "selectPlaceholder": "Select a model"
+      }
+    },
+    "actions": {
+      "fetchModels": "Fetch available models",
+      "fetching": "Fetching...",
+      "verify": "Verify connection",
+      "verifying": "Verifying...",
+      "cancel": "Cancel",
+      "save": "Save"
+    },
+    "messages": {
+      "verifySuccess": "Connection verified",
+      "confirmDelete": "Delete model configuration for {{name}}?"
+    },
+    "errors": {
+      "apiKeyRequired": "API key is required",
+      "fetchFailed": "Failed to fetch models. Check your API key.",
+      "verifyMissingInfo": "Fill in all fields before verifying",
+      "verifyFailed": "Verification failed. Check your configuration.",
+      "displayNameRequired": "Model name is required",
+      "baseUrlRequired": "Base URL is required",
+      "modelIdRequired": "Model ID is required"
+    }
+  },
+  "step4": {
+    "title": "Configure terminals",
+    "taskIndicator": "Task {{current}} / {{total}}",
+    "previousTask": "Previous task",
+    "nextTask": "Next task",
+    "taskNameFallback": "Task {{index}}",
+    "terminalCount": "This task has {{count}} terminals",
+    "cliStatusTitle": "CLI installation status",
+    "loadingCli": "Detecting CLI installation status...",
+    "refreshCli": "Refresh",
+    "installGuide": "Install guide",
+    "terminalLabel": "Terminal {{index}}",
+    "cliTypeLabel": "CLI type",
+    "modelLabel": "Model configuration",
+    "modelPlaceholder": "Select a model",
+    "roleLabel": "Role description (optional)",
+    "rolePlaceholder": "e.g. Backend API expert",
+    "errors": {
+      "noCliInstalled": "No CLI tools are installed. Please install at least one CLI tool (Claude Code, Gemini CLI, Codex, or Cursor Agent) to continue."
+    },
+    "cliNotInstalledTitle": "CLI not installed",
+    "cliNotInstalledDescription": "The selected CLI tool is not installed. Please install it before running the workflow."
+  },
+  "step5": {
+    "title": "Slash command configuration",
+    "enableLabel": "Enable slash commands",
+    "disableLabel": "Disable",
+    "selectedTitle": "Selected commands (in execution order)",
+    "selectedEmpty": "No commands selected yet. Add presets below.",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "remove": "Remove",
+    "add": "Add",
+    "clearAll": "Clear all",
+    "resetDefault": "Reset default",
+    "availableTitle": "Available presets",
+    "systemPresetsTitle": "System presets",
+    "userPresetsTitle": "User presets",
+    "loadingUserPresets": "Loading user presets...",
+    "presets": {
+      "writeCode": {
+        "name": "Write code",
+        "description": "Implement new code or features based on requirements"
+      },
+      "review": {
+        "name": "Code review",
+        "description": "Review code quality, security, and best practices"
+      },
+      "fixIssues": {
+        "name": "Fix issues",
+        "description": "Fix bugs, errors, and issues"
+      },
+      "test": {
+        "name": "Run tests",
+        "description": "Execute test suite and validate behavior"
+      },
+      "refactor": {
+        "name": "Refactor code",
+        "description": "Refactor code to improve maintainability"
+      },
+      "document": {
+        "name": "Document",
+        "description": "Write documentation"
+      }
+    },
+    "edit": "Edit",
+    "editPreset": {
+      "title": "Edit",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "Custom description for this command",
+      "descriptionHint": "Leave blank to use the default description"
+    },
+    "params": {
+      "title": "Custom Parameters (JSON format)",
+      "advancedTitle": "Advanced: JSON Parameters",
+      "description": "Optional: Configure custom parameters in JSON format. Leave empty to skip.",
+      "edit": "Edit parameters",
+      "configured": "Configured",
+      "cancel": "Cancel",
+      "save": "Save",
+      "placeholder": "Enter JSON object...",
+      "hint": "Press Ctrl+Enter to save",
+      "error": {
+        "invalidJson": "Invalid JSON syntax. Please enter a valid JSON object, e.g., {\"key\": \"value\"}",
+        "notObject": "Value must be a JSON object, e.g., {\"key\": \"value\"}"
+      }
+    },
+    "commands": {
+      "title": "Additional Slash Commands",
+      "description": "Add extra slash commands to run after this preset (one per line).",
+      "placeholder": "/compact\n/review"
+    }
+  },
+  "step6": {
+    "orchestrator": {
+      "label": "Primary agent configuration",
+      "description": "Select the main AI model coordinating parallel tasks",
+      "placeholder": "Select a model"
+    },
+    "errorTerminal": {
+      "enableLabel": "Enable error recovery terminal (optional)",
+      "description": "Automatically use a dedicated terminal to recover from failures",
+      "cliLabel": "Error recovery CLI",
+      "modelLabel": "Error recovery model",
+      "cliPlaceholder": "Select a CLI type",
+      "modelPlaceholder": "Select a model"
+    },
+    "mergeTerminal": {
+      "title": "Merge terminal configuration",
+      "description": "Configure the terminal and model used to merge task branches",
+      "cliLabel": "Merge CLI",
+      "modelLabel": "Merge model",
+      "cliPlaceholder": "Select a CLI type",
+      "modelPlaceholder": "Select a model",
+      "runTestsLabel": "Run tests before merge",
+      "pauseOnConflictLabel": "Pause on conflicts"
+    },
+    "targetBranch": {
+      "label": "Target branch",
+      "placeholder": "e.g. main"
+    },
+    "gitWatcher": {
+      "enableLabel": "Enable Git monitoring",
+      "description": "Automatically monitor Git commit events and trigger Orchestrator responses"
+    },
+    "gitCommit": {
+      "title": "Git commit format (enforced)",
+      "description": "All commits will follow this format and are generated automatically"
+    }
+  },
+  "validation": {
+    "project": {
+      "workingDirectoryRequired": "Working directory is required"
+    },
+    "basic": {
+      "nameRequired": "Workflow name is required",
+      "taskCountMin": "Task count must be at least 1",
+      "initialGoalRequired": "Initial goal is required for agent-planned workflows"
+    },
+    "tasks": {
+      "required": "At least one task is required",
+      "nameRequired": "Task name is required",
+      "descriptionRequired": "Task description is required"
+    },
+    "models": {
+      "required": "At least one model configuration is required"
+    },
+    "terminals": {
+      "required": "At least one terminal is required",
+      "cliRequired": "Select a CLI type",
+      "modelRequired": "Select a model",
+      "modelCliMismatch": "Selected model is bound to a different CLI type"
+    },
+    "advanced": {
+      "orchestratorModelRequired": "Select the primary agent model",
+      "mergeCliRequired": "Select a merge CLI type",
+      "mergeModelRequired": "Select a merge model",
+      "targetBranchRequired": "Target branch is required"
+    }
+  },
+  "empty": {
+    "title": "No workflows yet",
+    "description": "Create your first workflow to start parallel task execution",
+    "button": "Create Your First Workflow"
+  },
+  "errors": {
+    "loadFailed": "Failed to load workflows",
+    "startFailed": "Failed to start workflow",
+    "pauseFailed": "Failed to pause workflow",
+    "stopFailed": "Failed to stop workflow",
+    "deleteFailed": "Failed to delete workflow",
+    "deleteConfirm": "Are you sure you want to delete this workflow? This action cannot be undone."
+  },
+  "success": {
+    "start": "Workflow started",
+    "pause": "Workflow paused",
+    "stop": "Workflow stopped",
+    "delete": "Workflow deleted"
+  },
+  "pipeline": {
+    "status": {
+      "idle": "Idle",
+      "running": "Running",
+      "paused": "Paused",
+      "completed": "Completed",
+      "failed": "Failed"
+    },
+    "emptyTitle": "No tasks yet",
+    "emptyDescription": "This workflow does not have any tasks to display yet.",
+    "emptyDescriptionAgentPlanned": "Agent-planned workflows can start with an empty graph. Tasks and terminals will appear here after planning begins.",
+    "initialGoalLabel": "Initial goal",
+    "taskLabel": "Task {{index}}",
+    "mergeTerminalRole": "Merge Terminal",
+    "terminalsCount": "{{count}} terminals",
+    "terminalsCount_one": "{{count}} terminal",
+    "slashCommands": "Slash Commands:",
+    "hint": "Click on a terminal to view details"
+  },
+  "terminalCard": {
+    "orderLabel": "T{{index}}",
+    "defaultRole": "Terminal",
+    "debugButton": "Debug terminals"
+  },
+  "taskCard": {
+    "debugButton": "Debug terminals"
+  },
+  "terminalDebug": {
+    "listTitle": "Terminal list",
+    "clear": "Clear",
+    "restart": "Restart",
+    "emptyTitle": "No terminals yet",
+    "emptyDescription": "Terminals will appear here as soon as the workflow creates or prepares them.",
+    "selectPrompt": "Select a terminal to start debugging",
+    "starting": "Starting terminal...",
+    "historyTitle": "Terminal history",
+    "historyLoading": "Loading terminal history...",
+    "historyLoadFailed": "Failed to load terminal history.",
+    "reloadHistory": "Reload history",
+    "historyEmpty": "No terminal history available yet.",
+    "status": {
+      "not_started": "Not started",
+      "starting": "Starting",
+      "waiting": "Waiting",
+      "working": "Working",
+      "running": "Running",
+      "active": "Active",
+      "paused": "Paused",
+      "completed": "Completed",
+      "failed": "Failed",
+      "killed": "Killed",
+      "idle": "Idle",
+      "waiting_for_approval": "Awaiting Approval",
+      "stalled": "Stalled",
+      "unknown": "Unknown"
+    }
+  },
+  "workflowDebug": {
+    "loading": "Loading...",
+    "error": "Failed to load",
+    "back": "Back",
+    "statusLabel": "Status: {{status}}",
+    "start": "Start",
+    "pause": "Pause",
+    "stop": "Stop",
+    "confirmStop": "Are you sure you want to stop this workflow?",
+    "tabs": {
+      "pipeline": "Pipeline view",
+      "terminals": "Terminal debug"
+    }
+  },
+  "modeSwitch": {
+    "manual": "Manual Workflow",
+    "orchestrated": "Orchestrated Workspace"
+  },
+  "viewSwitcher": {
+    "kanban": "Kanban",
+    "pipeline": "Pipeline",
+    "debug": "Debug",
+    "selectWorkflowFirst": "Select a workflow first",
+    "settings": "Settings",
+    "workflowManagement": "Workflow Management",
+    "createWorkspace": "Create Workspace"
+  },
+  "sidebar": {
+    "title": "Workflows",
+    "loading": "Loading..."
+  },
+  "management": {
+    "title": "Workflows",
+    "description": "Manage multi-terminal workflows for parallel task execution",
+    "selectProject": "Select project",
+    "createProject": "Create Project",
+    "deleteProject": "Delete Project",
+    "deletingProject": "Deleting...",
+    "createWorkflow": "Create Workflow",
+    "backToWorkflows": "Back to Workflows",
+    "createWorkspace": "Create Workspace",
+    "loadingProjects": "Loading projects...",
+    "loadingWorkflows": "Loading workflows...",
+    "noProjectsTitle": "No Projects Found",
+    "noProjectsDescription": "Please create a project first in Settings -> Projects before creating workflows.",
+    "counts": {
+      "tasks_one": "{{count}} task",
+      "tasks_other": "{{count}} tasks",
+      "terminals_one": "{{count}} terminal",
+      "terminals_other": "{{count}} terminals"
+    },
+    "mode": {
+      "diy": "DIY",
+      "agent_planned": "Agent Planned"
+    },
+    "goalLabel": "Initial goal",
+    "actions": {
+      "prepare": "Prepare Workflow",
+      "preparing": "Preparing...",
+      "start": "Start Workflow",
+      "pause": "Pause",
+      "stop": "Stop",
+      "merge": "Merge Workflow",
+      "merging": "Merging...",
+      "delete": "Delete"
+    },
+    "dialogs": {
+      "deleteProjectTitle": "Delete Project",
+      "deleteProjectMessage": "Delete project \"{{name}}\"? This cannot be undone.",
+      "stopWorkflowTitle": "Stop Workflow",
+      "deleteWorkflowTitle": "Delete Workflow"
+    },
+    "toasts": {
+      "projectDeleted": "Project deleted",
+      "deleteProjectFailed": "Failed to delete project"
+    },
+    "errors": {
+      "noProjectSelected": "No project selected to create workflow",
+      "createWorkflowFailed": "Failed to create workflow"
+    }
+  },
+  "kanban": {
+    "columns": {
+      "pending": "Pending",
+      "running": "Running",
+      "review_pending": "Review",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "emptyTitle": "No tasks yet",
+    "emptyDescription": "This workflow does not have any task cards yet.",
+    "emptyDescriptionAgentPlanned": "Agent-planned workflows may start empty. Task cards will appear here when the orchestrator expands the execution graph.",
+    "selectWorkflow": "Select a workflow",
+    "loading": "Loading..."
+  },
+  "terminalActivity": {
+    "title": "Terminal Activity",
+    "active": "{{count}} active",
+    "selectWorkflow": "Select a workflow to view terminal activity.",
+    "loading": "Loading terminal activity...",
+    "noTerminalsYet": "No terminals yet.",
+    "noActive": "No active terminals.",
+    "defaultLabel": "Terminal",
+    "timeAgo": {
+      "seconds": "{{count}}s ago",
+      "minutes": "{{count}}m ago",
+      "hours": "{{count}}h ago"
+    }
+  }
+}

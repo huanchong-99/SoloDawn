@@ -69,10 +69,12 @@ const queryClient = new QueryClient({
       retry: shouldRetry,
     },
     mutations: {
-      retry: shouldRetry,
+      // G30-005: Mutations should not auto-retry — the user should decide
+      retry: false,
       onError: (error: Error) => {
-        // Global fallback: log mutation errors that aren't handled locally
+        // Global fallback: log + report mutation errors that aren't handled locally
         console.error('[QueryClient] Mutation error:', error.message);
+        Sentry.captureException(error, { tags: { layer: 'react-query-mutation' } });
       },
     },
   },

@@ -18,6 +18,8 @@ import {
   Trash2,
   Rocket,
   GitMerge,
+  AlertTriangle,
+  RotateCcw,
 } from 'lucide-react';
 import { Loader } from '@/components/ui/loader';
 import {
@@ -72,14 +74,19 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { useUserSystem } from '@/components/ConfigProvider';
 
+// Local type alias — mirrors the non-exported ConnectionStatus from wsStore
+type WsConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+
 interface WorkflowPromptQueueItem {
   id: string;
   detected: TerminalPromptDetectedPayload;
   decision: TerminalPromptDecisionPayload | null;
 }
 
-// G07-004: Reduce dedup window to 800ms to align closer to backend 500ms quiet window
-const PROMPT_DUPLICATE_WINDOW_MS = 800;
+// G07-004: Reduce dedup window to 600ms to align with backend 500ms quiet window
+const PROMPT_DUPLICATE_WINDOW_MS = 600;
+// G07-004: Reduce submitted history TTL to 600ms (was 60s) to match dedup window
+const PROMPT_SUBMITTED_HISTORY_TTL_MS = 600;
 const PROMPT_HISTORY_TTL_MS = 60_000;
 // G27-005: Auto-cleanup stale prompts that have not been responded to within 120s
 const PROMPT_QUEUE_TIMEOUT_MS = 120_000;
@@ -107,9 +114,9 @@ function getPromptQueueItemId(payload: TerminalPromptDetectedPayload): string {
   ].join('::');
 }
 
-function cleanupPromptHistory(history: Map<string, number>, now: number): void {
+function cleanupPromptHistory(history: Map<string, number>, now: number, ttl: number): void {
   for (const [key, timestamp] of history.entries()) {
-    if (now - timestamp > PROMPT_HISTORY_TTL_MS) {
+    if (now - timestamp > ttl) {
       history.delete(key);
     }
   }
@@ -125,9 +132,18 @@ function isSamePromptContext(
   if (prompt.terminalId !== decision.terminalId) {
     return false;
   }
-  // G07-007: Also match on sessionId when both are present
+  // G07-007: Match on sessionId when both are present
   if (prompt.sessionId && decision.sessionId) {
     return prompt.sessionId === decision.sessionId;
+  }
+  // G07-007: When sessionId is missing on either side, use promptKind as a
+  // supplementary matching dimension to avoid false positives across different
+  // prompt types on the same terminal.
+  if (!prompt.sessionId || !decision.sessionId) {
+    const decisionPromptKind = (decision as Record<string, unknown>).promptKind as string | undefined;
+    if (prompt.promptKind && decisionPromptKind) {
+      return prompt.promptKind === decisionPromptKind;
+    }
   }
   return true;
 }
@@ -596,13 +612,17 @@ function OrchestratorChatPanel({
   workflowStatus,
   orchestratorEnabled,
   executionMode,
+  wsConnectionStatus,
 }: Readonly<{
   workflowId: string;
   workflowStatus: string;
   orchestratorEnabled: boolean;
   executionMode?: string;
+  // G26-008: Pass WS connection status to disable send when disconnected
+  wsConnectionStatus: WsConnectionStatus;
 }>) {
   const { t } = useTranslation('workflow');
+  const queryClient = useQueryClient();
   const { config: userConfig } = useUserSystem();
   const [messageInput, setMessageInput] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -615,17 +635,52 @@ function OrchestratorChatPanel({
     [userConfig]
   );
   const canSendMessage = orchestratorEnabled && isRunning && hasConfiguredModels;
+  const isWsConnected = wsConnectionStatus === 'connected';
+
+  // G28-004: Replace 2s polling with WS-driven invalidation.
+  // Subscribe to orchestrator.decision and orchestrator.awakened events to
+  // invalidate the messages query only when the orchestrator actually produces
+  // new output, eliminating unnecessary network traffic.
+  const subscribeToWorkflow = useWsStore((s) => s.subscribeToWorkflow);
+
+  useEffect(() => {
+    if (!workflowId || !canSendMessage) return;
+
+    const orchestratorQueryKey = [
+      ...workflowKeys.byId(workflowId),
+      'orchestratorMessages',
+      null,
+      80,
+    ];
+
+    const invalidate = () => {
+      queryClient.invalidateQueries({ queryKey: orchestratorQueryKey });
+    };
+
+    const unsubs = [
+      subscribeToWorkflow(workflowId, 'orchestrator.decision', invalidate),
+      subscribeToWorkflow(workflowId, 'orchestrator.awakened', invalidate),
+      // Also refresh on terminal completions and status changes that may
+      // produce new orchestrator messages
+      subscribeToWorkflow(workflowId, 'terminal.completed', invalidate),
+      subscribeToWorkflow(workflowId, 'workflow.status_changed', invalidate),
+    ];
+
+    return () => {
+      unsubs.forEach((unsub) => unsub());
+    };
+  }, [workflowId, canSendMessage, queryClient, subscribeToWorkflow]);
 
   const {
     data: messages,
     isLoading,
     error,
     refetch,
-  // TODO: G28-004 — Replace 2s polling with WebSocket-driven invalidation
-  // (subscribe to orchestrator.decision / orchestrator.awakened events).
   } = useOrchestratorMessages(workflowId, {
     enabled: canSendMessage,
-    refetchInterval: canSendMessage ? 2000 : false,
+    // G28-004: No polling — rely on WS-driven invalidation above.
+    // Keep a long stale time so React Query does not refetch on window focus.
+    refetchInterval: false,
     limit: 80,
   });
   const submitOrchestratorChatMutation = useSubmitOrchestratorChat();
@@ -756,6 +811,7 @@ function OrchestratorChatPanel({
               }}
               disabled={
                 !canSendMessage ||
+                !isWsConnected ||
                 submitOrchestratorChatMutation.isPending ||
                 messageInput.trim().length === 0
               }
@@ -789,6 +845,9 @@ function SelectedWorkflowView({
   onDelete,
   runAsyncSafely,
   promptDialog,
+  wsConnectionStatus,
+  mergeProgress,
+  promptQueueCount,
 }: Readonly<{
   workflow: WorkflowDetailDto;
   mutations: {
@@ -808,6 +867,12 @@ function SelectedWorkflowView({
   onDelete: (workflowId: string) => Promise<void>;
   runAsyncSafely: (task: Promise<unknown>) => void;
   promptDialog: ReactNode;
+  // G26-008: WS connection status for warning banner + button disabling
+  wsConnectionStatus: WsConnectionStatus;
+  // G26-007: Merge progress tracking
+  mergeProgress: string | null;
+  // G07-011 / G27-008: Prompt queue count for indicator
+  promptQueueCount: number;
 }>) {
   const { t } = useTranslation('workflow');
   const actions = getWorkflowActions(workflow.status as WorkflowStatusEnum);
@@ -819,8 +884,22 @@ function SelectedWorkflowView({
     actions.canMerge && hasCompletedAllTasks && !mutations.mergePending;
   const executionModeLabel = getExecutionModeLabel(workflow.executionMode, t);
 
+  const isWsDisconnected = wsConnectionStatus === 'disconnected' || wsConnectionStatus === 'reconnecting';
+
   return (
     <div className="h-full min-h-0 overflow-auto space-y-6">
+      {/* G26-008: Warning banner when WS is disconnected */}
+      {isWsDisconnected && (
+        <div className="flex items-center gap-2 rounded border border-yellow-300 bg-yellow-50 px-4 py-2 text-sm text-yellow-800">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>
+            {t('management.wsDisconnected', {
+              defaultValue: 'Real-time connection lost. Updates may be delayed. Write operations are disabled until reconnected.',
+            })}
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <Button variant="outline" onClick={onBack}>
           {`\u2190 ${t('management.backToWorkflows')}`}
@@ -829,7 +908,11 @@ function SelectedWorkflowView({
           workflowId={workflow.id}
           actions={actions}
           hasCompletedAllTasks={hasCompletedAllTasks}
-          mutations={mutations}
+          mutations={{
+            ...mutations,
+            // G26-008: Disable all write operations when WS is disconnected
+            anyPending: mutations.anyPending || isWsDisconnected,
+          }}
           handlers={{
             onPrepare: (workflowId) => {
               runAsyncSafely(onPrepare(workflowId));
@@ -886,7 +969,29 @@ function SelectedWorkflowView({
         workflowStatus={workflow.status}
         orchestratorEnabled={workflow.orchestratorEnabled}
         executionMode={workflow.executionMode}
+        wsConnectionStatus={wsConnectionStatus}
       />
+
+      {/* G26-007: Merge progress indicator */}
+      {mergeProgress && (
+        <div className="flex items-center gap-2 rounded border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800">
+          <GitMerge className="w-4 h-4 shrink-0 animate-pulse" />
+          <span>{mergeProgress}</span>
+        </div>
+      )}
+
+      {/* G07-011 / G27-008: Prompt queue count indicator */}
+      {promptQueueCount > 1 && (
+        <div className="flex items-center gap-2 rounded border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>
+            {t('management.promptQueueCount', {
+              defaultValue: `${promptQueueCount} prompts waiting for response (showing 1/${promptQueueCount})`,
+              count: promptQueueCount,
+            })}
+          </span>
+        </div>
+      )}
 
       <PipelineView
         name={workflow.name}
@@ -1083,8 +1188,8 @@ export function Workflows() {
   const handleTerminalPromptDetected = useCallback(
     (payload: TerminalPromptDetectedPayload) => {
       const now = Date.now();
-      cleanupPromptHistory(promptDetectedHistoryRef.current, now);
-      cleanupPromptHistory(promptSubmittedHistoryRef.current, now);
+      cleanupPromptHistory(promptDetectedHistoryRef.current, now, PROMPT_HISTORY_TTL_MS);
+      cleanupPromptHistory(promptSubmittedHistoryRef.current, now, PROMPT_SUBMITTED_HISTORY_TTL_MS);
 
       const promptItemId = getPromptQueueItemId(payload);
       const lastDetectedAt = promptDetectedHistoryRef.current.get(promptItemId);
@@ -1098,7 +1203,7 @@ export function Workflows() {
       const lastSubmittedAt = promptSubmittedHistoryRef.current.get(promptItemId);
       if (
         lastSubmittedAt !== undefined &&
-        now - lastSubmittedAt < PROMPT_HISTORY_TTL_MS
+        now - lastSubmittedAt < PROMPT_SUBMITTED_HISTORY_TTL_MS
       ) {
         return;
       }
@@ -1226,12 +1331,39 @@ export function Workflows() {
     ]
   );
 
-  useWorkflowEvents(selectedWorkflowId, workflowEventHandlers);
+  const { connectionStatus: wsConnectionStatus } = useWorkflowEvents(selectedWorkflowId, workflowEventHandlers);
 
-  // TODO: G26-008 — Show a warning banner when the WebSocket connection is
-  // disconnected or reconnecting, so the user knows real-time updates are stale.
-  // Use useWsStore(s => s.getWorkflowConnectionStatus(selectedWorkflowId)) to
-  // detect 'disconnected' | 'reconnecting' states.
+  // Fetch workflow detail when selected (must be before merge progress effect)
+  const { data: selectedWorkflowDetail } = useWorkflow(
+    selectedWorkflowId || ''
+  );
+
+  // G26-007: Track merge progress via task status changes
+  const [mergeProgress, setMergeProgress] = useState<string | null>(null);
+
+  // G26-007: Compute merge progress from workflow tasks when status is 'merging'
+  useEffect(() => {
+    if (!selectedWorkflowDetail || selectedWorkflowDetail.status !== 'merging') {
+      setMergeProgress(null);
+      return;
+    }
+    const tasks = selectedWorkflowDetail.tasks ?? [];
+    const totalTasks = tasks.length;
+    if (totalTasks === 0) {
+      setMergeProgress(null);
+      return;
+    }
+    const mergedTasks = tasks.filter(
+      (task) => task.status === 'completed' || task.status === 'merged'
+    ).length;
+    setMergeProgress(
+      t('management.mergeProgress', {
+        defaultValue: `Merging (${mergedTasks}/${totalTasks} tasks)`,
+        merged: mergedTasks,
+        total: totalTasks,
+      })
+    );
+  }, [selectedWorkflowDetail, t]);
 
   // G26-004: Aggregate mutation pending flag to prevent quick successive clicks
   const isAnyMutationPending =
@@ -1245,8 +1377,8 @@ export function Workflows() {
 
   const activePrompt = useMemo(() => promptQueue[0] ?? null, [promptQueue]);
 
-  // G07-011 / G27-008: Prompt queue depth — expose for future queue count indicator in UI
-  // TODO: Display promptQueue.length in the WorkflowPromptDialog or as a badge on the prompt button
+  // G07-011 / G27-008: Prompt queue depth — displayed as indicator in SelectedWorkflowView
+  const promptQueueCount = promptQueue.length;
 
   // G27-005: Auto-cleanup stale prompts that have not been responded to within 120s
   useEffect(() => {
@@ -1328,10 +1460,10 @@ export function Workflows() {
   );
 
   // Helper to handle general prompt submission error
-  // TODO: G27-004 — Add retry logic for transient failures (e.g. network timeout).
-  // Consider exponential backoff with max 2 retries before surfacing the error.
+  // G27-004: Surface error with toast and allow retry via lastFailedPromptResponse ref
+  const lastFailedPromptResponseRef = useRef<{ prompt: WorkflowPromptQueueItem; response: string } | null>(null);
   const handlePromptSubmitError = useCallback(
-    (currentPrompt: WorkflowPromptQueueItem, error: unknown) => {
+    (currentPrompt: WorkflowPromptQueueItem, error: unknown, response?: string) => {
       promptSubmittedHistoryRef.current.delete(currentPrompt.id);
       // G30-012: Use i18n for user-facing error messages
       const message =
@@ -1341,8 +1473,18 @@ export function Workflows() {
               defaultValue: 'Failed to submit prompt response',
             });
       setPromptSubmitError(message);
+      // G27-004: Store failed response for retry
+      if (response !== undefined) {
+        lastFailedPromptResponseRef.current = { prompt: currentPrompt, response };
+      }
+      showToast(
+        t('management.errors.promptSubmitFailedToast', {
+          defaultValue: 'Prompt response failed. Use the retry button to try again.',
+        }),
+        'error'
+      );
     },
-    [t]
+    [t, showToast]
   );
 
   const handleSubmitPromptResponse = useCallback(
@@ -1363,7 +1505,7 @@ export function Workflows() {
       setPromptSubmitError(null);
 
       const now = Date.now();
-      cleanupPromptHistory(promptSubmittedHistoryRef.current, now);
+      cleanupPromptHistory(promptSubmittedHistoryRef.current, now, PROMPT_SUBMITTED_HISTORY_TTL_MS);
       promptSubmittedHistoryRef.current.set(currentPrompt.id, now);
 
       try {
@@ -1384,7 +1526,7 @@ export function Workflows() {
         );
 
         if (!handled) {
-          handlePromptSubmitError(currentPrompt, error);
+          handlePromptSubmitError(currentPrompt, error, response);
         }
       } finally {
         if (submittingPromptRef.current === currentPrompt.id) {
@@ -1425,22 +1567,43 @@ export function Workflows() {
     });
   }, [showToast, t]);
 
-  const promptDialog = activePrompt ? (
-    <WorkflowPromptDialog
-      prompt={activePrompt.detected}
-      decision={activePromptDecision}
-      submitError={promptSubmitError}
-      isSubmitting={isSubmittingActivePrompt}
-      onSubmit={(response) => {
-        runAsyncSafely(handleSubmitPromptResponse(response));
-      }}
-    />
-  ) : null;
+  // G27-004: Retry handler for failed prompt submissions
+  const handleRetryPromptSubmit = useCallback(() => {
+    const lastFailed = lastFailedPromptResponseRef.current;
+    if (!lastFailed) return;
+    lastFailedPromptResponseRef.current = null;
+    setPromptSubmitError(null);
+    runAsyncSafely(handleSubmitPromptResponse(lastFailed.response));
+  }, [handleSubmitPromptResponse, runAsyncSafely]);
 
-  // Fetch workflow detail when selected
-  const { data: selectedWorkflowDetail } = useWorkflow(
-    selectedWorkflowId || ''
-  );
+  const promptDialog = activePrompt ? (
+    <>
+      <WorkflowPromptDialog
+        prompt={activePrompt.detected}
+        decision={activePromptDecision}
+        submitError={promptSubmitError}
+        isSubmitting={isSubmittingActivePrompt}
+        onSubmit={(response) => {
+          runAsyncSafely(handleSubmitPromptResponse(response));
+        }}
+      />
+      {/* G27-004: Retry button shown when prompt submission failed */}
+      {promptSubmitError && lastFailedPromptResponseRef.current && (
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded border border-red-300 bg-red-50 px-4 py-2 shadow-lg">
+          <span className="text-sm text-red-800">{promptSubmitError}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRetryPromptSubmit}
+            disabled={isSubmittingActivePrompt}
+          >
+            <RotateCcw className="w-3 h-3 mr-1" />
+            {t('management.actions.retry', { defaultValue: 'Retry' })}
+          </Button>
+        </div>
+      )}
+    </>
+  ) : null;
 
   // Handle project change (preserve other URL params)
   const handleProjectChange = (newProjectId: string) => {
@@ -1641,6 +1804,9 @@ export function Workflows() {
         onDelete={handleDeleteWorkflow}
         runAsyncSafely={runAsyncSafely}
         promptDialog={promptDialog}
+        wsConnectionStatus={wsConnectionStatus}
+        mergeProgress={mergeProgress}
+        promptQueueCount={promptQueueCount}
       />
     );
   }

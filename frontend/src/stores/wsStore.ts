@@ -39,11 +39,18 @@ type ConnectionStatus =
   | 'connected'
   | 'reconnecting';
 
+// G30-007 / G30-008: Extended status used internally by WorkflowScopedConnection
+// to distinguish transport errors ('error') and permanent reconnect failure ('failed')
+// from a clean 'disconnected'. The public-facing connectionStatus / workflowConnectionStatus
+// maps these back to the base ConnectionStatus for backward compatibility, while
+// lastError carries the detail.
+type InternalConnectionStatus = ConnectionStatus | 'error' | 'failed';
+
 type MessageHandler = (payload: unknown) => void;
 
 interface WorkflowScopedConnection {
   ws: WebSocket | null;
-  status: ConnectionStatus;
+  status: InternalConnectionStatus;
   reconnectAttempts: number;
   heartbeatInterval: ReturnType<typeof setInterval> | null;
   reconnectTimeout: ReturnType<typeof setTimeout> | null;
@@ -64,6 +71,7 @@ interface WsState {
   connectionStatus: ConnectionStatus;
   workflowConnectionStatus: Record<string, ConnectionStatus>;
   lastHeartbeat: Date | null;
+  lastError: string | null;
   reconnectAttempts: number;
   currentWorkflowId: string | null;
 
@@ -600,6 +608,13 @@ function normalizeWorkflowEventPayload(
     case 'provider.recovered':
       console.warn('[wsStore] Provider recovered:', payload);
       return payload;
+    // G08-006: Log lagged events so consumers (e.g. useWorkflowEvents) can
+    // trigger invalidateQueries for a full state refresh.
+    case 'system.lagged': {
+      const skipped = isJsonRecord(payload) ? getNumberField(payload, 'skipped') : undefined;
+      console.warn(`[wsStore] system.lagged — ${skipped ?? '?'} messages skipped`);
+      return payload;
+    }
     default:
       return payload;
   }
@@ -648,7 +663,9 @@ function aggregateConnectionStatus(
   if (statuses.has('connecting')) {
     return 'connecting';
   }
-
+  // G30-007 / G30-008: Internal 'error' and 'failed' states are mapped to
+  // 'disconnected' for the public ConnectionStatus API. Consumers should
+  // check lastError for details on why the connection dropped.
   return 'disconnected';
 }
 
@@ -681,13 +698,20 @@ function aggregateReconnectAttempts(
   return attempts;
 }
 
+function internalToPublicStatus(status: InternalConnectionStatus): ConnectionStatus {
+  if (status === 'error' || status === 'failed') {
+    return 'disconnected';
+  }
+  return status;
+}
+
 function toWorkflowConnectionStatusRecord(
   workflowConnections: Map<string, WorkflowScopedConnection>
 ): Record<string, ConnectionStatus> {
   const record: Record<string, ConnectionStatus> = {};
 
   for (const [workflowId, connection] of workflowConnections.entries()) {
-    record[workflowId] = connection.status;
+    record[workflowId] = internalToPublicStatus(connection.status);
   }
 
   return record;
@@ -729,6 +753,7 @@ export const useWsStore = create<WsState>((set, get) => ({
   connectionStatus: 'disconnected',
   workflowConnectionStatus: {},
   lastHeartbeat: null,
+  lastError: null,
   reconnectAttempts: 0,
   currentWorkflowId: null,
 
@@ -749,7 +774,8 @@ export const useWsStore = create<WsState>((set, get) => ({
   _manualDisconnect: false,
 
   getWorkflowConnectionStatus: (workflowId: string) => {
-    return get()._workflowConnections.get(workflowId)?.status ?? 'disconnected';
+    const internal = get()._workflowConnections.get(workflowId)?.status ?? 'disconnected';
+    return internalToPublicStatus(internal);
   },
 
   subscribeToWorkflow: (
@@ -1084,6 +1110,8 @@ export const useWsStore = create<WsState>((set, get) => ({
     };
 
     // Helper: Handle max reconnect attempts exceeded
+    // G30-008: Set status to 'failed' (not 'disconnected') and expose lastError
+    // so consumers can distinguish "gave up reconnecting" from "intentionally closed".
     const handleMaxReconnectExceeded = (
       targetWorkflowId: string,
       ws: WebSocket,
@@ -1093,10 +1121,12 @@ export const useWsStore = create<WsState>((set, get) => ({
       const active = disconnectedConnections.get(targetWorkflowId);
       if (active?.ws !== ws) return;
 
+      const failedErrorMsg = `WebSocket reconnection failed after ${MAX_RECONNECT_ATTEMPTS} attempts`;
+
       disconnectedConnections.set(targetWorkflowId, {
         ...active,
         ws: null,
-        status: 'disconnected',
+        status: 'failed',
         heartbeatInterval: null,
         reconnectTimeout: null,
       });
@@ -1113,6 +1143,7 @@ export const useWsStore = create<WsState>((set, get) => ({
         connectionStatus: aggregateConnectionStatus(disconnectedConnections),
         lastHeartbeat: aggregateLastHeartbeat(disconnectedConnections),
         reconnectAttempts: aggregateReconnectAttempts(disconnectedConnections),
+        lastError: failedErrorMsg,
       });
 
       // Notify subscribers that reconnection has been exhausted
@@ -1220,20 +1251,23 @@ export const useWsStore = create<WsState>((set, get) => ({
       ws.onclose = handleWebSocketClose(targetWorkflowId, ws, isStale, openConnection);
       ws.onerror = () => {
         if (isStale()) return;
-        console.error(`[wsStore] WebSocket error on workflow "${targetWorkflowId}"`);
+        const errorMsg = `WebSocket error on workflow "${targetWorkflowId}"`;
+        console.error(`[wsStore] ${errorMsg}`);
 
-        // Update connection status to reflect the error
+        // G30-007: Update connection status to 'error' (not 'reconnecting')
+        // so consumers can distinguish transport errors from intentional reconnects.
         const errorConnections = new Map(get()._workflowConnections);
         const errConn = errorConnections.get(targetWorkflowId);
         if (errConn?.ws === ws) {
           errorConnections.set(targetWorkflowId, {
             ...errConn,
-            status: 'reconnecting',
+            status: 'error',
           });
           set({
             _workflowConnections: errorConnections,
             workflowConnectionStatus: toWorkflowConnectionStatusRecord(errorConnections),
             connectionStatus: aggregateConnectionStatus(errorConnections),
+            lastError: errorMsg,
           });
         }
       };
@@ -1322,10 +1356,17 @@ export const useWsStore = create<WsState>((set, get) => ({
       }
     }
 
+    // G12-003: Explicitly clear the old Map instances so any lingering
+    // references (e.g. closures from a not-yet-closed WS) see empty maps.
+    // Then replace with fresh Maps via set() for the store itself.
+    state._handlers.clear();
+    state._workflowHandlers.clear();
+
     set({
       connectionStatus: 'disconnected',
       workflowConnectionStatus: {},
       lastHeartbeat: null,
+      lastError: null,
       currentWorkflowId: null,
       _ws: null,
       _workflowConnections: new Map(),
@@ -1499,6 +1540,8 @@ export interface QualityGateResultPayload {
   newIssues: number;
   passed: boolean;
   summary: string;
+  /** G31-002: Optional commit hash associated with this quality gate run */
+  commitHash?: string;
 }
 
 export type TerminalPromptKind =
