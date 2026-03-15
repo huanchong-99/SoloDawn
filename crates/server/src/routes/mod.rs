@@ -6,6 +6,8 @@ use axum::{
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 pub use subscription_hub::SharedSubscriptionHub;
 
+use services::services::cli_health_monitor::SharedCliHealthMonitor;
+
 use crate::{DeploymentImpl, feishu_handle::SharedFeishuHandle, middleware::require_api_token};
 
 /// Build CORS layer based on environment configuration.
@@ -99,11 +101,11 @@ pub mod workflow_ws;
 pub mod workflows;
 pub mod workflows_dto;
 
-pub fn router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feishu_handle: SharedFeishuHandle) -> IntoMakeService<Router> {
-    build_router(deployment, hub, feishu_handle).into_make_service()
+pub fn router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feishu_handle: SharedFeishuHandle, cli_health_monitor: SharedCliHealthMonitor) -> IntoMakeService<Router> {
+    build_router(deployment, hub, feishu_handle, cli_health_monitor).into_make_service()
 }
 
-pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feishu_handle: SharedFeishuHandle) -> Router {
+pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feishu_handle: SharedFeishuHandle, cli_health_monitor: SharedCliHealthMonitor) -> Router {
     let outer_deployment = deployment.clone();
     // G32-015: Clone before moving into base_routes so we can also attach to outer router.
     let outer_feishu_handle = feishu_handle.clone();
@@ -132,8 +134,7 @@ pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feis
         .nest("/images", images::routes())
         .nest("/models", models::router())
         .nest("/cli_types", cli_types::cli_types_routes())
-        // CLI status SSE: requires SharedCliHealthMonitor Extension layer
-        // .nest("/cli_types", cli_status_sse::cli_status_sse_routes())
+        .nest("/cli_types", cli_status_sse::cli_status_sse_routes())
         .nest("/planning-drafts", planning_drafts::planning_draft_routes())
         .nest("/workflows", workflows::workflows_routes())
         .nest("/workflows", slash_commands::slash_commands_routes())
@@ -147,6 +148,7 @@ pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feis
         // WebSocket routes for workflow events (requires Extension layer for hub)
         .nest("/ws", workflow_ws::workflow_ws_routes())
         .layer(Extension(hub))
+        .layer(Extension(cli_health_monitor))
         .layer(Extension(feishu_handle))
         .layer(axum::middleware::from_fn(require_api_token))
         // G18-005: CORS configuration. In production, set GITCORTEX_CORS_ORIGINS

@@ -167,7 +167,8 @@ async fn main() -> Result<(), GitCortexError> {
         tracing::debug!("Feishu integration disabled (GITCORTEX_FEISHU_ENABLED not set)");
     }
 
-    let app_router = routes::router(deployment.clone(), subscription_hub, feishu_handle);
+    let cli_health_monitor = deployment.cli_health_monitor().clone();
+    let app_router = routes::router(deployment.clone(), subscription_hub, feishu_handle, cli_health_monitor);
 
     let port = std::env::var("BACKEND_PORT")
         .or_else(|_| std::env::var("PORT"))

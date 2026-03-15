@@ -1,5 +1,6 @@
 //! CLI Type API Routes
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
@@ -18,7 +19,9 @@ use deployment::Deployment;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use services::services::cli_installer::{CliInstaller, InstallOutputLine as ServiceInstallOutputLine};
 use services::services::terminal::detector::CliDetector;
+use tokio::sync::broadcast;
 
 use crate::{DeploymentImpl, error::ApiError};
 
@@ -87,8 +90,21 @@ fn default_limit() -> i64 {
     20
 }
 
-// TODO: Import from crates/services when available
-// use services::services::cli_installer::CliInstaller;
+/// Shared registry of active install job output channels.
+/// Maps job_id -> broadcast sender for streaming install output to WebSocket clients.
+type InstallJobRegistry = Arc<tokio::sync::RwLock<HashMap<String, broadcast::Sender<String>>>>;
+
+/// Lazily-initialized global install job registry and CliInstaller.
+static INSTALL_REGISTRY: std::sync::OnceLock<InstallJobRegistry> = std::sync::OnceLock::new();
+static CLI_INSTALLER: std::sync::OnceLock<CliInstaller> = std::sync::OnceLock::new();
+
+fn get_install_registry() -> &'static InstallJobRegistry {
+    INSTALL_REGISTRY.get_or_init(|| Arc::new(tokio::sync::RwLock::new(HashMap::new())))
+}
+
+fn get_cli_installer() -> &'static CliInstaller {
+    CLI_INSTALLER.get_or_init(CliInstaller::new)
+}
 
 // ---------------------------------------------------------------------------
 // Router
@@ -197,35 +213,71 @@ async fn install_cli(
     //   ).await?;
 
     // Spawn background installation task
-    let bg_cli_type_id = cli_type_id.clone();
+    let bg_cli_name = cli_type.name.clone();
     let bg_job_id = job_id.clone();
-    let bg_deployment = deployment.clone();
     tokio::spawn(async move {
         tracing::info!(
             job_id = %bg_job_id,
-            cli_type_id = %bg_cli_type_id,
+            cli_name = %bg_cli_name,
             "Background CLI install task started"
         );
 
-        // TODO: Use CliInstaller from crates/services when available:
-        //   let installer = CliInstaller::new(bg_deployment.db().clone());
-        //   let result = installer.install(&bg_cli_type_id).await;
-        //   match result {
-        //       Ok(output) => {
-        //           CliInstallHistory::update_completed(
-        //               &bg_deployment.db().pool, &bg_job_id,
-        //               0, &output,
-        //           ).await.ok();
-        //       }
-        //       Err(e) => {
-        //           CliInstallHistory::update_failed(
-        //               &bg_deployment.db().pool, &bg_job_id,
-        //               &e.to_string(),
-        //           ).await.ok();
-        //       }
-        //   }
+        let (tx, _) = broadcast::channel::<String>(256);
+        {
+            let mut registry = get_install_registry().write().await;
+            registry.insert(bg_job_id.clone(), tx.clone());
+        }
 
-        let _ = (bg_deployment, bg_cli_type_id, bg_job_id);
+        match get_cli_installer().install_cli(&bg_cli_name).await {
+            Ok(mut stream) => {
+                while let Some(line) = stream.receiver.recv().await {
+                    let msg = match &line {
+                        ServiceInstallOutputLine::Stdout(s) => serde_json::json!({
+                            "type": "stdout",
+                            "content": s,
+                            "timestamp": chrono::Utc::now().timestamp_millis(),
+                        }),
+                        ServiceInstallOutputLine::Stderr(s) => serde_json::json!({
+                            "type": "stderr",
+                            "content": s,
+                            "timestamp": chrono::Utc::now().timestamp_millis(),
+                        }),
+                        ServiceInstallOutputLine::Completed { exit_code } => serde_json::json!({
+                            "type": "completed",
+                            "content": format!("Process exited with code {exit_code}"),
+                            "exit_code": exit_code,
+                            "timestamp": chrono::Utc::now().timestamp_millis(),
+                        }),
+                        ServiceInstallOutputLine::Error(e) => serde_json::json!({
+                            "type": "error",
+                            "content": e,
+                            "timestamp": chrono::Utc::now().timestamp_millis(),
+                        }),
+                    };
+                    if let Ok(json_str) = serde_json::to_string(&msg) {
+                        let _ = tx.send(json_str);
+                    }
+                }
+            }
+            Err(e) => {
+                let msg = serde_json::json!({
+                    "type": "error",
+                    "content": e.to_string(),
+                    "timestamp": chrono::Utc::now().timestamp_millis(),
+                });
+                if let Ok(json_str) = serde_json::to_string(&msg) {
+                    let _ = tx.send(json_str);
+                }
+            }
+        }
+
+        // Clean up registry
+        {
+            let mut registry = get_install_registry().write().await;
+            registry.remove(&bg_job_id);
+        }
+
+        tracing::info!(job_id = %bg_job_id, "Background CLI install task completed");
     });
 
     Ok((
@@ -247,7 +299,7 @@ async fn uninstall_cli(
     tracing::info!(cli_type_id = %cli_type_id, "Starting CLI uninstall");
 
     // Validate cli_type_id exists
-    let _cli_type = CliTypeModel::find_by_id(&deployment.db().pool, &cli_type_id)
+    let cli_type = CliTypeModel::find_by_id(&deployment.db().pool, &cli_type_id)
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("CLI type not found: {cli_type_id}")))?;
 
@@ -260,22 +312,70 @@ async fn uninstall_cli(
     // TODO: Create a CliInstallHistory record with action="uninstall", status="running"
 
     // Spawn background uninstall task
-    let bg_cli_type_id = cli_type_id.clone();
+    let bg_cli_name = cli_type.name.clone();
     let bg_job_id = job_id.clone();
-    let bg_deployment = deployment.clone();
     tokio::spawn(async move {
         tracing::info!(
             job_id = %bg_job_id,
-            cli_type_id = %bg_cli_type_id,
+            cli_name = %bg_cli_name,
             "Background CLI uninstall task started"
         );
 
-        // TODO: Use CliInstaller from crates/services when available:
-        //   let installer = CliInstaller::new(bg_deployment.db().clone());
-        //   let result = installer.uninstall(&bg_cli_type_id).await;
-        //   Update CliInstallHistory on completion/failure.
+        let (tx, _) = broadcast::channel::<String>(256);
+        {
+            let mut registry = get_install_registry().write().await;
+            registry.insert(bg_job_id.clone(), tx.clone());
+        }
 
-        let _ = (bg_deployment, bg_cli_type_id, bg_job_id);
+        match get_cli_installer().uninstall_cli(&bg_cli_name).await {
+            Ok(mut stream) => {
+                while let Some(line) = stream.receiver.recv().await {
+                    let msg = match &line {
+                        ServiceInstallOutputLine::Stdout(s) => serde_json::json!({
+                            "type": "stdout",
+                            "content": s,
+                            "timestamp": chrono::Utc::now().timestamp_millis(),
+                        }),
+                        ServiceInstallOutputLine::Stderr(s) => serde_json::json!({
+                            "type": "stderr",
+                            "content": s,
+                            "timestamp": chrono::Utc::now().timestamp_millis(),
+                        }),
+                        ServiceInstallOutputLine::Completed { exit_code } => serde_json::json!({
+                            "type": "completed",
+                            "content": format!("Process exited with code {exit_code}"),
+                            "exit_code": exit_code,
+                            "timestamp": chrono::Utc::now().timestamp_millis(),
+                        }),
+                        ServiceInstallOutputLine::Error(e) => serde_json::json!({
+                            "type": "error",
+                            "content": e,
+                            "timestamp": chrono::Utc::now().timestamp_millis(),
+                        }),
+                    };
+                    if let Ok(json_str) = serde_json::to_string(&msg) {
+                        let _ = tx.send(json_str);
+                    }
+                }
+            }
+            Err(e) => {
+                let msg = serde_json::json!({
+                    "type": "error",
+                    "content": e.to_string(),
+                    "timestamp": chrono::Utc::now().timestamp_millis(),
+                });
+                if let Ok(json_str) = serde_json::to_string(&msg) {
+                    let _ = tx.send(json_str);
+                }
+            }
+        }
+
+        {
+            let mut registry = get_install_registry().write().await;
+            registry.remove(&bg_job_id);
+        }
+
+        tracing::info!(job_id = %bg_job_id, "Background CLI uninstall task completed");
     });
 
     Ok((
@@ -429,7 +529,7 @@ async fn install_progress_ws(
 /// Handle the WebSocket connection for streaming install progress.
 async fn handle_install_progress_ws(
     socket: WebSocket,
-    deployment: DeploymentImpl,
+    _deployment: DeploymentImpl,
     cli_type_id: String,
     job_id: String,
 ) {
@@ -441,49 +541,52 @@ async fn handle_install_progress_ws(
         "Install progress WebSocket connected"
     );
 
-    // TODO: Subscribe to install output for the given job_id.
-    // When CliInstaller is available, it should expose a broadcast channel or
-    // similar mechanism for streaming output lines. Example:
-    //
-    //   let mut rx = CliInstaller::subscribe_output(&job_id);
-    //   loop {
-    //       tokio::select! {
-    //           Some(line) = rx.recv() => {
-    //               let msg = serde_json::to_string(&line).unwrap();
-    //               if sender.send(Message::Text(msg.into())).await.is_err() {
-    //                   break;
-    //               }
-    //           }
-    //           Some(msg) = receiver.next() => {
-    //               match msg {
-    //                   Ok(Message::Close(_)) | Err(_) => break,
-    //                   _ => {} // ignore other client messages
-    //               }
-    //           }
-    //           else => break,
-    //       }
-    //   }
+    // Try to subscribe to the job's broadcast channel
+    let mut rx = {
+        let registry = get_install_registry().read().await;
+        match registry.get(&job_id) {
+            Some(tx) => tx.subscribe(),
+            None => {
+                // Job not found or already completed
+                let msg = serde_json::json!({
+                    "type": "error",
+                    "content": format!("No active install job found for job_id: {job_id}"),
+                    "timestamp": chrono::Utc::now().timestamp_millis(),
+                });
+                if let Ok(json_str) = serde_json::to_string(&msg) {
+                    let _ = sender.send(Message::Text(json_str.into())).await;
+                }
+                return;
+            }
+        }
+    };
 
-    // Placeholder: send a status message and close
-    let status_msg = json!({
-        "type": "status",
-        "job_id": job_id,
-        "cli_type_id": cli_type_id,
-        "message": "Install progress streaming not yet implemented"
-    });
-
-    if let Ok(msg_text) = serde_json::to_string(&status_msg) {
-        let _ = sender.send(Message::Text(msg_text.into())).await;
-    }
-
-    // Wait for client close or drop
-    while let Some(Ok(msg)) = receiver.next().await {
-        if matches!(msg, Message::Close(_)) {
-            break;
+    loop {
+        tokio::select! {
+            result = rx.recv() => {
+                match result {
+                    Ok(msg) => {
+                        if sender.send(Message::Text(msg.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(skipped = n, "WebSocket client lagged");
+                    }
+                }
+            }
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Err(_)) => break,
+                    _ => {}
+                }
+            }
         }
     }
-
-    let _ = deployment;
 
     tracing::info!(
         job_id = %job_id,

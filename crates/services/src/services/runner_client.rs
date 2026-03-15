@@ -165,29 +165,44 @@ impl RunnerClient for LocalRunner {
 // RemoteRunner
 // ============================================================================
 
-/// gRPC client stub for a remote runner process.
-///
-/// All methods currently return an error since the proto is not yet compiled.
-// TODO: Connect to gRPC RunnerService when proto is compiled
-#[derive(Debug, Clone)]
+mod runner_proto {
+    tonic::include_proto!("gitcortex.runner");
+}
+
+use runner_proto::runner_service_client::RunnerServiceClient;
+
+/// gRPC client for a remote runner process.
+#[derive(Clone)]
 pub struct RemoteRunner {
     addr: String,
+    client: Arc<tokio::sync::RwLock<Option<RunnerServiceClient<tonic::transport::Channel>>>>,
+}
+
+impl std::fmt::Debug for RemoteRunner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteRunner")
+            .field("addr", &self.addr)
+            .finish()
+    }
 }
 
 impl RemoteRunner {
     /// Creates a new `RemoteRunner` targeting the given address.
-    ///
-    /// Does not establish a connection; call `connect` to initialize the gRPC channel.
+    /// Does not establish a connection until the first RPC call.
     pub fn new(addr: impl Into<String>) -> Self {
-        Self { addr: addr.into() }
+        Self {
+            addr: addr.into(),
+            client: Arc::new(tokio::sync::RwLock::new(None)),
+        }
     }
 
-    /// Attempts to connect to the remote runner gRPC service.
-    // TODO: Connect to gRPC RunnerService when proto is compiled
+    /// Connects to the remote runner gRPC service.
     pub async fn connect(addr: &str) -> Result<Self> {
-        tracing::info!(addr = %addr, "RemoteRunner created (gRPC not yet connected)");
+        let client = RunnerServiceClient::connect(addr.to_string()).await?;
+        tracing::info!(addr = %addr, "RemoteRunner connected via gRPC");
         Ok(Self {
             addr: addr.to_string(),
+            client: Arc::new(tokio::sync::RwLock::new(Some(client))),
         })
     }
 
@@ -195,32 +210,105 @@ impl RemoteRunner {
     pub fn addr(&self) -> &str {
         &self.addr
     }
+
+    /// Ensure the gRPC client is connected, lazily establishing the connection.
+    async fn get_client(&self) -> Result<RunnerServiceClient<tonic::transport::Channel>> {
+        {
+            let guard = self.client.read().await;
+            if let Some(client) = guard.as_ref() {
+                return Ok(client.clone());
+            }
+        }
+        let mut guard = self.client.write().await;
+        if let Some(client) = guard.as_ref() {
+            return Ok(client.clone());
+        }
+        let client = RunnerServiceClient::connect(self.addr.clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to connect to remote runner at {}: {e}", self.addr))?;
+        tracing::info!(addr = %self.addr, "RemoteRunner lazily connected via gRPC");
+        *guard = Some(client.clone());
+        Ok(client)
+    }
 }
 
 #[async_trait]
 impl RunnerClient for RemoteRunner {
-    async fn spawn_terminal(&self, _config: TerminalSpawnConfig) -> Result<SpawnResult> {
-        bail!("Remote runner not yet connected (addr={})", self.addr)
+    async fn spawn_terminal(&self, config: TerminalSpawnConfig) -> Result<SpawnResult> {
+        let mut client = self.get_client().await?;
+        let request = tonic::Request::new(runner_proto::SpawnTerminalRequest {
+            terminal_id: config.terminal_id,
+            command: config.command,
+            args: config.args,
+            working_dir: config.working_dir,
+            env_set: config.env_set,
+            env_unset: config.env_unset,
+            cols: config.cols,
+            rows: config.rows,
+        });
+        let response = client.spawn_terminal(request).await?.into_inner();
+        if !response.success {
+            bail!("Remote spawn_terminal failed: {}", response.error);
+        }
+        Ok(SpawnResult { pid: response.pid })
     }
 
-    async fn kill_terminal(&self, _terminal_id: &str) -> Result<()> {
-        bail!("Remote runner not yet connected (addr={})", self.addr)
+    async fn kill_terminal(&self, terminal_id: &str) -> Result<()> {
+        let mut client = self.get_client().await?;
+        let request = tonic::Request::new(runner_proto::KillTerminalRequest {
+            terminal_id: terminal_id.to_string(),
+        });
+        let response = client.kill_terminal(request).await?.into_inner();
+        if !response.success {
+            bail!("Remote kill_terminal failed for {terminal_id}");
+        }
+        Ok(())
     }
 
-    async fn is_running(&self, _terminal_id: &str) -> Result<bool> {
-        bail!("Remote runner not yet connected (addr={})", self.addr)
+    async fn is_running(&self, terminal_id: &str) -> Result<bool> {
+        let mut client = self.get_client().await?;
+        let request = tonic::Request::new(runner_proto::IsRunningRequest {
+            terminal_id: terminal_id.to_string(),
+        });
+        let response = client.is_running(request).await?.into_inner();
+        Ok(response.running)
     }
 
-    async fn write_input(&self, _terminal_id: &str, _data: &[u8]) -> Result<()> {
-        bail!("Remote runner not yet connected (addr={})", self.addr)
+    async fn write_input(&self, terminal_id: &str, data: &[u8]) -> Result<()> {
+        let mut client = self.get_client().await?;
+        let request = tonic::Request::new(runner_proto::WriteInputRequest {
+            terminal_id: terminal_id.to_string(),
+            data: data.to_vec(),
+        });
+        let response = client.write_input(request).await?.into_inner();
+        if !response.success {
+            bail!("Remote write_input failed for {terminal_id}");
+        }
+        Ok(())
     }
 
-    async fn resize_terminal(&self, _terminal_id: &str, _cols: u32, _rows: u32) -> Result<()> {
-        bail!("Remote runner not yet connected (addr={})", self.addr)
+    async fn resize_terminal(&self, terminal_id: &str, cols: u32, rows: u32) -> Result<()> {
+        let mut client = self.get_client().await?;
+        let request = tonic::Request::new(runner_proto::ResizeRequest {
+            terminal_id: terminal_id.to_string(),
+            cols,
+            rows,
+        });
+        let response = client.resize_terminal(request).await?.into_inner();
+        if !response.success {
+            bail!("Remote resize_terminal failed for {terminal_id}");
+        }
+        Ok(())
     }
 
     async fn health_check(&self) -> Result<RunnerHealth> {
-        bail!("Remote runner not yet connected (addr={})", self.addr)
+        let mut client = self.get_client().await?;
+        let request = tonic::Request::new(runner_proto::HealthRequest {});
+        let response = client.health(request).await?.into_inner();
+        Ok(RunnerHealth {
+            healthy: response.healthy,
+            active_terminals: response.active_terminals,
+        })
     }
 }
 
@@ -304,7 +392,7 @@ impl RunnerClientImpl {
                     );
                     "http://runner:50051".to_string()
                 });
-                tracing::info!(addr = %addr, "Runner mode: remote (gRPC stub)");
+                tracing::info!(addr = %addr, "Runner mode: remote (gRPC)");
                 Ok(Self::Remote(RemoteRunner::new(addr)))
             }
             other => {

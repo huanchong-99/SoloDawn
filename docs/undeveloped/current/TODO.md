@@ -10,20 +10,22 @@
 - 全量代码审计（36组6轮）已完成 ✅ — 报告归档至 `docs/developed/issues/2026-03-14-full-code-audit-master.md`
 - 审计修复全部完成 ✅ — 373 个 G-ID 全部修复，63 个文件，~5681 行新增 / ~976 行删除
 - P1/P2 生产就绪修复已完成 ✅ — 11 项关键问题已修复
-- BACKLOG-002 Runner 容器分离 ✅ — 架构实现完成（详见下方剩余 stub）
-- BACKLOG-003 CLI 安装状态 API 增强 ✅ — 架构实现完成（详见下方剩余 stub）
+- BACKLOG-002 Runner 容器分离 ✅ — 100% 完成（RemoteRunner gRPC client 已实现）
+- BACKLOG-003 CLI 安装状态 API 增强 ✅ — 100% 完成（WebSocket 进度流、SSE 路由已启用）
 - CI 状态：✅ 全绿（Basic Checks / Quality Gate / Docker Build 均 success）
 - SonarCloud：0 bugs, 0 vulnerabilities, 0 code smells, 0 security hotspots — A rating
 
-## 剩余收尾项（Stub / 注释代码）
+## 已完成收尾项
 
-以下为已完成功能中遗留的少量 stub，不影响现有功能运行：
+以下原遗留 stub 已全部实现（2026-03-15）：
 
-| 项目 | 说明 | 优先级 |
-|------|------|--------|
-| RemoteRunner gRPC client | `crates/services/src/services/runner_client.rs` 中 `RemoteRunner` 为 placeholder，所有方法返回 `bail!`。需集成 tonic gRPC client 代码 | 低 — 仅远程 Runner 模式需要 |
-| WebSocket 安装进度 | `crates/server/src/routes/cli_types.rs` 中 `install_progress_ws()` 为 skeleton，需订阅 broadcast channel | 低 — 安装仍可通过 REST 轮询 |
-| SSE 路由未启用 | `crates/server/src/routes/mod.rs` 中 SSE 路由被注释，需添加 `SharedCliHealthMonitor` Extension 层后启用 | 低 — 手动刷新仍可用 |
+| 项目 | 完成状态 |
+|------|---------|
+| RemoteRunner gRPC client | ✅ 已实现 — tonic gRPC 客户端，支持懒连接，完整 6 个 RPC 方法 |
+| WebSocket 安装进度 | ✅ 已实现 — CliInstaller 集成 + broadcast channel + 实时 WebSocket 推送 |
+| SSE 路由已启用 | ✅ 已实现 — SharedCliHealthMonitor Extension 层 + SSE 端点已激活 |
+
+**当前无未完成任务。项目开发已 100% 完成。**
 
 ## 文档入口
 

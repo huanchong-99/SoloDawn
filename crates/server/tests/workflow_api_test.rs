@@ -12,11 +12,17 @@ use db::models::{
     project::{CreateProject, Project},
 };
 use server::{Deployment, DeploymentImpl, routes::subscription_hub::SubscriptionHub};
+use services::services::cli_health_monitor::{CliHealthMonitor, SharedCliHealthMonitor};
 use uuid::Uuid;
 
 /// Helper: Create a test subscription hub
 fn create_test_hub() -> server::routes::SharedSubscriptionHub {
     Arc::new(SubscriptionHub::default())
+}
+
+/// Helper: Create a test CLI health monitor
+fn create_test_cli_health_monitor() -> SharedCliHealthMonitor {
+    Arc::new(CliHealthMonitor::new(0))
 }
 
 /// Helper: Setup test environment
@@ -142,7 +148,7 @@ async fn test_start_workflow_requires_ready_status() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle());
+    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle(), create_test_cli_health_monitor());
 
     let request = Request::builder()
         .method("POST")
@@ -226,7 +232,7 @@ async fn test_start_workflow_without_orchestrator() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle());
+    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle(), create_test_cli_health_monitor());
 
     let request = Request::builder()
         .method("POST")

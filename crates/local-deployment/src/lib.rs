@@ -22,6 +22,7 @@ use services::services::{
     analytics::{AnalyticsConfig, AnalyticsContext, AnalyticsService, generate_user_id},
     approvals::Approvals,
     auth::AuthContext,
+    cli_health_monitor::{CliHealthMonitor, SharedCliHealthMonitor},
     config::{Config, load_config_from_file, save_config_to_file},
     container::ContainerService,
     events::EventService,
@@ -73,6 +74,7 @@ pub struct LocalDeployment {
     runner_client: RunnerClientImpl,
     message_bus: SharedMessageBus,
     prompt_watcher: PromptWatcher,
+    cli_health_monitor: SharedCliHealthMonitor,
 }
 
 #[derive(Debug, Clone)]
@@ -227,6 +229,10 @@ impl Deployment for LocalDeployment {
             }
         }
 
+        // Create CLI health monitor
+        let cli_health_monitor: SharedCliHealthMonitor = Arc::new(CliHealthMonitor::new(0));
+        cli_health_monitor.start(Arc::new(db.clone()));
+
         let deployment = Self {
             config,
             user_id,
@@ -250,6 +256,7 @@ impl Deployment for LocalDeployment {
             process_manager,
             message_bus,
             prompt_watcher,
+            cli_health_monitor,
         };
 
         Ok(deployment)
@@ -337,6 +344,11 @@ impl LocalDeployment {
     /// Get the prompt watcher for terminal prompt detection.
     pub fn prompt_watcher(&self) -> &PromptWatcher {
         &self.prompt_watcher
+    }
+
+    /// Get the CLI health monitor for SSE streaming.
+    pub fn cli_health_monitor(&self) -> &SharedCliHealthMonitor {
+        &self.cli_health_monitor
     }
 
     /// Reconcile terminal statuses on startup
