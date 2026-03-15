@@ -186,32 +186,25 @@ impl RunnerService for RunnerGrpcService {
         let (tx, rx) = tokio::sync::mpsc::channel(128);
 
         tokio::spawn(async move {
-            loop {
-                match subscription.recv().await {
-                    Ok(chunk) => {
-                        let timestamp = chunk
-                            .timestamp
-                            .duration_since(UNIX_EPOCH)
-                            .map(|d| d.as_millis() as i64)
-                            .unwrap_or(0);
+            while let Ok(chunk) = subscription.recv().await {
+                let timestamp = chunk
+                    .timestamp
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
 
-                        let output_chunk = TerminalOutputChunk {
-                            seq: chunk.seq,
-                            data: chunk.text.into_bytes(),
-                            timestamp,
-                        };
+                let output_chunk = TerminalOutputChunk {
+                    seq: chunk.seq,
+                    data: chunk.text.into_bytes(),
+                    timestamp,
+                };
 
-                        if tx.send(Ok(output_chunk)).await.is_err() {
-                            // Client disconnected
-                            break;
-                        }
-                    }
-                    Err(_) => {
-                        // Broadcast channel closed (terminal exited)
-                        break;
-                    }
+                if tx.send(Ok(output_chunk)).await.is_err() {
+                    // Client disconnected
+                    break;
                 }
             }
+            // Broadcast channel closed (terminal exited)
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
