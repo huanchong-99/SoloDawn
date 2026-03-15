@@ -61,6 +61,7 @@ secrecy = "0.10.3"
 moka = { version = "0.12", features = ["future"] }
 handlebars = "6.0"
 portable-pty = "0.8"
+redis = { version = "0.27", features = ["tokio-comp", "aio"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.29"

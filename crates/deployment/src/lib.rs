@@ -43,6 +43,7 @@ use services::services::{
     project::ProjectService,
     queued_message::QueuedMessageService,
     repo::RepoService,
+    runner_client::RunnerClientImpl,
     terminal::process::ProcessManager,
     worktree_manager::WorktreeError,
 };
@@ -124,6 +125,8 @@ pub trait Deployment: Clone + Send + Sync + 'static {
     fn orchestrator_runtime(&self) -> &OrchestratorRuntime;
 
     fn process_manager(&self) -> &Arc<ProcessManager>;
+
+    fn runner_client(&self) -> &RunnerClientImpl;
 
     async fn update_sentry_scope(&self) -> Result<(), DeploymentError> {
         let user_id = self.user_id();

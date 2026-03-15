@@ -27,6 +27,61 @@ use uuid::Uuid;
 
 use crate::{DeploymentImpl, error::ApiError};
 
+// BACKLOG-002: Runner container separation
+// ============================================================================
+// RunnerClient Terminal Spawn Configuration
+// ============================================================================
+
+/// Terminal spawn configuration for the RunnerClient abstraction layer.
+///
+/// This struct bridges the existing `SpawnCommand` format (used by ProcessManager)
+/// to the RunnerClient interface. When RunnerClient is fully integrated, terminal
+/// spawn requests will be sent via gRPC using this configuration.
+///
+/// Import path (future): `crate::services::runner_client::TerminalSpawnConfig`
+// BACKLOG-002: Runner container separation
+#[allow(dead_code)]
+pub(crate) struct TerminalSpawnConfig {
+    /// Unique terminal identifier.
+    pub terminal_id: String,
+    /// Command to execute (e.g., "claude", "codex", "gemini").
+    pub command: String,
+    /// Command-line arguments.
+    pub args: Vec<String>,
+    /// Working directory for the child process.
+    pub working_dir: std::path::PathBuf,
+    /// Environment variables to set on the child process.
+    pub env_set: std::collections::HashMap<String, String>,
+    /// Environment variable keys to remove from the inherited environment.
+    pub env_unset: Vec<String>,
+    /// Terminal width in columns.
+    pub cols: u16,
+    /// Terminal height in rows.
+    pub rows: u16,
+}
+
+/// Build TerminalSpawnConfig from CCSwitchService output.
+/// This bridges the existing SpawnCommand format to the RunnerClient interface.
+// BACKLOG-002: Runner container separation
+#[allow(dead_code)]
+fn spawn_command_to_runner_config(
+    terminal_id: &str,
+    spawn_config: &services::services::terminal::process::SpawnCommand,
+    cols: u16,
+    rows: u16,
+) -> TerminalSpawnConfig {
+    TerminalSpawnConfig {
+        terminal_id: terminal_id.to_string(),
+        command: spawn_config.command.clone(),
+        args: spawn_config.args.clone(),
+        working_dir: spawn_config.working_dir.clone(),
+        env_set: spawn_config.env.set.clone(),
+        env_unset: spawn_config.env.unset.clone(),
+        cols,
+        rows,
+    }
+}
+
 async fn broadcast_terminal_status(
     deployment: &DeploymentImpl,
     terminal: &Terminal,
@@ -309,6 +364,12 @@ pub async fn start_terminal(
     };
 
     // Spawn PTY process with configuration
+    // RUNNER_CLIENT_MIGRATION: When RunnerClient is integrated, replace:
+    //   deployment.process_manager().spawn_pty_with_config(&id, &spawn_config, cols, rows)
+    // with:
+    //   deployment.runner_client().spawn_terminal(TerminalSpawnConfig { ... })
+    // The TerminalSpawnConfig is built from CCSwitchService::build_launch_config() output.
+    // Use spawn_command_to_runner_config() to convert SpawnCommand -> TerminalSpawnConfig.
     let handle = match deployment
         .process_manager()
         .spawn_pty_with_config(&id, &spawn_config, DEFAULT_COLS, DEFAULT_ROWS)
@@ -581,6 +642,7 @@ pub async fn stop_terminal(
             ))
         })?;
     // Best-effort kill in case the process is still running
+    // RUNNER_CLIENT_MIGRATION: Replace process_manager().kill_terminal() with runner_client().kill_terminal()
     if let Err(e) = deployment.process_manager().kill_terminal(&id).await {
         tracing::warn!("Failed to kill terminal {}: {}", id, e);
     }
@@ -622,6 +684,7 @@ pub async fn close_terminal(
         )));
     }
 
+    // RUNNER_CLIENT_MIGRATION: Replace process_manager().kill_terminal() with runner_client().kill_terminal()
     if let Err(e) = deployment.process_manager().kill_terminal(&id).await {
         tracing::warn!("Failed to kill terminal {} during close: {}", id, e);
     }

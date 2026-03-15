@@ -1,0 +1,153 @@
+# syntax=docker/dockerfile:1.7
+
+# Dockerfile.server — Server-only image (API + frontend)
+# No AI CLI tooling or Node.js in runtime; Node is only used for the frontend build stage.
+
+ARG GITCORTEX_BUILD_NETWORK_PROFILE=official
+ARG PNPM_VERSION=10.13.1
+ARG RUST_TOOLCHAIN=nightly-2025-12-04
+ARG NODE_MAJOR=22
+
+# ============================================================
+# Stage 1: Frontend build
+# ============================================================
+FROM node:${NODE_MAJOR}-slim AS frontend-builder
+ARG GITCORTEX_BUILD_NETWORK_PROFILE
+ARG PNPM_VERSION
+
+WORKDIR /build
+
+# Enable corepack pnpm
+RUN corepack enable && corepack prepare "pnpm@${PNPM_VERSION}" --activate
+
+# China mirror for npm/pnpm
+RUN set -eux; \
+    if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+        npm config --global set registry https://registry.npmmirror.com; \
+        pnpm config set registry https://registry.npmmirror.com --global; \
+    fi
+
+# Layer 1: dependency manifest only — cached unless lockfile changes
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY frontend/package.json frontend/
+
+RUN --mount=type=cache,id=gitcortex-pnpm-store,target=/pnpm/store,sharing=locked \
+    pnpm config set store-dir /pnpm/store && \
+    cd frontend && \
+    pnpm install --frozen-lockfile --prefer-offline
+
+# Layer 2: source code — only rebuilds when src changes
+COPY frontend/ frontend/
+COPY shared/ shared/
+
+ENV BROWSERSLIST_IGNORE_OLD_DATA=1 \
+    GITCORTEX_BUILD_SOURCEMAP=0
+
+RUN cd frontend && pnpm run build:docker
+
+# ============================================================
+# Stage 2: Rust build (server binary only)
+# ============================================================
+FROM rust:slim-trixie AS rust-base
+ARG GITCORTEX_BUILD_NETWORK_PROFILE
+ARG RUST_TOOLCHAIN
+
+RUN set -eux; \
+    if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true; \
+    fi; \
+    printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+        > /etc/apt/apt.conf.d/80gitcortex-retries; \
+    apt-get update && apt-get install -y --no-install-recommends \
+        git pkg-config libsqlite3-dev libgit2-dev zlib1g-dev \
+        cmake make ninja-build clang libclang-dev perl nasm libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+        export RUSTUP_DIST_SERVER=https://rsproxy.cn; \
+        export RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup; \
+    fi; \
+    rustup set profile minimal && \
+    rustup toolchain install "${RUST_TOOLCHAIN}" && \
+    rustup default "${RUST_TOOLCHAIN}"
+
+ENV SQLX_OFFLINE=true \
+    CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
+    CARGO_NET_RETRY=10 \
+    CARGO_HTTP_TIMEOUT=120 \
+    CARGO_HTTP_MULTIPLEXING=false \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true \
+    AWS_LC_SYS_STATIC=1
+
+RUN set -eux; \
+    if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+        mkdir -p /usr/local/cargo && \
+        printf '%s\n' \
+            '[source.crates-io]' \
+            'replace-with = "rsproxy-sparse"' \
+            '' \
+            '[source.rsproxy-sparse]' \
+            'registry = "sparse+https://rsproxy.cn/crates.io-index/"' \
+            '' \
+            '[registries.rsproxy-sparse]' \
+            'index = "sparse+https://rsproxy.cn/crates.io-index/"' \
+            >> /usr/local/cargo/config.toml; \
+    fi
+
+FROM rust-base AS rust-builder
+WORKDIR /build
+
+COPY Cargo.toml Cargo.lock ./
+COPY .cargo/config.toml .cargo/config.toml
+COPY crates/ crates/
+COPY assets/ assets/
+COPY shared/ shared/
+COPY --from=frontend-builder /build/frontend/dist frontend/dist
+
+RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo build --release --locked -p server \
+    && cp /build/target/release/server /tmp/gitcortex-server
+
+# ============================================================
+# Stage 3: Runtime (minimal — no Node.js, no AI CLIs)
+# ============================================================
+FROM debian:trixie-slim AS runtime
+ARG GITCORTEX_BUILD_NETWORK_PROFILE
+
+RUN set -eux; \
+    if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true; \
+    fi; \
+    printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+        > /etc/apt/apt.conf.d/80gitcortex-retries; \
+    apt-get update && apt-get install -y --no-install-recommends \
+        libsqlite3-0 libgit2-1.9 git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=rust-builder /tmp/gitcortex-server /usr/local/bin/gitcortex-server
+COPY assets/scripts/ /opt/gitcortex/assets/scripts/
+
+RUN groupadd -r gitcortex && useradd -r -g gitcortex -m gitcortex \
+    && mkdir -p /var/lib/gitcortex/assets /var/lib/gitcortex \
+    && chown -R gitcortex:gitcortex /var/lib/gitcortex
+VOLUME ["/var/lib/gitcortex"]
+
+ENV GITCORTEX_ASSET_DIR=/var/lib/gitcortex/assets \
+    GITCORTEX_TEMP_DIR=/var/lib/gitcortex \
+    HOST=0.0.0.0 \
+    PORT=23456 \
+    RUST_LOG=info \
+    GITCORTEX_RUNNER_MODE=remote \
+    GITCORTEX_RUNNER_ADDR=http://runner:50051 \
+    GITCORTEX_MESSAGE_BUS=redis \
+    GITCORTEX_REDIS_URL=redis://redis:6379
+
+EXPOSE 23456
+
+USER gitcortex
+
+ENTRYPOINT ["gitcortex-server"]

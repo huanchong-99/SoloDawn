@@ -1,0 +1,63 @@
+version: "3.8"
+
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.server
+      args:
+        GITCORTEX_BUILD_NETWORK_PROFILE: ${GITCORTEX_BUILD_NETWORK_PROFILE:-official}
+        BUILDKIT_INLINE_CACHE: "1"
+    ports:
+      - "${GITCORTEX_PORT:-23456}:23456"
+    environment:
+      GITCORTEX_RUNNER_MODE: remote
+      GITCORTEX_RUNNER_ADDR: http://runner:50051
+      GITCORTEX_MESSAGE_BUS: redis
+      GITCORTEX_REDIS_URL: redis://redis:6379
+      GITCORTEX_ENCRYPTION_KEY: ${GITCORTEX_ENCRYPTION_KEY}
+      GITCORTEX_API_TOKEN: ${GITCORTEX_API_TOKEN:-}
+      GITCORTEX_CORS_ORIGINS: ${GITCORTEX_CORS_ORIGINS:-}
+    volumes:
+      - gitcortex-data:/var/lib/gitcortex
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:23456/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  runner:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.runner
+      args:
+        GITCORTEX_BUILD_NETWORK_PROFILE: ${GITCORTEX_BUILD_NETWORK_PROFILE:-official}
+        BUILDKIT_INLINE_CACHE: "1"
+    environment:
+      GITCORTEX_RUNNER_ADDR: "0.0.0.0:50051"
+      GITCORTEX_MESSAGE_BUS: redis
+      GITCORTEX_REDIS_URL: redis://redis:6379
+    volumes:
+      - ${HOST_WORKSPACE_ROOT:-./workspace}:${GITCORTEX_WORKSPACE_ROOT:-/workspace}
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  gitcortex-data:
+  redis-data:

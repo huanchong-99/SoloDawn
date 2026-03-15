@@ -1,0 +1,21 @@
+[package]
+name = "runner"
+version = "0.0.1"
+edition = "2024"
+
+[[bin]]
+name = "runner"
+path = "src/main.rs"
+
+[dependencies]
+services = { path = "../services" }
+tonic = "0.12"
+prost = "0.13"
+tokio = { workspace = true }
+tokio-stream = "0.1"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+
+[build-dependencies]
+tonic-build = "0.12"

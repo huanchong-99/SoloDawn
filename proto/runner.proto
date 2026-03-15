@@ -1,0 +1,47 @@
+syntax = "proto3";
+package gitcortex.runner;
+
+service RunnerService {
+  rpc SpawnTerminal(SpawnTerminalRequest) returns (SpawnTerminalResponse);
+  rpc KillTerminal(KillTerminalRequest) returns (KillTerminalResponse);
+  rpc IsRunning(IsRunningRequest) returns (IsRunningResponse);
+  rpc ResizeTerminal(ResizeRequest) returns (ResizeResponse);
+  rpc WriteInput(WriteInputRequest) returns (WriteInputResponse);
+  rpc StreamOutput(StreamOutputRequest) returns (stream TerminalOutputChunk);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message SpawnTerminalRequest {
+  string terminal_id = 1;
+  string command = 2;
+  repeated string args = 3;
+  string working_dir = 4;
+  map<string, string> env_set = 5;
+  repeated string env_unset = 6;
+  uint32 cols = 7;
+  uint32 rows = 8;
+}
+
+message SpawnTerminalResponse {
+  bool success = 1;
+  string error = 2;
+  uint32 pid = 3;
+}
+
+message KillTerminalRequest { string terminal_id = 1; }
+message KillTerminalResponse { bool success = 1; }
+
+message IsRunningRequest { string terminal_id = 1; }
+message IsRunningResponse { bool running = 1; }
+
+message ResizeRequest { string terminal_id = 1; uint32 cols = 2; uint32 rows = 3; }
+message ResizeResponse { bool success = 1; }
+
+message WriteInputRequest { string terminal_id = 1; bytes data = 2; }
+message WriteInputResponse { bool success = 1; }
+
+message StreamOutputRequest { string terminal_id = 1; uint64 from_seq = 2; }
+message TerminalOutputChunk { uint64 seq = 1; bytes data = 2; int64 timestamp = 3; }
+
+message HealthRequest {}
+message HealthResponse { bool healthy = 1; uint32 active_terminals = 2; }

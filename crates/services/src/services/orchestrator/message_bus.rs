@@ -2,6 +2,8 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 
 use super::{
@@ -17,7 +19,7 @@ const TERMINAL_INPUT_TOPIC_PREFIX: &str = "terminal.input.";
 
 /// Messages routed through the orchestrator bus.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BusMessage {
     TerminalCompleted(TerminalCompletionEvent),
     GitEvent {
@@ -76,14 +78,41 @@ pub enum BusMessage {
     Shutdown,
 }
 
+// ---------------------------------------------------------------------------
+// Trait
+// ---------------------------------------------------------------------------
+
+/// Backend-agnostic message bus operations.
+#[async_trait]
+pub trait MessageBusBackend: Send + Sync + 'static {
+    /// Publish a message to a specific topic.
+    async fn publish_to_topic(&self, topic: &str, message: BusMessage) -> anyhow::Result<()>;
+
+    /// Subscribe to a topic-specific mpsc stream.
+    async fn subscribe_topic(&self, topic: &str) -> anyhow::Result<mpsc::Receiver<BusMessage>>;
+
+    /// Broadcast a message to all broadcast subscribers.
+    async fn broadcast(&self, message: BusMessage) -> anyhow::Result<()>;
+
+    /// Subscribe to the broadcast channel.
+    async fn subscribe_broadcast(&self) -> broadcast::Receiver<BusMessage>;
+
+    /// Unsubscribe / remove all subscribers from a topic.
+    async fn unsubscribe_topic(&self, topic: &str);
+}
+
+// ---------------------------------------------------------------------------
+// InMemoryMessageBus
+// ---------------------------------------------------------------------------
+
 /// In-memory pub/sub bus for workflow and terminal events.
 #[derive(Clone)]
-pub struct MessageBus {
+pub struct InMemoryMessageBus {
     broadcast_tx: broadcast::Sender<BusMessage>,
     subscribers: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<BusMessage>>>>>,
 }
 
-impl MessageBus {
+impl InMemoryMessageBus {
     pub fn new(capacity: usize) -> Self {
         let (broadcast_tx, _) = broadcast::channel(capacity);
         Self {
@@ -92,73 +121,13 @@ impl MessageBus {
         }
     }
 
-    #[allow(clippy::result_large_err)]
-    pub fn broadcast(
-        &self,
-        message: BusMessage,
-    ) -> Result<usize, broadcast::error::SendError<BusMessage>> {
-        self.broadcast_tx.send(message)
-    }
-
-    pub fn subscribe_broadcast(&self) -> broadcast::Receiver<BusMessage> {
-        self.broadcast_tx.subscribe()
-    }
-
-    /// Subscribe to a topic-specific mpsc stream.
-    pub async fn subscribe(&self, topic: &str) -> mpsc::Receiver<BusMessage> {
-        let (tx, rx) = mpsc::channel(100);
-        let mut subscribers: tokio::sync::RwLockWriteGuard<
-            '_,
-            HashMap<String, Vec<mpsc::Sender<BusMessage>>>,
-        > = self.subscribers.write().await;
-        subscribers.entry(topic.to_string()).or_default().push(tx);
-        rx
-    }
-
     /// Returns current subscriber count for a topic.
     pub async fn subscriber_count(&self, topic: &str) -> usize {
         let subscribers = self.subscribers.read().await;
         subscribers.get(topic).map_or(0, Vec::len)
     }
 
-    /// Publish a message and require at least one subscriber.
-    ///
-    /// Returns the number of subscribers that received the message.
-    pub async fn publish_required(
-        &self,
-        topic: &str,
-        message: BusMessage,
-    ) -> anyhow::Result<usize> {
-        self.publish_inner(topic, message, true).await
-    }
-
-    /// Publish a message to all subscribers of a topic.
-    pub async fn publish(&self, topic: &str, message: BusMessage) -> anyhow::Result<()> {
-        self.publish_inner(topic, message, false).await.map(|_| ())
-    }
-
-    /// Publish a workflow-scoped event to both workflow topic and broadcast channel.
-    ///
-    /// Returns the number of workflow topic subscribers that received the event.
-    pub async fn publish_workflow_event(
-        &self,
-        workflow_id: &str,
-        message: BusMessage,
-    ) -> anyhow::Result<usize> {
-        let topic = format!("{WORKFLOW_TOPIC_PREFIX}{workflow_id}");
-        let delivered = self.publish_inner(&topic, message.clone(), false).await?;
-
-        if let Err(err) = self.broadcast(message) {
-            tracing::debug!(
-                ?err,
-                workflow_id = %workflow_id,
-                "Workflow broadcast skipped because no broadcast subscribers are active"
-            );
-        }
-
-        Ok(delivered)
-    }
-
+    /// Internal publish with optional subscriber requirement.
     async fn publish_inner(
         &self,
         topic: &str,
@@ -222,6 +191,386 @@ impl MessageBus {
         );
         Ok(delivered)
     }
+}
+
+#[async_trait]
+impl MessageBusBackend for InMemoryMessageBus {
+    async fn publish_to_topic(&self, topic: &str, message: BusMessage) -> anyhow::Result<()> {
+        self.publish_inner(topic, message, false).await.map(|_| ())
+    }
+
+    async fn subscribe_topic(&self, topic: &str) -> anyhow::Result<mpsc::Receiver<BusMessage>> {
+        let (tx, rx) = mpsc::channel(100);
+        let mut subscribers = self.subscribers.write().await;
+        subscribers.entry(topic.to_string()).or_default().push(tx);
+        Ok(rx)
+    }
+
+    async fn broadcast(&self, message: BusMessage) -> anyhow::Result<()> {
+        match self.broadcast_tx.send(message) {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                tracing::debug!("Broadcast skipped: no active broadcast subscribers");
+                Ok(())
+            }
+        }
+    }
+
+    async fn subscribe_broadcast(&self) -> broadcast::Receiver<BusMessage> {
+        self.broadcast_tx.subscribe()
+    }
+
+    async fn unsubscribe_topic(&self, topic: &str) {
+        let mut subscribers = self.subscribers.write().await;
+        subscribers.remove(topic);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RedisBus
+// ---------------------------------------------------------------------------
+
+/// Redis PubSub-backed message bus for multi-container deployments.
+#[derive(Clone)]
+pub struct RedisBus {
+    client: redis::Client,
+    /// Local broadcast channel used to fan-out received Redis messages to
+    /// in-process subscribers of the broadcast stream.
+    broadcast_tx: broadcast::Sender<BusMessage>,
+    /// Capacity used when creating mpsc channels for topic subscriptions.
+    capacity: usize,
+}
+
+impl RedisBus {
+    /// Create a new Redis-backed message bus.
+    ///
+    /// `redis_url` should be a valid Redis connection string, e.g. `redis://127.0.0.1:6379`.
+    pub async fn new(redis_url: &str, capacity: usize) -> anyhow::Result<Self> {
+        let client = redis::Client::open(redis_url)?;
+        // Verify connectivity
+        let mut conn = client.get_multiplexed_async_connection().await?;
+        redis::cmd("PING")
+            .query_async::<String>(&mut conn)
+            .await?;
+        tracing::info!(url = %redis_url, "RedisBus connected successfully");
+
+        let (broadcast_tx, _) = broadcast::channel(capacity);
+        Ok(Self {
+            client,
+            broadcast_tx,
+            capacity,
+        })
+    }
+
+    fn topic_channel(topic: &str) -> String {
+        format!("gitcortex:topic:{topic}")
+    }
+
+    const BROADCAST_CHANNEL: &'static str = "gitcortex:broadcast";
+}
+
+#[async_trait]
+impl MessageBusBackend for RedisBus {
+    async fn publish_to_topic(&self, topic: &str, message: BusMessage) -> anyhow::Result<()> {
+        let channel = Self::topic_channel(topic);
+        let payload = serde_json::to_string(&message)?;
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        redis::cmd("PUBLISH")
+            .arg(&channel)
+            .arg(&payload)
+            .query_async::<i64>(&mut conn)
+            .await?;
+        tracing::trace!(topic = %topic, channel = %channel, "Published message to Redis topic");
+        Ok(())
+    }
+
+    async fn subscribe_topic(&self, topic: &str) -> anyhow::Result<mpsc::Receiver<BusMessage>> {
+        let (tx, rx) = mpsc::channel(self.capacity);
+        let channel = Self::topic_channel(topic);
+        let client = self.client.clone();
+
+        tokio::spawn(async move {
+            let conn = match client.get_async_pubsub().await {
+                Ok(c) => c,
+                Err(err) => {
+                    tracing::warn!(?err, channel = %channel, "Failed to open Redis PubSub connection for topic");
+                    return;
+                }
+            };
+            let mut pubsub = conn;
+            if let Err(err) = pubsub.subscribe(&channel).await {
+                tracing::warn!(?err, channel = %channel, "Failed to subscribe to Redis channel");
+                return;
+            }
+
+            let mut msg_stream = pubsub.into_on_message();
+            use futures_util::StreamExt;
+            while let Some(msg) = msg_stream.next().await {
+                let payload: String = match msg.get_payload() {
+                    Ok(p) => p,
+                    Err(err) => {
+                        tracing::warn!(?err, channel = %channel, "Failed to get Redis message payload");
+                        continue;
+                    }
+                };
+                let bus_msg: BusMessage = match serde_json::from_str(&payload) {
+                    Ok(m) => m,
+                    Err(err) => {
+                        tracing::warn!(?err, channel = %channel, "Failed to deserialize Redis message");
+                        continue;
+                    }
+                };
+                if tx.send(bus_msg).await.is_err() {
+                    tracing::debug!(channel = %channel, "Topic subscriber dropped, stopping Redis listener");
+                    break;
+                }
+            }
+        });
+
+        Ok(rx)
+    }
+
+    async fn broadcast(&self, message: BusMessage) -> anyhow::Result<()> {
+        let payload = serde_json::to_string(&message)?;
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        redis::cmd("PUBLISH")
+            .arg(Self::BROADCAST_CHANNEL)
+            .arg(&payload)
+            .query_async::<i64>(&mut conn)
+            .await?;
+
+        // Also fan-out locally so in-process broadcast subscribers receive it
+        let _ = self.broadcast_tx.send(message);
+        Ok(())
+    }
+
+    async fn subscribe_broadcast(&self) -> broadcast::Receiver<BusMessage> {
+        let local_rx = self.broadcast_tx.subscribe();
+
+        // Spawn a background task that listens on the Redis broadcast channel and
+        // re-publishes into the local broadcast sender so that all in-process
+        // subscribers receive messages published by *other* containers.
+        let client = self.client.clone();
+        let tx = self.broadcast_tx.clone();
+        tokio::spawn(async move {
+            let conn = match client.get_async_pubsub().await {
+                Ok(c) => c,
+                Err(err) => {
+                    tracing::warn!(?err, "Failed to open Redis PubSub for broadcast");
+                    return;
+                }
+            };
+            let mut pubsub = conn;
+            if let Err(err) = pubsub.subscribe(RedisBus::BROADCAST_CHANNEL).await {
+                tracing::warn!(?err, "Failed to subscribe to Redis broadcast channel");
+                return;
+            }
+
+            let mut msg_stream = pubsub.into_on_message();
+            use futures_util::StreamExt;
+            while let Some(msg) = msg_stream.next().await {
+                let payload: String = match msg.get_payload() {
+                    Ok(p) => p,
+                    Err(err) => {
+                        tracing::warn!(?err, "Failed to get Redis broadcast payload");
+                        continue;
+                    }
+                };
+                let bus_msg: BusMessage = match serde_json::from_str(&payload) {
+                    Ok(m) => m,
+                    Err(err) => {
+                        tracing::warn!(?err, "Failed to deserialize Redis broadcast message");
+                        continue;
+                    }
+                };
+                if tx.send(bus_msg).is_err() {
+                    tracing::debug!("No broadcast subscribers, stopping Redis broadcast listener");
+                    break;
+                }
+            }
+        });
+
+        local_rx
+    }
+
+    async fn unsubscribe_topic(&self, topic: &str) {
+        // For Redis, unsubscribing happens implicitly when the subscriber Receiver
+        // is dropped (the spawned task detects the closed channel and exits).
+        // We log for observability.
+        tracing::debug!(topic = %topic, "RedisBus: unsubscribe_topic called (subscriber cleanup is implicit)");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Unified MessageBus wrapper
+// ---------------------------------------------------------------------------
+
+/// Unified message bus that delegates to either an in-memory or Redis backend.
+#[derive(Clone)]
+pub enum MessageBus {
+    InMemory(InMemoryMessageBus),
+    Redis(RedisBus),
+}
+
+impl MessageBus {
+    /// Create a new in-memory message bus.
+    pub fn new_in_memory(capacity: usize) -> Self {
+        Self::InMemory(InMemoryMessageBus::new(capacity))
+    }
+
+    /// Create a new Redis-backed message bus.
+    pub async fn new_redis(url: &str, capacity: usize) -> anyhow::Result<Self> {
+        let redis_bus = RedisBus::new(url, capacity).await?;
+        Ok(Self::Redis(redis_bus))
+    }
+
+    /// Create a message bus from environment variables.
+    ///
+    /// Reads `GITCORTEX_MESSAGE_BUS` (values: `"redis"` or `"memory"`, default `"memory"`)
+    /// and `GITCORTEX_REDIS_URL` (required when bus is `"redis"`).
+    pub fn from_env(capacity: usize) -> anyhow::Result<Self> {
+        let bus_type = std::env::var("GITCORTEX_MESSAGE_BUS").unwrap_or_else(|_| "memory".into());
+        match bus_type.as_str() {
+            "redis" => {
+                let url = std::env::var("GITCORTEX_REDIS_URL").map_err(|_| {
+                    anyhow::anyhow!(
+                        "GITCORTEX_REDIS_URL must be set when GITCORTEX_MESSAGE_BUS=redis"
+                    )
+                })?;
+                // We need a runtime to create the Redis connection; use block_on
+                // if called outside of an async context, otherwise use spawn.
+                let rt = tokio::runtime::Handle::try_current().map_err(|_| {
+                    anyhow::anyhow!("from_env must be called within a Tokio runtime")
+                })?;
+                let bus = rt.block_on(Self::new_redis(&url, capacity))?;
+                Ok(bus)
+            }
+            "memory" | "" => Ok(Self::new_in_memory(capacity)),
+            other => Err(anyhow::anyhow!(
+                "Unknown GITCORTEX_MESSAGE_BUS value: {other}. Expected 'redis' or 'memory'."
+            )),
+        }
+    }
+
+    /// Backwards-compatible constructor (creates in-memory bus).
+    pub fn new(capacity: usize) -> Self {
+        Self::new_in_memory(capacity)
+    }
+
+    /// Returns the in-memory backend, if this bus uses one.
+    fn as_in_memory(&self) -> Option<&InMemoryMessageBus> {
+        match self {
+            Self::InMemory(inner) => Some(inner),
+            Self::Redis(_) => None,
+        }
+    }
+
+    /// Returns the broadcast sender for the underlying backend.
+    fn broadcast_tx(&self) -> &broadcast::Sender<BusMessage> {
+        match self {
+            Self::InMemory(inner) => &inner.broadcast_tx,
+            Self::Redis(inner) => &inner.broadcast_tx,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Synchronous broadcast API (backwards-compatible with original MessageBus)
+    // -----------------------------------------------------------------------
+
+    /// Broadcast a message synchronously (original API).
+    ///
+    /// For the in-memory backend this is a direct channel send.
+    /// For the Redis backend this only fans out locally; use the async
+    /// [`MessageBusBackend::broadcast`] trait method to also publish to Redis.
+    #[allow(clippy::result_large_err)]
+    pub fn broadcast(
+        &self,
+        message: BusMessage,
+    ) -> Result<usize, broadcast::error::SendError<BusMessage>> {
+        self.broadcast_tx().send(message)
+    }
+
+    /// Subscribe to the broadcast channel (synchronous, original API).
+    pub fn subscribe_broadcast(&self) -> broadcast::Receiver<BusMessage> {
+        self.broadcast_tx().subscribe()
+    }
+
+    // -----------------------------------------------------------------------
+    // High-level convenience methods (preserved from original API)
+    // -----------------------------------------------------------------------
+
+    /// Subscribe to a topic-specific mpsc stream.
+    pub async fn subscribe(&self, topic: &str) -> mpsc::Receiver<BusMessage> {
+        self.subscribe_topic(topic)
+            .await
+            .expect("subscribe_topic should not fail for in-memory bus")
+    }
+
+    /// Returns current subscriber count for a topic.
+    ///
+    /// Only meaningful for in-memory backend; returns 0 for Redis.
+    pub async fn subscriber_count(&self, topic: &str) -> usize {
+        match self.as_in_memory() {
+            Some(inner) => inner.subscriber_count(topic).await,
+            None => 0,
+        }
+    }
+
+    /// Publish a message and require at least one subscriber.
+    pub async fn publish_required(
+        &self,
+        topic: &str,
+        message: BusMessage,
+    ) -> anyhow::Result<usize> {
+        match self {
+            Self::InMemory(inner) => inner.publish_inner(topic, message, true).await,
+            Self::Redis(_) => {
+                self.publish_to_topic(topic, message).await?;
+                // Redis PubSub doesn't return subscriber count to the publisher in a
+                // useful way, so we optimistically return 1.
+                Ok(1)
+            }
+        }
+    }
+
+    /// Publish a message to all subscribers of a topic.
+    pub async fn publish(&self, topic: &str, message: BusMessage) -> anyhow::Result<()> {
+        self.publish_to_topic(topic, message).await
+    }
+
+    /// Publish a workflow-scoped event to both workflow topic and broadcast channel.
+    pub async fn publish_workflow_event(
+        &self,
+        workflow_id: &str,
+        message: BusMessage,
+    ) -> anyhow::Result<usize> {
+        let topic = format!("{WORKFLOW_TOPIC_PREFIX}{workflow_id}");
+
+        match self {
+            Self::InMemory(inner) => {
+                let delivered = inner.publish_inner(&topic, message.clone(), false).await?;
+                if let Err(err) = self.broadcast(message) {
+                    tracing::debug!(
+                        ?err,
+                        workflow_id = %workflow_id,
+                        "Workflow broadcast skipped because no broadcast subscribers are active"
+                    );
+                }
+                Ok(delivered)
+            }
+            Self::Redis(_) => {
+                self.publish_to_topic(&topic, message.clone()).await?;
+                if let Err(err) = self.broadcast(message) {
+                    tracing::debug!(
+                        ?err,
+                        workflow_id = %workflow_id,
+                        "Workflow broadcast skipped"
+                    );
+                }
+                Ok(1)
+            }
+        }
+    }
 
     /// Publishes a terminal completion event to workflow topic and broadcast channel.
     pub async fn publish_terminal_completed(&self, event: TerminalCompletionEvent) {
@@ -239,10 +588,6 @@ impl MessageBus {
     }
 
     /// Publishes a git event to workflow topic and broadcast channel.
-    ///
-    /// This is called when a new commit is detected in the repository.
-    /// For commits without METADATA, this triggers the orchestrator to wake up
-    /// and make a decision about the next action.
     pub async fn publish_git_event(
         &self,
         workflow_id: &str,
@@ -266,8 +611,6 @@ impl MessageBus {
     }
 
     /// Publishes a terminal prompt detected event.
-    ///
-    /// Called by PromptWatcher when an interactive prompt is detected in PTY output.
     pub async fn publish_terminal_prompt_detected(&self, event: TerminalPromptEvent) {
         let workflow_id = event.workflow_id.clone();
         if let Err(e) = self
@@ -283,8 +626,6 @@ impl MessageBus {
     }
 
     /// Publishes a terminal input message to be sent to PTY stdin.
-    ///
-    /// Called by Orchestrator after making a decision about how to respond to a prompt.
     pub async fn publish_terminal_input(
         &self,
         terminal_id: &str,
@@ -299,68 +640,98 @@ impl MessageBus {
             decision,
         };
 
-        // Publish to terminal-specific topic first (preferred path for PTY routing).
-        // If no terminal-input subscriber is present, fall back to legacy session topic.
-        // This avoids silent drop while preventing duplicate PTY delivery.
-        let topic = format!("{TERMINAL_INPUT_TOPIC_PREFIX}{terminal_id}");
-        let topic_subscriber_count = self.subscriber_count(&topic).await;
-        let fallback_topic = session_id.to_string();
-        let delivered = if topic_subscriber_count > 0 {
-            match self.publish_inner(&topic, message.clone(), false).await {
-                Ok(primary_delivered) if primary_delivered > 0 => true,
-                Ok(_) => {
+        match self {
+            Self::InMemory(inner) => {
+                // Publish to terminal-specific topic first (preferred path for PTY routing).
+                let topic = format!("{TERMINAL_INPUT_TOPIC_PREFIX}{terminal_id}");
+                let topic_subscriber_count = inner.subscriber_count(&topic).await;
+                let fallback_topic = session_id.to_string();
+                let delivered = if topic_subscriber_count > 0 {
+                    match inner.publish_inner(&topic, message.clone(), false).await {
+                        Ok(primary_delivered) if primary_delivered > 0 => true,
+                        Ok(_) => {
+                            self.publish_terminal_input_fallback(
+                                terminal_id,
+                                session_id,
+                                &topic,
+                                &fallback_topic,
+                                &message,
+                                "primary topic had no active subscribers",
+                            )
+                            .await
+                        }
+                        Err(err) => {
+                            tracing::error!(
+                                ?err,
+                                terminal_id = %terminal_id,
+                                session_id = %session_id,
+                                topic = %topic,
+                                "Failed to publish terminal input to primary topic"
+                            );
+                            self.publish_terminal_input_fallback(
+                                terminal_id,
+                                session_id,
+                                &topic,
+                                &fallback_topic,
+                                &message,
+                                "primary topic publish failed",
+                            )
+                            .await
+                        }
+                    }
+                } else {
                     self.publish_terminal_input_fallback(
                         terminal_id,
                         session_id,
                         &topic,
                         &fallback_topic,
                         &message,
-                        "primary topic had no active subscribers",
+                        "no primary terminal-input subscribers",
                     )
                     .await
-                }
-                Err(err) => {
-                    tracing::error!(
+                };
+
+                // Also broadcast for legacy compatibility
+                if let Err(err) = self.broadcast(message) {
+                    tracing::debug!(
                         ?err,
                         terminal_id = %terminal_id,
                         session_id = %session_id,
-                        topic = %topic,
-                        "Failed to publish terminal input to primary topic"
+                        "Terminal-input broadcast skipped because no broadcast subscribers are active"
                     );
-                    self.publish_terminal_input_fallback(
-                        terminal_id,
-                        session_id,
-                        &topic,
-                        &fallback_topic,
-                        &message,
-                        "primary topic publish failed",
-                    )
-                    .await
                 }
+
+                delivered
             }
-        } else {
-            self.publish_terminal_input_fallback(
-                terminal_id,
-                session_id,
-                &topic,
-                &fallback_topic,
-                &message,
-                "no primary terminal-input subscribers",
-            )
-            .await
-        };
-
-        // Also broadcast for legacy compatibility
-        if let Err(err) = self.broadcast(message) {
-            tracing::debug!(
-                ?err,
-                terminal_id = %terminal_id,
-                session_id = %session_id,
-                "Terminal-input broadcast skipped because no broadcast subscribers are active"
-            );
+            Self::Redis(_) => {
+                // For Redis, publish to the primary topic and broadcast
+                let topic = format!("{TERMINAL_INPUT_TOPIC_PREFIX}{terminal_id}");
+                if let Err(err) = self.publish_to_topic(&topic, message.clone()).await {
+                    tracing::warn!(
+                        ?err,
+                        terminal_id = %terminal_id,
+                        "Failed to publish terminal input to Redis topic"
+                    );
+                }
+                // Also publish to session fallback topic
+                let fallback_topic = session_id.to_string();
+                if let Err(err) = self.publish_to_topic(&fallback_topic, message.clone()).await {
+                    tracing::debug!(
+                        ?err,
+                        terminal_id = %terminal_id,
+                        "Failed to publish terminal input to Redis fallback topic"
+                    );
+                }
+                if let Err(err) = self.broadcast(message) {
+                    tracing::debug!(
+                        ?err,
+                        terminal_id = %terminal_id,
+                        "Terminal-input broadcast skipped"
+                    );
+                }
+                true
+            }
         }
-
-        delivered
     }
 
     async fn publish_terminal_input_fallback(
@@ -410,8 +781,6 @@ impl MessageBus {
     }
 
     /// Publishes a terminal prompt decision for UI updates.
-    ///
-    /// Called by Orchestrator to notify UI about the decision made for a prompt.
     pub async fn publish_terminal_prompt_decision(
         &self,
         terminal_id: &str,
@@ -433,8 +802,6 @@ impl MessageBus {
     }
 
     /// Publishes a quality gate result event.
-    ///
-    /// Called after quality gate evaluation completes for a terminal checkpoint.
     pub async fn publish_quality_gate_result(&self, event: QualityGateResultEvent) {
         let workflow_id = event.workflow_id.clone();
         if let Err(e) = self
@@ -449,6 +816,44 @@ impl MessageBus {
                 error = %e,
                 "Failed to publish quality gate result event (non-fatal)"
             );
+        }
+    }
+}
+
+#[async_trait]
+impl MessageBusBackend for MessageBus {
+    async fn publish_to_topic(&self, topic: &str, message: BusMessage) -> anyhow::Result<()> {
+        match self {
+            Self::InMemory(inner) => inner.publish_to_topic(topic, message).await,
+            Self::Redis(inner) => inner.publish_to_topic(topic, message).await,
+        }
+    }
+
+    async fn subscribe_topic(&self, topic: &str) -> anyhow::Result<mpsc::Receiver<BusMessage>> {
+        match self {
+            Self::InMemory(inner) => inner.subscribe_topic(topic).await,
+            Self::Redis(inner) => inner.subscribe_topic(topic).await,
+        }
+    }
+
+    async fn broadcast(&self, message: BusMessage) -> anyhow::Result<()> {
+        match self {
+            Self::InMemory(inner) => inner.broadcast(message).await,
+            Self::Redis(inner) => inner.broadcast(message).await,
+        }
+    }
+
+    async fn subscribe_broadcast(&self) -> broadcast::Receiver<BusMessage> {
+        match self {
+            Self::InMemory(inner) => inner.subscribe_broadcast().await,
+            Self::Redis(inner) => inner.subscribe_broadcast().await,
+        }
+    }
+
+    async fn unsubscribe_topic(&self, topic: &str) {
+        match self {
+            Self::InMemory(inner) => inner.unsubscribe_topic(topic).await,
+            Self::Redis(inner) => inner.unsubscribe_topic(topic).await,
         }
     }
 }

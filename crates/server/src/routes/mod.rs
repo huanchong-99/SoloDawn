@@ -62,6 +62,7 @@ fn build_cors_layer() -> CorsLayer {
 pub mod approvals;
 pub mod chat_integrations;
 pub mod ci_webhook;
+pub mod cli_status_sse;
 pub mod cli_types;
 pub mod config;
 pub mod containers;
@@ -131,6 +132,8 @@ pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feis
         .nest("/images", images::routes())
         .nest("/models", models::router())
         .nest("/cli_types", cli_types::cli_types_routes())
+        // CLI status SSE: requires SharedCliHealthMonitor Extension layer
+        // .nest("/cli_types", cli_status_sse::cli_status_sse_routes())
         .nest("/planning-drafts", planning_drafts::planning_draft_routes())
         .nest("/workflows", workflows::workflows_routes())
         .nest("/workflows", slash_commands::slash_commands_routes())

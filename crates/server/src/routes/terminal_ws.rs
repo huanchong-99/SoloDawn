@@ -45,6 +45,49 @@ fn elapsed_since_millis(start_millis: u64) -> Duration {
 
 use crate::{DeploymentImpl, error::ApiError};
 
+// BACKLOG-002: Runner container separation
+// ============================================================================
+// Terminal I/O Abstraction
+// ============================================================================
+
+/// Terminal I/O abstraction for future RunnerClient migration.
+/// Currently delegates to ProcessManager directly.
+/// When RunnerClient is integrated, this will route through gRPC streams
+/// instead of local ProcessHandle reader/writer pairs.
+// BACKLOG-002: Runner container separation
+#[allow(dead_code)]
+pub(crate) struct TerminalIO {
+    /// The terminal identifier this I/O handle is associated with.
+    pub terminal_id: String,
+    /// PTY writer handle, wrapped for shared access across reconnections.
+    /// When RunnerClient is integrated, this will be replaced with a gRPC
+    /// stream sender for forwarding input to the remote runner.
+    pub writer: Option<
+        std::sync::Arc<std::sync::Mutex<services::services::terminal::process::PtyWriter>>,
+    >,
+    // RUNNER_CLIENT_MIGRATION: Future fields for gRPC-based I/O:
+    //   pub input_stream: Option<tonic::Streaming<TerminalInputChunk>>,
+    //   pub output_stream: Option<tonic::Streaming<TerminalOutputChunk>>,
+}
+
+#[allow(dead_code)]
+impl TerminalIO {
+    /// Create a TerminalIO from an existing ProcessHandle.
+    /// This is the current local-runner path. When RunnerClient is integrated,
+    /// a separate constructor (e.g., `from_runner_stream`) will be added for
+    /// gRPC-based terminal I/O.
+    // BACKLOG-002: Runner container separation
+    pub fn from_process_handle(
+        terminal_id: String,
+        handle: &services::services::terminal::process::ProcessHandle,
+    ) -> Self {
+        Self {
+            terminal_id,
+            writer: handle.writer.clone(),
+        }
+    }
+}
+
 // ============================================================================
 // Constants
 // ============================================================================

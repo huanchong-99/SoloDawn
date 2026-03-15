@@ -34,6 +34,7 @@ use services::services::{
     project::ProjectService,
     queued_message::QueuedMessageService,
     repo::RepoService,
+    runner_client::RunnerClientImpl,
     terminal::{PromptWatcher, process::ProcessManager},
 };
 use tokio::sync::RwLock;
@@ -69,6 +70,7 @@ pub struct LocalDeployment {
     oauth_handoffs: Arc<RwLock<HashMap<Uuid, PendingHandoff>>>,
     orchestrator_runtime: OrchestratorRuntime,
     process_manager: Arc<ProcessManager>,
+    runner_client: RunnerClientImpl,
     message_bus: SharedMessageBus,
     prompt_watcher: PromptWatcher,
 }
@@ -243,6 +245,8 @@ impl Deployment for LocalDeployment {
             auth_context,
             oauth_handoffs,
             orchestrator_runtime,
+            runner_client: RunnerClientImpl::from_env(process_manager.clone())
+                .expect("Failed to initialize RunnerClient"),
             process_manager,
             message_bus,
             prompt_watcher,
@@ -317,6 +321,10 @@ impl Deployment for LocalDeployment {
 
     fn process_manager(&self) -> &Arc<ProcessManager> {
         &self.process_manager
+    }
+
+    fn runner_client(&self) -> &RunnerClientImpl {
+        &self.runner_client
     }
 }
 
