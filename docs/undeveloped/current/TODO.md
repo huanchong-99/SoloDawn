@@ -33,11 +33,8 @@
 
 | ID | 描述 | 优先级 |
 |----|------|--------|
-| BACKLOG-001 | Docker Deployment 抽象 | 低 |
-| BACKLOG-002 | Runner 容器分离 | 低 |
+| BACKLOG-002 | Runner 容器分离 | 中 |
 | BACKLOG-003 | CLI 安装状态 API | 中 |
-| BACKLOG-004 | K8s 部署支持 | 低 |
-| BACKLOG-005 | 镜像体积优化 | 中 |
 
 ## 文档入口
 
