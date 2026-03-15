@@ -105,6 +105,7 @@ vi.mock('@/components/workflow/WorkflowWizard', () => ({
 
 const wsStoreMock = vi.hoisted(() => ({
   sendPromptResponse: vi.fn(() => true),
+  subscribeToWorkflow: vi.fn(() => vi.fn()),
   workflowId: null,
   handlers: undefined,
 }));
@@ -130,10 +131,12 @@ vi.mock('@/stores/wsStore', () => ({
     (
       selector: (state: {
         sendPromptResponse: typeof wsStoreMock.sendPromptResponse;
+        subscribeToWorkflow: typeof wsStoreMock.subscribeToWorkflow;
       }) => unknown
     ) =>
       selector({
         sendPromptResponse: wsStoreMock.sendPromptResponse,
+        subscribeToWorkflow: wsStoreMock.subscribeToWorkflow,
       })
   ),
 }));
