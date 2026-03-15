@@ -1,0 +1,44 @@
+# ============================================================================
+# Composite Action: Setup sccache
+# Installs and configures sccache for Rust compilation caching via GitHub
+# Actions cache backend. When disabled, cargo calls rustc directly.
+# ============================================================================
+name: 'Setup sccache'
+description: 'Install sccache and configure Rust compilation caching with GitHub Actions cache backend'
+
+inputs:
+  version:
+    description: 'sccache version to use'
+    required: false
+    default: '0.8.2'
+  enabled:
+    description: 'Whether to enable sccache (set to false to skip all steps)'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run sccache-action
+      if: inputs.enabled == 'true'
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      with:
+        version: v${{ inputs.version }}
+
+    - name: Set sccache environment variables
+      if: inputs.enabled == 'true'
+      shell: bash
+      run: |
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+
+    - name: Show sccache configuration
+      if: inputs.enabled == 'true'
+      shell: bash
+      run: |
+        echo "::group::sccache configuration"
+        echo "sccache path: $(which sccache)"
+        sccache --version
+        echo "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED}"
+        echo "RUSTC_WRAPPER=${RUSTC_WRAPPER}"
+        echo "::endgroup::"

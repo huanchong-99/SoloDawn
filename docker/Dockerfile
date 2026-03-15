@@ -95,14 +95,61 @@ RUN set -eux; \
     fi
 
 # ============================================================
-# Stage 3: Rust final build
-# 稳定优先：不再使用 skeleton 预编译，避免污染 cargo target cache
+# Stage 3: Install cargo-chef (shared by planner and builder)
 # ============================================================
-FROM rust-base AS rust-builder
+FROM rust-base AS rust-with-chef
+
+RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo install cargo-chef --locked
+
+# ============================================================
+# Stage 3a: cargo-chef planner
+# Produces recipe.json — a dependency-only build plan.
+# This stage is lightweight and rebuilds whenever Cargo
+# manifests or crate structure changes.
+# ============================================================
+FROM rust-with-chef AS chef-planner
+
 WORKDIR /build
 
+# Copy only what cargo-chef needs to analyze the dependency graph
 COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
 COPY .cargo/config.toml .cargo/config.toml
+COPY proto/ proto/
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ============================================================
+# Stage 3b: cargo-chef cook + final build
+# First: cook dependencies from recipe.json (heavily cached).
+# Then:  build project source (only recompiles on src changes).
+# ============================================================
+FROM rust-with-chef AS rust-builder
+
+WORKDIR /build
+
+# .cargo/config.toml must be present before cook so that
+# build settings (env vars, rustflags, source mirrors) apply
+# to dependency compilation as well.
+COPY .cargo/config.toml .cargo/config.toml
+
+# Copy the recipe from planner stage
+COPY --from=chef-planner /build/recipe.json recipe.json
+
+# Cook dependencies only (project source is NOT present yet).
+# Uses --profile docker (opt-level=1, codegen-units=256) for
+# faster builds. cargo-chef supports --profile since v0.1.62.
+# BuildKit cache mounts keep the cargo registry/git warm.
+RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo chef cook --profile docker --recipe-path recipe.json -p server
+
+# Now copy the full project source code.
+# Because dependencies are already compiled, only project
+# crates will be recompiled on source changes.
+COPY Cargo.toml Cargo.lock ./
 COPY proto/ proto/
 COPY crates/ crates/
 COPY assets/ assets/
@@ -111,8 +158,8 @@ COPY --from=frontend-builder /build/frontend/dist frontend/dist
 
 RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    cargo build --release --locked -p server \
-    && cp /build/target/release/server /tmp/gitcortex-server
+    cargo build --profile docker --locked -p server \
+    && cp /build/target/docker/server /tmp/gitcortex-server
 
 # ============================================================
 # Stage 4: Runtime (minimal footprint)

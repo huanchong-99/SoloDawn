@@ -34,8 +34,7 @@ serde_with = "3"
 async-trait = "0.1"
 
 [profile.release]
-debug = 1
-split-debuginfo = "packed"
+debug = 0
 strip = true
 
 [profile.docker]
