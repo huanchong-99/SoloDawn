@@ -243,6 +243,9 @@ impl StandardCodingAgentExecutor for ClaudeCode {
             };
         }
 
+        // G19-013: config_found supplements binary detection because users may
+        // have installed Claude Code (creating config files) without the binary
+        // being on PATH — e.g. IDE-embedded installs or partial setups.
         let config_found = self.default_mcp_config_path().is_some_and(|p| p.exists());
 
         if binary_found || config_found {
@@ -425,6 +428,13 @@ impl ClaudeLogProcessor {
 
                     match serde_json::from_str::<ClaudeJson>(trimmed) {
                         Ok(claude_json) => {
+                            // G19-011: Log when the Unknown catch-all variant is deserialized
+                            if let ClaudeJson::Unknown { ref data } = claude_json {
+                                tracing::debug!(
+                                    keys = ?data.keys().collect::<Vec<_>>(),
+                                    "ClaudeJson deserialized as Unknown variant"
+                                );
+                            }
                             // Extract session ID if present
                             if !session_id_extracted
                                 && let Some(session_id) = Self::extract_session_id(&claude_json)

@@ -330,6 +330,43 @@ fn sanitize_terminal_id(id: &str) -> String {
         .collect()
 }
 
+/// G20-013/G22-008: Shared helper to create an isolated home directory for a CLI.
+///
+/// Creates `<temp>/gitcortex/<prefix>-<sanitized_terminal_id>` with restrictive
+/// permissions on Unix (0o700). Returns the created directory path.
+fn create_isolated_home(terminal_id: &str, prefix: &str) -> anyhow::Result<std::path::PathBuf> {
+    let safe_id = sanitize_terminal_id(terminal_id);
+    let base_dir = std::env::temp_dir().join("gitcortex");
+    std::fs::create_dir_all(&base_dir).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to create {prefix} home base directory {}: {e}",
+            base_dir.display()
+        )
+    })?;
+    let home = base_dir.join(format!("{prefix}-{safe_id}"));
+    std::fs::create_dir_all(&home).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to create {prefix} home directory {}: {e}",
+            home.display()
+        )
+    })?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)) {
+            tracing::warn!(
+                terminal_id = %terminal_id,
+                home = %home.display(),
+                error = %e,
+                "Failed to set restrictive permissions on {prefix} home"
+            );
+        }
+    }
+
+    Ok(home)
+}
+
 /// CC-Switch trait for dependency injection and testing
 #[async_trait]
 pub trait CCSwitch: Send + Sync {
@@ -626,38 +663,7 @@ impl CCSwitchService {
         match cli {
             CcCliType::ClaudeCode => {
                 // Create isolated Claude home directory
-                let safe_id = sanitize_terminal_id(&terminal.id);
-                let base_dir = std::env::temp_dir().join("gitcortex");
-                std::fs::create_dir_all(&base_dir).map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to create Claude home base directory {}: {e}",
-                        base_dir.display()
-                    )
-                })?;
-                let claude_home = base_dir.join(format!("claude-{safe_id}"));
-                std::fs::create_dir_all(&claude_home).map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to create Claude home directory {}: {e}",
-                        claude_home.display()
-                    )
-                })?;
-
-                // Set restrictive permissions on Unix
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if let Err(e) = std::fs::set_permissions(
-                        &claude_home,
-                        std::fs::Permissions::from_mode(0o700),
-                    ) {
-                        tracing::warn!(
-                            terminal_id = %terminal.id,
-                            claude_home = %claude_home.display(),
-                            error = %e,
-                            "Failed to set restrictive permissions on Claude home"
-                        );
-                    }
-                }
+                let claude_home = create_isolated_home(&terminal.id, "claude")?;
 
                 // Set CLAUDE_HOME to isolated directory
                 // [G19-006] TODO: CLAUDE_HOME directories are cleaned up only for Codex
@@ -783,14 +789,17 @@ impl CCSwitchService {
                     "Resolved API key for Claude Code terminal"
                 );
 
-                // Create config.json to skip authentication
-                if let Err(e) = create_claude_config(&claude_home, &api_key) {
-                    tracing::warn!(
+                // G22-003: Propagate config creation failure instead of silently swallowing it.
+                // A missing config.json can cause Claude Code to fall back to global auth,
+                // leading to unexpected billing or auth errors.
+                create_claude_config(&claude_home, &api_key).map_err(|e| {
+                    tracing::error!(
                         terminal_id = %terminal.id,
                         error = %e,
-                        "Failed to create Claude config for authentication skip, continuing anyway"
+                        "Failed to create Claude config.json for authentication skip"
                     );
-                }
+                    e
+                })?;
 
                 let model = self
                     .resolve_claude_launch_model(
@@ -880,39 +889,7 @@ impl CCSwitchService {
                 env.unset.push("OPENAI_BASE_URL".to_string());
 
                 // Create isolated CODEX_HOME directory for this terminal
-                // Sanitize terminal ID to prevent path traversal attacks
-                let safe_id = sanitize_terminal_id(&terminal.id);
-                let base_dir = std::env::temp_dir().join("gitcortex");
-                std::fs::create_dir_all(&base_dir).map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to create CODEX_HOME base directory {}: {e}",
-                        base_dir.display()
-                    )
-                })?;
-                let codex_home = base_dir.join(format!("codex-{safe_id}"));
-                std::fs::create_dir_all(&codex_home).map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to create CODEX_HOME directory {}: {e}",
-                        codex_home.display()
-                    )
-                })?;
-
-                // Set restrictive permissions on Unix (0o700 = owner read/write/execute only)
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if let Err(e) = std::fs::set_permissions(
-                        &codex_home,
-                        std::fs::Permissions::from_mode(0o700),
-                    ) {
-                        tracing::warn!(
-                            terminal_id = %terminal.id,
-                            codex_home = %codex_home.display(),
-                            error = %e,
-                            "Failed to set restrictive permissions on CODEX_HOME"
-                        );
-                    }
-                }
+                let codex_home = create_isolated_home(&terminal.id, "codex")?;
 
                 // Get model name
                 let model = model_config
@@ -973,39 +950,7 @@ impl CCSwitchService {
                     .ok_or_else(|| anyhow::anyhow!("Gemini requires API key (set terminal.custom_api_key or workflow.orchestrator_config.api_key)"))?;
 
                 // Create isolated Gemini home directory
-                // [G20-013/G22-008] Use shared sanitize_terminal_id instead of inline logic
-                let safe_id = sanitize_terminal_id(&terminal.id);
-                let base_dir = std::env::temp_dir().join("gitcortex");
-                std::fs::create_dir_all(&base_dir).map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to create Gemini home base directory {}: {e}",
-                        base_dir.display()
-                    )
-                })?;
-                let gemini_home = base_dir.join(format!("gemini-{safe_id}"));
-                std::fs::create_dir_all(&gemini_home).map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to create Gemini home directory {}: {e}",
-                        gemini_home.display()
-                    )
-                })?;
-
-                // Set restrictive permissions on Unix
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if let Err(e) = std::fs::set_permissions(
-                        &gemini_home,
-                        std::fs::Permissions::from_mode(0o700),
-                    ) {
-                        tracing::warn!(
-                            terminal_id = %terminal.id,
-                            gemini_home = %gemini_home.display(),
-                            error = %e,
-                            "Failed to set restrictive permissions on Gemini home"
-                        );
-                    }
-                }
+                let gemini_home = create_isolated_home(&terminal.id, "gemini")?;
 
                 // Get model name
                 let model = model_config
@@ -1013,19 +958,23 @@ impl CCSwitchService {
                     .clone()
                     .unwrap_or_else(|| model_config.name.clone());
 
-                // Create .env to skip authentication
-                if let Err(e) = create_gemini_env(
+                // G22-003: Propagate .env creation failure instead of silently swallowing it.
+                // A missing .env can cause Gemini CLI to fall back to global auth,
+                // leading to unexpected billing or auth errors.
+                create_gemini_env(
                     &gemini_home,
                     &api_key,
                     terminal.custom_base_url.as_deref(),
                     &model,
-                ) {
-                    tracing::warn!(
+                )
+                .map_err(|e| {
+                    tracing::error!(
                         terminal_id = %terminal.id,
                         error = %e,
-                        "Failed to create Gemini .env for authentication skip, continuing anyway"
+                        "Failed to create Gemini .env for authentication skip"
                     );
-                }
+                    e
+                })?;
 
                 // Set GEMINI_HOME to isolated directory (Gemini CLI respects this)
                 env.set.insert(

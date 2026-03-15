@@ -46,7 +46,7 @@ export function SearchProvider({ children }: Readonly<SearchProviderProps>) {
     setQuery('');
   }, [projectId]);
 
-  const clear = () => setQuery('');
+  const clear = useCallback(() => setQuery(''), []);
 
   const focusInput = useCallback(() => {
     if (inputRef.current && isTasksRoute) {
@@ -67,7 +67,7 @@ export function SearchProvider({ children }: Readonly<SearchProviderProps>) {
       focusInput,
       registerInputRef,
     }),
-    [query, isTasksRoute, registerInputRef, focusInput]
+    [query, isTasksRoute, clear, registerInputRef, focusInput]
   );
 
   return (

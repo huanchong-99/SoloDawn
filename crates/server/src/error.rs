@@ -206,7 +206,12 @@ impl IntoResponse for ApiError {
             }
             ApiError::Multipart(_) => "Failed to upload file. Please ensure the file is valid and try again.".to_string(),
             ApiError::Unauthorized => "Unauthorized. Please sign in again.".to_string(),
-            ApiError::Internal(_) => "An internal error occurred. Please try again.".to_string(),
+            ApiError::Internal(detail) => {
+                // [G35-004] Log the detailed internal error for debugging but return
+                // a generic message to the client to avoid leaking server internals.
+                tracing::error!(error_type, detail = %detail, "Internal server error");
+                "An internal error occurred. Please try again.".to_string()
+            }
             ApiError::NotFound(msg) => msg.clone(),
             ApiError::BadRequest(msg) | ApiError::Conflict(msg) | ApiError::Forbidden(msg) => {
                 msg.clone()

@@ -85,7 +85,9 @@ impl FeishuClient {
                             }
                         }
                         Err(e) => {
-                            tracing::debug!(error = %e, raw = %text, "Failed to parse Feishu event");
+                            // G32-012: Warn-level because a parse failure may indicate
+                            // an unexpected event schema change from Feishu.
+                            tracing::warn!(error = %e, raw = %text, "Failed to parse Feishu event");
                         }
                     }
                 }

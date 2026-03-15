@@ -327,7 +327,13 @@ impl ChatConnector for FeishuConnector {
     }
 
     fn is_connected(&self) -> bool {
-        // Use try_read to avoid blocking; default to false if lock is contended.
+        // G32-017: `try_read` is intentional here — `is_connected` is called from
+        // synchronous trait methods (ChatConnector) and must not block. If the
+        // RwLock is write-locked (i.e. connection state is being updated), we
+        // conservatively return `false` rather than waiting. An AtomicBool would
+        // be simpler but the RwLock is shared with `set_connected` which is async
+        // and already uses the write lock; switching would require changing the
+        // FeishuConnector struct layout for minimal benefit.
         self.connected
             .try_read()
             .map(|guard| *guard)

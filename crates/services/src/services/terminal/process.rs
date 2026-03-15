@@ -646,15 +646,9 @@ impl ProcessManager {
             }
         }
 
-        // Capture CODEX_HOME for cleanup on process exit
-        let codex_home = config.env.set.get("CODEX_HOME").and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(trimmed))
-            }
-        });
+        // [G21-001] CODEX_HOME was already captured above (line ~558) and stored in
+        // `codex_home_guard`. The duplicate parsing here previously overwrote the
+        // guard-protected value. Removed to use the single source of truth.
 
         // Spawn child process on slave PTY
         let mut child = pair
@@ -1275,8 +1269,14 @@ impl Default for ProcessManager {
 /// Batches log lines and flushes them every second to reduce I/O overhead.
 pub const DEFAULT_MAX_BUFFER_SIZE: usize = 1000;
 
+/// [G09-006] Maximum buffer byte size before forced flush/truncation (10 MiB).
+/// Prevents unbounded memory growth when the flush worker is slower than output.
+const MAX_BUFFER_BYTES: usize = 10 * 1024 * 1024;
+
 pub struct TerminalLogger {
     buffer: Arc<RwLock<Vec<String>>>,
+    /// Approximate byte size of buffered entries (tracked to avoid O(n) recount).
+    buffer_bytes: Arc<std::sync::atomic::AtomicUsize>,
     flush_lock: Arc<AsyncMutex<()>>,
     flush_interval_secs: u64,
     max_buffer_size: usize,
@@ -1292,6 +1292,7 @@ impl Clone for TerminalLogger {
     fn clone(&self) -> Self {
         Self {
             buffer: Arc::clone(&self.buffer),
+            buffer_bytes: Arc::clone(&self.buffer_bytes),
             flush_lock: Arc::clone(&self.flush_lock),
             flush_interval_secs: self.flush_interval_secs,
             max_buffer_size: self.max_buffer_size,
@@ -1354,6 +1355,7 @@ impl TerminalLogger {
     ) -> Self {
         Self {
             buffer: Arc::new(RwLock::new(Vec::new())),
+            buffer_bytes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             flush_lock: Arc::new(AsyncMutex::new(())),
             flush_interval_secs,
             max_buffer_size: max_buffer_size.max(1),
@@ -1413,31 +1415,24 @@ impl TerminalLogger {
             return Ok(());
         }
 
+        // [G21-009] Use mem::take to atomically drain the buffer, preventing TOCTOU
+        // races where new entries could be appended between the read and drain steps.
         let entries = {
-            let buffer = buffer.read().await;
+            let mut buffer = buffer.write().await;
             if buffer.is_empty() {
                 return Ok(());
             }
-            buffer.clone()
+            std::mem::take(&mut *buffer)
         };
 
         if let Err(error) = Self::persist_entries(db, terminal_id, log_type, &entries).await {
             if Self::is_sqlite_foreign_key_violation(&error) {
-                let dropped_entries = {
-                    let mut buffer = buffer.write().await;
-                    let dropped = entries.len().min(buffer.len());
-                    if dropped > 0 {
-                        buffer.drain(..dropped);
-                    }
-                    dropped
-                };
-
                 let first_disable = !persistence_disabled.swap(true, Ordering::Relaxed);
                 if first_disable {
                     tracing::warn!(
                         terminal_id = %terminal_id,
                         log_type = %log_type,
-                        dropped_entries = dropped_entries,
+                        dropped_entries = entries.len(),
                         error = %error,
                         "Terminal logger disabled after foreign-key violation (SQLite code 787)"
                     );
@@ -1447,17 +1442,12 @@ impl TerminalLogger {
             return Err(error);
         }
 
-        let mut buffer = buffer.write().await;
-        let drained = entries.len().min(buffer.len());
-        if drained > 0 {
-            buffer.drain(..drained);
-        }
-
         Ok(())
     }
 
     fn start_flush_task(self) -> Self {
         let buffer = Arc::clone(&self.buffer);
+        let buffer_bytes = Arc::clone(&self.buffer_bytes);
         let flush_lock = Arc::clone(&self.flush_lock);
         let interval_secs = self.flush_interval_secs;
         let db = Arc::clone(&self.db);
@@ -1481,6 +1471,7 @@ impl TerminalLogger {
                                 "Failed to persist terminal logs during flush task shutdown"
                             );
                         }
+                        buffer_bytes.store(0, Ordering::Relaxed);
                         tracing::debug!(
                             terminal_id = %terminal_id,
                             log_type = %log_type,
@@ -1499,6 +1490,7 @@ impl TerminalLogger {
                                 "Failed to persist terminal logs in flush task"
                             );
                         }
+                        buffer_bytes.store(0, Ordering::Relaxed);
                     }
                 }
             }
@@ -1595,24 +1587,18 @@ impl TerminalLogger {
 
         let should_flush = {
             let mut buffer = self.buffer.write().await;
+            let line_bytes = line.len();
             buffer.push(line.to_string());
-            buffer.len() >= self.max_buffer_size
+            let current_bytes = self.buffer_bytes.fetch_add(line_bytes, Ordering::Relaxed) + line_bytes;
+            // [G09-006] Flush when entry count OR byte size exceeds limits
+            buffer.len() >= self.max_buffer_size || current_bytes >= MAX_BUFFER_BYTES
         };
 
         if !should_flush {
             return;
         }
 
-        if let Err(e) = Self::flush_buffer(
-            &self.buffer,
-            &self.flush_lock,
-            &self.db,
-            &self.terminal_id,
-            &self.log_type,
-            &self.persistence_disabled,
-        )
-        .await
-        {
+        if let Err(e) = self.flush_and_reset_bytes().await {
             tracing::error!(
                 terminal_id = %self.terminal_id,
                 log_type = %self.log_type,
@@ -1623,7 +1609,12 @@ impl TerminalLogger {
     }
 
     pub async fn flush(&self) -> anyhow::Result<()> {
-        Self::flush_buffer(
+        self.flush_and_reset_bytes().await
+    }
+
+    /// Flush buffer and reset the byte counter.
+    async fn flush_and_reset_bytes(&self) -> anyhow::Result<()> {
+        let result = Self::flush_buffer(
             &self.buffer,
             &self.flush_lock,
             &self.db,
@@ -1631,7 +1622,10 @@ impl TerminalLogger {
             &self.log_type,
             &self.persistence_disabled,
         )
-        .await
+        .await;
+        // Reset byte counter after flush (buffer was drained by flush_buffer via mem::take)
+        self.buffer_bytes.store(0, Ordering::Relaxed);
+        result
     }
 
     fn is_sqlite_foreign_key_violation(error: &anyhow::Error) -> bool {

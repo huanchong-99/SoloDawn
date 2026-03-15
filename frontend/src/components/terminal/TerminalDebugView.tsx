@@ -150,8 +150,9 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
         return true;
       }
 
-      // Only 'working' remains after filtering out historical, waiting, needsRestart,
-      // starting, and ready states above.
+      // G28-002: After filtering out historical, waiting, needsRestart, starting,
+      // and ready states above, only 'working' and 'not_started' remain.
+      // 'not_started' terminals should not render live (they haven't launched yet).
       return terminal.status === 'working';
     },
     [isHistoricalTerminalStatus]

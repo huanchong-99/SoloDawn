@@ -13,6 +13,18 @@ interface Column {
   readonly titleKey: string;
 }
 
+// G29-005: Client-side status transition whitelist to prevent unnecessary API calls.
+// The backend is the source of truth and will reject invalid transitions,
+// but this avoids round-trips for obviously invalid drags.
+const VALID_STATUS_TRANSITIONS: Record<string, string[]> = {
+  pending: ['running', 'cancelled'],
+  running: ['review_pending', 'completed', 'failed'],
+  review_pending: ['running', 'completed', 'failed'],
+  completed: [],
+  failed: ['pending', 'running'],
+  cancelled: ['pending'],
+};
+
 /**
  * Kanban columns matching backend WorkflowTaskStatus enum:
  * pending, running, review_pending, completed, failed, cancelled
@@ -84,11 +96,10 @@ export function WorkflowKanbanBoard({ workflowId }: Readonly<WorkflowKanbanBoard
     const task = tasks.find((item) => item.id === taskId);
     if (!task || task.status === nextStatus) return;
 
-    // Note: State transition legality is validated server-side.
-    // The backend will reject invalid transitions and return an error,
-    // which the mutation's onError handler will process.
-    // TODO: G29-005 — Add a client-side whitelist of valid status transitions
-    // to prevent unnecessary API calls for obviously invalid drags.
+    // G29-005: Client-side transition validation to avoid unnecessary API calls
+    const allowedTransitions = VALID_STATUS_TRANSITIONS[task.status];
+    if (allowedTransitions && !allowedTransitions.includes(nextStatus)) return;
+
     // Trigger the mutation (optimistic update handled in the hook)
     updateTaskStatus.mutate({
       workflowId,

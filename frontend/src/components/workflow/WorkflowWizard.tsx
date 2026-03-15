@@ -183,12 +183,10 @@ export function WorkflowWizard({
     }
     setCompletedSteps(newCompletedSteps);
 
-    // G25-018: Navigate first, then clear errors to avoid stale error flash
+    // G25-018: Clear errors BEFORE navigation to prevent stale error flash on the next step
+    validation.clearErrors();
     if (navigation.canGoNext()) {
       navigation.next();
-      validation.clearErrors();
-    } else {
-      validation.clearErrors();
     }
   };
 

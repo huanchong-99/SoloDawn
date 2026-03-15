@@ -14,22 +14,22 @@ import type { ProcessStartPayload } from '@/types/logs';
 import FileChangeRenderer from './FileChangeRenderer';
 import { useExpandable } from '@/stores/useExpandableStore';
 import {
-  AlertCircle,
-  Bot,
+  WarningCircle as AlertCircle,
+  Robot as Bot,
   Brain,
   CheckSquare,
-  ChevronDown,
+  CaretDown as ChevronDown,
   Hammer,
-  Edit,
+  PencilSimple as Edit,
   Eye,
   Globe,
   Plus,
-  Search,
-  Settings,
+  MagnifyingGlass as Search,
+  Gear as Settings,
   Terminal,
   User,
   Wrench,
-} from 'lucide-react';
+} from '@phosphor-icons/react';
 import RawLogText from '../common/RawLogText';
 import UserMessage from './UserMessage';
 import PendingApprovalEntry from './PendingApprovalEntry';

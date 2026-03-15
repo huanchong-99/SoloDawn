@@ -479,6 +479,17 @@ impl TerminalBridge {
     /// PTY-based TUIs are generally Enter-key driven (`\r`) rather than
     /// line-feed-driven (`\n`/`\r\n`).
     ///
+    /// # Newline Normalization Convention (G07-005)
+    ///
+    /// All messages forwarded to PTY stdin are normalized to end with a single
+    /// carriage return (`\r`), which is the standard Enter key representation
+    /// in terminal emulators. The rules are:
+    /// - `\r\n` (CRLF) → `\r` (strip the LF)
+    /// - `\n` (LF) → `\r` (replace with CR)
+    /// - `\r` (CR) → `\r` (keep as-is)
+    /// - no trailing newline → append `\r`
+    /// - empty string → `\r` (bare Enter key)
+    ///
     /// # Arguments
     ///
     /// * `message` - The message to normalize

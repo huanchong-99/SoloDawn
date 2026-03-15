@@ -129,6 +129,13 @@ export function Board() {
     handleRealtimeWorkflowSignal();
   }, [handleRealtimeWorkflowSignal]);
 
+  // G08-006: When the server reports a system.lagged event (messages were dropped),
+  // invalidate all workflow caches to resync state.
+  const handleSystemLagged = useCallback(() => {
+    console.warn('[Board] system.lagged received — invalidating all workflow caches');
+    queryClient.invalidateQueries({ queryKey: workflowKeys.all });
+  }, [queryClient]);
+
   const workflowEventHandlers = useMemo(
     () => ({
       onWorkflowStatusChanged: handleRealtimeWorkflowSignal,
@@ -139,8 +146,10 @@ export function Board() {
       onTerminalPromptDetected: handlePromptEvent,
       onTerminalPromptDecision: handlePromptEvent,
       onQualityGateResult: handleQualityGateResult,
+      // G08-006: Invalidate all caches when messages were dropped
+      onSystemLagged: handleSystemLagged,
     }),
-    [handleRealtimeWorkflowSignal, handlePromptEvent, handleQualityGateResult]
+    [handleRealtimeWorkflowSignal, handlePromptEvent, handleQualityGateResult, handleSystemLagged]
   );
 
   useWorkflowEvents(selectedWorkflowId, workflowEventHandlers);

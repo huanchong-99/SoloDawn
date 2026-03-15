@@ -191,18 +191,29 @@ impl ResilientLLMClient {
     }
 
     /// Record a successful request for the given provider.
+    ///
+    /// G24-008: Release the state lock before acquiring the events lock to
+    /// avoid nested lock acquisition which could cause deadlocks under
+    /// contention.
     async fn record_success(&self, idx: usize) {
-        let mut state = self.providers[idx].state.write().await;
-        state.total_requests += 1;
-        state.consecutive_failures = 0;
-        if state.is_dead {
-            tracing::info!(
-                "ResilientLLMClient: provider {} ({}) revived after successful probe",
-                idx,
-                self.providers[idx].name,
-            );
-            state.is_dead = false;
-            // Record recovery event
+        let was_dead = {
+            let mut state = self.providers[idx].state.write().await;
+            state.total_requests += 1;
+            state.consecutive_failures = 0;
+            let was_dead = state.is_dead;
+            if state.is_dead {
+                tracing::info!(
+                    "ResilientLLMClient: provider {} ({}) revived after successful probe",
+                    idx,
+                    self.providers[idx].name,
+                );
+                state.is_dead = false;
+            }
+            was_dead
+            // state lock released here
+        };
+        if was_dead {
+            // Record recovery event with state lock already released
             let mut events = self.last_events.write().await;
             events.push(ProviderEvent::Recovered {
                 provider_name: self.providers[idx].name.clone(),

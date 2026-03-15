@@ -25,9 +25,12 @@ use super::{
         COMPLETION_CONTEXT_LOG_LINES, COMPLETION_CONTEXT_LOG_MAX_CHARS,
         GIT_COMMIT_METADATA_SEPARATOR, HANDOFF_COMMIT_MAX_CHARS, HANDOFF_NOTES_MAX_CHARS,
         MAX_CONSECUTIVE_LLM_FAILURES, QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
-        QUALITY_GATE_MODE_SHADOW, STATE_SAVE_DEBOUNCE_SECS, TERMINAL_STATUS_COMPLETED,
-        TERMINAL_STATUS_FAILED, TERMINAL_STATUS_QUALITY_PENDING, TERMINAL_STATUS_REVIEW_PASSED,
-        TERMINAL_STATUS_REVIEW_REJECTED,
+        QUALITY_GATE_MODE_SHADOW, STATE_SAVE_DEBOUNCE_SECS, TASK_STATUS_CANCELLED,
+        TASK_STATUS_COMPLETED, TASK_STATUS_FAILED, TASK_STATUS_RUNNING,
+        TERMINAL_STATUS_CANCELLED, TERMINAL_STATUS_COMPLETED, TERMINAL_STATUS_FAILED,
+        TERMINAL_STATUS_NOT_STARTED, TERMINAL_STATUS_QUALITY_PENDING, TERMINAL_STATUS_REVIEW_PASSED,
+        TERMINAL_STATUS_REVIEW_REJECTED, TERMINAL_STATUS_STARTING, TERMINAL_STATUS_WAITING,
+        TERMINAL_STATUS_WORKING,
         WORKFLOW_STATUS_COMPLETED, WORKFLOW_STATUS_FAILED, WORKFLOW_STATUS_MERGING,
         WORKFLOW_STATUS_RUNNING, WORKFLOW_TOPIC_PREFIX,
     },
@@ -462,7 +465,7 @@ impl OrchestratorAgent {
             return Ok(());
         }
 
-        let status = if task_failed { "failed" } else { "completed" };
+        let status = if task_failed { TASK_STATUS_FAILED } else { TASK_STATUS_COMPLETED };
         db::models::WorkflowTask::update_status(&self.db.pool, task_id, status)
             .await
             .map_err(|e| anyhow!("Failed to update task {task_id} status to {status}: {e}"))?;
@@ -619,7 +622,7 @@ impl OrchestratorAgent {
         let mut active_working_terminal_ids = HashSet::new();
 
         for task in tasks {
-            if matches!(task.status.as_str(), "completed" | "failed" | "cancelled") {
+            if matches!(task.status.as_str(), TASK_STATUS_COMPLETED | TASK_STATUS_FAILED | TASK_STATUS_CANCELLED) {
                 continue;
             }
 
@@ -630,7 +633,7 @@ impl OrchestratorAgent {
 
             for terminal in terminals
                 .iter()
-                .filter(|terminal| terminal.status == "working")
+                .filter(|terminal| terminal.status == TERMINAL_STATUS_WORKING)
             {
                 active_working_terminal_ids.insert(terminal.id.clone());
 
@@ -845,7 +848,7 @@ impl OrchestratorAgent {
             return Ok(());
         }
 
-        if success && existing_terminal.status != "working" {
+        if success && existing_terminal.status != TERMINAL_STATUS_WORKING {
             tracing::warn!(
                 terminal_id = %event.terminal_id,
                 task_id = %event.task_id,
@@ -895,7 +898,7 @@ impl OrchestratorAgent {
             match db::models::Terminal::set_completed_cas(
                 &self.db.pool,
                 &event.terminal_id,
-                "working",
+                TERMINAL_STATUS_WORKING,
                 terminal_final_status,
             )
             .await
@@ -955,7 +958,7 @@ impl OrchestratorAgent {
             match db::models::Terminal::set_completed_cas(
                 &self.db.pool,
                 &event.terminal_id,
-                "working",
+                TERMINAL_STATUS_WORKING,
                 terminal_final_status,
             )
             .await
@@ -1056,11 +1059,11 @@ impl OrchestratorAgent {
                 event.task_id,
                 event.terminal_id
             );
-            Some("failed")
+            Some(TASK_STATUS_FAILED)
         } else if task_failed && task_completed {
-            Some("failed")
+            Some(TASK_STATUS_FAILED)
         } else if task_completed {
-            Some("completed")
+            Some(TASK_STATUS_COMPLETED)
         } else {
             None
         };
@@ -1202,7 +1205,7 @@ impl OrchestratorAgent {
         if let Ok(Some(terminal)) =
             db::models::Terminal::find_by_id(&self.db.pool, &event.terminal_id).await
         {
-            let valid_states = ["working", TERMINAL_STATUS_QUALITY_PENDING];
+            let valid_states = [TERMINAL_STATUS_WORKING, TERMINAL_STATUS_QUALITY_PENDING];
             if !valid_states.contains(&terminal.status.as_str()) {
                 tracing::warn!(
                     terminal_id = %event.terminal_id,
@@ -1562,8 +1565,8 @@ impl OrchestratorAgent {
 
         for (index, terminal) in terminals.iter().enumerate() {
             match terminal.status.as_str() {
-                "completed" => completed_terminals.push(terminal.id.clone()),
-                "failed" | "cancelled" => failed_terminals.push(terminal.id.clone()),
+                TERMINAL_STATUS_COMPLETED => completed_terminals.push(terminal.id.clone()),
+                TERMINAL_STATUS_FAILED | TERMINAL_STATUS_CANCELLED => failed_terminals.push(terminal.id.clone()),
                 _ => {
                     if !found_active_terminal {
                         current_terminal_index = index;
@@ -1652,7 +1655,7 @@ impl OrchestratorAgent {
                         // re-publishing the completion event. Another path (e.g. GitEvent)
                         // may have already completed it during the quiet window.
                         let still_working = match db::models::Terminal::find_by_id(&db.pool, &terminal_id).await {
-                            Ok(Some(t)) => t.status == "working",
+                            Ok(Some(t)) => t.status == TERMINAL_STATUS_WORKING,
                             Ok(None) => {
                                 tracing::warn!(
                                     terminal_id = %terminal_id,
@@ -1798,13 +1801,13 @@ impl OrchestratorAgent {
         let mut active_terminal = terminal;
 
         for attempt in 0..=Self::NEXT_TERMINAL_WAIT_RETRY_ATTEMPTS {
-            if active_terminal.status == "waiting" {
+            if active_terminal.status == TERMINAL_STATUS_WAITING {
                 break;
             }
 
             if matches!(
                 active_terminal.status.as_str(),
-                "working" | "completed" | "failed" | "cancelled"
+                TERMINAL_STATUS_WORKING | TERMINAL_STATUS_COMPLETED | TERMINAL_STATUS_FAILED | TERMINAL_STATUS_CANCELLED
             ) {
                 tracing::debug!(
                     terminal_id = %active_terminal.id,
@@ -2161,7 +2164,7 @@ impl OrchestratorAgent {
             let working_terminals: Vec<_> = terminals
                 .iter()
                 .enumerate()
-                .filter(|(_, terminal)| terminal.status == "working")
+                .filter(|(_, terminal)| terminal.status == TERMINAL_STATUS_WORKING)
                 .collect();
 
             if working_terminals.len() > 1 {
@@ -2364,7 +2367,7 @@ impl OrchestratorAgent {
         // been completed via handle_terminal_completed (e.g. from a TerminalCompleted
         // bus message), skip to avoid double-processing the same completion.
         if let Some(terminal) = db::models::Terminal::find_by_id(&self.db.pool, terminal_id).await? {
-            if terminal.status != "working" {
+            if terminal.status != TERMINAL_STATUS_WORKING {
                 tracing::debug!(
                     terminal_id = %terminal_id,
                     current_status = %terminal.status,
@@ -2659,7 +2662,7 @@ impl OrchestratorAgent {
                 BusMessage::TerminalStatusUpdate {
                     workflow_id: workflow_id.clone(),
                     terminal_id: replacement.id.clone(),
-                    status: "working".to_string(),
+                    status: TERMINAL_STATUS_WORKING.to_string(),
                 },
             )
             .await
@@ -3162,7 +3165,7 @@ impl OrchestratorAgent {
                 let planning_complete = self.task_planning_complete(&task_id).await;
                 self.sync_task_state_from_db(&task_id, Some(planning_complete))
                     .await?;
-                let mark_success = matches!(terminal.status.as_str(), "completed" | "cancelled");
+                let mark_success = matches!(terminal.status.as_str(), TERMINAL_STATUS_COMPLETED | TERMINAL_STATUS_CANCELLED);
                 {
                     let mut state = self.state.write().await;
                     state.mark_terminal_completed(&task_id, &terminal.id, mark_success);
@@ -3220,7 +3223,7 @@ impl OrchestratorAgent {
                     .map_err(|e| anyhow::anyhow!("Failed to get terminal: {e}"))?
                     .ok_or_else(|| anyhow::anyhow!("Terminal {terminal_id} not found"))?;
                 // Skip stale send instructions for terminals that are no longer active.
-                if terminal.status != "working" {
+                if terminal.status != TERMINAL_STATUS_WORKING {
                     tracing::info!(
                         terminal_id = %terminal.id,
                         status = %terminal.status,
@@ -3633,8 +3636,8 @@ impl OrchestratorAgent {
         let dispatch_acquired = db::models::Terminal::update_status_cas(
             &self.db.pool,
             &terminal.id,
-            "waiting",
-            "working",
+            TERMINAL_STATUS_WAITING,
+            TERMINAL_STATUS_WORKING,
         )
         .await
         .map_err(|e| anyhow::anyhow!("Failed to update terminal status with CAS: {e}"))?;
@@ -3710,7 +3713,7 @@ impl OrchestratorAgent {
 
             // Mark task as failed
             if let Err(e) =
-                db::models::WorkflowTask::update_status(&self.db.pool, task_id, "failed").await
+                db::models::WorkflowTask::update_status(&self.db.pool, task_id, TASK_STATUS_FAILED).await
             {
                 tracing::warn!(task_id = %task_id, error = %e, "Failed to mark task as failed in DB");
             }
@@ -3723,7 +3726,7 @@ impl OrchestratorAgent {
                     BusMessage::TaskStatusUpdate {
                         workflow_id: workflow_id.clone(),
                         task_id: task_id.to_string(),
-                        status: "failed".to_string(),
+                        status: TASK_STATUS_FAILED.to_string(),
                     },
                 )
                 .await
@@ -3763,7 +3766,7 @@ impl OrchestratorAgent {
         //      through the CAS helper, adding significant complexity for a rare edge case.
 
         // 4. Update task status to running.
-        db::models::WorkflowTask::update_status(&self.db.pool, task_id, "running")
+        db::models::WorkflowTask::update_status(&self.db.pool, task_id, TASK_STATUS_RUNNING)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to update task status: {e}"))?;
 
@@ -3775,7 +3778,7 @@ impl OrchestratorAgent {
                 BusMessage::TerminalStatusUpdate {
                     workflow_id: workflow_id.clone(),
                     terminal_id: active_terminal.id.clone(),
-                    status: "working".to_string(),
+                    status: TERMINAL_STATUS_WORKING.to_string(),
                 },
             )
             .await
@@ -3789,7 +3792,7 @@ impl OrchestratorAgent {
                 BusMessage::TaskStatusUpdate {
                     workflow_id: workflow_id.clone(),
                     task_id: task_id.to_string(),
-                    status: "running".to_string(),
+                    status: TASK_STATUS_RUNNING.to_string(),
                 },
             )
             .await
@@ -4179,7 +4182,7 @@ impl OrchestratorAgent {
 
         for task in tasks {
             // Skip tasks that are already completed, failed, or cancelled
-            if task.status == "completed" || task.status == "failed" || task.status == "cancelled" {
+            if task.status == TASK_STATUS_COMPLETED || task.status == TASK_STATUS_FAILED || task.status == TASK_STATUS_CANCELLED {
                 tracing::debug!("Skipping task {} due to status {}", task.id, task.status);
                 continue;
             }
@@ -4230,7 +4233,7 @@ impl OrchestratorAgent {
             };
 
             // Only dispatch terminals in waiting status
-            if terminal.status != "waiting" {
+            if terminal.status != TERMINAL_STATUS_WAITING {
                 tracing::debug!(
                     "Skipping terminal {} for task {} due to status {}",
                     terminal.id,
@@ -4416,13 +4419,13 @@ impl OrchestratorAgent {
         let has_runnable_terminals = terminals.iter().any(|terminal| {
             matches!(
                 terminal.status.as_str(),
-                "not_started" | "starting" | "waiting" | "working"
+                TERMINAL_STATUS_NOT_STARTED | TERMINAL_STATUS_STARTING | TERMINAL_STATUS_WAITING | TERMINAL_STATUS_WORKING
             )
         });
         if has_runnable_terminals {
             return Ok(());
         }
-        if !tasks.is_empty() && tasks.iter().any(|task| task.status != "completed") {
+        if !tasks.is_empty() && tasks.iter().any(|task| task.status != TASK_STATUS_COMPLETED) {
             return Ok(());
         }
 
@@ -4494,7 +4497,7 @@ impl OrchestratorAgent {
 
         let task_branches: HashMap<String, String> = tasks
             .into_iter()
-            .filter(|task| task.status == "completed" && !task.branch.is_empty())
+            .filter(|task| task.status == TASK_STATUS_COMPLETED && !task.branch.is_empty())
             .map(|task| (task.id.clone(), task.branch.clone()))
             .collect();
 

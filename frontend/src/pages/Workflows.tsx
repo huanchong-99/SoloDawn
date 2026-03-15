@@ -92,13 +92,18 @@ function getPromptContextKey(
   return [payload.workflowId, payload.terminalId, payload.sessionId ?? ''].join(':');
 }
 
+// G27-003: Include a timestamp component (detectedAt or fallback) in the dedup
+// key so that legitimate same-content prompts arriving outside the dedup window
+// are not incorrectly dropped.
 function getPromptQueueItemId(payload: TerminalPromptDetectedPayload): string {
   const optionsHash = payload.options.join('|');
+  const timestampKey = payload.detectedAt ?? new Date().toISOString();
   return [
     getPromptContextKey(payload),
     payload.promptKind,
     payload.promptText,
     optionsHash,
+    timestampKey,
   ].join('::');
 }
 
@@ -126,12 +131,6 @@ function isSamePromptContext(
   }
   return true;
 }
-
-// G27-003: Generate a unique prompt queue item ID that includes a timestamp
-// component to distinguish re-detections of the same prompt text.
-// TODO: Integrate this into handleTerminalPromptDetected once the backend
-// reliably provides detectedAt in prompt events.
-// Implementation: `${getPromptQueueItemId(payload)}::${payload.detectedAt ?? new Date().toISOString()}`
 
 function getExecutionModeLabel(
   mode: string | undefined,
@@ -1197,6 +1196,13 @@ export function Workflows() {
     }
   }, [queryClient]);
 
+  // G08-006: When the server reports a system.lagged event (messages were dropped),
+  // invalidate all workflow caches to resync state.
+  const handleSystemLagged = useCallback(() => {
+    console.warn('[Workflows] system.lagged received — invalidating all workflow caches');
+    queryClient.invalidateQueries({ queryKey: workflowKeys.all });
+  }, [queryClient]);
+
   const workflowEventHandlers = useMemo(
     () => ({
       onTerminalPromptDetected: handleTerminalPromptDetected,
@@ -1208,12 +1214,15 @@ export function Workflows() {
       // G08-003 / G11-008: Subscribe to git commit events for cache invalidation
       onGitCommitDetected: handleRealtimeWorkflowSignal,
       onQualityGateResult: handleQualityGateResult,
+      // G08-006: Invalidate all caches when messages were dropped
+      onSystemLagged: handleSystemLagged,
     }),
     [
       handleTerminalPromptDetected,
       handleTerminalPromptDecision,
       handleRealtimeWorkflowSignal,
       handleQualityGateResult,
+      handleSystemLagged,
     ]
   );
 
@@ -1309,10 +1318,13 @@ export function Workflows() {
       }
 
       promptSubmittedHistoryRef.current.delete(currentPrompt.id);
-      setPromptSubmitError('Failed to submit prompt response over WebSocket');
+      // G30-012: Use i18n for user-facing error messages
+      setPromptSubmitError(t('management.errors.promptWsFailed', {
+        defaultValue: 'Failed to submit prompt response over WebSocket',
+      }));
       return true;
     },
-    [handlePromptSubmitSuccess]
+    [handlePromptSubmitSuccess, t]
   );
 
   // Helper to handle general prompt submission error
@@ -1321,13 +1333,16 @@ export function Workflows() {
   const handlePromptSubmitError = useCallback(
     (currentPrompt: WorkflowPromptQueueItem, error: unknown) => {
       promptSubmittedHistoryRef.current.delete(currentPrompt.id);
+      // G30-012: Use i18n for user-facing error messages
       const message =
         error instanceof Error && error.message
           ? error.message
-          : 'Failed to submit prompt response';
+          : t('management.errors.promptSubmitFailed', {
+              defaultValue: 'Failed to submit prompt response',
+            });
       setPromptSubmitError(message);
     },
-    []
+    [t]
   );
 
   const handleSubmitPromptResponse = useCallback(

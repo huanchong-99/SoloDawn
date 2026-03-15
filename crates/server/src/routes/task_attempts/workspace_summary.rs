@@ -9,6 +9,7 @@ use db::models::{
     workspace_repo::WorkspaceRepo,
 };
 use deployment::Deployment;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use services::services::git::DiffTarget;
 use ts_rs::TS;
@@ -109,7 +110,9 @@ pub async fn get_workspace_summaries(
     // 6. Get PR status for each workspace
     let pr_statuses = Merge::get_latest_pr_status_for_workspaces(pool, archived).await?;
 
-    // 7. Compute diff stats for each workspace (in parallel)
+    // 7. Compute diff stats for each workspace (in parallel, bounded concurrency)
+    // G34-009: Use buffer_unordered(8) to limit parallel diff operations and
+    // avoid overwhelming the git process pool when many workspaces exist.
     let diff_futures: Vec<_> = workspaces
         .iter()
         .map(|ws| {
@@ -129,7 +132,10 @@ pub async fn get_workspace_summaries(
         .collect();
 
     let diff_results: Vec<Option<(Uuid, DiffStats)>> =
-        futures_util::future::join_all(diff_futures).await;
+        futures_util::stream::iter(diff_futures)
+            .buffer_unordered(8)
+            .collect()
+            .await;
     let diff_stats: HashMap<Uuid, DiffStats> = diff_results.into_iter().flatten().collect();
 
     // 8. Assemble response

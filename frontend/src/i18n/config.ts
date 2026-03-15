@@ -114,11 +114,11 @@ i18n
     resources,
     lng: 'zh-Hans', // Set Chinese as default language (user requirement)
     fallbackLng: {
-      'zh-TW': ['zh-Hant'],
-      'zh-HK': ['zh-Hant'],
-      'zh-MO': ['zh-Hant'],
-      zh: ['zh-Hans'], // Map generic Chinese to Simplified Chinese
-      default: ['zh-Hans'], // Changed to default to Chinese (user requirement)
+      'zh-TW': ['zh-Hant', 'en'],
+      'zh-HK': ['zh-Hant', 'en'],
+      'zh-MO': ['zh-Hant', 'en'],
+      zh: ['zh-Hans', 'en'], // Map generic Chinese to Simplified Chinese, then English
+      default: ['zh-Hans', 'en'], // G36-012: Include 'en' in fallback chain for missing keys
     },
     defaultNS: 'common',
     debug: isDev,

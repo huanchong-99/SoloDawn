@@ -37,15 +37,23 @@ pub fn parse_message_event(event: &FeishuEvent) -> anyhow::Result<ReceivedMessag
     let message = &evt["message"];
     let sender = &evt["sender"];
 
+    // G32-013: Use ok_or_else for critical fields that downstream code depends on.
+    // An empty chat_id or message_id would cause silent failures in message routing.
+    let chat_id = message["chat_id"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Missing or empty chat_id in Feishu message event"))?
+        .to_string();
+
+    let message_id = message["message_id"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Missing or empty message_id in Feishu message event"))?
+        .to_string();
+
     Ok(ReceivedMessage {
-        message_id: message["message_id"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
-        chat_id: message["chat_id"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
+        message_id,
+        chat_id,
         chat_type: message["chat_type"]
             .as_str()
             .unwrap_or_default()

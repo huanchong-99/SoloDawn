@@ -4,7 +4,7 @@ import {
   useQueryClient,
   UseQueryResult,
 } from '@tanstack/react-query';
-import { handleApiResponse, logApiError, makeRequest } from '@/lib/api';
+import { handleApiResponse, logApiError, makeRequest, ApiError } from '@/lib/api';
 import type {
   WorkflowDetailDto,
   WorkflowListItemDto,
@@ -13,6 +13,15 @@ import type {
 
 // Type alias for convenience
 export type Workflow = WorkflowDetailDto;
+
+// G30-006: Retry function that skips retry for 4xx client errors.
+// Only retries on 5xx server errors and network failures.
+function shouldRetryOnServerError(failureCount: number, error: Error): boolean {
+  if (error instanceof ApiError && error.status !== undefined && error.status >= 400 && error.status < 500) {
+    return false;
+  }
+  return failureCount < 3;
+}
 
 // ============================================================================
 // Create Request Types (not in generated types yet)
@@ -539,7 +548,7 @@ export function useWorkflow(
     queryFn: () => workflowsApi.getById(workflowId),
     enabled: !!workflowId,
     staleTime: options?.staleTime ?? 1000 * 60 * 5, // default 5 minutes
-    retry: options?.retry ?? 3,
+    retry: options?.retry ?? shouldRetryOnServerError,
     refetchInterval: (query) => {
       if (!options?.refetchInterval) {
         return false;
