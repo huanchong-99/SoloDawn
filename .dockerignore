@@ -35,6 +35,7 @@
 !Cargo.toml
 !Cargo.lock
 !crates/
+!proto/
 !.cargo/config.toml
 
 # --- 放行：静态资源（嵌入二进制） ---
