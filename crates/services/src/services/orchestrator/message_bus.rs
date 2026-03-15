@@ -226,9 +226,16 @@ impl MessageBus {
     /// Publishes a terminal completion event to workflow topic and broadcast channel.
     pub async fn publish_terminal_completed(&self, event: TerminalCompletionEvent) {
         let workflow_id = event.workflow_id.clone();
-        let _ = self
+        if let Err(e) = self
             .publish_workflow_event(&workflow_id, BusMessage::TerminalCompleted(event))
-            .await;
+            .await
+        {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                error = %e,
+                "Failed to publish terminal completion event (non-fatal)"
+            );
+        }
     }
 
     /// Publishes a git event to workflow topic and broadcast channel.
@@ -249,7 +256,13 @@ impl MessageBus {
             branch: branch.to_string(),
             message: message.to_string(),
         };
-        let _ = self.publish_workflow_event(workflow_id, event).await;
+        if let Err(e) = self.publish_workflow_event(workflow_id, event).await {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                error = %e,
+                "Failed to publish git event (non-fatal)"
+            );
+        }
     }
 
     /// Publishes a terminal prompt detected event.
@@ -257,9 +270,16 @@ impl MessageBus {
     /// Called by PromptWatcher when an interactive prompt is detected in PTY output.
     pub async fn publish_terminal_prompt_detected(&self, event: TerminalPromptEvent) {
         let workflow_id = event.workflow_id.clone();
-        let _ = self
+        if let Err(e) = self
             .publish_workflow_event(&workflow_id, BusMessage::TerminalPromptDetected(event))
-            .await;
+            .await
+        {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                error = %e,
+                "Failed to publish terminal prompt detected event (non-fatal)"
+            );
+        }
     }
 
     /// Publishes a terminal input message to be sent to PTY stdin.
@@ -403,7 +423,13 @@ impl MessageBus {
             workflow_id: workflow_id.to_string(),
             decision,
         };
-        let _ = self.publish_workflow_event(workflow_id, message).await;
+        if let Err(e) = self.publish_workflow_event(workflow_id, message).await {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                error = %e,
+                "Failed to publish prompt decision event (non-fatal)"
+            );
+        }
     }
 
     /// Publishes a quality gate result event.
@@ -411,12 +437,19 @@ impl MessageBus {
     /// Called after quality gate evaluation completes for a terminal checkpoint.
     pub async fn publish_quality_gate_result(&self, event: QualityGateResultEvent) {
         let workflow_id = event.workflow_id.clone();
-        let _ = self
+        if let Err(e) = self
             .publish_workflow_event(
                 &workflow_id,
                 BusMessage::TerminalQualityGateResult(event),
             )
-            .await;
+            .await
+        {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                error = %e,
+                "Failed to publish quality gate result event (non-fatal)"
+            );
+        }
     }
 }
 

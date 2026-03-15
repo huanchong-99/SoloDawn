@@ -1,11 +1,63 @@
 use axum::{
     Extension, Router,
+    http::{HeaderValue, Method},
     routing::{IntoMakeService, get},
 };
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 pub use subscription_hub::SharedSubscriptionHub;
 
 use crate::{DeploymentImpl, feishu_handle::SharedFeishuHandle, middleware::require_api_token};
+
+/// Build CORS layer based on environment configuration.
+///
+/// - If `GITCORTEX_CORS_ORIGINS` is set: only allow those origins (comma-separated).
+/// - If unset or empty: allow all origins (development mode).
+fn build_cors_layer() -> CorsLayer {
+    let origins_env = std::env::var("GITCORTEX_CORS_ORIGINS").unwrap_or_default();
+    let trimmed = origins_env.trim();
+
+    if trimmed.is_empty() {
+        tracing::debug!("GITCORTEX_CORS_ORIGINS not set; allowing all origins (development mode)");
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any)
+    } else {
+        let origins: Vec<HeaderValue> = trimmed
+            .split(',')
+            .filter_map(|s| {
+                let s = s.trim();
+                if s.is_empty() {
+                    return None;
+                }
+                match s.parse::<HeaderValue>() {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        tracing::warn!(origin = %s, error = %e, "Ignoring invalid CORS origin");
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        tracing::info!(
+            count = origins.len(),
+            "CORS configured with restricted origins"
+        );
+
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(origins))
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::DELETE,
+                Method::PATCH,
+                Method::OPTIONS,
+            ])
+            .allow_headers(Any)
+    }
+}
 
 pub mod approvals;
 pub mod chat_integrations;
@@ -94,14 +146,10 @@ pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feis
         .layer(Extension(hub))
         .layer(Extension(feishu_handle))
         .layer(axum::middleware::from_fn(require_api_token))
-        // G18-005: Restrict CORS in production. Currently permissive for local dev;
-        // TODO(G18-005): tighten allowed origins/methods/headers for production deployments.
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
+        // G18-005: CORS configuration. In production, set GITCORTEX_CORS_ORIGINS
+        // to restrict allowed origins (comma-separated). When unset, allows all
+        // origins for local development convenience.
+        .layer(build_cors_layer())
         .with_state(deployment);
 
     Router::new()

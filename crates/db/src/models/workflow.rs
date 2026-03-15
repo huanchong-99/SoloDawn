@@ -812,6 +812,29 @@ impl Workflow {
         Ok(())
     }
 
+    /// Atomically transition workflow from 'running' to 'completed' (CAS).
+    ///
+    /// Returns `true` if the transition succeeded, `false` if the workflow
+    /// was no longer in 'running' state (e.g., already paused or merging).
+    /// This prevents auto-sync completion from overwriting concurrent state changes.
+    pub async fn set_completed_from_running(pool: &SqlitePool, id: &str) -> anyhow::Result<bool> {
+        let now = Utc::now();
+        let result = sqlx::query(
+            r"
+            UPDATE workflow
+            SET status = 'completed', completed_at = COALESCE(completed_at, ?), updated_at = ?
+            WHERE id = ? AND status = 'running'
+            ",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Delete workflow
     pub async fn delete(pool: &SqlitePool, id: &str) -> sqlx::Result<u64> {
         let result = sqlx::query("DELETE FROM workflow WHERE id = ?")

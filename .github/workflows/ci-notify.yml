@@ -26,6 +26,7 @@ jobs:
       env:
         GITCORTEX_API_URL: ${{ vars.GITCORTEX_API_URL || 'http://localhost:23456' }}
         GITCORTEX_API_TOKEN: ${{ secrets.GITCORTEX_API_TOKEN }}
+        GITCORTEX_CI_WEBHOOK_SECRET: ${{ secrets.GITCORTEX_CI_WEBHOOK_SECRET }}
         WF_NAME: ${{ github.event.workflow_run.name }}
         WF_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         WF_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -33,6 +34,30 @@ jobs:
         WF_RUN_ID: ${{ github.event.workflow_run.id }}
         WF_RUN_URL: ${{ github.event.workflow_run.html_url }}
       run: |
+        # Validate inputs: reject empty values
+        for var_name in WF_NAME WF_CONCLUSION WF_SHA WF_BRANCH; do
+          eval "val=\$$var_name"
+          if [ -z "$val" ]; then
+            echo "Error: $var_name is empty, aborting."
+            exit 0  # Non-blocking: don't fail the workflow
+          fi
+        done
+
+        # Validate SHA format (40 hex chars)
+        if ! echo "$WF_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+          echo "Warning: WF_SHA does not look like a valid commit SHA, skipping notification."
+          exit 0
+        fi
+
+        # Validate conclusion is one of the expected values
+        case "$WF_CONCLUSION" in
+          success|failure|cancelled|skipped|timed_out|action_required|neutral|stale) ;;
+          *)
+            echo "Warning: unexpected conclusion value '$WF_CONCLUSION', skipping notification."
+            exit 0
+            ;;
+        esac
+
         PAYLOAD=$(jq -n \
           --arg workflow "$WF_NAME" \
           --arg conclusion "$WF_CONCLUSION" \
@@ -45,11 +70,20 @@ jobs:
         echo "Sending CI notification:"
         echo "$PAYLOAD" | jq .
 
+        # Build curl headers
+        CURL_HEADERS=(-H "Content-Type: application/json" -H "Authorization: Bearer ${GITCORTEX_API_TOKEN}")
+
+        # G35-009: Compute HMAC-SHA256 signature if webhook secret is configured
+        if [ -n "$GITCORTEX_CI_WEBHOOK_SECRET" ]; then
+          SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$GITCORTEX_CI_WEBHOOK_SECRET" | sed 's/^.* //')
+          CURL_HEADERS+=(-H "X-Webhook-Signature: sha256=${SIGNATURE}")
+          echo "HMAC signature computed and attached."
+        fi
+
         # POST to GitCortex API (best-effort, non-blocking)
         HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
           -X POST "${GITCORTEX_API_URL}/api/ci/webhook" \
-          -H "Content-Type: application/json" \
-          -H "Authorization: Bearer ${GITCORTEX_API_TOKEN}" \
+          "${CURL_HEADERS[@]}" \
           -d "$PAYLOAD" \
           --connect-timeout 10 \
           --max-time 30 \

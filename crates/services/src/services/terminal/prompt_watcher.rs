@@ -43,6 +43,10 @@ const PROMPT_DEBOUNCE_MS: u64 = 500;
 /// Timeout for prompt state machine to reset to idle
 const PROMPT_STATE_TIMEOUT_SECS: i64 = 30;
 
+/// Timeout for WaitingForApproval state (G07-008): if user doesn't respond
+/// within this duration, the state machine resets to Idle.
+const WAITING_FOR_APPROVAL_TIMEOUT_SECS: i64 = 300; // 5 minutes
+
 /// Minimum confidence threshold for publishing prompt events
 const MIN_CONFIDENCE_THRESHOLD: f32 = 0.7;
 
@@ -641,10 +645,28 @@ impl TerminalWatchState {
         Some(prompt)
     }
 
-    /// Reset state machine if stale
+    /// Reset state machine if stale.
+    ///
+    /// Uses a longer timeout for WaitingForApproval (G07-008) since that state
+    /// legitimately waits for user input, but should still auto-reset eventually.
     fn check_and_reset_stale(&mut self) {
-        let timeout = chrono::Duration::seconds(PROMPT_STATE_TIMEOUT_SECS);
+        let timeout_secs = match self.state_machine.state {
+            crate::services::orchestrator::types::PromptState::WaitingForApproval => {
+                WAITING_FOR_APPROVAL_TIMEOUT_SECS
+            }
+            _ => PROMPT_STATE_TIMEOUT_SECS,
+        };
+        let timeout = chrono::Duration::seconds(timeout_secs);
         if self.state_machine.is_stale(timeout) {
+            if matches!(
+                self.state_machine.state,
+                crate::services::orchestrator::types::PromptState::WaitingForApproval
+            ) {
+                tracing::warn!(
+                    "WaitingForApproval state timed out after {}s, resetting to Idle",
+                    WAITING_FOR_APPROVAL_TIMEOUT_SECS
+                );
+            }
             self.state_machine.reset();
             self.detector.clear_buffer();
             self.claude_bypass_context.clear();

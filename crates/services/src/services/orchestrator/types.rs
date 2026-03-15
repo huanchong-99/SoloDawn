@@ -317,6 +317,11 @@ pub enum PromptState {
 /// `Detected/Deciding/Responding`, while still avoiding duplicate storms.
 const SAME_PROMPT_RETRY_WINDOW_SECS: i64 = 5;
 
+/// Timeout for WaitingForApproval state: if the user does not respond within
+/// this duration, the state machine auto-resets to Idle so the terminal is
+/// not stuck indefinitely waiting for input. (G07-008)
+const WAITING_FOR_APPROVAL_TIMEOUT_SECS: i64 = 300; // 5 minutes
+
 /// Terminal prompt state machine to prevent duplicate responses
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalPromptStateMachine {
@@ -366,7 +371,17 @@ impl TerminalPromptStateMachine {
                     Some(_) => self.same_prompt_retry_window_elapsed(),
                 }
             }
-            PromptState::WaitingForApproval => false, // Never auto-process while waiting for user
+            PromptState::WaitingForApproval => {
+                // G07-008: Auto-reset after timeout so terminals don't hang forever.
+                let timed_out = self.is_stale(chrono::Duration::seconds(WAITING_FOR_APPROVAL_TIMEOUT_SECS));
+                if timed_out {
+                    tracing::warn!(
+                        "WaitingForApproval timed out after {}s, allowing prompt re-processing",
+                        WAITING_FOR_APPROVAL_TIMEOUT_SECS
+                    );
+                }
+                timed_out
+            }
         }
     }
 

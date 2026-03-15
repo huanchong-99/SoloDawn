@@ -4590,8 +4590,17 @@ impl OrchestratorAgent {
             return Ok(());
         }
 
-        db::models::Workflow::update_status(&self.db.pool, workflow_id, WORKFLOW_STATUS_COMPLETED)
-            .await?;
+        // CAS: only transition running → completed to prevent overwriting concurrent
+        // state changes (e.g., pause or merge already in progress).
+        let transitioned =
+            db::models::Workflow::set_completed_from_running(&self.db.pool, workflow_id).await?;
+        if !transitioned {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                "Auto-sync to completed skipped: workflow status changed concurrently"
+            );
+            return Ok(());
+        }
 
         if let Err(e) = self
             .message_bus

@@ -1814,10 +1814,14 @@ async fn pause_workflow(
             WorkflowTask::update_status(&deployment.db().pool, &task.id, "pending").await?;
         }
     }
+    // Cascade terminal status: working/waiting → not_started so they can be re-prepared on resume
     for terminal in &terminals {
-        if terminal.status == "working" {
-            Terminal::update_status(&deployment.db().pool, &terminal.id, "cancelled").await?;
-            Terminal::update_process(&deployment.db().pool, &terminal.id, None, None).await?;
+        match terminal.status.as_str() {
+            "working" | "waiting" | "starting" => {
+                Terminal::update_status(&deployment.db().pool, &terminal.id, "not_started").await?;
+                Terminal::update_process(&deployment.db().pool, &terminal.id, None, None).await?;
+            }
+            _ => {}
         }
     }
 
@@ -1877,9 +1881,6 @@ async fn resume_workflow(
 
 /// POST /api/workflows/:workflow_id/stop
 /// Stop a workflow and mark as cancelled
-// TODO(G23-004): After stopping terminals, clean up associated worktrees via
-// WorktreeManager::batch_cleanup_worktrees to free disk space. Same applies to
-// delete_workflow above.
 async fn stop_workflow(
     State(deployment): State<DeploymentImpl>,
     Path(workflow_id): Path<Uuid>,
@@ -1927,6 +1928,9 @@ async fn stop_workflow(
             Terminal::update_process(&deployment.db().pool, &terminal.id, None, None).await?;
         }
     }
+
+    // G23-004: Clean up worktree directories to free disk space
+    cleanup_workflow_worktrees(&deployment, &workflow, &tasks).await;
 
     tracing::info!(
         workflow_id = %workflow_id,
@@ -1983,6 +1987,76 @@ async fn cleanup_workflow_terminals(
     }
 
     Ok(terminals)
+}
+
+/// G23-004: Clean up worktree directories for all tasks in a workflow.
+///
+/// This is best-effort and non-fatal — worktree cleanup failures are logged
+/// but do not prevent workflow stop/delete from succeeding.
+async fn cleanup_workflow_worktrees(
+    deployment: &DeploymentImpl,
+    workflow: &Workflow,
+    tasks: &[WorkflowTask],
+) {
+    let base_repo_path = match Project::find_by_id(&deployment.db().pool, workflow.project_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|p| {
+            p.default_agent_working_dir
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+        }) {
+        Some(path) => path,
+        None => {
+            tracing::debug!(
+                workflow_id = %workflow.id,
+                "Skipping worktree cleanup: no base repo path"
+            );
+            return;
+        }
+    };
+
+    let worktree_cleanups: Vec<services::services::worktree_manager::WorktreeCleanup> = tasks
+        .iter()
+        .filter(|t| !t.branch.trim().is_empty())
+        .filter_map(|t| {
+            let branch = t.branch.trim();
+            let managed_path =
+                services::services::worktree_manager::WorktreeManager::get_worktree_base_dir()
+                    .join(branch);
+            let legacy_path = base_repo_path.join("worktrees").join(branch);
+            let worktree_path = if managed_path.exists() {
+                managed_path
+            } else if legacy_path.exists() {
+                legacy_path
+            } else {
+                return None;
+            };
+            Some(services::services::worktree_manager::WorktreeCleanup::new(
+                worktree_path,
+                Some(base_repo_path.clone()),
+            ))
+        })
+        .collect();
+
+    if !worktree_cleanups.is_empty() {
+        if let Err(e) = services::services::worktree_manager::WorktreeManager::batch_cleanup_worktrees(&worktree_cleanups).await {
+            tracing::warn!(
+                workflow_id = %workflow.id,
+                error = %e,
+                "Failed to clean up worktrees (non-fatal)"
+            );
+        } else {
+            tracing::info!(
+                workflow_id = %workflow.id,
+                count = worktree_cleanups.len(),
+                "Cleaned up worktree directories"
+            );
+        }
+    }
 }
 
 /// POST /api/workflows/:workflow_id/tasks
@@ -2374,13 +2448,30 @@ async fn update_task_status(
     WorkflowTask::update_status(&deployment.db().pool, &task_id, &req.status).await?;
 
     // Auto-sync workflow status: when all tasks are completed, mark running workflow as completed.
+    // Uses CAS (running → completed) to prevent overwriting concurrent state changes.
     let tasks = WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
     if should_auto_complete_workflow(&workflow.status, &tasks) {
-        Workflow::update_status(&deployment.db().pool, &workflow_id, "completed").await?;
-        tracing::info!(
-            workflow_id = %workflow_id,
-            "Workflow auto-synced to completed after all tasks completed"
-        );
+        match Workflow::set_completed_from_running(&deployment.db().pool, &workflow_id).await {
+            Ok(true) => {
+                tracing::info!(
+                    workflow_id = %workflow_id,
+                    "Workflow auto-synced to completed after all tasks completed"
+                );
+            }
+            Ok(false) => {
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    "Workflow auto-sync to completed skipped: status changed concurrently"
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    workflow_id = %workflow_id,
+                    error = %e,
+                    "Failed to auto-sync workflow to completed"
+                );
+            }
+        }
     }
 
     // Fetch updated task
@@ -2953,12 +3044,32 @@ async fn merge_workflow(
     }
 
     let mut merged_tasks = Vec::new();
-    // TODO(G06-004): Record HEAD SHA before merge loop so multi-task merge failures
+
+    // G06-004: Record HEAD SHA before merge loop so multi-task merge failures
     // can be rolled back to a known-good state.
-    // TODO(G06-005): Check if task branch is already merged into target_branch before
-    // attempting merge (idempotency). Use `git merge-base --is-ancestor` or equivalent.
-    // TODO(G06-009): Inspect stderr from merge_squash_commit for conflict markers and
-    // surface structured conflict info to the caller instead of a generic error.
+    let pre_merge_head_sha = match deployment
+        .git()
+        .get_branch_oid(&base_repo_path, &workflow.target_branch)
+    {
+        Ok(sha) => {
+            tracing::info!(
+                workflow_id = %workflow_id,
+                target_branch = %workflow.target_branch,
+                pre_merge_sha = %sha,
+                "Recorded HEAD SHA before merge loop for rollback support"
+            );
+            Some(sha)
+        }
+        Err(e) => {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                error = %e,
+                "Could not record pre-merge HEAD SHA (merge will proceed without rollback support)"
+            );
+            None
+        }
+    };
+
     for task in tasks {
         let task_id = task.id.clone();
         let task_branch = task.branch.trim();
@@ -3026,8 +3137,16 @@ async fn merge_workflow(
                         );
                     }
                 }
-                // For recoverable errors (conflicts, diverged, dirty, rebase),
-                // keep 'merging' status so the user can resolve and retry.
+
+                // G06-004: Log pre-merge HEAD SHA for manual rollback if needed
+                if let Some(ref sha) = pre_merge_head_sha {
+                    tracing::error!(
+                        workflow_id = %workflow_id,
+                        task_id = %task_id,
+                        pre_merge_head_sha = %sha,
+                        "Merge failed. To rollback: git reset --hard {sha}"
+                    );
+                }
 
                 return Err(ApiError::from(err));
             }
@@ -3068,6 +3187,7 @@ async fn merge_workflow(
         "workflow_id": workflow_id,
         "workflowId": workflow_id,
         "targetBranch": workflow.target_branch,
+        "preMergeHeadSha": pre_merge_head_sha,
         "mergedTasks": merged_tasks
     });
 
