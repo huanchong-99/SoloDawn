@@ -193,6 +193,14 @@ pub fn ci_webhook_routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
 mod tests {
     use super::*;
 
+    fn bytes_to_hex(bytes: &[u8]) -> String {
+        use std::fmt::Write;
+        bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+    }
+
     #[test]
     fn test_hmac_sha256_known_vector() {
         // RFC 4231 Test Case 2
@@ -201,7 +209,7 @@ mod tests {
         let expected = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843";
 
         let result = compute_hmac_sha256(key, data);
-        let result_hex: String = result.iter().map(|b| format!("{b:02x}")).collect();
+        let result_hex = bytes_to_hex(&result);
         assert_eq!(result_hex, expected);
     }
 
@@ -210,7 +218,7 @@ mod tests {
         let key = b"test-secret";
         let body = b"test body";
         let mac = compute_hmac_sha256(key, body);
-        let hex_sig: String = mac.iter().map(|b| format!("{b:02x}")).collect();
+        let hex_sig = bytes_to_hex(&mac);
 
         assert!(verify_hmac_sha256(key, body, &format!("sha256={hex_sig}")));
         assert!(verify_hmac_sha256(key, body, &hex_sig));
