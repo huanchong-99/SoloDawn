@@ -14,7 +14,7 @@ use crate::{log_msg::LogMsg, stream_lines::LinesStreamExt};
 const HISTORY_BYTES: usize = 50_000 * 1_024;
 
 /// Warn threshold: emit a tracing::warn! when usage exceeds 80% of the cap.
-const HISTORY_WARN_THRESHOLD: usize = (HISTORY_BYTES as f64 * 0.8) as usize;
+const HISTORY_WARN_THRESHOLD: usize = HISTORY_BYTES / 5 * 4;
 
 #[derive(Clone)]
 struct StoredMsg {

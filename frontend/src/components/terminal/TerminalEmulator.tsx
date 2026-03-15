@@ -218,7 +218,6 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
         terminalReadyRef.current = false;
         terminal.dispose();
       };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // WebSocket connection
