@@ -2872,56 +2872,22 @@ next_action: handoff";
     }
 
     // =========================================================================
-    // Test Suite 8: LLM Retry with Backoff (Task 12)
+    // Test Suite 8: LLM Error Propagation (Task 12)
+    // G24-006: Internal retry removed; single-provider client propagates errors.
     // =========================================================================
 
     #[tokio::test]
-    async fn test_llm_retry_with_backoff() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        struct RetryResponder {
-            counter: AtomicUsize,
-        }
-
-        impl wiremock::Respond for RetryResponder {
-            fn respond(&self, _request: &wiremock::Request) -> wiremock::ResponseTemplate {
-                let count = self.counter.fetch_add(1, Ordering::SeqCst) + 1;
-                if count < 3 {
-                    ResponseTemplate::new(500).set_body_json(serde_json::json!({
-                        "error": "Internal server error"
-                    }))
-                } else {
-                    ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                        "choices": [{
-                            "message": {
-                                "role": "assistant",
-                                "content": "Success after retries"
-                            }
-                        }],
-                        "usage": {
-                            "prompt_tokens": 10,
-                            "completion_tokens": 20,
-                            "total_tokens": 30
-                        }
-                    }))
-                }
-            }
-        }
-
+    async fn test_llm_error_propagation() {
         // Install crypto provider for reqwest
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let mock_server = MockServer::start().await;
 
-        // Create a custom responder that tracks calls
-        // Mount the responder - it will be moved
-        let responder = RetryResponder {
-            counter: AtomicUsize::new(0),
-        };
-
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
-            .respond_with(responder)
+            .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
+                "error": "Internal server error"
+            })))
             .mount(&mock_server)
             .await;
 
@@ -2941,10 +2907,11 @@ next_action: handoff";
 
         let result = client.chat(messages).await;
 
-        // Test passes if retry logic is implemented (succeeds after retries)
-        // Test fails if no retry logic (fails on first 500 error)
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().content, "Success after retries");
+        // G24-006: Single-provider client has no internal retry.
+        // A 500 error should be propagated immediately.
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("500"), "Error should contain status code: {err_msg}");
     }
 
     // =========================================================================
