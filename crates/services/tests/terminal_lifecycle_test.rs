@@ -282,7 +282,7 @@ async fn test_terminal_full_lifecycle() {
 
         // Clean up the process if it's running
         if let Some(handle) = launch_result.process_handle {
-            let _ = process_manager.kill(handle.pid);
+            let _ = process_manager.kill(handle.pid).await;
         }
     } else {
         // If launch failed, verify error was captured
