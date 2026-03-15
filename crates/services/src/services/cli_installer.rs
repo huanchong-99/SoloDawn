@@ -42,6 +42,7 @@ pub enum InstallOutputLine {
 }
 
 /// Streaming output from an install/uninstall operation.
+#[derive(Debug)]
 pub struct InstallOutputStream {
     /// Channel receiver that yields output lines as they arrive.
     pub receiver: tokio::sync::mpsc::Receiver<InstallOutputLine>,

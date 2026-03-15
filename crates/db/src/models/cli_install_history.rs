@@ -270,7 +270,6 @@ impl CliDetectionCache {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[tokio::test]
     async fn test_cli_install_history_create() {
