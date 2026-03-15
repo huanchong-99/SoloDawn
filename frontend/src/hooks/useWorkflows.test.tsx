@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ToastProvider } from '@/components/ui/toast';
 
 const { mockLogApiError } = vi.hoisted(() => ({
   mockLogApiError: vi.fn(),
@@ -49,7 +50,7 @@ const createMockQueryClient = () =>
 
 const wrapper = ({ children }: Readonly<{ children: React.ReactNode }>) => (
   <QueryClientProvider client={createMockQueryClient()}>
-    {children}
+    <ToastProvider>{children}</ToastProvider>
   </QueryClientProvider>
 );
 
@@ -58,7 +59,9 @@ const createScopedWrapper = () => {
   const scopedWrapper = ({
     children,
   }: Readonly<{ children: React.ReactNode }>) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>{children}</ToastProvider>
+    </QueryClientProvider>
   );
   return { queryClient, scopedWrapper };
 };
