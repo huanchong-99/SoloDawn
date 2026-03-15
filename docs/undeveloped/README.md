@@ -8,17 +8,14 @@ This repository uses two top-level documentation folders:
 ## Current `docs/undeveloped/` structure
 
 - `docs/undeveloped/current/`: active unfinished work
-  - `TODO.md` — single source of truth for all active unfinished tasks (only backlog remains)
-- `docs/undeveloped/misc/`: auxiliary data used during development
-  - `TEST_DATA.md` — test workflow configuration and API credentials
+  - `TODO.md` — single source of truth for all active unfinished tasks (only minor stubs remain)
 
 ## Current `docs/developed/` structure
 
-- `docs/developed/plans/`: completed phase plans and design documents (Phase 0-29)
+- `docs/developed/plans/`: completed phase plans and design documents (Phase 0-29 + BACKLOG-002/003)
 - `docs/developed/issues/`: resolved audit reports, SonarCloud reports, and issue analyses
 - `docs/developed/ops/`: operations runbook, troubleshooting, deployment guides
 - `docs/developed/misc/`: archived TODO lists, user guide, operations manual, and other reference docs
-- `docs/developed/quality/`: quality gate documentation
 
 ## Maintenance rules
 
