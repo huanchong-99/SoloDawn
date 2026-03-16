@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { McpConfig } from 'shared/types';
-import { buildMcpServersPayload } from './McpSettings';
+import { buildMcpServersPayload } from '@/pages/ui-new/settings/McpSettingsNew';
 
 const mcpConfigFixture: McpConfig = {
   servers: {},
