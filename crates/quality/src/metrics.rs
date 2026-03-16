@@ -88,6 +88,47 @@ pub enum MetricKey {
     /// Sonar Critical 级别问题数
     #[serde(rename = "sonar_critical_issues")]
     SonarCriticalIssues,
+
+    // ── Built-in Rust 分析指标 ──
+    /// 内置 Rust 规则发现的问题总数
+    #[serde(rename = "builtin_rust_issues")]
+    BuiltinRustIssues,
+    /// 内置 Rust 规则发现的 Critical+ 问题数
+    #[serde(rename = "builtin_rust_critical")]
+    BuiltinRustCritical,
+    /// 最高圈复杂度
+    #[serde(rename = "rust_cyclomatic_complexity")]
+    RustCyclomaticComplexity,
+    /// 最高认知复杂度
+    #[serde(rename = "rust_cognitive_complexity")]
+    RustCognitiveComplexity,
+
+    // ── Built-in Frontend 分析指标 ──
+    /// 内置前端规则发现的问题总数
+    #[serde(rename = "builtin_frontend_issues")]
+    BuiltinFrontendIssues,
+    /// 内置前端规则发现的 Critical+ 问题数
+    #[serde(rename = "builtin_frontend_critical")]
+    BuiltinFrontendCritical,
+
+    // ── Built-in Common 分析指标 ──
+    /// 内置通用规则发现的问题总数
+    #[serde(rename = "builtin_common_issues")]
+    BuiltinCommonIssues,
+    /// 重复代码块数
+    #[serde(rename = "duplicated_blocks")]
+    DuplicatedBlocks,
+    /// 检测到的密钥/凭证数
+    #[serde(rename = "secrets_detected")]
+    SecretsDetected,
+
+    // ── Coverage 指标 ──
+    /// 行覆盖率 (%)
+    #[serde(rename = "line_coverage")]
+    LineCoverage,
+    /// 分支覆盖率 (%)
+    #[serde(rename = "branch_coverage")]
+    BranchCoverage,
 }
 
 impl MetricKey {
@@ -117,6 +158,17 @@ impl MetricKey {
             Self::SonarIssues => "sonar_issues",
             Self::SonarBlockerIssues => "sonar_blocker_issues",
             Self::SonarCriticalIssues => "sonar_critical_issues",
+            Self::BuiltinRustIssues => "builtin_rust_issues",
+            Self::BuiltinRustCritical => "builtin_rust_critical",
+            Self::RustCyclomaticComplexity => "rust_cyclomatic_complexity",
+            Self::RustCognitiveComplexity => "rust_cognitive_complexity",
+            Self::BuiltinFrontendIssues => "builtin_frontend_issues",
+            Self::BuiltinFrontendCritical => "builtin_frontend_critical",
+            Self::BuiltinCommonIssues => "builtin_common_issues",
+            Self::DuplicatedBlocks => "duplicated_blocks",
+            Self::SecretsDetected => "secrets_detected",
+            Self::LineCoverage => "line_coverage",
+            Self::BranchCoverage => "branch_coverage",
         }
     }
 
@@ -146,6 +198,17 @@ impl MetricKey {
             Self::SonarIssues => "Sonar Issues",
             Self::SonarBlockerIssues => "Sonar Blocker Issues",
             Self::SonarCriticalIssues => "Sonar Critical Issues",
+            Self::BuiltinRustIssues => "Built-in Rust Issues",
+            Self::BuiltinRustCritical => "Built-in Rust Critical",
+            Self::RustCyclomaticComplexity => "Rust Cyclomatic Complexity",
+            Self::RustCognitiveComplexity => "Rust Cognitive Complexity",
+            Self::BuiltinFrontendIssues => "Built-in Frontend Issues",
+            Self::BuiltinFrontendCritical => "Built-in Frontend Critical",
+            Self::BuiltinCommonIssues => "Built-in Common Issues",
+            Self::DuplicatedBlocks => "Duplicated Blocks",
+            Self::SecretsDetected => "Secrets Detected",
+            Self::LineCoverage => "Line Coverage (%)",
+            Self::BranchCoverage => "Branch Coverage (%)",
         }
     }
 }

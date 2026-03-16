@@ -22,6 +22,7 @@
 //! - `metrics` — 度量指标定义
 //! - `config` — 配置加载（quality-gate.yaml）
 
+pub mod analysis;
 pub mod config;
 pub mod engine;
 pub mod gate;
@@ -30,4 +31,5 @@ pub mod metrics;
 pub mod provider;
 pub mod report;
 pub mod rule;
+pub mod rules;
 pub mod sarif;

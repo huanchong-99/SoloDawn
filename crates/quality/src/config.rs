@@ -88,6 +88,18 @@ pub struct ProvidersConfig {
     pub security: bool,
     #[serde(default = "default_true")]
     pub sonar: bool,
+    /// Built-in Rust static analysis rules
+    #[serde(default = "default_true")]
+    pub builtin_rust: bool,
+    /// Built-in TypeScript/JavaScript static analysis rules
+    #[serde(default = "default_true")]
+    pub builtin_frontend: bool,
+    /// Built-in language-agnostic rules (duplication, secrets, etc.)
+    #[serde(default = "default_true")]
+    pub builtin_common: bool,
+    /// Coverage report parsing (lcov, cobertura, tarpaulin)
+    #[serde(default = "default_true")]
+    pub coverage: bool,
 }
 
 fn default_true() -> bool {

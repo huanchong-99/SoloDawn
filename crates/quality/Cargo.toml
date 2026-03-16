@@ -22,3 +22,4 @@ async-trait = { workspace = true }
 futures = "0.3"
 regex = "1"
 reqwest = { workspace = true, features = ["multipart"] }
+syn = { version = "2", features = ["full", "parsing", "visit"] }
