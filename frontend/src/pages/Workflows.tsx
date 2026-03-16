@@ -1381,23 +1381,24 @@ export function Workflows() {
   const promptQueueCount = promptQueue.length;
 
   // G27-005: Auto-cleanup stale prompts that have not been responded to within 120s
+  const removeStalePrompts = useCallback(() => {
+    const now = Date.now();
+    setPromptQueue((prev) =>
+      prev.filter((item) => {
+        const detectedAt = item.detected.detectedAt
+          ? new Date(item.detected.detectedAt).getTime()
+          : now;
+        return now - detectedAt < PROMPT_QUEUE_TIMEOUT_MS;
+      })
+    );
+  }, []);
+
   useEffect(() => {
     if (promptQueue.length === 0) return;
 
-    const isPromptStale = (item: (typeof promptQueue)[number], now: number) => {
-      const detectedAt = item.detected.detectedAt
-        ? new Date(item.detected.detectedAt).getTime()
-        : now;
-      return now - detectedAt >= PROMPT_QUEUE_TIMEOUT_MS;
-    };
-
-    const timer = setInterval(() => {
-      const now = Date.now();
-      setPromptQueue((prev) => prev.filter((item) => !isPromptStale(item, now)));
-    }, 30_000); // Check every 30s
-
+    const timer = setInterval(removeStalePrompts, 30_000); // Check every 30s
     return () => clearInterval(timer);
-  }, [promptQueue.length]);
+  }, [promptQueue.length, removeStalePrompts]);
 
   useEffect(() => {
     if (
