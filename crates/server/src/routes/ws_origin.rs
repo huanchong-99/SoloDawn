@@ -18,21 +18,31 @@ pub fn validate_ws_origin(headers: &HeaderMap) -> Result<(), (StatusCode, String
 
     // Dev mode: no allowlist configured — allow everything with a warning.
     if trimmed.is_empty() {
-        tracing::warn!("GITCORTEX_CORS_ORIGINS not set; WebSocket origin validation disabled (development mode)");
+        tracing::warn!(
+            "GITCORTEX_CORS_ORIGINS not set; WebSocket origin validation disabled (development mode)"
+        );
         return Ok(());
     }
 
-    let allowed: Vec<&str> = trimmed.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+    let allowed: Vec<&str> = trimmed
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
 
     let origin = match headers.get("origin").and_then(|v| v.to_str().ok()) {
         Some(o) => o,
         None => {
             // Allow missing Origin from localhost (e.g. non-browser clients on loopback).
             if is_localhost_request(headers) {
-                tracing::debug!("Allowing WebSocket connection with no Origin header from localhost");
+                tracing::debug!(
+                    "Allowing WebSocket connection with no Origin header from localhost"
+                );
                 return Ok(());
             }
-            tracing::warn!("Rejected WebSocket connection: no Origin header from non-localhost source");
+            tracing::warn!(
+                "Rejected WebSocket connection: no Origin header from non-localhost source"
+            );
             return Err((
                 StatusCode::FORBIDDEN,
                 "Forbidden: missing Origin header".to_string(),
@@ -91,25 +101,37 @@ mod tests {
     fn dev_mode_allows_any_origin() {
         with_env(None, || {
             let mut headers = HeaderMap::new();
-            headers.insert("origin", HeaderValue::from_static("http://evil.example.com"));
+            headers.insert(
+                "origin",
+                HeaderValue::from_static("http://evil.example.com"),
+            );
             assert!(validate_ws_origin(&headers).is_ok());
         });
     }
 
     #[test]
     fn allowed_origin_passes() {
-        with_env(Some("http://localhost:3000,https://app.example.com"), || {
-            let mut headers = HeaderMap::new();
-            headers.insert("origin", HeaderValue::from_static("https://app.example.com"));
-            assert!(validate_ws_origin(&headers).is_ok());
-        });
+        with_env(
+            Some("http://localhost:3000,https://app.example.com"),
+            || {
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    "origin",
+                    HeaderValue::from_static("https://app.example.com"),
+                );
+                assert!(validate_ws_origin(&headers).is_ok());
+            },
+        );
     }
 
     #[test]
     fn disallowed_origin_rejected() {
         with_env(Some("https://app.example.com"), || {
             let mut headers = HeaderMap::new();
-            headers.insert("origin", HeaderValue::from_static("https://evil.example.com"));
+            headers.insert(
+                "origin",
+                HeaderValue::from_static("https://evil.example.com"),
+            );
             let err = validate_ws_origin(&headers).unwrap_err();
             assert_eq!(err.0, StatusCode::FORBIDDEN);
         });
