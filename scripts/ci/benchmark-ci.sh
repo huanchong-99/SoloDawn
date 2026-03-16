@@ -18,7 +18,7 @@ usage() {
   echo "  start <step_name>  Record the start timestamp for a step"
   echo "  end <step_name>    Record the end timestamp, compute and print duration"
   echo "  report             Output a JSON summary of all recorded steps"
-  exit 1
+  return 1
 }
 
 ensure_dir() {

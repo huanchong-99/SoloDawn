@@ -218,6 +218,16 @@ function getInstallPhaseKey(
   });
 }
 
+/** Derives installed CLI names from the install result (extracted to reduce cognitive complexity). */
+function deriveInstalledCliNames(
+  installCliResult: { installed?: boolean; output?: string } | null,
+): string[] {
+  if (installCliResult?.installed && installCliResult.output) {
+    return parseInstalledCliNames(installCliResult.output);
+  }
+  return [];
+}
+
 /** Resets local profiles state to server content (extracted to reduce cognitive complexity). */
 function resetToServerProfiles(
   serverContent: string | undefined,
@@ -656,10 +666,7 @@ export function AgentSettingsNew() {
     );
   }
 
-  const installedCliNames =
-    installCliResult?.installed && installCliResult.output
-      ? parseInstalledCliNames(installCliResult.output)
-      : [];
+  const installedCliNames = deriveInstalledCliNames(installCliResult);
 
   // ---- Variant dropdown helpers ----
   const currentProfileVariant = executorDraft;
