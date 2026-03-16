@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { isEqual } from 'lodash';
-import { SpinnerGap, CheckCircle } from '@phosphor-icons/react';
+import { SpinnerGapIcon, CheckCircleIcon } from '@phosphor-icons/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { cn } from '@/lib/utils';
@@ -219,7 +219,7 @@ export function ReposSettingsNew() {
   if (reposLoading) {
     return (
       <div className="flex items-center justify-center py-double">
-        <SpinnerGap
+        <SpinnerGapIcon
           className="size-icon-lg animate-spin text-low"
           weight="bold"
         />
@@ -250,7 +250,7 @@ export function ReposSettingsNew() {
 
       {success && (
         <div className="flex items-center gap-half border border-success bg-success/10 p-base text-sm text-success rounded">
-          <CheckCircle className="size-icon-sm" weight="bold" />
+          <CheckCircleIcon className="size-icon-sm" weight="bold" />
           <span className="font-medium">
             {t('settings.repos.save.success')}
           </span>

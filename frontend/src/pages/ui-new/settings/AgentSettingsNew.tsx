@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cloneDeep, isEqual } from 'lodash';
 import {
-  CaretDown,
-  SpinnerGap,
-  Trash,
-  Plus,
-  ArrowsClockwise,
-  DownloadSimple,
+  CaretDownIcon,
+  SpinnerGapIcon,
+  TrashIcon,
+  PlusIcon,
+  ArrowsClockwiseIcon,
+  DownloadSimpleIcon,
 } from '@phosphor-icons/react';
 
 import { cn } from '@/lib/utils';
@@ -87,7 +87,7 @@ function NativeSelect({
           </option>
         ))}
       </select>
-      <CaretDown
+      <CaretDownIcon
         className="size-icon-xs absolute right-1.5 top-1/2 -translate-y-1/2 text-low pointer-events-none"
         weight="bold"
       />
@@ -132,7 +132,7 @@ function InfoAlert({
 /* ------------------------------------------------------------------ */
 function Spinner({ className }: Readonly<{ className?: string }>) {
   return (
-    <SpinnerGap
+    <SpinnerGapIcon
       className={cn('animate-spin', className)}
       weight="bold"
     />
@@ -660,7 +660,7 @@ export function AgentSettingsNew() {
                 {currentProfileVariant?.variant ||
                   t('settings.general.taskExecution.defaultLabel')}
               </span>
-              <CaretDown
+              <CaretDownIcon
                 className="size-icon-xs ml-1 shrink-0 text-low"
                 weight="bold"
               />
@@ -791,7 +791,7 @@ export function AgentSettingsNew() {
               {installingCli ? (
                 <Spinner className="size-icon-xs" />
               ) : (
-                <DownloadSimple className="size-icon-xs" weight="bold" />
+                <DownloadSimpleIcon className="size-icon-xs" weight="bold" />
               )}
               {t('settings.agents.installAiCli', {
                 defaultValue: 'One-click Install AI CLIs',
@@ -805,7 +805,7 @@ export function AgentSettingsNew() {
               }
               disabled={installingCli}
             >
-              <ArrowsClockwise className="size-icon-xs" weight="bold" />
+              <ArrowsClockwiseIcon className="size-icon-xs" weight="bold" />
               {t('settings.agents.refreshAvailability', {
                 defaultValue: 'Refresh availability',
               })}
@@ -985,7 +985,7 @@ export function AgentSettingsNew() {
                       onClick={openCreateDialog}
                       title={t('settings.agents.editor.createNew')}
                     >
-                      <Plus
+                      <PlusIcon
                         className="size-icon-xs"
                         weight="bold"
                       />
@@ -1024,7 +1024,7 @@ export function AgentSettingsNew() {
                             )
                       }
                     >
-                      <Trash
+                      <TrashIcon
                         className="size-icon-xs"
                         weight="bold"
                       />

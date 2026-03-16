@@ -4,10 +4,10 @@ import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { isEqual } from 'lodash';
 import {
-  Plus,
-  Trash,
-  SpinnerGap,
-  CheckCircle,
+  PlusIcon,
+  TrashIcon,
+  SpinnerGapIcon,
+  CheckCircleIcon,
 } from '@phosphor-icons/react';
 
 import { SettingsCard } from '@/components/ui-new/primitives/SettingsCard';
@@ -334,7 +334,7 @@ export function ProjectSettingsNew() {
   if (projectsLoading) {
     return (
       <div className="flex items-center justify-center py-double">
-        <SpinnerGap className="size-icon-lg animate-spin text-low" weight="bold" />
+        <SpinnerGapIcon className="size-icon-lg animate-spin text-low" weight="bold" />
         <span className="ml-base text-normal text-sm">
           {t('settings.projects.loading')}
         </span>
@@ -362,7 +362,7 @@ export function ProjectSettingsNew() {
 
       {success && (
         <div className="relative w-full border border-success bg-success/10 p-base text-sm text-success flex items-center gap-half">
-          <CheckCircle className="size-icon-sm" weight="bold" />
+          <CheckCircleIcon className="size-icon-sm" weight="bold" />
           <span className="font-medium">
             {t('settings.projects.save.success')}
           </span>
@@ -388,7 +388,7 @@ export function ProjectSettingsNew() {
             </div>
             <div className="shrink-0 pt-0.5">
               <Button variant="outline" size="sm" onClick={handleCreateProject}>
-                <Plus className="size-icon-xs" weight="bold" />
+                <PlusIcon className="size-icon-xs" weight="bold" />
                 {t('projects:createProject')}
               </Button>
             </div>
@@ -439,7 +439,7 @@ export function ProjectSettingsNew() {
                     disabled={saving || !hasUnsavedChanges}
                   >
                     {saving && (
-                      <SpinnerGap
+                      <SpinnerGapIcon
                         className="size-icon-xs animate-spin"
                         weight="bold"
                       />
@@ -463,7 +463,7 @@ export function ProjectSettingsNew() {
 
               {loadingRepos ? (
                 <div className="flex items-center justify-center py-base">
-                  <SpinnerGap
+                  <SpinnerGapIcon
                     className="size-icon-sm animate-spin text-low"
                     weight="bold"
                   />
@@ -503,7 +503,7 @@ export function ProjectSettingsNew() {
                           />
                         ) : (
                           <IconButton
-                            icon={Trash}
+                            icon={TrashIcon}
                             aria-label="Delete repository"
                             title="Delete repository"
                             onClick={() => {
@@ -529,12 +529,12 @@ export function ProjectSettingsNew() {
                     className="w-full"
                   >
                     {addingRepo ? (
-                      <SpinnerGap
+                      <SpinnerGapIcon
                         className="size-icon-xs animate-spin"
                         weight="bold"
                       />
                     ) : (
-                      <Plus className="size-icon-xs" weight="bold" />
+                      <PlusIcon className="size-icon-xs" weight="bold" />
                     )}
                     Add Repository
                   </Button>

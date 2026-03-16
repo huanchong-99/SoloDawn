@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import {
-  Plus,
-  UserPlus,
-  Trash,
-  SpinnerGap,
-  CheckCircle,
-  Info,
+  PlusIcon,
+  UserPlusIcon,
+  TrashIcon,
+  SpinnerGapIcon,
+  CheckCircleIcon,
+  InfoIcon,
 } from '@phosphor-icons/react';
 import { useUserOrganizations } from '@/hooks/useUserOrganizations';
 import { useOrganizationSelection } from '@/hooks/useOrganizationSelection';
@@ -59,7 +59,7 @@ function SuccessAlert({
         className
       )}
     >
-      <CheckCircle className="size-icon-sm shrink-0" weight="bold" />
+      <CheckCircleIcon className="size-icon-sm shrink-0" weight="bold" />
       <span>{message}</span>
     </output>
   );
@@ -78,7 +78,7 @@ function InfoAlert({
         className
       )}
     >
-      <Info className="size-icon-sm shrink-0" weight="bold" />
+      <InfoIcon className="size-icon-sm shrink-0" weight="bold" />
       <span>{message}</span>
     </output>
   );
@@ -89,7 +89,7 @@ function InfoAlert({
 function LoadingSpinner({ text }: Readonly<{ text: string }>) {
   return (
     <div className="flex items-center justify-center py-double">
-      <SpinnerGap className="size-icon-md animate-spin text-low" weight="bold" />
+      <SpinnerGapIcon className="size-icon-md animate-spin text-low" weight="bold" />
       <span className="ml-half text-low text-sm">{text}</span>
     </div>
   );
@@ -651,7 +651,7 @@ export function OrganizationSettingsNew() {
             size="sm"
             onClick={handleCreateOrganization}
           >
-            <Plus className="size-icon-xs" weight="bold" />
+            <PlusIcon className="size-icon-xs" weight="bold" />
             {t('createDialog.createButton')}
           </Button>
         </div>
@@ -706,7 +706,7 @@ export function OrganizationSettingsNew() {
                 size="sm"
                 onClick={handleInviteMember}
               >
-                <UserPlus className="size-icon-xs" weight="bold" />
+                <UserPlusIcon className="size-icon-xs" weight="bold" />
                 {t('memberList.inviteButton')}
               </Button>
             </div>
@@ -777,12 +777,12 @@ export function OrganizationSettingsNew() {
               disabled={deleteOrganization.isPending}
             >
               {deleteOrganization.isPending ? (
-                <SpinnerGap
+                <SpinnerGapIcon
                   className="size-icon-xs animate-spin"
                   weight="bold"
                 />
               ) : (
-                <Trash className="size-icon-xs" weight="bold" />
+                <TrashIcon className="size-icon-xs" weight="bold" />
               )}
               {t('common:buttons.delete')}
             </Button>

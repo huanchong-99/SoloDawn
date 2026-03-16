@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cloneDeep, merge, isEqual } from 'lodash';
-import { SpeakerHigh, ArrowCounterClockwise, SpinnerGap } from '@phosphor-icons/react';
+import { SpeakerHighIcon, ArrowCounterClockwiseIcon, SpinnerGapIcon } from '@phosphor-icons/react';
 import {
   DEFAULT_PR_DESCRIPTION_PROMPT,
   EditorType,
@@ -218,7 +218,7 @@ export function GeneralSettingsNew() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-double">
-        <SpinnerGap className="size-icon-xl animate-spin text-low" weight="bold" />
+        <SpinnerGapIcon className="size-icon-xl animate-spin text-low" weight="bold" />
         <span className="ml-base text-normal text-base">
           {t('settings.general.loading')}
         </span>
@@ -521,7 +521,7 @@ export function GeneralSettingsNew() {
                     className="flex items-center justify-center rounded border border-border bg-secondary px-half py-1 text-low hover:text-normal transition-colors duration-200"
                     aria-label="Play sound preview"
                   >
-                    <SpeakerHigh className="size-icon-sm" weight="bold" />
+                    <SpeakerHighIcon className="size-icon-sm" weight="bold" />
                   </button>
                 </div>
               </div>
@@ -589,7 +589,7 @@ export function GeneralSettingsNew() {
               onClick={resetDisclaimer}
               className="inline-flex items-center gap-1.5 shrink-0 rounded border border-border bg-secondary px-base py-1 text-sm text-normal hover:bg-surface-2 transition-colors duration-200"
             >
-              <ArrowCounterClockwise className="size-icon-xs" weight="bold" />
+              <ArrowCounterClockwiseIcon className="size-icon-xs" weight="bold" />
               {t('settings.general.safety.disclaimer.button')}
             </button>
           </div>
@@ -608,7 +608,7 @@ export function GeneralSettingsNew() {
               onClick={resetOnboarding}
               className="inline-flex items-center gap-1.5 shrink-0 rounded border border-border bg-secondary px-base py-1 text-sm text-normal hover:bg-surface-2 transition-colors duration-200"
             >
-              <ArrowCounterClockwise className="size-icon-xs" weight="bold" />
+              <ArrowCounterClockwiseIcon className="size-icon-xs" weight="bold" />
               {t('settings.general.safety.onboarding.button')}
             </button>
           </div>

@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Globe, CaretDown } from '@phosphor-icons/react';
+import { GlobeIcon, CaretDownIcon } from '@phosphor-icons/react';
 
 import { cn } from '@/lib/utils';
 
@@ -33,7 +33,7 @@ export function SetupWizardStep1Welcome({
 
       <div className="w-full space-y-half">
         <label className="flex items-center gap-half text-normal text-base">
-          <Globe className="size-icon-sm text-low" weight="regular" />
+          <GlobeIcon className="size-icon-sm text-low" weight="regular" />
           {t('setup:wizard.welcome.languageLabel')}
         </label>
         <div className="relative w-full">
@@ -52,7 +52,7 @@ export function SetupWizardStep1Welcome({
               </option>
             ))}
           </select>
-          <CaretDown
+          <CaretDownIcon
             className="size-icon-xs absolute right-2 top-1/2 -translate-y-1/2 text-low pointer-events-none"
             weight="bold"
           />

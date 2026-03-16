@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import type { Icon } from '@phosphor-icons/react';
-import { ArrowCounterClockwise } from '@phosphor-icons/react';
+import { ArrowCounterClockwiseIcon } from '@phosphor-icons/react';
 
 export interface SettingsNavItem {
   path: string;
@@ -79,7 +79,7 @@ export function SettingsLayout({
               'text-xs text-low hover:text-normal hover:bg-panel transition-colors'
             )}
           >
-            <ArrowCounterClockwise className="size-icon-xs shrink-0" />
+            <ArrowCounterClockwiseIcon className="size-icon-xs shrink-0" />
             <span className="truncate">{rerunSetupLabel}</span>
           </button>
         </div>

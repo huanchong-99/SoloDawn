@@ -1,11 +1,11 @@
 import { useTranslation } from 'react-i18next';
 import {
-  CheckCircle,
-  WarningCircle,
-  CircleNotch,
-  Eye,
-  EyeSlash,
-  CaretDown,
+  CheckCircleIcon,
+  WarningCircleIcon,
+  CircleNotchIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  CaretDownIcon,
 } from '@phosphor-icons/react';
 
 import { cn } from '@/lib/utils';
@@ -161,9 +161,9 @@ export function SetupWizardStep2Model({
               aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
             >
               {showApiKey ? (
-                <EyeSlash className="size-icon-sm" />
+                <EyeSlashIcon className="size-icon-sm" />
               ) : (
-                <Eye className="size-icon-sm" />
+                <EyeIcon className="size-icon-sm" />
               )}
             </button>
           </div>
@@ -209,7 +209,7 @@ export function SetupWizardStep2Model({
             )}
           >
             {isLoadingModels && (
-              <CircleNotch className="size-icon-sm animate-spin" weight="bold" />
+              <CircleNotchIcon className="size-icon-sm animate-spin" weight="bold" />
             )}
             {isLoadingModels
               ? t('setup:wizard.model.fetchingModels')
@@ -246,7 +246,7 @@ export function SetupWizardStep2Model({
                   </option>
                 ))}
               </select>
-              <CaretDown
+              <CaretDownIcon
                 className="size-icon-xs absolute right-2 top-1/2 -translate-y-1/2 text-low pointer-events-none"
                 weight="bold"
               />
@@ -270,7 +270,7 @@ export function SetupWizardStep2Model({
               )}
             >
               {isVerifying && (
-                <CircleNotch
+                <CircleNotchIcon
                   className="size-icon-sm animate-spin"
                   weight="bold"
                 />
@@ -283,13 +283,13 @@ export function SetupWizardStep2Model({
             {/* Verification result */}
             {isVerified && (
               <div className="flex items-center gap-half text-success text-base">
-                <CheckCircle className="size-icon-sm" weight="fill" />
+                <CheckCircleIcon className="size-icon-sm" weight="fill" />
                 <span>{t('setup:wizard.model.verified')}</span>
               </div>
             )}
             {verifyError && !isVerified && (
               <div className="flex items-center gap-half text-error text-base">
-                <WarningCircle className="size-icon-sm" weight="fill" />
+                <WarningCircleIcon className="size-icon-sm" weight="fill" />
                 <span>{t('setup:wizard.model.verifyFailed')}</span>
               </div>
             )}

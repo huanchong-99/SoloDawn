@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  ArrowsClockwise,
-  CheckCircle,
-  XCircle,
-  SpinnerGap,
-  Warning,
+  ArrowsClockwiseIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  SpinnerGapIcon,
+  WarningIcon,
 } from '@phosphor-icons/react';
 import { feishuApi, makeRequest, handleApiResponse } from '@/lib/api';
 import { SettingsCard } from '@/components/ui-new/primitives/SettingsCard';
@@ -143,7 +143,7 @@ export function FeishuSettingsNew() {
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-low py-double">
-        <SpinnerGap className="size-icon-sm animate-spin" />
+        <SpinnerGapIcon className="size-icon-sm animate-spin" />
         <span className="text-base">{t('settings.general.loading')}</span>
       </div>
     );
@@ -156,7 +156,7 @@ export function FeishuSettingsNew() {
     if (isConnected) {
       return (
         <>
-          <CheckCircle
+          <CheckCircleIcon
             className="size-icon-sm text-success"
             weight="fill"
           />
@@ -169,7 +169,7 @@ export function FeishuSettingsNew() {
     if (isConfigured) {
       return (
         <>
-          <XCircle
+          <XCircleIcon
             className="size-icon-sm text-error"
             weight="fill"
           />
@@ -181,7 +181,7 @@ export function FeishuSettingsNew() {
     }
     return (
       <>
-        <Warning
+        <WarningIcon
           className="size-icon-sm text-low"
           weight="fill"
         />
@@ -231,7 +231,7 @@ export function FeishuSettingsNew() {
                   variant="tertiary"
                   onClick={handleReconnect}
                   disabled={reconnecting}
-                  actionIcon={reconnecting ? 'spinner' : ArrowsClockwise}
+                  actionIcon={reconnecting ? 'spinner' : ArrowsClockwiseIcon}
                   value={t('settings:newDesign.feishu.reconnect')}
                 />
               </div>
