@@ -80,20 +80,20 @@ export function SetupWizardStep2ModelContainer({
   );
 
   const handleFetchModels = useCallback(() => {
-    void fetchModels(
+    fetchModels(
       apiType,
       apiKey,
       apiType === 'openai-compatible' ? baseUrl : undefined
-    );
+    ).catch(() => { /* handled internally */ });
   }, [apiType, apiKey, baseUrl, fetchModels]);
 
   const handleVerify = useCallback(() => {
-    void verifyModel({
+    verifyModel({
       apiType,
       apiKey,
       baseUrl: apiType === 'openai-compatible' ? baseUrl : undefined,
       modelId,
-    });
+    }).catch(() => { /* handled internally */ });
   }, [apiType, apiKey, baseUrl, modelId, verifyModel]);
 
   const handleNext = useCallback(async () => {
@@ -144,7 +144,7 @@ export function SetupWizardStep2ModelContainer({
       onToggleApiKeyVisibility={() => setShowApiKey((prev) => !prev)}
       onFetchModels={handleFetchModels}
       onVerify={handleVerify}
-      onNext={() => void handleNext()}
+      onNext={() => { handleNext().catch(() => { /* handled internally */ }); }}
       onBack={onBack}
       onSkip={onSkip}
       canProceed={canProceed}

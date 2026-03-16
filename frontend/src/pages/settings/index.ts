@@ -1,9 +1,10 @@
-export { SettingsLayout } from './SettingsLayout';
-export { GeneralSettings } from './GeneralSettings';
-export { ProjectSettings } from './ProjectSettings';
-export { ReposSettings } from './ReposSettings';
-export { OrganizationSettings } from './OrganizationSettings';
-export { AgentSettings } from './AgentSettings';
-export { ModelsSettings } from './ModelsSettings';
-export { McpSettings } from './McpSettings';
-export { FeishuSettings } from './FeishuSettings';
+// Re-export new design settings pages
+export { GeneralSettingsNew as GeneralSettings } from '@/pages/ui-new/settings';
+export { ModelsSettingsNew as ModelsSettings } from '@/pages/ui-new/settings';
+export { ProjectSettingsNew as ProjectSettings } from '@/pages/ui-new/settings';
+export { ReposSettingsNew as ReposSettings } from '@/pages/ui-new/settings';
+export { AgentSettingsNew as AgentSettings } from '@/pages/ui-new/settings';
+export { McpSettingsNew as McpSettings } from '@/pages/ui-new/settings';
+export { FeishuSettingsNew as FeishuSettings } from '@/pages/ui-new/settings';
+export { OrganizationSettingsNew as OrganizationSettings } from '@/pages/ui-new/settings';
+export { SettingsLayoutContainer as SettingsLayout } from '@/components/ui-new/containers/SettingsLayoutContainer';

@@ -53,8 +53,7 @@ function SuccessAlert({
   className,
 }: Readonly<{ message: string; className?: string }>) {
   return (
-    <div
-      role="status"
+    <output
       className={cn(
         'relative w-full border border-success bg-success/10 p-base text-sm text-success flex items-center gap-half',
         className
@@ -62,7 +61,7 @@ function SuccessAlert({
     >
       <CheckCircle className="size-icon-sm shrink-0" weight="bold" />
       <span>{message}</span>
-    </div>
+    </output>
   );
 }
 
@@ -73,8 +72,7 @@ function InfoAlert({
   className,
 }: Readonly<{ message: string; className?: string }>) {
   return (
-    <div
-      role="status"
+    <output
       className={cn(
         'relative w-full border border-border bg-secondary p-base text-sm text-normal flex items-center gap-half',
         className
@@ -82,7 +80,7 @@ function InfoAlert({
     >
       <Info className="size-icon-sm shrink-0" weight="bold" />
       <span>{message}</span>
-    </div>
+    </output>
   );
 }
 

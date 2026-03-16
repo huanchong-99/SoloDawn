@@ -289,12 +289,11 @@ export function McpSettingsNew() {
       )}
 
       {success && (
-        <div
-          role="status"
-          className="relative w-full border border-success bg-success/10 p-base text-sm text-success"
+        <output
+          className="relative w-full border border-success bg-success/10 p-base text-sm text-success block"
         >
           {t('settings.mcp.save.successMessage')}
-        </div>
+        </output>
       )}
 
       <SettingsCard

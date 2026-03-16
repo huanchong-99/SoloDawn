@@ -1,6 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Globe } from '@phosphor-icons/react';
-import { CaretDown } from '@phosphor-icons/react';
+import { Globe, CaretDown } from '@phosphor-icons/react';
 
 import { cn } from '@/lib/utils';
 

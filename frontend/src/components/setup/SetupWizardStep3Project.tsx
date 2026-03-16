@@ -35,6 +35,37 @@ export function SetupWizardStep3Project({
 
   const canContinue = directory.trim() !== '' && isValid && !isChecking && !isCreating;
 
+  const validationIndicator = (() => {
+    if (isChecking) {
+      return (
+        <>
+          <CircleNotch className="size-icon-xs text-low animate-spin" />
+          <span className="text-sm text-low">
+            {t('setup:wizard.project.checking')}
+          </span>
+        </>
+      );
+    }
+    if (isValid) {
+      return (
+        <>
+          <CheckCircle className="size-icon-xs text-success" weight="fill" />
+          <span className="text-sm text-success">
+            {validationMessage ?? t('setup:wizard.project.validGitRepo')}
+          </span>
+        </>
+      );
+    }
+    return (
+      <>
+        <XCircle className="size-icon-xs text-error" weight="fill" />
+        <span className="text-sm text-error">
+          {validationMessage ?? t('setup:wizard.project.notGitRepo')}
+        </span>
+      </>
+    );
+  })();
+
   return (
     <div className="flex flex-col items-center justify-center max-w-lg mx-auto space-y-double">
       <div className="text-center space-y-base">
@@ -90,28 +121,7 @@ export function SetupWizardStep3Project({
 
         {directory.trim() !== '' && (
           <div className="flex items-center gap-half mt-half">
-            {isChecking ? (
-              <>
-                <CircleNotch className="size-icon-xs text-low animate-spin" />
-                <span className="text-sm text-low">
-                  {t('setup:wizard.project.checking')}
-                </span>
-              </>
-            ) : isValid ? (
-              <>
-                <CheckCircle className="size-icon-xs text-success" weight="fill" />
-                <span className="text-sm text-success">
-                  {validationMessage ?? t('setup:wizard.project.validGitRepo')}
-                </span>
-              </>
-            ) : (
-              <>
-                <XCircle className="size-icon-xs text-error" weight="fill" />
-                <span className="text-sm text-error">
-                  {validationMessage ?? t('setup:wizard.project.notGitRepo')}
-                </span>
-              </>
-            )}
+            {validationIndicator}
           </div>
         )}
       </div>

@@ -46,9 +46,9 @@ async function checkGitRepo(path: string): Promise<GitCheckResult> {
 }
 
 function deriveProjectName(directory: string): string {
-  const trimmed = directory.replace(/[\\/]+$/, '');
-  const parts = trimmed.split(/[\\/]/);
-  const last = parts[parts.length - 1] ?? '';
+  const trimmed = directory.replace(/[/\\]+$/, '');
+  const parts = trimmed.split(/[/\\]/);
+  const last = parts.at(-1) ?? '';
   return last || 'My Project';
 }
 
@@ -130,7 +130,7 @@ export function SetupWizardStep3ProjectContainer({
 
       if (path.trim()) {
         debounceTimerRef.current = setTimeout(() => {
-          void validateDirectory(path);
+          validateDirectory(path).catch(() => { /* handled internally */ });
         }, 500);
       }
     },
@@ -147,7 +147,7 @@ export function SetupWizardStep3ProjectContainer({
       if (!selectedPath) return;
 
       setDirectory(selectedPath);
-      void validateDirectory(selectedPath);
+      validateDirectory(selectedPath).catch(() => { /* handled internally */ });
     } catch {
       // User cancelled the dialog
     }

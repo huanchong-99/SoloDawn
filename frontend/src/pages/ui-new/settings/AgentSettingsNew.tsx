@@ -44,6 +44,16 @@ type ExecutorsMap = Record<string, Record<string, Record<string, unknown>>>;
 /* ------------------------------------------------------------------ */
 /*  Inline select primitive (native <select> styled for new design)   */
 /* ------------------------------------------------------------------ */
+interface NativeSelectProps {
+  id?: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  options: Array<{ value: string; label: string }>;
+  className?: string;
+}
+
 function NativeSelect({
   id,
   value,
@@ -52,15 +62,7 @@ function NativeSelect({
   placeholder,
   options,
   className,
-}: {
-  id?: string;
-  value: string;
-  onChange: (v: string) => void;
-  disabled?: boolean;
-  placeholder?: string;
-  options: Array<{ value: string; label: string }>;
-  className?: string;
-}) {
+}: Readonly<NativeSelectProps>) {
   return (
     <div className={cn('relative', className)}>
       <select
@@ -96,24 +98,23 @@ function NativeSelect({
 /* ------------------------------------------------------------------ */
 /*  Success / info alert for new design                               */
 /* ------------------------------------------------------------------ */
-function SuccessAlert({ message }: { message: string }) {
+function SuccessAlert({ message }: Readonly<{ message: string }>) {
   return (
-    <div
-      role="status"
-      className="relative w-full border border-success bg-success/10 p-base text-sm text-success"
+    <output
+      className="relative w-full border border-success bg-success/10 p-base text-sm text-success block"
     >
       {message}
-    </div>
+    </output>
   );
 }
 
 function InfoAlert({
   children,
   className,
-}: {
+}: Readonly<{
   children: React.ReactNode;
   className?: string;
-}) {
+}>) {
   return (
     <div
       className={cn(
@@ -129,13 +130,64 @@ function InfoAlert({
 /* ------------------------------------------------------------------ */
 /*  Spinner icon (Phosphor-based)                                     */
 /* ------------------------------------------------------------------ */
-function Spinner({ className }: { className?: string }) {
+function Spinner({ className }: Readonly<{ className?: string }>) {
   return (
     <SpinnerGap
       className={cn('animate-spin', className)}
       weight="bold"
     />
   );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Pure helpers (outside component to reduce cognitive complexity)    */
+/* ------------------------------------------------------------------ */
+
+function parseInstalledCliNames(output: string): string[] {
+  const names = new Set<string>();
+  const lines = output.split('\n');
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const okIndex = line.indexOf('OK ');
+    if (okIndex < 0) {
+      continue;
+    }
+
+    const nameStart = okIndex + 3;
+    const colonIndex = line.indexOf(':', nameStart);
+    if (colonIndex < 0) {
+      continue;
+    }
+
+    const name = line.slice(nameStart, colonIndex).trim();
+    if (name.length > 0) {
+      names.add(name);
+    }
+  }
+
+  return Array.from(names);
+}
+
+function getProfilesErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    const message = Reflect.get(error, 'message');
+    if (typeof message === 'string' && message.trim()) {
+      return message;
+    }
+
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return '[Unserializable error object]';
+    }
+  }
+
+  return String(error);
 }
 
 /* ================================================================== */
@@ -312,32 +364,6 @@ export function AgentSettingsNew() {
     return t('settings.agents.installAiCliPhaseVerifying', {
       defaultValue: 'Verifying installation results...',
     });
-  };
-
-  const parseInstalledCliNames = (output: string): string[] => {
-    const names = new Set<string>();
-    const lines = output.split('\n');
-
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      const okIndex = line.indexOf('OK ');
-      if (okIndex < 0) {
-        continue;
-      }
-
-      const nameStart = okIndex + 3;
-      const colonIndex = line.indexOf(':', nameStart);
-      if (colonIndex < 0) {
-        continue;
-      }
-
-      const name = line.slice(nameStart, colonIndex).trim();
-      if (name.length > 0) {
-        names.add(name);
-      }
-    }
-
-    return Array.from(names);
   };
 
   const syncRawProfiles = (profileData: unknown) => {
@@ -585,27 +611,6 @@ export function AgentSettingsNew() {
     }
   };
 
-  const getProfilesErrorMessage = (error: unknown): string => {
-    if (error instanceof Error) {
-      return error.message;
-    }
-
-    if (typeof error === 'object' && error !== null) {
-      const message = Reflect.get(error, 'message');
-      if (typeof message === 'string' && message.trim()) {
-        return message;
-      }
-
-      try {
-        return JSON.stringify(error);
-      } catch {
-        return '[Unserializable error object]';
-      }
-    }
-
-    return String(error);
-  };
-
   const handleDiscardProfiles = () => {
     if (serverProfilesContent) {
       setLocalProfilesContent(serverProfilesContent);
@@ -641,6 +646,67 @@ export function AgentSettingsNew() {
     profiles?.[currentProfileVariant?.executor || ''];
   const hasVariants =
     !!selectedProfile && Object.keys(selectedProfile).length > 0;
+
+  const variantDropdown = (() => {
+    if (hasVariants) {
+      return (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="w-full flex items-center justify-between rounded border border-border bg-secondary px-base py-1 text-base text-normal focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <span className="truncate flex-1 text-left">
+                {currentProfileVariant?.variant ||
+                  t('settings.general.taskExecution.defaultLabel')}
+              </span>
+              <CaretDown
+                className="size-icon-xs ml-1 shrink-0 text-low"
+                weight="bold"
+              />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            {Object.entries(selectedProfile).map(
+              ([variantLabel]) => (
+                <DropdownMenuItem
+                  key={variantLabel}
+                  onClick={() => {
+                    const newProfile: ExecutorProfileId = {
+                      executor: currentProfileVariant!.executor,
+                      variant: variantLabel,
+                    };
+                    updateExecutorDraft(newProfile);
+                  }}
+                  className={
+                    currentProfileVariant?.variant === variantLabel
+                      ? 'bg-secondary'
+                      : ''
+                  }
+                >
+                  {variantLabel}
+                </DropdownMenuItem>
+              )
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      );
+    }
+    if (selectedProfile) {
+      return (
+        <button
+          type="button"
+          disabled
+          className="w-full flex items-center justify-between rounded border border-border bg-secondary px-base py-1 text-base text-low opacity-60 cursor-not-allowed"
+        >
+          <span className="truncate flex-1 text-left">
+            {t('settings.general.taskExecution.defaultLabel')}
+          </span>
+        </button>
+      );
+    }
+    return null;
+  })();
 
   return (
     <div className="space-y-base">
@@ -707,58 +773,7 @@ export function AgentSettingsNew() {
               />
 
               {/* Variant dropdown */}
-              {hasVariants ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className="w-full flex items-center justify-between rounded border border-border bg-secondary px-base py-1 text-base text-normal focus:outline-none focus:ring-1 focus:ring-brand"
-                    >
-                      <span className="truncate flex-1 text-left">
-                        {currentProfileVariant?.variant ||
-                          t('settings.general.taskExecution.defaultLabel')}
-                      </span>
-                      <CaretDown
-                        className="size-icon-xs ml-1 shrink-0 text-low"
-                        weight="bold"
-                      />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    {Object.entries(selectedProfile).map(
-                      ([variantLabel]) => (
-                        <DropdownMenuItem
-                          key={variantLabel}
-                          onClick={() => {
-                            const newProfile: ExecutorProfileId = {
-                              executor: currentProfileVariant!.executor,
-                              variant: variantLabel,
-                            };
-                            updateExecutorDraft(newProfile);
-                          }}
-                          className={
-                            currentProfileVariant?.variant === variantLabel
-                              ? 'bg-secondary'
-                              : ''
-                          }
-                        >
-                          {variantLabel}
-                        </DropdownMenuItem>
-                      )
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : selectedProfile ? (
-                <button
-                  type="button"
-                  disabled
-                  className="w-full flex items-center justify-between rounded border border-border bg-secondary px-base py-1 text-base text-low opacity-60 cursor-not-allowed"
-                >
-                  <span className="truncate flex-1 text-left">
-                    {t('settings.general.taskExecution.defaultLabel')}
-                  </span>
-                </button>
-              ) : null}
+              {variantDropdown}
             </div>
           </div>
 

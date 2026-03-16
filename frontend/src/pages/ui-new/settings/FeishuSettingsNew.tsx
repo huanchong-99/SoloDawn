@@ -85,11 +85,7 @@ export function FeishuSettingsNew() {
       setFeishuEnabled(checked);
       await fetchStatus();
     } catch {
-      setError(
-        checked
-          ? t('settings.feishu.form.saveError')
-          : t('settings.feishu.form.saveError')
-      );
+      setError(t('settings.feishu.form.saveError'));
     } finally {
       setTogglingEnabled(false);
     }
@@ -156,6 +152,46 @@ export function FeishuSettingsNew() {
   const isConnected = status?.connectionStatus === 'connected';
   const isConfigured = status?.configSummary != null;
 
+  const connectionStatusIndicator = (() => {
+    if (isConnected) {
+      return (
+        <>
+          <CheckCircle
+            className="size-icon-sm text-success"
+            weight="fill"
+          />
+          <span className="text-base text-success">
+            {t('settings:newDesign.feishu.connected')}
+          </span>
+        </>
+      );
+    }
+    if (isConfigured) {
+      return (
+        <>
+          <XCircle
+            className="size-icon-sm text-error"
+            weight="fill"
+          />
+          <span className="text-base text-error">
+            {t('settings:newDesign.feishu.disconnected')}
+          </span>
+        </>
+      );
+    }
+    return (
+      <>
+        <Warning
+          className="size-icon-sm text-low"
+          weight="fill"
+        />
+        <span className="text-base text-low">
+          {t('settings:newDesign.feishu.notConfigured')}
+        </span>
+      </>
+    );
+  })();
+
   /* ------------------------------------------------------------------ */
   /*  Render                                                             */
   /* ------------------------------------------------------------------ */
@@ -185,37 +221,7 @@ export function FeishuSettingsNew() {
               label={t('settings:newDesign.feishu.connectionStatus')}
             >
               <div className="flex items-center gap-2">
-                {isConnected ? (
-                  <>
-                    <CheckCircle
-                      className="size-icon-sm text-success"
-                      weight="fill"
-                    />
-                    <span className="text-base text-success">
-                      {t('settings:newDesign.feishu.connected')}
-                    </span>
-                  </>
-                ) : isConfigured ? (
-                  <>
-                    <XCircle
-                      className="size-icon-sm text-error"
-                      weight="fill"
-                    />
-                    <span className="text-base text-error">
-                      {t('settings:newDesign.feishu.disconnected')}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <Warning
-                      className="size-icon-sm text-low"
-                      weight="fill"
-                    />
-                    <span className="text-base text-low">
-                      {t('settings:newDesign.feishu.notConfigured')}
-                    </span>
-                  </>
-                )}
+                {connectionStatusIndicator}
               </div>
             </SettingsRow>
 

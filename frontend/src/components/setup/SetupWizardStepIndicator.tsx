@@ -10,6 +10,18 @@ interface SetupWizardStepIndicatorProps {
   currentStep: number;
 }
 
+function getDotStyle(isCurrent: boolean, isCompleted: boolean): string {
+  if (isCurrent) return 'bg-brand text-white';
+  if (isCompleted) return 'border-2 border-brand text-brand';
+  return 'border-2 border-low bg-transparent text-low';
+}
+
+function getLabelStyle(isCurrent: boolean, isCompleted: boolean): string {
+  if (isCurrent) return 'text-high font-medium';
+  if (isCompleted) return 'text-normal';
+  return 'text-low';
+}
+
 export function SetupWizardStepIndicator({
   steps,
   currentStep,
@@ -28,11 +40,7 @@ export function SetupWizardStepIndicator({
                 className={[
                   'flex items-center justify-center rounded-full transition-colors',
                   'size-6',
-                  isCurrent
-                    ? 'bg-brand text-white'
-                    : isCompleted
-                      ? 'border-2 border-brand text-brand'
-                      : 'border-2 border-low bg-transparent text-low',
+                  getDotStyle(isCurrent, isCompleted),
                 ].join(' ')}
               >
                 {isCompleted ? (
@@ -48,11 +56,7 @@ export function SetupWizardStepIndicator({
               <span
                 className={[
                   'hidden sm:block text-xs whitespace-nowrap transition-colors',
-                  isCurrent
-                    ? 'text-high font-medium'
-                    : isCompleted
-                      ? 'text-normal'
-                      : 'text-low',
+                  getLabelStyle(isCurrent, isCompleted),
                 ].join(' ')}
               >
                 {step.label}

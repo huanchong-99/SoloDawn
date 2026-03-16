@@ -83,8 +83,8 @@ function AppContent() {
         DisclaimerDialog.hide();
       } else if (!(config as Record<string, unknown>).setup_wizard_completed) {
         // New setup wizard replaces old onboarding dialog
-        if (window.location.pathname !== '/setup') {
-          window.location.href = '/setup';
+        if (globalThis.location.pathname !== '/setup') {
+          globalThis.location.href = '/setup';
         }
         return;
       } else if (config.show_release_notes) {
