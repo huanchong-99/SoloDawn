@@ -39,7 +39,10 @@ impl SessionManager {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            anyhow::bail!("Invalid session_id: must contain only alphanumeric characters, hyphens, or underscores");
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Invalid session_id: must contain only alphanumeric characters, hyphens, or underscores",
+            ));
         }
         Ok(self.base_dir.join(format!("{session_id}.jsonl")))
     }
