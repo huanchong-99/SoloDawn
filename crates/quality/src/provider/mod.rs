@@ -2,6 +2,10 @@
 //!
 //! 可插拔的分析器 provider 架构。每个 provider 负责执行特定工具并收集结果。
 
+pub mod builtin_common;
+pub mod builtin_frontend;
+pub mod builtin_rust;
+pub mod coverage;
 pub mod frontend;
 pub mod repo;
 pub mod rust_analyzer;

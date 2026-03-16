@@ -72,6 +72,28 @@ impl QualityEngine {
             providers.push(Arc::new(sonar));
         }
 
+        // Built-in providers (no external service dependencies)
+        if config.providers.builtin_rust {
+            providers.push(Arc::new(
+                crate::provider::builtin_rust::BuiltinRustProvider,
+            ));
+        }
+        if config.providers.builtin_frontend {
+            providers.push(Arc::new(
+                crate::provider::builtin_frontend::BuiltinFrontendProvider::default(),
+            ));
+        }
+        if config.providers.builtin_common {
+            providers.push(Arc::new(
+                crate::provider::builtin_common::BuiltinCommonProvider,
+            ));
+        }
+        if config.providers.coverage {
+            providers.push(Arc::new(
+                crate::provider::coverage::CoverageProvider,
+            ));
+        }
+
         Ok(Self::new(config, providers))
     }
 

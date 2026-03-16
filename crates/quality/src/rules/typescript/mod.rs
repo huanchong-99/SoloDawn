@@ -21,14 +21,14 @@ pub fn all_ts_rules() -> Vec<Box<dyn TsRule>> {
     vec![
         Box::new(complexity::ComplexityRule::default()),
         Box::new(function_length::FunctionLengthRule::default()),
-        Box::new(file_length::FileLengthRule::default()),
+        Box::new(file_length::FileLengthRule),
         Box::new(nesting_depth::NestingDepthRule::default()),
-        Box::new(any_usage::AnyUsageRule::default()),
+        Box::new(any_usage::AnyUsageRule),
         Box::new(type_assertion::TypeAssertionRule::default()),
         Box::new(console_usage::ConsoleUsageRule::default()),
         Box::new(naming::NamingConventionRule::default()),
-        Box::new(react_hooks::ReactHooksRule::default()),
-        Box::new(import_order::ImportOrderRule::default()),
-        Box::new(todo_comments::TodoCommentsRule::default()),
+        Box::new(react_hooks::ReactHooksRule),
+        Box::new(import_order::ImportOrderRule),
+        Box::new(todo_comments::TodoCommentsRule),
     ]
 }

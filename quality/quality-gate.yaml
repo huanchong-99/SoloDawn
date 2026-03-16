@@ -32,6 +32,16 @@ terminal_gate:
     - metric: frontend_test_failures
       operator: "GT"
       threshold: "0"
+    # Built-in rules: block on critical issues
+    - metric: builtin_rust_critical
+      operator: "GT"
+      threshold: "0"
+    - metric: builtin_frontend_critical
+      operator: "GT"
+      threshold: "0"
+    - metric: secrets_detected
+      operator: "GT"
+      threshold: "0"
 
 # ── 分支级质量门 ──
 # 触发时机: 任务最后一个终端通过后
@@ -60,6 +70,25 @@ branch_gate:
     - metric: test_failures
       operator: "GT"
       threshold: "0"
+    # Built-in rules: tolerance threshold for branch-level
+    - metric: builtin_rust_issues
+      operator: "GT"
+      threshold: "10"
+    - metric: builtin_frontend_issues
+      operator: "GT"
+      threshold: "10"
+    - metric: duplicated_blocks
+      operator: "GT"
+      threshold: "5"
+    - metric: secrets_detected
+      operator: "GT"
+      threshold: "0"
+    - metric: rust_cyclomatic_complexity
+      operator: "GT"
+      threshold: "25"
+    - metric: line_coverage
+      operator: "LT"
+      threshold: "60"
 
 # ── 仓库级质量门 ──
 # 触发时机: 合并主分支前 / GitHub Actions
@@ -97,6 +126,25 @@ repo_gate:
     - metric: security_issues
       operator: "GT"
       threshold: "0"
+    # Built-in rules: zero tolerance for repo gate
+    - metric: builtin_rust_critical
+      operator: "GT"
+      threshold: "0"
+    - metric: builtin_frontend_critical
+      operator: "GT"
+      threshold: "0"
+    - metric: builtin_common_issues
+      operator: "GT"
+      threshold: "5"
+    - metric: secrets_detected
+      operator: "GT"
+      threshold: "0"
+    - metric: duplicated_blocks
+      operator: "GT"
+      threshold: "3"
+    - metric: line_coverage
+      operator: "LT"
+      threshold: "80"
 
 # ── Provider 启用/禁用 ──
 providers:
@@ -105,6 +153,11 @@ providers:
   repo: true
   security: true
   sonar: true
+  # Built-in analysis providers (no external service needed)
+  builtin_rust: true
+  builtin_frontend: true
+  builtin_common: true
+  coverage: true
 
 # ── SonarQube 本地配置 ──
 sonar:

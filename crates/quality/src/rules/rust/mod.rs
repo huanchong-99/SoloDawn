@@ -21,18 +21,18 @@ use super::RustRule;
 /// Collect all built-in Rust rules
 pub fn all_rust_rules() -> Vec<Box<dyn RustRule>> {
     vec![
-        Box::new(cyclomatic_complexity::CyclomaticComplexityRule::default()),
+        Box::new(cyclomatic_complexity::CyclomaticComplexityRule),
         Box::new(cognitive_complexity::CognitiveComplexityRule::default()),
-        Box::new(function_length::FunctionLengthRule::default()),
-        Box::new(file_length::FileLengthRule::default()),
-        Box::new(nesting_depth::NestingDepthRule::default()),
-        Box::new(error_handling::ErrorHandlingRule::default()),
-        Box::new(unsafe_usage::UnsafeUsageRule::default()),
-        Box::new(clone_usage::CloneUsageRule::default()),
-        Box::new(naming::NamingConventionRule::default()),
-        Box::new(documentation::DocumentationRule::default()),
-        Box::new(type_complexity::TypeComplexityRule::default()),
-        Box::new(todo_comments::TodoCommentsRule::default()),
-        Box::new(magic_numbers::MagicNumbersRule::default()),
+        Box::new(function_length::FunctionLengthRule),
+        Box::new(file_length::FileLengthRule),
+        Box::new(nesting_depth::NestingDepthRule),
+        Box::new(error_handling::ErrorHandlingRule),
+        Box::new(unsafe_usage::UnsafeUsageRule),
+        Box::new(clone_usage::CloneUsageRule),
+        Box::new(naming::NamingConventionRule),
+        Box::new(documentation::DocumentationRule),
+        Box::new(type_complexity::TypeComplexityRule),
+        Box::new(todo_comments::TodoCommentsRule),
+        Box::new(magic_numbers::MagicNumbersRule),
     ]
 }

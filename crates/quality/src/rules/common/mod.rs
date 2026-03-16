@@ -14,11 +14,11 @@ use super::CommonRule;
 /// Collect all built-in common rules
 pub fn all_common_rules() -> Vec<Box<dyn CommonRule>> {
     vec![
-        Box::new(duplication::DuplicationRule::default()),
+        Box::new(duplication::DuplicationRule),
         Box::new(secret_detection::SecretDetectionRule::default()),
-        Box::new(large_file::LargeFileRule::default()),
-        Box::new(line_length::LineLengthRule::default()),
-        Box::new(trailing_whitespace::TrailingWhitespaceRule::default()),
-        Box::new(encoding::EncodingRule::default()),
+        Box::new(large_file::LargeFileRule),
+        Box::new(line_length::LineLengthRule),
+        Box::new(trailing_whitespace::TrailingWhitespaceRule),
+        Box::new(encoding::EncodingRule),
     ]
 }
