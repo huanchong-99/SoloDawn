@@ -497,7 +497,7 @@ export function ProjectSettingsNew() {
                         }}
                       >
                         {deletingRepoId === repo.id ? (
-                          <SpinnerGap
+                          <SpinnerGapIcon
                             className="size-icon-sm animate-spin text-low"
                             weight="bold"
                           />
