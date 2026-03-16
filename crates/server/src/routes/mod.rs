@@ -88,9 +88,11 @@ pub mod quality;
 pub mod repo;
 pub mod scratch;
 pub mod sessions;
+pub mod setup;
 pub mod shared_tasks_types;
 pub mod slash_commands;
 pub mod subscription_hub;
+pub mod system_settings;
 pub mod tags;
 pub mod task_attempts;
 pub mod tasks;
@@ -131,6 +133,8 @@ pub fn build_router(deployment: DeploymentImpl, hub: SharedSubscriptionHub, feis
         .nest("/integrations", feishu::router())
         .merge(scratch::router(&deployment))
         .merge(sessions::router(&deployment))
+        .merge(system_settings::router())
+        .merge(setup::router())
         .nest("/images", images::routes())
         .nest("/models", models::router())
         .nest("/cli_types", cli_types::cli_types_routes())

@@ -451,5 +451,49 @@
         }
       }
     }
+  },
+  "newDesign": {
+    "layout": {
+      "title": "設定",
+      "rerunSetup": "重新執行設定精靈",
+      "rerunSetupDescription": "重新進行初始設定流程"
+    },
+    "nav": {
+      "general": "一般",
+      "projects": "專案",
+      "repos": "儲存庫",
+      "agents": "AI 代理",
+      "models": "模型",
+      "mcp": "MCP 伺服器",
+      "feishu": "飛書",
+      "organizations": "組織"
+    },
+    "common": {
+      "save": "儲存變更",
+      "discard": "放棄",
+      "saving": "儲存中...",
+      "unsavedChanges": "您有未儲存的變更",
+      "enabled": "已啟用",
+      "disabled": "已停用",
+      "configure": "設定",
+      "remove": "移除",
+      "add": "新增",
+      "edit": "編輯",
+      "verify": "驗證",
+      "verified": "已驗證",
+      "notConfigured": "未設定",
+      "optional": "選填",
+      "required": "必填",
+      "learnMore": "瞭解更多"
+    },
+    "feishu": {
+      "enableToggle": "啟用飛書整合",
+      "enableDescription": "啟用後，GitCortex 可以透過飛書機器人傳送通知和接收指令。",
+      "connectionStatus": "連線狀態",
+      "connected": "已連線",
+      "disconnected": "已斷線",
+      "notConfigured": "未設定",
+      "reconnect": "重新連線"
+    }
   }
 }

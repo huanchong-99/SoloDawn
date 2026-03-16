@@ -24,6 +24,7 @@ pub mod planning_draft;
 pub mod quality_issue;
 pub mod quality_policy_snapshot;
 pub mod quality_run;
+pub mod system_settings;
 pub mod terminal;
 pub mod workflow;
 
@@ -33,5 +34,6 @@ pub use orchestrator_message::*;
 pub use quality_issue::*;
 pub use quality_policy_snapshot::*;
 pub use quality_run::*;
+pub use system_settings::SystemSetting;
 pub use terminal::*;
 pub use workflow::*;

@@ -440,5 +440,49 @@
         }
       }
     }
+  },
+  "newDesign": {
+    "layout": {
+      "title": "設定",
+      "rerunSetup": "セットアップウィザードを再実行",
+      "rerunSetupDescription": "初期セットアッププロセスをもう一度実行します"
+    },
+    "nav": {
+      "general": "一般",
+      "projects": "プロジェクト",
+      "repos": "リポジトリ",
+      "agents": "AIエージェント",
+      "models": "モデル",
+      "mcp": "MCPサーバー",
+      "feishu": "Feishu",
+      "organizations": "組織"
+    },
+    "common": {
+      "save": "変更を保存",
+      "discard": "破棄",
+      "saving": "保存中...",
+      "unsavedChanges": "未保存の変更があります",
+      "enabled": "有効",
+      "disabled": "無効",
+      "configure": "設定",
+      "remove": "削除",
+      "add": "追加",
+      "edit": "編集",
+      "verify": "検証",
+      "verified": "検証済み",
+      "notConfigured": "未設定",
+      "optional": "任意",
+      "required": "必須",
+      "learnMore": "詳細を見る"
+    },
+    "feishu": {
+      "enableToggle": "Feishu連携を有効化",
+      "enableDescription": "有効にすると、GitCortexはFeishuボットを通じて通知の送信やコマンドの受信ができます。",
+      "connectionStatus": "接続状態",
+      "connected": "接続済み",
+      "disconnected": "切断済み",
+      "notConfigured": "未設定",
+      "reconnect": "再接続"
+    }
   }
 }

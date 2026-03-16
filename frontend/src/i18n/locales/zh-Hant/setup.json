@@ -1,0 +1,80 @@
+{
+  "wizard": {
+    "steps": {
+      "welcome": "歡迎",
+      "model": "AI 模型",
+      "project": "專案",
+      "integrations": "整合",
+      "done": "開始使用"
+    },
+    "welcome": {
+      "title": "歡迎使用 GitCortex",
+      "subtitle": "讓我們用幾個簡單步驟來設定您的環境。您可以跳過此步驟，稍後在設定中進行配置。",
+      "languageLabel": "語言",
+      "continueButton": "繼續",
+      "skipButton": "跳過設定"
+    },
+    "model": {
+      "title": "設定 AI 模型",
+      "subtitle": "GitCortex 需要至少一個 AI 模型來執行工作流程。您可以稍後在設定中新增更多模型。",
+      "displayNameLabel": "顯示名稱",
+      "displayNamePlaceholder": "例如：我的 Claude API",
+      "apiTypeLabel": "API 類型",
+      "apiKeyLabel": "API 金鑰",
+      "apiKeyPlaceholder": "輸入您的 API 金鑰",
+      "baseUrlLabel": "基礎 URL",
+      "baseUrlPlaceholder": "https://api.openai.com/v1",
+      "modelIdLabel": "模型",
+      "modelIdPlaceholder": "選擇模型",
+      "fetchModelsButton": "取得模型列表",
+      "fetchingModels": "正在取得模型...",
+      "verifyButton": "驗證連線",
+      "verifying": "驗證中...",
+      "verified": "連線驗證成功",
+      "verifyFailed": "驗證失敗，請檢查您的 API 金鑰和設定。",
+      "skipHint": "您可以跳過此步驟，稍後在 設定 → 模型 中進行配置。",
+      "apiTypes": {
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "google": "Google AI",
+        "openaiCompatible": "OpenAI 相容"
+      }
+    },
+    "project": {
+      "title": "設定專案",
+      "subtitle": "為您的第一個專案選擇工作目錄。GitCortex 將在此目錄中管理您的程式碼。",
+      "optionalBadge": "可選",
+      "directoryLabel": "工作目錄",
+      "directoryPlaceholder": "選擇目錄...",
+      "browseButton": "瀏覽",
+      "continueButton": "繼續",
+      "skipButton": "跳過",
+      "skipHint": "您可以跳過此步驟，稍後從面板建立專案。",
+      "checking": "正在檢查目錄...",
+      "validGitRepo": "偵測到有效的 Git 儲存庫",
+      "notGitRepo": "此目錄不是 Git 儲存庫",
+      "directoryNotFound": "找不到目錄",
+      "checkFailed": "目錄檢查失敗",
+      "creating": "正在建立專案..."
+    },
+    "integrations": {
+      "title": "整合",
+      "subtitle": "將 GitCortex 與您常用的工具連接。所有整合皆為選用。",
+      "feishu": {
+        "label": "飛書 / Lark",
+        "description": "透過飛書機器人接收工作流程通知並與 GitCortex 互動。",
+        "appIdLabel": "App ID",
+        "appIdPlaceholder": "輸入飛書 App ID",
+        "appSecretLabel": "App Secret",
+        "appSecretPlaceholder": "輸入飛書 App Secret"
+      },
+      "skipHint": "您可以隨時在設定中配置整合。"
+    },
+    "done": {
+      "title": "一切就緒！",
+      "subtitle": "GitCortex 已準備就緒。現在開始建立您的第一個工作流程吧。",
+      "getStartedButton": "開始使用",
+      "rerunHint": "您可以隨時在設定中重新執行此設定精靈。"
+    }
+  }
+}

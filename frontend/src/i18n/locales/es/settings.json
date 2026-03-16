@@ -440,5 +440,49 @@
         }
       }
     }
+  },
+  "newDesign": {
+    "layout": {
+      "title": "Configuración",
+      "rerunSetup": "Ejecutar asistente de configuración de nuevo",
+      "rerunSetupDescription": "Volver a realizar el proceso de configuración inicial"
+    },
+    "nav": {
+      "general": "General",
+      "projects": "Proyectos",
+      "repos": "Repositorios",
+      "agents": "Agentes de IA",
+      "models": "Modelos",
+      "mcp": "Servidores MCP",
+      "feishu": "Feishu",
+      "organizations": "Organizaciones"
+    },
+    "common": {
+      "save": "Guardar cambios",
+      "discard": "Descartar",
+      "saving": "Guardando...",
+      "unsavedChanges": "Tienes cambios sin guardar",
+      "enabled": "Habilitado",
+      "disabled": "Deshabilitado",
+      "configure": "Configurar",
+      "remove": "Eliminar",
+      "add": "Agregar",
+      "edit": "Editar",
+      "verify": "Verificar",
+      "verified": "Verificado",
+      "notConfigured": "No configurado",
+      "optional": "Opcional",
+      "required": "Obligatorio",
+      "learnMore": "Más información"
+    },
+    "feishu": {
+      "enableToggle": "Habilitar integración con Feishu",
+      "enableDescription": "Cuando está habilitado, GitCortex puede enviar notificaciones y recibir comandos a través del bot de Feishu.",
+      "connectionStatus": "Estado de conexión",
+      "connected": "Conectado",
+      "disconnected": "Desconectado",
+      "notConfigured": "No configurado",
+      "reconnect": "Reconectar"
+    }
   }
 }

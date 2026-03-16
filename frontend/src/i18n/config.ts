@@ -11,6 +11,7 @@ import enTasks from './locales/en/tasks.json';
 import enOrganization from './locales/en/organization.json';
 import enWorkflow from './locales/en/workflow.json';
 import enQuality from './locales/en/quality.json';
+import enSetup from './locales/en/setup.json';
 import jaCommon from './locales/ja/common.json';
 import jaSettings from './locales/ja/settings.json';
 import jaProjects from './locales/ja/projects.json';
@@ -18,6 +19,7 @@ import jaTasks from './locales/ja/tasks.json';
 import jaOrganization from './locales/ja/organization.json';
 import jaWorkflow from './locales/ja/workflow.json';
 import jaQuality from './locales/ja/quality.json';
+import jaSetup from './locales/ja/setup.json';
 import esCommon from './locales/es/common.json';
 import esSettings from './locales/es/settings.json';
 import esProjects from './locales/es/projects.json';
@@ -25,6 +27,7 @@ import esTasks from './locales/es/tasks.json';
 import esOrganization from './locales/es/organization.json';
 import esWorkflow from './locales/es/workflow.json';
 import esQuality from './locales/es/quality.json';
+import esSetup from './locales/es/setup.json';
 import koCommon from './locales/ko/common.json';
 import koSettings from './locales/ko/settings.json';
 import koProjects from './locales/ko/projects.json';
@@ -32,6 +35,7 @@ import koTasks from './locales/ko/tasks.json';
 import koOrganization from './locales/ko/organization.json';
 import koWorkflow from './locales/ko/workflow.json';
 import koQuality from './locales/ko/quality.json';
+import koSetup from './locales/ko/setup.json';
 import zhHansCommon from './locales/zh-Hans/common.json';
 import zhHansSettings from './locales/zh-Hans/settings.json';
 import zhHansProjects from './locales/zh-Hans/projects.json';
@@ -39,6 +43,7 @@ import zhHansTasks from './locales/zh-Hans/tasks.json';
 import zhHansOrganization from './locales/zh-Hans/organization.json';
 import zhHansWorkflow from './locales/zh-Hans/workflow.json';
 import zhHansQuality from './locales/zh-Hans/quality.json';
+import zhHansSetup from './locales/zh-Hans/setup.json';
 import zhHantCommon from './locales/zh-Hant/common.json';
 import zhHantSettings from './locales/zh-Hant/settings.json';
 import zhHantProjects from './locales/zh-Hant/projects.json';
@@ -46,6 +51,7 @@ import zhHantTasks from './locales/zh-Hant/tasks.json';
 import zhHantOrganization from './locales/zh-Hant/organization.json';
 import zhHantWorkflow from './locales/zh-Hant/workflow.json';
 import zhHantQuality from './locales/zh-Hant/quality.json';
+import zhHantSetup from './locales/zh-Hant/setup.json';
 
 const resources = {
   en: {
@@ -56,6 +62,7 @@ const resources = {
     organization: enOrganization,
     workflow: enWorkflow,
     quality: enQuality,
+    setup: enSetup,
   },
   ja: {
     common: jaCommon,
@@ -65,6 +72,7 @@ const resources = {
     organization: jaOrganization,
     workflow: jaWorkflow,
     quality: jaQuality,
+    setup: jaSetup,
   },
   es: {
     common: esCommon,
@@ -74,6 +82,7 @@ const resources = {
     organization: esOrganization,
     workflow: esWorkflow,
     quality: esQuality,
+    setup: esSetup,
   },
   ko: {
     common: koCommon,
@@ -83,6 +92,7 @@ const resources = {
     organization: koOrganization,
     workflow: koWorkflow,
     quality: koQuality,
+    setup: koSetup,
   },
   'zh-Hans': {
     common: zhHansCommon,
@@ -92,6 +102,7 @@ const resources = {
     organization: zhHansOrganization,
     workflow: zhHansWorkflow,
     quality: zhHansQuality,
+    setup: zhHansSetup,
   },
   'zh-Hant': {
     common: zhHantCommon,
@@ -101,6 +112,7 @@ const resources = {
     organization: zhHantOrganization,
     workflow: zhHantWorkflow,
     quality: zhHantQuality,
+    setup: zhHantSetup,
   },
 };
 

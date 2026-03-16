@@ -158,13 +158,13 @@ async fn main() -> Result<(), GitCortexError> {
 
     // Conditional Feishu connector startup
     let feishu_handle = server::feishu_handle::new_shared_handle();
-    if is_feishu_enabled() {
+    if db::models::system_settings::SystemSetting::is_feishu_enabled(&deployment.db().pool).await {
         match start_feishu_connector(&deployment, &feishu_handle).await {
             Ok(()) => tracing::info!("Feishu connector started"),
             Err(e) => tracing::warn!("Feishu connector startup skipped: {e}"),
         }
     } else {
-        tracing::debug!("Feishu integration disabled (GITCORTEX_FEISHU_ENABLED not set)");
+        tracing::debug!("Feishu integration disabled (neither env var nor database setting enabled)");
     }
 
     let cli_health_monitor = deployment.cli_health_monitor().clone();
@@ -265,13 +265,6 @@ pub async fn perform_cleanup_actions(deployment: &DeploymentImpl) {
         .kill_all_running_processes()
         .await
         .expect("Failed to cleanly kill running execution processes");
-}
-
-/// Check whether the Feishu integration feature flag is enabled.
-fn is_feishu_enabled() -> bool {
-    std::env::var("GITCORTEX_FEISHU_ENABLED")
-        .ok()
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
 }
 
 /// Decrypt an AES-256-GCM encrypted secret stored as base64 (nonce || ciphertext).

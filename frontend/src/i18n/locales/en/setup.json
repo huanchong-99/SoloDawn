@@ -1,0 +1,81 @@
+{
+  "wizard": {
+    "steps": {
+      "welcome": "Welcome",
+      "model": "AI Model",
+      "project": "Project",
+      "integrations": "Integrations",
+      "done": "Get Started"
+    },
+    "welcome": {
+      "title": "Welcome to GitCortex",
+      "subtitle": "Let's set up your environment in a few simple steps. You can skip this and configure everything later in Settings.",
+      "languageLabel": "Language",
+      "continueButton": "Continue",
+      "backButton": "Back",
+      "skipButton": "Skip Setup"
+    },
+    "model": {
+      "title": "Configure an AI Model",
+      "subtitle": "GitCortex needs at least one AI model to run workflows. You can add more later in Settings.",
+      "displayNameLabel": "Display Name",
+      "displayNamePlaceholder": "e.g. My Claude API",
+      "apiTypeLabel": "API Type",
+      "apiKeyLabel": "API Key",
+      "apiKeyPlaceholder": "Enter your API key",
+      "baseUrlLabel": "Base URL",
+      "baseUrlPlaceholder": "https://api.openai.com/v1",
+      "modelIdLabel": "Model",
+      "modelIdPlaceholder": "Select a model",
+      "fetchModelsButton": "Fetch Models",
+      "fetchingModels": "Fetching models...",
+      "verifyButton": "Verify Connection",
+      "verifying": "Verifying...",
+      "verified": "Connection verified",
+      "verifyFailed": "Verification failed. Please check your API key and settings.",
+      "skipHint": "You can skip this step and configure models later in Settings → Models.",
+      "apiTypes": {
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "google": "Google AI",
+        "openaiCompatible": "OpenAI Compatible"
+      }
+    },
+    "project": {
+      "title": "Set Up a Project",
+      "subtitle": "Select a working directory for your first project. This is where GitCortex will manage your code.",
+      "optionalBadge": "Optional",
+      "directoryLabel": "Working Directory",
+      "directoryPlaceholder": "Select a directory...",
+      "browseButton": "Browse",
+      "continueButton": "Continue",
+      "skipButton": "Skip",
+      "skipHint": "You can skip this and create projects later from the Board.",
+      "checking": "Checking directory...",
+      "validGitRepo": "Valid Git repository detected",
+      "notGitRepo": "This directory is not a Git repository",
+      "directoryNotFound": "Directory not found",
+      "checkFailed": "Failed to check directory",
+      "creating": "Creating project..."
+    },
+    "integrations": {
+      "title": "Integrations",
+      "subtitle": "Connect GitCortex with your favorite tools. All integrations are optional.",
+      "feishu": {
+        "label": "Feishu / Lark",
+        "description": "Receive workflow notifications and interact with GitCortex through Feishu bot.",
+        "appIdLabel": "App ID",
+        "appIdPlaceholder": "Enter Feishu App ID",
+        "appSecretLabel": "App Secret",
+        "appSecretPlaceholder": "Enter Feishu App Secret"
+      },
+      "skipHint": "You can configure integrations anytime in Settings."
+    },
+    "done": {
+      "title": "You're All Set!",
+      "subtitle": "GitCortex is ready to go. Start by creating your first workflow.",
+      "getStartedButton": "Get Started",
+      "rerunHint": "You can re-run this setup anytime from Settings."
+    }
+  }
+}

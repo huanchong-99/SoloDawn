@@ -1,5 +1,5 @@
 use axum::{Extension, extract::State, http::StatusCode, response::Json};
-use db::models::feishu_config::FeishuAppConfig;
+use db::models::{feishu_config::FeishuAppConfig, system_settings::SystemSetting};
 use deployment::Deployment;
 use serde_json::{json, Value};
 use utils::response::ApiResponse;
@@ -54,9 +54,7 @@ async fn resolve_feishu_health(
     deployment: &DeploymentImpl,
     feishu_handle: &SharedFeishuHandle,
 ) -> Value {
-    let feature_enabled = std::env::var("GITCORTEX_FEISHU_ENABLED")
-        .ok()
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1");
+    let feature_enabled = SystemSetting::is_feishu_enabled(&deployment.db().pool).await;
 
     if !feature_enabled {
         return json!({ "enabled": false, "connectionStatus": "disabled" });

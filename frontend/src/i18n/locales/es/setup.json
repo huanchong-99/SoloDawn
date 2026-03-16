@@ -1,0 +1,80 @@
+{
+  "wizard": {
+    "steps": {
+      "welcome": "Bienvenida",
+      "model": "Modelo IA",
+      "project": "Proyecto",
+      "integrations": "Integraciones",
+      "done": "Comenzar"
+    },
+    "welcome": {
+      "title": "Bienvenido a GitCortex",
+      "subtitle": "Configuremos tu entorno en unos sencillos pasos. Puedes omitir este proceso y configurar todo m\u00e1s tarde en Ajustes.",
+      "languageLabel": "Idioma",
+      "continueButton": "Continuar",
+      "skipButton": "Omitir configuraci\u00f3n"
+    },
+    "model": {
+      "title": "Configurar un modelo de IA",
+      "subtitle": "GitCortex necesita al menos un modelo de IA para ejecutar flujos de trabajo. Puedes agregar m\u00e1s posteriormente en Ajustes.",
+      "displayNameLabel": "Nombre visible",
+      "displayNamePlaceholder": "ej. Mi API de Claude",
+      "apiTypeLabel": "Tipo de API",
+      "apiKeyLabel": "Clave de API",
+      "apiKeyPlaceholder": "Introduce tu clave de API",
+      "baseUrlLabel": "URL base",
+      "baseUrlPlaceholder": "https://api.openai.com/v1",
+      "modelIdLabel": "Modelo",
+      "modelIdPlaceholder": "Selecciona un modelo",
+      "fetchModelsButton": "Obtener modelos",
+      "fetchingModels": "Obteniendo modelos...",
+      "verifyButton": "Verificar conexi\u00f3n",
+      "verifying": "Verificando...",
+      "verified": "Conexi\u00f3n verificada",
+      "verifyFailed": "La verificaci\u00f3n fall\u00f3. Revisa tu clave de API y la configuraci\u00f3n.",
+      "skipHint": "Puedes omitir este paso y configurar modelos m\u00e1s tarde en Ajustes \u2192 Modelos.",
+      "apiTypes": {
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "google": "Google AI",
+        "openaiCompatible": "Compatible con OpenAI"
+      }
+    },
+    "project": {
+      "title": "Configurar un proyecto",
+      "subtitle": "Selecciona un directorio de trabajo para tu primer proyecto. GitCortex gestionar\u00e1 tu c\u00f3digo en esta ubicaci\u00f3n.",
+      "optionalBadge": "Opcional",
+      "directoryLabel": "Directorio de trabajo",
+      "directoryPlaceholder": "Selecciona un directorio...",
+      "browseButton": "Explorar",
+      "continueButton": "Continuar",
+      "skipButton": "Omitir",
+      "skipHint": "Puedes omitir este paso y crear proyectos m\u00e1s tarde desde el tablero.",
+      "checking": "Verificando directorio...",
+      "validGitRepo": "Repositorio Git v\u00e1lido detectado",
+      "notGitRepo": "Este directorio no es un repositorio Git",
+      "directoryNotFound": "Directorio no encontrado",
+      "checkFailed": "Error al verificar el directorio",
+      "creating": "Creando proyecto..."
+    },
+    "integrations": {
+      "title": "Integraciones",
+      "subtitle": "Conecta GitCortex con tus herramientas favoritas. Todas las integraciones son opcionales.",
+      "feishu": {
+        "label": "Feishu / Lark",
+        "description": "Recibe notificaciones de flujos de trabajo e interact\u00faa con GitCortex a trav\u00e9s del bot de Feishu.",
+        "appIdLabel": "App ID",
+        "appIdPlaceholder": "Introduce el App ID de Feishu",
+        "appSecretLabel": "App Secret",
+        "appSecretPlaceholder": "Introduce el App Secret de Feishu"
+      },
+      "skipHint": "Puedes configurar integraciones en cualquier momento desde Ajustes."
+    },
+    "done": {
+      "title": "\u00a1Todo listo!",
+      "subtitle": "GitCortex est\u00e1 preparado. Comienza creando tu primer flujo de trabajo.",
+      "getStartedButton": "Comenzar",
+      "rerunHint": "Puedes volver a ejecutar esta configuraci\u00f3n en cualquier momento desde Ajustes."
+    }
+  }
+}

@@ -7,17 +7,18 @@ import { usePostHog } from 'posthog-js/react';
 import { useAuth } from '@/hooks';
 import { usePreviousPath } from '@/hooks/usePreviousPath';
 
+import { SetupWizardShell } from '@/components/setup';
+import { SettingsLayoutContainer } from '@/components/ui-new/containers/SettingsLayoutContainer';
 import {
-  AgentSettings,
-  GeneralSettings,
-  McpSettings,
-  ModelsSettings,
-  OrganizationSettings,
-  ProjectSettings,
-  ReposSettings,
-  FeishuSettings,
-  SettingsLayout,
-} from '@/pages/settings/';
+  GeneralSettingsNew,
+  ModelsSettingsNew,
+  ProjectSettingsNew,
+  ReposSettingsNew,
+  AgentSettingsNew,
+  McpSettingsNew,
+  FeishuSettingsNew,
+  OrganizationSettingsNew,
+} from '@/pages/ui-new/settings';
 import { UserSystemProvider, useUserSystem } from '@/components/ConfigProvider';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { SearchProvider } from '@/contexts/SearchContext';
@@ -29,7 +30,6 @@ import { ThemeMode } from 'shared/types';
 import * as Sentry from '@sentry/react';
 
 import { DisclaimerDialog } from '@/components/dialogs/global/DisclaimerDialog';
-import { OnboardingDialog } from '@/components/dialogs/global/OnboardingDialog';
 import { ReleaseNotesDialog } from '@/components/dialogs/global/ReleaseNotesDialog';
 import { ClickedElementsProvider } from './contexts/ClickedElementsProvider';
 
@@ -51,8 +51,7 @@ import { WorkspacesLanding } from '@/pages/ui-new/WorkspacesLanding';
 const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 
 function AppContent() {
-  const { config, analyticsUserId, updateAndSaveConfig, remoteFeaturesEnabled } =
-    useUserSystem();
+  const { config, analyticsUserId, updateAndSaveConfig } = useUserSystem();
   const posthog = usePostHog();
   const { isSignedIn } = useAuth();
 
@@ -82,16 +81,12 @@ function AppContent() {
           await updateAndSaveConfig({ disclaimer_acknowledged: true });
         }
         DisclaimerDialog.hide();
-      } else if (!config.onboarding_acknowledged) {
-        const result = await OnboardingDialog.show();
-        if (!cancelled) {
-          await updateAndSaveConfig({
-            onboarding_acknowledged: true,
-            executor_profile: result.profile,
-            editor: result.editor,
-          });
+      } else if (!(config as Record<string, unknown>).setup_wizard_completed) {
+        // New setup wizard replaces old onboarding dialog
+        if (window.location.pathname !== '/setup') {
+          window.location.href = '/setup';
         }
-        OnboardingDialog.hide();
+        return;
       } else if (config.show_release_notes) {
         await ReleaseNotesDialog.show();
         if (!cancelled) {
@@ -136,7 +131,37 @@ function AppContent() {
               <Route path="workspaces/:workspaceId" element={<Workspaces />} />
             </Route>
 
-            {/* ========== LEGACY DESIGN ROUTES (Settings) ========== */}
+            {/* ========== SETUP WIZARD (full-page, no layout) ========== */}
+            <Route
+              path="/setup"
+              element={
+                <NewDesignScope>
+                  <SetupWizardShell />
+                </NewDesignScope>
+              }
+            />
+
+            {/* ========== NEW DESIGN SETTINGS ========== */}
+            <Route
+              path="/settings"
+              element={
+                <NewDesignScope>
+                  <SettingsLayoutContainer />
+                </NewDesignScope>
+              }
+            >
+              <Route index element={<Navigate to="/settings/general" replace />} />
+              <Route path="general" element={<GeneralSettingsNew />} />
+              <Route path="projects" element={<ProjectSettingsNew />} />
+              <Route path="repos" element={<ReposSettingsNew />} />
+              <Route path="agents" element={<AgentSettingsNew />} />
+              <Route path="models" element={<ModelsSettingsNew />} />
+              <Route path="mcp" element={<McpSettingsNew />} />
+              <Route path="feishu" element={<FeishuSettingsNew />} />
+              <Route path="organizations" element={<OrganizationSettingsNew />} />
+            </Route>
+
+            {/* ========== LEGACY DESIGN ROUTES ========== */}
             <Route
               element={
                 <LegacyDesignScope>
@@ -145,22 +170,6 @@ function AppContent() {
               }
             >
               <Route path="/commands" element={<SlashCommands />} />
-              <Route path="/settings/*" element={<SettingsLayout />}>
-                <Route index element={<Navigate to="general" replace />} />
-                <Route path="general" element={<GeneralSettings />} />
-                <Route path="projects" element={<ProjectSettings />} />
-                <Route path="repos" element={<ReposSettings />} />
-                {remoteFeaturesEnabled && (
-                  <Route
-                    path="organizations"
-                    element={<OrganizationSettings />}
-                  />
-                )}
-                <Route path="agents" element={<AgentSettings />} />
-                <Route path="models" element={<ModelsSettings />} />
-                <Route path="mcp" element={<McpSettings />} />
-                <Route path="feishu" element={<FeishuSettings />} />
-              </Route>
               <Route
                 path="/mcp-servers"
                 element={<Navigate to="/settings/mcp" replace />}

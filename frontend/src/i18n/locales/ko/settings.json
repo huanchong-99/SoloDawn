@@ -440,5 +440,49 @@
         }
       }
     }
+  },
+  "newDesign": {
+    "layout": {
+      "title": "설정",
+      "rerunSetup": "설정 마법사 다시 실행",
+      "rerunSetupDescription": "초기 설정 과정을 다시 진행합니다"
+    },
+    "nav": {
+      "general": "일반",
+      "projects": "프로젝트",
+      "repos": "저장소",
+      "agents": "AI 에이전트",
+      "models": "모델",
+      "mcp": "MCP 서버",
+      "feishu": "Feishu",
+      "organizations": "조직"
+    },
+    "common": {
+      "save": "변경사항 저장",
+      "discard": "취소",
+      "saving": "저장 중...",
+      "unsavedChanges": "저장되지 않은 변경사항이 있습니다",
+      "enabled": "활성화됨",
+      "disabled": "비활성화됨",
+      "configure": "구성",
+      "remove": "제거",
+      "add": "추가",
+      "edit": "편집",
+      "verify": "확인",
+      "verified": "확인됨",
+      "notConfigured": "구성되지 않음",
+      "optional": "선택사항",
+      "required": "필수",
+      "learnMore": "자세히 알아보기"
+    },
+    "feishu": {
+      "enableToggle": "Feishu 연동 활성화",
+      "enableDescription": "활성화하면 GitCortex가 Feishu 봇을 통해 알림을 보내고 명령을 받을 수 있습니다.",
+      "connectionStatus": "연결 상태",
+      "connected": "연결됨",
+      "disconnected": "연결 해제됨",
+      "notConfigured": "구성되지 않음",
+      "reconnect": "재연결"
+    }
   }
 }

@@ -1,0 +1,80 @@
+{
+  "wizard": {
+    "steps": {
+      "welcome": "ようこそ",
+      "model": "AI モデル",
+      "project": "プロジェクト",
+      "integrations": "連携",
+      "done": "はじめる"
+    },
+    "welcome": {
+      "title": "GitCortex へようこそ",
+      "subtitle": "いくつかの簡単なステップで環境をセットアップしましょう。スキップして、後から設定で構成することもできます。",
+      "languageLabel": "言語",
+      "continueButton": "続ける",
+      "skipButton": "セットアップをスキップ"
+    },
+    "model": {
+      "title": "AI モデルを設定",
+      "subtitle": "GitCortex でワークフローを実行するには、少なくとも1つの AI モデルが必要です。後から設定で追加できます。",
+      "displayNameLabel": "表示名",
+      "displayNamePlaceholder": "例: My Claude API",
+      "apiTypeLabel": "API タイプ",
+      "apiKeyLabel": "API キー",
+      "apiKeyPlaceholder": "API キーを入力",
+      "baseUrlLabel": "ベース URL",
+      "baseUrlPlaceholder": "https://api.openai.com/v1",
+      "modelIdLabel": "モデル",
+      "modelIdPlaceholder": "モデルを選択",
+      "fetchModelsButton": "モデル一覧を取得",
+      "fetchingModels": "モデルを取得中...",
+      "verifyButton": "接続を検証",
+      "verifying": "検証中...",
+      "verified": "接続の検証に成功しました",
+      "verifyFailed": "検証に失敗しました。API キーと設定を確認してください。",
+      "skipHint": "このステップをスキップして、後から 設定 → モデル で構成できます。",
+      "apiTypes": {
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "google": "Google AI",
+        "openaiCompatible": "OpenAI 互換"
+      }
+    },
+    "project": {
+      "title": "プロジェクトを設定",
+      "subtitle": "最初のプロジェクトの作業ディレクトリを選択してください。GitCortex がこのディレクトリでコードを管理します。",
+      "optionalBadge": "任意",
+      "directoryLabel": "作業ディレクトリ",
+      "directoryPlaceholder": "ディレクトリを選択...",
+      "browseButton": "参照",
+      "continueButton": "続ける",
+      "skipButton": "スキップ",
+      "skipHint": "スキップして、後からボードでプロジェクトを作成できます。",
+      "checking": "ディレクトリを確認中...",
+      "validGitRepo": "有効な Git リポジトリが検出されました",
+      "notGitRepo": "このディレクトリは Git リポジトリではありません",
+      "directoryNotFound": "ディレクトリが見つかりません",
+      "checkFailed": "ディレクトリの確認に失敗しました",
+      "creating": "プロジェクトを作成中..."
+    },
+    "integrations": {
+      "title": "連携",
+      "subtitle": "GitCortex をお気に入りのツールと接続しましょう。すべての連携は任意です。",
+      "feishu": {
+        "label": "Feishu / Lark",
+        "description": "Feishu ボットを通じてワークフロー通知を受け取り、GitCortex と対話できます。",
+        "appIdLabel": "App ID",
+        "appIdPlaceholder": "Feishu App ID を入力",
+        "appSecretLabel": "App Secret",
+        "appSecretPlaceholder": "Feishu App Secret を入力"
+      },
+      "skipHint": "連携はいつでも設定から構成できます。"
+    },
+    "done": {
+      "title": "準備完了！",
+      "subtitle": "GitCortex の準備が整いました。最初のワークフローを作成してみましょう。",
+      "getStartedButton": "はじめる",
+      "rerunHint": "このセットアップは設定からいつでも再実行できます。"
+    }
+  }
+}

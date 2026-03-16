@@ -483,5 +483,49 @@
         }
       }
     }
+  },
+  "newDesign": {
+    "layout": {
+      "title": "设置",
+      "rerunSetup": "重新运行设置向导",
+      "rerunSetupDescription": "重新进行初始设置流程"
+    },
+    "nav": {
+      "general": "通用",
+      "projects": "项目",
+      "repos": "仓库",
+      "agents": "AI 代理",
+      "models": "模型",
+      "mcp": "MCP 服务器",
+      "feishu": "飞书",
+      "organizations": "组织"
+    },
+    "common": {
+      "save": "保存更改",
+      "discard": "丢弃",
+      "saving": "保存中...",
+      "unsavedChanges": "您有未保存的更改",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "configure": "配置",
+      "remove": "移除",
+      "add": "添加",
+      "edit": "编辑",
+      "verify": "验证",
+      "verified": "已验证",
+      "notConfigured": "未配置",
+      "optional": "可选",
+      "required": "必填",
+      "learnMore": "了解更多"
+    },
+    "feishu": {
+      "enableToggle": "启用飞书集成",
+      "enableDescription": "启用后，GitCortex 可以通过飞书机器人发送通知和接收命令。",
+      "connectionStatus": "连接状态",
+      "connected": "已连接",
+      "disconnected": "已断开",
+      "notConfigured": "未配置",
+      "reconnect": "重新连接"
+    }
   }
 }

@@ -11,18 +11,17 @@ use axum::{
     routing::{get, post, put},
 };
 use chrono::Utc;
-use db::models::feishu_config::FeishuAppConfig;
+use db::models::{feishu_config::FeishuAppConfig, system_settings::SystemSetting};
 use deployment::Deployment;
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use utils::response::ApiResponse;
 
 use crate::{DeploymentImpl, error::ApiError, feishu_handle::SharedFeishuHandle};
 
-/// Whether the Feishu integration feature is enabled via environment variable.
-fn is_feishu_enabled() -> bool {
-    std::env::var("GITCORTEX_FEISHU_ENABLED")
-        .ok()
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
+/// Whether the Feishu integration feature is enabled (env var takes precedence, then database).
+async fn is_feishu_enabled(pool: &SqlitePool) -> bool {
+    SystemSetting::is_feishu_enabled(pool).await
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +103,7 @@ async fn get_status(
     State(deployment): State<DeploymentImpl>,
     Extension(feishu_handle): Extension<SharedFeishuHandle>,
 ) -> Result<Json<ApiResponse<FeishuStatusResponse>>, ApiError> {
-    let feature_enabled = is_feishu_enabled();
+    let feature_enabled = is_feishu_enabled(&deployment.db().pool).await;
 
     let config = FeishuAppConfig::find_enabled(&deployment.db().pool)
         .await
@@ -145,9 +144,9 @@ async fn update_config(
     State(deployment): State<DeploymentImpl>,
     Json(payload): Json<UpdateFeishuConfigRequest>,
 ) -> Result<Json<ApiResponse<UpdateFeishuConfigResponse>>, ApiError> {
-    if !is_feishu_enabled() {
+    if !is_feishu_enabled(&deployment.db().pool).await {
         return Err(ApiError::Conflict(
-            "Feishu integration is disabled. Set GITCORTEX_FEISHU_ENABLED=true to enable.".to_string(),
+            "Feishu integration is disabled. Enable it via system settings or set GITCORTEX_FEISHU_ENABLED=true.".to_string(),
         ));
     }
 
@@ -229,7 +228,7 @@ async fn reconnect(
     State(deployment): State<DeploymentImpl>,
     Extension(feishu_handle): Extension<SharedFeishuHandle>,
 ) -> Result<Json<ApiResponse<ReconnectResponse>>, ApiError> {
-    if !is_feishu_enabled() {
+    if !is_feishu_enabled(&deployment.db().pool).await {
         return Err(ApiError::Conflict(
             "Feishu integration is disabled".to_string(),
         ));
