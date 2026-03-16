@@ -82,14 +82,14 @@ export function SetupWizardShell() {
   };
 
   return (
-    <div className="new-design flex min-h-screen items-center justify-center bg-primary p-base font-ibm-plex-sans">
-      <div className="w-full max-w-2xl rounded-lg bg-secondary p-double shadow-lg">
+    <div className="new-design flex min-h-screen items-start justify-center overflow-y-auto bg-primary p-base py-double font-ibm-plex-sans">
+      <div className="my-auto w-full max-w-2xl rounded-lg bg-secondary p-double shadow-lg">
         {/* Step indicator */}
         <div className="mb-double">
           <SetupWizardStepIndicator steps={steps} currentStep={currentStep} />
         </div>
 
-        {/* Step content with fade transition */}
+        {/* Step content with scroll for long forms */}
         <div
           key={currentStep}
           className="animate-in fade-in duration-200"
