@@ -59,21 +59,56 @@ RUN set -eux; \
             >> /usr/local/cargo/config.toml; \
     fi
 
-FROM rust-base AS rust-builder
+# ============================================================
+# Stage 1a: Install cargo-chef
+# ============================================================
+FROM rust-base AS rust-with-chef
+
+RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo install cargo-chef --locked
+
+# ============================================================
+# Stage 1b: cargo-chef planner — produces recipe.json
+# ============================================================
+FROM rust-with-chef AS chef-planner
+
 WORKDIR /build
 
 COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
 COPY .cargo/config.toml .cargo/config.toml
 COPY proto/ proto/
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ============================================================
+# Stage 1c: cargo-chef cook + final build
+# ============================================================
+FROM rust-with-chef AS rust-builder
+
+WORKDIR /build
+
+COPY .cargo/config.toml .cargo/config.toml
+COPY --from=chef-planner /build/recipe.json recipe.json
+
+# Cook dependencies only (project source is NOT present yet).
+RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo chef cook --profile docker --recipe-path recipe.json -p runner
+
+# Now copy the full project source code.
+# Note: runner crate does not depend on shared/ or assets/ —
+# omitting them avoids false cache invalidation.
+COPY Cargo.toml Cargo.lock ./
+COPY proto/ proto/
 COPY crates/ crates/
-COPY assets/ assets/
-COPY shared/ shared/
 
 # Build the runner binary (the runner crate must exist in the workspace)
 RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    cargo build --release --locked -p runner \
-    && cp /build/target/release/runner /tmp/gitcortex-runner
+    cargo build --profile docker --locked -p runner \
+    && cp /build/target/docker/runner /tmp/gitcortex-runner
 
 # ============================================================
 # Stage 2: Runtime (Node.js + AI CLIs for terminal sessions)
@@ -90,7 +125,7 @@ RUN set -eux; \
     printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
         > /etc/apt/apt.conf.d/80gitcortex-retries; \
     apt-get update && apt-get install -y --no-install-recommends \
-        git curl ca-certificates bash gnupg xz-utils \
+        libsqlite3-0 libgit2-1.9 git curl ca-certificates bash gnupg xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
         NODE_DIST_URL="https://npmmirror.com/mirrors/node"; \

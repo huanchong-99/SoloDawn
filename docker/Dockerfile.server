@@ -97,21 +97,56 @@ RUN set -eux; \
             >> /usr/local/cargo/config.toml; \
     fi
 
-FROM rust-base AS rust-builder
+# ============================================================
+# Stage 2a: Install cargo-chef
+# ============================================================
+FROM rust-base AS rust-with-chef
+
+RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo install cargo-chef --locked
+
+# ============================================================
+# Stage 2b: cargo-chef planner — produces recipe.json
+# ============================================================
+FROM rust-with-chef AS chef-planner
+
 WORKDIR /build
 
 COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
 COPY .cargo/config.toml .cargo/config.toml
+COPY proto/ proto/
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ============================================================
+# Stage 2c: cargo-chef cook + final build
+# ============================================================
+FROM rust-with-chef AS rust-builder
+
+WORKDIR /build
+
+COPY .cargo/config.toml .cargo/config.toml
+COPY --from=chef-planner /build/recipe.json recipe.json
+
+# Cook dependencies only (project source is NOT present yet).
+RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo chef cook --profile docker --recipe-path recipe.json -p server
+
+# Now copy the full project source code.
+# Note: shared/ is TypeScript output (not consumed by Rust build) — omitted.
+COPY Cargo.toml Cargo.lock ./
 COPY proto/ proto/
 COPY crates/ crates/
 COPY assets/ assets/
-COPY shared/ shared/
 COPY --from=frontend-builder /build/frontend/dist frontend/dist
 
 RUN --mount=type=cache,id=gitcortex-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=gitcortex-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    cargo build --release --locked -p server \
-    && cp /build/target/release/server /tmp/gitcortex-server
+    cargo build --profile docker --locked -p server \
+    && cp /build/target/docker/server /tmp/gitcortex-server
 
 # ============================================================
 # Stage 3: Runtime (minimal — no Node.js, no AI CLIs)
