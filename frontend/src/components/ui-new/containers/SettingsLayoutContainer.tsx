@@ -76,10 +76,10 @@ export function SettingsLayoutContainer() {
 
   const handleRerunSetup = useCallback(async () => {
     await updateAndSaveConfig({
-      onboarding_acknowledged: false,
-    });
-    navigate('/');
-  }, [updateAndSaveConfig, navigate]);
+      setup_wizard_completed: false,
+    } as Record<string, unknown>);
+    globalThis.location.href = '/setup';
+  }, [updateAndSaveConfig]);
 
   return (
     <SettingsLayout
