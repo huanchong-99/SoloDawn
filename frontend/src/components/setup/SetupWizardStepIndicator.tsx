@@ -1,4 +1,4 @@
-import { Check } from '@phosphor-icons/react';
+import { CheckIcon } from '@phosphor-icons/react';
 
 interface StepDefinition {
   key: string;
@@ -44,7 +44,7 @@ export function SetupWizardStepIndicator({
                 ].join(' ')}
               >
                 {isCompleted ? (
-                  <Check weight="bold" className="size-icon-xs" />
+                  <CheckIcon weight="bold" className="size-icon-xs" />
                 ) : (
                   <span className="text-xs font-medium leading-none">
                     {index + 1}

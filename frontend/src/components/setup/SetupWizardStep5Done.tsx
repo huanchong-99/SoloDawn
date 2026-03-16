@@ -1,4 +1,4 @@
-import { Sparkle } from '@phosphor-icons/react';
+import { SparkleIcon } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 
 interface SetupWizardStep5DoneProps {
@@ -14,7 +14,7 @@ export function SetupWizardStep5Done({
     <div className="flex flex-col items-center justify-center gap-6 py-double text-center">
       {/* Celebratory icon */}
       <div className="flex items-center justify-center rounded-full bg-brand/10 p-double">
-        <Sparkle weight="duotone" className="size-icon-xl text-brand" />
+        <SparkleIcon weight="duotone" className="size-icon-xl text-brand" />
       </div>
 
       {/* Title */}

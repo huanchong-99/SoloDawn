@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { ChatTeardropDots, Eye, EyeSlash } from '@phosphor-icons/react';
+import { ChatTeardropDotsIcon, EyeIcon, EyeSlashIcon } from '@phosphor-icons/react';
 import { useState } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -43,7 +43,7 @@ export function SetupWizardStep4Integrations({
       <div className="w-full rounded border border-border bg-secondary p-base space-y-base">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-base">
-            <ChatTeardropDots
+            <ChatTeardropDotsIcon
               className="size-icon-md text-brand"
               weight="duotone"
             />
@@ -142,9 +142,9 @@ export function SetupWizardStep4Integrations({
                   tabIndex={-1}
                 >
                   {secretVisible ? (
-                    <EyeSlash className="size-icon-xs" weight="regular" />
+                    <EyeSlashIcon className="size-icon-xs" weight="regular" />
                   ) : (
-                    <Eye className="size-icon-xs" weight="regular" />
+                    <EyeIcon className="size-icon-xs" weight="regular" />
                   )}
                 </button>
               </div>

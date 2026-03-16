@@ -1,9 +1,9 @@
 import { useTranslation } from 'react-i18next';
 import {
-  FolderOpen,
-  CheckCircle,
-  XCircle,
-  CircleNotch,
+  FolderOpenIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  CircleNotchIcon,
 } from '@phosphor-icons/react';
 
 import { cn } from '@/lib/utils';
@@ -39,7 +39,7 @@ export function SetupWizardStep3Project({
     if (isChecking) {
       return (
         <>
-          <CircleNotch className="size-icon-xs text-low animate-spin" />
+          <CircleNotchIcon className="size-icon-xs text-low animate-spin" />
           <span className="text-sm text-low">
             {t('setup:wizard.project.checking')}
           </span>
@@ -49,7 +49,7 @@ export function SetupWizardStep3Project({
     if (isValid) {
       return (
         <>
-          <CheckCircle className="size-icon-xs text-success" weight="fill" />
+          <CheckCircleIcon className="size-icon-xs text-success" weight="fill" />
           <span className="text-sm text-success">
             {validationMessage ?? t('setup:wizard.project.validGitRepo')}
           </span>
@@ -58,7 +58,7 @@ export function SetupWizardStep3Project({
     }
     return (
       <>
-        <XCircle className="size-icon-xs text-error" weight="fill" />
+        <XCircleIcon className="size-icon-xs text-error" weight="fill" />
         <span className="text-sm text-error">
           {validationMessage ?? t('setup:wizard.project.notGitRepo')}
         </span>
@@ -115,7 +115,7 @@ export function SetupWizardStep3Project({
             aria-label={t('setup:wizard.project.browseButton')}
             title={t('setup:wizard.project.browseButton')}
           >
-            <FolderOpen className="size-icon-sm" weight="regular" />
+            <FolderOpenIcon className="size-icon-sm" weight="regular" />
           </button>
         </div>
 

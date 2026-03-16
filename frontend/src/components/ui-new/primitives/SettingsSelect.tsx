@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { CaretDown } from '@phosphor-icons/react';
+import { CaretDownIcon } from '@phosphor-icons/react';
 
 import { cn } from '@/lib/utils';
 
@@ -60,7 +60,7 @@ const SettingsSelect = React.forwardRef<HTMLDivElement, SettingsSelectProps>(
             </option>
           ))}
         </select>
-        <CaretDown
+        <CaretDownIcon
           className="size-icon-xs absolute right-1.5 top-1/2 -translate-y-1/2 text-low pointer-events-none"
           weight="bold"
         />

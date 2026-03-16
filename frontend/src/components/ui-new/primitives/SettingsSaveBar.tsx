@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { FloppyDisk } from '@phosphor-icons/react';
+import { FloppyDiskIcon } from '@phosphor-icons/react';
 
 import { cn } from '@/lib/utils';
 
@@ -37,7 +37,7 @@ const SettingsSaveBar = React.forwardRef<HTMLDivElement, SettingsSaveBarProps>(
           disabled={saving}
           className="inline-flex items-center gap-1.5 rounded bg-brand px-base py-1 text-sm text-white hover:bg-brand-hover transition-colors duration-200 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <FloppyDisk className="size-icon-xs" weight="bold" />
+          <FloppyDiskIcon className="size-icon-xs" weight="bold" />
           {saving ? 'Saving...' : 'Save changes'}
         </button>
       </div>

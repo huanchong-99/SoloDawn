@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { SpinnerGap, WarningCircle } from '@phosphor-icons/react';
+import { SpinnerGapIcon, WarningCircleIcon } from '@phosphor-icons/react';
 
 import { SettingsCard } from '@/components/ui-new/primitives/SettingsCard';
 import { Step3Models } from '@/components/workflow/steps/Step3Models';
@@ -98,7 +98,7 @@ export function ModelsSettingsNew() {
     <div className="flex flex-col gap-base">
       {workflowModelsError && (
         <div className="flex items-center gap-half rounded-sm border border-error bg-error/10 px-base py-half text-sm text-error">
-          <WarningCircle className="size-icon-sm shrink-0" weight="fill" />
+          <WarningCircleIcon className="size-icon-sm shrink-0" weight="fill" />
           {workflowModelsError}
         </div>
       )}
@@ -110,7 +110,7 @@ export function ModelsSettingsNew() {
         <div className="flex flex-col gap-base">
           {workflowModelsSaving && (
             <div className="flex items-center gap-half text-sm text-low">
-              <SpinnerGap className="size-icon-xs animate-spin" weight="bold" />
+              <SpinnerGapIcon className="size-icon-xs animate-spin" weight="bold" />
               {t('settings.general.save.button')}
             </div>
           )}

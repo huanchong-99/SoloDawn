@@ -2,14 +2,14 @@ import { useCallback, useMemo } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  GearSix,
-  FolderSimple,
-  GitBranch,
-  Robot,
-  Brain,
-  Plugs,
-  ChatTeardropDots,
-  Buildings,
+  GearSixIcon,
+  FolderSimpleIcon,
+  GitBranchIcon,
+  RobotIcon,
+  BrainIcon,
+  PlugsIcon,
+  ChatTeardropDotsIcon,
+  BuildingsIcon,
 } from '@phosphor-icons/react';
 import { useUserSystem } from '@/components/ConfigProvider';
 import { SettingsLayout, type SettingsNavItem } from '../views/SettingsLayout';
@@ -25,42 +25,42 @@ export function SettingsLayoutContainer() {
       {
         path: 'general',
         label: t('settings:newDesign.nav.general'),
-        icon: GearSix,
+        icon: GearSixIcon,
       },
       {
         path: 'projects',
         label: t('settings:newDesign.nav.projects'),
-        icon: FolderSimple,
+        icon: FolderSimpleIcon,
       },
       {
         path: 'repos',
         label: t('settings:newDesign.nav.repos'),
-        icon: GitBranch,
+        icon: GitBranchIcon,
       },
       {
         path: 'agents',
         label: t('settings:newDesign.nav.agents'),
-        icon: Robot,
+        icon: RobotIcon,
       },
       {
         path: 'models',
         label: t('settings:newDesign.nav.models'),
-        icon: Brain,
+        icon: BrainIcon,
       },
       {
         path: 'mcp',
         label: t('settings:newDesign.nav.mcp'),
-        icon: Plugs,
+        icon: PlugsIcon,
       },
       {
         path: 'feishu',
         label: t('settings:newDesign.nav.feishu'),
-        icon: ChatTeardropDots,
+        icon: ChatTeardropDotsIcon,
       },
       {
         path: 'organizations',
         label: t('settings:newDesign.nav.organizations'),
-        icon: Buildings,
+        icon: BuildingsIcon,
         visible: remoteFeaturesEnabled,
       },
     ],

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  SpinnerGap,
-  Check,
-  CaretLeft,
-  CaretRight,
-  Warning,
+  SpinnerGapIcon,
+  CheckIcon,
+  CaretLeftIcon,
+  CaretRightIcon,
+  WarningIcon,
 } from '@phosphor-icons/react';
 import { BaseCodingAgent, McpConfig } from 'shared/types';
 import { useUserSystem } from '@/components/ConfigProvider';
@@ -316,7 +316,7 @@ export function McpSettingsNew() {
           {isMcpUnsupported ? (
             <div className="rounded border border-[hsl(40,80%,50%)]/30 bg-[hsl(40,80%,50%)]/10 p-base">
               <div className="flex gap-base">
-                <Warning
+                <WarningIcon
                   className="size-icon-sm text-[hsl(40,80%,50%)] shrink-0 mt-0.5"
                   weight="fill"
                 />
@@ -456,7 +456,7 @@ export function McpSettingsNew() {
                           className="absolute left-1 top-1/2 -translate-y-1/2 size-7 rounded-full border border-border bg-panel/80 backdrop-blur grid place-items-center text-low hover:text-normal transition-colors duration-200"
                           aria-label="Previous servers"
                         >
-                          <CaretLeft
+                          <CaretLeftIcon
                             className="size-icon-xs"
                             weight="bold"
                           />
@@ -473,7 +473,7 @@ export function McpSettingsNew() {
                           className="absolute right-1 top-1/2 -translate-y-1/2 size-7 rounded-full border border-border bg-panel/80 backdrop-blur grid place-items-center text-low hover:text-normal transition-colors duration-200"
                           aria-label="Next servers"
                         >
-                          <CaretRight
+                          <CaretRightIcon
                             className="size-icon-xs"
                             weight="bold"
                           />
@@ -497,13 +497,13 @@ export function McpSettingsNew() {
             disabled={mcpApplying || mcpLoading || !!mcpError || success}
           >
             {mcpApplying && (
-              <SpinnerGap
+              <SpinnerGapIcon
                 className="size-icon-xs animate-spin"
                 weight="bold"
               />
             )}
             {success && (
-              <Check className="size-icon-xs" weight="bold" />
+              <CheckIcon className="size-icon-xs" weight="bold" />
             )}
             {success
               ? t('settings.mcp.save.success')
