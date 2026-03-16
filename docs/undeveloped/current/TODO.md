@@ -1,8 +1,8 @@
 # GitCortex TODO — 项目状态总览
 
-> 更新时间：2026-03-15
+> 更新时间：2026-03-16
 > 目的：本文件是当前唯一的未完成总计划入口。
-> 所有已完成阶段（Phase 0-29 + 全量审计修复 + BACKLOG-002/003）已归档至 `docs/developed/`。
+> 所有已完成阶段（Phase 0-29 + 全量审计修复 + BACKLOG-002/003 + CI 优化）已归档至 `docs/developed/`。
 
 ## 当前状态
 
@@ -12,6 +12,7 @@
 - P1/P2 生产就绪修复已完成 ✅ — 11 项关键问题已修复
 - BACKLOG-002 Runner 容器分离 ✅ — 100% 完成（RemoteRunner gRPC client 已实现）
 - BACKLOG-003 CLI 安装状态 API 增强 ✅ — 100% 完成（WebSocket 进度流、SSE 路由已启用）
+- CI Pipeline 全面优化 ✅ — 20 个 Agent 任务全部完成（sccache、cargo-chef、composite actions、cargo-nextest）
 - CI 状态：✅ 全绿（Basic Checks / Quality Gate / Docker Build 均 success）
 - SonarCloud：0 bugs, 0 vulnerabilities, 0 code smells, 0 security hotspots — A rating
 
@@ -24,6 +25,7 @@
 | RemoteRunner gRPC client | ✅ 已实现 — tonic gRPC 客户端，支持懒连接，完整 6 个 RPC 方法 |
 | WebSocket 安装进度 | ✅ 已实现 — CliInstaller 集成 + broadcast channel + 实时 WebSocket 推送 |
 | SSE 路由已启用 | ✅ 已实现 — SharedCliHealthMonitor Extension 层 + SSE 端点已激活 |
+| CI Pipeline 全面优化 | ✅ 已完成 — 3 个 Composite Actions、sccache 集成、cargo-chef Docker 分层、cargo-nextest 替换 |
 
 **当前无未完成任务。项目开发已 100% 完成。**
 
@@ -34,6 +36,8 @@
 - 审计修复状态跟踪：`docs/developed/plans/2026-03-14-audit-fix-status.md`
 - Runner 容器分离计划：`docs/developed/plans/BACKLOG-002-runner-container-separation.md`
 - CLI 安装状态 API 计划：`docs/developed/plans/BACKLOG-003-cli-installation-status-api.md`
+- CI Pipeline 优化计划：`docs/developed/plans/CI-OPTIMIZATION-PLAN.md`
+- CI 优化运维指南：`docs/developed/ops/ci-optimization.md`
 - Phase 0 详细计划：`docs/developed/plans/XX-phase-0-backend-foundation.md`
 - Phase 1 详细计划：`docs/developed/plans/XX-phase-1-frontend-core.md`
 - Phase 2 详细计划：`docs/developed/plans/XX-phase-2-integration.md`
