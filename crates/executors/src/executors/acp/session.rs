@@ -34,8 +34,14 @@ impl SessionManager {
     }
 
     /// Get the file path for a session
-    fn session_file_path(&self, session_id: &str) -> PathBuf {
-        self.base_dir.join(format!("{session_id}.jsonl"))
+    fn session_file_path(&self, session_id: &str) -> Result<PathBuf> {
+        if !session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            anyhow::bail!("Invalid session_id: must contain only alphanumeric characters, hyphens, or underscores");
+        }
+        Ok(self.base_dir.join(format!("{session_id}.jsonl")))
     }
 
     /// Append a raw JSON line to the session log

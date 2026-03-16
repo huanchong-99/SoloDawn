@@ -2,6 +2,8 @@
 //!
 //! 提供统一的模型切换接口。
 
+use std::fmt;
+
 use crate::{
     claude, codex,
     error::{CCSwitchError, Result},
@@ -9,7 +11,7 @@ use crate::{
 };
 
 /// 模型切换配置
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SwitchConfig {
     /// API Base URL（可选，None 表示使用官方 API）
     pub base_url: Option<String>,
@@ -17,6 +19,16 @@ pub struct SwitchConfig {
     pub api_key: String,
     /// 模型名称
     pub model: String,
+}
+
+impl fmt::Debug for SwitchConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SwitchConfig")
+            .field("base_url", &self.base_url)
+            .field("api_key", &"[REDACTED]")
+            .field("model", &self.model)
+            .finish()
+    }
 }
 
 /// 切换模型

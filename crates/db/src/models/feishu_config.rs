@@ -10,12 +10,13 @@ use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
+use std::fmt;
 use uuid::Uuid;
 
 /// Feishu App Config
 ///
 /// Corresponds to database table: feishu_app_config
-#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+#[derive(Clone, FromRow, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeishuAppConfig {
     /// Primary key UUID
@@ -41,6 +42,21 @@ pub struct FeishuAppConfig {
 
     /// Updated timestamp
     pub updated_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for FeishuAppConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FeishuAppConfig")
+            .field("id", &self.id)
+            .field("app_id", &self.app_id)
+            .field("app_secret_encrypted", &"[REDACTED]")
+            .field("tenant_key", &self.tenant_key)
+            .field("base_url", &self.base_url)
+            .field("enabled", &self.enabled)
+            .field("created_at", &self.created_at)
+            .field("updated_at", &self.updated_at)
+            .finish()
+    }
 }
 
 impl FeishuAppConfig {

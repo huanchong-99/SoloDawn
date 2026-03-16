@@ -1,4 +1,8 @@
-use std::{path::Path, sync::Arc};
+use std::{
+    io,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use enum_dispatch::enum_dispatch;
@@ -21,6 +25,32 @@ pub mod review;
 pub mod script;
 
 pub use review::RepoReviewContext;
+
+/// Validates that an optional relative working_dir does not escape the workspace root.
+/// Returns the effective directory to use, or a PermissionDenied error if path traversal is detected.
+pub fn validate_working_dir(current_dir: &Path, working_dir: &Option<String>) -> Result<PathBuf, io::Error> {
+    match working_dir {
+        None => Ok(current_dir.to_path_buf()),
+        Some(rel_path) => {
+            let joined = current_dir.join(rel_path);
+            let canonical = joined.canonicalize()?;
+            let canonical_base = current_dir.canonicalize()?;
+            if canonical.starts_with(&canonical_base) {
+                Ok(canonical)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!(
+                        "working_dir '{}' resolves to '{}' which is outside the workspace '{}'",
+                        rel_path,
+                        canonical.display(),
+                        canonical_base.display()
+                    ),
+                ))
+            }
+        }
+    }
+}
 
 #[enum_dispatch]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

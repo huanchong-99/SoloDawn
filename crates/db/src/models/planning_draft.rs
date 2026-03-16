@@ -1,5 +1,10 @@
 //! Planning draft models for orchestrated workspace mode.
 
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, AeadCore, KeyInit, OsRng},
+};
+use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
@@ -18,6 +23,7 @@ pub struct PlanningDraft {
     pub planner_model_id: Option<String>,
     pub planner_api_type: Option<String>,
     pub planner_base_url: Option<String>,
+    #[serde(skip_serializing)]
     pub planner_api_key: Option<String>,
     pub confirmed_at: Option<DateTime<Utc>>,
     pub materialized_workflow_id: Option<String>,
@@ -30,6 +36,79 @@ pub const PLANNING_DRAFT_STATUSES: [&str; 5] =
     ["gathering", "spec_ready", "confirmed", "materialized", "cancelled"];
 
 impl PlanningDraft {
+    const ENCRYPTION_KEY_ENV: &str = "GITCORTEX_ENCRYPTION_KEY";
+
+    /// Get encryption key from environment variable (same as Workflow).
+    fn get_encryption_key() -> anyhow::Result<[u8; 32]> {
+        let key_str = std::env::var(Self::ENCRYPTION_KEY_ENV).map_err(|_| {
+            anyhow::anyhow!(
+                "Encryption key not found. Please set {} environment variable with a 32-byte value.",
+                Self::ENCRYPTION_KEY_ENV
+            )
+        })?;
+
+        if key_str.len() != 32 {
+            return Err(anyhow::anyhow!(
+                "Invalid encryption key length: got {} bytes, expected exactly 32 bytes",
+                key_str.len()
+            ));
+        }
+
+        key_str
+            .as_bytes()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid encryption key format"))
+    }
+
+    /// Encrypt and store the planner API key.
+    pub fn set_api_key(&mut self, plaintext: &str) -> anyhow::Result<()> {
+        let key = Self::get_encryption_key()?;
+        let cipher = Aes256Gcm::new_from_slice(&key)
+            .map_err(|e| anyhow::anyhow!("Invalid encryption key: {e}"))?;
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+
+        let ciphertext = cipher
+            .encrypt(&nonce, plaintext.as_bytes())
+            .map_err(|e| anyhow::anyhow!("Encryption failed: {e}"))?;
+
+        let mut combined = nonce.to_vec();
+        combined.extend_from_slice(&ciphertext);
+
+        self.planner_api_key = Some(general_purpose::STANDARD.encode(&combined));
+        Ok(())
+    }
+
+    /// Decrypt and return the planner API key.
+    pub fn get_api_key(&self) -> anyhow::Result<Option<String>> {
+        match &self.planner_api_key {
+            None => Ok(None),
+            Some(encoded) => {
+                let key = Self::get_encryption_key()?;
+                let combined = general_purpose::STANDARD
+                    .decode(encoded)
+                    .map_err(|e| anyhow::anyhow!("Base64 decode failed: {e}"))?;
+
+                if combined.len() < 12 {
+                    return Err(anyhow::anyhow!("Invalid encrypted data length"));
+                }
+
+                let (nonce_bytes, ciphertext) = combined.split_at(12);
+                #[allow(deprecated)]
+                let nonce = Nonce::from_slice(nonce_bytes);
+                let cipher = Aes256Gcm::new_from_slice(&key)
+                    .map_err(|e| anyhow::anyhow!("Invalid encryption key: {e}"))?;
+
+                let plaintext_bytes = cipher
+                    .decrypt(nonce, ciphertext)
+                    .map_err(|e| anyhow::anyhow!("Decryption failed: {e}"))?;
+
+                Ok(Some(String::from_utf8(plaintext_bytes).map_err(|e| {
+                    anyhow::anyhow!("Invalid UTF-8 in decrypted data: {e}")
+                })?))
+            }
+        }
+    }
+
     pub fn new(project_id: Uuid, name: &str) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),

@@ -6,7 +6,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
-    actions::Executable,
+    actions::{validate_working_dir, Executable},
     approvals::ExecutorApprovalService,
     env::ExecutionEnv,
     executors::{BaseCodingAgent, ExecutorError, SpawnedChild, StandardCodingAgentExecutor},
@@ -38,11 +38,8 @@ impl ReviewRequest {
         self.executor_profile_id.executor
     }
 
-    pub fn effective_dir(&self, current_dir: &Path) -> std::path::PathBuf {
-        match &self.working_dir {
-            Some(rel_path) => current_dir.join(rel_path),
-            None => current_dir.to_path_buf(),
-        }
+    pub fn effective_dir(&self, current_dir: &Path) -> Result<std::path::PathBuf, std::io::Error> {
+        validate_working_dir(current_dir, &self.working_dir)
     }
 }
 
@@ -55,10 +52,7 @@ impl Executable for ReviewRequest {
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
         // Use working_dir if specified, otherwise use current_dir
-        let effective_dir = match &self.working_dir {
-            Some(rel_path) => current_dir.join(rel_path),
-            None => current_dir.to_path_buf(),
-        };
+        let effective_dir = validate_working_dir(current_dir, &self.working_dir)?;
 
         let executor_profile_id = self.executor_profile_id.clone();
         let mut agent = ExecutorConfigs::get_cached()

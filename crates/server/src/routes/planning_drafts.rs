@@ -124,7 +124,9 @@ async fn create_draft(
     draft.planner_model_id = req.planner_model_id;
     draft.planner_api_type = req.planner_api_type;
     draft.planner_base_url = req.planner_base_url;
-    draft.planner_api_key = req.planner_api_key;
+    if let Some(ref api_key) = req.planner_api_key {
+        draft.set_api_key(api_key).map_err(|e| ApiError::Internal(format!("Failed to encrypt API key: {e}")))?;
+    }
 
     PlanningDraft::insert(&deployment.db().pool, &draft)
         .await
@@ -326,10 +328,17 @@ async fn send_message(
 fn build_llm_client_from_draft(
     draft: &PlanningDraft,
 ) -> Option<Box<dyn services::services::orchestrator::LLMClient>> {
+    let decrypted_key = match draft.get_api_key() {
+        Ok(key) => key,
+        Err(e) => {
+            tracing::warn!("Failed to decrypt planner API key for draft {}: {e}", draft.id);
+            return None;
+        }
+    };
     let config = OrchestratorConfig::from_workflow(
         draft.planner_api_type.as_deref(),
         draft.planner_base_url.as_deref(),
-        draft.planner_api_key.as_deref(),
+        decrypted_key.as_deref(),
         draft.planner_model_id.as_deref(),
     )?;
     match create_llm_client(&config) {
@@ -424,7 +433,9 @@ async fn materialize_draft(
         updated_at: now,
     };
 
-    if let Some(ref api_key) = draft.planner_api_key {
+    let decrypted_key = draft.get_api_key()
+        .map_err(|e| ApiError::Internal(format!("Failed to decrypt planner API key: {e}")))?;
+    if let Some(ref api_key) = decrypted_key {
         workflow.set_api_key(api_key).map_err(|e| ApiError::Internal(format!("Failed to encrypt API key: {e}")))?;
     }
 

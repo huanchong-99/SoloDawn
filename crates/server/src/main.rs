@@ -32,6 +32,21 @@ use utils::{
 
 const DEV_DEFAULT_ENCRYPTION_KEY: &str = "12345678901234567890123456789012";
 
+fn ensure_api_token_in_release() {
+    if !cfg!(debug_assertions) {
+        // SEC-002: In release mode, require GITCORTEX_API_TOKEN — fail closed
+        match std::env::var("GITCORTEX_API_TOKEN") {
+            Ok(value) if !value.trim().is_empty() => {}
+            Ok(_) | Err(_) => {
+                panic!(
+                    "GITCORTEX_API_TOKEN is not set or is empty. \
+                     An API token is required in release mode to prevent unauthenticated access."
+                );
+            }
+        }
+    }
+}
+
 fn ensure_dev_encryption_key() {
     if !cfg!(debug_assertions) {
         // G18-003: In release mode, require a valid encryption key — do not silently proceed
@@ -96,6 +111,7 @@ async fn main() -> Result<(), GitCortexError> {
     // Load environment variables from .env file
     dotenv::dotenv().ok();
     ensure_dev_encryption_key();
+    ensure_api_token_in_release();
 
     // Install rustls crypto provider before any TLS operations
     rustls::crypto::aws_lc_rs::default_provider()

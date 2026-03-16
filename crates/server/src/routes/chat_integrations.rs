@@ -266,7 +266,7 @@ async fn handle_chat_event(
 
     let secret = read_chat_webhook_secret()?;
     let expected_signature = compute_chat_signature(&secret, &provider, &payload);
-    if payload.signature != expected_signature {
+    if !constant_time_eq(payload.signature.as_bytes(), expected_signature.as_bytes()) {
         return Err(ApiError::Forbidden(
             "Invalid chat event signature".to_string(),
         ));

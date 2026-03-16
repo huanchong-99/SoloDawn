@@ -8,7 +8,7 @@ use ts_rs::TS;
 use workspace_utils::shell::get_shell_command;
 
 use crate::{
-    actions::Executable,
+    actions::{validate_working_dir, Executable},
     approvals::ExecutorApprovalService,
     env::ExecutionEnv,
     executors::{ExecutorError, SpawnedChild},
@@ -47,10 +47,7 @@ impl Executable for ScriptRequest {
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
         // Use working_dir if specified, otherwise use current_dir
-        let effective_dir = match &self.working_dir {
-            Some(rel_path) => current_dir.join(rel_path),
-            None => current_dir.to_path_buf(),
-        };
+        let effective_dir = validate_working_dir(current_dir, &self.working_dir)?;
 
         let (shell_cmd, shell_arg) = get_shell_command();
         let mut command = Command::new(shell_cmd);
