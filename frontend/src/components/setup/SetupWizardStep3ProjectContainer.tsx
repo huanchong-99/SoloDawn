@@ -46,9 +46,13 @@ async function checkGitRepo(path: string): Promise<GitCheckResult> {
 }
 
 function deriveProjectName(directory: string): string {
-  const trimmed = directory.replace(/[/\\]+$/, '');
-  const parts = trimmed.split(/[/\\]/);
-  const last = parts.at(-1) ?? '';
+  // Strip trailing slashes without regex (avoids S5852 backtracking hotspot)
+  let trimmed = directory;
+  while (trimmed.endsWith('/') || trimmed.endsWith('\\')) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  const sepIndex = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  const last = sepIndex >= 0 ? trimmed.slice(sepIndex + 1) : trimmed;
   return last || 'My Project';
 }
 
