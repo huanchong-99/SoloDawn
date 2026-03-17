@@ -1159,19 +1159,20 @@ describe('Workflows Page', () => {
       );
       fireEvent.click(submitButton);
 
-      await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledWith(
-          '/api/projects/resolve-by-path',
-          expect.objectContaining({ method: 'POST' })
-        );
-      });
-
+      // With the fix, when a project is already selected (proj-1 from URL),
+      // resolve-by-path is NOT called — the selected project ID is used directly.
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalledWith(
           '/api/workflows',
           expect.objectContaining({ method: 'POST' })
         );
       });
+
+      // Verify resolve-by-path was NOT called (project already selected)
+      expect(fetchMock).not.toHaveBeenCalledWith(
+        '/api/projects/resolve-by-path',
+        expect.anything()
+      );
 
       await waitFor(() => {
         expect(
