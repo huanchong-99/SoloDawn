@@ -12,8 +12,8 @@ This repository uses two top-level documentation folders:
 
 ## Current `docs/developed/` structure
 
-- `docs/developed/plans/`: completed phase plans and design documents (Phase 0-29 + BACKLOG-002/003)
-- `docs/developed/issues/`: resolved audit reports, SonarCloud reports, and issue analyses
+- `docs/developed/plans/`: completed phase plans and design documents (Phase 0-29 + BACKLOG-002/003 + builtin-quality-rules-plan)
+- `docs/developed/issues/`: resolved audit reports, SonarCloud reports, security audit report, and issue analyses
 - `docs/developed/ops/`: operations runbook, troubleshooting, deployment guides
 - `docs/developed/misc/`: archived TODO lists, user guide, operations manual, and other reference docs
 
