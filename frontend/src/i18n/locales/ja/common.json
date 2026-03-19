@@ -279,5 +279,9 @@
   "search": {
     "matchCount": "{{current}} / {{total}}",
     "noMatches": "一致なし"
+  },
+  "dialogs": {
+    "selectGitRepository": "Git リポジトリを選択",
+    "chooseExistingRepo": "既存のリポジトリフォルダーを選択"
   }
 }

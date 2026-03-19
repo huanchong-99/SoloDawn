@@ -29,6 +29,7 @@ import {
 } from '../primitives/SessionChatBox';
 import {
   useWorkspacePanelState,
+  useUiPreferencesStore,
   RIGHT_MAIN_PANEL_MODES,
 } from '@/stores/useUiPreferencesStore';
 import { Actions, type ActionDefinition } from '../actions';
@@ -103,6 +104,12 @@ export function SessionChatBoxContainer({
   const actionCtx = useActionVisibilityContext();
   const { rightMainPanelMode, setRightMainPanelMode } =
     useWorkspacePanelState(workspaceId);
+
+  const sendOnEnter = useUiPreferencesStore((s) => s.sendOnEnter);
+  const toggleSendMode = useUiPreferencesStore((s) => s.setSendOnEnter);
+  const handleToggleSendMode = useCallback(() => {
+    toggleSendMode(!sendOnEnter);
+  }, [sendOnEnter, toggleSendMode]);
 
   const handleViewCode = useCallback(() => {
     setRightMainPanelMode(
@@ -586,6 +593,8 @@ export function SessionChatBoxContainer({
           linesAdded: 0,
           linesRemoved: 0,
         }}
+        sendOnEnter={sendOnEnter}
+        onToggleSendMode={handleToggleSendMode}
         onViewCode={handleViewCode}
       />
     );
@@ -595,6 +604,8 @@ export function SessionChatBoxContainer({
     <SessionChatBox
       status={status}
       onViewCode={handleViewCode}
+      sendOnEnter={sendOnEnter}
+      onToggleSendMode={handleToggleSendMode}
       workspaceId={workspaceId}
       projectId={projectId}
       editor={{

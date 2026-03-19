@@ -25,6 +25,7 @@ import {
 } from './steps';
 
 interface WorkflowWizardProps {
+  projectId?: string | null;
   onComplete: (config: WizardConfig) => void | Promise<void>;
   onCancel: () => void;
   onError?: (error: Error) => void;
@@ -34,6 +35,7 @@ interface WorkflowWizardProps {
  * Renders the multi-step workflow wizard with navigation and validation.
  */
 export function WorkflowWizard({
+  projectId,
   onComplete,
   onCancel,
   onError,
@@ -243,6 +245,7 @@ export function WorkflowWizard({
         return (
           <Step0Project
             config={config.project}
+            projectId={projectId ?? undefined}
             errors={errors}
             onError={onError}
             onChange={(updates) => {

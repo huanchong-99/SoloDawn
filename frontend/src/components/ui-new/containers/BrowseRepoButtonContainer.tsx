@@ -21,8 +21,8 @@ export function BrowseRepoButtonContainer({
 
   const handleBrowse = useCallback(async () => {
     const selectedPath = await FolderPickerDialog.show({
-      title: t('dialogs.selectGitRepository'),
-      description: t('dialogs.chooseExistingRepo'),
+      title: t('dialogs.selectGitRepository', { defaultValue: 'Select Git Repository' }),
+      description: t('dialogs.chooseExistingRepo', { defaultValue: 'Choose an existing repository folder' }),
     });
 
     if (selectedPath) {

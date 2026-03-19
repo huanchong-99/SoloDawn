@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use codex_app_server_protocol::{
@@ -38,7 +39,7 @@ use crate::{
         ActionType, CommandExitStatus, CommandRunResult, FileChange, NormalizedEntry,
         NormalizedEntryError, NormalizedEntryType, TodoItem, ToolResult, ToolResultValueType,
         ToolStatus,
-        stderr_processor::normalize_stderr_logs,
+        plain_text_processor::PlainTextLogProcessor,
         utils::{
             ConversationPatch, EntryIndexProvider,
             patch::{add_normalized_entry, replace_normalized_entry, upsert_normalized_entry},
@@ -360,9 +361,41 @@ fn format_todo_status(status: &StepStatus) -> String {
     .to_string()
 }
 
+/// Regex matching npm warning/notice lines that should be filtered from Codex stderr output.
+static NPM_NOISE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)^npm (warn|WARN|notice|ERR!)").expect("valid regex"));
+
 pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
     let entry_index = EntryIndexProvider::start_from(&msg_store);
-    normalize_stderr_logs(msg_store.clone(), entry_index.clone());
+
+    // Codex-specific stderr normalizer: filters npm warnings before display
+    {
+        let msg_store = msg_store.clone();
+        let entry_index = entry_index.clone();
+        tokio::spawn(async move {
+            let mut stderr = msg_store.stderr_chunked_stream();
+            let mut processor = PlainTextLogProcessor::builder()
+                .normalized_entry_producer(|content: String| NormalizedEntry {
+                    timestamp: None,
+                    entry_type: NormalizedEntryType::ErrorMessage {
+                        error_type: NormalizedEntryError::Other,
+                    },
+                    content: strip_ansi_escapes::strip_str(&content),
+                    metadata: None,
+                })
+                .time_gap(Duration::from_secs(2))
+                .transform_lines(Box::new(|lines: &mut Vec<String>| {
+                    lines.retain(|line| !NPM_NOISE_RE.is_match(line.trim()));
+                }))
+                .index_provider(entry_index)
+                .build();
+            while let Some(Ok(chunk)) = stderr.next().await {
+                for patch in processor.process(chunk) {
+                    msg_store.push_patch(patch);
+                }
+            }
+        });
+    }
 
     let worktree_path_str = worktree_path.to_string_lossy().to_string();
     tokio::spawn(async move {

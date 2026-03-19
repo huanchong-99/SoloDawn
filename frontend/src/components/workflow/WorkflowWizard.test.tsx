@@ -12,6 +12,10 @@ vi.mock('@/components/ConfigProvider', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useProjectRepos', () => ({
+  useProjectRepos: () => ({ data: undefined, isLoading: false }),
+}));
+
 const fetchMock = vi.fn();
 
 describe('WorkflowWizard', () => {

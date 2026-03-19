@@ -8,6 +8,25 @@ import type { LocalImageMetadata } from '@/components/ui/wysiwyg/context/task-at
 import { Toolbar, ToolbarDropdown } from './Toolbar';
 import { DropdownMenuItem, DropdownMenuLabel } from './Dropdown';
 
+function SendModeToggle({
+  sendOnEnter,
+  onToggle,
+}: {
+  readonly sendOnEnter: boolean;
+  readonly onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="text-[10px] text-low hover:text-normal transition-colors whitespace-nowrap"
+      title={sendOnEnter ? 'Enter sends, Shift+Enter for newline' : 'Ctrl+Enter sends, Enter for newline'}
+    >
+      {sendOnEnter ? '⏎ Send' : '⌃⏎ Send'}
+    </button>
+  );
+}
+
 export interface EditorProps {
   value: string;
   onChange: (value: string) => void;
@@ -71,6 +90,10 @@ interface ChatBoxBaseProps {
 
   // Local images for immediate preview (before saved to server)
   readonly localImages?: LocalImageMetadata[];
+
+  // Send mode toggle
+  readonly sendOnEnter?: boolean;
+  readonly onToggleSendMode?: () => void;
 }
 
 /**
@@ -97,6 +120,8 @@ export function ChatBoxBase({
   isRunning,
   focusKey,
   localImages,
+  sendOnEnter,
+  onToggleSendMode,
 }: Readonly<ChatBoxBaseProps>) {
   const { t } = useTranslation('common');
   const variantLabel = toPrettyCase(variant?.selected || 'DEFAULT');
@@ -176,6 +201,9 @@ export function ChatBoxBase({
                 </ToolbarDropdown>
               )}
             {footerLeft}
+            {onToggleSendMode != null && sendOnEnter != null && (
+              <SendModeToggle sendOnEnter={sendOnEnter} onToggle={onToggleSendMode} />
+            )}
           </Toolbar>
           <div className="flex gap-base">{footerRight}</div>
         </div>

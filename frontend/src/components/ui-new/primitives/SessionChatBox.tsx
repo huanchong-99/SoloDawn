@@ -135,6 +135,8 @@ interface SessionChatBoxProps {
   inProgressTodo?: TodoItem | null;
   localImages?: LocalImageMetadata[];
   onViewCode?: () => void;
+  sendOnEnter?: boolean;
+  onToggleSendMode?: () => void;
 }
 
 /**
@@ -161,6 +163,8 @@ export function SessionChatBox({
   inProgressTodo,
   localImages,
   onViewCode,
+  sendOnEnter,
+  onToggleSendMode,
 }: Readonly<SessionChatBoxProps>) {
   const { t } = useTranslation('tasks');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -536,6 +540,8 @@ export function SessionChatBox({
       isRunning={showRunningAnimation}
       onPasteFiles={actions.onPasteFiles}
       localImages={localImages}
+      sendOnEnter={sendOnEnter}
+      onToggleSendMode={onToggleSendMode}
       headerLeft={
         <>
           {/* New session mode: agent icon + executor dropdown */}

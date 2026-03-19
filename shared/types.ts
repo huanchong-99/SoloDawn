@@ -4,11 +4,20 @@
 
 // If you are an AI, and you absolutely have to edit this file, please confirm with the user first.
 
-export type WorkflowDetailDto = { id: string, projectId: string, name: string, description: string | null, status: string, executionMode: string, initialGoal: string | null, useSlashCommands: boolean, orchestratorEnabled: boolean, orchestratorApiType: string | null, orchestratorBaseUrl: string | null, orchestratorModel: string | null, errorTerminalEnabled: boolean, errorTerminalCliId: string | null, errorTerminalModelId: string | null, mergeTerminalCliId: string | null, mergeTerminalModelId: string | null, targetBranch: string, gitWatcherEnabled: boolean, readyAt: string | null, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, tasks: Array<WorkflowTaskDto>, commands: Array<WorkflowCommandDto>, };
+export type WorkflowDetailDto = { id: string, projectId: string, name: string, description: string | null, status: string, executionMode: string, initialGoal: string | null, useSlashCommands: boolean, orchestratorEnabled: boolean, orchestratorApiType: string | null, orchestratorBaseUrl: string | null, orchestratorModel: string | null, errorTerminalEnabled: boolean, errorTerminalCliId: string | null, errorTerminalModelId: string | null, 
+/**
+ * Wrapped in Option for backward compatibility with older API clients that
+ * may not send these fields. The underlying DB column is NOT NULL with a default.
+ */
+mergeTerminalCliId: string | null, 
+/**
+ * See `merge_terminal_cli_id` — same backward-compat rationale.
+ */
+mergeTerminalModelId: string | null, targetBranch: string, gitWatcherEnabled: boolean, readyAt: string | null, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, tasks: Array<WorkflowTaskDto>, commands: Array<WorkflowCommandDto>, };
 
 export type WorkflowTaskDto = { id: string, workflowId: string, vkTaskId: string | null, name: string, description: string | null, branch: string, status: string, orderIndex: number, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, terminals: Array<TerminalDto>, };
 
-export type TerminalDto = { id: string, workflowTaskId: string, cliTypeId: string, modelConfigId: string, customBaseUrl: string | null, customApiKey?: string, role: string | null, roleDescription: string | null, orderIndex: number, status: string, createdAt: string, updatedAt: string, };
+export type TerminalDto = { id: string, workflowTaskId: string, cliTypeId: string, modelConfigId: string, customBaseUrl: string | null, customApiKey?: string, role: string | null, roleDescription: string | null, orderIndex: number, status: string, autoConfirm: boolean, lastCommitHash: string | null, lastCommitMessage: string | null, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, };
 
 export type WorkflowCommandDto = { id: string, workflowId: string, presetId: string, orderIndex: number, customParams: string | null, createdAt: string, preset: SlashCommandPresetDto, };
 
@@ -108,7 +117,7 @@ dropped: boolean, startedAt: string, completedAt: string | null, createdAt: stri
 
 export enum ExecutionProcessStatus { running = "running", completed = "completed", failed = "failed", killed = "killed" }
 
-export type ExecutionProcessRunReason = "setupscript" | "cleanupscript" | "codingagent" | "devserver";
+export type ExecutionProcessRunReason = "setupscript" | "cleanupscript" | "codingagent" | "devserver" | "qualityscan";
 
 export type ExecutionProcessRepoState = { id: string, executionProcessId: string, repoId: string, beforeHeadCommit: string | null, afterHeadCommit: string | null, mergeCommit: string | null, createdAt: Date, updatedAt: Date, };
 
@@ -390,7 +399,7 @@ export type DirectoryListResponse = { entries: Array<DirectoryEntry>, current_pa
 
 export type SearchMode = "taskform" | "settings";
 
-export type Config = { config_version: string, theme: ThemeMode, executor_profile: ExecutorProfileId, disclaimer_acknowledged: boolean, onboarding_acknowledged: boolean, notifications: NotificationConfig, editor: EditorConfig, github: GitHubConfig, analytics_enabled: boolean, workspace_dir: string | null, last_app_version: string | null, show_release_notes: boolean, language: UiLanguage, git_branch_prefix: string, showcases: ShowcaseState, pr_auto_description_enabled: boolean, pr_auto_description_prompt: string | null, beta_workspaces: boolean, beta_workspaces_invitation_sent: boolean, workflow_model_library: Array<WorkflowModelLibraryItem>, };
+export type Config = { config_version: string, theme: ThemeMode, executor_profile: ExecutorProfileId, disclaimer_acknowledged: boolean, onboarding_acknowledged: boolean, notifications: NotificationConfig, editor: EditorConfig, github: GitHubConfig, analytics_enabled: boolean, workspace_dir: string | null, last_app_version: string | null, show_release_notes: boolean, language: UiLanguage, git_branch_prefix: string, showcases: ShowcaseState, pr_auto_description_enabled: boolean, pr_auto_description_prompt: string | null, beta_workspaces: boolean, beta_workspaces_invitation_sent: boolean, workflow_model_library: Array<WorkflowModelLibraryItem>, setup_wizard_completed: boolean, };
 
 export type WorkflowModelLibraryItem = { id: string, displayName: string, cliTypeId: string | null, apiType: string, baseUrl: string, apiKey: string, modelId: string, isVerified: boolean, };
 
@@ -642,6 +651,138 @@ export type SeverityCount = { severity: string, count: number, };
 export type QualityRunSummary = { id: string, workflowId: string, taskId: string | null, terminalId: string | null, commitHash: string | null, gateLevel: string, gateStatus: string, mode: string, totalIssues: number, blockingIssues: number, newIssues: number, durationMs: number, errorMessage: string | null, createdAt: string, completedAt: string | null, };
 
 export type QualityRunDetail = { providersRun: JsonValue | null, reportJson: JsonValue | null, decisionJson: JsonValue | null, id: string, workflowId: string, taskId: string | null, terminalId: string | null, commitHash: string | null, gateLevel: string, gateStatus: string, mode: string, totalIssues: number, blockingIssues: number, newIssues: number, durationMs: number, errorMessage: string | null, createdAt: string, completedAt: string | null, };
+
+export type WsEvent = { 
+/**
+ * Event type (e.g., "workflow.status_changed")
+ */
+type: WsEventType, 
+/**
+ * Event payload (varies by event type)
+ */
+payload: JsonValue, 
+/**
+ * ISO 8601 timestamp when event was created
+ */
+timestamp: string, 
+/**
+ * Unique event identifier for deduplication
+ */
+id: string, };
+
+export type WsEventType = "workflow.status_changed" | "terminal.status_changed" | "task.status_changed" | "terminal.completed" | "git.commit_detected" | "orchestrator.awakened" | "orchestrator.decision" | "system.heartbeat" | "system.lagged" | "system.error" | "terminal.prompt_detected" | "terminal.prompt_decision" | "provider.switched" | "provider.exhausted" | "provider.recovered" | "quality.gate_result";
+
+export type WorkflowStatus = "created" | "starting" | "ready" | "running" | "paused" | "merging" | "completed" | "failed" | "cancelled";
+
+export type WorkflowTaskStatus = "pending" | "running" | "review_pending" | "completed" | "failed" | "cancelled";
+
+export type TerminalStatus = "not_started" | "starting" | "waiting" | "working" | "completed" | "failed" | "cancelled" | "review_passed" | "review_rejected" | "quality_pending";
+
+export type CliType = { 
+/**
+ * Primary key ID, format: cli-{name}
+ */
+id: string, 
+/**
+ * Internal name, e.g., 'claude-code'
+ */
+name: string, 
+/**
+ * Display name, e.g., 'Claude Code'
+ */
+displayName: string, 
+/**
+ * Detection command, e.g., 'claude --version'
+ */
+detectCommand: string, 
+/**
+ * Installation command (optional)
+ */
+installCommand: string | null, 
+/**
+ * Installation guide URL
+ */
+installGuideUrl: string | null, 
+/**
+ * Config file path template, e.g., '~/.claude/settings.json'
+ */
+configFilePath: string | null, 
+/**
+ * Is system built-in
+ */
+isSystem: boolean, 
+/**
+ * Created timestamp
+ */
+createdAt: string, };
+
+export type ModelConfig = { 
+/**
+ * Primary key ID, format: model-{cli}-{name}
+ */
+id: string, 
+/**
+ * Associated CLI type ID
+ */
+cliTypeId: string, 
+/**
+ * Model internal name, e.g., 'sonnet'
+ */
+name: string, 
+/**
+ * Display name, e.g., 'Claude Sonnet'
+ */
+displayName: string, 
+/**
+ * API model ID, e.g., 'claude-sonnet-4-20250514'
+ */
+apiModelId: string | null, 
+/**
+ * Is default model
+ */
+isDefault: boolean, 
+/**
+ * Is official model
+ */
+isOfficial: boolean, 
+/**
+ * Created timestamp
+ */
+createdAt: string, 
+/**
+ * Updated timestamp
+ */
+updatedAt: string, };
+
+export type CliDetectionStatus = { 
+/**
+ * CLI type ID
+ */
+cliTypeId: string, 
+/**
+ * CLI name
+ */
+name: string, 
+/**
+ * Display name
+ */
+displayName: string, 
+/**
+ * Is installed
+ */
+installed: boolean, 
+/**
+ * Version number (if installed)
+ */
+version: string | null, 
+/**
+ * Executable file path (if installed)
+ */
+executablePath: string | null, 
+/**
+ * Installation guide URL
+ */
+installGuideUrl: string | null, };
 
 export const DEFAULT_PR_DESCRIPTION_PROMPT = `Update the PR that was just created with a better title and description.
 The PR number is #{pr_number} and the URL is {pr_url}.

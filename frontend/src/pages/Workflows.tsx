@@ -1884,6 +1884,7 @@ export function Workflows() {
 
       {showWizard && (
         <WorkflowWizard
+          projectId={validProjectId}
           onComplete={handleCreateWorkflow}
           onCancel={() => setShowWizard(false)}
         />

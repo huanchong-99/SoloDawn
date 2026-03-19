@@ -326,6 +326,10 @@
     "unableToLoadDescription": "我们无法在此窗口中显示更新日志。请点击下方按钮在浏览器中查看。",
     "openInBrowser": "在浏览器中打开更新日志"
   },
+  "dialogs": {
+    "selectGitRepository": "选择 Git 仓库",
+    "chooseExistingRepo": "选择一个已有的仓库文件夹"
+  },
   "workspace": {
     "selectProjectTitle": "选择项目",
     "selectProjectHint": "请在右侧面板中选择已有项目或创建新项目以开始。",

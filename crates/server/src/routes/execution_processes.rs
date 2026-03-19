@@ -263,6 +263,39 @@ pub async fn stop_execution_process(
     Ok(ResponseJson(ApiResponse::success(())))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PaginatedSessionQuery {
+    pub session_id: Uuid,
+    #[serde(default)]
+    pub show_soft_deleted: Option<bool>,
+    #[serde(default = "default_page_limit")]
+    pub limit: i64,
+    #[serde(default)]
+    pub offset: i64,
+}
+
+fn default_page_limit() -> i64 {
+    50
+}
+
+pub async fn get_execution_processes_by_session(
+    State(deployment): State<DeploymentImpl>,
+    Query(query): Query<PaginatedSessionQuery>,
+) -> Result<ResponseJson<ApiResponse<Vec<ExecutionProcess>>>, ApiError> {
+    let show_soft_deleted = query.show_soft_deleted.unwrap_or(false);
+    let limit = query.limit.clamp(1, 500);
+    let offset = query.offset.max(0);
+    let processes = ExecutionProcess::find_by_session_id_paginated(
+        &deployment.db().pool,
+        query.session_id,
+        show_soft_deleted,
+        limit,
+        offset,
+    )
+    .await?;
+    Ok(ResponseJson(ApiResponse::success(processes)))
+}
+
 pub async fn stream_execution_processes_by_session_ws(
     ws: WebSocketUpgrade,
     State(deployment): State<DeploymentImpl>,
@@ -382,6 +415,10 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         .route(
             "/stream/session/ws",
             get(stream_execution_processes_by_session_ws),
+        )
+        .route(
+            "/by-session",
+            get(get_execution_processes_by_session),
         )
         .nest("/{id}", workspace_id_router);
 

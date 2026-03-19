@@ -279,5 +279,9 @@
   "search": {
     "matchCount": "{{current}} de {{total}}",
     "noMatches": "Sin coincidencias"
+  },
+  "dialogs": {
+    "selectGitRepository": "Seleccionar repositorio Git",
+    "chooseExistingRepo": "Elegir una carpeta de repositorio existente"
   }
 }

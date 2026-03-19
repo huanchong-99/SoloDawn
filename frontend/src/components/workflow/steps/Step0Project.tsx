@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   GitBranch as GitBranchIcon,
   Warning as WarningIcon,
@@ -14,9 +14,11 @@ import { useTranslation } from 'react-i18next';
 import { useErrorNotification } from '@/hooks/useErrorNotification';
 import { FolderPickerDialog } from '@/components/dialogs/shared/FolderPickerDialog';
 import { useUserSystem } from '@/components/ConfigProvider';
+import { useProjectRepos } from '@/hooks/useProjectRepos';
 
 interface Step0ProjectProps {
   config: ProjectConfig;
+  projectId?: string;
   onChange: (updates: Partial<ProjectConfig>) => void;
   errors: Record<string, string>;
   onError?: (error: Error) => void;
@@ -56,6 +58,7 @@ const parseJson = async (response: Response): Promise<unknown> => {
  */
 export const Step0Project: React.FC<Step0ProjectProps> = ({
   config,
+  projectId,
   onChange,
   errors,
   onError,
@@ -65,6 +68,9 @@ export const Step0Project: React.FC<Step0ProjectProps> = ({
   const { environment } = useUserSystem();
   const [isLoading, setIsLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  // Fetch project-bound repos for auto-fill
+  const { data: projectRepos } = useProjectRepos(projectId);
 
   const folderPickerInitialPath =
     config.workingDirectory ||
@@ -124,6 +130,16 @@ export const Step0Project: React.FC<Step0ProjectProps> = ({
       setIsLoading(false);
     }
   };
+
+  // Auto-select when exactly one repo is bound and no directory is set
+  const didAutoSelect = React.useRef(false);
+  useEffect(() => {
+    if (didAutoSelect.current) return;
+    if (projectRepos?.length === 1 && !config.workingDirectory) {
+      didAutoSelect.current = true;
+      onChange({ workingDirectory: projectRepos[0].path });
+    }
+  }, [projectRepos, config.workingDirectory, onChange]);
 
   const handleInitGit = async () => {
     setIsLoading(true);
@@ -190,6 +206,32 @@ export const Step0Project: React.FC<Step0ProjectProps> = ({
           </div>
         )}
       </Field>
+
+      {/* Project-bound repositories for quick selection */}
+      {projectRepos && projectRepos.length > 0 && !config.workingDirectory && (
+        <div className="rounded-sm border border-border bg-secondary p-base">
+          <p className="text-sm text-low mb-half">
+            {t('workflow:step0.boundRepos', { defaultValue: 'Project repositories:' })}
+          </p>
+          <div className="flex flex-col gap-half">
+            {projectRepos.map((repo) => (
+              <button
+                key={repo.id}
+                type="button"
+                className="flex items-center gap-base px-base py-half rounded text-left text-sm text-normal hover:bg-primary/50 border border-transparent hover:border-border transition-colors"
+                onClick={() => {
+                  onChange({ workingDirectory: repo.path });
+                  setApiError(null);
+                  void checkGitStatus(repo.path);
+                }}
+              >
+                <GitBranchIcon className="size-icon-xs text-low shrink-0" />
+                <span className="truncate font-mono">{repo.path}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {config.workingDirectory && (
         <div className="rounded-sm border border-border bg-secondary p-base">

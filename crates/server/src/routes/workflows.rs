@@ -844,6 +844,7 @@ async fn create_workflow(
         completed_at: None,
         created_at: now,
         updated_at: now,
+        pause_reason: None,
     };
 
     // Encrypt and store API key if provided

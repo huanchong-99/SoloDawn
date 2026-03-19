@@ -675,6 +675,16 @@ impl CCSwitchService {
                 anyhow::anyhow!("Model config not found: {}", terminal.model_config_id)
             })?;
 
+        tracing::info!(
+            terminal_id = %terminal.id,
+            model_config_id = %terminal.model_config_id,
+            model_display_name = %model_config.display_name,
+            model_api_model_id = ?model_config.api_model_id,
+            model_name = %model_config.name,
+            cli_type = %cli_type.name,
+            "Resolved model config for terminal launch"
+        );
+
         let mut env = SpawnEnv::default();
         let mut args = Vec::new();
 

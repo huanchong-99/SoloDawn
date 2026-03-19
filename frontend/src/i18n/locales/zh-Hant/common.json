@@ -279,5 +279,9 @@
   "search": {
     "matchCount": "{{current}} / {{total}}",
     "noMatches": "無匹配項"
+  },
+  "dialogs": {
+    "selectGitRepository": "選擇 Git 倉庫",
+    "chooseExistingRepo": "選擇一個已有的倉庫資料夾"
   }
 }

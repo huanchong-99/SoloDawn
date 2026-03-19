@@ -31,6 +31,10 @@ vi.mock('@/components/dialogs/shared/FolderPickerDialog', () => ({
   },
 }));
 
+vi.mock('@/hooks/useProjectRepos', () => ({
+  useProjectRepos: () => ({ data: undefined, isLoading: false }),
+}));
+
 describe('Step0Project', () => {
   const mockOnChange = vi.fn<(updates: Partial<ProjectConfig>) => void>();
 

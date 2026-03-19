@@ -131,7 +131,7 @@ function WYSIWYGEditor({
           'my-3 border-l-4 border-primary-foreground pl-4 text-muted-foreground',
         list: {
           ul: 'my-1 list-disc list-inside',
-          ol: 'my-1 list-decimal list-inside',
+          ol: 'my-1 list-decimal list-outside pl-6',
           listitem: '',
           nested: {
             listitem: 'pl-4',

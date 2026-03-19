@@ -171,6 +171,49 @@ pub trait ContainerService {
             }
         }
 
+        // Run quality gate in workspace mode (non-blocking, shadow by default)
+        if matches!(
+            ctx.execution_process.status,
+            ExecutionProcessStatus::Completed
+        ) {
+            // Resolve working directory from workspace repos
+            let pool = self.db().pool.clone();
+            let workspace_id = ctx.workspace.id;
+            let task_id = ctx.task.id;
+            tokio::spawn(async move {
+                let repo_path = match WorkspaceRepo::find_by_workspace_id(&pool, workspace_id).await {
+                    Ok(ws_repos) if !ws_repos.is_empty() => {
+                        match Repo::find_by_id(&pool, ws_repos[0].repo_id).await {
+                            Ok(Some(repo)) => repo.path,
+                            _ => return,
+                        }
+                    }
+                    _ => return,
+                };
+                let path = std::path::Path::new(&repo_path);
+                match quality::engine::QualityEngine::from_project(path) {
+                    Ok(engine) => {
+                        match engine.run(path, quality::gate::QualityGateLevel::Terminal, None).await {
+                            Ok(report) => {
+                                tracing::info!(
+                                    task_id = %task_id,
+                                    passed = report.is_passed(),
+                                    new_issues = report.new_issues().len(),
+                                    "Workspace quality gate completed"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(task_id = %task_id, "Workspace quality gate failed: {e}");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!(task_id = %task_id, "Quality gate not configured for workspace: {e}");
+                    }
+                }
+            });
+        }
+
         // Skip notification if process was intentionally killed by user
         if matches!(ctx.execution_process.status, ExecutionProcessStatus::Killed) {
             return;

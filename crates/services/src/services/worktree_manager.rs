@@ -63,6 +63,27 @@ pub enum WorktreeError {
 pub struct WorktreeManager;
 
 impl WorktreeManager {
+    /// Unshallow a repository if it is a shallow clone. Runs unconditionally
+    /// and treats "not a shallow repository" as a no-op to avoid TOCTOU races.
+    async fn ensure_not_shallow(repo_path: &Path) -> Result<(), WorktreeError> {
+        let output = tokio::process::Command::new("git")
+            .args(["fetch", "--unshallow"])
+            .current_dir(repo_path)
+            .output()
+            .await
+            .map_err(|e| WorktreeError::Repository(format!("Failed to run git fetch --unshallow: {e}")))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // "not a shallow repository" is expected for normal repos — not an error
+            if !stderr.contains("not a shallow") {
+                tracing::warn!(repo = %repo_path.display(), stderr = %stderr, "git fetch --unshallow failed, continuing anyway");
+            }
+        } else {
+            tracing::info!(repo = %repo_path.display(), "Successfully unshallowed repository");
+        }
+        Ok(())
+    }
+
     /// Create a worktree with a new branch
     pub async fn create_worktree(
         repo_path: &Path,
@@ -71,6 +92,9 @@ impl WorktreeManager {
         base_branch: &str,
         create_branch: bool,
     ) -> Result<(), WorktreeError> {
+        // Ensure repo is not a shallow clone (shallow clones can't commit properly)
+        Self::ensure_not_shallow(repo_path).await?;
+
         if create_branch {
             let repo_path_owned = repo_path.to_path_buf();
             let branch_name_owned = branch_name.to_string();

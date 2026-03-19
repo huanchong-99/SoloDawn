@@ -483,4 +483,11 @@
   }
 }
 
+/* Responsive: prevent horizontal overflow on narrow viewports */
+@media (max-width: 800px) {
+  .new-design {
+    overflow-x: hidden;
+  }
+}
+
 @config '../../../tailwind.new.config.js';

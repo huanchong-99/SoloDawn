@@ -274,6 +274,42 @@ impl ExecutionProcess {
         .await
     }
 
+    /// Find execution processes for a session with pagination (most recent first).
+    pub async fn find_by_session_id_paginated(
+        pool: &SqlitePool,
+        session_id: Uuid,
+        show_soft_deleted: bool,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Self>, sqlx::Error> {
+        sqlx::query_as!(
+            ExecutionProcess,
+            r#"SELECT
+                      ep.id              as "id!: Uuid",
+                      ep.session_id      as "session_id!: Uuid",
+                      ep.run_reason      as "run_reason!: ExecutionProcessRunReason",
+                      ep.executor_action as "executor_action!: sqlx::types::Json<ExecutorActionField>",
+                      ep.status          as "status!: ExecutionProcessStatus",
+                      ep.exit_code,
+                      ep.dropped as "dropped!: bool",
+                      ep.started_at      as "started_at!: DateTime<Utc>",
+                      ep.completed_at    as "completed_at?: DateTime<Utc>",
+                      ep.created_at      as "created_at!: DateTime<Utc>",
+                      ep.updated_at      as "updated_at!: DateTime<Utc>"
+               FROM execution_processes ep
+               WHERE ep.session_id = ?
+                 AND (? OR ep.dropped = FALSE)
+               ORDER BY ep.created_at ASC
+               LIMIT ? OFFSET ?"#,
+            session_id,
+            show_soft_deleted,
+            limit,
+            offset
+        )
+        .fetch_all(pool)
+        .await
+    }
+
     /// Find running execution processes
     pub async fn find_running(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
         sqlx::query_as!(

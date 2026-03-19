@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import {
@@ -8,6 +8,7 @@ import {
   COMMAND_PRIORITY_HIGH,
 } from 'lexical';
 import { $convertToMarkdownString, type Transformer } from '@lexical/markdown';
+import { useUiPreferencesStore } from '@/stores/useUiPreferencesStore';
 
 type Props = {
   onCmdEnter?: () => void;
@@ -22,6 +23,12 @@ export function KeyboardCommandsPlugin({
   onChange,
   transformers,
 }: Props) {
+  const sendOnEnterPref = useUiPreferencesStore((s) => s.sendOnEnter);
+  // Use a ref so the command handlers always see the latest value
+  // without tearing down and re-registering Lexical commands.
+  const sendOnEnterRef = useRef(sendOnEnterPref);
+  sendOnEnterRef.current = sendOnEnterPref;
+
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
@@ -64,12 +71,27 @@ export function KeyboardCommandsPlugin({
     );
 
     // Block KEY_ENTER_COMMAND when CMD/Ctrl is pressed to prevent
-    // RichTextPlugin from inserting a new line
+    // RichTextPlugin from inserting a new line.
+    // When sendOnEnter is true, plain Enter also triggers send.
     const unregisterEnter = editor.registerCommand(
       KEY_ENTER_COMMAND,
       (event: KeyboardEvent | null) => {
         if (event && (event.metaKey || event.ctrlKey)) {
           return true; // Mark as handled, preventing line break insertion
+        }
+        // Send on plain Enter (no Shift) when preference is enabled
+        if (sendOnEnterRef.current && event && !event.shiftKey && onCmdEnter) {
+          event.preventDefault();
+          if (onChange && transformers) {
+            const markdown = editor
+              .getEditorState()
+              .read(() => $convertToMarkdownString(transformers));
+            flushSync(() => {
+              onChange(markdown);
+            });
+          }
+          onCmdEnter();
+          return true;
         }
         return false;
       },

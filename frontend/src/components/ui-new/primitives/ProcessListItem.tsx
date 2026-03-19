@@ -26,6 +26,7 @@ const RUN_REASON_LABELS: Record<ExecutionProcessRunReason, string> = {
   setupscript: 'Setup Script',
   cleanupscript: 'Cleanup Script',
   devserver: 'Dev Server',
+  qualityscan: 'Quality Scan',
 };
 
 const RUN_REASON_ICONS: Record<ExecutionProcessRunReason, typeof TerminalIcon> =
@@ -34,6 +35,7 @@ const RUN_REASON_ICONS: Record<ExecutionProcessRunReason, typeof TerminalIcon> =
     setupscript: GearIcon,
     cleanupscript: GearIcon,
     devserver: GlobeIcon,
+    qualityscan: GearIcon,
   };
 
 const STATUS_COLORS: Record<ExecutionProcessStatus, string> = {

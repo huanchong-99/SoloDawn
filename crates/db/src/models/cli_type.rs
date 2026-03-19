@@ -203,13 +203,17 @@ impl ModelConfig {
         // Use the ID as the name for custom configs
         let name = id.to_string();
 
-        // Try to insert, handle conflict by returning existing record
+        // Try to insert, handle conflict by updating the model fields
         let result = sqlx::query_as::<_, ModelConfig>(
             r"
             INSERT INTO model_config (
                 id, cli_type_id, name, display_name, api_model_id,
                 is_default, is_official, created_at, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7)
+            ON CONFLICT(id) DO UPDATE SET
+                display_name = excluded.display_name,
+                api_model_id = excluded.api_model_id,
+                updated_at = excluded.updated_at
             RETURNING *
             ",
         )
@@ -223,16 +227,7 @@ impl ModelConfig {
         .fetch_one(pool)
         .await;
 
-        match result {
-            Ok(config) => Ok(config),
-            Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
-                // Concurrent insert - fetch the existing record
-                Self::find_by_id(pool, id)
-                    .await?
-                    .ok_or_else(|| sqlx::Error::RowNotFound)
-            }
-            Err(e) => Err(e),
-        }
+        result
     }
 
     /// Get default model for a CLI type

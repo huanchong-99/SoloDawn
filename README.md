@@ -94,6 +94,28 @@ Before creating a workflow, you can engage the AI in multi-turn planning:
 
 The Planning Draft captures both `requirement_summary` and `technical_spec`, which are combined into the workflow's initial goal for the orchestrator.
 
+### Intelligent Requirement Assessment
+
+The Workspace Planner automatically evaluates the clarity of your input:
+
+- **Vague requirements** (e.g., "build a knowledge management tool") trigger the Gathering phase: the AI asks focused follow-up questions about scope, features, auth, deployment, etc.
+- **Precise requirements** (e.g., 5+ specific technical requirements with clear scope) skip directly to spec generation, respecting your expertise.
+
+This eliminates both the friction of unnecessary interrogation for experienced users and the risk of building the wrong thing from ambiguous prompts.
+
+### V1.0 Feature Highlights
+
+| Feature | Description |
+|---|---|
+| **Quality Gate System** | Three-layer verification (terminal/branch/repo) with shadow, warn, and enforce modes. Works in both Workflow and Workspace modes. |
+| **Send Mode Toggle** | Switch between Enter and Ctrl+Enter for message sending via a single click in the chat footer. |
+| **Responsive Layout** | Workspace UI adapts to narrow viewports (800px+) with collapsible sidebars. |
+| **Repo Auto-Fill** | When creating a workflow, bound repositories are auto-populated from the selected project. |
+| **Shallow Clone Handling** | Automatically unshallows `--depth 1` clones during workspace preparation to prevent commit failures. |
+| **Model Selection Reliability** | Improved model config persistence ensures the selected model is always used, even across workflow restarts. |
+| **Paginated Process Loading** | Execution process history loads incrementally via REST API with database-level indexing. |
+| **API Fault Recovery** | Circuit breaker auto-pauses workflows on provider exhaustion; tracks pause reason for future auto-resume. |
+
 ---
 
 ## Architecture

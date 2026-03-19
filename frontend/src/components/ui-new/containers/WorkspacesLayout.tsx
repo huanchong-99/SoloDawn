@@ -151,7 +151,7 @@ export function WorkspacesLayout() {
         <NavbarContainer />
         <div className="flex flex-1 min-h-0">
           {isLeftSidebarVisible && (
-            <div className="w-[300px] shrink-0 h-full overflow-hidden">
+            <div className="w-[300px] max-w-[30vw] shrink-0 h-full overflow-hidden">
               <WorkspacesSidebarContainer />
             </div>
           )}
@@ -224,7 +224,7 @@ export function WorkspacesLayout() {
                     </Group>
 
                     {isRightSidebarVisible && (
-                      <div className="w-[300px] shrink-0 h-full overflow-hidden">
+                      <div className="w-[300px] max-w-[30vw] shrink-0 h-full overflow-hidden">
                         <RightSidebar
                           isCreateMode={isCreateMode}
                           rightMainPanelMode={rightMainPanelMode}

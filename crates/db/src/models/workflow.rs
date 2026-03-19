@@ -191,6 +191,9 @@ pub struct Workflow {
 
     /// Updated timestamp
     pub updated_at: DateTime<Utc>,
+
+    /// Reason for pause (e.g., "api_exhausted", "user_requested")
+    pub pause_reason: Option<String>,
 }
 
 impl Workflow {
@@ -1218,6 +1221,38 @@ mod encryption_tests {
     use serial_test::serial;
     use temp_env::with_var;
 
+    /// Create a test Workflow with default fields
+    fn test_workflow(id: &str) -> super::Workflow {
+        super::Workflow {
+            id: id.to_string(),
+            project_id: uuid::Uuid::nil(),
+            name: "Test Workflow".to_string(),
+            description: None,
+            status: "pending".to_string(),
+            execution_mode: "diy".to_string(),
+            initial_goal: None,
+            use_slash_commands: false,
+            orchestrator_enabled: false,
+            orchestrator_api_type: None,
+            orchestrator_base_url: None,
+            orchestrator_api_key: None,
+            orchestrator_model: None,
+            error_terminal_enabled: false,
+            error_terminal_cli_id: None,
+            error_terminal_model_id: None,
+            merge_terminal_cli_id: "merge-cli".to_string(),
+            merge_terminal_model_id: "merge-model".to_string(),
+            target_branch: "main".to_string(),
+            git_watcher_enabled: true,
+            ready_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            pause_reason: None,
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -1274,33 +1309,7 @@ mod encryption_tests {
             "GITCORTEX_ENCRYPTION_KEY",
             Some("12345678901234567890123456789012"),
             || {
-                let mut workflow = Workflow {
-                    id: "test-workflow".to_string(),
-                    project_id: Uuid::nil(),
-                    name: "Test Workflow".to_string(),
-                    description: None,
-                    status: "pending".to_string(),
-                    execution_mode: "diy".to_string(),
-                    initial_goal: None,
-                    use_slash_commands: false,
-                    orchestrator_enabled: false,
-                    orchestrator_api_type: None,
-                    orchestrator_base_url: None,
-                    orchestrator_api_key: None,
-                    orchestrator_model: None,
-                    error_terminal_enabled: false,
-                    error_terminal_cli_id: None,
-                    error_terminal_model_id: None,
-                    merge_terminal_cli_id: "merge-cli".to_string(),
-                    merge_terminal_model_id: "merge-model".to_string(),
-                    target_branch: "main".to_string(),
-                    git_watcher_enabled: true,
-                    ready_at: None,
-                    started_at: None,
-                    completed_at: None,
-                    created_at: chrono::Utc::now(),
-                    updated_at: chrono::Utc::now(),
-                };
+                let mut workflow = test_workflow("test-workflow");
 
                 // Test encryption
                 let original_key = "sk-test-key-12345";
@@ -1324,33 +1333,7 @@ mod encryption_tests {
     #[serial]
     fn test_api_key_encryption_missing_env_key() {
         with_var("GITCORTEX_ENCRYPTION_KEY", Option::<&str>::None, || {
-            let mut workflow = Workflow {
-                id: "test-workflow".to_string(),
-                project_id: Uuid::nil(),
-                name: "Test Workflow".to_string(),
-                description: None,
-                status: "pending".to_string(),
-                execution_mode: "diy".to_string(),
-                initial_goal: None,
-                use_slash_commands: false,
-                orchestrator_enabled: false,
-                orchestrator_api_type: None,
-                orchestrator_base_url: None,
-                orchestrator_api_key: None,
-                orchestrator_model: None,
-                error_terminal_enabled: false,
-                error_terminal_cli_id: None,
-                error_terminal_model_id: None,
-                merge_terminal_cli_id: "merge-cli".to_string(),
-                merge_terminal_model_id: "merge-model".to_string(),
-                target_branch: "main".to_string(),
-                git_watcher_enabled: true,
-                ready_at: None,
-                started_at: None,
-                completed_at: None,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-            };
+            let mut workflow = test_workflow("test-workflow");
 
             // Should fail without encryption key
             let result = workflow.set_api_key("sk-test");
@@ -1368,33 +1351,7 @@ mod encryption_tests {
     #[serial]
     fn test_api_key_encryption_invalid_key_length() {
         with_var("GITCORTEX_ENCRYPTION_KEY", Some("short"), || {
-            let mut workflow = Workflow {
-                id: "test-workflow".to_string(),
-                project_id: Uuid::nil(),
-                name: "Test Workflow".to_string(),
-                description: None,
-                status: "pending".to_string(),
-                execution_mode: "diy".to_string(),
-                initial_goal: None,
-                use_slash_commands: false,
-                orchestrator_enabled: false,
-                orchestrator_api_type: None,
-                orchestrator_base_url: None,
-                orchestrator_api_key: None,
-                orchestrator_model: None,
-                error_terminal_enabled: false,
-                error_terminal_cli_id: None,
-                error_terminal_model_id: None,
-                merge_terminal_cli_id: "merge-cli".to_string(),
-                merge_terminal_model_id: "merge-model".to_string(),
-                target_branch: "main".to_string(),
-                git_watcher_enabled: true,
-                ready_at: None,
-                started_at: None,
-                completed_at: None,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-            };
+            let mut workflow = test_workflow("test-workflow");
 
             let result = workflow.set_api_key("sk-test");
             assert!(result.is_err());
@@ -1409,33 +1366,7 @@ mod encryption_tests {
             "GITCORTEX_ENCRYPTION_KEY",
             Some("12345678901234567890123456789012"),
             || {
-                let workflow = Workflow {
-                    id: "test-workflow".to_string(),
-                    project_id: Uuid::nil(),
-                    name: "Test Workflow".to_string(),
-                    description: None,
-                    status: "pending".to_string(),
-                    execution_mode: "diy".to_string(),
-                    initial_goal: None,
-                    use_slash_commands: false,
-                    orchestrator_enabled: false,
-                    orchestrator_api_type: None,
-                    orchestrator_base_url: None,
-                    orchestrator_api_key: None,
-                    orchestrator_model: None,
-                    error_terminal_enabled: false,
-                    error_terminal_cli_id: None,
-                    error_terminal_model_id: None,
-                    merge_terminal_cli_id: "merge-cli".to_string(),
-                    merge_terminal_model_id: "merge-model".to_string(),
-                    target_branch: "main".to_string(),
-                    git_watcher_enabled: true,
-                    ready_at: None,
-                    started_at: None,
-                    completed_at: None,
-                    created_at: chrono::Utc::now(),
-                    updated_at: chrono::Utc::now(),
-                };
+                let workflow = test_workflow("test-workflow");
 
                 let key = workflow.get_api_key().unwrap();
                 assert!(key.is_none());
@@ -1450,33 +1381,7 @@ mod encryption_tests {
             "GITCORTEX_ENCRYPTION_KEY",
             Some("12345678901234567890123456789012"),
             || {
-                let mut workflow = Workflow {
-                    id: "test-workflow".to_string(),
-                    project_id: Uuid::nil(),
-                    name: "Test Workflow".to_string(),
-                    description: None,
-                    status: "pending".to_string(),
-                    execution_mode: "diy".to_string(),
-                    initial_goal: None,
-                    use_slash_commands: false,
-                    orchestrator_enabled: false,
-                    orchestrator_api_type: None,
-                    orchestrator_base_url: None,
-                    orchestrator_api_key: None,
-                    orchestrator_model: None,
-                    error_terminal_enabled: false,
-                    error_terminal_cli_id: None,
-                    error_terminal_model_id: None,
-                    merge_terminal_cli_id: "merge-cli".to_string(),
-                    merge_terminal_model_id: "merge-model".to_string(),
-                    target_branch: "main".to_string(),
-                    git_watcher_enabled: true,
-                    ready_at: None,
-                    started_at: None,
-                    completed_at: None,
-                    created_at: chrono::Utc::now(),
-                    updated_at: chrono::Utc::now(),
-                };
+                let mut workflow = test_workflow("test-workflow");
 
                 workflow.set_api_key("sk-test").unwrap();
 

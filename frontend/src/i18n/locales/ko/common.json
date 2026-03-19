@@ -279,5 +279,9 @@
   "search": {
     "matchCount": "{{current}} / {{total}}",
     "noMatches": "일치 항목 없음"
+  },
+  "dialogs": {
+    "selectGitRepository": "Git 저장소 선택",
+    "chooseExistingRepo": "기존 저장소 폴더 선택"
   }
 }

@@ -308,6 +308,26 @@ async fn send_message(
                 } else {
                     result.push(MessageResponse::from(assistant_msg));
                 }
+
+                // Auto-transition: if LLM produced a ```json PLANNING_SPEC block,
+                // move draft from gathering → spec_ready.
+                // Use fenced block detection to avoid false positives from conversational mentions.
+                if draft.status == "gathering"
+                    && (response.content.contains("```json\n") || response.content.contains("```\n"))
+                    && response.content.contains("\"productGoal\"")
+                {
+                    if let Err(e) = PlanningDraft::update_status(
+                        &deployment.db().pool,
+                        &draft_id,
+                        "spec_ready",
+                    )
+                    .await
+                    {
+                        tracing::warn!(draft_id = %draft_id, "Failed to auto-transition to spec_ready: {e}");
+                    } else {
+                        tracing::info!(draft_id = %draft_id, "Auto-transitioned draft to spec_ready");
+                    }
+                }
             }
             Err(e) => {
                 tracing::warn!(draft_id = %draft_id, "LLM call failed for planning draft: {e}");
@@ -440,6 +460,7 @@ async fn materialize_draft(
         completed_at: None,
         created_at: now,
         updated_at: now,
+        pause_reason: None,
     };
 
     let decrypted_key = draft.get_api_key()

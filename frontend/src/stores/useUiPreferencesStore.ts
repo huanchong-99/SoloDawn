@@ -93,10 +93,14 @@ type State = {
   isRightSidebarVisible: boolean;
   previewRefreshKey: number;
 
+  // Keyboard preferences
+  sendOnEnter: boolean;
+
   // Workspace-specific panel state
   workspacePanelStates: Record<string, WorkspacePanelState>;
 
   // UI preferences actions
+  setSendOnEnter: (value: boolean) => void;
   setRepoAction: (repoId: string, action: RepoAction) => void;
   setExpanded: (key: string, value: boolean) => void;
   toggleExpanded: (key: string, defaultValue?: boolean) => void;
@@ -138,6 +142,7 @@ export const useUiPreferencesStore = create<State>()(
       contextBarPosition: 'middle-right',
       paneSizes: {},
       collapsedPaths: {},
+      sendOnEnter: false,
 
       // Global layout state
       isLeftSidebarVisible: true,
@@ -172,6 +177,7 @@ export const useUiPreferencesStore = create<State>()(
         set((s) => ({ paneSizes: { ...s.paneSizes, [key]: size } })),
       setCollapsedPaths: (key, paths) =>
         set((s) => ({ collapsedPaths: { ...s.collapsedPaths, [key]: paths } })),
+      setSendOnEnter: (value) => set({ sendOnEnter: value }),
 
       // Layout actions
       toggleLeftSidebar: () =>
@@ -310,6 +316,7 @@ export const useUiPreferencesStore = create<State>()(
         contextBarPosition: state.contextBarPosition,
         paneSizes: state.paneSizes,
         collapsedPaths: state.collapsedPaths,
+        sendOnEnter: state.sendOnEnter,
         // Global layout (persist sidebar visibility)
         isLeftSidebarVisible: state.isLeftSidebarVisible,
         isRightSidebarVisible: state.isRightSidebarVisible,
