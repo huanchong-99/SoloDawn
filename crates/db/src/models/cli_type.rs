@@ -203,8 +203,8 @@ impl ModelConfig {
         // Use the ID as the name for custom configs
         let name = id.to_string();
 
-        // Try to insert, handle conflict by updating the model fields
-        let result = sqlx::query_as::<_, ModelConfig>(
+        // Insert or update model fields on conflict (ensures latest model ID is always stored)
+        sqlx::query_as::<_, ModelConfig>(
             r"
             INSERT INTO model_config (
                 id, cli_type_id, name, display_name, api_model_id,
@@ -225,9 +225,7 @@ impl ModelConfig {
         .bind(now)
         .bind(now)
         .fetch_one(pool)
-        .await;
-
-        result
+        .await
     }
 
     /// Get default model for a CLI type
