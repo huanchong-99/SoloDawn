@@ -122,7 +122,7 @@ impl TrayApp {
 
         let env_vars = self.load_env_vars();
 
-        // Build PATH with bundled tools (order matters: bundled first, system last)
+        // Build PATH with legacy bundled tools (backward compat) (order matters: bundled first, system last)
         let mut path_dirs: Vec<String> = Vec::new();
         let node_dir = self.install_dir.join("node_portable");
         if node_dir.exists() {
@@ -133,15 +133,10 @@ impl TrayApp {
         if npm_global.exists() {
             path_dirs.push(npm_global.to_string_lossy().to_string());
         }
-        // Git: try PortableGit first (has bash.exe), then MinGit fallback
+        // Git: PortableGit (has bash.exe)
         let git_cmd = self.install_dir.join("git").join("cmd");
         if git_cmd.exists() {
             path_dirs.push(git_cmd.to_string_lossy().to_string());
-        } else {
-            let mingit_cmd = self.install_dir.join("mingit").join("cmd");
-            if mingit_cmd.exists() {
-                path_dirs.push(mingit_cmd.to_string_lossy().to_string());
-            }
         }
         // git usr/bin contains bash.exe (needed by Claude Code CLI)
         let git_usr_bin = self.install_dir.join("git").join("usr").join("bin");
