@@ -570,5 +570,20 @@
       "notConfigured": "Not configured",
       "reconnect": "Reconnect"
     }
+  },
+  "runtime": {
+    "title": "Runtime Environment",
+    "description": "View system dependency status and installed AI CLI tools.",
+    "prerequisites": "System Prerequisites",
+    "prereqAllMet": "All met",
+    "prereqMissing": "{{count}} missing",
+    "prereqLoading": "Checking system prerequisites...",
+    "optional": "optional",
+    "cliTools": "AI CLI Tools",
+    "cliCount": "{{installed}}/{{total}} installed",
+    "loading": "Detecting CLI tools...",
+    "noClis": "No AI CLI tools detected. Install via npm install -g.",
+    "notInstalled": "Not installed",
+    "refresh": "Refresh"
   }
 }

@@ -5,8 +5,6 @@ import {
   Warning,
   ArrowsClockwise,
   Package,
-  FolderOpen,
-  Globe,
   Wrench,
   XCircle,
 } from '@phosphor-icons/react';
@@ -19,11 +17,10 @@ import { cliTypesKeys } from '@/hooks/useCliTypes';
 
 interface CliRuntimeInfo {
   name: string;
-  display_name: string;
+  displayName: string;
   installed: boolean;
-  version?: string;
-  latest_version?: string;
-  has_update?: boolean;
+  version?: string | null;
+  installGuideUrl?: string;
 }
 
 interface PrerequisiteStatus {
@@ -46,13 +43,16 @@ function useRuntimeCliStatus() {
   return useQuery<CliRuntimeInfo[]>({
     queryKey: ['runtime', 'cli-status'],
     queryFn: async () => {
-      const response = await fetch('/api/cli-types/detect');
-      const data = await handleApiResponse<Record<string, unknown>[]>(response);
-      return (data || []).map((item: Record<string, unknown>) => ({
+      const response = await fetch('/api/cli_types/detect');
+      if (!response.ok) throw new Error(`CLI detect failed: ${response.status}`);
+      // This endpoint returns a raw array, not wrapped in ApiResponse
+      const data: Record<string, unknown>[] = await response.json();
+      return (data || []).map((item) => ({
         name: (item.name as string) || '',
-        display_name: (item.display_name as string) || (item.name as string) || '',
-        installed: Boolean(item.detected),
+        displayName: (item.displayName as string) || (item.name as string) || '',
+        installed: Boolean(item.installed),
         version: item.version as string | undefined,
+        installGuideUrl: item.installGuideUrl as string | undefined,
       }));
     },
     staleTime: 60_000,
@@ -84,8 +84,7 @@ export function RuntimeSettingsNew() {
 
   const refreshMutation = useMutation({
     mutationFn: async () => {
-      // Re-detect all CLIs
-      const response = await fetch('/api/cli-types/detect', { method: 'GET' });
+      const response = await fetch('/api/cli_types/detect', { method: 'GET' });
       return handleApiResponse(response);
     },
     onSuccess: () => {
@@ -108,19 +107,17 @@ export function RuntimeSettingsNew() {
     (p) => p.required && !p.found
   );
   const allRequiredMet = missingRequired?.length === 0;
+  const installedCount = cliStatuses?.filter((c) => c.installed).length ?? 0;
 
   return (
     <div className="space-y-double">
       {/* Header */}
       <div>
         <h2 className="text-lg font-semibold text-high">
-          {t('settings:runtime.title', 'Runtime Environment')}
+          {t('settings:runtime.title')}
         </h2>
         <p className="mt-half text-sm text-normal">
-          {t(
-            'settings:runtime.description',
-            'Manage bundled tools, npm mirror settings, and CLI versions.',
-          )}
+          {t('settings:runtime.description')}
         </p>
       </div>
 
@@ -130,10 +127,7 @@ export function RuntimeSettingsNew() {
           <div className="flex items-center gap-half">
             <Wrench className="size-icon-md text-brand" weight="duotone" />
             <h3 className="text-base font-medium text-high">
-              {t(
-                'settings:runtime.prerequisites',
-                'System Prerequisites',
-              )}
+              {t('settings:runtime.prerequisites')}
             </h3>
             {!prereqLoading && prerequisites && (
               <span
@@ -144,8 +138,8 @@ export function RuntimeSettingsNew() {
                 }`}
               >
                 {allRequiredMet
-                  ? t('settings:runtime.prereqAllMet', 'All met')
-                  : t('settings:runtime.prereqMissing', '{{count}} missing', {
+                  ? t('settings:runtime.prereqAllMet')
+                  : t('settings:runtime.prereqMissing', {
                       count: missingRequired?.length ?? 0,
                     })}
               </span>
@@ -160,16 +154,13 @@ export function RuntimeSettingsNew() {
             <ArrowsClockwise
               className={`size-icon-xs ${refreshPrereqMutation.isPending ? 'animate-spin' : ''}`}
             />
-            {t('settings:runtime.refresh', 'Refresh')}
+            {t('settings:runtime.refresh')}
           </button>
         </div>
 
         {prereqLoading ? (
           <div className="py-base text-center text-sm text-low">
-            {t(
-              'settings:runtime.prereqLoading',
-              'Checking system prerequisites...',
-            )}
+            {t('settings:runtime.prereqLoading')}
           </div>
         ) : (
           <div className="space-y-half">
@@ -195,7 +186,7 @@ export function RuntimeSettingsNew() {
                   <span className="text-sm text-high">{dep.name}</span>
                   {!dep.required && (
                     <span className="text-xs text-low">
-                      ({t('settings:runtime.optional', 'optional')})
+                      ({t('settings:runtime.optional')})
                     </span>
                   )}
                 </div>
@@ -220,8 +211,16 @@ export function RuntimeSettingsNew() {
           <div className="flex items-center gap-half">
             <Package className="size-icon-md text-brand" weight="duotone" />
             <h3 className="text-base font-medium text-high">
-              {t('settings:runtime.cliTools', 'CLI Tools')}
+              {t('settings:runtime.cliTools')}
             </h3>
+            {!isLoading && cliStatuses && (
+              <span className="ml-half text-xs text-low">
+                {t('settings:runtime.cliCount', {
+                  installed: installedCount,
+                  total: cliStatuses.length,
+                })}
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -232,17 +231,21 @@ export function RuntimeSettingsNew() {
             <ArrowsClockwise
               className={`size-icon-xs ${refreshMutation.isPending ? 'animate-spin' : ''}`}
             />
-            {t('settings:runtime.refresh', 'Refresh')}
+            {t('settings:runtime.refresh')}
           </button>
         </div>
 
         {isLoading ? (
           <div className="py-base text-center text-sm text-low">
-            {t('settings:runtime.loading', 'Detecting CLI tools...')}
+            {t('settings:runtime.loading')}
+          </div>
+        ) : !cliStatuses || cliStatuses.length === 0 ? (
+          <div className="py-base text-center text-sm text-low">
+            {t('settings:runtime.noClis')}
           </div>
         ) : (
           <div className="space-y-half">
-            {cliStatuses?.map((cli) => (
+            {cliStatuses.map((cli) => (
               <div
                 key={cli.name}
                 className="flex items-center justify-between rounded bg-panel px-base py-half"
@@ -251,60 +254,25 @@ export function RuntimeSettingsNew() {
                   {cli.installed ? (
                     <CheckCircle className="size-icon-sm text-success" weight="fill" />
                   ) : (
-                    <Warning className="size-icon-sm text-low" />
+                    <XCircle className="size-icon-sm text-low" />
                   )}
-                  <span className="text-sm text-high">{cli.display_name}</span>
+                  <span className="text-sm text-high">{cli.displayName}</span>
                 </div>
                 <div className="flex items-center gap-base">
-                  {cli.version && (
-                    <span className="text-xs text-low">{cli.version}</span>
-                  )}
-                  {cli.has_update && (
-                    <span className="rounded bg-brand/10 px-half text-xs text-brand">
-                      {t('settings:runtime.updateAvailable', 'Update available')}
+                  {cli.installed && cli.version ? (
+                    <span className="font-ibm-plex-mono text-xs text-low">
+                      {cli.version}
                     </span>
-                  )}
+                  ) : !cli.installed ? (
+                    <span className="text-xs text-low">
+                      {t('settings:runtime.notInstalled')}
+                    </span>
+                  ) : null}
                 </div>
               </div>
             ))}
           </div>
         )}
-      </div>
-
-      {/* Install Path Info */}
-      <div className="rounded border p-base">
-        <div className="flex items-center gap-half">
-          <FolderOpen className="size-icon-md text-brand" weight="duotone" />
-          <h3 className="text-base font-medium text-high">
-            {t('settings:runtime.paths', 'Installation Paths')}
-          </h3>
-        </div>
-        <div className="mt-base space-y-half text-sm">
-          <div className="flex justify-between">
-            <span className="text-normal">
-              {t('settings:runtime.installDir', 'Install Directory')}
-            </span>
-            <span className="font-ibm-plex-mono text-xs text-low">
-              {t('settings:runtime.detectAtStartup', 'Detected at startup')}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* npm Mirror Section */}
-      <div className="rounded border p-base">
-        <div className="flex items-center gap-half">
-          <Globe className="size-icon-md text-brand" weight="duotone" />
-          <h3 className="text-base font-medium text-high">
-            {t('settings:runtime.npmMirror', 'npm Registry')}
-          </h3>
-        </div>
-        <p className="mt-half text-xs text-low">
-          {t(
-            'settings:runtime.npmMirrorHint',
-            'The npm registry mirror is configured in the bundled Node.js installation. Change it via Settings > Agents or reinstall with a different mirror option.',
-          )}
-        </p>
       </div>
     </div>
   );

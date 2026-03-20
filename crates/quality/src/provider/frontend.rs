@@ -243,10 +243,8 @@ fn extract_number_before(text: &str, keyword: &str) -> Option<i64> {
 /// 命令输出
 struct CommandOutput {
     stdout: String,
-    #[allow(dead_code)]
-    stderr: String,
-    #[allow(dead_code)]
-    success: bool,
+    _stderr: String,
+    _success: bool,
 }
 
 /// 执行前端 pnpm 命令
@@ -259,7 +257,7 @@ async fn run_frontend_command(cwd: &Path, args: &[&str]) -> anyhow::Result<Comma
 
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        success: output.status.success(),
+        _stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        _success: output.status.success(),
     })
 }

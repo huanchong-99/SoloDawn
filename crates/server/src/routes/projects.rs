@@ -205,34 +205,6 @@ pub async fn get_project_remote_members(
         "Remote project features are not supported in this version.".to_string(),
     ))
 }
-#[allow(dead_code)]
-async fn apply_remote_project_link(
-    deployment: &DeploymentImpl,
-    project: Project,
-    remote_project: RemoteProject,
-) -> Result<Project, ApiError> {
-    if project.remote_project_id.is_some() {
-        return Err(ApiError::Conflict(
-            "Project is already linked to a remote project. Unlink it first.".to_string(),
-        ));
-    }
-
-    let updated_project = deployment
-        .project()
-        .link_to_remote(&deployment.db().pool, project.id, remote_project)
-        .await?;
-
-    deployment
-        .track_if_analytics_allowed(
-            "project_linked_to_remote",
-            serde_json::json!({
-                "project_id": project.id.to_string(),
-            }),
-        )
-        .await;
-
-    Ok(updated_project)
-}
 
 pub async fn create_project(
     State(deployment): State<DeploymentImpl>,

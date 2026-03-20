@@ -1,138 +1,99 @@
-# GitCortex Windows Installer - Verification Plan
+# GitCortex Windows Installer - Verification Plan (Lightweight)
+
+## Overview
+
+The lightweight installer ships only `server.exe` and `tray.exe`. Node.js, Git, and npm are expected to be pre-installed on the user's system and reachable via PATH.
 
 ## Test Environment Requirements
-- Clean Windows 10/11 VM (no prior Node.js, Git, or AI CLIs installed)
-- Internet access (or pre-downloaded installer for offline test)
+
+- Windows 10/11 machine with Node.js (>=18), Git, and npm installed
 - Admin privileges
+- Port 23456 available
 
 ## Verification Checklist
 
 ### 1. Installation
 
 - [ ] Run `GitCortex-Setup-v{version}.exe`
-- [ ] Language selection shows Chinese Simplified when system locale is zh-CN
-- [ ] Component selection page shows all components checked by default
-- [ ] China mirror option auto-appears for zh-CN locale
 - [ ] Installation completes without errors
 - [ ] Desktop shortcut created (if selected)
 - [ ] Start Menu folder created
-- [ ] VC++ Runtime installed silently
-- [ ] `.env` file generated with valid encryption key and API token
-- [ ] Firewall rule added for port 23456
 
-### 2. Bundled Tools Verification
+### 2. Installed Files
 
-- [ ] `node --version` returns v22.x (from `{app}\node_portable`)
-- [ ] `git --version` returns v2.47+ (from `{app}\mingit\cmd`)
-- [ ] `gh --version` returns v2.63+ (from `{app}\gh`)
-- [ ] All 9 AI CLIs installed from offline cache:
-  - [ ] `claude --version`
-  - [ ] `codex --version`
-  - [ ] `gemini --version`
-  - [ ] `amp --version`
-  - [ ] `qwen --version`
-  - [ ] `opencode --version`
-  - [ ] `droid --version`
-  - [ ] `cursor-agent --version`
-  - [ ] `gh copilot --version`
+- [ ] `{app}\server.exe` exists and is executable
+- [ ] `{app}\tray.exe` exists and is executable
+- [ ] `{app}\.env` generated with `GITCORTEX_ENCRYPTION_KEY` (32 bytes) and `GITCORTEX_API_TOKEN`
+- [ ] `.env` values are non-empty and correctly formatted
 
-### 3. Server Startup
+### 3. System Prerequisites Detection
 
-- [ ] System tray icon appears after installation
-- [ ] Right-click menu shows: Open GitCortex, Start Server, Stop Server, Quit
-- [ ] Server starts automatically on tray app launch
-- [ ] Browser opens to `http://127.0.0.1:23456`
-- [ ] Web UI loads successfully
-- [ ] Setup wizard or first-run wizard appears on first visit
+Verify the installer's post-install check detects tools already on the system:
 
-### 4. First-Run Wizard
+- [ ] `node --version` resolves via PATH
+- [ ] `git --version` resolves via PATH
+- [ ] `npm --version` resolves via PATH
 
-- [ ] Welcome step displays correctly
-- [ ] Environment step shows all CLIs with checkmarks
-- [ ] API Key step provides guidance
-- [ ] "Skip" button works at any step
-- [ ] Completing wizard navigates to Board page
-- [ ] Wizard does not appear on subsequent visits
+If any prerequisite is missing, the installer should warn the user.
 
-### 5. Settings > Runtime Environment
+### 4. Server Startup and Health
+
+- [ ] Launch tray app (or start `server.exe` directly)
+- [ ] Server binds to `http://127.0.0.1:23456`
+- [ ] `GET /healthz` returns HTTP 200
+- [ ] `GET /readyz` returns HTTP 200 (DB initialized, asset dir present)
+- [ ] Web UI loads at `http://127.0.0.1:23456`
+
+### 5. Runtime Settings Page
 
 - [ ] Navigate to Settings > Runtime
-- [ ] All bundled CLI tools listed with versions
-- [ ] Refresh button re-detects CLI tools
-- [ ] Installation paths displayed correctly
+- [ ] Node.js detected and version displayed
+- [ ] Git detected and version displayed
+- [ ] npm detected and version displayed
+- [ ] Refresh button re-detects prerequisites
 
-### 6. CLI Installation via UI
+### 6. System Tray Lifecycle
 
-- [ ] Go to Settings > Agents
-- [ ] Install button works for individual CLIs
-- [ ] Uninstall button works
-- [ ] Progress streaming shows output
-- [ ] npm mirror (npmmirror.com) used when China mirror was selected during install
-
-### 7. Core Functionality
-
-- [ ] Create a new project (bind to a local git repository)
-- [ ] Create a manual workflow with at least one task
-- [ ] Verify Git worktree creation works (uses bundled MinGit)
-- [ ] Start the workflow (requires at least one configured AI CLI with valid API key)
-
-### 8. System Tray Lifecycle
-
-- [ ] Start Server: starts `gitcortex-server.exe`
-- [ ] Stop Server: stops the server process
+- [ ] Tray icon appears on launch
 - [ ] Open GitCortex: opens browser to web UI
+- [ ] Start/Stop Server: controls `server.exe` process
 - [ ] Quit: stops server and exits tray app
-- [ ] Auto-start on login (if startup shortcut was created)
 
-### 9. Reboot Test
+### 7. Update (Overwrite) Test
 
-- [ ] Restart the computer
-- [ ] Tray app auto-starts (if startup was selected)
-- [ ] Server starts automatically
-- [ ] Web UI accessible
-
-### 10. Update Test
-
-- [ ] Download a newer installer version
-- [ ] Run installer over existing installation
+- [ ] Run newer installer over existing installation
 - [ ] `.env` file preserved (encryption key not regenerated)
 - [ ] Database preserved
 - [ ] Server starts successfully after update
-- [ ] No duplicate PATH entries
 
-### 11. Uninstall Test
+### 8. Uninstall Test
 
-- [ ] Run uninstaller from Start Menu or Add/Remove Programs
-- [ ] Server process killed
-- [ ] Tray app process killed
+- [ ] Run uninstaller from Add/Remove Programs
+- [ ] `server.exe` and `tray.exe` processes killed
 - [ ] Installation directory removed
-- [ ] Firewall rule removed
-- [ ] PATH entries cleaned up
-- [ ] Desktop shortcut removed
-- [ ] Start Menu folder removed
-- [ ] `.env` and database files removed (or user prompted)
+- [ ] Desktop shortcut and Start Menu folder removed
 
-### 12. Silent Install Test
+### 9. Silent Install Test
 
 ```powershell
 GitCortex-Setup-v{version}.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
+
 - [ ] Installs without any UI
-- [ ] All components installed
+- [ ] `.env` generated
 - [ ] Server accessible after installation
 
 ## Known Limitations
 
-1. **No code signing**: Windows SmartScreen may warn on first run. Users should click "More info" → "Run anyway".
-2. **AI CLI versions**: Bundled .tgz packages are snapshot versions from build time. Use Settings > Agents to update.
-3. **PATH conflicts**: If user has system Node.js/Git, bundled versions take precedence in GitCortex processes but don't affect user's system tools.
+1. **No code signing**: Windows SmartScreen may warn on first run. Click "More info" then "Run anyway".
+2. **System prerequisites required**: Node.js, Git, and npm must be installed separately before running GitCortex.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| SmartScreen blocks installer | Not code-signed | Click "More info" → "Run anyway" |
-| Server won't start | Port 23456 in use | Check `netstat -ano | findstr :23456`, kill conflicting process |
-| CLI not detected after install | PATH not refreshed | Restart tray app or reopen terminal |
-| npm install fails | Network/mirror issue | Check npm mirror setting in `{app}\node_portable\.npmrc` |
+| SmartScreen blocks installer | Not code-signed | Click "More info" then "Run anyway" |
+| Server won't start | Port 23456 in use | `netstat -ano \| findstr :23456`, kill conflicting process |
+| "Node.js not found" in Runtime Settings | Node.js not on PATH | Install Node.js and restart tray app |
 | Database errors | Missing encryption key | Verify `GITCORTEX_ENCRYPTION_KEY` in `{app}\.env` |
+| `/readyz` fails | DB not initialized | Run `pnpm run prepare-db` or restart server (auto-migrates) |

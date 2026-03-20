@@ -570,5 +570,20 @@
       "notConfigured": "未配置",
       "reconnect": "重新连接"
     }
+  },
+  "runtime": {
+    "title": "运行环境",
+    "description": "查看系统依赖状态和已安装的 AI CLI 工具。",
+    "prerequisites": "系统依赖",
+    "prereqAllMet": "全部就绪",
+    "prereqMissing": "缺少 {{count}} 项",
+    "prereqLoading": "正在检测系统依赖...",
+    "optional": "可选",
+    "cliTools": "AI CLI 工具",
+    "cliCount": "已安装 {{installed}}/{{total}}",
+    "loading": "正在检测 CLI 工具...",
+    "noClis": "未检测到任何 AI CLI 工具。请使用 npm install -g 安装。",
+    "notInstalled": "未安装",
+    "refresh": "刷新"
   }
 }

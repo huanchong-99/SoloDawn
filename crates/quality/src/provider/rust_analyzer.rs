@@ -305,8 +305,7 @@ impl QualityProvider for RustProvider {
 struct CommandOutput {
     stdout: String,
     stderr: String,
-    #[allow(dead_code)]
-    success: bool,
+    _success: bool,
 }
 
 /// 异步执行命令
@@ -320,6 +319,6 @@ async fn run_command(cwd: &Path, program: &str, args: &[&str]) -> anyhow::Result
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        success: output.status.success(),
+        _success: output.status.success(),
     })
 }

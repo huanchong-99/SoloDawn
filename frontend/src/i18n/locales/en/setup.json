@@ -92,7 +92,7 @@
     "welcome": {
       "title": "Welcome to GitCortex",
       "subtitle": "Your installation is ready. Let's verify everything is working.",
-      "description": "GitCortex has been installed with all required tools bundled. This wizard will help you verify the installation and configure API keys for the AI CLIs you want to use."
+      "description": "GitCortex has been installed. This wizard will help you verify system prerequisites, check the installation, and configure API keys for the AI CLIs you want to use."
     },
     "environment": {
       "title": "Environment Status",

@@ -147,8 +147,8 @@ pub(super) struct MessagePartUpdatedEvent {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct PermissionAskedEvent {
-    #[allow(dead_code)]
-    pub(super) id: String,
+    #[serde(rename = "id")]
+    pub(super) _id: String,
     pub(super) permission: String,
     #[serde(default)]
     pub(super) patterns: Vec<String>,

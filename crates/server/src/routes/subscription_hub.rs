@@ -248,29 +248,6 @@ impl SubscriptionHub {
         );
     }
 
-    #[allow(dead_code)]
-    /// Get or create a broadcast sender for a workflow.
-    async fn get_or_create_sender(&self, workflow_id: &str) -> broadcast::Sender<WsEvent> {
-        // Fast path: check if sender already exists
-        if let Some(sender) = self.senders.read().await.get(workflow_id).cloned() {
-            return sender;
-        }
-
-        // Slow path: create new sender
-        let mut senders = self.senders.write().await;
-
-        // Double-check after acquiring write lock
-        if let Some(sender) = senders.get(workflow_id).cloned() {
-            return sender;
-        }
-
-        // Create new channel
-        let (sender, _) = broadcast::channel(self.capacity);
-        senders.insert(workflow_id.to_string(), sender.clone());
-        tracing::debug!("Created new channel for workflow: {}", workflow_id);
-
-        sender
-    }
 }
 
 impl Default for SubscriptionHub {
