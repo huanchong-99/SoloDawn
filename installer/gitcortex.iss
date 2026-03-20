@@ -62,12 +62,17 @@ Source: "scripts\generate-key.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversi
 Source: "scripts\install-single-cli.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "scripts\post-install-check.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 
+; Environment setup scripts (dev tools + AI CLIs one-click installer)
+Source: "..\scripts\setup-windows.cmd"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\setup-windows.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
+
 ; Assets
 Source: "assets\GitCortex.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Components: tray
 Name: "{group}\Open {#MyAppName} Web UI"; Filename: "http://127.0.0.1:{#DefaultPort}"
+Name: "{group}\Setup Dev Environment"; Filename: "{app}\scripts\setup-windows.cmd"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; Components: tray
 Name: "{commonstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startupicon; Components: tray
@@ -78,6 +83,9 @@ Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\s
 
 ; Launch tray app after install
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Components: tray; Flags: nowait postinstall skipifsilent
+
+; Run environment setup (dev tools + AI CLIs)
+Filename: "{app}\scripts\setup-windows.cmd"; Description: "Setup dev environment && AI CLIs (recommended for first install)"; Flags: postinstall skipifsilent unchecked nowait
 
 ; Run post-installation self-check
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\scripts\post-install-check.ps1"" -SkipServerTest"; Description: "Run post-installation self-check"; Flags: postinstall skipifsilent unchecked nowait runascurrentuser
