@@ -664,6 +664,8 @@
       "conflicts_other": "{{count}}件の競合ファイルを手動で解決する必要があります"
     },
     "executors": "エクゼキューター",
+    "models": "モデル",
+    "selectModel": "モデルを選択",
     "saveAsDefault": "デフォルトとして保存",
     "script": {
       "clickToViewLogs": "クリックしてログを表示",

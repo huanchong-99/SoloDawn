@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO sessions (id, workspace_id, executor, terminal_id)\n               VALUES ($1, $2, $3, $4)\n               RETURNING id AS \"id!: Uuid\",\n                         workspace_id AS \"workspace_id!: Uuid\",\n                         executor,\n                         terminal_id,\n                         model_config_id,\n                         created_at AS \"created_at!: DateTime<Utc>\",\n                         updated_at AS \"updated_at!: DateTime<Utc>\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: Uuid",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "workspace_id!: Uuid",
+        "ordinal": 1,
+        "type_info": "Blob"
+      },
+      {
+        "name": "executor",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "terminal_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "model_config_id",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!: DateTime<Utc>",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!: DateTime<Utc>",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "90b92480e10770877724f39819245f783e723aaf99845ffb791d1fc9779af215"
+}

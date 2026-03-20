@@ -7,6 +7,7 @@ interface CreateSessionParams {
   prompt: string;
   variant: string | null;
   executor: string;
+  modelConfigId?: string;
 }
 
 /**
@@ -22,11 +23,13 @@ export function useCreateSession() {
       prompt,
       variant,
       executor,
+      modelConfigId,
     }: CreateSessionParams): Promise<Session> => {
-      // Step 1: Create the session with the executor
+      // Step 1: Create the session with the executor and optional model config
       const session = await sessionsApi.create({
         workspace_id: workspaceId,
         executor,
+        model_config_id: modelConfigId,
       });
 
       // Step 2: Send the first message as a follow-up

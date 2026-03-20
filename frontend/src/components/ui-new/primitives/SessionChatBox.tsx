@@ -11,7 +11,7 @@ import {
   WarningIcon,
 } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
-import type { Session, BaseCodingAgent, TodoItem } from 'shared/types';
+import type { Session, BaseCodingAgent, TodoItem, ModelConfig } from 'shared/types';
 import type { LocalImageMetadata } from '@/components/ui/wysiwyg/context/task-attempt-context';
 import { formatDateShortWithTime } from '@/utils/date';
 import { toPrettyCase } from '@/utils/string';
@@ -115,6 +115,12 @@ interface ReviewCommentsProps {
   onClear: () => void;
 }
 
+interface ModelConfigProps {
+  models: ModelConfig[];
+  selectedId: string | null;
+  onChange: (id: string | null) => void;
+}
+
 interface SessionChatBoxProps {
   status: ExecutionStatus;
   editor: EditorProps;
@@ -132,6 +138,7 @@ interface SessionChatBoxProps {
   projectId?: string;
   agent?: BaseCodingAgent | null;
   executor?: ExecutorProps;
+  modelConfig?: ModelConfigProps;
   inProgressTodo?: TodoItem | null;
   localImages?: LocalImageMetadata[];
   onViewCode?: () => void;
@@ -160,6 +167,7 @@ export function SessionChatBox({
   projectId,
   agent,
   executor,
+  modelConfig,
   inProgressTodo,
   localImages,
   onViewCode,
@@ -568,6 +576,32 @@ export function SessionChatBox({
                   </DropdownMenuItem>
                 ))}
               </ToolbarDropdown>
+              {modelConfig && (
+                <ToolbarDropdown
+                  label={
+                    modelConfig.models.find(
+                      (m) => m.id === modelConfig.selectedId
+                    )?.displayName ?? t('conversation.selectModel')
+                  }
+                >
+                  <DropdownMenuLabel>
+                    {t('conversation.models')}
+                  </DropdownMenuLabel>
+                  {modelConfig.models.map((model) => (
+                    <DropdownMenuItem
+                      key={model.id}
+                      icon={
+                        modelConfig.selectedId === model.id
+                          ? CheckIcon
+                          : undefined
+                      }
+                      onClick={() => modelConfig.onChange(model.id)}
+                    >
+                      {model.displayName}
+                    </DropdownMenuItem>
+                  ))}
+                </ToolbarDropdown>
+              )}
             </>
           )}
           {/* Existing session mode: show active task item when running, otherwise file stats */}

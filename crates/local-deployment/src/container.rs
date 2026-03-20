@@ -882,6 +882,7 @@ impl LocalContainerService {
         base_executor: BaseCodingAgent,
         _executor_action: &ExecutorAction,
         pool: &sqlx::SqlitePool,
+        model_config_id: Option<&str>,
     ) -> HashMap<String, String> {
         let mut vars = HashMap::new();
 
@@ -920,7 +921,7 @@ impl LocalContainerService {
 
             // Fallback: inject credentials from model_config if no global auth
             if !has_global_auth {
-                match db::models::ModelConfig::find_with_credentials_for_cli(pool, "cli-claude-code").await {
+                match db::models::ModelConfig::resolve_preferred_or_default(pool, model_config_id, "cli-claude-code").await {
                     Ok(Some(model_config)) => {
                         if let Ok(Some(api_key)) = model_config.get_api_key() {
                             vars.insert("ANTHROPIC_API_KEY".to_string(), api_key.clone());
@@ -980,7 +981,7 @@ impl LocalContainerService {
                     Some(p) if p.exists() => p,
                     _ => {
                         // No global codex home — try model_config fallback
-                        match db::models::ModelConfig::find_with_credentials_for_cli(pool, "cli-codex").await {
+                        match db::models::ModelConfig::resolve_preferred_or_default(pool, model_config_id, "cli-codex").await {
                             Ok(Some(model_config)) => {
                                 if let Ok(Some(api_key)) = model_config.get_api_key() {
                                     vars.insert("OPENAI_API_KEY".to_string(), api_key);
@@ -1041,7 +1042,7 @@ impl LocalContainerService {
 
         if matches!(base_executor, BaseCodingAgent::Gemini) {
             // Inject Gemini credentials from model_config
-            match db::models::ModelConfig::find_with_credentials_for_cli(pool, "cli-gemini-cli").await {
+            match db::models::ModelConfig::resolve_preferred_or_default(pool, model_config_id, "cli-gemini-cli").await {
                 Ok(Some(model_config)) => {
                     if let Ok(Some(api_key)) = model_config.get_api_key() {
                         vars.insert("GEMINI_API_KEY".to_string(), api_key);
@@ -1232,6 +1233,7 @@ impl ContainerService for LocalContainerService {
         workspace: &Workspace,
         execution_process: &ExecutionProcess,
         executor_action: &ExecutorAction,
+        model_config_id: Option<&str>,
     ) -> Result<(), ContainerError> {
         // Get the worktree path
         let container_ref = workspace
@@ -1285,7 +1287,7 @@ impl ContainerService for LocalContainerService {
         // isolated workspace environment doesn't inherit global CLI configs.
         // Falls back to model_config stored credentials when global auth is missing.
         if let Some(base_executor) = executor_action.base_executor() {
-            let profile_vars = Self::resolve_executor_env_vars(base_executor, executor_action, &self.db.pool).await;
+            let profile_vars = Self::resolve_executor_env_vars(base_executor, executor_action, &self.db.pool, model_config_id).await;
             env.merge(&profile_vars);
         }
 

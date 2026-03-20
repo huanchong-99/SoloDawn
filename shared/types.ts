@@ -105,7 +105,7 @@ export type Workspace = { id: string, taskId: string, containerRef: string | nul
 
 export type WorkspaceWithStatus = { isRunning: boolean, isErrored: boolean, id: string, taskId: string, containerRef: string | null, branch: string, agentWorkingDir: string | null, setupCompletedAt: string | null, createdAt: string, updatedAt: string, archived: boolean, pinned: boolean, name: string | null, };
 
-export type Session = { id: string, workspaceId: string, executor: string | null, terminalId: string | null, createdAt: string, updatedAt: string, };
+export type Session = { id: string, workspaceId: string, executor: string | null, terminalId: string | null, modelConfigId: string | null, createdAt: string, updatedAt: string, };
 
 export type ExecutionProcess = { id: string, sessionId: string, runReason: ExecutionProcessRunReason, executorAction: ExecutorAction, status: ExecutionProcessStatus, exitCode: bigint | null, 
 /**

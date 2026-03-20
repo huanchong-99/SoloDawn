@@ -1623,6 +1623,7 @@ pub async fn start_dev_server(
                 pool,
                 &CreateSession {
                     executor: Some("dev-server".to_string()),
+                    model_config_id: None,
                 },
                 Uuid::new_v4(),
                 workspace.id,
@@ -1760,6 +1761,7 @@ pub async fn run_setup_script(
                 pool,
                 &CreateSession {
                     executor: Some("setup-script".to_string()),
+                    model_config_id: None,
                 },
                 Uuid::new_v4(),
                 workspace.id,
@@ -1838,6 +1840,7 @@ pub async fn run_cleanup_script(
                 pool,
                 &CreateSession {
                     executor: Some("cleanup-script".to_string()),
+                    model_config_id: None,
                 },
                 Uuid::new_v4(),
                 workspace.id,

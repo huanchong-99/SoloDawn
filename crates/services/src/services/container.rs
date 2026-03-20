@@ -551,6 +551,7 @@ pub trait ContainerService {
         workspace: &Workspace,
         execution_process: &ExecutionProcess,
         executor_action: &ExecutorAction,
+        model_config_id: Option<&str>,
     ) -> Result<(), ContainerError>;
 
     async fn stop_execution(
@@ -935,6 +936,7 @@ pub trait ContainerService {
             &self.db().pool,
             &CreateSession {
                 executor: Some(executor_profile_id.executor.to_string()),
+                model_config_id: None,
             },
             Uuid::new_v4(),
             workspace.id,
@@ -1090,7 +1092,7 @@ pub trait ContainerService {
         }
 
         if let Err(start_error) = self
-            .start_execution_inner(workspace, &execution_process, executor_action)
+            .start_execution_inner(workspace, &execution_process, executor_action, session.model_config_id.as_deref())
             .await
         {
             // Mark process as failed

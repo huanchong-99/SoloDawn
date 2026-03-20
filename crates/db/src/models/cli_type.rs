@@ -398,6 +398,21 @@ impl ModelConfig {
         Ok(())
     }
 
+    /// Resolve a model config: prefer an explicitly selected config ID,
+    /// fall back to the first config with credentials for the given CLI type.
+    pub async fn resolve_preferred_or_default(
+        pool: &SqlitePool,
+        config_id: Option<&str>,
+        cli_type_id: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        if let Some(id) = config_id {
+            if let Some(mc) = Self::find_by_id(pool, id).await? {
+                return Ok(Some(mc));
+            }
+        }
+        Self::find_with_credentials_for_cli(pool, cli_type_id).await
+    }
+
     /// Find the first model config with stored credentials for a given CLI type
     pub async fn find_with_credentials_for_cli(
         pool: &SqlitePool,

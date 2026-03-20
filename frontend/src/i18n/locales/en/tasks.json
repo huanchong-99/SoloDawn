@@ -235,6 +235,8 @@
   },
   "conversation": {
     "executors": "Executors",
+    "models": "Models",
+    "selectModel": "Select Model",
     "saveAsDefault": "Save as default",
     "you": "You",
     "thinking": "Thinking",

@@ -45,6 +45,7 @@ pub struct SessionQuery {
 pub struct CreateSessionRequest {
     pub workspace_id: Uuid,
     pub executor: Option<String>,
+    pub model_config_id: Option<String>,
 }
 
 pub async fn get_sessions(
@@ -79,6 +80,7 @@ pub async fn create_session(
         pool,
         &CreateSession {
             executor: payload.executor,
+            model_config_id: payload.model_config_id,
         },
         Uuid::new_v4(),
         payload.workspace_id,

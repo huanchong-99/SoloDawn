@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id AS \"id!: Uuid\",\n                      workspace_id AS \"workspace_id!: Uuid\",\n                      executor,\n                      terminal_id,\n                      created_at AS \"created_at!: DateTime<Utc>\",\n                      updated_at AS \"updated_at!: DateTime<Utc>\"\n               FROM sessions\n               WHERE id = $1",
+  "query": "SELECT id AS \"id!: Uuid\",\n                      workspace_id AS \"workspace_id!: Uuid\",\n                      executor,\n                      terminal_id,\n                      model_config_id,\n                      created_at AS \"created_at!: DateTime<Utc>\",\n                      updated_at AS \"updated_at!: DateTime<Utc>\"\n               FROM sessions\n               WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -24,13 +24,18 @@
         "type_info": "Text"
       },
       {
-        "name": "created_at!: DateTime<Utc>",
+        "name": "model_config_id",
         "ordinal": 4,
         "type_info": "Text"
       },
       {
-        "name": "updated_at!: DateTime<Utc>",
+        "name": "created_at!: DateTime<Utc>",
         "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!: DateTime<Utc>",
+        "ordinal": 6,
         "type_info": "Text"
       }
     ],
@@ -42,9 +47,10 @@
       false,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "be81537670cb569b0e9226073b030ca979bf1703352d1b79556ed6c26d536ba4"
+  "hash": "58177399445245c5af8ef8633e5d048ddc020e583635284620adebbd51654116"
 }

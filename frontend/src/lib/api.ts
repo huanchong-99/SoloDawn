@@ -520,6 +520,7 @@ export const sessionsApi = {
   create: async (data: {
     workspace_id: string;
     executor?: string;
+    model_config_id?: string;
   }): Promise<Session> => {
     const response = await makeRequest('/api/sessions', {
       method: 'POST',

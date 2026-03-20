@@ -129,7 +129,7 @@ async fn trigger_pr_description_follow_up(
             None => {
                 Session::create(
                     &deployment.db().pool,
-                    &CreateSession { executor: None },
+                    &CreateSession { executor: None, model_config_id: None },
                     Uuid::new_v4(),
                     workspace.id,
                 )

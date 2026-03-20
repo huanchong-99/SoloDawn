@@ -18,6 +18,7 @@ import { useExecutorSelection } from '@/hooks/useExecutorSelection';
 import { useSessionMessageEditor } from '@/hooks/useSessionMessageEditor';
 import { useSessionQueueInteraction } from '@/hooks/useSessionQueueInteraction';
 import { useSessionSend } from '@/hooks/useSessionSend';
+import { useModelConfigForExecutor } from '@/hooks/useModelConfigForExecutor';
 import { useSessionAttachments } from '@/hooks/useSessionAttachments';
 import { useMessageEditRetry } from '@/hooks/useMessageEditRetry';
 import { useBranchStatus } from '@/hooks/useBranchStatus';
@@ -277,6 +278,13 @@ export function SessionChatBoxContainer({
     configExecutorProfile: config?.executor_profile,
   });
 
+  // Model config selection for executor
+  const {
+    availableModels,
+    selectedModelConfigId,
+    setSelectedModelConfigId,
+  } = useModelConfigForExecutor(isNewSessionMode ? effectiveExecutor : null);
+
   // Wrap variant change to also save to scratch
   const setSelectedVariant = useCallback(
     (variant: string | null) => {
@@ -307,6 +315,7 @@ export function SessionChatBoxContainer({
     workspaceId,
     isNewSessionMode,
     effectiveExecutor,
+    selectedModelConfigId,
     onSelectSession,
   });
 
@@ -658,6 +667,15 @@ export function SessionChatBoxContainer({
               selected: effectiveExecutor,
               options: executorOptions,
               onChange: handleExecutorChange,
+            }
+          : undefined
+      }
+      modelConfig={
+        isNewSessionMode && availableModels.length > 1
+          ? {
+              models: availableModels,
+              selectedId: selectedModelConfigId,
+              onChange: setSelectedModelConfigId,
             }
           : undefined
       }

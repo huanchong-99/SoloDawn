@@ -22,6 +22,7 @@ pub struct Session {
     pub workspace_id: Uuid,
     pub executor: Option<String>,
     pub terminal_id: Option<String>,
+    pub model_config_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -30,6 +31,7 @@ pub struct Session {
 #[serde(rename_all = "camelCase")]
 pub struct CreateSession {
     pub executor: Option<String>,
+    pub model_config_id: Option<String>,
 }
 
 impl Session {
@@ -40,6 +42,7 @@ impl Session {
                       workspace_id AS "workspace_id!: Uuid",
                       executor,
                       terminal_id,
+                      model_config_id,
                       created_at AS "created_at!: DateTime<Utc>",
                       updated_at AS "updated_at!: DateTime<Utc>"
                FROM sessions
@@ -63,6 +66,7 @@ impl Session {
                       s.workspace_id AS "workspace_id!: Uuid",
                       s.executor,
                       s.terminal_id,
+                      s.model_config_id,
                       s.created_at AS "created_at!: DateTime<Utc>",
                       s.updated_at AS "updated_at!: DateTime<Utc>"
                FROM sessions s
@@ -93,6 +97,7 @@ impl Session {
                       s.workspace_id AS "workspace_id!: Uuid",
                       s.executor,
                       s.terminal_id,
+                      s.model_config_id,
                       s.created_at AS "created_at!: DateTime<Utc>",
                       s.updated_at AS "updated_at!: DateTime<Utc>"
                FROM sessions s
@@ -119,17 +124,19 @@ impl Session {
     ) -> Result<Self, SessionError> {
         Ok(sqlx::query_as!(
             Session,
-            r#"INSERT INTO sessions (id, workspace_id, executor)
-               VALUES ($1, $2, $3)
+            r#"INSERT INTO sessions (id, workspace_id, executor, model_config_id)
+               VALUES ($1, $2, $3, $4)
                RETURNING id AS "id!: Uuid",
                          workspace_id AS "workspace_id!: Uuid",
                          executor,
                          terminal_id,
+                         model_config_id,
                          created_at AS "created_at!: DateTime<Utc>",
                          updated_at AS "updated_at!: DateTime<Utc>""#,
             id,
             workspace_id,
-            data.executor
+            data.executor,
+            data.model_config_id
         )
         .fetch_one(pool)
         .await?)
@@ -151,6 +158,7 @@ impl Session {
                          workspace_id AS "workspace_id!: Uuid",
                          executor,
                          terminal_id,
+                         model_config_id,
                          created_at AS "created_at!: DateTime<Utc>",
                          updated_at AS "updated_at!: DateTime<Utc>""#,
             id,

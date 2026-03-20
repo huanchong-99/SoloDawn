@@ -12,6 +12,8 @@ interface UseSessionSendOptions {
   isNewSessionMode: boolean;
   /** Effective executor for new sessions */
   effectiveExecutor: BaseCodingAgent | null;
+  /** Selected model config ID for new sessions */
+  selectedModelConfigId?: string | null;
   /** Callback when session is selected (to exit new session mode) */
   onSelectSession?: (sessionId: string) => void;
 }
@@ -41,6 +43,7 @@ export function useSessionSend({
   workspaceId,
   isNewSessionMode,
   effectiveExecutor,
+  selectedModelConfigId,
   onSelectSession,
 }: UseSessionSendOptions): UseSessionSendResult {
   const { mutateAsync: createSession, isPending: isCreatingSession } =
@@ -67,6 +70,7 @@ export function useSessionSend({
             prompt: trimmed,
             variant,
             executor: effectiveExecutor,
+            modelConfigId: selectedModelConfigId ?? undefined,
           });
           onSelectSession?.(session.id);
           return true;
@@ -104,6 +108,7 @@ export function useSessionSend({
       workspaceId,
       isNewSessionMode,
       effectiveExecutor,
+      selectedModelConfigId,
       createSession,
       onSelectSession,
     ]

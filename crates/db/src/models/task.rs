@@ -559,6 +559,7 @@ mod tests {
             pool,
             &CreateSession {
                 executor: Some("test-executor".to_string()),
+                model_config_id: None,
             },
             session_id,
             workspace_id,
