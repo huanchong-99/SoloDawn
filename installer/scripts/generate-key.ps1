@@ -1,21 +1,12 @@
-# Generate GITCORTEX_ENCRYPTION_KEY and GITCORTEX_API_TOKEN, write to .env file.
-# Usage: generate-key.ps1 -EnvFile <path>
+# Generate GITCORTEX_ENCRYPTION_KEY, auto-detect bash path, write to .env file.
+# Usage: generate-key.ps1 -EnvFile <path> [-InstallDir <path>]
 param(
-    [Parameter(Mandatory=$true)][string]$EnvFile
+    [Parameter(Mandatory=$true)][string]$EnvFile,
+    [string]$InstallDir
 )
 
 $ErrorActionPreference = "Stop"
 
-function Generate-RandomHex {
-    param([int]$Bytes)
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    $buf = New-Object byte[] $Bytes
-    $rng.GetBytes($buf)
-    return ($buf | ForEach-Object { $_.ToString("x2") }) -join ""
-}
-
-# Generate 32-byte encryption key (hex string = 64 chars, but we need exactly 32 bytes as ASCII)
-# The server expects a 32-byte ASCII string.
 function Generate-AsciiKey {
     param([int]$Length)
     $chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -31,12 +22,29 @@ function Generate-AsciiKey {
 }
 
 $EncryptionKey = Generate-AsciiKey -Length 32
-$InstallDir = Split-Path -Parent $EnvFile
+if (-not $InstallDir) {
+    $InstallDir = Split-Path -Parent $EnvFile
+}
+
+# Auto-detect bash.exe for Claude Code
+$BashCandidates = @(
+    "$InstallDir\git\usr\bin\bash.exe",
+    "$env:ProgramFiles\Git\usr\bin\bash.exe",
+    "${env:ProgramFiles(x86)}\Git\usr\bin\bash.exe",
+    "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe"
+)
+$BashPath = $BashCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+# Build bash path line
+if ($BashPath) {
+    $BashLine = "CLAUDE_CODE_GIT_BASH_PATH=$BashPath"
+    Write-Host "[INFO] Detected bash at: $BashPath"
+} else {
+    $BashLine = "# CLAUDE_CODE_GIT_BASH_PATH=  (not found -- install Git for Windows and set manually)"
+    Write-Host "[WARN] bash.exe not found. Set CLAUDE_CODE_GIT_BASH_PATH manually after installing Git." -ForegroundColor Yellow
+}
 
 # Build .env content
-# NOTE: GITCORTEX_API_TOKEN is NOT set by default.
-# Local installations don't need API authentication (localhost only).
-# To enable API auth, uncomment and set a token value.
 $envContent = @"
 # GitCortex Environment Configuration
 # Generated during installation - DO NOT share these values.
@@ -56,10 +64,11 @@ BACKEND_PORT=23456
 HOST=127.0.0.1
 
 # Claude Code requires git-bash on Windows
-CLAUDE_CODE_GIT_BASH_PATH=$InstallDir\git\usr\bin\bash.exe
+$BashLine
 
 # Suppress npm update notices in CLI output
 NO_UPDATE_NOTIFIER=1
+NPM_CONFIG_UPDATE_NOTIFIER=false
 
 # Logging level (debug/info/warn/error)
 RUST_LOG=info
@@ -67,7 +76,6 @@ RUST_LOG=info
 
 # Write or append
 if (Test-Path $EnvFile) {
-    # Check if keys already exist to avoid duplicates
     $existing = Get-Content $EnvFile -Raw
     if ($existing -match "GITCORTEX_ENCRYPTION_KEY=") {
         Write-Host "[INFO] GITCORTEX_ENCRYPTION_KEY already exists in $EnvFile, skipping."
@@ -77,8 +85,7 @@ if (Test-Path $EnvFile) {
         Write-Host "[INFO] Keys appended to $EnvFile (UTF-8 no BOM)"
     }
 } else {
-    # Write UTF-8 WITHOUT BOM — critical for Rust env parsing
-    # PowerShell's -Encoding UTF8 adds BOM on Windows PowerShell 5.x
+    # Write UTF-8 WITHOUT BOM -- critical for Rust env parsing
     [System.IO.File]::WriteAllText($EnvFile, $envContent, (New-Object System.Text.UTF8Encoding $false))
     Write-Host "[INFO] Created $EnvFile with generated keys (UTF-8 no BOM)"
 }
