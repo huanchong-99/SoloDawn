@@ -14,7 +14,7 @@ function executorToCliTypeId(executor: BaseCodingAgent): string {
     case 'COPILOT':
       return 'cli-copilot';
     default:
-      return `cli-${executor.toLowerCase().replace(/_/g, '-')}`;
+      return `cli-${executor.toLowerCase().replaceAll('_', '-')}`;
   }
 }
 

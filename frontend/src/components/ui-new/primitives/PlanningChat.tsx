@@ -151,9 +151,9 @@ export function PlanningChat({
         disabled={!canSend}
         actionIcon={isThinking ? 'spinner' : undefined}
         value={
-          !draft
-            ? t('conversation.planning.startPlanning')
-            : t('conversation.actions.send')
+          draft
+            ? t('conversation.actions.send')
+            : t('conversation.planning.startPlanning')
         }
       />
     );

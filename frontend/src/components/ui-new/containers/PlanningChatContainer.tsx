@@ -55,7 +55,22 @@ export function PlanningChatContainer() {
     const trimmed = message.trim();
     if (!trimmed || !selectedProjectId) return;
 
-    if (!draftId) {
+    if (draftId) {
+      // Follow-up message
+      setIsThinking(true);
+      setMessage('');
+      try {
+        const newMessages = await sendMessageMutation.mutateAsync({
+          draftId,
+          message: trimmed,
+        });
+        setLocalMessages((prev) => [...prev, ...newMessages]);
+      } catch (e) {
+        console.error('Failed to send planning message:', e);
+      } finally {
+        setIsThinking(false);
+      }
+    } else {
       // First message — create draft then send
       setIsThinking(true);
       try {
@@ -69,8 +84,6 @@ export function PlanningChatContainer() {
           planner_api_key: modelConfig?.apiKey,
         });
         setDraftId(draft.id);
-
-        // Send the first message
         const newMessages = await planningDraftsApi.sendMessage(
           draft.id,
           trimmed
@@ -79,21 +92,6 @@ export function PlanningChatContainer() {
         setMessage('');
       } catch (e) {
         console.error('Failed to create planning draft:', e);
-      } finally {
-        setIsThinking(false);
-      }
-    } else {
-      // Follow-up message
-      setIsThinking(true);
-      setMessage('');
-      try {
-        const newMessages = await sendMessageMutation.mutateAsync({
-          draftId,
-          message: trimmed,
-        });
-        setLocalMessages((prev) => [...prev, ...newMessages]);
-      } catch (e) {
-        console.error('Failed to send planning message:', e);
       } finally {
         setIsThinking(false);
       }
