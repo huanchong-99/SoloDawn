@@ -11,7 +11,7 @@ import { LogsContentContainer } from '@/components/ui-new/containers/LogsContent
 import { WorkspacesMainContainer } from '@/components/ui-new/containers/WorkspacesMainContainer';
 import { RightSidebar } from '@/components/ui-new/containers/RightSidebar';
 import { ChangesPanelContainer } from '@/components/ui-new/containers/ChangesPanelContainer';
-import { CreateChatBoxContainer } from '@/components/ui-new/containers/CreateChatBoxContainer';
+import { PlanningChatContainer } from '@/components/ui-new/containers/PlanningChatContainer';
 import { NavbarContainer } from '@/components/ui-new/containers/NavbarContainer';
 import { PreviewBrowserContainer } from '@/components/ui-new/containers/PreviewBrowserContainer';
 import { WorkspacesGuideDialog } from '@/components/ui-new/dialogs/WorkspacesGuideDialog';
@@ -174,7 +174,7 @@ export function WorkspacesLayout() {
                           className="min-w-0 h-full overflow-hidden"
                         >
                           {isCreateMode ? (
-                            <CreateChatBoxContainer />
+                            <PlanningChatContainer />
                           ) : (
                             <WorkspacesMainContainer
                               selectedWorkspace={selectedWorkspace ?? null}

@@ -668,6 +668,25 @@
     "customModels": "Modelos personalizados",
     "officialModels": "Modelos oficiales",
     "selectModel": "Seleccionar modelo",
+    "planning": {
+      "title": "Planificador de Espacios",
+      "initialPlaceholder": "Describe lo que quieres construir...",
+      "continuePlaceholder": "Responder al planificador...",
+      "refineOrConfirm": "Refinar requisitos o confirmar el plan...",
+      "thinking": "El planificador está pensando...",
+      "startPlanning": "Iniciar Planificación",
+      "confirmButton": "Confirmar Plan",
+      "refineButton": "Refinar",
+      "materializeButton": "Crear Flujo de Trabajo",
+      "materialized": "Flujo de Trabajo Creado",
+      "status": {
+        "gathering": "Recopilando Requisitos",
+        "spec_ready": "Plan Listo",
+        "confirmed": "Confirmado",
+        "materialized": "Flujo Creado",
+        "cancelled": "Cancelado"
+      }
+    },
     "saveAsDefault": "Guardar como predeterminado",
     "script": {
       "clickToViewLogs": "Haz clic para ver registros",

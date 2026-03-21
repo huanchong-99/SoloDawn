@@ -1,15 +1,10 @@
 import React from 'react';
 import { Field, FieldLabel, FieldError } from '../../ui-new/primitives/Field';
 import { cn } from '@/lib/utils';
-import type { BasicConfig, WorkflowExecutionMode } from '../types';
+import type { BasicConfig } from '../types';
 import { useTranslation } from 'react-i18next';
 
 const TASK_COUNT_OPTIONS = [1, 2, 3, 4];
-
-const EXECUTION_MODE_OPTIONS: { value: WorkflowExecutionMode; titleKey: string; descKey: string }[] = [
-  { value: 'diy', titleKey: 'step1.diyTitle', descKey: 'step1.diyDescription' },
-  { value: 'agent_planned', titleKey: 'step1.agentPlannedTitle', descKey: 'step1.agentPlannedDescription' },
-];
 
 interface Step1BasicProps {
   config: BasicConfig;
@@ -42,35 +37,6 @@ export const Step1Basic: React.FC<Step1BasicProps> = ({
           )}
         />
         {errors.name && <FieldError>{t(errors.name)}</FieldError>}
-      </Field>
-
-      <Field>
-        <FieldLabel>{t('step1.modeLabel')}</FieldLabel>
-        <p className="text-sm text-low mb-half">{t('step1.modeHint')}</p>
-        <div className="grid grid-cols-2 gap-base">
-          {EXECUTION_MODE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => onChange({ executionMode: opt.value })}
-              className={cn(
-                'flex flex-col items-start gap-half px-base py-base rounded-sm border text-left transition-colors cursor-pointer',
-                'hover:border-brand',
-                config.executionMode === opt.value
-                  ? 'border-brand bg-brand/10'
-                  : 'border-border bg-secondary'
-              )}
-            >
-              <span className={cn(
-                'text-base font-medium',
-                config.executionMode === opt.value ? 'text-high' : 'text-normal'
-              )}>
-                {t(opt.titleKey)}
-              </span>
-              <span className="text-sm text-low">{t(opt.descKey)}</span>
-            </button>
-          ))}
-        </div>
       </Field>
 
       <Field>

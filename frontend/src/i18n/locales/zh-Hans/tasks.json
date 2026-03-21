@@ -695,6 +695,25 @@
     "customModels": "自定义模型",
     "officialModels": "官方模型",
     "selectModel": "选择模型",
+    "planning": {
+      "title": "工作区规划师",
+      "initialPlaceholder": "描述你想要构建的内容...",
+      "continuePlaceholder": "回复规划师...",
+      "refineOrConfirm": "继续完善需求或确认方案...",
+      "thinking": "规划师正在思考...",
+      "startPlanning": "开始规划",
+      "confirmButton": "确认方案",
+      "refineButton": "继续完善",
+      "materializeButton": "创建工作流",
+      "materialized": "工作流已创建",
+      "status": {
+        "gathering": "需求收集中",
+        "spec_ready": "方案就绪",
+        "confirmed": "已确认",
+        "materialized": "工作流已创建",
+        "cancelled": "已取消"
+      }
+    },
     "saveAsDefault": "设为默认",
     "updatedTodos": "更新的待办事项",
     "viewInChangesPanel": "在更改面板中查看",

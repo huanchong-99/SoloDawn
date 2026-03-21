@@ -668,6 +668,25 @@
     "customModels": "自訂模型",
     "officialModels": "官方模型",
     "selectModel": "選擇模型",
+    "planning": {
+      "title": "工作區規劃師",
+      "initialPlaceholder": "描述你想要構建的內容...",
+      "continuePlaceholder": "回覆規劃師...",
+      "refineOrConfirm": "繼續完善需求或確認方案...",
+      "thinking": "規劃師正在思考...",
+      "startPlanning": "開始規劃",
+      "confirmButton": "確認方案",
+      "refineButton": "繼續完善",
+      "materializeButton": "建立工作流",
+      "materialized": "工作流已建立",
+      "status": {
+        "gathering": "需求收集中",
+        "spec_ready": "方案就緒",
+        "confirmed": "已確認",
+        "materialized": "工作流已建立",
+        "cancelled": "已取消"
+      }
+    },
     "saveAsDefault": "設為預設",
     "script": {
       "clickToViewLogs": "點擊查看日誌",

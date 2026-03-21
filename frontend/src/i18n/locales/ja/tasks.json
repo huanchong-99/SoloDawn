@@ -668,6 +668,25 @@
     "customModels": "カスタムモデル",
     "officialModels": "公式モデル",
     "selectModel": "モデルを選択",
+    "planning": {
+      "title": "ワークスペースプランナー",
+      "initialPlaceholder": "構築したいものを説明してください...",
+      "continuePlaceholder": "プランナーに返信...",
+      "refineOrConfirm": "要件を改善するか、プランを確認...",
+      "thinking": "プランナーが考えています...",
+      "startPlanning": "計画開始",
+      "confirmButton": "プランを確認",
+      "refineButton": "改善する",
+      "materializeButton": "ワークフローを作成",
+      "materialized": "ワークフロー作成済み",
+      "status": {
+        "gathering": "要件収集中",
+        "spec_ready": "プラン準備完了",
+        "confirmed": "確認済み",
+        "materialized": "ワークフロー作成済み",
+        "cancelled": "キャンセル"
+      }
+    },
     "saveAsDefault": "デフォルトとして保存",
     "script": {
       "clickToViewLogs": "クリックしてログを表示",

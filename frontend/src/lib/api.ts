@@ -503,6 +503,95 @@ export const tasksApi = {
   },
 };
 
+// Planning Drafts API (orchestration workspace planner)
+export interface PlanningDraftResponse {
+  id: string;
+  projectId: string;
+  name: string;
+  status: 'gathering' | 'spec_ready' | 'confirmed' | 'materialized' | 'cancelled';
+  requirementSummary: string | null;
+  technicalSpec: string | null;
+  workflowSeed: string | null;
+  materializedWorkflowId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlanningMessageResponse {
+  id: string;
+  draftId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+}
+
+export interface MaterializeResponse {
+  draftId: string;
+  workflowId: string;
+  status: string;
+}
+
+export const planningDraftsApi = {
+  create: async (data: {
+    project_id: string;
+    name?: string;
+    planner_model_id?: string;
+    planner_api_type?: string;
+    planner_base_url?: string;
+    planner_api_key?: string;
+  }): Promise<PlanningDraftResponse> => {
+    const response = await makeRequest('/api/planning-drafts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return handleApiResponse<PlanningDraftResponse>(response);
+  },
+
+  get: async (draftId: string): Promise<PlanningDraftResponse> => {
+    const response = await makeRequest(`/api/planning-drafts/${draftId}`);
+    return handleApiResponse<PlanningDraftResponse>(response);
+  },
+
+  sendMessage: async (
+    draftId: string,
+    message: string
+  ): Promise<PlanningMessageResponse[]> => {
+    const response = await makeRequest(
+      `/api/planning-drafts/${draftId}/messages`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ message }),
+      }
+    );
+    return handleApiResponse<PlanningMessageResponse[]>(response);
+  },
+
+  listMessages: async (
+    draftId: string
+  ): Promise<PlanningMessageResponse[]> => {
+    const response = await makeRequest(
+      `/api/planning-drafts/${draftId}/messages`
+    );
+    return handleApiResponse<PlanningMessageResponse[]>(response);
+  },
+
+  confirm: async (draftId: string): Promise<PlanningDraftResponse> => {
+    const response = await makeRequest(
+      `/api/planning-drafts/${draftId}/confirm`,
+      { method: 'POST' }
+    );
+    return handleApiResponse<PlanningDraftResponse>(response);
+  },
+
+  materialize: async (draftId: string): Promise<MaterializeResponse> => {
+    const response = await makeRequest(
+      `/api/planning-drafts/${draftId}/materialize`,
+      { method: 'POST' }
+    );
+    return handleApiResponse<MaterializeResponse>(response);
+  },
+};
+
 // Sessions API
 export const sessionsApi = {
   getByWorkspace: async (workspaceId: string): Promise<Session[]> => {

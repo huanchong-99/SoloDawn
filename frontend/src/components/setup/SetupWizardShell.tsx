@@ -57,21 +57,21 @@ export function SetupWizardShell() {
           <SetupWizardStep2ModelContainer
             onNext={goNext}
             onBack={goPrevious}
-            onSkip={completeWizard}
+            onSkip={goNext}
           />
         );
       case 2:
         return (
           <SetupWizardStep3ProjectContainer
             onNext={goNext}
-            onSkip={completeWizard}
+            onSkip={goNext}
           />
         );
       case 3:
         return (
           <SetupWizardStep4IntegrationsContainer
             onNext={goNext}
-            onSkip={completeWizard}
+            onSkip={goNext}
           />
         );
       case 4:

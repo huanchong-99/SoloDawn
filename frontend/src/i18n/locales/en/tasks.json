@@ -239,6 +239,25 @@
     "customModels": "Custom Models",
     "officialModels": "Official Models",
     "selectModel": "Select Model",
+    "planning": {
+      "title": "Workspace Planner",
+      "initialPlaceholder": "Describe what you want to build...",
+      "continuePlaceholder": "Reply to the planner...",
+      "refineOrConfirm": "Refine requirements or confirm the plan...",
+      "thinking": "Planner is thinking...",
+      "startPlanning": "Start Planning",
+      "confirmButton": "Confirm Plan",
+      "refineButton": "Refine",
+      "materializeButton": "Create Workflow",
+      "materialized": "Workflow Created",
+      "status": {
+        "gathering": "Gathering Requirements",
+        "spec_ready": "Plan Ready",
+        "confirmed": "Confirmed",
+        "materialized": "Workflow Created",
+        "cancelled": "Cancelled"
+      }
+    },
     "saveAsDefault": "Save as default",
     "you": "You",
     "thinking": "Thinking",

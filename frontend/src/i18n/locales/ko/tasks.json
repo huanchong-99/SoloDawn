@@ -668,6 +668,25 @@
     "customModels": "사용자 정의 모델",
     "officialModels": "공식 모델",
     "selectModel": "모델 선택",
+    "planning": {
+      "title": "워크스페이스 플래너",
+      "initialPlaceholder": "구축하려는 내용을 설명하세요...",
+      "continuePlaceholder": "플래너에게 응답...",
+      "refineOrConfirm": "요구사항을 수정하거나 계획을 확인...",
+      "thinking": "플래너가 생각하는 중...",
+      "startPlanning": "계획 시작",
+      "confirmButton": "계획 확인",
+      "refineButton": "수정하기",
+      "materializeButton": "워크플로우 생성",
+      "materialized": "워크플로우 생성됨",
+      "status": {
+        "gathering": "요구사항 수집 중",
+        "spec_ready": "계획 준비 완료",
+        "confirmed": "확인됨",
+        "materialized": "워크플로우 생성됨",
+        "cancelled": "취소됨"
+      }
+    },
     "saveAsDefault": "기본값으로 저장",
     "script": {
       "clickToViewLogs": "로그를 보려면 클릭하세요",
