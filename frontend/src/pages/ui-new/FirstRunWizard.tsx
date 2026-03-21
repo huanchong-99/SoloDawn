@@ -69,7 +69,7 @@ function useRuntimeStatus() {
 // Step Components
 // ============================================================================
 
-function WelcomeStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
+function WelcomeStep({ onNext, onSkip }: Readonly<{ onNext: () => void; onSkip: () => void }>) {
   const { t } = useTranslation(['setup']);
 
   return (
@@ -118,7 +118,7 @@ function WelcomeStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
   );
 }
 
-function EnvironmentStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+function EnvironmentStep({ onNext, onBack }: Readonly<{ onNext: () => void; onBack: () => void }>) {
   const { t } = useTranslation(['setup']);
   const { data: runtime, isLoading } = useRuntimeStatus();
 
@@ -186,7 +186,7 @@ function EnvironmentStep({ onNext, onBack }: { onNext: () => void; onBack: () =>
   );
 }
 
-function ApiKeyStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+function ApiKeyStep({ onNext, onBack }: Readonly<{ onNext: () => void; onBack: () => void }>) {
   const { t } = useTranslation(['setup']);
 
   return (
@@ -235,7 +235,7 @@ function ApiKeyStep({ onNext, onBack }: { onNext: () => void; onBack: () => void
   );
 }
 
-function DoneStep({ onFinish }: { onFinish: () => void }) {
+function DoneStep({ onFinish }: Readonly<{ onFinish: () => void }>) {
   const { t } = useTranslation(['setup']);
 
   return (

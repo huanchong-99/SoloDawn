@@ -170,17 +170,19 @@ export function RuntimeSettingsNew() {
                 className="flex items-center justify-between rounded bg-panel px-base py-half"
               >
                 <div className="flex items-center gap-half">
-                  {dep.found ? (
+                  {dep.found && (
                     <CheckCircle
                       className="size-icon-sm text-success"
                       weight="fill"
                     />
-                  ) : dep.required ? (
+                  )}
+                  {!dep.found && dep.required && (
                     <XCircle
                       className="size-icon-sm text-error"
                       weight="fill"
                     />
-                  ) : (
+                  )}
+                  {!dep.found && !dep.required && (
                     <Warning className="size-icon-sm text-low" />
                   )}
                   <span className="text-sm text-high">{dep.name}</span>
@@ -191,13 +193,14 @@ export function RuntimeSettingsNew() {
                   )}
                 </div>
                 <div className="flex items-center gap-base">
-                  {dep.found && dep.version ? (
+                  {dep.found && dep.version && (
                     <span className="font-ibm-plex-mono text-xs text-low">
                       {dep.version}
                     </span>
-                  ) : !dep.found ? (
+                  )}
+                  {!dep.found && (
                     <span className="text-xs text-low">{dep.hint}</span>
-                  ) : null}
+                  )}
                 </div>
               </div>
             ))}
@@ -235,15 +238,17 @@ export function RuntimeSettingsNew() {
           </button>
         </div>
 
-        {isLoading ? (
+        {isLoading && (
           <div className="py-base text-center text-sm text-low">
             {t('settings:runtime.loading')}
           </div>
-        ) : !cliStatuses || cliStatuses.length === 0 ? (
+        )}
+        {!isLoading && (!cliStatuses || cliStatuses.length === 0) && (
           <div className="py-base text-center text-sm text-low">
             {t('settings:runtime.noClis')}
           </div>
-        ) : (
+        )}
+        {!isLoading && cliStatuses && cliStatuses.length > 0 && (
           <div className="space-y-half">
             {cliStatuses.map((cli) => (
               <div
@@ -259,15 +264,16 @@ export function RuntimeSettingsNew() {
                   <span className="text-sm text-high">{cli.displayName}</span>
                 </div>
                 <div className="flex items-center gap-base">
-                  {cli.installed && cli.version ? (
+                  {cli.installed && cli.version && (
                     <span className="font-ibm-plex-mono text-xs text-low">
                       {cli.version}
                     </span>
-                  ) : !cli.installed ? (
+                  )}
+                  {!cli.installed && (
                     <span className="text-xs text-low">
                       {t('settings:runtime.notInstalled')}
                     </span>
-                  ) : null}
+                  )}
                 </div>
               </div>
             ))}
