@@ -1,4 +1,5 @@
 import type { Icon } from '@phosphor-icons/react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '../primitives/Tooltip';
 import {
@@ -20,6 +21,54 @@ import {
 function isDivider(item: NavbarItem): item is { readonly type: 'divider' } {
   return 'type' in item && item.type === 'divider';
 }
+
+/**
+ * Mapping from English tooltip strings to i18n keys under common:navbarActions.
+ * Covers both static labels and dynamic tooltip variants for all navbar actions.
+ */
+const TOOLTIP_I18N_MAP: Record<string, string> = {
+  // Archive action
+  'Archive': 'archive-workspace',
+  'Unarchive': 'unarchive-workspace',
+  // Old UI
+  'Open in Old UI': 'open-in-old-ui',
+  // Diff view mode
+  'Inline view': 'toggle-diff-view-mode-inline',
+  'Side-by-side view': 'toggle-diff-view-mode-split',
+  // All diffs
+  'Collapse all diffs': 'toggle-all-diffs-collapse',
+  'Expand all diffs': 'toggle-all-diffs-expand',
+  // Left sidebar
+  'Hide Left Sidebar': 'toggle-left-sidebar-hide',
+  'Show Left Sidebar': 'toggle-left-sidebar-show',
+  // Chat panel
+  'Toggle Chat Panel': 'toggle-left-main-panel',
+  'Hide Chat Panel': 'hide-chat-panel',
+  'Show Chat Panel': 'show-chat-panel',
+  // Changes panel
+  'Toggle Changes Panel': 'toggle-changes-mode',
+  'Hide Changes Panel': 'hide-changes-panel',
+  'Show Changes Panel': 'show-changes-panel',
+  // Logs panel
+  'Toggle Logs Panel': 'toggle-logs-mode',
+  'Hide Logs Panel': 'hide-logs-panel',
+  'Show Logs Panel': 'show-logs-panel',
+  // Preview panel
+  'Toggle Preview Panel': 'toggle-preview-mode',
+  'Hide Preview Panel': 'hide-preview-panel',
+  'Show Preview Panel': 'show-preview-panel',
+  // Right sidebar
+  'Hide Right Sidebar': 'toggle-right-sidebar-hide',
+  'Show Right Sidebar': 'toggle-right-sidebar-show',
+  // Global actions
+  'New Workspace': 'new-workspace',
+  'Open Command Bar': 'open-command-bar',
+  'Give Feedback': 'feedback',
+  'Workspaces Guide': 'workspaces-guide',
+  'Settings': 'settings',
+  // Review
+  'Ask the agent to review your changes': 'start-review',
+};
 
 // NavbarIconButton - inlined from primitives
 interface NavbarIconButtonProps
@@ -78,6 +127,16 @@ export function Navbar({
   onExecuteAction,
   className,
 }: Readonly<NavbarProps>) {
+  const { t } = useTranslation('common');
+
+  const translateTooltip = (tooltipText: string): string => {
+    const i18nKey = TOOLTIP_I18N_MAP[tooltipText];
+    if (i18nKey) {
+      return t(`navbarActions.${i18nKey}`, tooltipText);
+    }
+    return tooltipText;
+  };
+
   const renderItem = (item: NavbarItem, key: string) => {
     // Render divider
     if (isDivider(item)) {
@@ -89,7 +148,7 @@ export function Navbar({
     const active = isActionActive(action, actionContext);
     const enabled = isActionEnabled(action, actionContext);
     const iconOrSpecial = getActionIcon(action, actionContext);
-    const tooltip = getActionTooltip(action, actionContext);
+    const tooltip = translateTooltip(getActionTooltip(action, actionContext));
     const isDisabled = !enabled;
 
     // Skip special icons in navbar (navbar only uses standard phosphor icons)

@@ -712,7 +712,8 @@
         "confirmed": "已确认",
         "materialized": "工作流已创建",
         "cancelled": "已取消"
-      }
+      },
+      "needRepo": "请至少添加一个仓库以开始规划"
     },
     "saveAsDefault": "设为默认",
     "updatedTodos": "更新的待办事项",

@@ -1,36 +1,62 @@
 import { useMemo, useCallback, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { useCreateMode } from '@/contexts/CreateModeContext';
 import { useUserSystem } from '@/components/ConfigProvider';
-import { useCreateWorkspace } from '@/hooks/useCreateWorkspace';
 import { useCreateAttachments } from '@/hooks/useCreateAttachments';
 import { getVariantOptions, areProfilesEqual } from '@/utils/executor';
-import { splitMessageToTitleDescription } from '@/utils/string';
 import type { ExecutorProfileId, BaseCodingAgent } from 'shared/types';
 import type { ModelConfig as WorkflowModelConfig } from '@/components/workflow/types';
 import { useModelConfigForExecutor } from '@/hooks/useModelConfigForExecutor';
+import {
+  planningDraftsApi,
+  type PlanningMessageResponse,
+} from '@/lib/api';
+import {
+  usePlanningDraft,
+  usePlanningDraftMessages,
+  useSendPlanningMessage,
+  useConfirmDraft,
+  useMaterializeDraft,
+} from '@/hooks/usePlanningDraft';
 import { CreateChatBox } from '../primitives/CreateChatBox';
+import { PlanningChat } from '../primitives/PlanningChat';
 
 export function CreateChatBoxContainer() {
   const { t } = useTranslation('common');
+  const { t: tTasks } = useTranslation('tasks');
+  const navigate = useNavigate();
   const { profiles, config, updateAndSaveConfig } = useUserSystem();
   const {
     repos,
-    targetBranches,
     selectedProfile,
     setSelectedProfile,
     message,
     setMessage,
     selectedProjectId,
-    clearDraft,
+    clearDraft: clearCreateDraft,
     hasInitialValue,
   } = useCreateMode();
 
-  const { createWorkspace } = useCreateWorkspace();
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const [saveAsDefault, setSaveAsDefault] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Attachment handling - insert markdown and track image IDs
+  // === Planning Draft state ===
+  const [planningDraftId, setPlanningDraftId] = useState<string | null>(null);
+  const [isCreatingDraft, setIsCreatingDraft] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
+  const [localMessages, setLocalMessages] = useState<PlanningMessageResponse[]>([]);
+
+  const { data: planningDraft } = usePlanningDraft(planningDraftId);
+  const { data: serverMessages } = usePlanningDraftMessages(planningDraftId);
+  const sendMessageMutation = useSendPlanningMessage();
+  const confirmMutation = useConfirmDraft();
+  const materializeMutation = useMaterializeDraft();
+
+  const planningMessages = serverMessages ?? localMessages;
+
+  // Attachment handling
   const handleInsertMarkdown = useCallback(
     (markdown: string) => {
       const newMessage = message.trim()
@@ -41,7 +67,7 @@ export function CreateChatBoxContainer() {
     [message, setMessage]
   );
 
-  const { uploadFiles, getImageIds, clearAttachments, localImages } =
+  const { uploadFiles, clearAttachments, localImages } =
     useCreateAttachments(handleInsertMarkdown);
 
   // Default to user's config profile or first available executor
@@ -61,7 +87,7 @@ export function CreateChatBoxContainer() {
     return null;
   }, [selectedProfile, config?.executor_profile, profiles]);
 
-  // Model config selection for executor
+  // Model config selection
   const {
     customModels,
     officialModels,
@@ -73,23 +99,18 @@ export function CreateChatBoxContainer() {
     (config as Record<string, unknown>)?.workflow_model_library as WorkflowModelConfig[] | undefined
   );
 
-  // Get variant options for the current executor
   const variantOptions = useMemo(
     () => getVariantOptions(effectiveProfile?.executor, profiles),
     [effectiveProfile?.executor, profiles]
   );
 
-  // Detect if user has changed from their saved default
   const hasChangedFromDefault = useMemo(() => {
     if (!config?.executor_profile || !effectiveProfile) return false;
     return !areProfilesEqual(effectiveProfile, config.executor_profile);
   }, [effectiveProfile, config?.executor_profile]);
 
-  // Reset toggle when profile matches default again
   useEffect(() => {
-    if (!hasChangedFromDefault) {
-      setSaveAsDefault(false);
-    }
+    if (!hasChangedFromDefault) setSaveAsDefault(false);
   }, [hasChangedFromDefault]);
 
   const projectId = selectedProjectId;
@@ -100,19 +121,14 @@ export function CreateChatBoxContainer() {
     effectiveProfile !== null &&
     projectId !== undefined;
 
-  // Handle variant change
   const handleVariantChange = useCallback(
     (variant: string | null) => {
       if (!effectiveProfile) return;
-      setSelectedProfile({
-        executor: effectiveProfile.executor,
-        variant,
-      });
+      setSelectedProfile({ executor: effectiveProfile.executor, variant });
     },
     [effectiveProfile, setSelectedProfile]
   );
 
-  // Handle executor change - use saved variant if switching to default executor
   const handleExecutorChange = useCallback(
     (executor: BaseCodingAgent) => {
       const executorConfig = profiles?.[executor];
@@ -120,103 +136,134 @@ export function CreateChatBoxContainer() {
         setSelectedProfile({ executor, variant: null });
         return;
       }
-
       const variants = Object.keys(executorConfig);
       let targetVariant: string | null = null;
-
-      // If switching to user's default executor, use their saved variant
       if (
         config?.executor_profile?.executor === executor &&
         config?.executor_profile?.variant
       ) {
         const savedVariant = config.executor_profile.variant;
-        if (variants.includes(savedVariant)) {
-          targetVariant = savedVariant;
-        }
+        if (variants.includes(savedVariant)) targetVariant = savedVariant;
       }
-
-      // Fallback to DEFAULT or first available
       if (!targetVariant) {
-        if (variants.includes('DEFAULT')) {
-          targetVariant = 'DEFAULT';
-        } else {
-          targetVariant = variants[0] ?? null;
-        }
+        targetVariant = variants.includes('DEFAULT')
+          ? 'DEFAULT'
+          : (variants[0] ?? null);
       }
-
       setSelectedProfile({ executor, variant: targetVariant });
     },
     [profiles, setSelectedProfile, config?.executor_profile]
   );
 
-  // Handle submit
-  const handleSubmit = useCallback(async () => {
-    setHasAttemptedSubmit(true);
-    if (!canSubmit || !effectiveProfile || !projectId) return;
+  // Get planner model config from workflow_model_library
+  const getPlannerModelConfig = useCallback((): WorkflowModelConfig | null => {
+    const lib = (config as Record<string, unknown>)
+      ?.workflow_model_library as WorkflowModelConfig[] | undefined;
+    if (!lib || lib.length === 0) return null;
+    return lib.find((m) => m.apiKey) ?? lib[0] ?? null;
+  }, [config]);
 
-    // Save profile as default if toggle is checked
-    if (saveAsDefault && hasChangedFromDefault) {
+  // === Phase 1: Initial submit — create planning draft ===
+  const handleInitialSubmit = useCallback(async () => {
+    setHasAttemptedSubmit(true);
+    setSubmitError(null);
+    if (!canSubmit || !projectId) return;
+
+    if (saveAsDefault && hasChangedFromDefault && effectiveProfile) {
       await updateAndSaveConfig({ executor_profile: effectiveProfile });
     }
 
-    const { title, description } = splitMessageToTitleDescription(message);
+    setIsCreatingDraft(true);
+    setIsThinking(true);
+    try {
+      const modelConfig = getPlannerModelConfig();
+      const draft = await planningDraftsApi.create({
+        project_id: projectId,
+        name: message.slice(0, 100),
+        planner_model_id: modelConfig?.modelId,
+        planner_api_type: modelConfig?.apiType,
+        planner_base_url: modelConfig?.baseUrl,
+        planner_api_key: modelConfig?.apiKey,
+      });
+      setPlanningDraftId(draft.id);
 
-    await createWorkspace.mutateAsync({
-      task: {
-        projectId: projectId,
-        title,
-        description,
-        status: null,
-        parentWorkspaceId: null,
-        imageIds: getImageIds(),
-        sharedTaskId: null,
-      },
-      executor_profile_id: effectiveProfile,
-      repos: repos.map((r) => ({
-        repo_id: r.id,
-        target_branch: targetBranches[r.id] ?? 'main',
-      })),
-    });
-
-    // Clear attachments and draft after successful creation
-    clearAttachments();
-    await clearDraft();
+      const newMessages = await planningDraftsApi.sendMessage(draft.id, message);
+      setLocalMessages(newMessages);
+      setMessage('');
+      clearAttachments();
+      await clearCreateDraft();
+    } catch (e) {
+      const err = e as { message?: string };
+      setSubmitError(err.message ?? 'Failed to start planning');
+    } finally {
+      setIsCreatingDraft(false);
+      setIsThinking(false);
+    }
   }, [
     canSubmit,
-    effectiveProfile,
     projectId,
     message,
-    repos,
-    targetBranches,
-    createWorkspace,
-    getImageIds,
-    clearAttachments,
-    clearDraft,
     saveAsDefault,
     hasChangedFromDefault,
+    effectiveProfile,
     updateAndSaveConfig,
+    getPlannerModelConfig,
+    setMessage,
+    clearAttachments,
+    clearCreateDraft,
   ]);
 
-  // Determine error to display
-  const displayError = (() => {
-    if (hasAttemptedSubmit && repos.length === 0) {
-      return 'Add at least one repository to create a workspace';
-    } else if (createWorkspace.error) {
-      if (createWorkspace.error instanceof Error) {
-        return createWorkspace.error.message;
-      } else {
-        return 'Failed to create workspace';
-      }
-    } else {
-      return null;
+  // === Phase 2: Follow-up messages in planning conversation ===
+  const handlePlanningMessage = useCallback(async () => {
+    const trimmed = message.trim();
+    if (!trimmed || !planningDraftId) return;
+
+    setIsThinking(true);
+    setMessage('');
+    try {
+      const newMessages = await sendMessageMutation.mutateAsync({
+        draftId: planningDraftId,
+        message: trimmed,
+      });
+      setLocalMessages((prev) => [...prev, ...newMessages]);
+    } catch (e) {
+      console.error('Failed to send planning message:', e);
+    } finally {
+      setIsThinking(false);
     }
+  }, [message, planningDraftId, setMessage, sendMessageMutation]);
+
+  // === Confirm spec ===
+  const handleConfirm = useCallback(async () => {
+    if (!planningDraftId) return;
+    try {
+      await confirmMutation.mutateAsync(planningDraftId);
+    } catch (e) {
+      console.error('Failed to confirm draft:', e);
+    }
+  }, [planningDraftId, confirmMutation]);
+
+  // === Materialize into workflow ===
+  const handleMaterialize = useCallback(async () => {
+    if (!planningDraftId) return;
+    try {
+      const result = await materializeMutation.mutateAsync(planningDraftId);
+      navigate(`/board?workflowId=${result.workflowId}`);
+    } catch (e) {
+      console.error('Failed to materialize draft:', e);
+    }
+  }, [planningDraftId, materializeMutation, navigate]);
+
+  // Determine error
+  const displayError = (() => {
+    if (submitError) return submitError;
+    if (hasAttemptedSubmit && repos.length === 0) {
+      return tTasks('conversation.planning.needRepo');
+    }
+    return null;
   })();
 
-  // Wait for initial value to be applied before rendering
-  // This ensures the editor mounts with content ready, so autoFocus works correctly
-  if (!hasInitialValue) {
-    return null;
-  }
+  if (!hasInitialValue) return null;
 
   if (!projectId) {
     return (
@@ -233,6 +280,30 @@ export function CreateChatBoxContainer() {
     );
   }
 
+  // === Phase 2 render: Planning conversation ===
+  if (planningDraftId) {
+    return (
+      <div className="relative flex flex-1 flex-col bg-primary h-full">
+        <PlanningChat
+          draft={planningDraft ?? null}
+          messages={planningMessages}
+          editor={{
+            value: message,
+            onChange: setMessage,
+          }}
+          isThinking={isThinking}
+          isConfirming={confirmMutation.isPending}
+          isMaterializing={materializeMutation.isPending}
+          projectId={projectId}
+          onSend={handlePlanningMessage}
+          onConfirm={handleConfirm}
+          onMaterialize={handleMaterialize}
+        />
+      </div>
+    );
+  }
+
+  // === Phase 1 render: Initial input (standard CreateChatBox UI) ===
   return (
     <div className="relative flex flex-1 flex-col bg-primary h-full justify-end">
       <div className="flex justify-center @container">
@@ -241,8 +312,8 @@ export function CreateChatBoxContainer() {
             value: message,
             onChange: setMessage,
           }}
-          onSend={handleSubmit}
-          isSending={createWorkspace.isPending}
+          onSend={handleInitialSubmit}
+          isSending={isCreatingDraft}
           executor={{
             selected: effectiveProfile?.executor ?? null,
             options: Object.keys(profiles || {}) as BaseCodingAgent[],

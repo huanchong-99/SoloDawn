@@ -256,7 +256,8 @@
         "confirmed": "Confirmed",
         "materialized": "Workflow Created",
         "cancelled": "Cancelled"
-      }
+      },
+      "needRepo": "Add at least one repository to start planning"
     },
     "saveAsDefault": "Save as default",
     "you": "You",
