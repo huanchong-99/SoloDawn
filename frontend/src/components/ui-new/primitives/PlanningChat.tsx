@@ -75,7 +75,7 @@ export function PlanningChat({
 
   // Render the message list when we have a draft
   const renderMessages = () => (
-    <div className="flex-1 overflow-y-auto px-double py-base space-y-base">
+    <div className="px-double py-base space-y-base">
       {messages.map((msg) => (
         <div
           key={msg.id}
@@ -182,21 +182,23 @@ export function PlanningChat({
 
   // Draft exists — show conversation + input
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       {/* Status badge */}
-      <div className="px-double py-half border-b flex items-center gap-half">
+      <div className="shrink-0 px-double py-half border-b flex items-center gap-half">
         <span className="text-xs text-low">{t('conversation.planning.title')}</span>
         <span className="text-xs px-1 py-px rounded bg-brand/10 text-brand">
           {t(`conversation.planning.status.${draft.status}`)}
         </span>
       </div>
 
-      {/* Messages */}
-      {renderMessages()}
+      {/* Messages — scrollable, takes remaining space */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {renderMessages()}
+      </div>
 
-      {/* Input area */}
+      {/* Input area — fixed at bottom */}
       {!isMaterialized && (
-        <div className="border-t">
+        <div className="shrink-0 border-t p-base">
           <ChatBoxBase
             editor={editor}
             placeholder={getPlaceholder()}
