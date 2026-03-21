@@ -665,6 +665,8 @@
     },
     "executors": "エクゼキューター",
     "models": "モデル",
+    "customModels": "カスタムモデル",
+    "officialModels": "公式モデル",
     "selectModel": "モデルを選択",
     "saveAsDefault": "デフォルトとして保存",
     "script": {

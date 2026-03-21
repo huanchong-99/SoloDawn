@@ -665,6 +665,8 @@
     },
     "executors": "Ejecutores",
     "models": "Modelos",
+    "customModels": "Modelos personalizados",
+    "officialModels": "Modelos oficiales",
     "selectModel": "Seleccionar modelo",
     "saveAsDefault": "Guardar como predeterminado",
     "script": {

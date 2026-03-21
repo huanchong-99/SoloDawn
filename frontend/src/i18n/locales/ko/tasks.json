@@ -665,6 +665,8 @@
     },
     "executors": "실행기",
     "models": "모델",
+    "customModels": "사용자 정의 모델",
+    "officialModels": "공식 모델",
     "selectModel": "모델 선택",
     "saveAsDefault": "기본값으로 저장",
     "script": {

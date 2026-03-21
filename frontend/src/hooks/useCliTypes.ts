@@ -1,5 +1,5 @@
 import { useQuery, UseQueryResult } from '@tanstack/react-query';
-import { handleApiResponse } from '@/lib/api';
+
 import {
   useErrorNotification,
   type ErrorNotificationOptions,
@@ -60,24 +60,33 @@ const cliTypesApi = {
    * Get all available CLI types
    */
   getAll: async (): Promise<CliType[]> => {
-    const response = await fetch('/api/cli-types');
-    return handleApiResponse<CliType[]>(response);
+    const response = await fetch('/api/cli_types');
+    if (!response.ok) {
+      throw new Error(`Failed to fetch CLI types: ${response.status}`);
+    }
+    return response.json();
   },
 
   /**
    * Detect which CLIs are installed on the system
    */
   detectInstallation: async (): Promise<CliDetectionResult[]> => {
-    const response = await fetch('/api/cli-types/detect');
-    return handleApiResponse<CliDetectionResult[]>(response);
+    const response = await fetch('/api/cli_types/detect');
+    if (!response.ok) {
+      throw new Error(`Failed to detect CLI installations: ${response.status}`);
+    }
+    return response.json();
   },
 
   /**
    * Get available models for a specific CLI type
    */
   getModels: async (cliTypeId: string): Promise<CliModel[]> => {
-    const response = await fetch(`/api/cli-types/${encodeURIComponent(cliTypeId)}/models`);
-    return handleApiResponse<CliModel[]>(response);
+    const response = await fetch(`/api/cli_types/${encodeURIComponent(cliTypeId)}/models`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch models: ${response.status}`);
+    }
+    return response.json();
   },
 };
 

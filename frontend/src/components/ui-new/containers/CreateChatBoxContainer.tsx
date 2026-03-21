@@ -7,6 +7,8 @@ import { useCreateAttachments } from '@/hooks/useCreateAttachments';
 import { getVariantOptions, areProfilesEqual } from '@/utils/executor';
 import { splitMessageToTitleDescription } from '@/utils/string';
 import type { ExecutorProfileId, BaseCodingAgent } from 'shared/types';
+import type { ModelConfig as WorkflowModelConfig } from '@/components/workflow/types';
+import { useModelConfigForExecutor } from '@/hooks/useModelConfigForExecutor';
 import { CreateChatBox } from '../primitives/CreateChatBox';
 
 export function CreateChatBoxContainer() {
@@ -58,6 +60,18 @@ export function CreateChatBoxContainer() {
     }
     return null;
   }, [selectedProfile, config?.executor_profile, profiles]);
+
+  // Model config selection for executor
+  const {
+    customModels,
+    officialModels,
+    allModels: availableModels,
+    selectedModelConfigId,
+    setSelectedModelConfigId,
+  } = useModelConfigForExecutor(
+    effectiveProfile?.executor ?? null,
+    (config as Record<string, unknown>)?.workflow_model_library as WorkflowModelConfig[] | undefined
+  );
 
   // Get variant options for the current executor
   const variantOptions = useMemo(
@@ -234,6 +248,16 @@ export function CreateChatBoxContainer() {
             options: Object.keys(profiles || {}) as BaseCodingAgent[],
             onChange: handleExecutorChange,
           }}
+          modelConfig={
+            availableModels.length > 0
+              ? {
+                  customModels,
+                  officialModels,
+                  selectedId: selectedModelConfigId,
+                  onChange: setSelectedModelConfigId,
+                }
+              : undefined
+          }
           variant={
             effectiveProfile
               ? {

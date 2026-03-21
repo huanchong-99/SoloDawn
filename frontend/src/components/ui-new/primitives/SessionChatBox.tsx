@@ -11,7 +11,8 @@ import {
   WarningIcon,
 } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
-import type { Session, BaseCodingAgent, TodoItem, ModelConfig } from 'shared/types';
+import type { Session, BaseCodingAgent, TodoItem } from 'shared/types';
+import type { ModelOption } from '@/hooks/useModelConfigForExecutor';
 import type { LocalImageMetadata } from '@/components/ui/wysiwyg/context/task-attempt-context';
 import { formatDateShortWithTime } from '@/utils/date';
 import { toPrettyCase } from '@/utils/string';
@@ -116,7 +117,8 @@ interface ReviewCommentsProps {
 }
 
 interface ModelConfigProps {
-  models: ModelConfig[];
+  customModels: ModelOption[];
+  officialModels: ModelOption[];
   selectedId: string | null;
   onChange: (id: string | null) => void;
 }
@@ -579,27 +581,61 @@ export function SessionChatBox({
               {modelConfig && (
                 <ToolbarDropdown
                   label={
-                    modelConfig.models.find(
-                      (m) => m.id === modelConfig.selectedId
-                    )?.displayName ?? t('conversation.selectModel')
+                    [...modelConfig.customModels, ...modelConfig.officialModels]
+                      .find((m) => m.id === modelConfig.selectedId)
+                      ?.displayName ?? t('conversation.selectModel')
                   }
                 >
-                  <DropdownMenuLabel>
-                    {t('conversation.models')}
-                  </DropdownMenuLabel>
-                  {modelConfig.models.map((model) => (
-                    <DropdownMenuItem
-                      key={model.id}
-                      icon={
-                        modelConfig.selectedId === model.id
-                          ? CheckIcon
-                          : undefined
-                      }
-                      onClick={() => modelConfig.onChange(model.id)}
-                    >
-                      {model.displayName}
-                    </DropdownMenuItem>
-                  ))}
+                  {modelConfig.customModels.length > 0 && (
+                    <>
+                      <DropdownMenuLabel>
+                        {t('conversation.customModels')}
+                      </DropdownMenuLabel>
+                      {modelConfig.customModels.map((model) => (
+                        <DropdownMenuItem
+                          key={model.id}
+                          icon={
+                            modelConfig.selectedId === model.id
+                              ? CheckIcon
+                              : undefined
+                          }
+                          onClick={() => modelConfig.onChange(model.id)}
+                        >
+                          <span className="flex flex-col">
+                            <span>{model.displayName}</span>
+                            {model.subtitle && (
+                              <span className="text-low text-xs">
+                                {model.subtitle}
+                              </span>
+                            )}
+                          </span>
+                        </DropdownMenuItem>
+                      ))}
+                    </>
+                  )}
+                  {modelConfig.officialModels.length > 0 && (
+                    <>
+                      {modelConfig.customModels.length > 0 && (
+                        <DropdownMenuSeparator />
+                      )}
+                      <DropdownMenuLabel>
+                        {t('conversation.officialModels')}
+                      </DropdownMenuLabel>
+                      {modelConfig.officialModels.map((model) => (
+                        <DropdownMenuItem
+                          key={model.id}
+                          icon={
+                            modelConfig.selectedId === model.id
+                              ? CheckIcon
+                              : undefined
+                          }
+                          onClick={() => modelConfig.onChange(model.id)}
+                        >
+                          {model.displayName}
+                        </DropdownMenuItem>
+                      ))}
+                    </>
+                  )}
                 </ToolbarDropdown>
               )}
             </>

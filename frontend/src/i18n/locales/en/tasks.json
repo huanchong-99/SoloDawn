@@ -236,6 +236,8 @@
   "conversation": {
     "executors": "Executors",
     "models": "Models",
+    "customModels": "Custom Models",
+    "officialModels": "Official Models",
     "selectModel": "Select Model",
     "saveAsDefault": "Save as default",
     "you": "You",

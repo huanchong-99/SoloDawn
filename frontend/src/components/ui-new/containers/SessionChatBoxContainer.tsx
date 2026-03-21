@@ -280,10 +280,15 @@ export function SessionChatBoxContainer({
 
   // Model config selection for executor
   const {
-    availableModels,
+    customModels,
+    officialModels,
+    allModels: availableModels,
     selectedModelConfigId,
     setSelectedModelConfigId,
-  } = useModelConfigForExecutor(isNewSessionMode ? effectiveExecutor : null);
+  } = useModelConfigForExecutor(
+    isNewSessionMode ? effectiveExecutor : null,
+    (config as Record<string, unknown>)?.workflow_model_library as import('@/components/workflow/types').ModelConfig[] | undefined
+  );
 
   // Wrap variant change to also save to scratch
   const setSelectedVariant = useCallback(
@@ -671,9 +676,10 @@ export function SessionChatBoxContainer({
           : undefined
       }
       modelConfig={
-        isNewSessionMode && availableModels.length > 1
+        isNewSessionMode && availableModels.length > 0
           ? {
-              models: availableModels,
+              customModels,
+              officialModels,
               selectedId: selectedModelConfigId,
               onChange: setSelectedModelConfigId,
             }

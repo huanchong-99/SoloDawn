@@ -3,6 +3,7 @@ import { CheckIcon, PaperclipIcon } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { toPrettyCase } from '@/utils/string';
 import type { BaseCodingAgent } from 'shared/types';
+import type { ModelOption } from '@/hooks/useModelConfigForExecutor';
 import type { LocalImageMetadata } from '@/components/ui/wysiwyg/context/task-attempt-context';
 import { AgentIcon } from '@/components/agents/AgentIcon';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -14,12 +15,23 @@ import {
 } from './ChatBoxBase';
 import { PrimaryButton } from './PrimaryButton';
 import { ToolbarDropdown, ToolbarIconButton } from './Toolbar';
-import { DropdownMenuItem, DropdownMenuLabel } from './Dropdown';
+import {
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from './Dropdown';
 
 export interface ExecutorProps {
   selected: BaseCodingAgent | null;
   options: BaseCodingAgent[];
   onChange: (executor: BaseCodingAgent) => void;
+}
+
+export interface ModelConfigProps {
+  customModels: ModelOption[];
+  officialModels: ModelOption[];
+  selectedId: string | null;
+  onChange: (id: string | null) => void;
 }
 
 export interface SaveAsDefaultProps {
@@ -33,6 +45,7 @@ interface CreateChatBoxProps {
   readonly onSend: () => void;
   readonly isSending: boolean;
   readonly executor: ExecutorProps;
+  readonly modelConfig?: ModelConfigProps;
   readonly variant?: VariantProps;
   readonly saveAsDefault?: SaveAsDefaultProps;
   readonly error?: string | null;
@@ -52,6 +65,7 @@ export function CreateChatBox({
   onSend,
   isSending,
   executor,
+  modelConfig,
   variant,
   saveAsDefault,
   error,
@@ -116,6 +130,66 @@ export function CreateChatBox({
               </DropdownMenuItem>
             ))}
           </ToolbarDropdown>
+          {modelConfig && (
+            <ToolbarDropdown
+              label={
+                [...modelConfig.customModels, ...modelConfig.officialModels]
+                  .find((m) => m.id === modelConfig.selectedId)
+                  ?.displayName ?? t('conversation.selectModel')
+              }
+            >
+              {modelConfig.customModels.length > 0 && (
+                <>
+                  <DropdownMenuLabel>
+                    {t('conversation.customModels')}
+                  </DropdownMenuLabel>
+                  {modelConfig.customModels.map((model) => (
+                    <DropdownMenuItem
+                      key={model.id}
+                      icon={
+                        modelConfig.selectedId === model.id
+                          ? CheckIcon
+                          : undefined
+                      }
+                      onClick={() => modelConfig.onChange(model.id)}
+                    >
+                      <span className="flex flex-col">
+                        <span>{model.displayName}</span>
+                        {model.subtitle && (
+                          <span className="text-low text-xs">
+                            {model.subtitle}
+                          </span>
+                        )}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+              {modelConfig.officialModels.length > 0 && (
+                <>
+                  {modelConfig.customModels.length > 0 && (
+                    <DropdownMenuSeparator />
+                  )}
+                  <DropdownMenuLabel>
+                    {t('conversation.officialModels')}
+                  </DropdownMenuLabel>
+                  {modelConfig.officialModels.map((model) => (
+                    <DropdownMenuItem
+                      key={model.id}
+                      icon={
+                        modelConfig.selectedId === model.id
+                          ? CheckIcon
+                          : undefined
+                      }
+                      onClick={() => modelConfig.onChange(model.id)}
+                    >
+                      {model.displayName}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+            </ToolbarDropdown>
+          )}
           {saveAsDefault?.visible && (
             <label className="flex items-center gap-1.5 text-sm text-low cursor-pointer ml-2">
               <Checkbox
