@@ -91,9 +91,30 @@ impl FeishuAuth {
             .post(&url)
             .header("Authorization", format!("Bearer {}", token))
             .send()
-            .await?
-            .json::<WsEndpointResponse>()
             .await?;
-        Ok(resp)
+
+        let status = resp.status();
+        let body = resp.text().await?;
+
+        let parsed: WsEndpointResponse = serde_json::from_str(&body).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse Feishu WS endpoint response (HTTP {}): {} — raw: {}",
+                status,
+                e,
+                body
+            )
+        })?;
+
+        if parsed.code != 0 {
+            anyhow::bail!(
+                "Feishu WS endpoint error: code={}, msg={}. \
+                 Check: 1) App is published 2) Long connection mode enabled \
+                 3) Events subscribed (im.message.receive_v1)",
+                parsed.code,
+                parsed.msg
+            );
+        }
+
+        Ok(parsed)
     }
 }

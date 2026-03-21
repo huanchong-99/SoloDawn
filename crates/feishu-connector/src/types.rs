@@ -19,7 +19,7 @@ pub struct WsEndpointResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct WsEndpointData {
-    #[serde(rename = "URL")]
+    #[serde(rename = "URL", default)]
     pub url: String,
     #[serde(rename = "ClientConfig")]
     pub client_config: Option<ClientConfig>,
