@@ -143,4 +143,10 @@ impl FeishuClient {
     pub async fn is_connected(&self) -> bool {
         *self.connected.read().await
     }
+
+    /// Get a clone of the internal connected flag for sharing with external
+    /// status monitors (e.g. FeishuHandle).
+    pub fn connected_flag(&self) -> Arc<RwLock<bool>> {
+        self.connected.clone()
+    }
 }

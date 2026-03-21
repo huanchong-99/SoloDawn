@@ -348,7 +348,7 @@ async fn start_feishu_connector(
     };
 
     let (reconnect_tx, mut reconnect_rx) = tokio::sync::mpsc::channel::<()>(1);
-    let connected = Arc::new(tokio::sync::RwLock::new(false));
+    let connected = service.connected_flag();
     let messenger = service.messenger().clone();
     let (event_tx, _) = tokio::sync::broadcast::channel::<feishu_connector::events::FeishuEvent>(64);
     service.set_event_broadcaster(event_tx.clone());

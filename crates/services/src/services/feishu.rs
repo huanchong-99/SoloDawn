@@ -331,6 +331,11 @@ impl FeishuService {
     pub fn set_event_broadcaster(&mut self, tx: tokio::sync::broadcast::Sender<FeishuEvent>) {
         self.event_broadcaster = Some(tx);
     }
+
+    /// Get the client's internal connected flag for sharing with FeishuHandle.
+    pub fn connected_flag(&self) -> Arc<tokio::sync::RwLock<bool>> {
+        self.client.connected_flag()
+    }
 }
 
 // ---------------------------------------------------------------------------
