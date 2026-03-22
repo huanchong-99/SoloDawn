@@ -120,7 +120,7 @@ impl FeishuService {
         let messenger = &self.messenger;
         let broadcaster = self.event_broadcaster.as_ref();
         let concierge = self.concierge_agent.as_ref();
-        let shared_config = &self.shared_config;
+        let shared_config = self.shared_config.as_ref();
 
         tokio::select! {
             conn_result = connect_fut => {
@@ -144,7 +144,7 @@ impl FeishuService {
         messenger: &Arc<FeishuMessenger>,
         broadcaster: Option<&tokio::sync::broadcast::Sender<FeishuEvent>>,
         concierge_agent: Option<&Arc<super::concierge::ConciergeAgent>>,
-        shared_config: &Option<Arc<tokio::sync::RwLock<super::config::Config>>>,
+        shared_config: Option<&Arc<tokio::sync::RwLock<super::config::Config>>>,
     ) {
         while let Some(event) = event_rx.recv().await {
             if let Some(tx) = broadcaster {
@@ -171,7 +171,7 @@ impl FeishuService {
         bus: &SharedMessageBus,
         messenger: &Arc<FeishuMessenger>,
         concierge_agent: Option<&Arc<super::concierge::ConciergeAgent>>,
-        shared_config: &Option<Arc<tokio::sync::RwLock<super::config::Config>>>,
+        shared_config: Option<&Arc<tokio::sync::RwLock<super::config::Config>>>,
     ) -> Result<()> {
         let Some(header) = &event.header else {
             tracing::debug!("Ignoring Feishu event without header");
@@ -199,7 +199,7 @@ impl FeishuService {
         bus: &SharedMessageBus,
         messenger: &Arc<FeishuMessenger>,
         concierge_agent: Option<&Arc<super::concierge::ConciergeAgent>>,
-        shared_config: &Option<Arc<tokio::sync::RwLock<super::config::Config>>>,
+        shared_config: Option<&Arc<tokio::sync::RwLock<super::config::Config>>>,
     ) -> Result<()> {
         let msg = events::parse_message_event(event)?;
 
@@ -246,7 +246,7 @@ impl FeishuService {
         pool: &SqlitePool,
         messenger: &Arc<FeishuMessenger>,
         concierge: &Arc<super::concierge::ConciergeAgent>,
-        shared_config: &Option<Arc<tokio::sync::RwLock<super::config::Config>>>,
+        shared_config: Option<&Arc<tokio::sync::RwLock<super::config::Config>>>,
     ) -> Result<()> {
         use db::models::concierge::{ConciergeMessage, ConciergeSession, ConciergeSessionChannel};
 
@@ -364,7 +364,7 @@ impl FeishuService {
 
     /// Get all models from the workflow model library in config.
     async fn get_available_models(
-        shared_config: &Option<Arc<tokio::sync::RwLock<super::config::Config>>>,
+        shared_config: Option<&Arc<tokio::sync::RwLock<super::config::Config>>>,
     ) -> Result<Vec<super::config::WorkflowModelLibraryItem>> {
         let config = shared_config
             .as_ref()

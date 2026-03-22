@@ -145,7 +145,7 @@ impl ConciergeAgent {
 
                 // Execute the tool
                 let tool_result = self
-                    .execute_tool_with_runtime(&session, &tool_call, &self.shared_config)
+                    .execute_tool_with_runtime(&session, &tool_call, self.shared_config.as_ref())
                     .await;
 
                 let result_text = match &tool_result {
@@ -297,7 +297,7 @@ impl ConciergeAgent {
         &self,
         session: &ConciergeSession,
         tool_call: &super::tools::ToolCall,
-        shared_config: &Option<Arc<tokio::sync::RwLock<crate::services::config::Config>>>,
+        shared_config: Option<&Arc<tokio::sync::RwLock<crate::services::config::Config>>>,
     ) -> Result<String> {
         let result = execute_tool(&self.pool, session, tool_call, shared_config).await?;
 

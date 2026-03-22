@@ -95,7 +95,7 @@ pub async fn execute_tool(
     pool: &SqlitePool,
     session: &ConciergeSession,
     tool_call: &ToolCall,
-    shared_config: &Option<std::sync::Arc<tokio::sync::RwLock<crate::services::config::Config>>>,
+    shared_config: Option<&std::sync::Arc<tokio::sync::RwLock<crate::services::config::Config>>>,
 ) -> Result<String> {
     match tool_call.tool.as_str() {
         "create_project" => execute_create_project(pool, session, &tool_call.params).await,
@@ -254,7 +254,7 @@ async fn execute_select_project(
 
 async fn execute_list_cli_types(
     pool: &SqlitePool,
-    shared_config: &Option<std::sync::Arc<tokio::sync::RwLock<crate::services::config::Config>>>,
+    shared_config: Option<&std::sync::Arc<tokio::sync::RwLock<crate::services::config::Config>>>,
 ) -> Result<String> {
     use db::models::cli_type::CliType;
     use std::collections::HashMap;
@@ -330,7 +330,7 @@ async fn execute_create_workflow(
     pool: &SqlitePool,
     session: &ConciergeSession,
     params: &serde_json::Value,
-    shared_config: &Option<std::sync::Arc<tokio::sync::RwLock<crate::services::config::Config>>>,
+    shared_config: Option<&std::sync::Arc<tokio::sync::RwLock<crate::services::config::Config>>>,
 ) -> Result<String> {
     let project_id_str = session
         .active_project_id
