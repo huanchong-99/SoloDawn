@@ -125,9 +125,13 @@ impl FeishuService {
     ) {
         while let Some(event) = event_rx.recv().await {
             if let Some(tx) = broadcaster {
-                if tx.receiver_count() > 0 {
+                let count = tx.receiver_count();
+                tracing::debug!(receiver_count = count, "Broadcasting event");
+                if count > 0 {
                     let _ = tx.send(event.clone());
                 }
+            } else {
+                tracing::debug!("No broadcaster configured");
             }
             if let Err(e) = Self::handle_event_inner(&event, pool, bus, messenger).await {
                 tracing::warn!(error = %e, "Failed to handle Feishu event");

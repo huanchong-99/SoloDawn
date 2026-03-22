@@ -330,11 +330,19 @@ async fn test_send(
     let messenger = h.messenger.clone();
     drop(handle_guard);
 
-    // Resolve chat_id: use provided value or find from conversation bindings
+    // Resolve chat_id: request param → last received → DB binding
+    let handle_guard2 = feishu_handle.read().await;
+    let last_id = handle_guard2.as_ref().and_then(|h| {
+        // Try read without blocking — use try_read
+        h.last_chat_id.try_read().ok().and_then(|g| g.clone())
+    });
+    drop(handle_guard2);
+
     let chat_id = if let Some(ref id) = payload.chat_id {
         id.clone()
+    } else if let Some(id) = last_id {
+        id
     } else {
-        // Try to find the most recent active binding
         let binding = db::models::ExternalConversationBinding::find_latest_active(
             &deployment.db().pool,
             "feishu",
@@ -347,7 +355,7 @@ async fn test_send(
             None => {
                 return Ok(Json(ApiResponse::success(TestResultResponse {
                     success: false,
-                    message: "No chat_id provided and no active conversation binding found. Please send a message to the bot in Feishu first, or use /bind <workflow_id>.".to_string(),
+                    message: "No recent chat found. Please first click 'Receive Test', then send a message to the bot in Feishu.".to_string(),
                 })));
             }
         }
@@ -392,6 +400,7 @@ async fn test_receive(
     }
 
     let mut rx = h.event_tx.subscribe();
+    let last_chat_id = h.last_chat_id.clone();
     drop(handle_guard);
 
     let timeout = tokio::time::Duration::from_secs(30);
@@ -399,10 +408,11 @@ async fn test_receive(
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    // Check if it's a message event
                     if let Some(ref header) = event.header {
                         if header.event_type == feishu_connector::events::EVENT_TYPE_MESSAGE {
                             if let Ok(msg) = feishu_connector::events::parse_message_event(&event) {
+                                // Save chat_id for test-send
+                                *last_chat_id.write().await = Some(msg.chat_id.clone());
                                 let text = feishu_connector::events::parse_text_content(&msg.content);
                                 return text;
                             }

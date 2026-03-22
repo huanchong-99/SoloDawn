@@ -358,6 +358,7 @@ async fn start_feishu_connector(
         reconnect_tx,
         messenger,
         event_tx,
+        last_chat_id: Arc::new(tokio::sync::RwLock::new(None)),
     };
 
     // Store the handle so route handlers can access it

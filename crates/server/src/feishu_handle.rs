@@ -17,6 +17,8 @@ pub struct FeishuHandle {
     pub messenger: Arc<FeishuMessenger>,
     /// Broadcast channel for incoming Feishu events (used by test-receive).
     pub event_tx: tokio::sync::broadcast::Sender<FeishuEvent>,
+    /// Last received chat_id (auto-captured from incoming messages for test-send).
+    pub last_chat_id: Arc<RwLock<Option<String>>>,
 }
 
 pub type SharedFeishuHandle = Arc<RwLock<Option<FeishuHandle>>>;

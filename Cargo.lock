@@ -2099,6 +2099,8 @@ dependencies = [
  "bytes",
  "flate2",
  "futures-util",
+ "prost",
+ "prost-build",
  "rand 0.8.5",
  "reqwest",
  "serde",
@@ -2107,6 +2109,7 @@ dependencies = [
  "tokio-tungstenite 0.26.2",
  "tokio-util",
  "tracing",
+ "url",
  "uuid",
 ]
 
