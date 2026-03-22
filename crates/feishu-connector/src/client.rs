@@ -35,9 +35,15 @@ fn new_ping_frame(service_id: i32) -> Frame {
     }
 }
 
+/// A single in-flight fragmented message being reassembled.
+struct FragmentEntry {
+    parts: Vec<Option<Vec<u8>>>,
+    created: tokio::time::Instant,
+}
+
 /// Simple fragment cache with TTL for reassembling multi-part messages.
 struct FragmentCache {
-    entries: HashMap<String, (Vec<Option<Vec<u8>>>, tokio::time::Instant)>,
+    entries: HashMap<String, FragmentEntry>,
 }
 
 impl FragmentCache {
@@ -49,25 +55,25 @@ impl FragmentCache {
 
     /// Insert a fragment. Returns the reassembled payload when all parts arrive.
     fn insert(&mut self, msg_id: &str, sum: usize, seq: usize, data: Vec<u8>) -> Option<Vec<u8>> {
-        // Clean expired entries (older than 5 seconds)
         let now = tokio::time::Instant::now();
         self.entries
-            .retain(|_, (_, ts)| now.duration_since(*ts).as_secs() < 5);
+            .retain(|_, e| now.duration_since(e.created).as_secs() < 5);
 
-        let entry = self
-            .entries
-            .entry(msg_id.to_string())
-            .or_insert_with(|| (vec![None; sum], now));
+        let entry = self.entries.entry(msg_id.to_string()).or_insert_with(|| {
+            FragmentEntry {
+                parts: vec![None; sum],
+                created: now,
+            }
+        });
 
-        if seq < entry.0.len() {
-            entry.0[seq] = Some(data);
+        if seq < entry.parts.len() {
+            entry.parts[seq] = Some(data);
         }
 
-        // Check if all parts arrived
-        if entry.0.iter().all(|p| p.is_some()) {
-            let parts = self.entries.remove(msg_id)?;
-            let combined: Vec<u8> = parts
-                .0
+        if entry.parts.iter().all(|p| p.is_some()) {
+            let entry = self.entries.remove(msg_id)?;
+            let combined: Vec<u8> = entry
+                .parts
                 .into_iter()
                 .flat_map(|p| p.unwrap_or_default())
                 .collect();
