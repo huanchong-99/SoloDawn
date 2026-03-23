@@ -28,7 +28,7 @@ export interface CliModel {
   modelId: string;
   displayName: string;
   provider: 'anthropic' | 'google' | 'openai' | 'other';
-  apiType: 'anthropic' | 'google' | 'openai' | 'openai-compatible';
+  apiType: 'anthropic' | 'anthropic-compatible' | 'google' | 'openai' | 'openai-compatible';
   requiresConfig: boolean;
   configSchema?: Record<string, unknown>;
 }

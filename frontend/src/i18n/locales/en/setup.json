@@ -37,6 +37,7 @@
       "skipHint": "You can skip this step and configure models later in Settings → Models.",
       "apiTypes": {
         "anthropic": "Anthropic",
+        "anthropicCompatible": "Anthropic Compatible",
         "openai": "OpenAI",
         "google": "Google AI",
         "openaiCompatible": "OpenAI Compatible"

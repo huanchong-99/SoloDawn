@@ -43,6 +43,7 @@ interface ModelStoreState {
 // Default models for each API type (fallback when API fetch fails)
 const DEFAULT_MODELS: Record<ApiType, string[]> = {
   anthropic: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229'],
+  'anthropic-compatible': [],
   google: ['gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash'],
   openai: ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
   'openai-compatible': [],

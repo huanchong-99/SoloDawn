@@ -74,7 +74,7 @@ async fn list_models(
             // For openai-compatible, use the URL as-is (user provides full path)
             list_openai_models(&client, &trim_trailing_slash(&base_url), &api_key).await?
         }
-        "anthropic" => {
+        "anthropic" | "anthropic-compatible" => {
             list_anthropic_models(&client, &trim_trailing_slash(&base_url), &api_key).await?
         }
         "google" => list_google_models(&client, &trim_trailing_slash(&base_url), &api_key).await?,
@@ -115,7 +115,7 @@ async fn verify_model(
             )
             .await
         }
-        "anthropic" => {
+        "anthropic" | "anthropic-compatible" => {
             verify_anthropic_model(
                 &client,
                 &trim_trailing_slash(&payload.base_url),
@@ -165,7 +165,7 @@ fn http_client() -> Result<Client, ApiError> {
 fn normalized_base_url(api_type: &str, base_url: Option<&str>) -> Result<String, ApiError> {
     let fallback = match api_type {
         "openai" => Some(DEFAULT_OPENAI_BASE_URL),
-        "openai-compatible" => None,
+        "openai-compatible" | "anthropic-compatible" => None,
         "anthropic" => Some(DEFAULT_ANTHROPIC_BASE_URL),
         "google" => Some(DEFAULT_GOOGLE_BASE_URL),
         _ => None,

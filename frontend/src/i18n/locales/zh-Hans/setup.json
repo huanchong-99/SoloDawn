@@ -37,6 +37,7 @@
       "skipHint": "您可以跳过此步骤，稍后在 设置 → 模型 中配置。",
       "apiTypes": {
         "anthropic": "Anthropic",
+        "anthropicCompatible": "Anthropic 兼容",
         "openai": "OpenAI",
         "google": "Google AI",
         "openaiCompatible": "OpenAI 兼容"

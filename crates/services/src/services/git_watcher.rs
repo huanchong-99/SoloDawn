@@ -362,11 +362,14 @@ impl GitWatcher {
 
         let mut cmd = Command::new("git");
         cmd.current_dir(repo_path)
-            .args(["log", "--all", "--format=%H", "--reverse"]);
+            .args(["log", "--branches", "--format=%H", "--reverse"]);
 
         if let Some(last_hash) = last_seen {
-            // Limit to commits on head_branch that are not ancestors of last_hash.
-            cmd.arg(format!("{last_hash}..{branch_ref}"));
+            // Use --not <last_hash> to exclude already-seen commits and their ancestors.
+            // Combined with --branches (local branches only, excluding remote tracking refs),
+            // this finds new commits on ANY local task branch without replaying old history
+            // from remote tracking branches (remotes/origin/develop, etc.).
+            cmd.args(["--not", last_hash]);
         } else {
             // No cursor yet: just grab the most recent commit on the current branch
             // to initialize the cursor without replaying entire history.

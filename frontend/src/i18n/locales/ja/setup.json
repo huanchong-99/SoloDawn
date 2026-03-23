@@ -35,6 +35,7 @@
       "skipHint": "このステップをスキップして、後から 設定 → モデル で構成できます。",
       "apiTypes": {
         "anthropic": "Anthropic",
+        "anthropicCompatible": "Anthropic 互換",
         "openai": "OpenAI",
         "google": "Google AI",
         "openaiCompatible": "OpenAI 互換"

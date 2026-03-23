@@ -86,7 +86,12 @@ struct InferredNoMetadataCompletion {
 #[derive(Debug, Default)]
 struct StallRecoveryTracker {
     last_recoveries: HashMap<String, Instant>,
+    recovery_counts: HashMap<String, u32>,
 }
+
+/// Maximum stall recovery attempts before force-completing a terminal.
+/// With 30s cooldown, 10 attempts = ~5 minutes of stall tolerance.
+const MAX_STALL_RECOVERY_ATTEMPTS: u32 = 10;
 
 impl StallRecoveryTracker {
     fn should_skip_due_to_cooldown(
@@ -102,10 +107,21 @@ impl StallRecoveryTracker {
 
     fn mark_recovered(&mut self, terminal_id: &str, now: Instant) {
         self.last_recoveries.insert(terminal_id.to_string(), now);
+        *self.recovery_counts.entry(terminal_id.to_string()).or_insert(0) += 1;
+    }
+
+    fn recovery_count(&self, terminal_id: &str) -> u32 {
+        self.recovery_counts.get(terminal_id).copied().unwrap_or(0)
+    }
+
+    fn should_force_complete(&self, terminal_id: &str) -> bool {
+        self.recovery_count(terminal_id) >= MAX_STALL_RECOVERY_ATTEMPTS
     }
 
     fn retain_active_terminals(&mut self, active_terminal_ids: &HashSet<String>) {
         self.last_recoveries
+            .retain(|terminal_id, _| active_terminal_ids.contains(terminal_id));
+        self.recovery_counts
             .retain(|terminal_id, _| active_terminal_ids.contains(terminal_id));
     }
 }
@@ -281,7 +297,42 @@ impl OrchestratorAgent {
 
         let prompt = self.build_initial_planning_prompt(&workflow).await?;
         let response = self.call_llm(&prompt).await?;
-        self.execute_instruction(&response).await
+        tracing::info!("Initial planning LLM response received, executing instructions");
+        if let Err(e) = self.execute_instruction(&response).await {
+            tracing::warn!("Initial planning instruction execution had errors (continuing): {e}");
+        }
+        tracing::info!("Initial planning instructions processed, checking for tasks without terminals");
+
+        // After initial planning, check if tasks were created but have no terminals.
+        // If so, re-prompt the LLM to create and dispatch terminals for the pending tasks.
+        let tasks_after = db::models::WorkflowTask::find_by_workflow(&self.db.pool, &workflow.id)
+            .await
+            .unwrap_or_default();
+        tracing::info!(task_count = tasks_after.len(), "Tasks found after initial planning");
+        if !tasks_after.is_empty() {
+            let mut any_without_terminals = false;
+            for task in &tasks_after {
+                let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id.to_string())
+                    .await
+                    .unwrap_or_default();
+                if terminals.is_empty() {
+                    any_without_terminals = true;
+                    break;
+                }
+            }
+            if any_without_terminals {
+                tracing::info!("Initial planning created tasks without terminals, re-prompting LLM for terminal dispatch");
+                let task_names: Vec<String> = tasks_after.iter().map(|t| format!("- {} (id: {}, branch: {})", t.name, t.id, &t.branch)).collect();
+                let follow_up = format!(
+                    "The following tasks have been created but have NO terminals yet:\n{}\n\nFor each task, create at least one terminal using create_terminal (with cli_type_id and model_config_id from the available pool) and then start it with start_terminal. Return raw JSON instructions only.",
+                    task_names.join("\n")
+                );
+                if let Ok(resp2) = self.call_llm(&follow_up).await {
+                    let _ = self.execute_instruction(&resp2).await;
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn build_initial_planning_prompt(
@@ -626,10 +677,8 @@ impl OrchestratorAgent {
         let mut active_working_terminal_ids = HashSet::new();
 
         for task in tasks {
-            if matches!(task.status.as_str(), TASK_STATUS_COMPLETED | TASK_STATUS_FAILED | TASK_STATUS_CANCELLED) {
-                continue;
-            }
-
+            // Don't skip completed/failed tasks entirely — they may still have
+            // working reviewer terminals that need stall recovery.
             let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id).await?;
             if terminals.is_empty() {
                 continue;
@@ -658,6 +707,21 @@ impl OrchestratorAgent {
                     continue;
                 }
 
+                // Force-complete terminally stalled terminals after max recovery attempts
+                if tracker.should_force_complete(&terminal.id) {
+                    tracing::warn!(
+                        workflow_id = %workflow_id,
+                        task_id = %task.id,
+                        terminal_id = %terminal.id,
+                        recovery_count = tracker.recovery_count(&terminal.id),
+                        "Force-completing terminal after max stall recovery attempts"
+                    );
+                    if let Err(e) = db::models::Terminal::set_completed_if_unfinished(&self.db.pool, &terminal.id, "completed").await {
+                        tracing::error!(terminal_id = %terminal.id, error = %e, "Failed to force-complete stalled terminal");
+                    }
+                    continue;
+                }
+
                 if let Err(error) = self
                     .redispatch_stalled_terminal_instruction(
                         &workflow_id,
@@ -674,6 +738,8 @@ impl OrchestratorAgent {
                         error = %error,
                         "Failed to re-dispatch stalled terminal"
                     );
+                    // Still count failed re-dispatch as a recovery attempt
+                    tracker.mark_recovered(&terminal.id, Instant::now());
                     continue;
                 }
 
@@ -3204,10 +3270,22 @@ impl OrchestratorAgent {
         // need these mappings so their cross-references stay consistent.
         let mut id_remap = std::collections::HashMap::<String, String>::new();
 
-        for mut instruction in instructions {
+        for (i, mut instruction) in instructions.into_iter().enumerate() {
             Self::validate_instruction_whitelist(&instruction)?;
             Self::remap_instruction_ids(&mut instruction, &mut id_remap);
-            self.execute_single_instruction(instruction).await?;
+            tracing::info!(index = i, instruction = ?std::mem::discriminant(&instruction), "Executing instruction");
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                self.execute_single_instruction(instruction),
+            ).await {
+                Ok(Ok(())) => tracing::info!(index = i, "Instruction completed"),
+                Ok(Err(e)) => {
+                    tracing::error!(index = i, error = %e, "Instruction failed, continuing");
+                }
+                Err(_) => {
+                    tracing::error!(index = i, "Instruction timed out after 60s, skipping");
+                }
+            }
         }
 
         Ok(())
@@ -3323,6 +3401,22 @@ impl OrchestratorAgent {
                     let state = self.state.read().await;
                     state.workflow_id.clone()
                 };
+                // Validate cli_type_id and model_config_id — LLM may return invalid IDs.
+                // Default to cli-codex/codex-gpt53 since Codex CLI works with the OpenAI-compatible
+                // endpoint; Claude Code CLI requires an Anthropic-compatible endpoint which may not
+                // be available.
+                let valid_cli = if db::models::CliType::find_by_id(&self.db.pool, &cli_type_id).await.is_ok() {
+                    cli_type_id
+                } else {
+                    tracing::warn!(invalid_cli = %cli_type_id, "LLM provided invalid cli_type_id, defaulting to cli-codex");
+                    "cli-codex".to_string()
+                };
+                let valid_model = if db::models::ModelConfig::find_by_id(&self.db.pool, &model_config_id).await.is_ok() {
+                    model_config_id
+                } else {
+                    tracing::warn!(invalid_model = %model_config_id, "LLM provided invalid model_config_id, defaulting to codex-gpt53");
+                    "codex-gpt53".to_string()
+                };
                 let planning_complete = self.task_planning_complete(&task_id).await;
                 self.runtime_actions()?
                     .create_terminal(
@@ -3330,8 +3424,8 @@ impl OrchestratorAgent {
                         RuntimeTerminalSpec {
                             terminal_id,
                             task_id: task_id.clone(),
-                            cli_type_id,
-                            model_config_id,
+                            cli_type_id: valid_cli,
+                            model_config_id: valid_model,
                             custom_base_url,
                             custom_api_key,
                             role,
@@ -3354,7 +3448,17 @@ impl OrchestratorAgent {
                 let planning_complete = self.task_planning_complete(&task_id).await;
                 self.sync_task_state_from_db(&task_id, Some(planning_complete))
                     .await?;
-                self.dispatch_terminal(&task_id, &terminal, &instruction).await?;
+                // Add timeout to dispatch to prevent indefinite hangs
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    self.dispatch_terminal(&task_id, &terminal, &instruction),
+                ).await {
+                    Ok(result) => result?,
+                    Err(_) => {
+                        tracing::error!(terminal_id = %terminal_id, "dispatch_terminal timed out after 30s");
+                        anyhow::bail!("dispatch_terminal timed out");
+                    }
+                }
             }
             OrchestratorInstruction::CloseTerminal {
                 terminal_id,

@@ -37,6 +37,11 @@ const API_TYPES = {
     defaultBaseUrl: 'https://api.anthropic.com',
     defaultModels: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
   },
+  'anthropic-compatible': {
+    label: 'Anthropic Compatible',
+    defaultBaseUrl: '',
+    defaultModels: [],
+  },
   google: {
     label: 'Google',
     defaultBaseUrl: 'https://generativelanguage.googleapis.com',
@@ -163,7 +168,7 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
       const models = await fetchModels(
         formData.apiType,
         formData.apiKey,
-        formData.apiType === 'openai-compatible' ? formData.baseUrl : undefined
+        formData.apiType === 'openai-compatible' || formData.apiType === 'anthropic-compatible' ? formData.baseUrl : undefined
       );
       setAvailableModels(models);
     } catch (error) {

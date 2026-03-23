@@ -12,6 +12,10 @@ import { cn } from '@/lib/utils';
 
 const API_TYPE_OPTIONS = [
   { value: 'anthropic', labelKey: 'setup:wizard.model.apiTypes.anthropic' },
+  {
+    value: 'anthropic-compatible',
+    labelKey: 'setup:wizard.model.apiTypes.anthropicCompatible',
+  },
   { value: 'openai', labelKey: 'setup:wizard.model.apiTypes.openai' },
   { value: 'google', labelKey: 'setup:wizard.model.apiTypes.google' },
   {
@@ -169,8 +173,8 @@ export function SetupWizardStep2Model({
           </div>
         </div>
 
-        {/* Base URL (only for OpenAI Compatible) */}
-        {apiType === 'openai-compatible' && (
+        {/* Base URL (only for Compatible types) */}
+        {(apiType === 'openai-compatible' || apiType === 'anthropic-compatible') && (
           <div className="space-y-half">
             <label
               htmlFor="setup-base-url"

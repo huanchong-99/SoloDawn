@@ -223,22 +223,27 @@ fn create_claude_settings(
     let settings_path = claude_home.join("settings.json");
 
     let mut env_obj = serde_json::Map::new();
-    // Choose auth env var based on key format and endpoint:
-    // - Custom base_url (third-party API) → always ANTHROPIC_API_KEY (third-party APIs
-    //   don't use Anthropic's OAuth token mechanism)
-    // - Official Anthropic API + sk- prefix → ANTHROPIC_API_KEY
-    // - Official Anthropic API + other format → ANTHROPIC_AUTH_TOKEN (OAuth session token)
-    if base_url.is_some() || api_key.starts_with("sk-") {
-        env_obj.insert(
-            "ANTHROPIC_API_KEY".to_string(),
-            serde_json::Value::String(api_key.to_string()),
-        );
-    } else {
-        env_obj.insert(
-            "ANTHROPIC_AUTH_TOKEN".to_string(),
-            serde_json::Value::String(api_key.to_string()),
-        );
+
+    // For third-party APIs with non-sk- keys (e.g., ZhipuAI), Claude Code rejects the key
+    // at format validation. Use apiKeyHelper to bypass the validation — Claude Code calls
+    // the helper script which returns the raw key, then sends it as X-Api-Key header.
+    let needs_api_key_helper = base_url.is_some() && !api_key.starts_with("sk-");
+
+    if !needs_api_key_helper {
+        // Standard auth: set env var directly
+        if base_url.is_some() || api_key.starts_with("sk-") {
+            env_obj.insert(
+                "ANTHROPIC_API_KEY".to_string(),
+                serde_json::Value::String(api_key.to_string()),
+            );
+        } else {
+            env_obj.insert(
+                "ANTHROPIC_AUTH_TOKEN".to_string(),
+                serde_json::Value::String(api_key.to_string()),
+            );
+        }
     }
+
     env_obj.insert(
         "ANTHROPIC_MODEL".to_string(),
         serde_json::Value::String(model.to_string()),
@@ -255,6 +260,10 @@ fn create_claude_settings(
         "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
         serde_json::Value::String(model.to_string()),
     );
+    env_obj.insert(
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+        serde_json::Value::String("1".to_string()),
+    );
     if let Some(url) = base_url {
         env_obj.insert(
             "ANTHROPIC_BASE_URL".to_string(),
@@ -262,25 +271,46 @@ fn create_claude_settings(
         );
     }
 
-    // primaryApiKey is Claude Code's internal auth (Anthropic account system).
-    // For custom endpoints (third-party API), omit it to prevent validation failure.
-    let settings = if base_url.is_some() {
-        serde_json::json!({
-            "env": env_obj,
-        })
-    } else {
-        serde_json::json!({
-            "env": env_obj,
-            "primaryApiKey": api_key,
-        })
-    };
+    // For non-sk- keys with custom base_url: write a helper script that echoes the key,
+    // and set apiKeyHelper in settings.json. Claude Code calls this script instead of
+    // reading the key from env vars, bypassing format validation.
+    let mut settings_map = serde_json::Map::new();
+    settings_map.insert("env".to_string(), serde_json::Value::Object(env_obj));
 
+    if needs_api_key_helper {
+        let helper_script = claude_home.join("api-key-helper.js");
+        let script_content = format!(
+            "console.log({});",
+            serde_json::to_string(api_key)?
+        );
+        std::fs::write(&helper_script, script_content)
+            .map_err(|e| anyhow::anyhow!("Failed to write api-key-helper.js: {e}"))?;
+
+        let helper_cmd = format!("node {}", helper_script.to_string_lossy().replace('\\', "/"));
+        settings_map.insert(
+            "apiKeyHelper".to_string(),
+            serde_json::Value::String(helper_cmd),
+        );
+        tracing::info!(
+            "Using apiKeyHelper for non-sk API key with custom base_url (bypassing format validation)"
+        );
+    } else if base_url.is_none() {
+        // primaryApiKey is Claude Code's internal auth (Anthropic account system).
+        // For custom endpoints (third-party API), omit it to prevent validation failure.
+        settings_map.insert(
+            "primaryApiKey".to_string(),
+            serde_json::Value::String(api_key.to_string()),
+        );
+    }
+
+    let settings = serde_json::Value::Object(settings_map);
     let content = serde_json::to_string_pretty(&settings)?;
     std::fs::write(&settings_path, content)
         .map_err(|e| anyhow::anyhow!("Failed to write Claude settings.json: {e}"))?;
 
     tracing::debug!(
         settings_path = %settings_path.display(),
+        needs_api_key_helper = needs_api_key_helper,
         "Created Claude Code settings.json for isolated authentication"
     );
 
@@ -347,9 +377,22 @@ fn apply_auto_confirm_args(cli: &CcCliType, args: &mut Vec<String>, auto_confirm
         return;
     }
 
+    match cli {
+        CcCliType::Codex => {
+            // Codex: use --full-auto for sandboxed auto-execution + -a never to skip approval
+            for flag in ["--full-auto", "-a", "never"] {
+                if !args.contains(&flag.to_string()) {
+                    args.push(flag.to_string());
+                }
+            }
+            return;
+        }
+        _ => {}
+    }
+
     let flag = match cli {
         CcCliType::ClaudeCode => "--dangerously-skip-permissions",
-        CcCliType::Codex | CcCliType::Gemini => "--yolo",
+        CcCliType::Gemini => "--yolo",
         _ => return,
     };
 
@@ -898,16 +941,20 @@ impl CCSwitchService {
                 args.push(settings_path.to_string_lossy().to_string());
 
                 // Inject auth env var based on key format and endpoint:
-                // - Custom base_url (third-party API) → always ANTHROPIC_API_KEY
-                //   (third-party APIs don't use Anthropic's OAuth token mechanism)
+                // - Non-sk- key + custom base_url → use apiKeyHelper (set in settings.json),
+                //   do NOT set env var (Claude Code rejects non-sk- format in ANTHROPIC_API_KEY)
+                // - Custom base_url + sk- prefix → ANTHROPIC_API_KEY
                 // - Official Anthropic API + sk- prefix → ANTHROPIC_API_KEY
                 // - Official Anthropic API + other format → ANTHROPIC_AUTH_TOKEN
-                if effective_base_url.is_some() || api_key.starts_with("sk-") {
-                    env.set
-                        .insert("ANTHROPIC_API_KEY".to_string(), api_key.clone());
-                } else {
-                    env.set
-                        .insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.clone());
+                let uses_api_key_helper = effective_base_url.is_some() && !api_key.starts_with("sk-");
+                if !uses_api_key_helper {
+                    if effective_base_url.is_some() || api_key.starts_with("sk-") {
+                        env.set
+                            .insert("ANTHROPIC_API_KEY".to_string(), api_key.clone());
+                    } else {
+                        env.set
+                            .insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.clone());
+                    }
                 }
 
                 // Set model for all tiers

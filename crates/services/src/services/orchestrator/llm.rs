@@ -223,6 +223,7 @@ struct UsageInfo {
 impl OpenAICompatibleClient {
     pub fn new(config: &OrchestratorConfig) -> Self {
         let client = Client::builder()
+            .connect_timeout(Duration::from_secs(30))
             .timeout(Duration::from_secs(config.timeout_secs))
             .build()
             .expect("Failed to create HTTP client");
@@ -264,6 +265,13 @@ impl OpenAICompatibleClient {
             max_tokens: Some(4096),
         };
 
+        tracing::info!(
+            url = %url,
+            model = %self.model,
+            msg_count = request.messages.len(),
+            "OpenAI-compatible LLM request starting"
+        );
+
         let response = self
             .client
             .post(&url)
@@ -271,7 +279,16 @@ impl OpenAICompatibleClient {
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::error!(url = %url, "OpenAI-compatible LLM request failed: {e}");
+                e
+            })?;
+
+        tracing::info!(
+            status = %response.status(),
+            "OpenAI-compatible LLM response received"
+        );
 
         if !response.status().is_success() {
             let status = response.status();
@@ -360,6 +377,7 @@ struct AnthropicUsage {
 impl AnthropicCompatibleClient {
     pub fn new(config: &OrchestratorConfig) -> Self {
         let client = Client::builder()
+            .connect_timeout(Duration::from_secs(30))
             .timeout(Duration::from_secs(config.timeout_secs))
             .build()
             .expect("Failed to create HTTP client");
@@ -475,7 +493,7 @@ pub fn build_terminal_completion_prompt(
 /// single-provider path is used (fully backward compatible).
 /// Determine whether to use Anthropic protocol based on api_type and base_url.
 fn should_use_anthropic_protocol(config: &OrchestratorConfig) -> bool {
-    if config.api_type == "anthropic" {
+    if config.api_type == "anthropic" || config.api_type == "anthropic-compatible" {
         return true;
     }
     // Auto-detect: if the base URL contains "anthropic" in the path,

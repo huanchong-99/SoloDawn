@@ -119,7 +119,7 @@ export interface TaskConfig {
 }
 
 /** API provider type */
-export type ApiType = 'anthropic' | 'google' | 'openai' | 'openai-compatible';
+export type ApiType = 'anthropic' | 'anthropic-compatible' | 'google' | 'openai' | 'openai-compatible';
 
 /** Model config (Step 3) */
 export interface ModelConfig {

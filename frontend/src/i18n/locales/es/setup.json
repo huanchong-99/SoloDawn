@@ -35,6 +35,7 @@
       "skipHint": "Puedes omitir este paso y configurar modelos m\u00e1s tarde en Ajustes \u2192 Modelos.",
       "apiTypes": {
         "anthropic": "Anthropic",
+        "anthropicCompatible": "Anthropic Compatible",
         "openai": "OpenAI",
         "google": "Google AI",
         "openaiCompatible": "Compatible con OpenAI"
