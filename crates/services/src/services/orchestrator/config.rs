@@ -480,10 +480,17 @@ complete_workflow: summary*
 fail_workflow: reason*
 pause_workflow: reason*
 
-### 8.2 Batching
+### 8.2 Example (minimal)
 
-Return a JSON array to batch multiple actions. When creating a task + terminal
-in the same batch, provide explicit IDs so later actions can reference them.
+[
+  {"type":"create_task","task_id":"task-1","name":"Refactor Architecture","branch":"feat/refactor","order_index":0},
+  {"type":"create_terminal","terminal_id":"term-1","task_id":"task-1","cli_type_id":"cli-codex","model_config_id":"model-codex53","role":"coder","auto_confirm":true},
+  {"type":"start_terminal","terminal_id":"term-1","instruction":"Refactor into layered architecture..."},
+  {"type":"set_workflow_planning_complete","summary":"1 task created"}
+]
+
+IMPORTANT: The "type" field is REQUIRED. Always use "type" (not "action").
+Return a JSON array. Provide explicit task_id and terminal_id.
 
 ================================================================================
 SECTION 9 — CRITICAL RULES

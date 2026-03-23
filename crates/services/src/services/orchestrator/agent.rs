@@ -3139,13 +3139,20 @@ impl OrchestratorAgent {
         // Fallback: extract JSON from mixed text response
         if let Some(extracted) = Self::extract_json_from_mixed_response(response) {
             tracing::info!(extracted_len = extracted.len(), "Extracted JSON from mixed LLM response");
-            return serde_json::from_str::<Vec<OrchestratorInstruction>>(&extracted)
+            let result = serde_json::from_str::<Vec<OrchestratorInstruction>>(&extracted)
                 .ok()
                 .or_else(|| {
                     serde_json::from_str::<OrchestratorInstruction>(&extracted)
                         .ok()
                         .map(|i| vec![i])
                 });
+            if result.is_some() {
+                return result;
+            }
+            tracing::warn!(
+                extracted_preview = &extracted[..extracted.len().min(300)],
+                "Extracted JSON did not parse as orchestrator instructions"
+            );
         }
 
         tracing::warn!(response_preview = &response[..response.len().min(500)], "Could not parse any instructions from LLM response");
