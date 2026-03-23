@@ -518,6 +518,20 @@ async fn materialize_draft(
         "materialized planning draft into workflow"
     );
 
+    // Auto-prepare and auto-start the workflow so the orchestrator begins
+    // immediately — the user should not need to manually call prepare+start.
+    {
+        let wf_uuid = uuid::Uuid::parse_str(&workflow_id)
+            .map_err(|e| ApiError::Internal(format!("Invalid workflow UUID: {e}")))?;
+        let dep = deployment.clone();
+        tokio::spawn(async move {
+            match crate::routes::workflows::auto_prepare_and_start(dep, &wf_uuid.to_string()).await {
+                Ok(()) => tracing::info!(workflow_id = %wf_uuid, "Auto-started materialized workflow"),
+                Err(e) => tracing::warn!(workflow_id = %wf_uuid, error = ?e, "Failed to auto-start workflow"),
+            }
+        });
+    }
+
     Ok(Json(ApiResponse::success(MaterializeResponse {
         draft_id,
         workflow_id,

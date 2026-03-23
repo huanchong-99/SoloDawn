@@ -1772,6 +1772,35 @@ async fn start_workflow(
     Ok(ResponseJson(ApiResponse::success(())))
 }
 
+/// Error type for auto_prepare_and_start.
+#[derive(Debug, thiserror::Error)]
+pub enum AutoStartError {
+    #[error("API error: {0}")]
+    Api(#[from] ApiError),
+}
+
+/// Prepare and start a workflow in one shot. Used by materialize_draft
+/// to auto-launch agent-planned workflows without requiring manual API calls.
+pub async fn auto_prepare_and_start(
+    deployment: DeploymentImpl,
+    workflow_id: &str,
+) -> Result<(), AutoStartError> {
+    let wf_uuid: uuid::Uuid = workflow_id.parse().map_err(|e| {
+        ApiError::Internal(format!("Invalid workflow UUID: {e}"))
+    })?;
+
+    // Prepare
+    let _ = prepare_workflow(State(deployment.clone()), Path(wf_uuid)).await?;
+
+    // Brief delay for terminal readiness
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    // Start
+    let _ = start_workflow(State(deployment), Path(wf_uuid)).await?;
+
+    Ok(())
+}
+
 /// POST /api/workflows/:workflow_id/pause
 /// Pause a running workflow
 async fn pause_workflow(
