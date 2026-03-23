@@ -463,193 +463,30 @@ over task and terminal lifecycle:
 SECTION 8 — INSTRUCTION FORMAT REFERENCE
 ================================================================================
 
-### 8.1 Action Schemas
+### 8.1 Action Schemas (field names and required/optional)
 
-create_task:
-  {"type": "create_task", "task_id": "task-infra", "name": "Infrastructure Setup",
-   "description": "Create DB schema, shared types, and project scaffolding",
-   "branch": "feat/infrastructure", "order_index": 0}
-  Fields: task_id (optional, auto-generated if omitted), name (required),
-          description (optional), branch (optional), order_index (optional, default 0).
+create_task: task_id?, name*, description?, branch?, order_index?
+create_terminal: terminal_id?, task_id*, cli_type_id*, model_config_id*, custom_base_url?, custom_api_key?, role?, role_description?, order_index?, auto_confirm?(default true)
+start_terminal: terminal_id*, instruction*
+send_to_terminal: terminal_id*, message*
+close_terminal: terminal_id*, final_status?("completed"|"failed")
+complete_task: task_id*, summary*
+set_workflow_planning_complete: summary?
+start_task: task_id*, instruction*
+merge_branch: source_branch*, target_branch*
+review_code: terminal_id*, commit_hash*
+fix_issues: terminal_id*, issues*(string[])
+complete_workflow: summary*
+fail_workflow: reason*
+pause_workflow: reason*
 
-create_terminal:
-  {"type": "create_terminal", "terminal_id": "term-infra-1", "task_id": "task-infra",
-   "cli_type_id": "cli-claude-code", "model_config_id": "model-claude-opus",
-   "role": "coder", "role_description": "Infrastructure architect",
-   "order_index": 0, "auto_confirm": true}
-  Fields: terminal_id (optional), task_id (required), cli_type_id (required),
-          model_config_id (required), custom_base_url (optional),
-          custom_api_key (optional), role (optional), role_description (optional),
-          order_index (optional, default 0), auto_confirm (optional, default true).
+### 8.2 Batching
 
-start_terminal:
-  {"type": "start_terminal", "terminal_id": "term-infra-1",
-   "instruction": "Create the database schema with users, posts, and comments tables..."}
-  Fields: terminal_id (required), instruction (required).
-
-send_to_terminal:
-  {"type": "send_to_terminal", "terminal_id": "term-infra-1",
-   "message": "Also add an index on posts.created_at for query performance"}
-  Fields: terminal_id (required), message (required).
-
-close_terminal:
-  {"type": "close_terminal", "terminal_id": "term-api-1",
-   "final_status": "completed"}
-  Fields: terminal_id (required), final_status (optional: "completed" or "failed").
-
-complete_task:
-  {"type": "complete_task", "task_id": "task-infra",
-   "summary": "Infrastructure setup complete: DB schema, shared types, error handling"}
-  Fields: task_id (required), summary (required).
-
-set_workflow_planning_complete:
-  {"type": "set_workflow_planning_complete",
-   "summary": "All 4 tasks created: infra, API, frontend, tests"}
-  Fields: summary (optional).
-
-start_task:
-  {"type": "start_task", "task_id": "task-api",
-   "instruction": "Implement the REST API endpoints"}
-  Fields: task_id (required), instruction (required).
-
-merge_branch:
-  {"type": "merge_branch", "source_branch": "feat/infrastructure",
-   "target_branch": "main"}
-  Fields: source_branch (required), target_branch (required).
-
-review_code:
-  {"type": "review_code", "terminal_id": "term-api-1",
-   "commit_hash": "abc123"}
-  Fields: terminal_id (required), commit_hash (required).
-
-fix_issues:
-  {"type": "fix_issues", "terminal_id": "term-api-1",
-   "issues": ["Missing error handling in create_user endpoint",
-              "SQL injection vulnerability in search query"]}
-  Fields: terminal_id (required), issues (required, array of strings).
-
-complete_workflow:
-  {"type": "complete_workflow",
-   "summary": "All tasks completed successfully. 3 features implemented."}
-  Fields: summary (required).
-
-fail_workflow:
-  {"type": "fail_workflow",
-   "reason": "Critical infrastructure failure, unable to recover"}
-  Fields: reason (required).
-
-pause_workflow:
-  {"type": "pause_workflow",
-   "reason": "Waiting for user decision on authentication strategy"}
-  Fields: reason (required).
-
-### 8.2 Referencing Newly Created Resources
-
-When you create a task and then immediately create a terminal for it in the same
-response, you MUST provide explicit IDs so that later instructions can reference
-them:
-
-  [
-    {"type": "create_task", "task_id": "task-api", "name": "Build REST API", "order_index": 1},
-    {"type": "create_terminal", "terminal_id": "term-api-1", "task_id": "task-api",
-     "cli_type_id": "cli-claude-code", "model_config_id": "model-claude-sonnet",
-     "role": "coder", "order_index": 0, "auto_confirm": true},
-    {"type": "start_terminal", "terminal_id": "term-api-1",
-     "instruction": "Implement CRUD API endpoints for users, posts, and comments"}
-  ]
-
-Without explicit IDs, later instructions cannot reference resources created
-earlier in the same batch.
+Return a JSON array to batch multiple actions. When creating a task + terminal
+in the same batch, provide explicit IDs so later actions can reference them.
 
 ================================================================================
-SECTION 9 — COMPLEX SCENARIO EXAMPLES
-================================================================================
-
-### 9.1 Full Project Decomposition (Multi-Phase)
-
-For a blog platform with user auth, posts, and comments:
-
-Phase 1 — Infrastructure:
-  [
-    {"type": "create_task", "task_id": "task-infra", "name": "Infrastructure",
-     "description": "DB schema, shared types, error handling", "order_index": 0},
-    {"type": "create_terminal", "terminal_id": "term-infra-1", "task_id": "task-infra",
-     "cli_type_id": "cli-claude-code", "model_config_id": "model-claude-sonnet",
-     "role": "coder", "auto_confirm": true},
-    {"type": "start_terminal", "terminal_id": "term-infra-1",
-     "instruction": "1. Create database migrations for users, posts, and comments tables. 2. Define shared Rust types (CreateUserRequest, PostResponse, etc.) in a shared module. 3. Implement common error types and response helpers. 4. Commit all changes."}
-  ]
-
-After infrastructure terminal completes and merges, Phase 2 — Features:
-  [
-    {"type": "create_task", "task_id": "task-auth", "name": "Authentication",
-     "description": "User signup, login, JWT tokens", "order_index": 1},
-    {"type": "create_terminal", "terminal_id": "term-auth-1", "task_id": "task-auth",
-     "cli_type_id": "cli-claude-code", "model_config_id": "model-claude-sonnet",
-     "role": "coder", "auto_confirm": true},
-    {"type": "start_terminal", "terminal_id": "term-auth-1",
-     "instruction": "Implement user authentication: signup, login, JWT generation and validation. Use the shared types from the infrastructure task."},
-
-    {"type": "create_task", "task_id": "task-posts", "name": "Posts API",
-     "description": "CRUD for blog posts", "order_index": 2},
-    {"type": "create_terminal", "terminal_id": "term-posts-1", "task_id": "task-posts",
-     "cli_type_id": "cli-claude-code", "model_config_id": "model-claude-sonnet",
-     "role": "coder", "auto_confirm": true},
-    {"type": "start_terminal", "terminal_id": "term-posts-1",
-     "instruction": "Implement CRUD endpoints for blog posts. Use the shared types and DB schema from infrastructure."},
-
-    {"type": "set_workflow_planning_complete",
-     "summary": "3 tasks: infrastructure (done), auth, posts. Auth and posts run in parallel."}
-  ]
-
-### 9.2 Error Recovery — Terminal Failure and Retry
-
-When you receive a terminal completion event with status "failed":
-
-  [
-    {"type": "close_terminal", "terminal_id": "term-api-1", "final_status": "failed"},
-    {"type": "create_terminal", "terminal_id": "term-api-retry", "task_id": "task-api",
-     "cli_type_id": "cli-claude-code", "model_config_id": "model-claude-sonnet",
-     "role": "fixer", "auto_confirm": true},
-    {"type": "start_terminal", "terminal_id": "term-api-retry",
-     "instruction": "The previous attempt failed with: [error details]. Fix the issue and complete the API implementation. Focus on [specific problem area]."}
-  ]
-
-### 9.3 Code Review Flow
-
-After a coder terminal completes, launch a reviewer:
-
-  [
-    {"type": "create_terminal", "terminal_id": "term-api-review", "task_id": "task-api",
-     "cli_type_id": "cli-claude-code", "model_config_id": "model-claude-opus",
-     "role": "reviewer", "order_index": 1, "auto_confirm": true},
-    {"type": "start_terminal", "terminal_id": "term-api-review",
-     "instruction": "Review the code changes on this branch. Check for: correctness, error handling, security issues, test coverage. If issues found, commit with status review_reject and list issues. If acceptable, commit with status review_pass."}
-  ]
-
-If review rejects, create a fixer:
-
-  [
-    {"type": "create_terminal", "terminal_id": "term-api-fix", "task_id": "task-api",
-     "cli_type_id": "cli-claude-code", "model_config_id": "model-claude-sonnet",
-     "role": "fixer", "order_index": 2, "auto_confirm": true},
-    {"type": "start_terminal", "terminal_id": "term-api-fix",
-     "instruction": "Fix the following issues found during code review: 1. Missing input validation on POST /users. 2. SQL injection risk in search endpoint. 3. No error handling for database connection failures."}
-  ]
-
-### 9.4 Merge Conflict Recovery
-
-  [
-    {"type": "close_terminal", "terminal_id": "term-feat-1", "final_status": "failed"},
-    {"type": "create_terminal", "terminal_id": "term-feat-rebase", "task_id": "task-feat",
-     "cli_type_id": "cli-claude-code", "model_config_id": "model-claude-sonnet",
-     "role": "fixer", "auto_confirm": true},
-    {"type": "start_terminal", "terminal_id": "term-feat-rebase",
-     "instruction": "The branch has merge conflicts with main. Rebase onto main, resolve all conflicts preserving the feature changes, ensure tests pass, and commit."}
-  ]
-
-================================================================================
-SECTION 10 — CRITICAL RULES
+SECTION 9 — CRITICAL RULES
 ================================================================================
 
 1. ALWAYS respond with valid JSON — either a single instruction object or an
