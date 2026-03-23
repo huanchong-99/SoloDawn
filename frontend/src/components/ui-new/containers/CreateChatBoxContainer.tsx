@@ -60,6 +60,7 @@ export function CreateChatBoxContainer() {
   const [isCreatingDraft, setIsCreatingDraft] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [localMessages, setLocalMessages] = useState<PlanningMessageResponse[]>([]);
+  const [materializedWorkflowId, setMaterializedWorkflowId] = useState<string | null>(null);
 
   const { data: planningDraft } = usePlanningDraft(planningDraftId);
   const { data: serverMessages } = usePlanningDraftMessages(planningDraftId);
@@ -262,11 +263,17 @@ export function CreateChatBoxContainer() {
     if (!planningDraftId) return;
     try {
       const result = await materializeMutation.mutateAsync(planningDraftId);
-      navigate(`/board?workflowId=${result.workflowId}`);
+      setMaterializedWorkflowId(result.workflowId);
     } catch (e) {
       console.error('Failed to materialize draft:', e);
     }
-  }, [planningDraftId, materializeMutation, navigate]);
+  }, [planningDraftId, materializeMutation]);
+
+  const handleOpenBoard = useCallback(() => {
+    if (materializedWorkflowId) {
+      navigate(`/board?workflowId=${materializedWorkflowId}&projectId=${projectId ?? ''}`);
+    }
+  }, [materializedWorkflowId, projectId, navigate]);
 
   // Determine error
   const displayError = (() => {
@@ -297,8 +304,9 @@ export function CreateChatBoxContainer() {
   // Determine if we're in planning conversation mode
   const isInPlanningMode = !!planningDraftId;
   const draftStatus = planningDraft?.status;
+  const isMaterialized = draftStatus === 'materialized' || !!materializedWorkflowId;
   const isSpecReady = draftStatus === 'spec_ready';
-  const isConfirmed = draftStatus === 'confirmed';
+  const isConfirmed = draftStatus === 'confirmed' && !isMaterialized;
 
   return (
     <div className="relative flex flex-1 flex-col bg-primary h-full overflow-hidden">
@@ -330,6 +338,17 @@ export function CreateChatBoxContainer() {
               >
                 {materializeMutation.isPending ? '...' : tTasks('conversation.planning.materializeButton')}
               </button>
+            )}
+            {isMaterialized && (
+              <div className="ml-auto flex items-center gap-base">
+                <span className="text-xs text-success animate-pulse">Workflow Running</span>
+                <button
+                  onClick={handleOpenBoard}
+                  className="text-xs px-base py-half rounded bg-brand text-white hover:bg-brand/90"
+                >
+                  {t('workspace.openBoard', { defaultValue: 'Open Board' })}
+                </button>
+              </div>
             )}
           </div>
 
