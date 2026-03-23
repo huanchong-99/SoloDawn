@@ -357,6 +357,43 @@ impl ModelConfig {
         Ok(item.map(Self::with_has_api_key))
     }
 
+    /// Get only user-configured models (non-official) that have API keys.
+    /// The agent must never see official preset models without real credentials.
+    pub async fn find_user_configured(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
+        let items = sqlx::query_as::<_, ModelConfig>(
+            r"
+            SELECT id, cli_type_id, name, display_name, api_model_id,
+                   is_default, is_official, created_at, updated_at,
+                   encrypted_api_key, base_url, api_type
+            FROM model_config
+            WHERE is_official = 0 AND encrypted_api_key IS NOT NULL
+            ORDER BY cli_type_id, is_default DESC, name ASC
+            ",
+        )
+        .fetch_all(pool)
+        .await?;
+        Ok(Self::vec_with_has_api_key(items))
+    }
+
+    /// Return `(cli_type_id, model_config_id)` of the first user-configured
+    /// model, or `None` if no user models exist. Uses `LIMIT 1`.
+    pub async fn first_user_configured_ids(
+        pool: &SqlitePool,
+    ) -> sqlx::Result<Option<(String, String)>> {
+        let row = sqlx::query_as::<_, (String, String)>(
+            r"
+            SELECT cli_type_id, id
+            FROM model_config
+            WHERE is_official = 0 AND encrypted_api_key IS NOT NULL
+            ORDER BY cli_type_id, is_default DESC, name ASC
+            LIMIT 1
+            ",
+        )
+        .fetch_optional(pool)
+        .await?;
+        Ok(row)
+    }
+
     /// Get all model configs
     pub async fn find_all(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
         let items = sqlx::query_as::<_, ModelConfig>(

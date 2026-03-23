@@ -358,7 +358,9 @@ impl OrchestratorAgent {
         let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, &workflow.id).await?;
         let terminals = db::models::Terminal::find_by_workflow(&self.db.pool, &workflow.id).await?;
         let cli_types = db::models::CliType::find_all(&self.db.pool).await?;
-        let model_configs = db::models::ModelConfig::find_all(&self.db.pool).await?;
+        // Only show user-configured models with API keys to the agent.
+        // Official preset models without credentials must never appear.
+        let model_configs = db::models::ModelConfig::find_user_configured(&self.db.pool).await?;
         let workflow_commands =
             db::models::WorkflowCommand::find_by_workflow(&self.db.pool, &workflow.id).await?;
 
@@ -416,11 +418,9 @@ impl OrchestratorAgent {
         let cli_summary = cli_types
             .iter()
             .map(|cli| {
-                // Only show models that have API keys configured — the agent
-                // must not pick models without credentials.
                 let models: Vec<String> = model_configs
                     .iter()
-                    .filter(|model| model.cli_type_id == cli.id && model.has_api_key)
+                    .filter(|model| model.cli_type_id == cli.id)
                     .map(|model| format!("{} ({})", model.id, model.display_name))
                     .collect();
                 format!(
@@ -3402,20 +3402,28 @@ impl OrchestratorAgent {
                     state.workflow_id.clone()
                 };
                 // Validate cli_type_id and model_config_id — LLM may return invalid IDs.
-                // Default to cli-codex/codex-gpt53 since Codex CLI works with the OpenAI-compatible
-                // endpoint; Claude Code CLI requires an Anthropic-compatible endpoint which may not
-                // be available.
+                // Fallback is resolved lazily (only on validation failure).
                 let valid_cli = if db::models::CliType::find_by_id(&self.db.pool, &cli_type_id).await.is_ok() {
                     cli_type_id
                 } else {
-                    tracing::warn!(invalid_cli = %cli_type_id, "LLM provided invalid cli_type_id, defaulting to cli-codex");
-                    "cli-codex".to_string()
+                    let (fb_cli, _) = db::models::ModelConfig::first_user_configured_ids(&self.db.pool)
+                        .await
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| ("cli-codex".to_string(), "cli-codex".to_string()));
+                    tracing::warn!(invalid_cli = %cli_type_id, fallback = %fb_cli, "LLM provided invalid cli_type_id, using fallback");
+                    fb_cli
                 };
                 let valid_model = if db::models::ModelConfig::find_by_id(&self.db.pool, &model_config_id).await.is_ok() {
                     model_config_id
                 } else {
-                    tracing::warn!(invalid_model = %model_config_id, "LLM provided invalid model_config_id, defaulting to codex-gpt53");
-                    "codex-gpt53".to_string()
+                    let (_, fb_model) = db::models::ModelConfig::first_user_configured_ids(&self.db.pool)
+                        .await
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| ("cli-codex".to_string(), "cli-codex".to_string()));
+                    tracing::warn!(invalid_model = %model_config_id, fallback = %fb_model, "LLM provided invalid model_config_id, using fallback");
+                    fb_model
                 };
                 let planning_complete = self.task_planning_complete(&task_id).await;
                 self.runtime_actions()?

@@ -430,6 +430,15 @@ async fn materialize_draft(
         (None, None) => None,
     };
 
+    // Use the first user-configured model for merge terminal defaults
+    // so we never reference official preset IDs that lack API keys.
+    let (default_cli_id, default_model_id) =
+        db::models::ModelConfig::first_user_configured_ids(&deployment.db().pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| ("cli-codex".to_string(), "cli-codex".to_string()));
+
     let mut workflow = Workflow {
         id: workflow_id.clone(),
         project_id: draft.project_id,
@@ -451,8 +460,8 @@ async fn materialize_draft(
         error_terminal_enabled: false,
         error_terminal_cli_id: None,
         error_terminal_model_id: None,
-        merge_terminal_cli_id: "cli-claude-code".to_string(),
-        merge_terminal_model_id: "model-claude-sonnet".to_string(),
+        merge_terminal_cli_id: default_cli_id,
+        merge_terminal_model_id: default_model_id,
         target_branch: "main".to_string(),
         git_watcher_enabled: true,
         ready_at: None,
