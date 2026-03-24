@@ -12,6 +12,7 @@ import type { ModelConfig as WorkflowModelConfig } from '@/components/workflow/t
 import { useModelConfigForExecutor } from '@/hooks/useModelConfigForExecutor';
 import {
   planningDraftsApi,
+  feishuApi,
   type PlanningMessageResponse,
 } from '@/lib/api';
 import {
@@ -20,6 +21,7 @@ import {
   useSendPlanningMessage,
   useConfirmDraft,
   useMaterializeDraft,
+  useTogglePlanningFeishuSync,
 } from '@/hooks/usePlanningDraft';
 import { CreateChatBox } from '../primitives/CreateChatBox';
 
@@ -88,6 +90,22 @@ export function CreateChatBoxContainer() {
   const sendMessageMutation = useSendPlanningMessage();
   const confirmMutation = useConfirmDraft();
   const materializeMutation = useMaterializeDraft();
+  const feishuSyncMutation = useTogglePlanningFeishuSync();
+
+  // Feishu connection status (only checked when in planning mode)
+  const [feishuConnected, setFeishuConnected] = useState(false);
+  useEffect(() => {
+    if (!planningDraftId) return;
+    let cancelled = false;
+    feishuApi.getStatus().then((status) => {
+      if (!cancelled) {
+        setFeishuConnected(status.connectionStatus === 'connected');
+      }
+    }).catch(() => {
+      if (!cancelled) setFeishuConnected(false);
+    });
+    return () => { cancelled = true; };
+  }, [planningDraftId]);
 
   const planningMessages = serverMessages ?? localMessages;
 
@@ -312,6 +330,30 @@ export function CreateChatBoxContainer() {
     }
   }, [materializedWorkflowId, projectId, navigate]);
 
+  // === Feishu sync toggle ===
+  const handleToggleFeishuSync = useCallback(async () => {
+    if (!planningDraftId || !planningDraft) return;
+    const currentlyOn = planningDraft.feishuSync;
+    if (currentlyOn) {
+      // Turn off
+      feishuSyncMutation.mutate({
+        draftId: planningDraftId,
+        enabled: false,
+        syncHistory: false,
+      });
+    } else {
+      // Turn on — ask about history sync
+      const syncHistory = window.confirm(
+        '是否同步历史消息到飞书？'
+      );
+      feishuSyncMutation.mutate({
+        draftId: planningDraftId,
+        enabled: true,
+        syncHistory,
+      });
+    }
+  }, [planningDraftId, planningDraft, feishuSyncMutation]);
+
   // Determine error
   const displayError = (() => {
     if (submitError) return submitError;
@@ -357,6 +399,22 @@ export function CreateChatBoxContainer() {
               <span className="text-xs px-1 py-px rounded bg-brand/10 text-brand">
                 {tTasks(`conversation.planning.status.${draftStatus}`)}
               </span>
+            )}
+            {feishuConnected && (
+              <button
+                type="button"
+                onClick={handleToggleFeishuSync}
+                disabled={feishuSyncMutation.isPending}
+                className={`flex items-center gap-1 rounded px-half py-px text-xs transition-colors ${
+                  planningDraft?.feishuSync
+                    ? 'bg-brand/20 text-brand hover:bg-brand/30'
+                    : 'bg-secondary text-low hover:text-normal'
+                }`}
+                title={planningDraft?.feishuSync ? '飞书同步已开启' : '飞书同步已关闭'}
+              >
+                <span className={`inline-block size-1.5 rounded-full ${planningDraft?.feishuSync ? 'bg-brand' : 'bg-secondary'}`} />
+                飞书同步
+              </button>
             )}
             {isSpecReady && (
               <button

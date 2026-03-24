@@ -97,6 +97,33 @@ export function useMaterializeDraft() {
   });
 }
 
+/** Toggle Feishu sync for a planning draft */
+export function useTogglePlanningFeishuSync() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      draftId,
+      enabled,
+      syncHistory,
+    }: {
+      draftId: string;
+      enabled: boolean;
+      syncHistory: boolean;
+    }): Promise<PlanningDraftResponse> => {
+      return planningDraftsApi.toggleFeishuSync(draftId, {
+        enabled,
+        syncHistory,
+      });
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({
+        queryKey: planningDraftKeys.byId(data.id),
+      });
+    },
+  });
+}
+
 /** Fetch planning draft messages associated with a workspace */
 export function useWorkspacePlanningMessages(workspaceId: string | null) {
   return useQuery({

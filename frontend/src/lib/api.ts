@@ -513,6 +513,7 @@ export interface PlanningDraftResponse {
   technicalSpec: string | null;
   workflowSeed: string | null;
   materializedWorkflowId: string | null;
+  feishuSync: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -594,6 +595,20 @@ export const planningDraftsApi = {
       { method: 'POST' }
     );
     return handleApiResponse<MaterializeResponse>(response);
+  },
+
+  toggleFeishuSync: async (
+    draftId: string,
+    data: { enabled: boolean; syncHistory: boolean }
+  ): Promise<PlanningDraftResponse> => {
+    const response = await makeRequest(
+      `/api/planning-drafts/${draftId}/feishu-sync`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+    return handleApiResponse<PlanningDraftResponse>(response);
   },
 };
 

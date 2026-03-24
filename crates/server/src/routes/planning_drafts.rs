@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, Query, State},
     response::Json as ResponseJson,
     routing::{get, post, put},
@@ -18,7 +18,7 @@ use services::services::orchestrator::{
 use utils::response::ApiResponse;
 use uuid::Uuid;
 
-use crate::{DeploymentImpl, error::ApiError};
+use crate::{DeploymentImpl, error::ApiError, feishu_handle::SharedFeishuHandle};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +57,7 @@ pub struct DraftResponse {
     pub technical_spec: Option<String>,
     pub workflow_seed: Option<String>,
     pub materialized_workflow_id: Option<String>,
+    pub feishu_sync: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -72,6 +73,7 @@ impl From<PlanningDraft> for DraftResponse {
             technical_spec: d.technical_spec,
             workflow_seed: d.workflow_seed,
             materialized_workflow_id: d.materialized_workflow_id,
+            feishu_sync: d.feishu_sync,
             created_at: d.created_at.to_rfc3339(),
             updated_at: d.updated_at.to_rfc3339(),
         }
@@ -107,6 +109,7 @@ pub fn planning_draft_routes() -> Router<DeploymentImpl> {
         .route("/{draft_id}/spec", put(update_spec))
         .route("/{draft_id}/confirm", post(confirm_draft))
         .route("/{draft_id}/materialize", post(materialize_draft))
+        .route("/{draft_id}/feishu-sync", post(toggle_feishu_sync))
         .route(
             "/{draft_id}/messages",
             get(list_messages).post(send_message),
@@ -252,6 +255,7 @@ async fn confirm_draft(
 
 async fn send_message(
     State(deployment): State<DeploymentImpl>,
+    Extension(feishu_handle): Extension<SharedFeishuHandle>,
     Path(draft_id): Path<String>,
     Json(req): Json<SendMessageRequest>,
 ) -> Result<ResponseJson<ApiResponse<Vec<MessageResponse>>>, ApiError> {
@@ -368,6 +372,39 @@ async fn send_message(
         );
     }
 
+    // Push new messages to Feishu if sync is enabled
+    if draft.feishu_sync {
+        if let Some(ref chat_id) = draft.feishu_chat_id {
+            let handle_guard = feishu_handle.read().await;
+            if let Some(ref h) = *handle_guard {
+                if *h.connected.read().await {
+                    let messenger = h.messenger.clone();
+                    let chat_id = chat_id.clone();
+                    let messages_to_push: Vec<_> = result
+                        .iter()
+                        .map(|m| (m.role.clone(), m.content.clone()))
+                        .collect();
+                    drop(handle_guard);
+                    tokio::spawn(async move {
+                        for (role, content) in messages_to_push {
+                            let prefix = if role == "user" { "[User]" } else { "[Assistant]" };
+                            let text = format!("{prefix} {content}");
+                            let truncated = if text.len() > 4000 {
+                                format!("{}...(truncated)", &text[..4000])
+                            } else {
+                                text
+                            };
+                            if let Err(e) = messenger.send_text(&chat_id, &truncated).await {
+                                tracing::warn!("Failed to push planning message to Feishu: {e}");
+                                break;
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    }
+
     Ok(Json(ApiResponse::success(result)))
 }
 
@@ -413,6 +450,127 @@ async fn list_messages(
 
     let dtos: Vec<MessageResponse> = messages.into_iter().map(MessageResponse::from).collect();
     Ok(Json(ApiResponse::success(dtos)))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FeishuSyncRequest {
+    enabled: bool,
+    sync_history: bool,
+}
+
+async fn toggle_feishu_sync(
+    State(deployment): State<DeploymentImpl>,
+    Extension(feishu_handle): Extension<SharedFeishuHandle>,
+    Path(draft_id): Path<String>,
+    Json(req): Json<FeishuSyncRequest>,
+) -> Result<ResponseJson<ApiResponse<DraftResponse>>, ApiError> {
+    let draft = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("Planning draft {draft_id} not found")))?;
+
+    if !req.enabled {
+        // Turning off — just clear feishu_sync
+        PlanningDraft::update_feishu_sync(&deployment.db().pool, &draft_id, false, None)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to update feishu sync: {e}")))?;
+    } else {
+        // Turning on — resolve chat_id from feishu handle
+        let handle_guard = feishu_handle.read().await;
+        let Some(ref h) = *handle_guard else {
+            return Err(ApiError::Conflict(
+                "Feishu connector is not running".to_string(),
+            ));
+        };
+
+        if !*h.connected.read().await {
+            return Err(ApiError::Conflict(
+                "Feishu is not connected".to_string(),
+            ));
+        }
+
+        let messenger = h.messenger.clone();
+
+        // Resolve chat_id: last received → DB binding
+        let last_id = h.last_chat_id.try_read().ok().and_then(|g| g.clone());
+        drop(handle_guard);
+
+        let chat_id = if let Some(id) = last_id {
+            id
+        } else {
+            let binding = db::models::ExternalConversationBinding::find_latest_active(
+                &deployment.db().pool,
+                "feishu",
+            )
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to query bindings: {e}")))?;
+
+            match binding {
+                Some(b) => b.conversation_id,
+                None => {
+                    return Err(ApiError::BadRequest(
+                        "No Feishu chat found. Send a message to the bot in Feishu first."
+                            .to_string(),
+                    ));
+                }
+            }
+        };
+
+        PlanningDraft::update_feishu_sync(
+            &deployment.db().pool,
+            &draft_id,
+            true,
+            Some(&chat_id),
+        )
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to update feishu sync: {e}")))?;
+
+        // If sync_history, push existing messages to Feishu
+        if req.sync_history {
+            let messages =
+                PlanningDraftMessage::list_by_draft(&deployment.db().pool, &draft_id)
+                    .await
+                    .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
+
+            let chat_id_clone = chat_id.clone();
+            let draft_name = draft.name.clone();
+            tokio::spawn(async move {
+                // Send a header message
+                if let Err(e) = messenger
+                    .send_text(
+                        &chat_id_clone,
+                        &format!("[Planning Draft: {}] Syncing conversation history...", draft_name),
+                    )
+                    .await
+                {
+                    tracing::warn!("Failed to send Feishu history header: {e}");
+                    return;
+                }
+                for msg in &messages {
+                    let prefix = if msg.role == "user" { "[User]" } else { "[Assistant]" };
+                    let text = format!("{prefix} {}", msg.content);
+                    // Truncate very long messages for Feishu
+                    let truncated = if text.len() > 4000 {
+                        format!("{}...(truncated)", &text[..4000])
+                    } else {
+                        text
+                    };
+                    if let Err(e) = messenger.send_text(&chat_id_clone, &truncated).await {
+                        tracing::warn!("Failed to push planning message to Feishu: {e}");
+                        break;
+                    }
+                }
+            });
+        }
+    }
+
+    let updated = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| ApiError::Internal("Draft disappeared after update".to_string()))?;
+
+    Ok(Json(ApiResponse::success(DraftResponse::from(updated))))
 }
 
 #[derive(Debug, Serialize)]

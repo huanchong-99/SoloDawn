@@ -27,6 +27,8 @@ pub struct PlanningDraft {
     pub planner_api_key: Option<String>,
     pub confirmed_at: Option<DateTime<Utc>>,
     pub materialized_workflow_id: Option<String>,
+    pub feishu_sync: bool,
+    pub feishu_chat_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -124,6 +126,8 @@ impl PlanningDraft {
             planner_api_key: None,
             confirmed_at: None,
             materialized_workflow_id: None,
+            feishu_sync: false,
+            feishu_chat_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -137,8 +141,9 @@ impl PlanningDraft {
                 requirement_summary, technical_spec, workflow_seed,
                 planner_model_id, planner_api_type, planner_base_url, planner_api_key,
                 confirmed_at, materialized_workflow_id,
+                feishu_sync, feishu_chat_id,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
             ",
         )
         .bind(&draft.id)
@@ -154,6 +159,8 @@ impl PlanningDraft {
         .bind(&draft.planner_api_key)
         .bind(draft.confirmed_at)
         .bind(&draft.materialized_workflow_id)
+        .bind(draft.feishu_sync)
+        .bind(&draft.feishu_chat_id)
         .bind(draft.created_at)
         .bind(draft.updated_at)
         .execute(pool)
@@ -266,6 +273,23 @@ impl PlanningDraft {
         )
         .bind(id)
         .bind(workflow_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn update_feishu_sync(
+        pool: &SqlitePool,
+        id: &str,
+        enabled: bool,
+        chat_id: Option<&str>,
+    ) -> sqlx::Result<()> {
+        sqlx::query(
+            "UPDATE planning_draft SET feishu_sync = ?2, feishu_chat_id = ?3, updated_at = datetime('now') WHERE id = ?1",
+        )
+        .bind(id)
+        .bind(enabled)
+        .bind(chat_id)
         .execute(pool)
         .await?;
         Ok(())
