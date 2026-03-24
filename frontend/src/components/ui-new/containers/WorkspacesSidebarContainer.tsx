@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useWorkspaceContext } from '@/contexts/WorkspaceContext';
 import { useScratch } from '@/hooks/useScratch';
 import { ScratchType, type DraftWorkspaceData } from 'shared/types';
@@ -52,6 +53,7 @@ export function WorkspacesSidebarContainer() {
   }, [draftScratch]);
 
   const { data: conciergeSessions } = useConciergeSessions();
+  const navigate = useNavigate();
 
   // Fetch planning drafts (cross-project) and merge into the workspace list
   const { data: planningDrafts } = usePlanningDrafts();
@@ -67,12 +69,22 @@ export function WorkspacesSidebarContainer() {
     return [...draftWorkspaces, ...activeWorkspaces];
   }, [planningDrafts, activeWorkspaces]);
 
+  // Route draft clicks to the create page with draftId param
+  const handleSelectWorkspace = useCallback((id: string) => {
+    if (id.startsWith('draft-')) {
+      const draftId = id.slice(6); // Remove 'draft-' prefix
+      navigate(`/workspaces/create?draftId=${draftId}`);
+    } else {
+      selectWorkspace(id);
+    }
+  }, [navigate, selectWorkspace]);
+
   return (
     <WorkspacesSidebar
       workspaces={combinedWorkspaces}
       archivedWorkspaces={archivedWorkspaces}
       selectedWorkspaceId={selectedWorkspaceId ?? null}
-      onSelectWorkspace={selectWorkspace}
+      onSelectWorkspace={handleSelectWorkspace}
       searchQuery={searchQuery}
       onSearchChange={setSearchQuery}
       onAddWorkspace={navigateToCreate}
