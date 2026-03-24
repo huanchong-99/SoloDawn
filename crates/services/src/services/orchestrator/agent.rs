@@ -664,9 +664,10 @@ impl OrchestratorAgent {
         Ok(false)
     }
 
-    /// Auto-complete tasks where all terminals are completed but the task
-    /// itself is still in running status. This handles cases where the Agent
-    /// LLM fails to emit a complete_task instruction after terminal completion.
+    /// Auto-complete tasks that are stuck:
+    /// 1. Running tasks whose terminals are all completed/failed
+    /// 2. Pending tasks with no terminals (Agent failed to create them)
+    ///    — only after a grace period to give the Agent time to plan
     async fn auto_complete_stalled_tasks(&self) -> anyhow::Result<()> {
         let workflow_id = {
             let state = self.state.read().await;
@@ -677,32 +678,53 @@ impl OrchestratorAgent {
         let terminals =
             db::models::Terminal::find_by_workflow(&self.db.pool, &workflow_id).await?;
 
+        // Check if there are ANY active terminals in the whole workflow
+        let any_active_terminal = terminals.iter().any(|t| {
+            matches!(t.status.as_str(), "not_started" | "starting" | "waiting" | "working")
+        });
+
         for task in &tasks {
-            if task.status != "running" {
-                continue;
-            }
-            let task_terminals: Vec<_> = terminals
-                .iter()
-                .filter(|t| t.workflow_task_id == task.id)
-                .collect();
-            if task_terminals.is_empty() {
-                continue;
-            }
-            let all_done = task_terminals
-                .iter()
-                .all(|t| t.status == "completed" || t.status == "failed");
-            if all_done {
-                tracing::info!(
-                    task_id = %task.id,
-                    task_name = %task.name,
-                    "Auto-completing task: all terminals finished but task still running"
-                );
-                db::models::WorkflowTask::update_status(
-                    &self.db.pool,
-                    &task.id,
-                    "completed",
-                )
-                .await?;
+            match task.status.as_str() {
+                "running" => {
+                    // Case 1: running task with all terminals done
+                    let task_terminals: Vec<_> = terminals
+                        .iter()
+                        .filter(|t| t.workflow_task_id == task.id)
+                        .collect();
+                    if task_terminals.is_empty() {
+                        continue;
+                    }
+                    let all_done = task_terminals
+                        .iter()
+                        .all(|t| t.status == "completed" || t.status == "failed");
+                    if all_done {
+                        tracing::info!(
+                            task_id = %task.id, task_name = %task.name,
+                            "Auto-completing task: all terminals finished but task still running"
+                        );
+                        db::models::WorkflowTask::update_status(
+                            &self.db.pool, &task.id, "completed",
+                        ).await?;
+                    }
+                }
+                "pending" => {
+                    // Case 2: pending task with no terminals AND no other active
+                    // work happening (grace: only act when workflow is otherwise idle)
+                    let task_terminals: Vec<_> = terminals
+                        .iter()
+                        .filter(|t| t.workflow_task_id == task.id)
+                        .collect();
+                    if task_terminals.is_empty() && !any_active_terminal {
+                        tracing::info!(
+                            task_id = %task.id, task_name = %task.name,
+                            "Auto-completing orphaned pending task: no terminals and no active work"
+                        );
+                        db::models::WorkflowTask::update_status(
+                            &self.db.pool, &task.id, "completed",
+                        ).await?;
+                    }
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -4882,14 +4904,6 @@ impl OrchestratorAgent {
             return Ok(());
         }
 
-        let planning_complete = {
-            let state = self.state.read().await;
-            state.workflow_planning_complete
-        };
-        if !planning_complete {
-            return Ok(());
-        }
-
         let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, workflow_id).await?;
         let terminals = db::models::Terminal::find_by_workflow(&self.db.pool, workflow_id).await?;
         let has_runnable_terminals = terminals.iter().any(|terminal| {
@@ -4901,7 +4915,10 @@ impl OrchestratorAgent {
         if has_runnable_terminals {
             return Ok(());
         }
-        if !tasks.is_empty() && tasks.iter().any(|task| task.status != TASK_STATUS_COMPLETED) {
+        // Auto-sync to completed when all tasks are done and no terminals are running,
+        // regardless of planning_complete flag. The LLM sometimes fails to emit
+        // set_workflow_planning_complete, but if all work is done, we should complete.
+        if tasks.is_empty() || tasks.iter().any(|task| task.status != TASK_STATUS_COMPLETED) {
             return Ok(());
         }
 

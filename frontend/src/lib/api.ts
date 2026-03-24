@@ -532,6 +532,11 @@ export interface MaterializeResponse {
 }
 
 export const planningDraftsApi = {
+  list: async (): Promise<PlanningDraftResponse[]> => {
+    const response = await makeRequest('/api/planning-drafts');
+    return handleApiResponse<PlanningDraftResponse[]>(response);
+  },
+
   create: async (data: {
     projectId: string;
     name?: string;

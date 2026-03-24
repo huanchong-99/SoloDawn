@@ -9,6 +9,8 @@ import {
 } from '@/stores/useUiPreferencesStore';
 import { WorkspacesSidebar } from '@/components/ui-new/views/WorkspacesSidebar';
 import { useConciergeSessions } from '@/hooks/useConcierge';
+import { usePlanningDrafts } from '@/hooks/usePlanningDraft';
+import type { Workspace } from '@/components/ui-new/hooks/useWorkspaces';
 
 // Fixed UUID for the universal workspace draft (same as in useCreateModeState.ts)
 const DRAFT_WORKSPACE_ID = '00000000-0000-0000-0000-000000000001';
@@ -51,9 +53,23 @@ export function WorkspacesSidebarContainer() {
 
   const { data: conciergeSessions } = useConciergeSessions();
 
+  // Fetch planning drafts (cross-project) and merge into the workspace list
+  const { data: planningDrafts } = usePlanningDrafts();
+  const combinedWorkspaces = useMemo(() => {
+    const draftWorkspaces: Workspace[] = (planningDrafts ?? []).map((draft) => ({
+      id: `draft-${draft.id}`,
+      taskId: draft.id,
+      name: draft.name || 'Untitled',
+      description: draft.status,
+      isRunning: draft.status === 'gathering' || draft.status === 'spec_ready' || draft.status === 'confirmed',
+      latestProcessStatus: draft.status === 'materialized' ? 'completed' as const : 'running' as const,
+    }));
+    return [...draftWorkspaces, ...activeWorkspaces];
+  }, [planningDrafts, activeWorkspaces]);
+
   return (
     <WorkspacesSidebar
-      workspaces={activeWorkspaces}
+      workspaces={combinedWorkspaces}
       archivedWorkspaces={archivedWorkspaces}
       selectedWorkspaceId={selectedWorkspaceId ?? null}
       onSelectWorkspace={selectWorkspace}

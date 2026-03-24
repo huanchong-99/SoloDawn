@@ -13,6 +13,15 @@ export const planningDraftKeys = {
     ['planningDrafts', draftId, 'messages'] as const,
 };
 
+/** Fetch all planning drafts (cross-project) */
+export function usePlanningDrafts() {
+  return useQuery({
+    queryKey: planningDraftKeys.all,
+    queryFn: () => planningDraftsApi.list(),
+    staleTime: 30_000,
+  });
+}
+
 /** Fetch a single planning draft by ID */
 export function usePlanningDraft(draftId: string | null) {
   return useQuery({
