@@ -65,9 +65,24 @@ export function WorkspacesSidebarContainer() {
       description: draft.status,
       isRunning: draft.status === 'gathering' || draft.status === 'spec_ready' || draft.status === 'confirmed',
       latestProcessStatus: draft.status === 'materialized' ? 'completed' as const : 'running' as const,
+      sortKey: draft.updatedAt ?? draft.createdAt,
     }));
-    return [...draftWorkspaces, ...activeWorkspaces];
-  }, [planningDrafts, activeWorkspaces]);
+    const conciergeWorkspaces: Workspace[] = (conciergeSessions ?? []).map((session) => ({
+      id: `concierge-${session.id}`,
+      taskId: session.id,
+      name: `${session.feishuSync ? '\u{1F517} ' : ''}${session.name || session.id.slice(0, 8)}`,
+      description: '',
+      isRunning: !!session.activeWorkflowId,
+      sortKey: session.updatedAt ?? session.createdAt,
+    }));
+    const all = [...draftWorkspaces, ...conciergeWorkspaces, ...activeWorkspaces];
+    all.sort((a, b) => {
+      const ta = a.sortKey ?? '';
+      const tb = b.sortKey ?? '';
+      return tb.localeCompare(ta); // newest first
+    });
+    return all;
+  }, [planningDrafts, activeWorkspaces, conciergeSessions]);
 
   // Route clicks based on item type
   const handleSelectWorkspace = useCallback((id: string) => {
@@ -96,7 +111,6 @@ export function WorkspacesSidebarContainer() {
       onSelectCreate={navigateToCreate}
       showArchive={showArchive}
       onShowArchiveChange={setShowArchive}
-      conciergeSessions={conciergeSessions ?? []}
     />
   );
 }

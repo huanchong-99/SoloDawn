@@ -29,6 +29,14 @@ pub struct ConciergeSession {
     pub llm_base_url: Option<String>,
     #[serde(skip_serializing)]
     pub llm_api_key_encrypted: Option<String>,
+    /// Push tool call events to Feishu when true.
+    pub sync_tools: bool,
+    /// Push terminal status changes to Feishu when true.
+    pub sync_terminal: bool,
+    /// Push workflow progress events to Feishu when true.
+    pub sync_progress: bool,
+    /// Send completion report on workflow/task completion.
+    pub notify_on_completion: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -108,6 +116,10 @@ impl ConciergeSession {
             llm_api_type: None,
             llm_base_url: None,
             llm_api_key_encrypted: None,
+            sync_tools: false,
+            sync_terminal: false,
+            sync_progress: false,
+            notify_on_completion: true,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -120,8 +132,9 @@ impl ConciergeSession {
                 id, name, active_project_id, active_workflow_id, active_planning_draft_id,
                 feishu_sync, progress_notifications,
                 llm_model_id, llm_api_type, llm_base_url, llm_api_key_encrypted,
+                sync_tools, sync_terminal, sync_progress, notify_on_completion,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
             ",
         )
         .bind(&session.id)
@@ -135,6 +148,10 @@ impl ConciergeSession {
         .bind(&session.llm_api_type)
         .bind(&session.llm_base_url)
         .bind(&session.llm_api_key_encrypted)
+        .bind(session.sync_tools)
+        .bind(session.sync_terminal)
+        .bind(session.sync_progress)
+        .bind(session.notify_on_completion)
         .bind(session.created_at)
         .bind(session.updated_at)
         .execute(pool)
@@ -257,6 +274,33 @@ impl ConciergeSession {
         Ok(())
     }
 
+    pub async fn update_sync_toggles(
+        pool: &SqlitePool,
+        id: &str,
+        sync_tools: bool,
+        sync_terminal: bool,
+        sync_progress: bool,
+        notify_on_completion: bool,
+    ) -> sqlx::Result<()> {
+        sqlx::query(
+            r"
+            UPDATE concierge_session SET
+                sync_tools = ?2, sync_terminal = ?3,
+                sync_progress = ?4, notify_on_completion = ?5,
+                updated_at = datetime('now')
+            WHERE id = ?1
+            ",
+        )
+        .bind(id)
+        .bind(sync_tools)
+        .bind(sync_terminal)
+        .bind(sync_progress)
+        .bind(notify_on_completion)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn update_llm_config(
         pool: &SqlitePool,
         id: &str,
@@ -293,6 +337,22 @@ impl ConciergeSession {
         .execute(pool)
         .await?;
         Ok(())
+    }
+
+    /// Find all sessions bound to a specific workflow with Feishu sync enabled.
+    pub async fn find_by_workflow_with_feishu(
+        pool: &SqlitePool,
+        workflow_id: &str,
+    ) -> sqlx::Result<Vec<Self>> {
+        sqlx::query_as::<_, Self>(
+            r"
+            SELECT * FROM concierge_session
+            WHERE active_workflow_id = ?1 AND feishu_sync = 1
+            ",
+        )
+        .bind(workflow_id)
+        .fetch_all(pool)
+        .await
     }
 
     pub async fn delete(pool: &SqlitePool, id: &str) -> sqlx::Result<u64> {

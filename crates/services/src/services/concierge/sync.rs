@@ -86,12 +86,29 @@ impl ConciergeBroadcaster {
     /// Broadcast an event to all channels of a session.
     ///
     /// - Web WS: sends via broadcast channel
-    /// - Feishu: sends text message (only for NewMessage events, and only if feishu_sync is on)
+    /// - Feishu: sends text message (messages always if feishu_sync is on;
+    ///   tool events only if sync_tools is also on)
     pub async fn broadcast(
         &self,
         session_id: &str,
         event: ConciergeEvent,
         feishu_sync: bool,
+        source_provider: Option<&str>,
+    ) {
+        self.broadcast_with_toggles(session_id, event, feishu_sync, false, source_provider)
+            .await;
+    }
+
+    /// Broadcast with granular sync toggles.
+    ///
+    /// - `feishu_sync`: master on/off for Feishu push
+    /// - `sync_tools`: when true, also push `ToolExecuting` events to Feishu
+    pub async fn broadcast_with_toggles(
+        &self,
+        session_id: &str,
+        event: ConciergeEvent,
+        feishu_sync: bool,
+        sync_tools: bool,
         source_provider: Option<&str>,
     ) {
         // Push to Web WS subscribers
@@ -100,27 +117,48 @@ impl ConciergeBroadcaster {
             let _ = sender.send(event.clone());
         }
 
-        // Push to Feishu (if sync enabled and not echoing back to source)
+        // Push to Feishu (if sync enabled)
         if feishu_sync {
-            if let ConciergeEvent::NewMessage { ref message } = event {
-                // Don't echo back to Feishu if the message came from Feishu
-                let from_feishu = source_provider == Some("feishu");
-                if !from_feishu {
-                    if let Some(target) = self.feishu_channels.get(session_id) {
-                        let text = message.content.clone();
-                        let chat_id = target.chat_id.clone();
-                        let sender = target.sender.clone();
-                        // Send asynchronously, don't block
-                        tokio::spawn(async move {
-                            if let Err(e) = sender.send_text(&chat_id, &text).await {
-                                tracing::warn!(
-                                    "Failed to push concierge message to Feishu: {e}"
-                                );
-                            }
-                        });
+            match &event {
+                ConciergeEvent::NewMessage { message } => {
+                    // Don't echo back to Feishu if the message came from Feishu
+                    let from_feishu = source_provider == Some("feishu");
+                    if !from_feishu {
+                        self.push_text_to_feishu(session_id, &message.content)
+                            .await;
                     }
                 }
+                ConciergeEvent::ToolExecuting { tool, status } if sync_tools => {
+                    let text = format!("\u{1f527} {tool}: {status}");
+                    self.push_text_to_feishu(session_id, &text).await;
+                }
+                _ => {} // SessionUpdated, ToolExecuting without sync_tools — skip
             }
+        }
+    }
+
+    /// Push a completion notification to all Feishu-synced sessions for a workflow.
+    pub async fn push_completion_notification(
+        &self,
+        session_id: &str,
+        text: &str,
+    ) {
+        self.push_text_to_feishu(session_id, text).await;
+    }
+
+    /// Internal helper: push text to the Feishu target for a session.
+    async fn push_text_to_feishu(&self, session_id: &str, text: &str) {
+        if let Some(target) = self.feishu_channels.get(session_id) {
+            let text = text.to_string();
+            let chat_id = target.chat_id.clone();
+            let sender = target.sender.clone();
+            tokio::spawn(async move {
+                if let Err(e) = sender.send_text(&chat_id, &text).await {
+                    tracing::warn!(
+                        "Failed to push concierge message to Feishu: {e}"
+                    );
+                }
+            });
         }
     }
 

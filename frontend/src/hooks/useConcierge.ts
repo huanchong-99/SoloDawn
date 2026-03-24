@@ -104,6 +104,9 @@ export function useUpdateConciergeSettings() {
       queryClient.invalidateQueries({
         queryKey: conciergeKeys.session(result.id),
       });
+      queryClient.invalidateQueries({
+        queryKey: conciergeKeys.sessions(),
+      });
     },
   });
 }

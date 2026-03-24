@@ -127,13 +127,14 @@ impl ConciergeAgent {
 
                 // Broadcast tool execution status
                 self.broadcaster
-                    .broadcast(
+                    .broadcast_with_toggles(
                         session_id,
                         ConciergeEvent::ToolExecuting {
                             tool: tool_call.tool.clone(),
                             status: "executing".to_string(),
                         },
                         session.feishu_sync,
+                        session.sync_tools,
                         None,
                     )
                     .await;
@@ -160,13 +161,14 @@ impl ConciergeAgent {
 
                 // Broadcast tool completion
                 self.broadcaster
-                    .broadcast(
+                    .broadcast_with_toggles(
                         session_id,
                         ConciergeEvent::ToolExecuting {
                             tool: tool_call.tool.clone(),
                             status: "completed".to_string(),
                         },
                         session.feishu_sync,
+                        session.sync_tools,
                         None,
                     )
                     .await;

@@ -26,6 +26,8 @@ export interface SidebarWorkspace {
   latestProcessCompletedAt?: string;
   latestProcessStatus?: 'running' | 'completed' | 'failed' | 'killed';
   prStatus?: 'open' | 'merged' | 'closed' | 'unknown';
+  /** ISO timestamp used for sorting sidebar items (newest first) */
+  sortKey?: string;
 }
 
 // Keep the old export name for backwards compatibility
@@ -69,6 +71,7 @@ function toSidebarWorkspace(
     latestProcessCompletedAt: summary?.latest_process_completed_at ?? undefined,
     latestProcessStatus: summary?.latest_process_status ?? undefined,
     prStatus: summary?.pr_status ?? undefined,
+    sortKey: ws.updatedAt ?? ws.createdAt,
   };
 }
 

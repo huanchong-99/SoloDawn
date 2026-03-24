@@ -5,7 +5,6 @@ import {
 } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { Workspace } from '@/components/ui-new/hooks/useWorkspaces';
-import type { ConciergeSession } from '@/lib/conciergeApi';
 import { InputField } from '@/components/ui-new/primitives/InputField';
 import { WorkspaceSummary } from '@/components/ui-new/primitives/WorkspaceSummary';
 import { SectionHeader } from '../primitives/SectionHeader';
@@ -28,8 +27,6 @@ interface WorkspacesSidebarProps {
   showArchive?: boolean;
   /** Handler for toggling archive view */
   onShowArchiveChange?: (show: boolean) => void;
-  /** Concierge chat sessions */
-  conciergeSessions?: readonly ConciergeSession[];
 }
 
 export function WorkspacesSidebar({
@@ -45,7 +42,6 @@ export function WorkspacesSidebar({
   onSelectCreate,
   showArchive = false,
   onShowArchiveChange,
-  conciergeSessions = [],
 }: Readonly<WorkspacesSidebarProps>) {
   const { t } = useTranslation(['tasks', 'common']);
   const searchLower = searchQuery.toLowerCase();
@@ -147,17 +143,6 @@ export function WorkspacesSidebar({
                 latestProcessStatus={workspace.latestProcessStatus}
                 prStatus={workspace.prStatus}
                 onClick={() => onSelectWorkspace(workspace.id)}
-              />
-            ))}
-            {/* Concierge sessions (Feishu/chat) inline with workspaces */}
-            {conciergeSessions.map((session) => (
-              <WorkspaceSummary
-                key={`concierge-${session.id}`}
-                name={`${session.feishuSync ? '🔗 ' : ''}${session.name || session.id.slice(0, 8)}`}
-                workspaceId={`concierge-${session.id}`}
-                isActive={false}
-                isRunning={!!session.activeWorkflowId}
-                onClick={() => onSelectWorkspace(`concierge-${session.id}`)}
               />
             ))}
           </div>

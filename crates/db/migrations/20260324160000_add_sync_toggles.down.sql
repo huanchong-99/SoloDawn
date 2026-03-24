@@ -1,0 +1,3 @@
+-- SQLite does not support DROP COLUMN in older versions.
+-- These columns will remain but are harmless if unused.
+-- For a full rollback, recreate the tables without these columns.

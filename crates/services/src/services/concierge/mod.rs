@@ -11,4 +11,5 @@ mod sync;
 mod tools;
 
 pub use agent::ConciergeAgent;
+pub use notifications::push_workflow_completion;
 pub use sync::{ConciergeBroadcaster, ConciergeEvent};

@@ -7,6 +7,7 @@ import {
   PlusIcon,
   ChatCircleIcon,
   ArrowSquareOutIcon,
+  GearIcon,
 } from '@phosphor-icons/react';
 import type { ConciergeMessage, ConciergeSession } from '@/lib/conciergeApi';
 import type { WorkflowDetailDto } from 'shared/types';
@@ -32,6 +33,13 @@ function termDotClass(status: string): string {
   return 'bg-secondary';
 }
 
+interface SyncToggles {
+  readonly syncTools: boolean;
+  readonly syncTerminal: boolean;
+  readonly syncProgress: boolean;
+  readonly notifyOnCompletion: boolean;
+}
+
 interface ConciergeChatViewProps {
   readonly messages: readonly ConciergeMessage[];
   readonly isLoading: boolean;
@@ -50,6 +58,8 @@ interface ConciergeChatViewProps {
   readonly workflow: WorkflowDetailDto | null;
   readonly feishuSync?: boolean;
   readonly onToggleFeishuSync?: () => void;
+  readonly syncToggles?: SyncToggles;
+  readonly onUpdateSyncToggle?: (key: keyof SyncToggles, value: boolean) => void;
 }
 
 function SourceBadge({ provider }: { readonly provider: string | null }) {
@@ -131,6 +141,65 @@ function MessageBubble({ message }: { readonly message: ConciergeMessage }) {
   );
 }
 
+function SyncToggleCheckbox({
+  label,
+  checked,
+  onChange,
+}: {
+  readonly label: string;
+  readonly checked: boolean;
+  readonly onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-1 cursor-pointer text-xs text-normal select-none">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="accent-brand size-3"
+      />
+      {label}
+    </label>
+  );
+}
+
+function SyncTogglesPanel({
+  toggles,
+  onUpdate,
+}: {
+  readonly toggles: SyncToggles;
+  readonly onUpdate: (key: keyof SyncToggles, value: boolean) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-base px-base py-half border-b bg-secondary/30">
+      <span className="flex items-center gap-1 text-xs text-low">
+        <GearIcon className="size-icon-xs" />
+        Sync:
+      </span>
+      <SyncToggleCheckbox
+        label="Tools"
+        checked={toggles.syncTools}
+        onChange={(v) => onUpdate('syncTools', v)}
+      />
+      <SyncToggleCheckbox
+        label="Terminal"
+        checked={toggles.syncTerminal}
+        onChange={(v) => onUpdate('syncTerminal', v)}
+      />
+      <SyncToggleCheckbox
+        label="Progress"
+        checked={toggles.syncProgress}
+        onChange={(v) => onUpdate('syncProgress', v)}
+      />
+      <SyncToggleCheckbox
+        label="Completion"
+        checked={toggles.notifyOnCompletion}
+        onChange={(v) => onUpdate('notifyOnCompletion', v)}
+      />
+    </div>
+  );
+}
+
 function WorkflowProgressPanel({ workflow }: { readonly workflow: WorkflowDetailDto }) {
   const tasks = workflow.tasks ?? [];
   const completedTasks = tasks.filter(t => t.status === 'completed').length;
@@ -203,6 +272,8 @@ export function ConciergeChatView({
   workflow,
   feishuSync = false,
   onToggleFeishuSync,
+  syncToggles,
+  onUpdateSyncToggle,
 }: ConciergeChatViewProps) {
   return (
     <div className="flex h-full flex-col bg-primary font-ibm-plex-sans">
@@ -268,14 +339,17 @@ export function ConciergeChatView({
         </div>
       </div>
 
-      {/* Workflow Progress */}
-      {workflow && <WorkflowProgressPanel workflow={workflow} />}
+      {/* Sync Toggles (shown when feishu sync is on) */}
+      {feishuSync && syncToggles && onUpdateSyncToggle && (
+        <SyncTogglesPanel toggles={syncToggles} onUpdate={onUpdateSyncToggle} />
+      )}
 
-      {/* Messages */}
+      {/* Messages (workflow progress scrolls with conversation) */}
       <div className="flex-1 space-y-base overflow-y-auto p-base">
         {messages.map((msg) => (
           <MessageBubble key={msg.id} message={msg} />
         ))}
+        {workflow && <WorkflowProgressPanel workflow={workflow} />}
         {isLoading && (
           <div className="flex items-center gap-half text-sm text-low">
             <RobotIcon className="size-icon-xs animate-pulse" />

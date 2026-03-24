@@ -9,6 +9,10 @@ export interface ConciergeSession {
   activeWorkflowId: string | null;
   feishuSync: boolean;
   progressNotifications: boolean;
+  syncTools: boolean;
+  syncTerminal: boolean;
+  syncProgress: boolean;
+  notifyOnCompletion: boolean;
   llmModelId: string | null;
   llmApiType: string | null;
   llmBaseUrl: string | null;
@@ -44,6 +48,10 @@ export interface SendMessageRequest {
 export interface UpdateSettingsRequest {
   feishuSync?: boolean;
   progressNotifications?: boolean;
+  syncTools?: boolean;
+  syncTerminal?: boolean;
+  syncProgress?: boolean;
+  notifyOnCompletion?: boolean;
   llmModelId?: string | null;
   llmApiType?: string | null;
   llmBaseUrl?: string | null;

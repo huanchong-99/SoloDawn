@@ -136,6 +136,27 @@ export function ConciergeChatContainer({
   useWorkflowInvalidation(activeWorkflowId ?? undefined);
   const sessionName = activeSession?.name || 'AI Assistant';
 
+  // Sync toggle handler
+  const handleUpdateSyncToggle = useCallback(
+    (key: 'syncTools' | 'syncTerminal' | 'syncProgress' | 'notifyOnCompletion', value: boolean) => {
+      if (!activeSessionId) return;
+      updateSettings.mutate({
+        sessionId: activeSessionId,
+        data: { [key]: value },
+      });
+    },
+    [activeSessionId, updateSettings]
+  );
+
+  const syncToggles = activeSession
+    ? {
+        syncTools: activeSession.syncTools ?? false,
+        syncTerminal: activeSession.syncTerminal ?? false,
+        syncProgress: activeSession.syncProgress ?? false,
+        notifyOnCompletion: activeSession.notifyOnCompletion ?? true,
+      }
+    : undefined;
+
   return (
     <ConciergeChatView
       messages={messages ?? []}
@@ -155,6 +176,8 @@ export function ConciergeChatContainer({
       workflow={workflow ?? null}
       feishuSync={activeSession?.feishuSync ?? false}
       onToggleFeishuSync={handleToggleFeishuSync}
+      syncToggles={syncToggles}
+      onUpdateSyncToggle={handleUpdateSyncToggle}
     />
   );
 }

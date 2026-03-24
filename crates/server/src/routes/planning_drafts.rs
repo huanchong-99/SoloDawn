@@ -58,6 +58,10 @@ pub struct DraftResponse {
     pub workflow_seed: Option<String>,
     pub materialized_workflow_id: Option<String>,
     pub feishu_sync: bool,
+    pub sync_tools: bool,
+    pub sync_terminal: bool,
+    pub sync_progress: bool,
+    pub notify_on_completion: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -74,6 +78,10 @@ impl From<PlanningDraft> for DraftResponse {
             workflow_seed: d.workflow_seed,
             materialized_workflow_id: d.materialized_workflow_id,
             feishu_sync: d.feishu_sync,
+            sync_tools: d.sync_tools,
+            sync_terminal: d.sync_terminal,
+            sync_progress: d.sync_progress,
+            notify_on_completion: d.notify_on_completion,
             created_at: d.created_at.to_rfc3339(),
             updated_at: d.updated_at.to_rfc3339(),
         }

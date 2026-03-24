@@ -29,6 +29,14 @@ pub struct PlanningDraft {
     pub materialized_workflow_id: Option<String>,
     pub feishu_sync: bool,
     pub feishu_chat_id: Option<String>,
+    /// Push tool call events to Feishu when true.
+    pub sync_tools: bool,
+    /// Push terminal status changes to Feishu when true.
+    pub sync_terminal: bool,
+    /// Push workflow progress events to Feishu when true.
+    pub sync_progress: bool,
+    /// Send completion report on workflow/task completion.
+    pub notify_on_completion: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -128,6 +136,10 @@ impl PlanningDraft {
             materialized_workflow_id: None,
             feishu_sync: false,
             feishu_chat_id: None,
+            sync_tools: false,
+            sync_terminal: false,
+            sync_progress: false,
+            notify_on_completion: true,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -142,8 +154,9 @@ impl PlanningDraft {
                 planner_model_id, planner_api_type, planner_base_url, planner_api_key,
                 confirmed_at, materialized_workflow_id,
                 feishu_sync, feishu_chat_id,
+                sync_tools, sync_terminal, sync_progress, notify_on_completion,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
             ",
         )
         .bind(&draft.id)
@@ -161,6 +174,10 @@ impl PlanningDraft {
         .bind(&draft.materialized_workflow_id)
         .bind(draft.feishu_sync)
         .bind(&draft.feishu_chat_id)
+        .bind(draft.sync_tools)
+        .bind(draft.sync_terminal)
+        .bind(draft.sync_progress)
+        .bind(draft.notify_on_completion)
         .bind(draft.created_at)
         .bind(draft.updated_at)
         .execute(pool)

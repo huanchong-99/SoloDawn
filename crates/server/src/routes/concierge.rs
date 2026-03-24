@@ -73,6 +73,10 @@ pub struct AddChannelRequest {
 pub struct UpdateSettingsRequest {
     pub feishu_sync: Option<bool>,
     pub progress_notifications: Option<bool>,
+    pub sync_tools: Option<bool>,
+    pub sync_terminal: Option<bool>,
+    pub sync_progress: Option<bool>,
+    pub notify_on_completion: Option<bool>,
     pub llm_model_id: Option<String>,
     pub llm_api_type: Option<String>,
     pub llm_base_url: Option<String>,
@@ -258,6 +262,28 @@ async fn update_settings(
         ConciergeSession::update_progress_notifications(pool, &id, progress)
             .await
             .map_err(|e| ApiError::Internal(format!("{e}")))?;
+    }
+    // Update sync toggles if any are provided
+    if payload.sync_tools.is_some()
+        || payload.sync_terminal.is_some()
+        || payload.sync_progress.is_some()
+        || payload.notify_on_completion.is_some()
+    {
+        // Reload current values to merge partial updates
+        let current = ConciergeSession::find_by_id(pool, &id)
+            .await
+            .map_err(|e| ApiError::Internal(format!("{e}")))?
+            .ok_or_else(|| ApiError::NotFound("Session not found".to_string()))?;
+        ConciergeSession::update_sync_toggles(
+            pool,
+            &id,
+            payload.sync_tools.unwrap_or(current.sync_tools),
+            payload.sync_terminal.unwrap_or(current.sync_terminal),
+            payload.sync_progress.unwrap_or(current.sync_progress),
+            payload.notify_on_completion.unwrap_or(current.notify_on_completion),
+        )
+        .await
+        .map_err(|e| ApiError::Internal(format!("{e}")))?;
     }
     if payload.llm_api_key.is_some() || payload.llm_model_id.is_some() {
         let encrypted_key = match &payload.llm_api_key {

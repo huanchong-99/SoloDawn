@@ -514,6 +514,10 @@ export interface PlanningDraftResponse {
   workflowSeed: string | null;
   materializedWorkflowId: string | null;
   feishuSync: boolean;
+  syncTools: boolean;
+  syncTerminal: boolean;
+  syncProgress: boolean;
+  notifyOnCompletion: boolean;
   createdAt: string;
   updatedAt: string;
 }
