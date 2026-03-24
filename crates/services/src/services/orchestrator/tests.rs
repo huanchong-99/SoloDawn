@@ -131,9 +131,6 @@ mod orchestrator_tests {
                 source_branch: "feature/login".to_string(),
                 target_branch: "main".to_string(),
             },
-            OrchestratorInstruction::PauseWorkflow {
-                reason: "Need manual review".to_string(),
-            },
             OrchestratorInstruction::CompleteWorkflow {
                 summary: "All tasks completed".to_string(),
             },
@@ -730,10 +727,6 @@ mod orchestrator_tests {
             (
                 r#"{"type":"merge_branch","source_branch":"feature","target_branch":"main"}"#,
                 "merge_branch",
-            ),
-            (
-                r#"{"type":"pause_workflow","reason":"manual review"}"#,
-                "pause_workflow",
             ),
             (
                 r#"{"type":"complete_workflow","summary":"done"}"#,

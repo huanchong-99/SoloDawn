@@ -79,8 +79,6 @@ pub enum OrchestratorInstruction {
         source_branch: String,
         target_branch: String,
     },
-    /// 暂停工作流
-    PauseWorkflow { reason: String },
     /// 完成工作流
     CompleteWorkflow { summary: String },
     /// 失败工作流

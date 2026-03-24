@@ -1006,6 +1006,78 @@ impl OrchestratorAgent {
         Ok(())
     }
 
+    /// Atomically marks a terminal as finalized using CAS with a fallback.
+    ///
+    /// Attempts `set_completed_cas` (working → final_status).  On CAS miss,
+    /// falls back to `set_completed_if_unfinished`.  Returns `true` when the
+    /// terminal was actually transitioned, `false` if it was already finalized
+    /// or an error occurred.
+    async fn try_finalize_terminal(
+        &self,
+        terminal_id: &str,
+        task_id: &str,
+        final_status: &str,
+    ) -> bool {
+        match db::models::Terminal::set_completed_cas(
+            &self.db.pool,
+            terminal_id,
+            TERMINAL_STATUS_WORKING,
+            final_status,
+        )
+        .await
+        {
+            Ok(true) => true,
+            Ok(false) => {
+                match db::models::Terminal::set_completed_if_unfinished(
+                    &self.db.pool,
+                    terminal_id,
+                    final_status,
+                )
+                .await
+                {
+                    Ok(true) => {
+                        tracing::info!(
+                            terminal_id = %terminal_id,
+                            task_id = %task_id,
+                            target_status = %final_status,
+                            "Applied terminal completion fallback after CAS miss"
+                        );
+                        true
+                    }
+                    Ok(false) => {
+                        tracing::info!(
+                            terminal_id = %terminal_id,
+                            task_id = %task_id,
+                            target_status = %final_status,
+                            "Skipping terminal completion because terminal is already finalized"
+                        );
+                        false
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            terminal_id = %terminal_id,
+                            task_id = %task_id,
+                            target_status = %final_status,
+                            error = %e,
+                            "Failed to mark terminal completion after CAS miss fallback"
+                        );
+                        false
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    terminal_id = %terminal_id,
+                    task_id = %task_id,
+                    target_status = %final_status,
+                    error = %e,
+                    "Failed to mark terminal completion with CAS"
+                );
+                false
+            }
+        }
+    }
+
     /// Handles terminal completion events.
     async fn handle_terminal_completed(
         &self,
@@ -1124,118 +1196,9 @@ impl OrchestratorAgent {
             TERMINAL_STATUS_FAILED
         };
 
-        let completion_updated = if success {
-            match db::models::Terminal::set_completed_cas(
-                &self.db.pool,
-                &event.terminal_id,
-                TERMINAL_STATUS_WORKING,
-                terminal_final_status,
-            )
-            .await
-            {
-                Ok(true) => true,
-                Ok(false) => {
-                    match db::models::Terminal::set_completed_if_unfinished(
-                        &self.db.pool,
-                        &event.terminal_id,
-                        terminal_final_status,
-                    )
-                    .await
-                    {
-                        Ok(true) => {
-                            tracing::info!(
-                                terminal_id = %event.terminal_id,
-                                task_id = %event.task_id,
-                                target_status = %terminal_final_status,
-                                "Applied terminal completion fallback after CAS miss"
-                            );
-                            true
-                        }
-                        Ok(false) => {
-                            tracing::info!(
-                                terminal_id = %event.terminal_id,
-                                task_id = %event.task_id,
-                                expected_status = "working",
-                                target_status = %terminal_final_status,
-                                "Skipping terminal completion because terminal is already finalized"
-                            );
-                            false
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                terminal_id = %event.terminal_id,
-                                task_id = %event.task_id,
-                                target_status = %terminal_final_status,
-                                error = %e,
-                                "Failed to mark terminal completion after CAS miss fallback"
-                            );
-                            false
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::error!(
-                        terminal_id = %event.terminal_id,
-                        task_id = %event.task_id,
-                        target_status = %terminal_final_status,
-                        error = %e,
-                        "Failed to mark terminal completion with CAS"
-                    );
-                    false
-                }
-            }
-        } else {
-            match db::models::Terminal::set_completed_cas(
-                &self.db.pool,
-                &event.terminal_id,
-                TERMINAL_STATUS_WORKING,
-                terminal_final_status,
-            )
-            .await
-            {
-                Ok(true) => true,
-                Ok(false) => {
-                    match db::models::Terminal::set_completed_if_unfinished(
-                        &self.db.pool,
-                        &event.terminal_id,
-                        terminal_final_status,
-                    )
-                    .await
-                    {
-                        Ok(true) => true,
-                        Ok(false) => {
-                            tracing::info!(
-                                terminal_id = %event.terminal_id,
-                                task_id = %event.task_id,
-                                target_status = %terminal_final_status,
-                                "Skipping terminal completion fallback because terminal is already finalized"
-                            );
-                            false
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                terminal_id = %event.terminal_id,
-                                task_id = %event.task_id,
-                                target_status = %terminal_final_status,
-                                error = %e,
-                                "Failed to mark terminal completion after CAS miss fallback"
-                            );
-                            false
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::error!(
-                        terminal_id = %event.terminal_id,
-                        task_id = %event.task_id,
-                        target_status = %terminal_final_status,
-                        error = %e,
-                        "Failed to mark terminal completion with CAS"
-                    );
-                    false
-                }
-            }
-        };
+        let completion_updated = self
+            .try_finalize_terminal(&event.terminal_id, &event.task_id, terminal_final_status)
+            .await;
 
         if !completion_updated {
             return Ok(());
@@ -1359,8 +1322,19 @@ impl OrchestratorAgent {
                     workflow_id = %wf_id,
                     task_id = %event.task_id,
                     terminal_id = %event.terminal_id,
-                    "LLM unavailable, falling back to auto-dispatch only"
+                    "LLM unavailable, falling back to auto-complete stalled tasks"
                 );
+
+                // Fallback: when LLM is unavailable and there's no next terminal to
+                // auto-dispatch, tasks/workflow can get stuck in running state forever.
+                // Auto-complete any tasks whose terminals have all finished.
+                if let Err(e) = self.auto_complete_stalled_tasks().await {
+                    tracing::error!(
+                        workflow_id = %wf_id,
+                        "LLM-unavailable fallback: failed to auto-complete stalled tasks: {}",
+                        e
+                    );
+                }
             }
         }
 
@@ -3357,7 +3331,6 @@ impl OrchestratorAgent {
             OrchestratorInstruction::ReviewCode { .. } => "review_code",
             OrchestratorInstruction::FixIssues { .. } => "fix_issues",
             OrchestratorInstruction::MergeBranch { .. } => "merge_branch",
-            OrchestratorInstruction::PauseWorkflow { .. } => "pause_workflow",
             OrchestratorInstruction::CompleteWorkflow { .. } => "complete_workflow",
             OrchestratorInstruction::FailWorkflow { .. } => "fail_workflow",
         }
@@ -4182,11 +4155,6 @@ impl OrchestratorAgent {
                 // StartTerminal forks from the updated target branch.
                 self.refresh_pending_task_branches(&target_branch, &base_repo_path)
                     .await;
-            }
-            OrchestratorInstruction::PauseWorkflow { .. } => {
-                tracing::warn!(
-                    "Instruction variant PauseWorkflow is parsed but not yet implemented"
-                );
             }
         }
 

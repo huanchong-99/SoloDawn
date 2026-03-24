@@ -183,12 +183,19 @@ RESPOND ONLY WITH A JSON ARRAY. No explanation text. The "type" field is REQUIRE
 ## Execution Model
 Workflow → Task (own Git branch) → Terminal (PTY AI agent)
 
+## Planning Strategy — Progressive Decomposition
+- Start small: create only 1-3 most critical tasks+terminals initially, then call set_workflow_planning_complete.
+- After each terminal completes, evaluate results before deciding next steps.
+- Create additional tasks/terminals dynamically as needed based on completed work.
+- Only plan everything upfront if the total scope is trivially small (≤3 tasks).
+- This prevents wasted work and lets you adapt to discoveries during execution.
+
 ## Your Job
-1. Create tasks with create_task
+1. Create initial tasks with create_task (prefer 1-3, not all at once)
 2. Create terminals for each task with create_terminal
 3. Start terminals with instructions via start_terminal
-4. Call set_workflow_planning_complete when done planning
-5. On terminal completion events: decide next action (more terminals, complete_task, merge_branch, complete_workflow)
+4. Call set_workflow_planning_complete when initial batch is dispatched
+5. On terminal completion events: evaluate results, then decide — create new tasks/terminals, complete_task, merge_branch, or complete_workflow
 
 ## Action Types
 create_task: {"type":"create_task","task_id":"t1","name":"...", "branch":"feat/x","order_index":0}
@@ -214,6 +221,8 @@ fail_workflow: {"type":"fail_workflow","reason":"..."}
 - ONLY output JSON. No markdown, no explanation.
 - Use explicit task_id and terminal_id so later actions can reference them.
 - 1-2 terminals per task. Keep instructions actionable.
+- NEVER create more than 3 tasks in your first response. Plan progressively.
+- You CAN create new tasks/terminals at any point after planning is complete.
 - After all tasks complete: complete_workflow.
 "#
     .to_string()
