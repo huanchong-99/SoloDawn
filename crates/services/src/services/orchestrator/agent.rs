@@ -619,6 +619,14 @@ impl OrchestratorAgent {
                             "Failed while recovering stalled terminals"
                         );
                     }
+                    // Auto-complete tasks whose terminals are all done
+                    if let Err(error) = self.auto_complete_stalled_tasks().await {
+                        tracing::warn!(
+                            workflow_id = %workflow_id,
+                            error = %error,
+                            "Failed while auto-completing stalled tasks"
+                        );
+                    }
                 }
             }
         }
@@ -656,10 +664,58 @@ impl OrchestratorAgent {
         Ok(false)
     }
 
+    /// Auto-complete tasks where all terminals are completed but the task
+    /// itself is still in running status. This handles cases where the Agent
+    /// LLM fails to emit a complete_task instruction after terminal completion.
+    async fn auto_complete_stalled_tasks(&self) -> anyhow::Result<()> {
+        let workflow_id = {
+            let state = self.state.read().await;
+            state.workflow_id.clone()
+        };
+        let tasks =
+            db::models::WorkflowTask::find_by_workflow(&self.db.pool, &workflow_id).await?;
+        let terminals =
+            db::models::Terminal::find_by_workflow(&self.db.pool, &workflow_id).await?;
+
+        for task in &tasks {
+            if task.status != "running" {
+                continue;
+            }
+            let task_terminals: Vec<_> = terminals
+                .iter()
+                .filter(|t| t.workflow_task_id == task.id)
+                .collect();
+            if task_terminals.is_empty() {
+                continue;
+            }
+            let all_done = task_terminals
+                .iter()
+                .all(|t| t.status == "completed" || t.status == "failed");
+            if all_done {
+                tracing::info!(
+                    task_id = %task.id,
+                    task_name = %task.name,
+                    "Auto-completing task: all terminals finished but task still running"
+                );
+                db::models::WorkflowTask::update_status(
+                    &self.db.pool,
+                    &task.id,
+                    "completed",
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn recover_stalled_terminals(
         &self,
         tracker: &mut StallRecoveryTracker,
     ) -> anyhow::Result<()> {
+        // Auto-complete tasks where all terminals are done but task is still running.
+        // This handles the case where the Agent LLM fails to emit complete_task.
+        self.auto_complete_stalled_tasks().await?;
+
         let workflow_id = {
             let state = self.state.read().await;
             if state.run_state != OrchestratorRunState::Idle {
