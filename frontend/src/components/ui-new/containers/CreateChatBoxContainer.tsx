@@ -374,7 +374,7 @@ export function CreateChatBoxContainer() {
                 {materializeMutation.isPending ? '...' : tTasks('conversation.planning.materializeButton')}
               </button>
             )}
-            {isMaterialized && <WorkflowStatusBadge workflowId={materializedWorkflowId} />}
+            {isMaterialized && <WorkflowStatusBadge key={materializedWorkflowId} workflowId={materializedWorkflowId} />}
           </div>
 
           {/* Scrollable message list */}
