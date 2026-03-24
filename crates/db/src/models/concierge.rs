@@ -24,6 +24,7 @@ pub struct ConciergeSession {
     pub active_workflow_id: Option<String>,
     pub active_planning_draft_id: Option<String>,
     pub feishu_sync: bool,
+    pub feishu_chat_id: Option<String>,
     pub progress_notifications: bool,
     pub llm_model_id: Option<String>,
     pub llm_api_type: Option<String>,
@@ -112,6 +113,7 @@ impl ConciergeSession {
             active_workflow_id: None,
             active_planning_draft_id: None,
             feishu_sync: false,
+            feishu_chat_id: None,
             progress_notifications: false,
             llm_model_id: None,
             llm_api_type: None,
@@ -131,11 +133,11 @@ impl ConciergeSession {
             r"
             INSERT INTO concierge_session (
                 id, name, active_project_id, active_workflow_id, active_planning_draft_id,
-                feishu_sync, progress_notifications,
+                feishu_sync, feishu_chat_id, progress_notifications,
                 llm_model_id, llm_api_type, llm_base_url, llm_api_key_encrypted,
                 sync_tools, sync_terminal, sync_progress, notify_on_completion,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
             ",
         )
         .bind(&session.id)
@@ -144,6 +146,7 @@ impl ConciergeSession {
         .bind(&session.active_workflow_id)
         .bind(&session.active_planning_draft_id)
         .bind(session.feishu_sync)
+        .bind(&session.feishu_chat_id)
         .bind(session.progress_notifications)
         .bind(&session.llm_model_id)
         .bind(&session.llm_api_type)
@@ -255,6 +258,21 @@ impl ConciergeSession {
         )
         .bind(id)
         .bind(enabled)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn update_feishu_chat_id(
+        pool: &SqlitePool,
+        id: &str,
+        chat_id: &str,
+    ) -> sqlx::Result<()> {
+        sqlx::query(
+            "UPDATE concierge_session SET feishu_chat_id = ?2, updated_at = datetime('now') WHERE id = ?1",
+        )
+        .bind(id)
+        .bind(chat_id)
         .execute(pool)
         .await?;
         Ok(())

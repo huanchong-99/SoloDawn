@@ -273,11 +273,18 @@ impl FeishuService {
         // Find or create session for this Feishu chat
         let mut session =
             match ConciergeSession::find_by_channel(pool, FEISHU_PROVIDER, &msg.chat_id).await? {
-                Some(s) => s,
+                Some(s) => {
+                    // Ensure chat_id is persisted on existing sessions
+                    if s.feishu_chat_id.is_none() {
+                        let _ = ConciergeSession::update_feishu_chat_id(pool, &s.id, &msg.chat_id).await;
+                    }
+                    s
+                }
                 None => {
                     let mut new_session =
                         ConciergeSession::new(&text.chars().take(50).collect::<String>());
                     new_session.feishu_sync = true; // Feishu-initiated = always sync
+                    new_session.feishu_chat_id = Some(msg.chat_id.clone());
                     ConciergeSession::insert(pool, &new_session).await?;
 
                     ConciergeSessionChannel::upsert(

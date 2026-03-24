@@ -58,6 +58,7 @@ interface ConciergeChatViewProps {
   readonly workflow: WorkflowDetailDto | null;
   readonly feishuSync?: boolean;
   readonly onToggleFeishuSync?: () => void;
+  readonly onSyncHistory?: () => void;
   readonly syncToggles?: SyncToggles;
   readonly onUpdateSyncToggle?: (key: keyof SyncToggles, value: boolean) => void;
 }
@@ -272,6 +273,7 @@ export function ConciergeChatView({
   workflow,
   feishuSync = false,
   onToggleFeishuSync,
+  onSyncHistory,
   syncToggles,
   onUpdateSyncToggle,
 }: ConciergeChatViewProps) {
@@ -301,6 +303,17 @@ export function ConciergeChatView({
           >
             <span className={`inline-block size-1.5 rounded-full ${feishuSync ? 'bg-brand' : 'bg-secondary'}`} />{' '}
             飞书同步
+          </button>
+        )}
+        {onSyncHistory && (
+          <button
+            type="button"
+            onClick={onSyncHistory}
+            className="flex items-center gap-1 rounded px-half py-px text-xs bg-secondary text-low hover:text-normal hover:bg-tertiary transition-colors"
+            title="将历史消息全量发送到飞书"
+          >
+            <ArrowSquareOutIcon className="size-icon-xs" />
+            同步历史
           </button>
         )}
         <div className="relative ml-auto">

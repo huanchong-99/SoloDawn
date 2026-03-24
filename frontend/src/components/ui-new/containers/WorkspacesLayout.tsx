@@ -251,6 +251,7 @@ export function WorkspacesLayout() {
                           isCreateMode={isCreateMode}
                           isConciergeMode={isConciergeMode}
                           conciergeWorkflow={conciergeWorkflow ?? null}
+                          currentSessionId={conciergeSessionId}
                           rightMainPanelMode={rightMainPanelMode}
                           selectedWorkspace={selectedWorkspace}
                           repos={repos}

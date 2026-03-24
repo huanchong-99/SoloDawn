@@ -514,14 +514,15 @@ async fn toggle_feishu_sync(
             .await
             .map_err(|e| ApiError::Internal(format!("Failed to query bindings: {e}")))?;
 
-            match binding {
-                Some(b) => b.conversation_id,
-                None => {
-                    return Err(ApiError::BadRequest(
-                        "No Feishu chat found. Send a message to the bot in Feishu first."
-                            .to_string(),
-                    ));
-                }
+            if let Some(b) = binding {
+                b.conversation_id
+            } else if let Some(bot_chat) = messenger.first_bot_chat_id().await.unwrap_or(None) {
+                bot_chat
+            } else {
+                return Err(ApiError::BadRequest(
+                    "No Feishu chat found. Send a message to the bot in Feishu first."
+                        .to_string(),
+                ));
             }
         };
 

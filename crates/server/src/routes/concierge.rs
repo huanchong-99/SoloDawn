@@ -28,6 +28,11 @@ pub fn concierge_routes() -> Router<DeploymentImpl> {
     Router::new()
         .route("/sessions", post(create_session))
         .route("/sessions", get(list_sessions))
+        // Static route before {id} wildcard
+        .route(
+            "/sessions/feishu-channel",
+            get(get_feishu_channel).post(switch_feishu_channel),
+        )
         .route("/sessions/{id}", get(get_session).delete(delete_session))
         .route("/sessions/{id}/messages", post(send_message))
         .route("/sessions/{id}/messages", get(list_messages))
@@ -96,6 +101,20 @@ pub struct SendMessageResponse {
 pub struct ListMessagesQuery {
     pub cursor: Option<usize>,
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchFeishuChannelRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeishuChannelStatus {
+    pub active_session_id: Option<String>,
+    pub active_session_name: Option<String>,
+    pub chat_id: Option<String>,
 }
 
 // ============================================================================
@@ -266,20 +285,20 @@ async fn update_settings(
             if let Some(ref h) = *handle_guard {
                 if *h.connected.read().await {
                     let messenger = h.messenger.clone();
-                    // Resolve chat_id from last received message or DB binding
+                    // Resolve chat_id: session's own → last received → DB binding → bot chat list
                     let last_id = h.last_chat_id.try_read().ok().and_then(|g| g.clone());
                     drop(handle_guard);
 
-                    let chat_id = if let Some(cid) = last_id {
+                    let chat_id = if let Some(ref cid) = session.feishu_chat_id {
+                        Some(cid.clone())
+                    } else if let Some(cid) = last_id {
                         Some(cid)
+                    } else if let Some(b) = db::models::ExternalConversationBinding::find_latest_active(
+                        pool, "feishu",
+                    ).await.ok().flatten() {
+                        Some(b.conversation_id)
                     } else {
-                        db::models::ExternalConversationBinding::find_latest_active(
-                            pool, "feishu",
-                        )
-                        .await
-                        .ok()
-                        .flatten()
-                        .map(|b| b.conversation_id)
+                        messenger.first_bot_chat_id().await.unwrap_or(None)
                     };
 
                     if let Some(chat_id) = chat_id {
@@ -389,4 +408,110 @@ async fn update_settings(
         .ok_or_else(|| ApiError::NotFound("Session not found".to_string()))?;
 
     Ok(ResponseJson(ApiResponse::success(updated)))
+}
+
+async fn get_feishu_channel(
+    State(deployment): State<DeploymentImpl>,
+    Extension(feishu_handle): Extension<SharedFeishuHandle>,
+) -> Result<ResponseJson<ApiResponse<FeishuChannelStatus>>, ApiError> {
+    let pool = &deployment.db().pool;
+
+    // Find active channel binding for provider "feishu"
+    let active = sqlx::query_as::<_, ConciergeSessionChannel>(
+        "SELECT * FROM concierge_session_channel WHERE provider = 'feishu' AND is_active = 1 LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| ApiError::Internal(format!("{e}")))?;
+
+    let (active_session_id, active_session_name) = if let Some(ref ch) = active {
+        let session = ConciergeSession::find_by_id(pool, &ch.session_id)
+            .await
+            .map_err(|e| ApiError::Internal(format!("{e}")))?;
+        (
+            Some(ch.session_id.clone()),
+            session.map(|s| s.name),
+        )
+    } else {
+        (None, None)
+    };
+
+    // Get chat_id from feishu handle
+    let chat_id = {
+        let handle_guard = feishu_handle.read().await;
+        if let Some(ref h) = *handle_guard {
+            h.last_chat_id.try_read().ok().and_then(|g| g.clone())
+        } else {
+            None
+        }
+    };
+
+    Ok(ResponseJson(ApiResponse::success(FeishuChannelStatus {
+        active_session_id,
+        active_session_name,
+        chat_id,
+    })))
+}
+
+async fn switch_feishu_channel(
+    State(deployment): State<DeploymentImpl>,
+    Extension(feishu_handle): Extension<SharedFeishuHandle>,
+    Json(payload): Json<SwitchFeishuChannelRequest>,
+) -> Result<ResponseJson<ApiResponse<FeishuChannelStatus>>, ApiError> {
+    let pool = &deployment.db().pool;
+    let session_id = &payload.session_id;
+
+    // Verify the session exists
+    let session = ConciergeSession::find_by_id(pool, session_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("{e}")))?
+        .ok_or_else(|| ApiError::NotFound("Session not found".to_string()))?;
+
+    // Resolve chat_id: session's feishu_chat_id → last_chat_id → DB binding
+    let last_chat_id = {
+        let handle_guard = feishu_handle.read().await;
+        if let Some(ref h) = *handle_guard {
+            h.last_chat_id.try_read().ok().and_then(|g| g.clone())
+        } else {
+            None
+        }
+    };
+
+    let chat_id = if let Some(ref cid) = session.feishu_chat_id {
+        cid.clone()
+    } else if let Some(cid) = last_chat_id {
+        cid
+    } else if let Some(b) =
+        db::models::ExternalConversationBinding::find_latest_active(pool, "feishu")
+            .await
+            .ok()
+            .flatten()
+    {
+        b.conversation_id
+    } else {
+        return Err(ApiError::BadRequest(
+            "No Feishu chat_id available. Send a message in Feishu first.".to_string(),
+        ));
+    };
+
+    // Switch active session for this channel
+    ConciergeSessionChannel::switch_active_session(pool, "feishu", &chat_id, session_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to switch channel: {e}")))?;
+
+    // Enable feishu sync on the target session
+    ConciergeSession::update_feishu_sync(pool, session_id, true)
+        .await
+        .map_err(|e| ApiError::Internal(format!("{e}")))?;
+
+    // Store the chat_id on the session
+    ConciergeSession::update_feishu_chat_id(pool, session_id, &chat_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("{e}")))?;
+
+    Ok(ResponseJson(ApiResponse::success(FeishuChannelStatus {
+        active_session_id: Some(session_id.clone()),
+        active_session_name: Some(session.name),
+        chat_id: Some(chat_id),
+    })))
 }

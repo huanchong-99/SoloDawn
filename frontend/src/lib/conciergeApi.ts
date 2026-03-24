@@ -8,6 +8,7 @@ export interface ConciergeSession {
   activeProjectId: string | null;
   activeWorkflowId: string | null;
   feishuSync: boolean;
+  feishuChatId: string | null;
   progressNotifications: boolean;
   syncTools: boolean;
   syncTerminal: boolean;
@@ -142,6 +143,29 @@ export const conciergeApi = {
       { method: 'DELETE' }
     );
     return handleApiResponse<void>(response);
+  },
+
+  getFeishuChannel: async (): Promise<{
+    activeSessionId: string | null;
+    activeSessionName: string | null;
+    chatId: string | null;
+  }> => {
+    const response = await makeRequest(`${BASE}/sessions/feishu-channel`);
+    return handleApiResponse(response);
+  },
+
+  switchFeishuChannel: async (
+    sessionId: string
+  ): Promise<{
+    activeSessionId: string | null;
+    activeSessionName: string | null;
+    chatId: string | null;
+  }> => {
+    const response = await makeRequest(`${BASE}/sessions/feishu-channel`, {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    });
+    return handleApiResponse(response);
   },
 
   updateSettings: async (

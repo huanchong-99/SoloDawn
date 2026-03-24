@@ -14,6 +14,7 @@ export const conciergeKeys = {
   session: (sessionId: string) => ['concierge', 'sessions', sessionId] as const,
   messages: (sessionId: string) =>
     ['concierge', 'sessions', sessionId, 'messages'] as const,
+  feishuChannel: () => [...['concierge'], 'feishu-channel'] as const,
 };
 
 /** List all concierge sessions */
@@ -103,6 +104,32 @@ export function useUpdateConciergeSettings() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({
         queryKey: conciergeKeys.session(result.id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: conciergeKeys.sessions(),
+      });
+    },
+  });
+}
+
+/** Fetch the current Feishu channel binding */
+export function useFeishuChannel() {
+  return useQuery({
+    queryKey: conciergeKeys.feishuChannel(),
+    queryFn: () => conciergeApi.getFeishuChannel(),
+    refetchInterval: 10_000,
+  });
+}
+
+/** Switch the Feishu channel to a different session */
+export function useSwitchFeishuChannel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) =>
+      conciergeApi.switchFeishuChannel(sessionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: conciergeKeys.feishuChannel(),
       });
       queryClient.invalidateQueries({
         queryKey: conciergeKeys.sessions(),

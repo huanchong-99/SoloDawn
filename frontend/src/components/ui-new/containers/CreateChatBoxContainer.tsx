@@ -334,28 +334,42 @@ export function CreateChatBoxContainer() {
   }, [materializedWorkflowId, projectId, navigate]);
 
   // === Feishu sync toggle ===
-  const handleToggleFeishuSync = useCallback(async () => {
+  const handleToggleFeishuSync = useCallback(() => {
     if (!planningDraftId || !planningDraft) return;
-    const currentlyOn = planningDraft.feishuSync;
-    if (currentlyOn) {
-      // Turn off
-      feishuSyncMutation.mutate({
+    feishuSyncMutation.mutate(
+      {
         draftId: planningDraftId,
-        enabled: false,
+        enabled: !planningDraft.feishuSync,
         syncHistory: false,
-      });
-    } else {
-      // Turn on — ask about history sync
-      const syncHistory = globalThis.confirm(
-        '是否同步历史消息到飞书？'
-      );
-      feishuSyncMutation.mutate({
+      },
+      {
+        onError: () => {
+          globalThis.alert(
+            '开启失败：未找到飞书聊天。\n\n请先在飞书中给 Bot 发送一条消息，建立连接后再试。'
+          );
+        },
+      }
+    );
+  }, [planningDraftId, planningDraft, feishuSyncMutation]);
+
+  // === Feishu history sync — one-time full push ===
+  const handleSyncHistory = useCallback(() => {
+    if (!planningDraftId) return;
+    feishuSyncMutation.mutate(
+      {
         draftId: planningDraftId,
         enabled: true,
-        syncHistory,
-      });
-    }
-  }, [planningDraftId, planningDraft, feishuSyncMutation]);
+        syncHistory: true,
+      },
+      {
+        onError: () => {
+          globalThis.alert(
+            '同步失败：未找到飞书聊天。\n\n请先在飞书中给 Bot 发送一条消息，建立连接后再试。'
+          );
+        },
+      }
+    );
+  }, [planningDraftId, feishuSyncMutation]);
 
   // Determine error
   const displayError = (() => {
@@ -417,6 +431,17 @@ export function CreateChatBoxContainer() {
               >
                 <span className={`inline-block size-1.5 rounded-full ${planningDraft?.feishuSync ? 'bg-brand' : 'bg-secondary'}`} />{' '}
                 飞书同步
+              </button>
+            )}
+            {feishuConnected && (
+              <button
+                type="button"
+                onClick={handleSyncHistory}
+                disabled={feishuSyncMutation.isPending}
+                className="flex items-center gap-1 rounded px-half py-px text-xs bg-secondary text-low hover:text-normal hover:bg-tertiary transition-colors disabled:opacity-50"
+                title="将历史消息全量发送到飞书"
+              >
+                同步历史
               </button>
             )}
             {isSpecReady && (

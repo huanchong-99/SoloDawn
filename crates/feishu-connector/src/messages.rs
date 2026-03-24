@@ -88,6 +88,38 @@ impl FeishuMessenger {
         Ok(msg_id)
     }
 
+    /// List chats the bot belongs to, returning the first chat_id found.
+    pub async fn first_bot_chat_id(&self) -> Result<Option<String>> {
+        let token = self.auth.get_tenant_token().await?;
+        let url = format!(
+            "{}/open-apis/im/v1/chats?page_size=1",
+            self.base_url
+        );
+        let resp = self
+            .http_client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await?
+            .json::<serde_json::Value>()
+            .await?;
+
+        let code = resp["code"].as_i64().unwrap_or(-1);
+        if code != 0 {
+            let msg = resp["msg"].as_str().unwrap_or("unknown error");
+            tracing::warn!("Feishu list_chats failed: code={code}, msg={msg}");
+            return Ok(None);
+        }
+
+        let chat_id = resp["data"]["items"]
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(|item| item["chat_id"].as_str())
+            .map(|s| s.to_string());
+
+        Ok(chat_id)
+    }
+
     /// Send an interactive card message to a chat
     pub async fn send_card(&self, chat_id: &str, card: &serde_json::Value) -> Result<String> {
         let token = self.auth.get_tenant_token().await?;
