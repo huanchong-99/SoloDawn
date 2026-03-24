@@ -14,6 +14,7 @@ interface WorkspacesSidebarProps {
   archivedWorkspaces?: Workspace[];
   selectedWorkspaceId: string | null;
   onSelectWorkspace: (id: string) => void;
+  onDeleteWorkspace?: (id: string) => void;
   onAddWorkspace?: () => void;
   searchQuery: string;
   onSearchChange: (value: string) => void;
@@ -34,6 +35,7 @@ export function WorkspacesSidebar({
   archivedWorkspaces = [],
   selectedWorkspaceId,
   onSelectWorkspace,
+  onDeleteWorkspace,
   onAddWorkspace,
   searchQuery,
   onSearchChange,
@@ -143,6 +145,9 @@ export function WorkspacesSidebar({
                 latestProcessStatus={workspace.latestProcessStatus}
                 prStatus={workspace.prStatus}
                 onClick={() => onSelectWorkspace(workspace.id)}
+                onDelete={onDeleteWorkspace && (workspace.id.startsWith('concierge-') || workspace.id.startsWith('draft-'))
+                  ? () => onDeleteWorkspace(workspace.id)
+                  : undefined}
               />
             ))}
           </div>

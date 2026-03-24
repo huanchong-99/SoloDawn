@@ -11,6 +11,7 @@ import {
 import { useConciergeWsStore } from '@/stores/conciergeWsStore';
 import { useWorkflow } from '@/hooks/useWorkflows';
 import { useWorkflowInvalidation } from '@/hooks/useWorkflowInvalidation';
+import { useCreateMode } from '@/contexts/CreateModeContext';
 import { ConciergeChatView } from '../views/ConciergeChatView';
 
 interface ConciergeChatContainerProps {
@@ -121,6 +122,14 @@ export function ConciergeChatContainer({
 
   // Find active session name
   const activeSession = sessions?.find((s) => s.id === activeSessionId);
+
+  // Sync right sidebar project when switching concierge sessions
+  const { selectedProjectId, setSelectedProjectId } = useCreateMode();
+  useEffect(() => {
+    if (activeSession?.activeProjectId && activeSession.activeProjectId !== selectedProjectId) {
+      setSelectedProjectId(activeSession.activeProjectId);
+    }
+  }, [activeSession?.activeProjectId, selectedProjectId, setSelectedProjectId]);
 
   // Feishu sync toggle
   const updateSettings = useUpdateConciergeSettings();

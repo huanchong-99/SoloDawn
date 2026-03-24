@@ -78,6 +78,10 @@ export const conciergeApi = {
     return handleApiResponse<ConciergeSession>(response);
   },
 
+  deleteSession: async (sessionId: string): Promise<void> => {
+    await makeRequest(`${BASE}/sessions/${sessionId}`, { method: 'DELETE' });
+  },
+
   listSessions: async (): Promise<ConciergeSession[]> => {
     const response = await makeRequest(`${BASE}/sessions`);
     return handleApiResponse<ConciergeSession[]>(response);

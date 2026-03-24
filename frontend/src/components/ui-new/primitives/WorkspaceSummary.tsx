@@ -29,6 +29,7 @@ interface WorkspaceSummaryProps {
   readonly latestProcessStatus?: 'running' | 'completed' | 'failed' | 'killed';
   readonly prStatus?: 'open' | 'merged' | 'closed' | 'unknown';
   readonly onClick?: () => void;
+  readonly onDelete?: () => void;
   readonly className?: string;
   readonly summary?: boolean;
   /** Whether this is a draft workspace (shows "Draft" instead of elapsed time) */
@@ -51,6 +52,7 @@ export function WorkspaceSummary({
   latestProcessStatus,
   prStatus,
   onClick,
+  onDelete,
   className,
   summary = false,
   isDraft = false,
@@ -216,10 +218,10 @@ export function WorkspaceSummary({
           {/* Single action button */}
           <div className="flex items-center pr-base h-full bg-secondary">
             <button
-              onClick={handleOpenCommandBar}
+              onClick={onDelete ?? handleOpenCommandBar}
               onPointerDown={(e) => e.stopPropagation()}
               className="p-1.5 rounded-sm text-low hover:text-normal hover:bg-tertiary"
-              title={t('workspaces.more')}
+              title={onDelete ? t('workspaces.delete', { defaultValue: 'Delete' }) : t('workspaces.more')}
             >
               <DotsThreeIcon className="size-5" weight="bold" />
             </button>

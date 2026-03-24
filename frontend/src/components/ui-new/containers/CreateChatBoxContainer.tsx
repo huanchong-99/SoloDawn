@@ -40,7 +40,7 @@ function WorkflowStatusBadge({ workflowId }: Readonly<{ workflowId: string | nul
     label = 'Failed';
   }
   return (
-    <span className={`ml-auto text-xs px-1 py-px rounded ${colorClass}`}>
+    <span className={`ml-auto text-sm px-base py-half rounded font-medium ${colorClass}`}>
       {label}
     </span>
   );
