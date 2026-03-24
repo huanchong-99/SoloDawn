@@ -312,7 +312,7 @@ impl OrchestratorAgent {
         if !tasks_after.is_empty() {
             let mut any_without_terminals = false;
             for task in &tasks_after {
-                let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id.to_string())
+                let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id.clone())
                     .await
                     .unwrap_or_default();
                 if terminals.is_empty() {

@@ -377,17 +377,14 @@ fn apply_auto_confirm_args(cli: &CcCliType, args: &mut Vec<String>, auto_confirm
         return;
     }
 
-    match cli {
-        CcCliType::Codex => {
-            // Codex: use --full-auto for sandboxed auto-execution + -a never to skip approval
-            for flag in ["--full-auto", "-a", "never"] {
-                if !args.contains(&flag.to_string()) {
-                    args.push(flag.to_string());
-                }
+    if cli == &CcCliType::Codex {
+        // Codex: use --full-auto for sandboxed auto-execution + -a never to skip approval
+        for flag in ["--full-auto", "-a", "never"] {
+            if !args.contains(&flag.to_string()) {
+                args.push(flag.to_string());
             }
-            return;
         }
-        _ => {}
+        return;
     }
 
     let flag = match cli {
