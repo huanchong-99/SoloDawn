@@ -190,6 +190,12 @@ async fn main() -> Result<(), GitCortexError> {
     };
     tracing::info!("Concierge Agent initialized");
 
+    // Wire concierge broadcaster into orchestrator runtime for terminal bridge messages
+    deployment
+        .orchestrator_runtime()
+        .set_concierge_broadcaster(concierge_broadcaster.clone())
+        .await;
+
     // Conditional Feishu connector startup
     let feishu_handle = server::feishu_handle::new_shared_handle();
     if db::models::system_settings::SystemSetting::is_feishu_enabled(&deployment.db().pool).await {

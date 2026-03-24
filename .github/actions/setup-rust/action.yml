@@ -47,8 +47,10 @@ runs:
     - name: Install extra system packages
       if: inputs.extra-packages != ''
       shell: bash
+      env:
+        EXTRA_PACKAGES: ${{ inputs.extra-packages }}
       run: |
-        sudo apt-get install -y ${{ inputs.extra-packages }}
+        sudo apt-get install -y $EXTRA_PACKAGES
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master

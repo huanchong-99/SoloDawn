@@ -49,6 +49,7 @@ use super::{
     },
 };
 use crate::services::{
+    concierge::{ConciergeBroadcaster, ConciergeEvent},
     error_handler::ErrorHandler,
     template_renderer::{TemplateRenderer, WorkflowContext},
 };
@@ -65,6 +66,7 @@ pub struct OrchestratorAgent {
     runtime_actions: Option<Arc<RuntimeActionService>>,
     persistence: Option<Arc<StatePersistence>>,
     last_state_save: Arc<tokio::sync::Mutex<tokio::time::Instant>>,
+    concierge_broadcaster: Option<Arc<ConciergeBroadcaster>>,
 }
 
 // G10-007: Use `[ \t]` instead of `\s` to prevent cross-line matching.
@@ -168,6 +170,7 @@ impl OrchestratorAgent {
             runtime_actions: None,
             persistence: None,
             last_state_save: Arc::new(tokio::sync::Mutex::new(tokio::time::Instant::now())),
+            concierge_broadcaster: None,
         })
     }
 
@@ -195,6 +198,7 @@ impl OrchestratorAgent {
             runtime_actions: None,
             persistence: None,
             last_state_save: Arc::new(tokio::sync::Mutex::new(tokio::time::Instant::now())),
+            concierge_broadcaster: None,
         })
     }
 
@@ -204,6 +208,57 @@ impl OrchestratorAgent {
 
     pub fn attach_persistence(&mut self, persistence: Arc<StatePersistence>) {
         self.persistence = Some(persistence);
+    }
+
+    pub fn attach_concierge_broadcaster(&mut self, broadcaster: Arc<ConciergeBroadcaster>) {
+        self.concierge_broadcaster = Some(broadcaster);
+    }
+
+    /// Push a terminal bridge message to all concierge sessions with `sync_terminal` enabled
+    /// for the current workflow. The message is inserted as a system message and broadcast
+    /// to Web WS subscribers (and Feishu if `feishu_sync` is also enabled on the session).
+    async fn push_concierge_terminal_bridge(&self, workflow_id: &str, text: &str) {
+        let Some(broadcaster) = &self.concierge_broadcaster else {
+            return;
+        };
+
+        let sessions = match db::models::concierge::ConciergeSession::find_by_workflow_with_sync_terminal(
+            &self.db.pool,
+            workflow_id,
+        )
+        .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    error = %e,
+                    "Failed to find concierge sessions for terminal bridge"
+                );
+                return;
+            }
+        };
+
+        for session in &sessions {
+            let msg = db::models::concierge::ConciergeMessage::new_system(&session.id, text);
+            if let Err(e) = db::models::concierge::ConciergeMessage::insert(&self.db.pool, &msg).await {
+                tracing::warn!(
+                    session_id = %session.id,
+                    error = %e,
+                    "Failed to insert terminal bridge message"
+                );
+                continue;
+            }
+
+            broadcaster
+                .broadcast(
+                    &session.id,
+                    ConciergeEvent::NewMessage { message: msg },
+                    session.feishu_sync,
+                    None,
+                )
+                .await;
+        }
     }
 
     /// Restore agent state from persisted data after crash recovery.
@@ -1206,6 +1261,22 @@ impl OrchestratorAgent {
             tracing::warn!(error = %e, "Failed to publish terminal status update event");
         }
 
+        // Push terminal bridge message to concierge sessions
+        {
+            let branch = db::models::WorkflowTask::find_by_id(&self.db.pool, &event.task_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|t| t.branch)
+                .unwrap_or_default();
+            let short_id = &event.terminal_id[..8.min(event.terminal_id.len())];
+            let text = format!(
+                "\u{1f4dd} Terminal {short_id} {terminal_final_status} on branch {branch}"
+            );
+            self.push_concierge_terminal_bridge(&workflow_id, &text)
+                .await;
+        }
+
         // Update state and get next terminal info
         let (next_terminal_index, task_completed, has_next, task_failed) = {
             let mut state = self.state.write().await;
@@ -2200,6 +2271,16 @@ impl OrchestratorAgent {
         let event_id = git_event.id.clone();
         if let Err(e) = db::models::git_event::GitEvent::insert(&self.db.pool, &git_event).await {
             tracing::warn!("Failed to persist git_event: {}", e);
+        }
+
+        // Push git commit bridge message to concierge sessions
+        {
+            let short_hash = &commit_hash[..8.min(commit_hash.len())];
+            let text = format!(
+                "\u{1f4e6} Git commit {short_hash} on {branch}: {message}"
+            );
+            self.push_concierge_terminal_bridge(workflow_id, &text)
+                .await;
         }
 
         // G10-002/G04-007: Single metadata parse attempt.

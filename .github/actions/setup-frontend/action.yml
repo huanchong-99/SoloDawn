@@ -36,8 +36,10 @@ runs:
     - name: Install frontend dependencies
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        FROZEN_LOCKFILE: ${{ inputs.frozen-lockfile }}
       run: |
-        if [ "${{ inputs.frozen-lockfile }}" = "true" ]; then
+        if [ "$FROZEN_LOCKFILE" = "true" ]; then
           pnpm install --frozen-lockfile
         else
           pnpm install

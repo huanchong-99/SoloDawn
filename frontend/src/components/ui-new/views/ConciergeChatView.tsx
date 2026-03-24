@@ -299,7 +299,7 @@ export function ConciergeChatView({
             }`}
             title={feishuSync ? '飞书同步已开启' : '飞书同步已关闭'}
           >
-            <span className={`inline-block size-1.5 rounded-full ${feishuSync ? 'bg-brand' : 'bg-secondary'}`} />
+            <span className={`inline-block size-1.5 rounded-full ${feishuSync ? 'bg-brand' : 'bg-secondary'}`} />{' '}
             飞书同步
           </button>
         )}

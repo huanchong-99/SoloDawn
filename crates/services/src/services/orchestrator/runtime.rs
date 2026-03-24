@@ -27,6 +27,7 @@ use super::{
     runtime_actions::RuntimeActionService,
     types::LLMMessage,
 };
+use crate::services::concierge::ConciergeBroadcaster;
 use crate::services::git_watcher::{GitWatcher, GitWatcherConfig};
 
 /// Configuration for the OrchestratorRuntime
@@ -110,6 +111,7 @@ pub struct OrchestratorRuntime {
         Arc<Mutex<HashMap<String, HashMap<String, OrchestratorChatCommandResult>>>>,
     persistence: StatePersistence,
     runtime_actions: Arc<RwLock<Option<Arc<RuntimeActionService>>>>,
+    concierge_broadcaster: Arc<RwLock<Option<Arc<ConciergeBroadcaster>>>>,
 }
 
 impl OrchestratorRuntime {
@@ -127,6 +129,7 @@ impl OrchestratorRuntime {
             orchestrator_chat_idempotency: Arc::new(Mutex::new(HashMap::new())),
             persistence,
             runtime_actions: Arc::new(RwLock::new(None)),
+            concierge_broadcaster: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -148,7 +151,13 @@ impl OrchestratorRuntime {
             orchestrator_chat_idempotency: Arc::new(Mutex::new(HashMap::new())),
             persistence,
             runtime_actions: Arc::new(RwLock::new(None)),
+            concierge_broadcaster: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Attach a concierge broadcaster for terminal bridge messages.
+    pub async fn set_concierge_broadcaster(&self, broadcaster: Arc<ConciergeBroadcaster>) {
+        *self.concierge_broadcaster.write().await = Some(broadcaster);
     }
 
     pub async fn set_runtime_actions(&self, runtime_actions: Arc<RuntimeActionService>) {
@@ -378,6 +387,9 @@ impl OrchestratorRuntime {
             agent.attach_runtime_actions(runtime_actions);
         }
         agent.attach_persistence(Arc::new(StatePersistence::new(self.db.clone())));
+        if let Some(ref broadcaster) = *self.concierge_broadcaster.read().await {
+            agent.attach_concierge_broadcaster(broadcaster.clone());
+        }
         let agent = Arc::new(agent);
 
         // Update workflow status to running AFTER agent is successfully created
@@ -1029,6 +1041,9 @@ impl OrchestratorRuntime {
             agent.attach_runtime_actions(runtime_actions);
         }
         agent.attach_persistence(Arc::new(StatePersistence::new(self.db.clone())));
+        if let Some(ref broadcaster) = *self.concierge_broadcaster.read().await {
+            agent.attach_concierge_broadcaster(broadcaster.clone());
+        }
         let agent = Arc::new(agent);
 
         // Inject the recovered state into the agent

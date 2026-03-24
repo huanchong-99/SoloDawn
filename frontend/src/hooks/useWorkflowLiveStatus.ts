@@ -60,7 +60,7 @@ export function useWorkflowLiveStatus(workflowId: string | null) {
     (event: Omit<LiveEvent, 'id' | 'timestamp'>) => {
       const entry: LiveEvent = {
         ...event,
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: globalThis.crypto.randomUUID(),
         timestamp: new Date().toISOString(),
       };
       setLiveEvents((prev) => [entry, ...prev].slice(0, MAX_EVENTS));

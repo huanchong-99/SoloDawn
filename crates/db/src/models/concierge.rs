@@ -357,6 +357,22 @@ impl ConciergeSession {
         .await
     }
 
+    /// Find all sessions bound to a specific workflow with terminal sync enabled.
+    pub async fn find_by_workflow_with_sync_terminal(
+        pool: &SqlitePool,
+        workflow_id: &str,
+    ) -> sqlx::Result<Vec<Self>> {
+        sqlx::query_as::<_, Self>(
+            r"
+            SELECT * FROM concierge_session
+            WHERE active_workflow_id = ?1 AND sync_terminal = 1
+            ",
+        )
+        .bind(workflow_id)
+        .fetch_all(pool)
+        .await
+    }
+
     pub async fn delete(pool: &SqlitePool, id: &str) -> sqlx::Result<u64> {
         let rows = sqlx::query("DELETE FROM concierge_session WHERE id = ?1")
             .bind(id)

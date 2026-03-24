@@ -190,7 +190,7 @@ impl RunnerService for RunnerGrpcService {
                 let timestamp = chunk
                     .timestamp
                     .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
+                    .map(|d: std::time::Duration| d.as_millis() as i64)
                     .unwrap_or(0);
 
                 let output_chunk = TerminalOutputChunk {

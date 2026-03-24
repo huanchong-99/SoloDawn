@@ -30,12 +30,15 @@ function WorkflowStatusBadge({ workflowId }: Readonly<{ workflowId: string | nul
   const status = workflow?.status ?? 'running';
   const isCompleted = status === 'completed';
   const isFailed = status === 'failed';
-  const colorClass = isCompleted
-    ? 'bg-success/10 text-success'
-    : isFailed
-      ? 'bg-error/10 text-error'
-      : 'bg-brand/10 text-brand animate-pulse';
-  const label = isCompleted ? 'Completed' : isFailed ? 'Failed' : 'Running';
+  let colorClass = 'bg-brand/10 text-brand animate-pulse';
+  let label = 'Running';
+  if (isCompleted) {
+    colorClass = 'bg-success/10 text-success';
+    label = 'Completed';
+  } else if (isFailed) {
+    colorClass = 'bg-error/10 text-error';
+    label = 'Failed';
+  }
   return (
     <span className={`ml-auto text-xs px-1 py-px rounded ${colorClass}`}>
       {label}
@@ -343,7 +346,7 @@ export function CreateChatBoxContainer() {
       });
     } else {
       // Turn on — ask about history sync
-      const syncHistory = window.confirm(
+      const syncHistory = globalThis.confirm(
         '是否同步历史消息到飞书？'
       );
       feishuSyncMutation.mutate({
@@ -412,7 +415,7 @@ export function CreateChatBoxContainer() {
                 }`}
                 title={planningDraft?.feishuSync ? '飞书同步已开启' : '飞书同步已关闭'}
               >
-                <span className={`inline-block size-1.5 rounded-full ${planningDraft?.feishuSync ? 'bg-brand' : 'bg-secondary'}`} />
+                <span className={`inline-block size-1.5 rounded-full ${planningDraft?.feishuSync ? 'bg-brand' : 'bg-secondary'}`} />{' '}
                 飞书同步
               </button>
             )}
