@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ConciergeSession {
     pub id: String,
     pub name: String,
@@ -274,6 +275,7 @@ impl ConciergeSession {
         Ok(())
     }
 
+    #[allow(clippy::fn_params_excessive_bools)]
     pub async fn update_sync_toggles(
         pool: &SqlitePool,
         id: &str,

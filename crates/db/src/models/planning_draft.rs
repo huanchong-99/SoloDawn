@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)]
 pub struct PlanningDraft {
     pub id: String,
     pub project_id: Uuid,
