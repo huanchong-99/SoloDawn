@@ -40,7 +40,6 @@ export interface RightSidebarProps {
   readonly isCreateMode: boolean;
   readonly isConciergeMode?: boolean;
   readonly conciergeWorkflow?: WorkflowDetailDto | null;
-  readonly currentSessionId?: string | null;
   readonly rightMainPanelMode: RightMainPanelMode | null;
   readonly selectedWorkspace: Workspace | undefined;
   readonly repos: RepoWithTargetBranch[];
@@ -50,7 +49,6 @@ export function RightSidebar({
   isCreateMode,
   isConciergeMode,
   conciergeWorkflow,
-  currentSessionId,
   rightMainPanelMode,
   selectedWorkspace,
   repos,
@@ -64,7 +62,7 @@ export function RightSidebar({
     if (!conciergeWorkflow) {
       return (
         <div className="flex h-full flex-col bg-secondary">
-          <FeishuChannelContainer currentSessionId={currentSessionId ?? null} />
+          <FeishuChannelContainer />
           <div className="flex flex-1 flex-col items-center justify-center p-base text-center text-sm text-low">
             <p>No active workflow</p>
             <p className="mt-half text-xs">Start a conversation to create a workflow</p>
@@ -76,7 +74,7 @@ export function RightSidebar({
     const tasks = conciergeWorkflow.tasks ?? [];
     return (
       <div className="flex h-full flex-col bg-secondary">
-        <FeishuChannelContainer currentSessionId={currentSessionId ?? null} />
+        <FeishuChannelContainer />
         <div className="border-b px-base py-half">
           <h3 className="text-sm font-medium text-high truncate">{conciergeWorkflow.name}</h3>
           <div className="flex items-center gap-half mt-px">
@@ -137,7 +135,7 @@ export function RightSidebar({
   if (isCreateMode) {
     return (
       <div className="flex h-full flex-col bg-secondary">
-        <FeishuChannelContainer currentSessionId={currentSessionId ?? null} />
+        <FeishuChannelContainer />
         <div className="flex-1 min-h-0 overflow-hidden">
           <GitPanelCreateContainer />
         </div>

@@ -465,6 +465,7 @@ async fn list_messages(
 struct FeishuSyncRequest {
     enabled: bool,
     sync_history: bool,
+    chat_id: Option<String>,
 }
 
 async fn toggle_feishu_sync(
@@ -500,11 +501,22 @@ async fn toggle_feishu_sync(
 
         let messenger = h.messenger.clone();
 
-        // Resolve chat_id: last received → DB binding
+        // Resolve chat_id: explicit param → last received → DB binding
         let last_id = h.last_chat_id.try_read().ok().and_then(|g| g.clone());
         drop(handle_guard);
 
-        let chat_id = if let Some(id) = last_id {
+        // Also check any concierge session that already has a feishu_chat_id
+        let session_chat_id = {
+            use db::models::concierge::ConciergeSession;
+            let sessions = ConciergeSession::list_all(&deployment.db().pool).await.unwrap_or_default();
+            sessions.into_iter().find_map(|s| s.feishu_chat_id)
+        };
+
+        let chat_id = if let Some(id) = req.chat_id.clone() {
+            id
+        } else if let Some(id) = last_id {
+            id
+        } else if let Some(id) = session_chat_id {
             id
         } else {
             let binding = db::models::ExternalConversationBinding::find_latest_active(

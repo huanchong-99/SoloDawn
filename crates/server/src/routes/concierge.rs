@@ -436,8 +436,19 @@ async fn get_feishu_channel(
         (None, None)
     };
 
-    // Get chat_id from feishu handle
-    let chat_id = {
+    // Get chat_id: session's feishu_chat_id → feishu handle last_chat_id
+    let session_chat_id = if let Some(ref ch) = active {
+        ConciergeSession::find_by_id(pool, &ch.session_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| s.feishu_chat_id)
+    } else {
+        None
+    };
+    let chat_id = if session_chat_id.is_some() {
+        session_chat_id
+    } else {
         let handle_guard = feishu_handle.read().await;
         if let Some(ref h) = *handle_guard {
             h.last_chat_id.try_read().ok().and_then(|g| g.clone())

@@ -7,16 +7,13 @@ import {
   useSwitchFeishuChannel,
   useConciergeSessions,
 } from '@/hooks/useConcierge';
-import { feishuApi } from '@/lib/api';
+import { usePlanningDrafts } from '@/hooks/usePlanningDraft';
+import { feishuApi, planningDraftsApi } from '@/lib/api';
 
-interface FeishuChannelContainerProps {
-  readonly currentSessionId: string | null;
-}
-
-export function FeishuChannelContainer({
-  currentSessionId,
-}: FeishuChannelContainerProps) {
+export function FeishuChannelContainer() {
   const [feishuConnected, setFeishuConnected] = useState(false);
+  const [selectedValue, setSelectedValue] = useState('');
+  const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
     feishuApi
@@ -29,13 +26,39 @@ export function FeishuChannelContainer({
 
   const { data: channel } = useFeishuChannel();
   const { data: sessions } = useConciergeSessions();
+  const { data: drafts } = usePlanningDrafts();
   const switchChannel = useSwitchFeishuChannel();
 
-  const handleSwitch = useCallback(
-    (sessionId: string) => {
-      switchChannel.mutate(sessionId);
+  const handleSelectChange = useCallback(
+    async (value: string) => {
+      if (!value) return;
+      setSelectedValue(value);
+
+      const knownChatId = channel?.chatId ?? undefined;
+      if (value.startsWith('draft:')) {
+        const draftId = value.slice(6);
+        setSwitching(true);
+        try {
+          await planningDraftsApi.toggleFeishuSync(draftId, {
+            enabled: true,
+            syncHistory: false,
+            chatId: knownChatId,
+          });
+        } catch {
+          globalThis.alert(
+            '绑定失败：未找到飞书聊天。\n\n请先在飞书中给 Bot 发送一条消息。'
+          );
+        } finally {
+          setSwitching(false);
+          setSelectedValue('');
+        }
+      } else {
+        switchChannel.mutate(value, {
+          onSettled: () => setSelectedValue(''),
+        });
+      }
     },
-    [switchChannel]
+    [switchChannel, channel?.chatId]
   );
 
   const sessionList = (sessions ?? []).map((s) => ({
@@ -43,15 +66,22 @@ export function FeishuChannelContainer({
     name: s.name || s.id.slice(0, 8),
   }));
 
+  const draftList = (drafts ?? []).map((d) => ({
+    id: `draft:${d.id}`,
+    name: `📝 ${d.name?.slice(0, 30) || d.id.slice(0, 8)}`,
+  }));
+
+  const allItems = [...sessionList, ...draftList];
+
   return (
     <FeishuChannelPanel
       connected={feishuConnected}
       activeSessionId={channel?.activeSessionId ?? null}
       activeSessionName={channel?.activeSessionName ?? null}
-      sessions={sessionList}
-      currentSessionId={currentSessionId}
-      onSwitchChannel={handleSwitch}
-      isPending={switchChannel.isPending}
+      sessions={allItems}
+      selectedValue={selectedValue}
+      onSelectChange={handleSelectChange}
+      isPending={switchChannel.isPending || switching}
     />
   );
 }

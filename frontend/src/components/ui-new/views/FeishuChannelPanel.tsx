@@ -5,8 +5,8 @@ interface FeishuChannelPanelProps {
   readonly activeSessionId: string | null;
   readonly activeSessionName: string | null;
   readonly sessions: readonly { id: string; name: string }[];
-  readonly currentSessionId: string | null;
-  readonly onSwitchChannel: (sessionId: string) => void;
+  readonly selectedValue: string;
+  readonly onSelectChange: (value: string) => void;
   readonly isPending: boolean;
 }
 
@@ -14,9 +14,9 @@ export function FeishuChannelPanel({
   connected,
   activeSessionId,
   activeSessionName,
-  sessions: _sessions,
-  currentSessionId,
-  onSwitchChannel,
+  sessions,
+  selectedValue,
+  onSelectChange,
   isPending,
 }: FeishuChannelPanelProps) {
   if (!connected) {
@@ -30,8 +30,6 @@ export function FeishuChannelPanel({
     );
   }
 
-  const isCurrentBound = activeSessionId === currentSessionId;
-
   return (
     <div className="border-b px-base py-half">
       <div className="mb-half flex items-center gap-half text-xs text-low">
@@ -39,7 +37,7 @@ export function FeishuChannelPanel({
         <span className="font-medium text-normal">飞书通道</span>
       </div>
 
-      {/* Current active session */}
+      {/* Current binding */}
       <div className="mb-half flex items-center gap-half text-xs">
         <LinkSimpleIcon className="size-icon-xs shrink-0" />
         <span className="text-low">当前绑定：</span>
@@ -48,21 +46,21 @@ export function FeishuChannelPanel({
         </span>
       </div>
 
-      {/* Bind current session button */}
-      {currentSessionId && !isCurrentBound && (
-        <button
-          type="button"
-          onClick={() => onSwitchChannel(currentSessionId)}
+      {/* Session selector */}
+      {sessions.length > 0 && (
+        <select
+          className="w-full rounded border bg-secondary px-half py-half text-xs text-normal"
+          value={selectedValue}
           disabled={isPending}
-          className="w-full rounded bg-brand/10 px-half py-half text-xs text-brand transition-colors hover:bg-brand/20 disabled:opacity-50"
+          onChange={(e) => onSelectChange(e.target.value)}
         >
-          {isPending ? '切换中...' : '绑定当前会话到飞书'}
-        </button>
-      )}
-      {isCurrentBound && (
-        <div className="rounded bg-success/10 px-half py-half text-center text-xs text-success">
-          当前会话已绑定飞书
-        </div>
+          <option value="">切换绑定会话...</option>
+          {sessions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.id === activeSessionId ? `✓ ${s.name}` : s.name}
+            </option>
+          ))}
+        </select>
       )}
     </div>
   );

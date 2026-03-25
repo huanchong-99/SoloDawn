@@ -603,7 +603,7 @@ export const planningDraftsApi = {
 
   toggleFeishuSync: async (
     draftId: string,
-    data: { enabled: boolean; syncHistory: boolean }
+    data: { enabled: boolean; syncHistory: boolean; chatId?: string }
   ): Promise<PlanningDraftResponse> => {
     const response = await makeRequest(
       `/api/planning-drafts/${draftId}/feishu-sync`,
