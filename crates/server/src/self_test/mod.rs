@@ -4,6 +4,7 @@
 //! database, exercises every API endpoint, and reports structured results.
 //! Designed to run on clean CI environments (GitHub Actions) with no UI.
 
+pub mod orchestration;
 pub mod runner;
 pub mod tests;
 
@@ -35,7 +36,7 @@ pub struct SelfTestReport {
 /// Entry point for the self-test subcommand.
 ///
 /// Returns exit code: 0 = all passed, 1 = failures.
-pub async fn run(json: bool, filter: Option<String>) -> i32 {
+pub async fn run(json: bool, filter: Option<String>, orchestration: bool) -> i32 {
     // Initialize minimal tracing — write to stderr so stdout is clean JSON
     let env_filter = tracing_subscriber::EnvFilter::try_new(
         std::env::var("RUST_LOG").unwrap_or_else(|_| "warn,server=info".to_string()),
@@ -72,7 +73,14 @@ pub async fn run(json: bool, filter: Option<String>) -> i32 {
     });
 
     let mut ctx = tests::TestContext::new(server.base_url.clone(), server.temp_dir());
-    let results = tests::run_all_tests(&mut ctx, filter_groups.as_deref()).await;
+    let mut results = tests::run_all_tests(&mut ctx, filter_groups.as_deref()).await;
+
+    // Run orchestration E2E tests if requested
+    if orchestration {
+        let orch_results =
+            orchestration::run_orchestration_tests(&server.base_url, &server.temp_dir()).await;
+        results.extend(orch_results);
+    }
 
     let total_duration = start.elapsed();
 

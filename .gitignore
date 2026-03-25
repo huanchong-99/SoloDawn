@@ -71,6 +71,9 @@ CLAUDE.md
 # Local test cases
 docs/undeveloped/current/GitCortex\ 1.0\ 发布测试用例.md
 
+# Confidential testing runbook (contains key management procedures)
+docs/undeveloped/current/E2E-Orchestration-Testing-Runbook.md
+
 # Installer build artifacts
 installer/build/
 installer/output/

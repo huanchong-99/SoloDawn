@@ -48,6 +48,9 @@ enum Commands {
         /// Run only specific test groups (comma-separated, e.g. "infra,config,projects")
         #[arg(long)]
         filter: Option<String>,
+        /// Run orchestration E2E tests (requires E2E_API_KEY env var)
+        #[arg(long)]
+        orchestration: bool,
     },
 }
 
@@ -137,8 +140,8 @@ async fn main() -> Result<(), GitCortexError> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::SelfTest { json, filter }) => {
-            let exit_code = server::self_test::run(json, filter).await;
+        Some(Commands::SelfTest { json, filter, orchestration }) => {
+            let exit_code = server::self_test::run(json, filter, orchestration).await;
             std::process::exit(exit_code);
         }
         None => run_server().await,
