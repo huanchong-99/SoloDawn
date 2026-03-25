@@ -323,7 +323,9 @@ async fn test_create_project(
         .map_err(|e| format!("Create project failed: {e}"))?;
 
     let status = resp.status().as_u16();
-    let body: Value = resp.json().await.map_err(|e| format!("Parse response: {e}"))?;
+    let body_text = resp.text().await.map_err(|e| format!("Read body: {e}"))?;
+    let body: Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("Parse project JSON ({status}): {e}\nBody: {}", &body_text[..body_text.len().min(500)]))?;
 
     if status >= 400 {
         return Err(format!("Create project returned {status}: {body}"));
@@ -360,7 +362,7 @@ async fn test_full_workflow(
                 "apiType": "anthropic",
                 "baseUrl": e2e_base_url(),
                 "apiKey": e2e_api_key(),
-                "modelId": e2e_model()
+                "model": e2e_model()
             },
             "mergeTerminalConfig": {
                 "cliTypeId": "cli-claude-code",
@@ -384,7 +386,9 @@ async fn test_full_workflow(
         .map_err(|e| format!("Create workflow: {e}"))?;
 
     let status = resp.status().as_u16();
-    let body: Value = resp.json().await.map_err(|e| format!("Parse: {e}"))?;
+    let body_text = resp.text().await.map_err(|e| format!("Read body: {e}"))?;
+    let body: Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("Parse JSON ({status}): {e}\nBody: {}", &body_text[..body_text.len().min(500)]))?;
     if status >= 400 {
         return Err(format!("Create workflow {status}: {body}"));
     }
