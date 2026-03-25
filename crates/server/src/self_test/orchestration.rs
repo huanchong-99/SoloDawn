@@ -155,32 +155,51 @@ pub async fn run_orchestration_tests(
 
 /// Find the `claude` binary, checking PATH and common npm global locations.
 fn find_claude_binary() -> Result<String, String> {
-    // Try PATH first
-    if let Ok(output) = std::process::Command::new("claude").arg("--version").output() {
-        if output.status.success() {
-            return Ok("claude".to_string());
-        }
-    }
-
-    // On Windows, check common npm global install locations
+    // On Windows, try `claude.cmd` first (npm installs .cmd wrappers)
     if cfg!(windows) {
+        // Try claude.cmd via PATH
+        if let Ok(output) = std::process::Command::new("cmd")
+            .args(["/C", "claude", "--version"])
+            .output()
+        {
+            if output.status.success() {
+                eprintln!("  Found claude via cmd /C");
+                return Ok("claude".to_string());
+            }
+        }
+
+        // Check common npm global install locations
         let candidates = [
-            // npm global bin (AppData)
             std::env::var("APPDATA")
                 .map(|d| format!("{d}\\npm\\claude.cmd"))
                 .unwrap_or_default(),
-            // npm prefix global bin
-            std::env::var("APPDATA")
-                .map(|d| format!("{d}\\npm\\node_modules\\.bin\\claude.cmd"))
-                .unwrap_or_default(),
-            // ProgramFiles
-            "C:\\Program Files\\nodejs\\claude.cmd".to_string(),
+            // npm prefix -g location on CI runners
+            "C:\\npm\\prefix\\claude.cmd".to_string(),
         ];
 
         for candidate in &candidates {
             if !candidate.is_empty() && std::path::Path::new(candidate).exists() {
                 eprintln!("  Found claude at: {candidate}");
                 return Ok(candidate.clone());
+            }
+        }
+
+        // Try `where claude` to find it in PATH
+        if let Ok(output) = std::process::Command::new("where").arg("claude").output() {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout);
+                let first_line = path.lines().next().unwrap_or("").trim();
+                if !first_line.is_empty() {
+                    eprintln!("  Found claude via `where`: {first_line}");
+                    return Ok(first_line.to_string());
+                }
+            }
+        }
+    } else {
+        // Unix: try directly
+        if let Ok(output) = std::process::Command::new("claude").arg("--version").output() {
+            if output.status.success() {
+                return Ok("claude".to_string());
             }
         }
     }
@@ -191,10 +210,17 @@ fn find_claude_binary() -> Result<String, String> {
 async fn test_cli_installed() -> Result<(), String> {
     let claude_bin = find_claude_binary()?;
 
-    let output = std::process::Command::new(&claude_bin)
-        .arg("--version")
-        .output()
-        .map_err(|e| format!("Failed to run `{claude_bin} --version`: {e}"))?;
+    // On Windows, run through cmd /C to resolve .cmd wrappers
+    let output = if cfg!(windows) {
+        std::process::Command::new("cmd")
+            .args(["/C", &claude_bin, "--version"])
+            .output()
+    } else {
+        std::process::Command::new(&claude_bin)
+            .arg("--version")
+            .output()
+    }
+    .map_err(|e| format!("Failed to run `{claude_bin} --version`: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
