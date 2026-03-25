@@ -356,6 +356,12 @@ async fn test_full_workflow(
             "name": "E2E Orchestration Test Workflow",
             "executionMode": "diy",
             "useSlashCommands": false,
+            "orchestratorConfig": {
+                "apiType": "anthropic",
+                "baseUrl": e2e_base_url(),
+                "apiKey": e2e_api_key(),
+                "modelId": e2e_model()
+            },
             "mergeTerminalConfig": {
                 "cliTypeId": "cli-claude-code",
                 "modelConfigId": model_config_id
