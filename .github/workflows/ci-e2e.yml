@@ -216,10 +216,21 @@ jobs:
         cd frontend && pnpm build
 
     - name: Install Claude Code CLI
-      run: npm install -g @anthropic-ai/claude-code
+      shell: bash
+      run: |
+        npm install -g @anthropic-ai/claude-code
+        # Ensure npm global bin is in PATH for child processes
+        NPM_GLOBAL_BIN="$(npm prefix -g)/bin"
+        echo "NPM global bin: $NPM_GLOBAL_BIN"
+        echo "$NPM_GLOBAL_BIN" >> "$GITHUB_PATH"
+        # Also add AppData/npm for Windows
+        echo "$APPDATA/npm" >> "$GITHUB_PATH"
 
     - name: Verify Claude Code installation
-      run: claude --version
+      shell: bash
+      run: |
+        which claude || where claude || echo "claude not in PATH yet"
+        claude --version
 
     - name: Build server (release)
       run: cargo build --release -p server

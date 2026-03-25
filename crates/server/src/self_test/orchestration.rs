@@ -153,16 +153,53 @@ pub async fn run_orchestration_tests(
 // Individual test implementations
 // ============================================================================
 
+/// Find the `claude` binary, checking PATH and common npm global locations.
+fn find_claude_binary() -> Result<String, String> {
+    // Try PATH first
+    if let Ok(output) = std::process::Command::new("claude").arg("--version").output() {
+        if output.status.success() {
+            return Ok("claude".to_string());
+        }
+    }
+
+    // On Windows, check common npm global install locations
+    if cfg!(windows) {
+        let candidates = [
+            // npm global bin (AppData)
+            std::env::var("APPDATA")
+                .map(|d| format!("{d}\\npm\\claude.cmd"))
+                .unwrap_or_default(),
+            // npm prefix global bin
+            std::env::var("APPDATA")
+                .map(|d| format!("{d}\\npm\\node_modules\\.bin\\claude.cmd"))
+                .unwrap_or_default(),
+            // ProgramFiles
+            "C:\\Program Files\\nodejs\\claude.cmd".to_string(),
+        ];
+
+        for candidate in &candidates {
+            if !candidate.is_empty() && std::path::Path::new(candidate).exists() {
+                eprintln!("  Found claude at: {candidate}");
+                return Ok(candidate.clone());
+            }
+        }
+    }
+
+    Err("Claude Code CLI not found in PATH or common locations. Is it installed?".to_string())
+}
+
 async fn test_cli_installed() -> Result<(), String> {
-    let output = std::process::Command::new("claude")
+    let claude_bin = find_claude_binary()?;
+
+    let output = std::process::Command::new(&claude_bin)
         .arg("--version")
         .output()
-        .map_err(|e| format!("Failed to run `claude --version`: {e}. Is Claude Code installed?"))?;
+        .map_err(|e| format!("Failed to run `{claude_bin} --version`: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
-            "`claude --version` exited with {}: {stderr}",
+            "`{claude_bin} --version` exited with {}: {stderr}",
             output.status
         ));
     }
