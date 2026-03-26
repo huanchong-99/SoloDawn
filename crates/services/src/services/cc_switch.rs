@@ -399,6 +399,13 @@ fn apply_auto_confirm_args(cli: &CcCliType, args: &mut Vec<String>, auto_confirm
     }
 
     args.push(flag.to_string());
+
+    // For Claude Code: also add --bare to skip all interactive first-launch
+    // dialogs (theme selector, workspace trust, security notes, bypass
+    // confirmation). Without this, a clean install hangs on these prompts.
+    if *cli == CcCliType::ClaudeCode && !args.iter().any(|arg| arg == "--bare") {
+        args.push("--bare".to_string());
+    }
 }
 
 /// Sanitize a terminal ID for use in filesystem paths.
