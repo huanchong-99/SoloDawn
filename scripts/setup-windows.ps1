@@ -448,8 +448,7 @@ function Test-VsBuildTools {
 function Install-Winget {
     Write-Info (T "WINGET_INSTALLING")
 
-    # Ensure TLS 1.2 for older Windows 10
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    # TLS 1.2 already set at script start (network connectivity check)
 
     $oldProgress = $ProgressPreference
     $ProgressPreference = "SilentlyContinue"  # speeds up Invoke-WebRequest
@@ -457,20 +456,41 @@ function Install-Winget {
     $tempDir = Join-Path $env:TEMP "winget-install-$(Get-Random)"
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
+    # Hardcoded fallback URLs for winget v1.10.340 (stable release)
+    # Used when GitHub API is unreachable (DNS failure, firewall, etc.)
+    $FALLBACK_BUNDLE_URL = "https://github.com/microsoft/winget-cli/releases/download/v1.10.340/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle"
+    $FALLBACK_LICENSE_URL = "https://github.com/microsoft/winget-cli/releases/download/v1.10.340/5d9d44b170b54c20a50d4c4e71cbc645_License1.xml"
+
     try {
-        # 1. Query GitHub API for latest winget-cli release
+        # 1. Try GitHub API for latest release; fall back to hardcoded URLs
         Write-Info (T "WINGET_DEP_WINGET")
-        $releaseJson = Invoke-WebRequest -Uri "https://api.github.com/repos/microsoft/winget-cli/releases/latest" -UseBasicParsing | ConvertFrom-Json
 
-        $bundleAsset = $releaseJson.assets | Where-Object { $_.name -like "*.msixbundle" } | Select-Object -First 1
-        $depsAsset   = $releaseJson.assets | Where-Object { $_.name -eq "DesktopAppInstaller_Dependencies.zip" } | Select-Object -First 1
-        $licenseAsset = $releaseJson.assets | Where-Object { $_.name -like "*License*.xml" } | Select-Object -First 1
+        $bundleUrl = $null
+        $licenseUrl = $null
+        $depsAsset = $null
 
-        if (-not $bundleAsset) { throw "Cannot find msixbundle asset in winget-cli release" }
+        try {
+            $releaseJson = Invoke-WebRequest -Uri "https://api.github.com/repos/microsoft/winget-cli/releases/latest" -UseBasicParsing -TimeoutSec 15 | ConvertFrom-Json
+            $bundleAsset = $releaseJson.assets | Where-Object { $_.name -like "*.msixbundle" } | Select-Object -First 1
+            $depsAsset   = $releaseJson.assets | Where-Object { $_.name -eq "DesktopAppInstaller_Dependencies.zip" } | Select-Object -First 1
+            $licenseAsset = $releaseJson.assets | Where-Object { $_.name -like "*License*.xml" } | Select-Object -First 1
+            if ($bundleAsset) { $bundleUrl = $bundleAsset.browser_download_url }
+            if ($licenseAsset) { $licenseUrl = $licenseAsset.browser_download_url }
+        } catch {
+            Write-Warn "GitHub API unreachable ($($_.Exception.Message)), using fallback URLs..."
+            $bundleUrl = $FALLBACK_BUNDLE_URL
+            $licenseUrl = $FALLBACK_LICENSE_URL
+        }
+
+        if (-not $bundleUrl) {
+            Write-Warn "Cannot find msixbundle asset, using fallback URL..."
+            $bundleUrl = $FALLBACK_BUNDLE_URL
+            $licenseUrl = $FALLBACK_LICENSE_URL
+        }
 
         # 2. Download the dependencies zip (contains VCLibs + UWPDesktop + WindowsAppRuntime, all architectures)
         Write-Info (T "WINGET_DEP_VCLIBS")
-        if ($depsAsset) {
+        if ($depsAsset -and $depsAsset.browser_download_url) {
             $depsZip = Join-Path $tempDir "deps.zip"
             $depsExtract = Join-Path $tempDir "deps"
             Invoke-WebRequest -Uri $depsAsset.browser_download_url -OutFile $depsZip
@@ -496,13 +516,13 @@ function Install-Winget {
         # 3. Download and install winget msixbundle
         Write-Info (T "WINGET_DEP_XAML")
         $wingetBundle = Join-Path $tempDir "Microsoft.DesktopAppInstaller.msixbundle"
-        Invoke-WebRequest -Uri $bundleAsset.browser_download_url -OutFile $wingetBundle
+        Invoke-WebRequest -Uri $bundleUrl -OutFile $wingetBundle
         Add-AppxPackage -Path $wingetBundle -ErrorAction Stop
 
         # 4. Provision for all users (best effort, needs license)
-        if ($licenseAsset) {
+        if ($licenseUrl) {
             $licensePath = Join-Path $tempDir "License1.xml"
-            Invoke-WebRequest -Uri $licenseAsset.browser_download_url -OutFile $licensePath
+            Invoke-WebRequest -Uri $licenseUrl -OutFile $licensePath
             try {
                 Add-AppxProvisionedPackage -Online -PackagePath $wingetBundle -LicensePath $licensePath -ErrorAction Stop | Out-Null
             } catch {
@@ -893,6 +913,24 @@ Write-Host ""
 Write-Host (T "TITLE") -ForegroundColor Cyan
 Write-Host (T "SUBTITLE") -ForegroundColor DarkGray
 Write-Host ""
+
+# Check network connectivity
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$networkOk = $false
+foreach ($testHost in @("github.com", "aka.ms", "nodejs.org")) {
+    try {
+        $null = [System.Net.Dns]::GetHostAddresses($testHost)
+        $networkOk = $true
+        break
+    } catch { }
+}
+if (-not $networkOk) {
+    Write-Err "Network connectivity issue detected — DNS resolution failed for github.com, aka.ms, nodejs.org."
+    Write-Err "This script requires internet access to download tools."
+    Write-Warn "Please check your network/DNS settings and try again."
+    Write-Warn "Tip: Try running 'nslookup github.com' to diagnose DNS issues."
+    Pause-BeforeExit 1
+}
 
 # Check PowerShell version
 if ($PSVersionTable.PSVersion.Major -lt 5) {
