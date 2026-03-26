@@ -634,12 +634,86 @@ function Invoke-WithRetry {
     return $false
 }
 
+# Direct download URLs for tools (used when winget is unavailable)
+$DIRECT_DOWNLOADS = @{
+    "Git.Git"         = @{
+        Url      = "https://github.com/git-for-windows/git/releases/download/v2.49.0.windows.1/Git-2.49.0-64-bit.exe"
+        Args     = "/VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS=`"icons,ext\reg\shellhere,assoc,assoc_sh`""
+        FileName = "git-installer.exe"
+    }
+    "OpenJS.NodeJS.LTS" = @{
+        Url      = "https://nodejs.org/dist/v22.16.0/node-v22.16.0-x64.msi"
+        Args     = "/qn"
+        FileName = "node-installer.msi"
+        IsMsi    = $true
+    }
+    "Rustlang.Rustup" = @{
+        Url      = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe"
+        Args     = "-y --default-toolchain none"
+        FileName = "rustup-init.exe"
+    }
+    "Microsoft.VisualStudio.2022.BuildTools" = @{
+        Url      = "https://aka.ms/vs/17/release/vs_BuildTools.exe"
+        Args     = "--wait --quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+        FileName = "vs_BuildTools.exe"
+    }
+    "GitHub.cli" = @{
+        Url      = "https://github.com/cli/cli/releases/download/v2.74.0/gh_2.74.0_windows_amd64.msi"
+        Args     = "/qn"
+        FileName = "gh-installer.msi"
+        IsMsi    = $true
+    }
+}
+
+function Install-Direct {
+    param(
+        [string]$PackageId,
+        [string]$DisplayName
+    )
+
+    $info = $DIRECT_DOWNLOADS[$PackageId]
+    if (-not $info) {
+        Write-Err "No direct download URL configured for $PackageId"
+        return $false
+    }
+
+    Write-Info (Tf "INSTALLING" @("$DisplayName (direct download)"))
+
+    $tempDir = Join-Path $env:TEMP "gitcortex-install-$(Get-Random)"
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    $installerPath = Join-Path $tempDir $info.FileName
+
+    try {
+        Write-Info "  Downloading $($info.Url)..."
+        Invoke-WebRequest -Uri $info.Url -OutFile $installerPath -UseBasicParsing
+        Write-Info "  Running installer..."
+        if ($info.IsMsi) {
+            Start-Process "msiexec.exe" -ArgumentList "/i `"$installerPath`" $($info.Args)" -Wait -NoNewWindow
+        } else {
+            Start-Process $installerPath -ArgumentList $info.Args -Wait -NoNewWindow
+        }
+        Write-Ok (Tf "INSTALL_OK" @($DisplayName))
+        return $true
+    } catch {
+        Write-Err (Tf "ERR_INSTALL_FAILED" @($DisplayName))
+        Write-Err $_.Exception.Message
+        return $false
+    } finally {
+        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Install-WithWinget {
     param(
         [string]$PackageId,
         [string]$DisplayName,
         [string]$Override = ""
     )
+
+    # If winget unavailable, try direct download
+    if (-not $global:UseWinget) {
+        return Install-Direct -PackageId $PackageId -DisplayName $DisplayName
+    }
 
     Write-Info (Tf "INSTALLING" @($DisplayName))
 
@@ -655,6 +729,10 @@ function Install-WithWinget {
 
     if ($ok) {
         Write-Ok (Tf "INSTALL_OK" @($DisplayName))
+    } else {
+        # Fallback to direct download if winget fails
+        Write-Warn "winget install failed, trying direct download..."
+        $ok = Install-Direct -PackageId $PackageId -DisplayName $DisplayName
     }
     return $ok
 }
@@ -957,13 +1035,17 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
     Pause-BeforeExit 1
 }
 
-# Check winget — install automatically if missing
-if (-not (Test-WingetAvailable)) {
+# Check winget — try to install if missing, but don't block on failure
+$global:UseWinget = $false
+if (Test-WingetAvailable) {
+    $global:UseWinget = $true
+} else {
     Write-Warn (T "ERR_WINGET_NOT_FOUND")
     $wingetOk = Install-Winget
-    if (-not $wingetOk -or -not (Test-WingetAvailable)) {
-        Write-Err (T "WINGET_INSTALL_FAILED")
-        Pause-BeforeExit 1
+    if ($wingetOk -and (Test-WingetAvailable)) {
+        $global:UseWinget = $true
+    } else {
+        Write-Warn "winget unavailable — will use direct downloads instead."
     }
 }
 
