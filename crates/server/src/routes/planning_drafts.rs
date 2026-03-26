@@ -371,13 +371,34 @@ async fn send_message(
             }
             Err(e) => {
                 tracing::warn!(draft_id = %draft_id, "LLM call failed for planning draft: {e}");
+                // Surface the error as an assistant message so the user sees it
+                let error_content = format!(
+                    "LLM call failed: {e}\n\nPlease check your model configuration (API key, base URL, model name) in Settings."
+                );
+                let error_msg =
+                    PlanningDraftMessage::new(&draft_id, "assistant", &error_content);
+                if let Ok(()) =
+                    PlanningDraftMessage::insert(&deployment.db().pool, &error_msg).await
+                {
+                    result.push(MessageResponse::from(error_msg));
+                }
             }
         }
     } else {
-        tracing::debug!(
+        tracing::warn!(
             draft_id = %draft_id,
-            "No LLM config on planning draft, skipping assistant reply"
+            "No LLM config on planning draft — model credentials may be missing"
         );
+        // Surface as an assistant message so the user knows what's wrong
+        let error_content =
+            "Model not configured for this workspace. Please check Settings → Models and ensure the selected model has a valid API key and base URL.";
+        let error_msg =
+            PlanningDraftMessage::new(&draft_id, "assistant", error_content);
+        if let Ok(()) =
+            PlanningDraftMessage::insert(&deployment.db().pool, &error_msg).await
+        {
+            result.push(MessageResponse::from(error_msg));
+        }
     }
 
     // Push new messages to Feishu if sync is enabled
