@@ -277,6 +277,17 @@ fn create_claude_settings(
     let mut settings_map = serde_json::Map::new();
     settings_map.insert("env".to_string(), serde_json::Value::Object(env_obj));
 
+    // Skip all first-launch interactive dialogs on clean installs:
+    // - Theme selector, security notes, workspace trust, bypass confirmation
+    settings_map.insert(
+        "hasCompletedOnboarding".to_string(),
+        serde_json::Value::Bool(true),
+    );
+    settings_map.insert(
+        "hasAcknowledgedDangerousSkipPermissions".to_string(),
+        serde_json::Value::Bool(true),
+    );
+
     if needs_api_key_helper {
         let helper_script = claude_home.join("api-key-helper.js");
         let script_content = format!(
