@@ -43,6 +43,7 @@ export function usePlanningDraftMessages(draftId: string | null) {
     queryKey: planningDraftKeys.messages(draftId ?? ''),
     queryFn: () => planningDraftsApi.listMessages(draftId!),
     enabled: !!draftId,
+    staleTime: 5_000,
   });
 }
 

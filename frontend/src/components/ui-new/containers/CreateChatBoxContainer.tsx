@@ -1,6 +1,7 @@
 import { useMemo, useCallback, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCreateMode } from '@/contexts/CreateModeContext';
 import { useUserSystem } from '@/components/ConfigProvider';
 import { useCreateAttachments } from '@/hooks/useCreateAttachments';
@@ -16,6 +17,7 @@ import {
   type PlanningMessageResponse,
 } from '@/lib/api';
 import {
+  planningDraftKeys,
   usePlanningDraft,
   usePlanningDraftMessages,
   useSendPlanningMessage,
@@ -50,6 +52,7 @@ export function CreateChatBoxContainer() {
   const { t } = useTranslation('common');
   const { t: tTasks } = useTranslation('tasks');
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { profiles, config, updateAndSaveConfig } = useUserSystem();
   const {
     repos,
@@ -110,7 +113,10 @@ export function CreateChatBoxContainer() {
     return () => { cancelled = true; };
   }, [planningDraftId]);
 
-  const planningMessages = serverMessages ?? localMessages;
+  // Use serverMessages only when it has content; otherwise fall back to localMessages.
+  // This prevents a race condition where React Query resolves with [] before the
+  // sendMessage POST returns, causing [] ?? localMessages to evaluate to [].
+  const planningMessages = (serverMessages && serverMessages.length > 0) ? serverMessages : localMessages;
 
   // Sync right sidebar project when a draft is loaded from the sidebar
   useEffect(() => {
@@ -261,6 +267,11 @@ export function CreateChatBoxContainer() {
 
       const newMessages = await planningDraftsApi.sendMessage(draft.id, message);
       setLocalMessages(newMessages);
+      // Invalidate React Query cache so serverMessages eventually catches up.
+      // handleInitialSubmit bypasses the mutation, so invalidation must be manual.
+      queryClient.invalidateQueries({
+        queryKey: planningDraftKeys.messages(draft.id),
+      });
       setMessage('');
       clearAttachments();
       await clearCreateDraft();
@@ -284,6 +295,7 @@ export function CreateChatBoxContainer() {
     setMessage,
     clearAttachments,
     clearCreateDraft,
+    queryClient,
   ]);
 
   // === Phase 2: Follow-up messages in planning conversation ===

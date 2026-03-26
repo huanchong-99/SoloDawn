@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use db::models::{repo::Repo, workspace::Workspace as DbWorkspace};
+use db::models::{repo::Repo, workspace::Workspace as DbWorkspace, workspace_repo::RepoWithTargetBranch};
 use sqlx::{Pool, Sqlite};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
@@ -168,6 +168,52 @@ impl WorkspaceManager {
 
             WorktreeManager::ensure_worktree_exists(&repo.path, branch_name, &worktree_path)
                 .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Ensure all worktrees in a workspace exist, with branch recreation fallback.
+    ///
+    /// Unlike [`ensure_workspace_exists`], this variant accepts `target_branch` per repo
+    /// so that if both the worktree and the local branch are lost after an abnormal exit,
+    /// the branch can be recreated from remote or from the base branch.
+    pub async fn ensure_workspace_exists_with_recovery(
+        workspace_dir: &Path,
+        repos: &[RepoWithTargetBranch],
+        branch_name: &str,
+    ) -> Result<(), WorkspaceError> {
+        if repos.is_empty() {
+            return Err(WorkspaceError::NoRepositories);
+        }
+
+        // Old layout placed worktree directly at workspace_dir; new layout nests under {repo_name}.
+        if repos.len() == 1
+            && Self::migrate_legacy_worktree(workspace_dir, &repos[0].repo).await?
+        {
+            return Ok(());
+        }
+
+        if !workspace_dir.exists() {
+            tokio::fs::create_dir_all(workspace_dir).await?;
+        }
+
+        for repo in repos {
+            let worktree_path = workspace_dir.join(&repo.repo.name);
+
+            debug!(
+                "Ensuring worktree (with recovery) for repo '{}' at {}",
+                repo.repo.name,
+                worktree_path.display()
+            );
+
+            WorktreeManager::ensure_worktree_exists_with_recovery(
+                &repo.repo.path,
+                branch_name,
+                &worktree_path,
+                &repo.target_branch,
+            )
+            .await?;
         }
 
         Ok(())

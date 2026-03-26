@@ -1165,10 +1165,15 @@ impl ContainerService for LocalContainerService {
         workspace: &Workspace,
     ) -> Result<ContainerRef, ContainerError> {
         Workspace::touch(&self.db.pool, workspace.id).await?;
-        let repositories =
-            WorkspaceRepo::find_repos_for_workspace(&self.db.pool, workspace.id).await?;
+        // Use the target-branch-aware query so recovery can recreate lost branches.
+        let repos_with_branch =
+            WorkspaceRepo::find_repos_with_target_branch_for_workspace(
+                &self.db.pool,
+                workspace.id,
+            )
+            .await?;
 
-        if repositories.is_empty() {
+        if repos_with_branch.is_empty() {
             return Err(ContainerError::Other(anyhow!(
                 "Workspace has no repositories configured"
             )));
@@ -1186,8 +1191,12 @@ impl ContainerService for LocalContainerService {
             WorkspaceManager::get_workspace_base_dir().join(&workspace_dir_name)
         };
 
-        WorkspaceManager::ensure_workspace_exists(&workspace_dir, &repositories, &workspace.branch)
-            .await?;
+        WorkspaceManager::ensure_workspace_exists_with_recovery(
+            &workspace_dir,
+            &repos_with_branch,
+            &workspace.branch,
+        )
+        .await?;
 
         if workspace.container_ref.is_none() {
             Workspace::update_container_ref(
@@ -1202,6 +1211,8 @@ impl ContainerService for LocalContainerService {
         self.copy_files_and_images(&workspace_dir, workspace)
             .await?;
 
+        let repositories: Vec<Repo> =
+            repos_with_branch.iter().map(|r| r.repo.clone()).collect();
         Self::create_workspace_config_files(&workspace_dir, &repositories).await?;
 
         Ok(workspace_dir.to_string_lossy().to_string())

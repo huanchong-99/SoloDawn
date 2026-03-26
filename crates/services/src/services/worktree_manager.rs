@@ -12,7 +12,7 @@ use thiserror::Error;
 use tracing::{debug, info, trace};
 use utils::{path::normalize_macos_private_alias, shell::resolve_executable_path};
 
-use super::git::{GitService, GitServiceError};
+use super::git::{GitCli, GitService, GitServiceError};
 
 // Global synchronization for worktree creation to prevent race conditions.
 // G23-001 + G23-010: Use parking_lot::Mutex (no poison) with an LruCache (capacity 1000)
@@ -116,6 +116,83 @@ impl WorktreeManager {
         }
 
         Self::ensure_worktree_exists(repo_path, branch_name, worktree_path).await
+    }
+
+    /// Ensure worktree exists with branch recreation fallback for cold-restart recovery.
+    ///
+    /// Recovery cascade:
+    /// 1. Try normal path (local branch exists) — fast path
+    /// 2. Recreate local branch from remote tracking branch (preserves any pushed work)
+    /// 3. Create fresh branch from `target_branch` (clean slate from base)
+    pub async fn ensure_worktree_exists_with_recovery(
+        repo_path: &Path,
+        branch_name: &str,
+        worktree_path: &Path,
+        target_branch: &str,
+    ) -> Result<(), WorktreeError> {
+        // 1. Try normal recovery (assumes branch exists locally)
+        match Self::ensure_worktree_exists(repo_path, branch_name, worktree_path).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                info!(
+                    "Normal worktree recovery failed for '{}': {e}. \
+                     Attempting branch recreation from target '{target_branch}'.",
+                    branch_name
+                );
+            }
+        }
+
+        // 2. Try recreating local branch from remote tracking branch
+        if Self::try_create_branch_from_remote(repo_path, branch_name).await {
+            info!(
+                "Recreated branch '{}' from remote. Retrying worktree creation.",
+                branch_name
+            );
+            if let Ok(()) =
+                Self::ensure_worktree_exists(repo_path, branch_name, worktree_path).await
+            {
+                return Ok(());
+            }
+        }
+
+        // 3. Last resort: create fresh branch from target_branch (base branch)
+        info!(
+            "Creating fresh branch '{}' from base '{}'.",
+            branch_name, target_branch
+        );
+        Self::create_worktree(repo_path, branch_name, worktree_path, target_branch, true).await
+    }
+
+    /// Try to recreate a local branch from its remote tracking counterpart (`origin/<branch>`).
+    /// Returns `true` if the branch was successfully created.
+    async fn try_create_branch_from_remote(repo_path: &Path, branch_name: &str) -> bool {
+        let repo_path = repo_path.to_path_buf();
+        let branch_name = branch_name.to_string();
+        tokio::task::spawn_blocking(move || {
+            let cli = GitCli::new();
+            let remote_ref = format!("origin/{branch_name}");
+            match cli.git(&repo_path, ["branch", &branch_name, &remote_ref]) {
+                Ok(_) => {
+                    info!(
+                        "Successfully created local branch '{}' from '{}'",
+                        branch_name, remote_ref
+                    );
+                    true
+                }
+                Err(e) => {
+                    debug!(
+                        "Could not create branch '{}' from '{}': {e}",
+                        branch_name, remote_ref
+                    );
+                    false
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("spawn_blocking panicked in try_create_branch_from_remote: {e}");
+            false
+        })
     }
 
     /// Ensure worktree exists, recreating if necessary with proper synchronization
