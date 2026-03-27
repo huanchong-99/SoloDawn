@@ -253,6 +253,7 @@ impl TrayApp {
     fn load_icon(install_dir: &Path) -> Icon {
         // Try .ico first (Windows native), then .png
         let candidates = [
+            install_dir.join("assets").join("SoloDawn.ico"),
             install_dir.join("assets").join("solodawn.ico"),
             install_dir.join("assets").join("solodawn.png"),
         ];

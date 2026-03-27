@@ -263,10 +263,10 @@ impl RedisBus {
     }
 
     fn topic_channel(topic: &str) -> String {
-        format!("gitcortex:topic:{topic}")
+        format!("solodawn:topic:{topic}")
     }
 
-    const BROADCAST_CHANNEL: &'static str = "gitcortex:broadcast";
+    const BROADCAST_CHANNEL: &'static str = "solodawn:broadcast";
 }
 
 #[async_trait]

@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn test_make_path_relative_macos_private_alias() {
         // Simulate a worktree under /var with a path reported under /private/var
-        let worktree = "/var/folders/zz/abc123/T/gitcortex-dev/worktrees/gc-test";
+        let worktree = "/var/folders/zz/abc123/T/solodawn-dev/worktrees/gc-test";
         let path_under_private = format!(
             "/private/var{}/hello-world.txt",
             worktree.strip_prefix("/var").unwrap()

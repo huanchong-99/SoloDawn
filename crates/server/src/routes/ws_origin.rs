@@ -84,7 +84,7 @@ mod tests {
 
     use super::*;
 
-    /// Helper: run validation with a specific GITCORTEX_CORS_ORIGINS value.
+    /// Helper: run validation with a specific SOLODAWN_CORS_ORIGINS value.
     /// Uses a closure to ensure test isolation (env var is set/unset around the call).
     fn with_env(val: Option<&str>, f: impl FnOnce()) {
         // SAFETY: tests using this helper must not run in parallel if they
@@ -92,13 +92,13 @@ mod tests {
         // but sequentially by default within a single module.
         unsafe {
             match val {
-                Some(v) => std::env::set_var("GITCORTEX_CORS_ORIGINS", v),
-                None => std::env::remove_var("GITCORTEX_CORS_ORIGINS"),
+                Some(v) => std::env::set_var("SOLODAWN_CORS_ORIGINS", v),
+                None => std::env::remove_var("SOLODAWN_CORS_ORIGINS"),
             }
         }
         f();
         unsafe {
-            std::env::remove_var("GITCORTEX_CORS_ORIGINS");
+            std::env::remove_var("SOLODAWN_CORS_ORIGINS");
         }
     }
 

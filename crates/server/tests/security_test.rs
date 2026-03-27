@@ -7,10 +7,10 @@
 //! Prerequisites:
 //! - Server running on http://localhost:3001
 //! - Database initialized with seed data
-//! - Server MUST be started with GITCORTEX_ENCRYPTION_KEY environment variable set
-//!   Example: GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012" cargo run --bin server
+//! - Server MUST be started with SOLODAWN_ENCRYPTION_KEY environment variable set
+//!   Example: SOLODAWN_ENCRYPTION_KEY="12345678901234567890123456789012" cargo run --bin server
 //!
-//! IMPORTANT: The test process sets GITCORTEX_ENCRYPTION_KEY for its own direct DB access,
+//! IMPORTANT: The test process sets SOLODAWN_ENCRYPTION_KEY for its own direct DB access,
 //! but the server process must have been started with the SAME key for proper encryption verification.
 
 use std::time::Duration;
@@ -46,7 +46,7 @@ fn get_test_api_key() -> String {
 
 /// Set encryption key for tests
 fn ensure_encryption_key() {
-    unsafe { std::env::set_var("GITCORTEX_ENCRYPTION_KEY", ENCRYPTION_KEY) };
+    unsafe { std::env::set_var("SOLODAWN_ENCRYPTION_KEY", ENCRYPTION_KEY) };
 }
 
 /// Ensure server is running before executing tests

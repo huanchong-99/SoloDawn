@@ -3,7 +3,7 @@
 -- necessarily repeat the same status enum values across different tables.
 
 -- ============================================================================
--- GitCortex Performance Indexes Migration
+-- SoloDawn Performance Indexes Migration
 -- Created: 2026-01-19
 -- Description: Add composite and partial indexes for workflow query optimization
 -- ============================================================================

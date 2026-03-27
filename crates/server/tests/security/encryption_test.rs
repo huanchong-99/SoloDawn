@@ -12,7 +12,7 @@ use std::time::Duration;
 use serial_test::serial;
 
 const ENCRYPTION_KEY: &str = "12345678901234567890123456789012";
-const ENCRYPTION_KEY_ENV: &str = "GITCORTEX_ENCRYPTION_KEY";
+const ENCRYPTION_KEY_ENV: &str = "SOLODAWN_ENCRYPTION_KEY";
 
 /// RAII guard for environment variable management
 /// Automatically restores the previous value when dropped
@@ -280,7 +280,7 @@ mod key_rotation_tests {
         println!("\n=== Key Rotation Strategy ===");
         println!("1. Generate new encryption key");
         println!("2. Re-encrypt all API keys with new key");
-        println!("3. Update GITCORTEX_ENCRYPTION_KEY environment variable");
+        println!("3. Update SOLODAWN_ENCRYPTION_KEY environment variable");
         println!("4. Restart server with new key");
         println!("5. Old encrypted values will fail decryption (expected)");
     }

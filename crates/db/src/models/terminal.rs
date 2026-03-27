@@ -114,7 +114,7 @@ pub struct Terminal {
     /// Associated execution process ID (NEW FIELD)
     pub execution_process_id: Option<String>,
 
-    /// Associated gitcortex session ID
+    /// Associated solodawn session ID
     pub vk_session_id: Option<Uuid>,
 
     /// Auto-confirm mode: skip CLI permission prompts
@@ -771,7 +771,7 @@ mod tests {
     #[serial]
     fn test_custom_api_key_encryption_roundtrip() {
         with_var(
-            "GITCORTEX_ENCRYPTION_KEY",
+            "SOLODAWN_ENCRYPTION_KEY",
             Some("12345678901234567890123456789012"),
             || {
                 let mut terminal = Terminal {
@@ -825,7 +825,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_custom_api_key_encryption_missing_env_key() {
-        with_var("GITCORTEX_ENCRYPTION_KEY", Option::<&str>::None, || {
+        with_var("SOLODAWN_ENCRYPTION_KEY", Option::<&str>::None, || {
             let mut terminal = Terminal {
                 id: Uuid::new_v4().to_string(),
                 workflow_task_id: "task-1".to_string(),
@@ -858,7 +858,7 @@ mod tests {
                 result
                     .unwrap_err()
                     .to_string()
-                    .contains("GITCORTEX_ENCRYPTION_KEY")
+                    .contains("SOLODAWN_ENCRYPTION_KEY")
             );
         });
     }
@@ -866,7 +866,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_custom_api_key_encryption_invalid_key_length() {
-        with_var("GITCORTEX_ENCRYPTION_KEY", Some("short"), || {
+        with_var("SOLODAWN_ENCRYPTION_KEY", Some("short"), || {
             let mut terminal = Terminal {
                 id: Uuid::new_v4().to_string(),
                 workflow_task_id: "task-1".to_string(),
@@ -902,7 +902,7 @@ mod tests {
     #[serial]
     fn test_custom_api_key_none_returns_none() {
         with_var(
-            "GITCORTEX_ENCRYPTION_KEY",
+            "SOLODAWN_ENCRYPTION_KEY",
             Some("12345678901234567890123456789012"),
             || {
                 let terminal = Terminal {
@@ -940,7 +940,7 @@ mod tests {
     #[serial]
     fn test_custom_api_key_serialization_skips_encrypted() {
         with_var(
-            "GITCORTEX_ENCRYPTION_KEY",
+            "SOLODAWN_ENCRYPTION_KEY",
             Some("12345678901234567890123456789012"),
             || {
                 let mut terminal = Terminal {
@@ -988,7 +988,7 @@ mod tests {
         // Here we just verify the encryption/decryption works
 
         with_var(
-            "GITCORTEX_ENCRYPTION_KEY",
+            "SOLODAWN_ENCRYPTION_KEY",
             Some("12345678901234567890123456789012"),
             || {
                 let mut terminal = Terminal {

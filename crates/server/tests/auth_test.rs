@@ -3,8 +3,8 @@
 //! Tests the authentication middleware for API endpoints.
 //!
 //! These tests verify that:
-//! - Requests are allowed when GITCORTEX_API_TOKEN is not set (development mode)
-//! - Requests are rejected when GITCORTEX_API_TOKEN is set but no auth header is provided
+//! - Requests are allowed when SOLODAWN_API_TOKEN is not set (development mode)
+//! - Requests are rejected when SOLODAWN_API_TOKEN is set but no auth header is provided
 //! - Requests are rejected when the token doesn't match
 //! - Requests are allowed when the token matches
 
@@ -102,7 +102,7 @@ impl Drop for EnvVarGuard {
 #[tokio::test]
 async fn test_allows_requests_when_token_unset() {
     // Unset API token to simulate development mode
-    let _env = EnvVarGuard::unset("GITCORTEX_API_TOKEN");
+    let _env = EnvVarGuard::unset("SOLODAWN_API_TOKEN");
 
     // Create deployment and router
     let deployment = DeploymentImpl::new()
@@ -131,7 +131,7 @@ async fn test_allows_requests_when_token_unset() {
 #[tokio::test]
 async fn test_rejects_requests_without_authorization() {
     // Set API token to simulate production mode
-    let _env = EnvVarGuard::set("GITCORTEX_API_TOKEN", "test-token");
+    let _env = EnvVarGuard::set("SOLODAWN_API_TOKEN", "test-token");
 
     // Create deployment and router
     let deployment = DeploymentImpl::new()
@@ -160,7 +160,7 @@ async fn test_rejects_requests_without_authorization() {
 #[tokio::test]
 async fn test_rejects_requests_with_invalid_token() {
     // Set API token
-    let _env = EnvVarGuard::set("GITCORTEX_API_TOKEN", "correct-token");
+    let _env = EnvVarGuard::set("SOLODAWN_API_TOKEN", "correct-token");
 
     // Create deployment and router
     let deployment = DeploymentImpl::new()
@@ -190,7 +190,7 @@ async fn test_rejects_requests_with_invalid_token() {
 #[tokio::test]
 async fn test_allows_requests_with_valid_token() {
     // Set API token
-    let _env = EnvVarGuard::set("GITCORTEX_API_TOKEN", "test-token");
+    let _env = EnvVarGuard::set("SOLODAWN_API_TOKEN", "test-token");
 
     // Create deployment and router
     let deployment = DeploymentImpl::new()
@@ -220,7 +220,7 @@ async fn test_allows_requests_with_valid_token() {
 #[tokio::test]
 async fn test_rejects_requests_with_malformed_auth_header() {
     // Set API token
-    let _env = EnvVarGuard::set("GITCORTEX_API_TOKEN", "test-token");
+    let _env = EnvVarGuard::set("SOLODAWN_API_TOKEN", "test-token");
 
     // Create deployment and router
     let deployment = DeploymentImpl::new()
@@ -250,7 +250,7 @@ async fn test_rejects_requests_with_malformed_auth_header() {
 #[tokio::test]
 async fn test_token_comparison_is_case_sensitive() {
     // Set API token with specific case
-    let _env = EnvVarGuard::set("GITCORTEX_API_TOKEN", "SecretToken");
+    let _env = EnvVarGuard::set("SOLODAWN_API_TOKEN", "SecretToken");
 
     // Create deployment and router
     let deployment = DeploymentImpl::new()
@@ -280,7 +280,7 @@ async fn test_token_comparison_is_case_sensitive() {
 #[tokio::test]
 async fn test_multiple_requests_with_same_token() {
     // Set API token
-    let _env = EnvVarGuard::set("GITCORTEX_API_TOKEN", "test-token");
+    let _env = EnvVarGuard::set("SOLODAWN_API_TOKEN", "test-token");
 
     // Create deployment and router
     let deployment = DeploymentImpl::new()

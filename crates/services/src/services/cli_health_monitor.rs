@@ -198,7 +198,7 @@ mod tests {
     fn test_new_default_interval() {
         // When 0 is passed and env var is not set, falls back to 300
         let monitor = CliHealthMonitor::new(0);
-        // Will be 300 unless GITCORTEX_CLI_HEALTH_INTERVAL_SECS is set
+        // Will be 300 unless SOLODAWN_CLI_HEALTH_INTERVAL_SECS is set
         assert!(monitor.interval_secs > 0);
     }
 

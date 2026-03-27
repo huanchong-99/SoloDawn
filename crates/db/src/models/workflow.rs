@@ -298,7 +298,7 @@ pub struct WorkflowTask {
     /// Associated workflow ID
     pub workflow_id: String,
 
-    /// Associated gitcortex task ID (optional)
+    /// Associated solodawn task ID (optional)
     pub vk_task_id: Option<Uuid>,
 
     /// Task name
@@ -1327,7 +1327,7 @@ mod encryption_tests {
     #[serial]
     fn test_api_key_encryption_decryption() {
         with_var(
-            "GITCORTEX_ENCRYPTION_KEY",
+            "SOLODAWN_ENCRYPTION_KEY",
             Some("12345678901234567890123456789012"),
             || {
                 let mut workflow = test_workflow("test-workflow");
@@ -1353,7 +1353,7 @@ mod encryption_tests {
     #[test]
     #[serial]
     fn test_api_key_encryption_missing_env_key() {
-        with_var("GITCORTEX_ENCRYPTION_KEY", Option::<&str>::None, || {
+        with_var("SOLODAWN_ENCRYPTION_KEY", Option::<&str>::None, || {
             let mut workflow = test_workflow("test-workflow");
 
             // Should fail without encryption key
@@ -1363,7 +1363,7 @@ mod encryption_tests {
                 result
                     .unwrap_err()
                     .to_string()
-                    .contains("GITCORTEX_ENCRYPTION_KEY")
+                    .contains("SOLODAWN_ENCRYPTION_KEY")
             );
         });
     }
@@ -1371,7 +1371,7 @@ mod encryption_tests {
     #[test]
     #[serial]
     fn test_api_key_encryption_invalid_key_length() {
-        with_var("GITCORTEX_ENCRYPTION_KEY", Some("short"), || {
+        with_var("SOLODAWN_ENCRYPTION_KEY", Some("short"), || {
             let mut workflow = test_workflow("test-workflow");
 
             let result = workflow.set_api_key("sk-test");
@@ -1384,7 +1384,7 @@ mod encryption_tests {
     #[serial]
     fn test_api_key_none_when_not_set() {
         with_var(
-            "GITCORTEX_ENCRYPTION_KEY",
+            "SOLODAWN_ENCRYPTION_KEY",
             Some("12345678901234567890123456789012"),
             || {
                 let workflow = test_workflow("test-workflow");
@@ -1399,7 +1399,7 @@ mod encryption_tests {
     #[serial]
     fn test_api_key_serialization_skips_encrypted() {
         with_var(
-            "GITCORTEX_ENCRYPTION_KEY",
+            "SOLODAWN_ENCRYPTION_KEY",
             Some("12345678901234567890123456789012"),
             || {
                 let mut workflow = test_workflow("test-workflow");

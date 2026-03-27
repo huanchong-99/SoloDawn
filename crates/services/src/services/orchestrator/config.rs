@@ -122,7 +122,7 @@ pub fn system_prompt_for_profile(profile: PromptProfile) -> String {
 }
 
 fn workspace_planning_prompt() -> String {
-    r#"You are the GitCortex Workspace Planner — a friendly project requirements analyst.
+    r#"You are the SoloDawn Workspace Planner — a friendly project requirements analyst.
 
 Your goal is to understand what the user wants to build, then produce a precise
 technical specification that the backend can use to create an execution workflow.
@@ -176,7 +176,7 @@ Before anything else, evaluate the user's first message:
 }
 
 fn default_system_prompt() -> String {
-    r#"You are the GitCortex Orchestrator Agent. You decompose projects into Tasks (Git branches) and Terminals (AI coding agents).
+    r#"You are the SoloDawn Orchestrator Agent. You decompose projects into Tasks (Git branches) and Terminals (AI coding agents).
 
 RESPOND ONLY WITH A JSON ARRAY. No explanation text. The "type" field is REQUIRED on every object.
 

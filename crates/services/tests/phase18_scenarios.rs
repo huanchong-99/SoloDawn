@@ -30,8 +30,8 @@ struct EnvGuard {
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         match self.prev.take() {
-            Some(value) => unsafe { std::env::set_var("GITCORTEX_ENCRYPTION_KEY", value) },
-            None => unsafe { std::env::remove_var("GITCORTEX_ENCRYPTION_KEY") },
+            Some(value) => unsafe { std::env::set_var("SOLODAWN_ENCRYPTION_KEY", value) },
+            None => unsafe { std::env::remove_var("SOLODAWN_ENCRYPTION_KEY") },
         }
     }
 }
@@ -41,10 +41,10 @@ static ENV_MUTEX: Lazy<Arc<Mutex<()>>> = Lazy::new(|| Arc::new(Mutex::new(())));
 
 async fn set_encryption_key() -> EnvGuard {
     let lock = ENV_MUTEX.clone().lock_owned().await;
-    let prev = std::env::var("GITCORTEX_ENCRYPTION_KEY").ok();
+    let prev = std::env::var("SOLODAWN_ENCRYPTION_KEY").ok();
     unsafe {
         std::env::set_var(
-            "GITCORTEX_ENCRYPTION_KEY",
+            "SOLODAWN_ENCRYPTION_KEY",
             "12345678901234567890123456789012",
         );
     }

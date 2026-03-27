@@ -461,7 +461,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn bind_and_unbind_conversation_succeeds_for_agent_planned_workflow() {
-        unsafe { std::env::set_var("GITCORTEX_CHAT_CONNECTOR_ENABLED", "true"); }
+        unsafe { std::env::set_var("SOLODAWN_CHAT_CONNECTOR_ENABLED", "true"); }
         let deployment = DeploymentImpl::new().await.expect("deployment should start");
         let app = router().with_state(deployment.clone());
 
@@ -572,8 +572,8 @@ mod tests {
     #[serial]
     async fn handle_chat_event_rejects_invalid_signature() {
         unsafe {
-            std::env::set_var("GITCORTEX_CHAT_CONNECTOR_ENABLED", "true");
-            std::env::set_var("GITCORTEX_CHAT_WEBHOOK_SECRET", "secret-1");
+            std::env::set_var("SOLODAWN_CHAT_CONNECTOR_ENABLED", "true");
+            std::env::set_var("SOLODAWN_CHAT_WEBHOOK_SECRET", "secret-1");
         }
 
         let deployment = DeploymentImpl::new().await.expect("deployment should start");
@@ -612,7 +612,7 @@ mod tests {
         );
 
         unsafe {
-            std::env::remove_var("GITCORTEX_CHAT_WEBHOOK_SECRET");
+            std::env::remove_var("SOLODAWN_CHAT_WEBHOOK_SECRET");
         }
     }
 }

@@ -297,7 +297,7 @@ impl ProcessManager {
 
     /// Cleans up CODEX_HOME temporary directory for a terminated Codex terminal.
     ///
-    /// Safety: Only removes directories under the gitcortex temp directory to prevent
+    /// Safety: Only removes directories under the solodawn temp directory to prevent
     /// accidental deletion of user data.
     fn cleanup_codex_home(terminal_id: &str, codex_home: &Path) {
         if codex_home.as_os_str().is_empty() {

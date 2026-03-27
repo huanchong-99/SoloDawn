@@ -478,8 +478,8 @@ mod path_boundary_tests {
     fn parses_allowed_roots_from_environment() {
         unsafe {
             std::env::set_var(
-                "GITCORTEX_ALLOWED_ROOTS",
-                "/workspace,/var/lib/gitcortex; /tmp/test-root ",
+                "SOLODAWN_ALLOWED_ROOTS",
+                "/workspace,/var/lib/solodawn; /tmp/test-root ",
             );
         }
 
@@ -487,11 +487,11 @@ mod path_boundary_tests {
 
         assert_eq!(roots.len(), 3);
         assert_eq!(roots[0], PathBuf::from("/workspace"));
-        assert_eq!(roots[1], PathBuf::from("/var/lib/gitcortex"));
+        assert_eq!(roots[1], PathBuf::from("/var/lib/solodawn"));
         assert_eq!(roots[2], PathBuf::from("/tmp/test-root"));
 
         unsafe {
-            std::env::remove_var("GITCORTEX_ALLOWED_ROOTS");
+            std::env::remove_var("SOLODAWN_ALLOWED_ROOTS");
         }
     }
 

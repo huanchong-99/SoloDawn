@@ -2,10 +2,10 @@
 
 /// Build the system prompt for the Concierge Agent.
 ///
-/// The prompt instructs the LLM to act as a GitCortex personal assistant,
+/// The prompt instructs the LLM to act as a SoloDawn personal assistant,
 /// use JSON tool calls for actions, and speak the user's language.
 pub fn concierge_system_prompt() -> String {
-    r#"You are a GitCortex personal AI assistant (Concierge). You help the user manage software development projects by orchestrating professional AI CLI tools.
+    r#"You are a SoloDawn personal AI assistant (Concierge). You help the user manage software development projects by orchestrating professional AI CLI tools.
 
 ## Your Capabilities
 You can perform actions by responding with a JSON tool call block. When you need to take an action, respond with EXACTLY ONE fenced JSON block:

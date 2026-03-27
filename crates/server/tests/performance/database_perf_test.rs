@@ -8,7 +8,7 @@
 //! - Concurrent write performance
 //! - Index effectiveness
 //!
-//! IMPORTANT: Set GITCORTEX_TEST_DATABASE_URL to a test database before running.
+//! IMPORTANT: Set SOLODAWN_TEST_DATABASE_URL to a test database before running.
 //! Run with: cargo test --test performance_database -- --nocapture
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -85,11 +85,11 @@ impl QueryStats {
 /// Create test database pool
 /// Fixed: Use dedicated test database environment variable to prevent production data mutation
 async fn create_test_pool() -> Result<SqlitePool, sqlx::Error> {
-    let database_url = std::env::var("GITCORTEX_TEST_DATABASE_URL").map_err(|_| {
+    let database_url = std::env::var("SOLODAWN_TEST_DATABASE_URL").map_err(|_| {
         sqlx::Error::Configuration(Box::new(std::io::Error::new(
             std::io::ErrorKind::Other,
-            "GITCORTEX_TEST_DATABASE_URL must be set for performance tests. \
-             Example: GITCORTEX_TEST_DATABASE_URL=sqlite:./test_data/perf_test.db",
+            "SOLODAWN_TEST_DATABASE_URL must be set for performance tests. \
+             Example: SOLODAWN_TEST_DATABASE_URL=sqlite:./test_data/perf_test.db",
         )))
     })?;
 

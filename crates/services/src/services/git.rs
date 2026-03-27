@@ -175,10 +175,10 @@ impl GitService {
         if !has_name || !has_email {
             let mut cfg = repo.config()?;
             if !has_name {
-                cfg.set_str("user.name", "GitCortex")?;
+                cfg.set_str("user.name", "SoloDawn")?;
             }
             if !has_email {
-                cfg.set_str("user.email", "noreply@gitcortex.com")?;
+                cfg.set_str("user.email", "noreply@solodawn.com")?;
             }
         }
         Ok(())
@@ -188,7 +188,7 @@ impl GitService {
     fn signature_with_fallback(repo: &Repository) -> Result<git2::Signature<'_>, GitServiceError> {
         match repo.signature() {
             Ok(sig) => Ok(sig),
-            Err(_) => git2::Signature::now("GitCortex", "noreply@gitcortex.com")
+            Err(_) => git2::Signature::now("SoloDawn", "noreply@solodawn.com")
                 .map_err(GitServiceError::from),
         }
     }

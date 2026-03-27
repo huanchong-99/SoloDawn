@@ -800,11 +800,11 @@ export const DEFAULT_PR_DESCRIPTION_PROMPT = `Update the PR that was just create
 The PR number is #{pr_number} and the URL is {pr_url}.
 
 Analyze the changes in this branch and write:
-1. A concise, descriptive title that summarizes the changes, postfixed with "(GitCortex)"
+1. A concise, descriptive title that summarizes the changes, postfixed with "(SoloDawn)"
 2. A detailed description that explains:
    - What changes were made
    - Why they were made (based on the task context)
    - Any important implementation details
-   - At the end, include a note: "This PR was written using [GitCortex](https://gitcortex.com)"
+   - At the end, include a note: "This PR was written using [SoloDawn](https://solodawn.com)"
 
 Use the appropriate CLI tool to update the PR (gh pr edit for GitHub, az repos pr update for Azure DevOps).`;

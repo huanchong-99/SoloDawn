@@ -3,7 +3,7 @@
 -- requires its own DEFAULT clause and foreign key references.
 
 -- ============================================================================
--- GitCortex Workflow Tables Migration
+-- SoloDawn Workflow Tables Migration
 -- Created: 2026-01-17
 -- Description: Add workflow coordination tables for multi-terminal orchestration
 -- ============================================================================

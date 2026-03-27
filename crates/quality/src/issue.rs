@@ -10,7 +10,7 @@ use crate::rule::{AnalyzerSource, RuleType, Severity};
 
 /// 单个质量问题
 ///
-/// 设计参考 SonarQube `DefaultIssue`，简化为 GitCortex 场景所需字段
+/// 设计参考 SonarQube `DefaultIssue`，简化为 SoloDawn 场景所需字段
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QualityIssue {
     /// 唯一标识

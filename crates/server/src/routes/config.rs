@@ -712,7 +712,7 @@ fn resolve_install_single_cli_script() -> Option<PathBuf> {
         candidates.into_iter().find(|path| path.is_file())
     } else {
         // Unix: batch script
-        let mut candidates = vec![PathBuf::from("/opt/gitcortex/install/install-ai-clis.sh")];
+        let mut candidates = vec![PathBuf::from("/opt/solodawn/install/install-ai-clis.sh")];
         if let Ok(cwd) = std::env::current_dir() {
             candidates.push(cwd.join("scripts/docker/install/install-ai-clis.sh"));
         }

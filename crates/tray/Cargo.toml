@@ -1,12 +1,12 @@
 [package]
-name = "gitcortex-tray"
+name = "solodawn-tray"
 version = "0.0.153"
 edition = "2024"
-description = "GitCortex system tray application for Windows"
+description = "SoloDawn system tray application for Windows"
 publish = false
 
 [[bin]]
-name = "gitcortex-tray"
+name = "solodawn-tray"
 path = "src/main.rs"
 
 [dependencies]

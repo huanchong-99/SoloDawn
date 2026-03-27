@@ -205,7 +205,7 @@ fn test_header_sanitization() {
     let safe_headers = vec![
         "Content-Type: application/json",
         "Accept: */*",
-        "User-Agent: GitCortex/1.0",
+        "User-Agent: SoloDawn/1.0",
         "X-Request-ID: abc123",
     ];
 
@@ -318,7 +318,7 @@ mod integration_tests {
             "user_id": "user_123",
             "resource_id": "workflow_456",
             "ip_address": "192.168.1.1",
-            "user_agent": "GitCortex-CLI/1.0"
+            "user_agent": "SoloDawn-CLI/1.0"
         }"#;
 
         let sensitive = contains_sensitive_data(audit_log);

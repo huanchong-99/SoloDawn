@@ -1,6 +1,6 @@
 //! Test server lifecycle management.
 //!
-//! Boots a real GitCortex server with a temporary database, listens on a
+//! Boots a real SoloDawn server with a temporary database, listens on a
 //! random port, and provides a handle for shutdown + cleanup.
 
 use std::path::PathBuf;
@@ -23,7 +23,7 @@ pub struct TestServer {
 }
 
 impl TestServer {
-    /// Boot a fully-initialized GitCortex server on a random port with a
+    /// Boot a fully-initialized SoloDawn server on a random port with a
     /// fresh temporary database. Blocks until `/healthz` responds 200.
     pub async fn start() -> Result<Self> {
         let temp_dir = TempDir::new()?;

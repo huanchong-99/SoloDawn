@@ -159,7 +159,7 @@ mod tests {
     #[serial]
     async fn test_allows_requests_when_token_unset() {
         // Ensure API token is not set
-        unsafe { std::env::remove_var("GITCORTEX_API_TOKEN") };
+        unsafe { std::env::remove_var("SOLODAWN_API_TOKEN") };
 
         let app = build_test_app();
 
@@ -175,7 +175,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_allows_requests_when_token_empty() {
-        unsafe { std::env::set_var("GITCORTEX_API_TOKEN", "") };
+        unsafe { std::env::set_var("SOLODAWN_API_TOKEN", "") };
 
         let app = build_test_app();
 
@@ -186,14 +186,14 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        unsafe { std::env::remove_var("GITCORTEX_API_TOKEN") };
+        unsafe { std::env::remove_var("SOLODAWN_API_TOKEN") };
     }
 
     #[tokio::test]
     #[serial]
     async fn test_rejects_requests_without_authorization_header() {
         // Set API token
-        unsafe { std::env::set_var("GITCORTEX_API_TOKEN", "test-secret-token") };
+        unsafe { std::env::set_var("SOLODAWN_API_TOKEN", "test-secret-token") };
 
         let app = build_test_app();
 
@@ -206,14 +206,14 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
         // Cleanup
-        unsafe { std::env::remove_var("GITCORTEX_API_TOKEN") };
+        unsafe { std::env::remove_var("SOLODAWN_API_TOKEN") };
     }
 
     #[tokio::test]
     #[serial]
     async fn test_rejects_requests_with_invalid_token() {
         // Set API token
-        unsafe { std::env::set_var("GITCORTEX_API_TOKEN", "correct-token") };
+        unsafe { std::env::set_var("SOLODAWN_API_TOKEN", "correct-token") };
 
         let app = build_test_app();
 
@@ -232,14 +232,14 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
         // Cleanup
-        unsafe { std::env::remove_var("GITCORTEX_API_TOKEN") };
+        unsafe { std::env::remove_var("SOLODAWN_API_TOKEN") };
     }
 
     #[tokio::test]
     #[serial]
     async fn test_allows_requests_with_valid_token() {
         // Set API token
-        unsafe { std::env::set_var("GITCORTEX_API_TOKEN", "test-secret-token") };
+        unsafe { std::env::set_var("SOLODAWN_API_TOKEN", "test-secret-token") };
 
         let app = build_test_app();
 
@@ -258,14 +258,14 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         // Cleanup
-        unsafe { std::env::remove_var("GITCORTEX_API_TOKEN") };
+        unsafe { std::env::remove_var("SOLODAWN_API_TOKEN") };
     }
 
     #[tokio::test]
     #[serial]
     async fn test_rejects_malformed_authorization_header() {
         // Set API token
-        unsafe { std::env::set_var("GITCORTEX_API_TOKEN", "test-token") };
+        unsafe { std::env::set_var("SOLODAWN_API_TOKEN", "test-token") };
 
         let app = build_test_app();
 
@@ -284,14 +284,14 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
         // Cleanup
-        unsafe { std::env::remove_var("GITCORTEX_API_TOKEN") };
+        unsafe { std::env::remove_var("SOLODAWN_API_TOKEN") };
     }
 
     #[tokio::test]
     #[serial]
     async fn test_token_case_sensitive() {
         // Set API token
-        unsafe { std::env::set_var("GITCORTEX_API_TOKEN", "SecretToken") };
+        unsafe { std::env::set_var("SOLODAWN_API_TOKEN", "SecretToken") };
 
         let app = build_test_app();
 
@@ -310,6 +310,6 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
         // Cleanup
-        unsafe { std::env::remove_var("GITCORTEX_API_TOKEN") };
+        unsafe { std::env::remove_var("SOLODAWN_API_TOKEN") };
     }
 }

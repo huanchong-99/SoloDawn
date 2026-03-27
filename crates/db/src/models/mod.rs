@@ -14,7 +14,7 @@ pub mod task;
 pub mod workspace;
 pub mod workspace_repo;
 
-// GitCortex Workflow models
+// SoloDawn Workflow models
 pub mod cli_install_history;
 pub mod concierge;
 pub mod cli_type;
