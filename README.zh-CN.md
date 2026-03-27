@@ -374,3 +374,6 @@ cd frontend && pnpm test:run && cd ..
 - CC-Switch 衍生部分：MIT
 - 质量门模型（移植自 SonarQube）：LGPL-3.0
 - 详见 `LICENSE`
+
+## 友链
+https://linux.do/
