@@ -1,25 +1,26 @@
 //! Shared WebSocket Origin header validation.
 //!
 //! Validates the `Origin` header on WebSocket upgrade requests against the
-//! `GITCORTEX_CORS_ORIGINS` allowlist (the same env var used for CORS config).
+//! `SOLODAWN_CORS_ORIGINS` allowlist (the same env var used for CORS config).
 
 use axum::http::{HeaderMap, StatusCode};
 
 /// Validate the Origin header for a WebSocket upgrade request.
 ///
-/// - If `GITCORTEX_CORS_ORIGINS` is **not set** (dev mode): allow all origins but log a warning.
+/// - If `SOLODAWN_CORS_ORIGINS` is **not set** (dev mode): allow all origins but log a warning.
 /// - If set: validate the `Origin` header against the comma-separated allowlist.
 /// - Reject requests with no `Origin` header unless they originate from localhost.
 ///
 /// Returns `Ok(())` if the origin is allowed, or `Err((StatusCode, String))` to reject.
 pub fn validate_ws_origin(headers: &HeaderMap) -> Result<(), (StatusCode, String)> {
-    let origins_env = std::env::var("GITCORTEX_CORS_ORIGINS").unwrap_or_default();
+    let origins_env = utils::env_compat::var_with_compat("SOLODAWN_CORS_ORIGINS", "GITCORTEX_CORS_ORIGINS")
+        .unwrap_or_default();
     let trimmed = origins_env.trim();
 
     // Dev mode: no allowlist configured — allow everything with a warning.
     if trimmed.is_empty() {
         tracing::warn!(
-            "GITCORTEX_CORS_ORIGINS not set; WebSocket origin validation disabled (development mode)"
+            "SOLODAWN_CORS_ORIGINS not set; WebSocket origin validation disabled (development mode)"
         );
         return Ok(());
     }
@@ -55,7 +56,7 @@ pub fn validate_ws_origin(headers: &HeaderMap) -> Result<(), (StatusCode, String
     } else {
         tracing::warn!(
             origin = %origin,
-            "Rejected WebSocket connection: origin not in GITCORTEX_CORS_ORIGINS allowlist"
+            "Rejected WebSocket connection: origin not in SOLODAWN_CORS_ORIGINS allowlist"
         );
         Err((
             StatusCode::FORBIDDEN,

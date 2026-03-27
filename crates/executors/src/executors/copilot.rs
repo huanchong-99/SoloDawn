@@ -19,7 +19,7 @@ use tokio::{
 };
 use ts_rs::TS;
 use uuid::Uuid;
-use workspace_utils::{msg_store::MsgStore, path::get_gitcortex_temp_dir};
+use workspace_utils::{msg_store::MsgStore, path::get_solodawn_temp_dir};
 
 use crate::{
     command::{CmdOverrides, CommandBuilder, apply_overrides},
@@ -254,7 +254,7 @@ impl Copilot {
     }
 
     async fn create_temp_log_dir(current_dir: &Path) -> Result<PathBuf, ExecutorError> {
-        let base_log_dir = get_gitcortex_temp_dir().join("copilot_logs");
+        let base_log_dir = get_solodawn_temp_dir().join("copilot_logs");
         fs::create_dir_all(&base_log_dir)
             .await
             .map_err(ExecutorError::Io)?;

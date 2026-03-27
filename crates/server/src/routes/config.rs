@@ -71,8 +71,7 @@ impl Default for Environment {
 impl Environment {
     pub fn new() -> Self {
         let info = os_info::get();
-        let workspace_root_hint = std::env::var("GITCORTEX_WORKSPACE_ROOT")
-            .ok()
+        let workspace_root_hint = utils::env_compat::var_opt_with_compat("SOLODAWN_WORKSPACE_ROOT", "GITCORTEX_WORKSPACE_ROOT")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
 
@@ -692,8 +691,8 @@ fn resolve_install_single_cli_script() -> Option<PathBuf> {
     if cfg!(target_os = "windows") {
         let mut candidates = Vec::new();
 
-        // Check GITCORTEX_INSTALL_DIR (set by tray app)
-        if let Ok(install_dir) = std::env::var("GITCORTEX_INSTALL_DIR") {
+        // Check SOLODAWN_INSTALL_DIR (set by tray app)
+        if let Some(install_dir) = utils::env_compat::var_opt_with_compat("SOLODAWN_INSTALL_DIR", "GITCORTEX_INSTALL_DIR") {
             candidates
                 .push(PathBuf::from(&install_dir).join("scripts/install-single-cli.ps1"));
         }

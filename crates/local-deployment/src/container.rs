@@ -895,7 +895,7 @@ impl LocalContainerService {
                 .filter(|p| p.exists());
 
             let home_id = format!("ws-{}", uuid::Uuid::new_v4().as_simple());
-            let claude_home = utils::path::get_gitcortex_temp_dir()
+            let claude_home = utils::path::get_solodawn_temp_dir()
                 .join("claude-workspaces")
                 .join(&home_id);
 
@@ -1006,7 +1006,7 @@ impl LocalContainerService {
 
             // Create an isolated CODEX_HOME and copy auth + config from global
             let home_id = format!("ws-{}", uuid::Uuid::new_v4().as_simple());
-            let codex_home = utils::path::get_gitcortex_temp_dir()
+            let codex_home = utils::path::get_solodawn_temp_dir()
                 .join("codex-workspaces")
                 .join(&home_id);
 

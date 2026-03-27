@@ -148,7 +148,7 @@ async fn update_config(
 ) -> Result<Json<ApiResponse<UpdateFeishuConfigResponse>>, ApiError> {
     if !is_feishu_enabled(&deployment.db().pool).await {
         return Err(ApiError::Conflict(
-            "Feishu integration is disabled. Enable it via system settings or set GITCORTEX_FEISHU_ENABLED=true.".to_string(),
+            "Feishu integration is disabled. Enable it via system settings or set SOLODAWN_FEISHU_ENABLED=true.".to_string(),
         ));
     }
 
@@ -265,7 +265,7 @@ async fn reconnect(
         }
     } else {
         return Err(ApiError::Conflict(
-            "Feishu connector is not running. Restart the server with GITCORTEX_FEISHU_ENABLED=true.".to_string(),
+            "Feishu connector is not running. Restart the server with SOLODAWN_FEISHU_ENABLED=true.".to_string(),
         ));
     }
     drop(handle_guard);

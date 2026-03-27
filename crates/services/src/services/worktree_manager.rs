@@ -649,9 +649,9 @@ impl WorktreeManager {
         .map_err(|e| WorktreeError::TaskJoin(format!("{e}")))?
     }
 
-    /// Get the base directory for gitcortex worktrees
+    /// Get the base directory for solodawn worktrees
     pub fn get_worktree_base_dir() -> std::path::PathBuf {
-        utils::path::get_gitcortex_temp_dir().join("worktrees")
+        utils::path::get_solodawn_temp_dir().join("worktrees")
     }
 
     /// G23-003: Ensure a branch name does not collide with any existing git branch.

@@ -56,12 +56,11 @@ pub type SharedCliHealthMonitor = Arc<CliHealthMonitor>;
 impl CliHealthMonitor {
     /// Create a new health monitor.
     ///
-    /// The interval defaults to `GITCORTEX_CLI_HEALTH_INTERVAL_SECS` env var
+    /// The interval defaults to `SOLODAWN_CLI_HEALTH_INTERVAL_SECS` env var
     /// (falling back to 300 seconds / 5 minutes).
     pub fn new(interval_secs: u64) -> Self {
         let effective_interval = if interval_secs == 0 {
-            std::env::var("GITCORTEX_CLI_HEALTH_INTERVAL_SECS")
-                .ok()
+            utils::env_compat::var_opt_with_compat("SOLODAWN_CLI_HEALTH_INTERVAL_SECS", "GITCORTEX_CLI_HEALTH_INTERVAL_SECS")
                 .and_then(|v| v.parse::<u64>().ok())
                 .unwrap_or(300)
         } else {

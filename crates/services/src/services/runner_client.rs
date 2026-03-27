@@ -5,7 +5,7 @@
 //! - `RemoteRunner`: gRPC client stub for remote runner mode (placeholder)
 //!
 //! The `RunnerClientImpl` enum delegates to the appropriate implementation
-//! based on the `GITCORTEX_RUNNER_MODE` environment variable.
+//! based on the `SOLODAWN_RUNNER_MODE` environment variable.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -374,10 +374,10 @@ impl RunnerClient for RunnerClientImpl {
 impl RunnerClientImpl {
     /// Creates a `RunnerClientImpl` based on environment variables.
     ///
-    /// - `GITCORTEX_RUNNER_MODE`: `"local"` (default) or `"remote"`
-    /// - `GITCORTEX_RUNNER_ADDR`: remote runner address (required when mode is `"remote"`)
+    /// - `SOLODAWN_RUNNER_MODE`: `"local"` (default) or `"remote"`
+    /// - `SOLODAWN_RUNNER_ADDR`: remote runner address (required when mode is `"remote"`)
     pub fn from_env(process_manager: Arc<ProcessManager>) -> Result<Self> {
-        let mode = std::env::var("GITCORTEX_RUNNER_MODE")
+        let mode = utils::env_compat::var_with_compat("SOLODAWN_RUNNER_MODE", "GITCORTEX_RUNNER_MODE")
             .unwrap_or_else(|_| "local".to_string());
 
         match mode.to_lowercase().as_str() {
@@ -386,9 +386,9 @@ impl RunnerClientImpl {
                 Ok(Self::Local(LocalRunner::new(process_manager)))
             }
             "remote" => {
-                let addr = std::env::var("GITCORTEX_RUNNER_ADDR").unwrap_or_else(|_| {
+                let addr = utils::env_compat::var_with_compat("SOLODAWN_RUNNER_ADDR", "GITCORTEX_RUNNER_ADDR").unwrap_or_else(|_| {
                     tracing::warn!(
-                        "GITCORTEX_RUNNER_ADDR not set, defaulting to http://runner:50051"
+                        "SOLODAWN_RUNNER_ADDR not set, defaulting to http://runner:50051"
                     );
                     "http://runner:50051".to_string()
                 });
@@ -397,7 +397,7 @@ impl RunnerClientImpl {
             }
             other => {
                 bail!(
-                    "Unknown GITCORTEX_RUNNER_MODE: '{other}'. Expected 'local' or 'remote'."
+                    "Unknown SOLODAWN_RUNNER_MODE: '{other}'. Expected 'local' or 'remote'."
                 );
             }
         }

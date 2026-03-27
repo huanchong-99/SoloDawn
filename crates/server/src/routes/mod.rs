@@ -12,14 +12,15 @@ use crate::{DeploymentImpl, feishu_handle::SharedFeishuHandle, middleware::requi
 
 /// Build CORS layer based on environment configuration.
 ///
-/// - If `GITCORTEX_CORS_ORIGINS` is set: only allow those origins (comma-separated).
+/// - If `SOLODAWN_CORS_ORIGINS` is set: only allow those origins (comma-separated).
 /// - If unset or empty: allow all origins (development mode).
 fn build_cors_layer() -> CorsLayer {
-    let origins_env = std::env::var("GITCORTEX_CORS_ORIGINS").unwrap_or_default();
+    let origins_env = utils::env_compat::var_with_compat("SOLODAWN_CORS_ORIGINS", "GITCORTEX_CORS_ORIGINS")
+        .unwrap_or_default();
     let trimmed = origins_env.trim();
 
     if trimmed.is_empty() {
-        tracing::debug!("GITCORTEX_CORS_ORIGINS not set; allowing all origins (development mode)");
+        tracing::debug!("SOLODAWN_CORS_ORIGINS not set; allowing all origins (development mode)");
         CorsLayer::new()
             .allow_origin(Any)
             .allow_methods(Any)
@@ -176,7 +177,7 @@ pub fn build_router(
         .layer(Extension(concierge_agent))
         .layer(Extension(concierge_broadcaster))
         .layer(axum::middleware::from_fn(require_api_token))
-        // G18-005: CORS configuration. In production, set GITCORTEX_CORS_ORIGINS
+        // G18-005: CORS configuration. In production, set SOLODAWN_CORS_ORIGINS
         // to restrict allowed origins (comma-separated). When unset, allows all
         // origins for local development convenience.
         .layer(build_cors_layer())

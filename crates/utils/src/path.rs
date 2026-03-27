@@ -99,15 +99,15 @@ pub fn normalize_macos_private_alias<P: AsRef<Path>>(p: P) -> PathBuf {
     p.to_path_buf()
 }
 
-pub fn get_gitcortex_temp_dir() -> std::path::PathBuf {
-    if let Ok(d) = std::env::var("GITCORTEX_TEMP_DIR") {
+pub fn get_solodawn_temp_dir() -> std::path::PathBuf {
+    if let Some(d) = crate::env_compat::var_opt_with_compat("SOLODAWN_TEMP_DIR", "GITCORTEX_TEMP_DIR") {
         return std::path::PathBuf::from(d);
     }
 
     let dir_name = if cfg!(debug_assertions) {
-        "gitcortex-dev"
+        "solodawn-dev"
     } else {
-        "gitcortex"
+        "solodawn"
     };
 
     if cfg!(target_os = "macos") {
@@ -117,9 +117,15 @@ pub fn get_gitcortex_temp_dir() -> std::path::PathBuf {
         // Linux: use /var/tmp instead of /tmp to avoid RAM usage
         std::path::PathBuf::from("/var/tmp").join(dir_name)
     } else {
-        // Windows and other platforms: use temp dir with gitcortex subdirectory
+        // Windows and other platforms: use temp dir with solodawn subdirectory
         std::env::temp_dir().join(dir_name)
     }
+}
+
+/// Backward-compatible alias for `get_solodawn_temp_dir`.
+#[deprecated(note = "Use get_solodawn_temp_dir instead")]
+pub fn get_gitcortex_temp_dir() -> std::path::PathBuf {
+    get_solodawn_temp_dir()
 }
 
 /// Expand leading ~ to user's home directory.

@@ -92,14 +92,13 @@ fn ensure_supported_provider(provider: &str) -> Result<(), ApiError> {
 }
 
 fn is_chat_connector_feature_enabled() -> bool {
-    std::env::var("GITCORTEX_CHAT_CONNECTOR_ENABLED")
-        .ok()
+    utils::env_compat::var_opt_with_compat("SOLODAWN_CHAT_CONNECTOR_ENABLED", "GITCORTEX_CHAT_CONNECTOR_ENABLED")
         .is_some_and(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
 }
 
 fn read_chat_webhook_secret() -> Result<String, ApiError> {
-    std::env::var("GITCORTEX_CHAT_WEBHOOK_SECRET")
-        .map_err(|_| ApiError::Conflict("GITCORTEX_CHAT_WEBHOOK_SECRET is not configured".to_string()))
+    utils::env_compat::var_with_compat("SOLODAWN_CHAT_WEBHOOK_SECRET", "GITCORTEX_CHAT_WEBHOOK_SECRET")
+        .map_err(|_| ApiError::Conflict("SOLODAWN_CHAT_WEBHOOK_SECRET is not configured".to_string()))
 }
 
 fn compute_chat_signature(secret: &str, provider: &str, payload: &ChatEventRequest) -> String {

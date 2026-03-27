@@ -160,8 +160,7 @@ pub trait Deployment: Clone + Send + Sync + 'static {
 
     /// Trigger background auto-setup of default projects for new users
     async fn trigger_auto_project_setup(&self) {
-        let auto_setup_enabled = std::env::var("GITCORTEX_AUTO_SETUP_PROJECTS")
-            .ok()
+        let auto_setup_enabled = utils::env_compat::var_opt_with_compat("SOLODAWN_AUTO_SETUP_PROJECTS", "GITCORTEX_AUTO_SETUP_PROJECTS")
             .map_or(true, |value| {
                 !matches!(
                     value.trim().to_ascii_lowercase().as_str(),
@@ -170,7 +169,7 @@ pub trait Deployment: Clone + Send + Sync + 'static {
             });
 
         if !auto_setup_enabled {
-            tracing::info!("Auto project setup disabled via GITCORTEX_AUTO_SETUP_PROJECTS");
+            tracing::info!("Auto project setup disabled via SOLODAWN_AUTO_SETUP_PROJECTS");
             return;
         }
 

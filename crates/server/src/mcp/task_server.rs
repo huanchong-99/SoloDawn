@@ -292,12 +292,12 @@ impl TaskServer {
         }
     }
 
-    // TODO(G35-008): When GITCORTEX_API_TOKEN is unset, apply_api_token silently skips auth.
+    // TODO(G35-008): When SOLODAWN_API_TOKEN is unset, apply_api_token silently skips auth.
     // The HTTP auth middleware (require_api_token) also skips when the env var is absent,
     // but the MCP server should align: either both enforce or both skip. Consider a
     // startup check that warns when the token is unset in production.
     fn apply_api_token(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        match std::env::var("GITCORTEX_API_TOKEN").ok() {
+        match utils::env_compat::var_opt_with_compat("SOLODAWN_API_TOKEN", "GITCORTEX_API_TOKEN") {
             Some(token) => request.bearer_auth(token),
             None => request,
         }
@@ -870,7 +870,7 @@ impl ServerHandler for TaskServer {
             protocol_version: ProtocolVersion::V_2025_03_26,
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation {
-                name: "gitcortex".to_string(),
+                name: "solodawn".to_string(),
                 version: "1.0.0".to_string(),
             },
             instructions: Some(instruction),

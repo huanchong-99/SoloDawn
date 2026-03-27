@@ -101,8 +101,8 @@ impl CliInstaller {
     fn resolve_windows_script_path() -> Option<PathBuf> {
         let mut candidates = Vec::new();
 
-        // Check GITCORTEX_INSTALL_DIR (set by installer)
-        if let Ok(install_dir) = std::env::var("GITCORTEX_INSTALL_DIR") {
+        // Check SOLODAWN_INSTALL_DIR (set by installer)
+        if let Some(install_dir) = utils::env_compat::var_opt_with_compat("SOLODAWN_INSTALL_DIR", "GITCORTEX_INSTALL_DIR") {
             candidates.push(
                 PathBuf::from(&install_dir).join("scripts/install-single-cli.ps1"),
             );

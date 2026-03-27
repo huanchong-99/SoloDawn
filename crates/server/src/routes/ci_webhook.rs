@@ -19,7 +19,7 @@ pub struct CiWebhookPayload {
 ///
 /// Accepts CI workflow completion notifications from GitHub Actions.
 ///
-/// G35-009: When `GITCORTEX_CI_WEBHOOK_SECRET` is set, validates the
+/// G35-009: When `SOLODAWN_CI_WEBHOOK_SECRET` is set, validates the
 /// `X-Webhook-Signature` header (HMAC-SHA256) before accepting payloads.
 /// When unset, accepts all payloads (development mode).
 pub async fn ci_webhook(
@@ -27,7 +27,7 @@ pub async fn ci_webhook(
     body: axum::body::Bytes,
 ) -> (StatusCode, Json<Value>) {
     // G35-009: Validate HMAC signature if webhook secret is configured
-    if let Ok(secret) = std::env::var("GITCORTEX_CI_WEBHOOK_SECRET") {
+    if let Ok(secret) = utils::env_compat::var_with_compat("SOLODAWN_CI_WEBHOOK_SECRET", "GITCORTEX_CI_WEBHOOK_SECRET") {
         if !secret.trim().is_empty() {
             let signature = headers
                 .get("x-webhook-signature")

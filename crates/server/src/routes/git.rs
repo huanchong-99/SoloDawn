@@ -57,7 +57,7 @@ fn user_home_directory() -> Option<PathBuf> {
 
 fn get_env_allowed_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
-    if let Ok(raw) = std::env::var("GITCORTEX_ALLOWED_ROOTS") {
+    if let Ok(raw) = utils::env_compat::var_with_compat("SOLODAWN_ALLOWED_ROOTS", "GITCORTEX_ALLOWED_ROOTS") {
         for item in raw.split([',', ';']) {
             let trimmed = item.trim();
             if trimmed.is_empty() {

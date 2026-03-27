@@ -34,13 +34,13 @@ impl TestServer {
 
         // Set environment for isolated testing
         unsafe {
-            std::env::set_var("GITCORTEX_ASSET_DIR", temp_path.to_str().unwrap());
+            std::env::set_var("SOLODAWN_ASSET_DIR", temp_path.to_str().unwrap());
             std::env::set_var(
-                "GITCORTEX_ENCRYPTION_KEY",
+                "SOLODAWN_ENCRYPTION_KEY",
                 "12345678901234567890123456789012",
             );
-            std::env::set_var("GITCORTEX_LOCAL_MODE", "1");
-            std::env::set_var("GITCORTEX_NO_BROWSER", "1");
+            std::env::set_var("SOLODAWN_LOCAL_MODE", "1");
+            std::env::set_var("SOLODAWN_NO_BROWSER", "1");
         }
 
         // Initialize deployment (creates DB in temp dir)

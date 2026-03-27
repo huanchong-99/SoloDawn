@@ -282,8 +282,7 @@ fn has_configured_workflow_models(config: &AppConfig) -> bool {
 }
 
 fn is_orchestrator_chat_feature_enabled() -> bool {
-    std::env::var("GITCORTEX_ORCHESTRATOR_CHAT_ENABLED")
-        .ok()
+    utils::env_compat::var_opt_with_compat("SOLODAWN_ORCHESTRATOR_CHAT_ENABLED", "GITCORTEX_ORCHESTRATOR_CHAT_ENABLED")
         .map_or(true, |value| value.trim().eq_ignore_ascii_case("true"))
 }
 

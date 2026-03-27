@@ -128,7 +128,7 @@ impl FilesystemService {
 
     fn get_env_allowed_roots() -> Vec<PathBuf> {
         let mut roots = Vec::new();
-        if let Ok(raw) = std::env::var("GITCORTEX_ALLOWED_ROOTS") {
+        if let Ok(raw) = utils::env_compat::var_with_compat("SOLODAWN_ALLOWED_ROOTS", "GITCORTEX_ALLOWED_ROOTS") {
             for item in raw.split([',', ';']) {
                 let trimmed = item.trim();
                 if trimmed.is_empty() {
@@ -376,7 +376,7 @@ impl FilesystemService {
             return vec![];
         };
         let skip_dirs = Self::get_directories_to_skip();
-        let gitcortex_temp_dir = utils::path::get_gitcortex_temp_dir();
+        let gitcortex_temp_dir = utils::path::get_solodawn_temp_dir();
         let mut walker_builder = WalkBuilder::new(base_dir);
         walker_builder
             .follow_links(false)
@@ -468,7 +468,7 @@ impl FilesystemService {
     fn default_browse_root(&self) -> PathBuf {
         let mut preferred_paths: Vec<PathBuf> = Vec::new();
 
-        if let Ok(workspace_root) = std::env::var("GITCORTEX_WORKSPACE_ROOT") {
+        if let Ok(workspace_root) = utils::env_compat::var_with_compat("SOLODAWN_WORKSPACE_ROOT", "GITCORTEX_WORKSPACE_ROOT") {
             let trimmed = workspace_root.trim();
             if !trimmed.is_empty() {
                 preferred_paths.push(PathBuf::from(trimmed));

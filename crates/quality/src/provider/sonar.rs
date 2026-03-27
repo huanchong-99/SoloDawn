@@ -36,7 +36,7 @@ impl Default for SonarProvider {
     fn default() -> Self {
         Self {
             host_url: "http://localhost:9000".to_string(),
-            project_key: "gitcortex".to_string(),
+            project_key: "solodawn".to_string(),
             token: None,
             properties_path: "quality/sonar/sonar-project.properties".to_string(),
         }

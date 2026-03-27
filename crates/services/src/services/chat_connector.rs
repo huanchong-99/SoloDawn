@@ -51,11 +51,10 @@ impl TelegramConnector {
         }
     }
 
-    /// Try to create a connector from the `GITCORTEX_TELEGRAM_BOT_TOKEN`
+    /// Try to create a connector from the `SOLODAWN_TELEGRAM_BOT_TOKEN`
     /// environment variable. Returns `None` when the variable is unset.
     pub fn from_env() -> Option<Self> {
-        std::env::var("GITCORTEX_TELEGRAM_BOT_TOKEN")
-            .ok()
+        utils::env_compat::var_opt_with_compat("SOLODAWN_TELEGRAM_BOT_TOKEN", "GITCORTEX_TELEGRAM_BOT_TOKEN")
             .filter(|t| !t.is_empty())
             .map(Self::new)
     }

@@ -305,7 +305,7 @@ impl ProcessManager {
         }
 
         // Safety check: only clean up directories under our temp directory
-        let base_dir = std::env::temp_dir().join("gitcortex");
+        let base_dir = std::env::temp_dir().join("solodawn");
         if !codex_home.starts_with(&base_dir) {
             tracing::warn!(
                 terminal_id = %terminal_id,

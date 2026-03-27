@@ -32,7 +32,7 @@ use utils::{
 };
 
 #[derive(Parser)]
-#[command(name = "gitcortex-server", about = "GitCortex Server")]
+#[command(name = "solodawn-server", about = "SoloDawn Server")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -58,18 +58,18 @@ const DEV_DEFAULT_ENCRYPTION_KEY: &str = "12345678901234567890123456789012";
 
 fn ensure_api_token_in_release() {
     if !cfg!(debug_assertions) {
-        // SEC-002: In release mode, require GITCORTEX_API_TOKEN — fail closed
+        // SEC-002: In release mode, require SOLODAWN_API_TOKEN — fail closed
         // Exception: local installer mode (localhost-only, no external access)
-        if std::env::var("GITCORTEX_LOCAL_MODE").is_ok() {
+        if utils::env_compat::var_is_set("SOLODAWN_LOCAL_MODE", "GITCORTEX_LOCAL_MODE") {
             return;
         }
-        match std::env::var("GITCORTEX_API_TOKEN") {
+        match utils::env_compat::var_with_compat("SOLODAWN_API_TOKEN", "GITCORTEX_API_TOKEN") {
             Ok(value) if !value.trim().is_empty() => {}
             Ok(_) | Err(_) => {
                 panic!(
-                    "GITCORTEX_API_TOKEN is not set or is empty. \
+                    "SOLODAWN_API_TOKEN is not set or is empty. \
                      An API token is required in release mode to prevent unauthenticated access. \
-                     Set GITCORTEX_LOCAL_MODE=1 to skip this check for localhost-only installations."
+                     Set SOLODAWN_LOCAL_MODE=1 to skip this check for localhost-only installations."
                 );
             }
         }
@@ -79,24 +79,24 @@ fn ensure_api_token_in_release() {
 fn ensure_dev_encryption_key() {
     if !cfg!(debug_assertions) {
         // G18-003: In release mode, require a valid encryption key — do not silently proceed
-        match std::env::var("GITCORTEX_ENCRYPTION_KEY") {
+        match utils::env_compat::var_with_compat("SOLODAWN_ENCRYPTION_KEY", "GITCORTEX_ENCRYPTION_KEY") {
             Ok(value) if value.len() == 32 => {}
             Ok(value) => {
                 panic!(
-                    "GITCORTEX_ENCRYPTION_KEY has invalid length {} (expected 32 bytes). \
+                    "SOLODAWN_ENCRYPTION_KEY has invalid length {} (expected 32 bytes). \
                      Set a valid 32-byte key before starting in release mode.",
                     value.len()
                 );
             }
             Err(std::env::VarError::NotPresent) => {
                 panic!(
-                    "GITCORTEX_ENCRYPTION_KEY is not set. \
+                    "SOLODAWN_ENCRYPTION_KEY is not set. \
                      A 32-byte encryption key is required in release mode."
                 );
             }
             Err(e) => {
                 panic!(
-                    "GITCORTEX_ENCRYPTION_KEY is not valid: {e}. \
+                    "SOLODAWN_ENCRYPTION_KEY is not valid: {e}. \
                      A 32-byte encryption key is required in release mode."
                 );
             }
@@ -104,20 +104,20 @@ fn ensure_dev_encryption_key() {
         return;
     }
 
-    match std::env::var("GITCORTEX_ENCRYPTION_KEY") {
+    match utils::env_compat::var_with_compat("SOLODAWN_ENCRYPTION_KEY", "GITCORTEX_ENCRYPTION_KEY") {
         Ok(value) if value.len() == 32 => {}
         Ok(value) => {
             tracing::warn!(
                 provided_length = value.len(),
-                "GITCORTEX_ENCRYPTION_KEY is set but length is invalid; workflow start may fail"
+                "SOLODAWN_ENCRYPTION_KEY is set but length is invalid; workflow start may fail"
             );
         }
         Err(_) => {
             unsafe {
-                std::env::set_var("GITCORTEX_ENCRYPTION_KEY", DEV_DEFAULT_ENCRYPTION_KEY);
+                std::env::set_var("SOLODAWN_ENCRYPTION_KEY", DEV_DEFAULT_ENCRYPTION_KEY);
             }
             tracing::warn!(
-                "GITCORTEX_ENCRYPTION_KEY not set; using development fallback key"
+                "SOLODAWN_ENCRYPTION_KEY not set; using development fallback key"
             );
         }
     }
@@ -318,7 +318,7 @@ async fn run_server() -> Result<(), GitCortexError> {
 
     if !cfg!(debug_assertions)
         && !std::path::Path::new("/.dockerenv").exists()
-        && std::env::var("GITCORTEX_NO_BROWSER").is_err()
+        && !utils::env_compat::var_is_set("SOLODAWN_NO_BROWSER", "GITCORTEX_NO_BROWSER")
     {
         tracing::info!("Opening browser...");
         tokio::spawn(async move {
@@ -393,8 +393,8 @@ fn decrypt_feishu_secret(encrypted: &str) -> anyhow::Result<String> {
     };
     use base64::{Engine as _, engine::general_purpose};
 
-    let key_str = std::env::var("GITCORTEX_ENCRYPTION_KEY")
-        .map_err(|_| anyhow::anyhow!("GITCORTEX_ENCRYPTION_KEY not set"))?;
+    let key_str = utils::env_compat::var_with_compat("SOLODAWN_ENCRYPTION_KEY", "GITCORTEX_ENCRYPTION_KEY")
+        .map_err(|_| anyhow::anyhow!("SOLODAWN_ENCRYPTION_KEY not set"))?;
     if key_str.len() != 32 {
         return Err(anyhow::anyhow!("Invalid encryption key length"));
     }

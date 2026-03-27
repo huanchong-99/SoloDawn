@@ -28,7 +28,7 @@ pub async fn readyz(
         .is_ok();
     let asset_ok = utils::assets::asset_dir().map(|p| p.exists()).unwrap_or(false);
     let temp_ok = {
-        let dir = utils::path::get_gitcortex_temp_dir();
+        let dir = utils::path::get_solodawn_temp_dir();
         std::fs::create_dir_all(&dir).is_ok() && dir.exists()
     };
 

@@ -1,6 +1,6 @@
-//! GitCortex system tray application for Windows.
+//! SoloDawn system tray application for Windows.
 //!
-//! Manages the lifecycle of `gitcortex-server.exe`, provides a system tray
+//! Manages the lifecycle of `solodawn-server.exe`, provides a system tray
 //! icon with context menu for common actions, and reads `.env` configuration
 //! from the installation directory.
 
@@ -26,7 +26,7 @@ use winit::window::WindowId;
 // ---------------------------------------------------------------------------
 
 const DEFAULT_PORT: u16 = 23456;
-const SERVER_BINARY: &str = "gitcortex-server.exe";
+const SERVER_BINARY: &str = "solodawn-server.exe";
 
 // ---------------------------------------------------------------------------
 // Application state
@@ -193,7 +193,7 @@ impl TrayApp {
         cmd.current_dir(&self.install_dir)
             .envs(env_vars)
             .env("PATH", &combined_path)
-            .env("GITCORTEX_INSTALL_DIR", &self.install_dir)
+            .env("SOLODAWN_INSTALL_DIR", &self.install_dir)
             .stdout(stdout_file)
             .stderr(stderr_file);
 

@@ -426,15 +426,16 @@ impl MessageBus {
 
     /// Create a message bus from environment variables.
     ///
-    /// Reads `GITCORTEX_MESSAGE_BUS` (values: `"redis"` or `"memory"`, default `"memory"`)
-    /// and `GITCORTEX_REDIS_URL` (required when bus is `"redis"`).
+    /// Reads `SOLODAWN_MESSAGE_BUS` (values: `"redis"` or `"memory"`, default `"memory"`)
+    /// and `SOLODAWN_REDIS_URL` (required when bus is `"redis"`).
     pub fn from_env(capacity: usize) -> anyhow::Result<Self> {
-        let bus_type = std::env::var("GITCORTEX_MESSAGE_BUS").unwrap_or_else(|_| "memory".into());
+        let bus_type = utils::env_compat::var_with_compat("SOLODAWN_MESSAGE_BUS", "GITCORTEX_MESSAGE_BUS")
+            .unwrap_or_else(|_| "memory".into());
         match bus_type.as_str() {
             "redis" => {
-                let url = std::env::var("GITCORTEX_REDIS_URL").map_err(|_| {
+                let url = utils::env_compat::var_with_compat("SOLODAWN_REDIS_URL", "GITCORTEX_REDIS_URL").map_err(|_| {
                     anyhow::anyhow!(
-                        "GITCORTEX_REDIS_URL must be set when GITCORTEX_MESSAGE_BUS=redis"
+                        "SOLODAWN_REDIS_URL must be set when SOLODAWN_MESSAGE_BUS=redis"
                     )
                 })?;
                 // We need a runtime to create the Redis connection; use block_on
@@ -447,7 +448,7 @@ impl MessageBus {
             }
             "memory" | "" => Ok(Self::new_in_memory(capacity)),
             other => Err(anyhow::anyhow!(
-                "Unknown GITCORTEX_MESSAGE_BUS value: {other}. Expected 'redis' or 'memory'."
+                "Unknown SOLODAWN_MESSAGE_BUS value: {other}. Expected 'redis' or 'memory'."
             )),
         }
     }

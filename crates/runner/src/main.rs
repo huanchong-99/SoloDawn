@@ -16,7 +16,8 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let addr = std::env::var("GITCORTEX_RUNNER_ADDR")
+    let addr = std::env::var("SOLODAWN_RUNNER_ADDR")
+        .or_else(|_| std::env::var("GITCORTEX_RUNNER_ADDR"))
         .unwrap_or_else(|_| "0.0.0.0:50051".to_string())
         .parse()?;
 

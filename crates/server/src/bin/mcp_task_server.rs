@@ -51,7 +51,7 @@ fn main() -> anyhow::Result<()> {
                         })?
                     }
                     Err(_) => {
-                        let port = read_port_file("gitcortex").await?;
+                        let port = read_port_file("solodawn").await?;
                         tracing::info!("[MCP] Using port from port file: {}", port);
                         port
                     }

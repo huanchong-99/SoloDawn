@@ -44,15 +44,26 @@ pub struct ConciergeSession {
 }
 
 impl ConciergeSession {
-    const ENCRYPTION_KEY_ENV: &str = "GITCORTEX_ENCRYPTION_KEY";
+    const ENCRYPTION_KEY_ENV: &str = "SOLODAWN_ENCRYPTION_KEY";
+    const ENCRYPTION_KEY_ENV_LEGACY: &str = "GITCORTEX_ENCRYPTION_KEY";
 
     fn get_encryption_key() -> anyhow::Result<[u8; 32]> {
-        let key_str = std::env::var(Self::ENCRYPTION_KEY_ENV).map_err(|_| {
-            anyhow::anyhow!(
-                "Encryption key not found. Set {} (32-byte value).",
-                Self::ENCRYPTION_KEY_ENV
-            )
-        })?;
+        let key_str = std::env::var(Self::ENCRYPTION_KEY_ENV)
+            .or_else(|_| {
+                let val = std::env::var(Self::ENCRYPTION_KEY_ENV_LEGACY)?;
+                tracing::warn!(
+                    new = Self::ENCRYPTION_KEY_ENV,
+                    old = Self::ENCRYPTION_KEY_ENV_LEGACY,
+                    "Deprecated env var used; please switch to the new name"
+                );
+                Ok(val)
+            })
+            .map_err(|_: std::env::VarError| {
+                anyhow::anyhow!(
+                    "Encryption key not found. Set {} (32-byte value).",
+                    Self::ENCRYPTION_KEY_ENV
+                )
+            })?;
         if key_str.len() != 32 {
             return Err(anyhow::anyhow!(
                 "Invalid encryption key length: got {} bytes, expected 32",

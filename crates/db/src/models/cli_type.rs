@@ -181,12 +181,22 @@ impl CliType {
 }
 
 impl ModelConfig {
-    const ENCRYPTION_KEY_ENV: &str = "GITCORTEX_ENCRYPTION_KEY";
+    const ENCRYPTION_KEY_ENV: &str = "SOLODAWN_ENCRYPTION_KEY";
+    const ENCRYPTION_KEY_ENV_LEGACY: &str = "GITCORTEX_ENCRYPTION_KEY";
 
     /// Get encryption key from environment variable
     fn get_encryption_key() -> anyhow::Result<[u8; 32]> {
         let key_str = std::env::var(Self::ENCRYPTION_KEY_ENV)
-            .map_err(|_| anyhow::anyhow!(
+            .or_else(|_| {
+                let val = std::env::var(Self::ENCRYPTION_KEY_ENV_LEGACY)?;
+                tracing::warn!(
+                    new = Self::ENCRYPTION_KEY_ENV,
+                    old = Self::ENCRYPTION_KEY_ENV_LEGACY,
+                    "Deprecated env var used; please switch to the new name"
+                );
+                Ok(val)
+            })
+            .map_err(|_: std::env::VarError| anyhow::anyhow!(
                 "Encryption key not found. Please set {} environment variable with a 32-byte value.",
                 Self::ENCRYPTION_KEY_ENV
             ))?;

@@ -3,7 +3,7 @@
 //! This module provides middleware for API authentication using bearer tokens.
 //!
 //! # Environment Variables
-//! - `GITCORTEX_API_TOKEN`: When set, requires API requests to include a valid bearer token
+//! - `SOLODAWN_API_TOKEN`: When set, requires API requests to include a valid bearer token
 //! - When unset, authentication is skipped (development mode)
 //!
 //! # Usage
@@ -26,8 +26,8 @@ use axum::{
 /// Middleware that requires API token authentication.
 ///
 /// # Behavior
-/// - If `GITCORTEX_API_TOKEN` environment variable is **not set**: allows all requests (development mode)
-/// - If `GITCORTEX_API_TOKEN` environment variable **is set**:
+/// - If `SOLODAWN_API_TOKEN` environment variable is **not set**: allows all requests (development mode)
+/// - If `SOLODAWN_API_TOKEN` environment variable **is set**:
 ///   - Requires `Authorization: Bearer <token>` header
 ///   - Token must match the environment variable value exactly
 ///   - Returns `401 Unauthorized` if token is missing or invalid
@@ -42,33 +42,33 @@ use axum::{
 /// use server::middleware::auth::require_api_token;
 ///
 /// // In development - no authentication required
-/// // GITCORTEX_API_TOKEN is not set
+/// // SOLODAWN_API_TOKEN is not set
 ///
 /// // In production - authentication required
-/// // GITCORTEX_API_TOKEN="my-secret-token"
+/// // SOLODAWN_API_TOKEN="my-secret-token"
 /// // Request: Authorization: Bearer my-secret-token
 /// ```
 pub async fn require_api_token(req: Request, next: Next) -> Result<Response, Response> {
     // Check if API token is configured.
     // NOTE(G35-002): std::env::var() is called per-request intentionally. The cost is
     // negligible (< 1µs on all platforms) and allows runtime token rotation without restart.
-    let token = match std::env::var("GITCORTEX_API_TOKEN") {
+    let token = match utils::env_compat::var_with_compat("SOLODAWN_API_TOKEN", "GITCORTEX_API_TOKEN") {
         Ok(value) if !value.trim().is_empty() => value,
         Err(_) => {
             // SEC-002: In local mode (installer), suppress per-request warnings
-            if std::env::var("GITCORTEX_LOCAL_MODE").is_err() {
+            if !utils::env_compat::var_is_set("SOLODAWN_LOCAL_MODE", "GITCORTEX_LOCAL_MODE") {
                 tracing::warn!(
-                    "SEC-002: GITCORTEX_API_TOKEN not set — all requests are unauthenticated! \
-                     Set GITCORTEX_API_TOKEN to secure API access."
+                    "SEC-002: SOLODAWN_API_TOKEN not set — all requests are unauthenticated! \
+                     Set SOLODAWN_API_TOKEN to secure API access."
                 );
             }
             return Ok(next.run(req).await);
         }
         _ => {
-            if std::env::var("GITCORTEX_LOCAL_MODE").is_err() {
+            if !utils::env_compat::var_is_set("SOLODAWN_LOCAL_MODE", "GITCORTEX_LOCAL_MODE") {
                 tracing::warn!(
-                    "SEC-002: GITCORTEX_API_TOKEN is empty — all requests are unauthenticated! \
-                     Set a non-empty GITCORTEX_API_TOKEN to secure API access."
+                    "SEC-002: SOLODAWN_API_TOKEN is empty — all requests are unauthenticated! \
+                     Set a non-empty SOLODAWN_API_TOKEN to secure API access."
                 );
             }
             return Ok(next.run(req).await);

@@ -52,7 +52,8 @@ impl SystemSetting {
     ///
     /// Returns `Some(true/false)` if the env var is set, `None` otherwise.
     pub fn is_feishu_enabled_sync() -> Option<bool> {
-        std::env::var("GITCORTEX_FEISHU_ENABLED")
+        std::env::var("SOLODAWN_FEISHU_ENABLED")
+            .or_else(|_| std::env::var("GITCORTEX_FEISHU_ENABLED"))
             .ok()
             .map(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
     }

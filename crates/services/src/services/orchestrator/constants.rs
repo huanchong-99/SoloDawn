@@ -11,7 +11,7 @@ pub const GIT_EVENT_TOPIC_PREFIX: &str = "git_event:";
 pub const GIT_COMMIT_METADATA_SEPARATOR: &str = "---METADATA---";
 
 /// Environment variable names
-pub const ENCRYPTION_KEY_ENV: &str = "GITCORTEX_ENCRYPTION_KEY";
+pub const ENCRYPTION_KEY_ENV: &str = "SOLODAWN_ENCRYPTION_KEY";
 
 /// Default configuration values
 pub const DEFAULT_MAX_CONVERSATION_HISTORY: usize = 50;

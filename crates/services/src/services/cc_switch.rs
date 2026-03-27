@@ -67,16 +67,16 @@ fn create_codex_auth(codex_home: &Path, api_key: &str) -> anyhow::Result<()> {
 
 /// Resolve Codex wire protocol.
 /// Default to `responses` for OpenAI-compatible gateways.
-/// Allow override via env: GITCORTEX_CODEX_WIRE_API=responses|codex
+/// Allow override via env: SOLODAWN_CODEX_WIRE_API=responses|codex
 fn resolve_codex_wire_api() -> String {
-    if let Ok(raw) = std::env::var("GITCORTEX_CODEX_WIRE_API") {
+    if let Some(raw) = utils::env_compat::var_opt_with_compat("SOLODAWN_CODEX_WIRE_API", "GITCORTEX_CODEX_WIRE_API") {
         let normalized = raw.trim().to_ascii_lowercase();
         if normalized == "responses" || normalized == "codex" {
             return normalized;
         }
         tracing::warn!(
             configured = %raw,
-            "Invalid GITCORTEX_CODEX_WIRE_API value; expected 'responses' or 'codex', falling back to 'responses'"
+            "Invalid SOLODAWN_CODEX_WIRE_API value; expected 'responses' or 'codex', falling back to 'responses'"
         );
     }
 
@@ -128,7 +128,7 @@ api_key = "{api_key}"
     );
 
     // Default to OpenAI Responses API for compatibility with most custom gateways.
-    // Set GITCORTEX_CODEX_WIRE_API=codex when provider explicitly requires /codex.
+    // Set SOLODAWN_CODEX_WIRE_API=codex when provider explicitly requires /codex.
     config_content.push_str(&format!("wire_api = \"{wire_api}\"\n"));
 
     // Skip interactive sandbox setup prompt by pre-configuring sandbox and approval.
@@ -443,7 +443,7 @@ fn sanitize_terminal_id(id: &str) -> String {
 /// permissions on Unix (0o700). Returns the created directory path.
 fn create_isolated_home(terminal_id: &str, prefix: &str) -> anyhow::Result<std::path::PathBuf> {
     let safe_id = sanitize_terminal_id(terminal_id);
-    let base_dir = std::env::temp_dir().join("gitcortex");
+    let base_dir = std::env::temp_dir().join("solodawn");
     std::fs::create_dir_all(&base_dir).map_err(|e| {
         anyhow::anyhow!(
             "Failed to create {prefix} home base directory {}: {e}",

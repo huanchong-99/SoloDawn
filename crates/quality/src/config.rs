@@ -134,7 +134,7 @@ fn default_sonar_host() -> String {
 }
 
 fn default_project_key() -> String {
-    "gitcortex".to_string()
+    "solodawn".to_string()
 }
 
 impl QualityGateConfig {

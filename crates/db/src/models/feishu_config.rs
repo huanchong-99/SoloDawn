@@ -190,11 +190,21 @@ impl FeishuAppConfig {
 
     /// Encrypt a plaintext secret using AES-256-GCM (same scheme as Workflow API keys).
     ///
-    /// Reads the key from `GITCORTEX_ENCRYPTION_KEY` (must be exactly 32 bytes).
+    /// Reads the key from `SOLODAWN_ENCRYPTION_KEY` (must be exactly 32 bytes).
     pub fn encrypt_secret(plaintext: &str) -> anyhow::Result<String> {
-        let key_str = std::env::var("GITCORTEX_ENCRYPTION_KEY").map_err(|_| {
-            anyhow::anyhow!("GITCORTEX_ENCRYPTION_KEY is not set")
-        })?;
+        let key_str = std::env::var("SOLODAWN_ENCRYPTION_KEY")
+            .or_else(|_| {
+                let val = std::env::var("GITCORTEX_ENCRYPTION_KEY")?;
+                tracing::warn!(
+                    new = "SOLODAWN_ENCRYPTION_KEY",
+                    old = "GITCORTEX_ENCRYPTION_KEY",
+                    "Deprecated env var used; please switch to the new name"
+                );
+                Ok(val)
+            })
+            .map_err(|_: std::env::VarError| {
+                anyhow::anyhow!("SOLODAWN_ENCRYPTION_KEY is not set")
+            })?;
         if key_str.len() != 32 {
             return Err(anyhow::anyhow!(
                 "Invalid encryption key length: got {} bytes, expected 32",
