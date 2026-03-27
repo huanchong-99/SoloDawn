@@ -666,7 +666,7 @@ async fn execute_show_overview(pool: &SqlitePool) -> Result<String> {
             .await?;
 
     let mut result = format!(
-        "=== GitCortex Overview ===\nProjects: {}\nWorkflows: {}\n",
+        "=== SoloDawn Overview ===\nProjects: {}\nWorkflows: {}\n",
         projects.len(),
         workflows.len()
     );

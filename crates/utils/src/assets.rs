@@ -57,13 +57,13 @@ mod tests {
 
     #[test]
     fn test_asset_dir_env_override() {
-        let dir = std::env::temp_dir().join("gitcortex-asset-dir-test");
+        let dir = std::env::temp_dir().join("solodawn-asset-dir-test");
         let _ = std::fs::remove_dir_all(&dir);
-        unsafe { std::env::set_var("GITCORTEX_ASSET_DIR", &dir) };
+        unsafe { std::env::set_var("SOLODAWN_ASSET_DIR", &dir) };
         let result = asset_dir().expect("asset_dir should succeed with env override");
         assert_eq!(result, dir);
         assert!(dir.exists());
-        unsafe { std::env::remove_var("GITCORTEX_ASSET_DIR") };
+        unsafe { std::env::remove_var("SOLODAWN_ASSET_DIR") };
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

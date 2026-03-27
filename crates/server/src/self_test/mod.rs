@@ -1,4 +1,4 @@
-//! Headless self-test module for GitCortex server.
+//! Headless self-test module for SoloDawn server.
 //!
 //! Provides a `self-test` subcommand that boots the server with a temporary
 //! database, exercises every API endpoint, and reports structured results.
@@ -47,7 +47,7 @@ pub async fn run(json: bool, filter: Option<String>, orchestration: bool) -> i32
         .with_env_filter(env_filter)
         .try_init();
 
-    eprintln!("GitCortex Self-Test — starting server...");
+    eprintln!("SoloDawn Self-Test — starting server...");
 
     let server = match runner::TestServer::start().await {
         Ok(s) => s,
@@ -113,7 +113,7 @@ pub async fn run(json: bool, filter: Option<String>, orchestration: bool) -> i32
 
 fn print_human_report(report: &SelfTestReport) {
     eprintln!("\n{}", "=".repeat(72));
-    eprintln!("  GitCortex Self-Test Report");
+    eprintln!("  SoloDawn Self-Test Report");
     eprintln!("{}", "=".repeat(72));
 
     let mut current_group = String::new();

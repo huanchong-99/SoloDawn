@@ -301,7 +301,7 @@ pub struct TestResultResponse {
 
 /// POST /api/integrations/feishu/test-send
 ///
-/// Sends a test message ("Hello from GitCortex") to the specified chat, or
+/// Sends a test message ("Hello from SoloDawn") to the specified chat, or
 /// to the most recently active conversation binding.
 async fn test_send(
     State(deployment): State<DeploymentImpl>,
@@ -361,7 +361,7 @@ async fn test_send(
         }
     };
 
-    match messenger.send_text(&chat_id, "Hello from GitCortex / 你好，来自 GitCortex 的测试消息").await {
+    match messenger.send_text(&chat_id, "Hello from SoloDawn / 你好，来自 SoloDawn 的测试消息").await {
         Ok(_) => Ok(Json(ApiResponse::success(TestResultResponse {
             success: true,
             message: "Test message sent successfully".to_string(),

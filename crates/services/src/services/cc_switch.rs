@@ -1,6 +1,6 @@
 //! CC-Switch 服务
 //!
-//! 封装 cc-switch crate，提供与 gitcortex 集成的接口。
+//! 封装 cc-switch crate，提供与 solodawn 集成的接口。
 //!
 //! ## 进程隔离架构 (Phase 23)
 //!
@@ -434,7 +434,7 @@ fn sanitize_terminal_id(id: &str) -> String {
 
 /// G20-013/G22-008: Shared helper to create an isolated home directory for a CLI.
 ///
-/// Creates `<temp>/gitcortex/<prefix>-<sanitized_terminal_id>` with restrictive
+/// Creates `<temp>/solodawn/<prefix>-<sanitized_terminal_id>` with restrictive
 /// permissions on Unix (0o700). Returns the created directory path.
 fn create_isolated_home(terminal_id: &str, prefix: &str) -> anyhow::Result<std::path::PathBuf> {
     let safe_id = sanitize_terminal_id(terminal_id);

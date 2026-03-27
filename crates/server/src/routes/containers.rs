@@ -71,7 +71,7 @@ pub async fn get_context(
 
 pub fn router(_deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
     Router::new()
-        // NOTE: /containers/info is required by the VSCode extension (gitcortex-vscode)
+        // NOTE: /containers/info is required by the VSCode extension (solodawn-vscode)
         // to auto-detect workspaces. It maps workspace_id to attempt_id for compatibility.
         // Do not remove this endpoint without updating the extension.
         .route("/containers/info", get(get_container_info))

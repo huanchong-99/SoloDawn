@@ -1,4 +1,4 @@
-//! Concierge Agent: session-scoped AI assistant for GitCortex.
+//! Concierge Agent: session-scoped AI assistant for SoloDawn.
 //!
 //! Provides a unified conversational interface across Feishu and Web UI,
 //! capable of creating projects, planning workflows, navigating tasks,

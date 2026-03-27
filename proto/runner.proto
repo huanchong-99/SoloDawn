@@ -1,5 +1,5 @@
 syntax = "proto3";
-package gitcortex.runner;
+package solodawn.runner;
 
 service RunnerService {
   rpc SpawnTerminal(SpawnTerminalRequest) returns (SpawnTerminalResponse);

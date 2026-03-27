@@ -124,7 +124,7 @@ fn ensure_dev_encryption_key() {
 }
 
 #[derive(Debug, Error)]
-pub enum GitCortexError {
+pub enum SoloDawnError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -136,7 +136,7 @@ pub enum GitCortexError {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), GitCortexError> {
+async fn main() -> Result<(), SoloDawnError> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -148,7 +148,7 @@ async fn main() -> Result<(), GitCortexError> {
     }
 }
 
-async fn run_server() -> Result<(), GitCortexError> {
+async fn run_server() -> Result<(), SoloDawnError> {
     // Load environment variables from .env file
     dotenv::dotenv().ok();
     ensure_dev_encryption_key();

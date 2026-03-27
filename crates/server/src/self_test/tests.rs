@@ -1,4 +1,4 @@
-//! Full-coverage API test cases for GitCortex self-test.
+//! Full-coverage API test cases for SoloDawn self-test.
 //!
 //! ~164 test cases exercising every API endpoint.
 //! Tests execute in dependency order: create entities first, reuse IDs later,
@@ -618,11 +618,11 @@ async fn test_init_temp_git_repo(ctx: &mut TestContext) -> Result<(), String> {
 
     // Configure git user for commits
     let _ = std::process::Command::new("git")
-        .args(["config", "user.email", "test@gitcortex.dev"])
+        .args(["config", "user.email", "test@solodawn.dev"])
         .current_dir(&repo_path)
         .output();
     let _ = std::process::Command::new("git")
-        .args(["config", "user.name", "GitCortex Self-Test"])
+        .args(["config", "user.name", "SoloDawn Self-Test"])
         .current_dir(&repo_path)
         .output();
 

@@ -2,8 +2,8 @@
 name = "cc-switch"
 version = "0.1.0"
 edition = "2021"
-description = "CLI configuration switching core for GitCortex"
-authors = ["GitCortex Contributors"]
+description = "CLI configuration switching core for SoloDawn"
+authors = ["SoloDawn Contributors"]
 license = "Apache-2.0"
 
 [dependencies]

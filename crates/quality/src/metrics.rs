@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// 度量指标 Key
 ///
-/// GitCortex 的度量指标体系，结合 SonarQube 模式和项目实际分析工具
+/// SoloDawn 的度量指标体系，结合 SonarQube 模式和项目实际分析工具
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MetricKey {
     // ── Rust 分析器指标 ──

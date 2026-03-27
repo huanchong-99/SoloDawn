@@ -35,7 +35,7 @@ const BANNER: &str = r#"
 #[derive(Parser, Debug)]
 #[command(name = "review")]
 #[command(
-    about = "GitCortex Review helps you review GitHub pull requests by turning them into a clear, story-driven summary instead of a wall of diffs. You provide a pull request URL, optionally link a Claude Code project for additional context, and it builds a narrative that highlights key events and important decisions, helping you prioritise what actually needs attention. It's particularly useful when reviewing large amounts of AI-generated code. Note that code is uploaded to and processed on GitCortex servers using AI."
+    about = "SoloDawn Review helps you review GitHub pull requests by turning them into a clear, story-driven summary instead of a wall of diffs. You provide a pull request URL, optionally link a Claude Code project for additional context, and it builds a narrative that highlights key events and important decisions, helping you prioritise what actually needs attention. It's particularly useful when reviewing large amounts of AI-generated code. Note that code is uploaded to and processed on SoloDawn servers using AI."
 )]
 #[command(version)]
 struct Args {

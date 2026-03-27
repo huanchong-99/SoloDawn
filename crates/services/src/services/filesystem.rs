@@ -31,7 +31,7 @@ mod tests {
 
         unsafe {
             std::env::set_var(
-                "GITCORTEX_WORKSPACE_ROOT",
+                "SOLODAWN_WORKSPACE_ROOT",
                 workspace.path().to_string_lossy().to_string(),
             );
         }
@@ -48,7 +48,7 @@ mod tests {
         );
 
         unsafe {
-            std::env::remove_var("GITCORTEX_WORKSPACE_ROOT");
+            std::env::remove_var("SOLODAWN_WORKSPACE_ROOT");
         }
     }
 
@@ -62,7 +62,7 @@ mod tests {
 
         unsafe {
             std::env::set_var(
-                "GITCORTEX_WORKSPACE_ROOT",
+                "SOLODAWN_WORKSPACE_ROOT",
                 outside.path().to_string_lossy().to_string(),
             );
         }
@@ -78,7 +78,7 @@ mod tests {
         );
 
         unsafe {
-            std::env::remove_var("GITCORTEX_WORKSPACE_ROOT");
+            std::env::remove_var("SOLODAWN_WORKSPACE_ROOT");
         }
     }
 }
@@ -376,7 +376,7 @@ impl FilesystemService {
             return vec![];
         };
         let skip_dirs = Self::get_directories_to_skip();
-        let gitcortex_temp_dir = utils::path::get_solodawn_temp_dir();
+        let solodawn_temp_dir = utils::path::get_solodawn_temp_dir();
         let mut walker_builder = WalkBuilder::new(base_dir);
         walker_builder
             .follow_links(false)
@@ -397,10 +397,10 @@ impl FilesystemService {
                         return false;
                     }
 
-                    // Skip gitcortex temp directory and all subdirectories
+                    // Skip solodawn temp directory and all subdirectories
                     // Normalize to handle macOS /private/var vs /var aliasing
                     if utils::path::normalize_macos_private_alias(path)
-                        .starts_with(&gitcortex_temp_dir)
+                        .starts_with(&solodawn_temp_dir)
                     {
                         return false;
                     }

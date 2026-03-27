@@ -1,9 +1,9 @@
 {
-  "gitcortex": {
+  "solodawn": {
     "command": "npx",
     "args": [
       "-y",
-      "gitcortex@latest",
+      "solodawn@latest",
       "--mcp"
     ]
   },
@@ -38,10 +38,10 @@
     ]
   },
   "meta": {
-    "gitcortex": {
-      "name": "GitCortex",
-      "description": "Create, update and delete GitCortex tasks",
-      "url": "https://gitcortex.com/docs/integrations/gitcortex-mcp-server",
+    "solodawn": {
+      "name": "SoloDawn",
+      "description": "Create, update and delete SoloDawn tasks",
+      "url": "https://solodawn.com/docs/integrations/solodawn-mcp-server",
       "icon": "favicon-gc-light.svg"
     },
     "context7": {

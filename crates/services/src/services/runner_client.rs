@@ -166,7 +166,7 @@ impl RunnerClient for LocalRunner {
 // ============================================================================
 
 mod runner_proto {
-    tonic::include_proto!("gitcortex.runner");
+    tonic::include_proto!("solodawn.runner");
 }
 
 use runner_proto::runner_service_client::RunnerServiceClient;

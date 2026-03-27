@@ -14,7 +14,7 @@ async fn test_terminal_launch_creates_session() {
     // Setup encryption key for API key encryption
     unsafe {
         std::env::set_var(
-            "GITCORTEX_ENCRYPTION_KEY",
+            "SOLODAWN_ENCRYPTION_KEY",
             "12345678901234567890123456789012",
         );
     }

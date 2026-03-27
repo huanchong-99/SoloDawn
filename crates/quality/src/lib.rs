@@ -1,4 +1,4 @@
-//! # GitCortex Quality Gate Engine
+//! # SoloDawn Quality Gate Engine
 //!
 //! 全栈代码质量门引擎，提供代码质量分析、条件求值和报告聚合能力。
 //!

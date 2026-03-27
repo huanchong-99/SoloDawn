@@ -314,7 +314,7 @@ impl FeishuService {
                 messenger
                     .reply_text(
                         &msg.message_id,
-                        "没有可用的 AI 模型配置。请先在 GitCortex 设置页面配置至少一个模型的 API Key。",
+                        "没有可用的 AI 模型配置。请先在 SoloDawn 设置页面配置至少一个模型的 API Key。",
                     )
                     .await?;
                 return Ok(());
@@ -478,7 +478,7 @@ impl FeishuService {
 
     fn build_help_text() -> String {
         [
-            "📖 GitCortex 飞书命令指南\n",
+            "📖 SoloDawn 飞书命令指南\n",
             "💬 会话管理：",
             "  /new <名称>  — 创建新会话（当前会话自动归档）",
             "  /list       — 显示所有会话列表",

@@ -301,8 +301,8 @@ async fn setup_git_repo(repo_path: &Path) -> Result<(), String> {
     };
 
     run(&["init"])?;
-    run(&["config", "user.email", "e2e@gitcortex.dev"])?;
-    run(&["config", "user.name", "GitCortex E2E"])?;
+    run(&["config", "user.email", "e2e@solodawn.dev"])?;
+    run(&["config", "user.name", "SoloDawn E2E"])?;
 
     // Create a README so the repo isn't empty
     std::fs::write(repo_path.join("README.md"), "# E2E Test Repo\n")

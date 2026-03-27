@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn test_make_path_relative_macos_private_alias() {
         // Simulate a worktree under /var with a path reported under /private/var
-        let worktree = "/var/folders/zz/abc123/T/gitcortex-dev/worktrees/gc-test";
+        let worktree = "/var/folders/zz/abc123/T/solodawn-dev/worktrees/gc-test";
         let path_under_private = format!(
             "/private/var{}/hello-world.txt",
             worktree.strip_prefix("/var").unwrap()
@@ -182,11 +182,11 @@ mod tests {
     }
 
     #[test]
-    fn test_get_gitcortex_temp_dir_env_override() {
-        let dir = std::path::PathBuf::from("/custom/temp/gitcortex");
-        unsafe { std::env::set_var("GITCORTEX_TEMP_DIR", &dir) };
-        let result = get_gitcortex_temp_dir();
+    fn test_get_solodawn_temp_dir_env_override() {
+        let dir = std::path::PathBuf::from("/custom/temp/solodawn");
+        unsafe { std::env::set_var("SOLODAWN_TEMP_DIR", &dir) };
+        let result = get_solodawn_temp_dir();
         assert_eq!(result, dir);
-        unsafe { std::env::remove_var("GITCORTEX_TEMP_DIR") };
+        unsafe { std::env::remove_var("SOLODAWN_TEMP_DIR") };
     }
 }

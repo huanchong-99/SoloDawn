@@ -227,7 +227,7 @@ impl TrayApp {
         }
     }
 
-    /// Open the GitCortex web UI in the default browser.
+    /// Open the SoloDawn web UI in the default browser.
     fn open_browser(&self) {
         let port = self.port();
         let url = format!("http://127.0.0.1:{}", port);
@@ -253,9 +253,9 @@ impl TrayApp {
     fn load_icon(install_dir: &Path) -> Icon {
         // Try .ico first (Windows native), then .png
         let candidates = [
-            install_dir.join("assets").join("GitCortex.ico"),
-            install_dir.join("assets").join("gitcortex.ico"),
-            install_dir.join("assets").join("gitcortex.png"),
+            install_dir.join("assets").join("SoloDawn.ico"),
+            install_dir.join("assets").join("solodawn.ico"),
+            install_dir.join("assets").join("solodawn.png"),
         ];
         for icon_path in &candidates {
             if icon_path.exists() {
@@ -308,7 +308,7 @@ impl ApplicationHandler for TrayAppHandler {
         // Detect Chinese locale for menu labels
         let is_chinese = Self::is_chinese_locale();
 
-        let label_open = if is_chinese { "打开 GitCortex" } else { "Open GitCortex" };
+        let label_open = if is_chinese { "打开 SoloDawn" } else { "Open SoloDawn" };
         let label_start = if is_chinese { "启动服务" } else { "Start Server" };
         let label_stop = if is_chinese { "停止服务" } else { "Stop Server" };
         let label_quit = if is_chinese { "退出" } else { "Quit" };
@@ -351,7 +351,7 @@ impl ApplicationHandler for TrayAppHandler {
 
         match TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_tooltip("GitCortex")
+            .with_tooltip("SoloDawn")
             .with_icon(icon)
             .build()
         {
