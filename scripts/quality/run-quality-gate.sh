@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-echo "=== GitCortex Quality Gate ==="
+echo "=== SoloDawn Quality Gate ==="
 echo "Project root: $PROJECT_ROOT"
 echo "Tier: $TIER"
 echo "Mode: $MODE"

@@ -187,7 +187,7 @@ ORDER BY created_at DESC;
 #!/bin/bash
 # scripts/migrate_auto_confirm.sh
 
-DB_PATH="${1:-./gitcortex.db}"
+DB_PATH="${1:-./solodawn.db}"
 
 echo "=== Dry Run: Terminals with auto_confirm=0 ==="
 sqlite3 "$DB_PATH" < scripts/migrate_auto_confirm.sql
@@ -205,7 +205,7 @@ fi
 
 ```bash
 chmod +x scripts/migrate_auto_confirm.sh
-./scripts/migrate_auto_confirm.sh ./gitcortex.db
+./scripts/migrate_auto_confirm.sh ./solodawn.db
 ```
 
 Expected: Shows affected terminals, prompts for confirmation

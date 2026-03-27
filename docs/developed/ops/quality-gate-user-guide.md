@@ -1,6 +1,6 @@
 # Quality Gate User Guide
 
-This guide explains how to enable, configure, and use GitCortex's built-in quality gate system.
+This guide explains how to enable, configure, and use SoloDawn's built-in quality gate system.
 
 ## Enabling the Quality Gate
 
@@ -162,7 +162,7 @@ SonarQube provides deep static analysis beyond what local tools catch.
      sonar: true
    sonar:
      host_url: "http://localhost:9000"
-     project_key: "gitcortex"
+     project_key: "solodawn"
    ```
 
 5. Run manually:

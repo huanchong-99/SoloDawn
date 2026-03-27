@@ -1,6 +1,6 @@
 # Platform Verification: Windows Dev + Linux Deploy
 
-GitCortex is developed on Windows and deployed on Linux. This document covers verification steps and known issues for each platform.
+SoloDawn is developed on Windows and deployed on Linux. This document covers verification steps and known issues for each platform.
 
 ## Windows Development
 
@@ -15,7 +15,7 @@ GitCortex is developed on Windows and deployed on Linux. This document covers ve
 
 ```powershell
 # Set required env var
-$env:GITCORTEX_ENCRYPTION_KEY = "12345678901234567890123456789012"
+$env:SOLODAWN_ENCRYPTION_KEY = "12345678901234567890123456789012"
 
 # Install dependencies
 pnpm install
@@ -63,7 +63,7 @@ sqlx migrate run --database-url sqlite:crates/db/data.db --source crates/db/migr
 ```bash
 # Copy and fill environment config
 cp docker/.env.example docker/compose/.env
-# Edit .env — set GITCORTEX_ENCRYPTION_KEY at minimum
+# Edit .env — set SOLODAWN_ENCRYPTION_KEY at minimum
 
 # Start all services
 cd docker/compose
@@ -80,19 +80,19 @@ curl -f http://localhost:9000/api/system/status
 For bare-metal deployment without Docker:
 
 ```ini
-# /etc/systemd/system/gitcortex.service
+# /etc/systemd/system/solodawn.service
 [Unit]
-Description=GitCortex Server
+Description=SoloDawn Server
 After=network.target
 
 [Service]
 Type=simple
-User=gitcortex
-Environment=GITCORTEX_ENCRYPTION_KEY=<your-32-byte-key>
+User=solodawn
+Environment=SOLODAWN_ENCRYPTION_KEY=<your-32-byte-key>
 Environment=RUST_LOG=info
 Environment=HOST=0.0.0.0
 Environment=PORT=23456
-ExecStart=/usr/local/bin/gitcortex-server
+ExecStart=/usr/local/bin/solodawn-server
 Restart=on-failure
 RestartSec=5
 
@@ -102,7 +102,7 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now gitcortex
+sudo systemctl enable --now solodawn
 ```
 
 ### Known Linux Issues
@@ -111,8 +111,8 @@ sudo systemctl enable --now gitcortex
 |-------|-----------|
 | SonarQube needs `vm.max_map_count >= 262144` | `sysctl -w vm.max_map_count=262144` (persist in `/etc/sysctl.conf`) |
 | SQLite WAL mode lock on NFS | Use local filesystem for DB, not NFS |
-| Container DNS resolution | Ensure Docker DNS works: `docker exec gitcortex ping sonarqube` |
-| Permission denied on volumes | Check UID mapping; gitcortex user is UID 999 in container |
+| Container DNS resolution | Ensure Docker DNS works: `docker exec solodawn ping sonarqube` |
+| Permission denied on volumes | Check UID mapping; solodawn user is UID 999 in container |
 
 ### Verification Checklist (Linux / Docker)
 
@@ -120,10 +120,10 @@ sudo systemctl enable --now gitcortex
 - [ ] `docker compose ps` shows all healthy
 - [ ] `curl http://localhost:23456/api/health` returns OK
 - [ ] `curl http://localhost:9000/api/system/status` returns `{"status":"UP"}`
-- [ ] SonarQube project exists: `curl http://localhost:9000/api/projects/search?projects=gitcortex`
+- [ ] SonarQube project exists: `curl http://localhost:9000/api/projects/search?projects=solodawn`
 - [ ] Quality gate runs in shadow mode (check logs)
 - [ ] WebSocket connects: `wscat -c ws://localhost:23456/ws/workflow/<id>/events`
-- [ ] Log rotation: check `/var/log/gitcortex/` or Docker log driver config
+- [ ] Log rotation: check `/var/log/solodawn/` or Docker log driver config
 
 ## Cross-Platform CI
 

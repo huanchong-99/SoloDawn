@@ -1,4 +1,4 @@
-# GitCortex 开发进度追踪
+# SoloDawn 开发进度追踪
 
 > **Path Update:** This tracker moved to `docs/undeveloped/current/TODO.md` after docs archive restructuring.
 > **Current Pending Plans Folder:** `docs/undeveloped/current/` (active unfinished plans) with historical plans in `docs/developed/plans/`.
@@ -45,7 +45,7 @@
 | Task | 目标描述 | 状态 | 完成时间 |
 |------|----------|------|----------|
 | 0.1 | LICENSE 文件 - 基于 MIT 协议，声明二开来源 | ✅ | 2026-01-16 |
-| 0.2 | README.md 文件 - GitCortex 项目说明文档 | ✅ | 2026-01-16 |
+| 0.2 | README.md 文件 - SoloDawn 项目说明文档 | ✅ | 2026-01-16 |
 
 ---
 

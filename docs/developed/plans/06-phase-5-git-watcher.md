@@ -660,7 +660,7 @@ Tried exponential backoff but still hitting limits."#;
 
 **运行测试:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo test -p services git_watcher -- --nocapture
 ```
 

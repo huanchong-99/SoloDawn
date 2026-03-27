@@ -2,18 +2,18 @@
 
 ## 1. Feature Flags
 
-- `GITCORTEX_ORCHESTRATOR_CHAT_ENABLED`
+- `SOLODAWN_ORCHESTRATOR_CHAT_ENABLED`
   - `true` (default): enable workflow orchestrator chat (`/api/workflows/:id/orchestrator/*`)
   - `false`: disable orchestrator chat entrypoint and message listing
-- `GITCORTEX_CHAT_CONNECTOR_ENABLED`
+- `SOLODAWN_CHAT_CONNECTOR_ENABLED`
   - `true` (default): enable social/chat connector routes (`/api/integrations/chat/*`)
   - `false`: disable external connector bind/unbind/event ingestion
 
 ## 2. Emergency Rollback Procedure (No DB Change)
 
 1. Set:
-   - `GITCORTEX_ORCHESTRATOR_CHAT_ENABLED=false`
-   - `GITCORTEX_CHAT_CONNECTOR_ENABLED=false`
+   - `SOLODAWN_ORCHESTRATOR_CHAT_ENABLED=false`
+   - `SOLODAWN_CHAT_CONNECTOR_ENABLED=false`
 2. Restart server process.
 3. Verify:
    - Orchestrator chat calls return conflict with feature-disabled message.
@@ -22,8 +22,8 @@
 ## 3. Partial Rollback
 
 - Disable only external channel:
-  - keep `GITCORTEX_ORCHESTRATOR_CHAT_ENABLED=true`
-  - set `GITCORTEX_CHAT_CONNECTOR_ENABLED=false`
+  - keep `SOLODAWN_ORCHESTRATOR_CHAT_ENABLED=true`
+  - set `SOLODAWN_CHAT_CONNECTOR_ENABLED=false`
 - Result:
   - Web workflow orchestrator chat remains available.
   - Social provider ingress is blocked.

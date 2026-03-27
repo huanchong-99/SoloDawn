@@ -1,4 +1,4 @@
-# GitCortex 详细实现计划
+# SoloDawn 详细实现计划
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -9,10 +9,10 @@
 **Tech Stack:** Rust (axum 0.8.4, sqlx, tokio) + React 18 + TypeScript + SQLite + xterm.js
 
 **源项目位置:**
-- Vibe Kanban: `F:\Project\GitCortex\vibe-kanban-main`
-- CC-Switch: `F:\Project\GitCortex\cc-switch-main`
+- Vibe Kanban: `F:\Project\SoloDawn\vibe-kanban-main`
+- CC-Switch: `F:\Project\SoloDawn\cc-switch-main`
 
-**设计文档:** `F:\Project\GitCortex\docs\plans\2026-01-16-orchestrator-design.md`
+**设计文档:** `F:\Project\SoloDawn\docs\plans\2026-01-16-orchestrator-design.md`
 
 ---
 
@@ -84,7 +84,7 @@
 ### 🏁 Milestone 1: 数据层就绪 (Phase 0-1)
 
 **预期产出:**
-- GitCortex 项目文档完成
+- SoloDawn 项目文档完成
 - 数据库 schema 完成，包含 9 张新表
 - Rust 模型和 DAO 层可用
 - API 端点可访问
@@ -185,7 +185,7 @@
 
 **状态:** ✅ 已完成
 
-**交付物:** `F:\Project\GitCortex\LICENSE`
+**交付物:** `F:\Project\SoloDawn\LICENSE`
 
 ---
 
@@ -193,7 +193,7 @@
 
 **状态:** ✅ 已完成
 
-**交付物:** `F:\Project\GitCortex\README.md`
+**交付物:** `F:\Project\SoloDawn\README.md`
 
 ---
 
@@ -241,7 +241,7 @@
 
 ```sql
 -- ============================================================================
--- GitCortex Workflow Tables Migration
+-- SoloDawn Workflow Tables Migration
 -- 创建日期: 2026-01-16
 -- 描述: 添加工作流协调相关表，支持主 Agent 跨终端任务协调
 -- ============================================================================
@@ -523,7 +523,7 @@ CREATE INDEX IF NOT EXISTS idx_git_event_process_status ON git_event(process_sta
 **Step 1.1.3: 验证迁移文件语法**
 
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 # 检查 SQL 语法（使用 sqlite3）
 sqlite3 :memory: < crates/db/migrations/20260116000001_create_workflow_tables.sql
 echo $?  # 应该输出 0
@@ -542,7 +542,7 @@ echo $?  # 应该输出 0
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo sqlx migrate run
 # 预期输出: Applied 20260116000001_create_workflow_tables (xxx ms)
 ```
@@ -1178,7 +1178,7 @@ pub struct TerminalDetail {
 在文件末尾添加：
 
 ```rust
-// GitCortex Workflow 模型
+// SoloDawn Workflow 模型
 pub mod cli_type;
 pub mod workflow;
 pub mod terminal;
@@ -1203,7 +1203,7 @@ pub use terminal::*;
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p db
 # 预期: 编译成功，无错误
 
@@ -2012,7 +2012,7 @@ pub async fn update_git_event_status(
 在 `vibe-kanban-main/crates/db/src/models/mod.rs` 末尾添加：
 
 ```rust
-// GitCortex DAO 模块
+// SoloDawn DAO 模块
 pub mod cli_type_dao;
 pub mod workflow_dao;
 pub mod terminal_dao;
@@ -2033,7 +2033,7 @@ pub mod terminal_dao;
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p db
 # 预期: 编译成功
 
@@ -2670,7 +2670,7 @@ pub fn api_routes(state: Arc<AppState>) -> Router {
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p server
 # 预期: 编译成功
 
@@ -2800,8 +2800,8 @@ curl http://localhost:3001/api/cli_types/detect
 name = "cc-switch"
 version = "0.1.0"
 edition = "2021"
-description = "CLI configuration switching core for GitCortex"
-authors = ["GitCortex Contributors"]
+description = "CLI configuration switching core for SoloDawn"
+authors = ["SoloDawn Contributors"]
 license = "Apache-2.0"
 
 [dependencies]
@@ -3165,7 +3165,7 @@ members = [
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p cc-switch
 # 预期: 编译成功
 
@@ -3736,7 +3736,7 @@ pub use gemini::*;
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo test -p cc-switch
 # 预期: 所有测试通过
 ```
@@ -3921,7 +3921,7 @@ pub use switcher::*;
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p cc-switch
 cargo test -p cc-switch
 ```
@@ -4090,7 +4090,7 @@ pub use cc_switch::CCSwitchService;
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p services
 ```
 
@@ -4284,7 +4284,7 @@ mod tests {
 
 **运行测试:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo test -p cc-switch -- --nocapture
 ```
 
@@ -4498,7 +4498,7 @@ fn default_timeout() -> u64 {
 }
 
 fn default_system_prompt() -> String {
-    r#"你是 GitCortex 的主协调 Agent，负责协调多个 AI 编码代理完成软件开发任务。
+    r#"你是 SoloDawn 的主协调 Agent，负责协调多个 AI 编码代理完成软件开发任务。
 
 你的职责：
 1. 根据工作流配置，向各终端发送任务指令
@@ -4761,7 +4761,7 @@ pub use orchestrator::{OrchestratorConfig, OrchestratorState};
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p services
 ```
 
@@ -5429,7 +5429,7 @@ data: [DONE]
 
 **运行测试:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo test -p services orchestrator -- --nocapture
 ```
 
@@ -6559,7 +6559,7 @@ Tried exponential backoff but still hitting limits."#;
 
 **运行测试:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo test -p services git_watcher -- --nocapture
 ```
 
@@ -7122,7 +7122,7 @@ export function WorkflowWizard({ onComplete, onCancel }: Props) {
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main\frontend
+cd F:\Project\SoloDawn\vibe-kanban-main\frontend
 pnpm run check
 # 预期: 无类型错误
 ```
@@ -7279,7 +7279,7 @@ export function Step0Project({ config, onChange, errors }: Props) {
                 <span>未检测到 Git 仓库</span>
               </div>
               <p className="text-sm text-low pl-6">
-                此文件夹不是 Git 仓库。GitCortex 需要 Git 来协调多终端工作流。
+                此文件夹不是 Git 仓库。SoloDawn 需要 Git 来协调多终端工作流。
               </p>
               <div className="flex gap-2 pl-6">
                 <Button onClick={handleInitGit} disabled={isChecking} size="sm">
@@ -9711,11 +9711,11 @@ let pool = SqlitePoolOptions::new()
 **Step 8.3.2: 创建 workflow-guide.md**
 
 ```markdown
-# GitCortex 工作流使用指南
+# SoloDawn 工作流使用指南
 
 ## 概述
 
-GitCortex 工作流允许您协调多个 AI 编码代理并行完成复杂的软件开发任务。
+SoloDawn 工作流允许您协调多个 AI 编码代理并行完成复杂的软件开发任务。
 
 ## 创建工作流
 

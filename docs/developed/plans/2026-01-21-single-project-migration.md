@@ -18,7 +18,7 @@
 
 - 将 `vibe-kanban-main` 与 `cc-switch-main` 融合为单一项目结构。
 - 删除原项目中在本项目内不使用的内容。
-- 保留并迁入已被 GitCortex 集成的必要模块（尤其是 cc-switch 相关）。
+- 保留并迁入已被 SoloDawn 集成的必要模块（尤其是 cc-switch 相关）。
 - 迁移完成后再进入修复与验证阶段。
 
 ---
@@ -67,8 +67,8 @@
 
 ```bash
 # 创建隔离的迁移工作树
-git worktree add ../gitcortex-migration -b single-project-migration
-cd ../gitcortex-migration/vibe-kanban-main
+git worktree add ../solodawn-migration -b single-project-migration
+cd ../solodawn-migration/vibe-kanban-main
 
 # 验证工作树创建成功
 git status
@@ -87,14 +87,14 @@ rg "use remote::" --type rust
 # 搜索所有 shared_task 相关引用
 rg "shared_task|share_publisher|SharePublisher" --type rust
 
-# 验证 GitCortex 新增模块不使用共享任务功能
+# 验证 SoloDawn 新增模块不使用共享任务功能
 rg "shared_task" --type-null crates/orchestrator/ crates/terminal/ crates/git_watcher/ crates/cc-switch/
 ```
 
 **验收标准:**
 - 所有 `use remote::` 引用已记录
 - 确认共享任务功能仅被上游代码使用
-- GitCortex 新增模块无依赖
+- SoloDawn 新增模块无依赖
 
 ---
 
@@ -115,7 +115,7 @@ cargo check --workspace
 
 **目标:** 创建独立的迁移分支，避免污染主分支
 **步骤:**
-1. 执行 `git worktree add ../gitcortex-migration -b single-project-migration`
+1. 执行 `git worktree add ../solodawn-migration -b single-project-migration`
 2. 验证 worktree 创建成功
 3. 在 worktree 中执行后续所有迁移任务
 **交付物:** 独立的迁移工作目录
@@ -139,7 +139,7 @@ cargo check --workspace
 
 > **代码审查发现 (2026-01-21):**
 > - `crates/remote` 被共享任务（Share）功能依赖
-> - 共享任务是 Vibe Kanban 上游的远程部署特性，GitCortex 不需要
+> - 共享任务是 Vibe Kanban 上游的远程部署特性，SoloDawn 不需要
 > - 直接删除相关模块，无需重构
 
 **目标:** 删除所有与 `crates/remote` 相关的上游代码
@@ -172,7 +172,7 @@ cargo check --workspace
 
 ### Task 11.3: cc-switch-main 必要模块补齐迁入
 
-**目标:** 补齐 GitCortex 已集成但 `crates/cc-switch` 缺失的能力
+**目标:** 补齐 SoloDawn 已集成但 `crates/cc-switch` 缺失的能力
 **涉及路径:** `cc-switch-main/src-tauri/src/*`, `crates/cc-switch/src/*`
 **步骤:**
 1. 对比 `cc-switch-main/src-tauri/src` 与 `crates/cc-switch/src` 能力覆盖。
@@ -188,8 +188,8 @@ cargo check --workspace
 **目标:** 将保留清单中的目录与文件一次性迁入根目录  
 **步骤:**
 1. 批量移动 `vibe-kanban-main` 保留目录至根目录。
-2. 批量移动必要配置文件至根目录（避免覆盖 GitCortex 现有文件）。
-3. 若冲突，保留 GitCortex 根目录版本，记录差异（迁移后再处理）。
+2. 批量移动必要配置文件至根目录（避免覆盖 SoloDawn 现有文件）。
+3. 若冲突，保留 SoloDawn 根目录版本，记录差异（迁移后再处理）。
 **交付物:** 根目录形成单项目结构  
 **验收标准:** 根目录包含 `crates/`, `frontend/`, `shared/`, `assets/`, `scripts/`, `tests/`
 
@@ -236,7 +236,7 @@ cargo check --workspace
 - 统一修复路径与导入，恢复构建与运行。
 - 清理遗留前端页面/后端路由，仅保留 MVP 目标功能。
 - 运行 `pnpm run check` 与 `cargo test --workspace` 并集中修复问题。
-- 更新根目录 README（仅保留 GitCortex 自有内容）。
+- 更新根目录 README（仅保留 SoloDawn 自有内容）。
 
 ---
 
@@ -272,7 +272,7 @@ cargo check --workspace
 
 ```bash
 # 阶段 0: 创建隔离环境 (Task 11.0)
-git worktree add ../gitcortex-migration -b single-project-migration
+git worktree add ../solodawn-migration -b single-project-migration
 
 # 阶段 1: 清理远程部署依赖 (Task 11.2)
 # 删除 share/、remote_client.rs、shared_tasks.rs 等

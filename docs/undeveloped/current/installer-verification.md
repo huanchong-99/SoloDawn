@@ -1,4 +1,4 @@
-# GitCortex Windows Installer - Verification Plan (Lightweight)
+# SoloDawn Windows Installer - Verification Plan (Lightweight)
 
 ## Overview
 
@@ -14,7 +14,7 @@ The lightweight installer ships only `server.exe` and `tray.exe`. Node.js, Git, 
 
 ### 1. Installation
 
-- [ ] Run `GitCortex-Setup-v{version}.exe`
+- [ ] Run `SoloDawn-Setup-v{version}.exe`
 - [ ] Installation completes without errors
 - [ ] Desktop shortcut created (if selected)
 - [ ] Start Menu folder created
@@ -23,7 +23,7 @@ The lightweight installer ships only `server.exe` and `tray.exe`. Node.js, Git, 
 
 - [ ] `{app}\server.exe` exists and is executable
 - [ ] `{app}\tray.exe` exists and is executable
-- [ ] `{app}\.env` generated with `GITCORTEX_ENCRYPTION_KEY` (32 bytes) and `GITCORTEX_API_TOKEN`
+- [ ] `{app}\.env` generated with `SOLODAWN_ENCRYPTION_KEY` (32 bytes) and `SOLODAWN_API_TOKEN`
 - [ ] `.env` values are non-empty and correctly formatted
 
 ### 3. System Prerequisites Detection
@@ -55,7 +55,7 @@ If any prerequisite is missing, the installer should warn the user.
 ### 6. System Tray Lifecycle
 
 - [ ] Tray icon appears on launch
-- [ ] Open GitCortex: opens browser to web UI
+- [ ] Open SoloDawn: opens browser to web UI
 - [ ] Start/Stop Server: controls `server.exe` process
 - [ ] Quit: stops server and exits tray app
 
@@ -76,7 +76,7 @@ If any prerequisite is missing, the installer should warn the user.
 ### 9. Silent Install Test
 
 ```powershell
-GitCortex-Setup-v{version}.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+SoloDawn-Setup-v{version}.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 - [ ] Installs without any UI
@@ -86,7 +86,7 @@ GitCortex-Setup-v{version}.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ## Known Limitations
 
 1. **No code signing**: Windows SmartScreen may warn on first run. Click "More info" then "Run anyway".
-2. **System prerequisites required**: Node.js, Git, and npm must be installed separately before running GitCortex.
+2. **System prerequisites required**: Node.js, Git, and npm must be installed separately before running SoloDawn.
 
 ## Troubleshooting
 
@@ -95,5 +95,5 @@ GitCortex-Setup-v{version}.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 | SmartScreen blocks installer | Not code-signed | Click "More info" then "Run anyway" |
 | Server won't start | Port 23456 in use | `netstat -ano \| findstr :23456`, kill conflicting process |
 | "Node.js not found" in Runtime Settings | Node.js not on PATH | Install Node.js and restart tray app |
-| Database errors | Missing encryption key | Verify `GITCORTEX_ENCRYPTION_KEY` in `{app}\.env` |
+| Database errors | Missing encryption key | Verify `SOLODAWN_ENCRYPTION_KEY` in `{app}\.env` |
 | `/readyz` fails | DB not initialized | Run `pnpm run prepare-db` or restart server (auto-migrates) |

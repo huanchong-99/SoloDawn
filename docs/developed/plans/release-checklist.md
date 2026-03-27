@@ -1,6 +1,6 @@
-# GitCortex Release Checklist
+# SoloDawn Release Checklist
 
-> **Purpose:** Comprehensive guide for releasing GitCortex to production
+> **Purpose:** Comprehensive guide for releasing SoloDawn to production
 > **Version:** 1.0.0
 > **Last Updated:** 2026-01-28
 
@@ -183,10 +183,10 @@
 - [ ] **Database backup**
   ```bash
   # SQLite
-  cp data/gitcortex.db data/gitcortex.db.backup.$(date +%Y%m%d_%H%M%S)
+  cp data/solodawn.db data/solodawn.db.backup.$(date +%Y%m%d_%H%M%S)
 
   # Or with SQLx
-  sqlx database export data/gitcortex.db > backup.sql
+  sqlx database export data/solodawn.db > backup.sql
   ```
 
 - [ ] **Configuration backup**
@@ -233,19 +233,19 @@
 5. [ ] **Stop current service**
    ```bash
    # Systemd
-   systemctl stop gitcortex
+   systemctl stop solodawn
 
    # Or manual
-   pkill -f gitcortex
+   pkill -f solodawn
    ```
 
 6. [ ] **Deploy new version**
    ```bash
    # Copy binaries
-   cp target/release/gitcortex /usr/local/bin/
+   cp target/release/solodawn /usr/local/bin/
 
    # Copy frontend assets
-   cp -r crates/server/frontend/dist/* /var/www/gitcortex/
+   cp -r crates/server/frontend/dist/* /var/www/solodawn/
 
    # Or use Docker
    docker-compose pull
@@ -254,7 +254,7 @@
 
 7. [ ] **Start service**
    ```bash
-   systemctl start gitcortex
+   systemctl start solodawn
    # or
    docker-compose up -d
    ```
@@ -290,9 +290,9 @@
 
 - [ ] **Check application logs**
   ```bash
-  journalctl -u gitcortex -f
+  journalctl -u solodawn -f
   # or
-  tail -f /var/log/gitcortex/app.log
+  tail -f /var/log/solodawn/app.log
   ```
   - No ERROR or CRITICAL messages
   - No unexpected warnings
@@ -336,7 +336,7 @@
 - [ ] **Create GitHub Release**
   - Go to GitHub → Releases → New Release
   - Tag: `v1.0.0`
-  - Title: `GitCortex v1.0.0`
+  - Title: `SoloDawn v1.0.0`
   - Description: Copy from CHANGELOG
   - Attach binaries (if applicable)
 
@@ -350,23 +350,23 @@
 
 1. [ ] **Stop current service**
    ```bash
-   systemctl stop gitcortex
+   systemctl stop solodawn
    ```
 
 2. [ ] **Revert to previous version**
    ```bash
    # Option A: Restore from backup
-   cp /usr/local/bin/gitcortex.backup /usr/local/bin/gitcortex
+   cp /usr/local/bin/solodawn.backup /usr/local/bin/solodawn
 
    # Option B: Reinstall previous version
    git checkout v0.9.0
    cargo build --release
-   cp target/release/gitcortex /usr/local/bin/
+   cp target/release/solodawn /usr/local/bin/
    ```
 
 3. [ ] **Restore database** (if schema changed)
    ```bash
-   cp data/gitcortex.db.backup.YYYYMMDD_HHMMSS data/gitcortex.db
+   cp data/solodawn.db.backup.YYYYMMDD_HHMMSS data/solodawn.db
    ```
 
 4. [ ] **Restore configuration**
@@ -376,7 +376,7 @@
 
 5. [ ] **Start service**
    ```bash
-   systemctl start gitcortex
+   systemctl start solodawn
    ```
 
 ### Rollback Verification
@@ -392,7 +392,7 @@
 
 ### Semantic Versioning
 
-GitCortex follows [Semantic Versioning 2.0.0](https://semver.org/):
+SoloDawn follows [Semantic Versioning 2.0.0](https://semver.org/):
 
 - **MAJOR**: Incompatible API changes
 - **MINOR**: Backwards-compatible functionality additions
@@ -434,7 +434,7 @@ For testing releases:
 
 - [ ] **Draft release notes**
   ```markdown
-  # GitCortex v1.0.0 Release Notes
+  # SoloDawn v1.0.0 Release Notes
 
   🎉 **First Stable Release!**
 
@@ -448,7 +448,7 @@ For testing releases:
 
   ## Upgrade Instructions
   ```bash
-  cargo install gitcortex --version 1.0.0
+  cargo install solodawn --version 1.0.0
   ```
 
   ## Known Issues
@@ -525,16 +525,16 @@ For testing releases:
 
 ```bash
 # Check version
-gitcortex --version
+solodawn --version
 
 # View logs
-journalctl -u gitcortex -n 100
+journalctl -u solodawn -n 100
 
 # Restart service
-systemctl restart gitcortex
+systemctl restart solodawn
 
 # Database backup
-cp data/gitcortex.db data/gitcortex.db.backup.$(date +%Y%m%d_%H%M%S)
+cp data/solodawn.db data/solodawn.db.backup.$(date +%Y%m%d_%H%M%S)
 
 # Health check
 curl http://localhost:3000/api/health

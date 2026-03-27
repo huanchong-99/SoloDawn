@@ -263,7 +263,7 @@ def main() -> int:
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    claude_home = Path(gettempdir()) / "gitcortex" / f"claude-probe-{ts}"
+    claude_home = Path(gettempdir()) / "solodawn" / f"claude-probe-{ts}"
     ensure_claude_home(claude_home)
 
     env = build_env(

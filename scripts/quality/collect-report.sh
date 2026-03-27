@@ -23,7 +23,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-echo "=== GitCortex Quality Report ==="
+echo "=== SoloDawn Quality Report ==="
 echo ""
 
 RESPONSE="$(curl -s "${API_BASE}/quality/runs?limit=${LIMIT}")"

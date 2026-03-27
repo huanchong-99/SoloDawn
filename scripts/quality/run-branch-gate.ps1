@@ -15,7 +15,7 @@ if ([string]::IsNullOrEmpty($Branch)) {
     $Branch = git rev-parse --abbrev-ref HEAD
 }
 
-Write-Host "=== GitCortex Branch Quality Gate ==="
+Write-Host "=== SoloDawn Branch Quality Gate ==="
 Write-Host "Project root: $ProjectRoot"
 Write-Host "Branch:       $Branch"
 Write-Host ""

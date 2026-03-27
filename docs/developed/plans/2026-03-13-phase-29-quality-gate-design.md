@@ -4,7 +4,7 @@
 
 ## 1. Overview
 
-GitCortex Phase 29 introduces a built-in quality gate engine that automatically verifies code quality before allowing terminal handoff. Instead of terminals completing and immediately proceeding, code goes through: **checkpoint → quality analysis → pass/fail → feedback loop**.
+SoloDawn Phase 29 introduces a built-in quality gate engine that automatically verifies code quality before allowing terminal handoff. Instead of terminals completing and immediately proceeding, code goes through: **checkpoint → quality analysis → pass/fail → feedback loop**.
 
 The system defaults to `shadow` mode (observe only) and can be progressively tightened to `enforce` mode.
 
@@ -105,7 +105,7 @@ providers:
 
 sonar:
   host_url: "http://localhost:9000"
-  project_key: "gitcortex"
+  project_key: "solodawn"
 ```
 
 ### Operators

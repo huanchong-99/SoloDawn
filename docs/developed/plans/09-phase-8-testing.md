@@ -193,11 +193,11 @@ let pool = SqlitePoolOptions::new()
 **Step 8.3.2: 创建 workflow-guide.md**
 
 ```markdown
-# GitCortex 工作流使用指南
+# SoloDawn 工作流使用指南
 
 ## 概述
 
-GitCortex 工作流允许您协调多个 AI 编码代理并行完成复杂的软件开发任务。
+SoloDawn 工作流允许您协调多个 AI 编码代理并行完成复杂的软件开发任务。
 
 ## 创建工作流
 

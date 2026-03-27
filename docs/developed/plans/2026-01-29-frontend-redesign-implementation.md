@@ -1,10 +1,10 @@
-# GitCortex 前端重构实施计划
+# SoloDawn 前端重构实施计划
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**目标:** 将前端从 Vibe Kanban 任务看板重构为 GitCortex 工作流编排系统，严格遵循 `2026-01-16-orchestrator-design.md` 设计文档
+**目标:** 将前端从 Vibe Kanban 任务看板重构为 SoloDawn 工作流编排系统，严格遵循 `2026-01-16-orchestrator-design.md` 设计文档
 
-**架构:** 删除所有 vibe-kanban 遗留代码，保留已实现的 GitCortex 功能（Workflow/Terminal/Orchestrator），按照设计文档重建 UI/UX
+**架构:** 删除所有 vibe-kanban 遗留代码，保留已实现的 SoloDawn 功能（Workflow/Terminal/Orchestrator），按照设计文档重建 UI/UX
 
 **Tech Stack:** React 18, TypeScript, Tailwind CSS, Radix UI, Zustand, React Query, xterm.js, WebSocket
 
@@ -14,7 +14,7 @@
 
 1. [问题分析](#问题分析)
 2. [删除 Vibe Kanban 遗留](#删除-vibe-kanban-遗留)
-3. [保留的 GitCortex 功能](#保留的-gitcortex-功能)
+3. [保留的 SoloDawn 功能](#保留的-solodawn-功能)
 4. [新页面实施计划](#新页面实施计划)
 5. [组件重构计划](#组件重构计划)
 6. [路由重构](#路由重构)
@@ -68,7 +68,7 @@
 **看板视图布局**:
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  GitCortex            [看板/流水线/调试 ▼]      [⚙️]        │
+│  SoloDawn            [看板/流水线/调试 ▼]      [⚙️]        │
 ├─────────────────────────────────────────────────────────────┤
 │  工作流列表  │  created  │  ready  │  running  │ completed │
 │             │  [WF-1]   │  [WF-2]  │  [WF-3]   │   [WF-4]   │
@@ -103,7 +103,7 @@
 
 **Step 1: 备份当前代码**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git checkout -b frontend-redesign-backup
 git add frontend/src/pages/Projects.tsx frontend/src/pages/ProjectTasks.tsx
 git commit -m "backup: vibe-kanban project/task pages before deletion"
@@ -111,7 +111,7 @@ git commit -m "backup: vibe-kanban project/task pages before deletion"
 
 **Step 2: 删除文件**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 rm -rf src/components/projects
 rm -f src/pages/Projects.tsx src/pages/ProjectTasks.tsx
 rm -f src/components/tasks/TaskKanbanBoard.tsx
@@ -128,7 +128,7 @@ rm -f src/components/layout/TasksLayout.tsx
 
 **Step 4: 验证编译**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 pnpm run check
 ```
 
@@ -136,7 +136,7 @@ Expected: PASS (如果其他页面不依赖这些文件)
 
 **Step 5: Commit**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git add frontend/
 git commit -m "refactor(frontend): remove vibe-kanban project/task management pages"
 ```
@@ -152,13 +152,13 @@ git commit -m "refactor(frontend): remove vibe-kanban project/task management pa
 
 **Step 1: 删除 shadcn-io kanban 组件**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 rm -rf src/components/ui/shadcn-io/kanban
 ```
 
 **Step 2: 删除项目相关组件**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 rm -rf src/components/project
 ```
 
@@ -175,7 +175,7 @@ pnpm run check
 
 **Step 5: Commit**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git add frontend/
 git commit -m "refactor(frontend): remove vibe-kanban specific components"
 ```
@@ -190,7 +190,7 @@ git commit -m "refactor(frontend): remove vibe-kanban specific components"
 
 **Step 1: 从 package.json 删除依赖**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 # 编辑 package.json，删除:
 "vibe-kanban-web-companion": "0.0.4",
 ```
@@ -204,7 +204,7 @@ import '@vibe-kanban-web-companion';
 
 **Step 3: 重新安装依赖**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 pnpm install
 ```
 
@@ -215,14 +215,14 @@ pnpm run check
 
 **Step 5: Commit**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git add frontend/
 git commit -m "refactor(frontend): remove vibe-kanban-companion dependency"
 ```
 
 ---
 
-## 保留的 GitCortex 功能
+## 保留的 SoloDawn 功能
 
 ### Task 4: 验证保留的核心功能
 
@@ -248,7 +248,7 @@ git commit -m "refactor(frontend): remove vibe-kanban-companion dependency"
 
 **Step 1: 检查这些文件的导入依赖**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 grep -r "from.*projects" src/
 grep -r "from.*tasks" src/
 grep -r "from.*TaskKanbanBoard" src/
@@ -311,7 +311,7 @@ export function Board() {
 
 **Step 2: 运行类型检查**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 pnpm run check
 ```
 
@@ -482,7 +482,7 @@ function App() {
 
 **Step 10: 运行测试**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 pnpm run check
 pnpm run build
 ```
@@ -491,7 +491,7 @@ Expected: PASS
 
 **Step 11: Commit**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git add frontend/
 git commit -m "feat(frontend): implement workflow board view (/board)"
 ```
@@ -681,13 +681,13 @@ import { Pipeline } from './pages/Pipeline';
 
 **Step 7: 测试**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 pnpm run check
 ```
 
 **Step 8: Commit**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git add frontend/
 git commit -m "feat(frontend): implement pipeline view with orchestrator header"
 ```
@@ -843,13 +843,13 @@ export function TerminalSidebar({
 
 **Step 4: 测试**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 pnpm run check
 ```
 
 **Step 5: Commit**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git add frontend/
 git commit -m "refactor(frontend): restructure debug view with task-grouped terminals"
 ```
@@ -951,13 +951,13 @@ export function StepIndicator({ currentStep, steps }: StepIndicatorProps) {
 
 **Step 3: 测试**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 pnpm run check
 ```
 
 **Step 4: Commit**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git add frontend/
 git commit -m "refactor(frontend): restructure wizard with proper step indicator"
 ```
@@ -976,15 +976,15 @@ git commit -m "refactor(frontend): restructure wizard with proper step indicator
 **Step 1: 更新 package.json**
 ```json
 {
-  "name": "gitcortex-frontend",
-  "displayName": "GitCortex"
+  "name": "solodawn-frontend",
+  "displayName": "SoloDawn"
 }
 ```
 
 **Step 2: 更新 index.html**
 ```html
-<title>GitCortex - AI 驱动的工作流编排系统</title>
-<meta name="description" content="GitCortex 是一个 AI 驱动的跨终端工作流编排系统，支持多 AI 模型协同工作。" />
+<title>SoloDawn - AI 驱动的工作流编排系统</title>
+<meta name="description" content="SoloDawn 是一个 AI 驱动的跨终端工作流编排系统，支持多 AI 模型协同工作。" />
 ```
 
 **Step 3: 更新 vite.config.ts**
@@ -992,8 +992,8 @@ git commit -m "refactor(frontend): restructure wizard with proper step indicator
 export default defineConfig({
   plugins: [
     sentry({
-      org: "gitcortex",
-      project: "gitcortex",
+      org: "solodawn",
+      project: "solodawn",
       // ...
     }),
   ],
@@ -1002,9 +1002,9 @@ export default defineConfig({
 
 **Step 4: Commit**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git add frontend/
-git commit -m "refactor(frontend): update brand identity from vibe-kanban to gitcortex"
+git commit -m "refactor(frontend): update brand identity from vibe-kanban to solodawn"
 ```
 
 ---
@@ -1072,7 +1072,7 @@ export default App;
 
 **Step 2: 更新导航链接**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 grep -r "to=/projects" src/ --include="*.tsx" --include="*.ts"
 ```
 
@@ -1085,7 +1085,7 @@ pnpm run check
 
 **Step 4: Commit**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git add frontend/
 git commit -m "refactor(frontend): restructure routing according to design document"
 ```
@@ -1094,18 +1094,18 @@ git commit -m "refactor(frontend): restructure routing according to design docum
 
 ## 样式与主题
 
-### Task 11: 实现 GitCortex 设计主题
+### Task 11: 实现 SoloDawn 设计主题
 
 **目标:** 创建符合设计文档的色彩方案和视觉风格
 
 **Files:**
-- Create: `frontend/src/styles/gitcortex/index.css`
+- Create: `frontend/src/styles/solodawn/index.css`
 - Modify: `frontend/src/styles/index.css`
 - Modify: `frontend/tailwind.config.ts`
 
-**Step 1: 定义 GitCortex 色彩方案**
+**Step 1: 定义 SoloDawn 色彩方案**
 ```css
-/* frontend/src/styles/gitcortex/index.css */
+/* frontend/src/styles/solodawn/index.css */
 
 :root {
   /* Brand Colors - 工作流编排系统的活力橙色 */
@@ -1215,7 +1215,7 @@ export default config;
 **Step 3: 应用主题到全局样式**
 ```css
 /* frontend/src/styles/index.css */
-@import './gitcortex/index.css';
+@import './solodawn/index.css';
 
 /* Base styles */
 body {
@@ -1234,15 +1234,15 @@ body {
 
 **Step 4: 测试主题**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 pnpm run check
 ```
 
 **Step 5: Commit**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git add frontend/
-git commit -m "feat(frontend): implement GitCortex design theme and color scheme"
+git commit -m "feat(frontend): implement SoloDawn design theme and color scheme"
 ```
 
 ---
@@ -1255,7 +1255,7 @@ git commit -m "feat(frontend): implement GitCortex design theme and color scheme
 
 **Step 1: 运行测试**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 pnpm test
 ```
 
@@ -1275,13 +1275,13 @@ pnpm test:run --coverage
 
 **Step 4: 创建端到端测试**
 ```bash
-cd E:/GitCortex/frontend
+cd E:/SoloDawn/frontend
 # 创建 E2E 测试文件
 ```
 
 **Step 5: Commit**
 ```bash
-cd E:/GitCortex
+cd E:/SoloDawn
 git add frontend/
 git commit -m "test(frontend): ensure all tests pass after refactoring"
 ```
@@ -1295,13 +1295,13 @@ git commit -m "test(frontend): ensure all tests pass after refactoring"
 1. **删除所有 Vibe Kanban 遗留代码**
 2. **实现设计文档要求的完整 UI**
 3. **路由架构完全符合设计**
-4. **品牌身份更新为 GitCortex**
+4. **品牌身份更新为 SoloDawn**
 5. **所有测试通过**
 
 ### 风险与缓解
 
 **风险 1: 破坏现有功能**
-- 缓解: 保留 GitCortex 核心功能（Workflow/Terminal/Orchestrator）
+- 缓解: 保留 SoloDawn 核心功能（Workflow/Terminal/Orchestrator）
 - 测试: 每个任务后运行 `pnpm test`
 
 **风险 2: 设计文档不完整**

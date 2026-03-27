@@ -1,6 +1,6 @@
-# GitCortex Troubleshooting Guide
+# SoloDawn Troubleshooting Guide
 
-This guide covers common issues and their solutions when running GitCortex.
+This guide covers common issues and their solutions when running SoloDawn.
 
 ## Table of Contents
 
@@ -55,16 +55,16 @@ lsof -i :3001
 
 **Symptoms:**
 ```
-Error: GITCORTEX_ENCRYPTION_KEY not set
+Error: SOLODAWN_ENCRYPTION_KEY not set
 ```
 
 **Solution:**
 ```bash
 # Windows PowerShell
-$env:GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
+$env:SOLODAWN_ENCRYPTION_KEY="12345678901234567890123456789012"
 
 # Linux/macOS
-export GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
+export SOLODAWN_ENCRYPTION_KEY="12345678901234567890123456789012"
 ```
 
 **Note:** Key must be 32 bytes (64 hex characters).
@@ -244,13 +244,13 @@ Error: Failed to decrypt API key
 **Diagnosis:**
 ```bash
 # Check encryption key is set
-echo $GITCORTEX_ENCRYPTION_KEY
+echo $SOLODAWN_ENCRYPTION_KEY
 
 # Should be 32 bytes (64 hex chars)
 ```
 
 **Solution:**
-- Ensure `GITCORTEX_ENCRYPTION_KEY` is set consistently
+- Ensure `SOLODAWN_ENCRYPTION_KEY` is set consistently
 - Must use same key used for encryption
 - If key lost, database must be recreated
 
@@ -394,7 +394,7 @@ Operations fail with "database is locked" error.
 **Diagnosis:**
 ```bash
 # Check for running processes
-ps aux | grep gitcortex-server
+ps aux | grep solodawn-server
 
 # Check for file locks
 lsof crates/db/data.db
@@ -557,7 +557,7 @@ Before seeking help, collect the following:
 2. **Server Logs:**
    ```bash
    # Last 100 lines
-   sudo journalctl -u gitcortex -n 100
+   sudo journalctl -u solodawn -n 100
 
    # Or from dev mode
    # Check console output
@@ -575,7 +575,7 @@ Before seeking help, collect the following:
 4. **Configuration:**
    ```bash
    # Environment variables (sanitize sensitive data)
-   env | grep GITCORTEX
+   env | grep SOLODAWN
    ```
 
 ### Resources
@@ -611,7 +611,7 @@ If server is completely unresponsive:
 
 1. **Force stop server:**
    ```bash
-   sudo systemctl kill -s SIGKILL gitcortex
+   sudo systemctl kill -s SIGKILL solodawn
    ```
 
 2. **Backup database:**
@@ -631,5 +631,5 @@ If server is completely unresponsive:
 
 5. **Restart server:**
    ```bash
-   sudo systemctl start gitcortex
+   sudo systemctl start solodawn
    ```

@@ -19,7 +19,7 @@ if ([string]::IsNullOrEmpty($ChangedFiles)) {
     exit 1
 }
 
-Write-Host "=== GitCortex Terminal Quality Gate ==="
+Write-Host "=== SoloDawn Terminal Quality Gate ==="
 Write-Host "Project root: $ProjectRoot"
 Write-Host "Working dir:  $WorkingDir"
 Write-Host "Changed files: $ChangedFiles"

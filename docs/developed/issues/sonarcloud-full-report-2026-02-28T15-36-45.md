@@ -1,7 +1,7 @@
 # SonarCloud 代码质量完整报告
 
 **生成时间**: 2026/02/28 23:36
-**项目**: huanchong-99_GitCortex
+**项目**: huanchong-99_SoloDawn
 
 ---
 
@@ -69,7 +69,7 @@
 8: const { getPorts } = require("./setup-dev-environment");
 10: const children = new Set();
 11: let shuttingDown = false;
-12: const devLockPath = path.join(os.tmpdir(), "gitcortex", "run-dev.lock");
+12: const devLockPath = path.join(os.tmpdir(), "solodawn", "run-dev.lock");
 13: let lockFd = null;
 15: function isProcessAlive(pid) {
 16: if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -194,7 +194,7 @@
 # SonarCloud 重复代码报告
 
 **生成时间**: 2026/02/28 23:36
-**项目**: huanchong-99_GitCortex
+**项目**: huanchong-99_SoloDawn
 **问题文件总数**: 7
 **重复行总数**: 475
 **重复块总数**: 86
@@ -222,7 +222,7 @@
 - **重复率**: 95.1%
 - **重复行数**: 98 行
 - **重复块数**: 26 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Acrates%2Fdb%2Fmigrations%2F20250716143725_add_default_templates.sql)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Acrates%2Fdb%2Fmigrations%2F20250716143725_add_default_templates.sql)
 
 ---
 
@@ -236,7 +236,7 @@
 - **重复率**: 100%
 - **重复行数**: 4 行
 - **重复块数**: 1 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fcomponents%2Fui-new%2Fcontainers%2FNavbarContainer.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fcomponents%2Fui-new%2Fcontainers%2FNavbarContainer.tsx)
 
 ### 2.2 ContextBarContainer.tsx
 
@@ -244,7 +244,7 @@
 - **重复率**: 66.7%
 - **重复行数**: 4 行
 - **重复块数**: 1 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fcomponents%2Fui-new%2Fcontainers%2FContextBarContainer.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fcomponents%2Fui-new%2Fcontainers%2FContextBarContainer.tsx)
 
 ---
 
@@ -258,7 +258,7 @@
 - **重复率**: 99.4%
 - **重复行数**: 169 行
 - **重复块数**: 3 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fcomponents%2Fui-new%2Fhooks%2FusePreviewUrl.ts)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fcomponents%2Fui-new%2Fhooks%2FusePreviewUrl.ts)
 
 ---
 
@@ -272,7 +272,7 @@
 - **重复率**: 99.4%
 - **重复行数**: 169 行
 - **重复块数**: 3 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fhooks%2FuseDevserverUrl.ts)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fhooks%2FuseDevserverUrl.ts)
 
 ### 4.2 useWorkflows.test.tsx
 
@@ -280,7 +280,7 @@
 - **重复率**: 37.5%
 - **重复行数**: 3 行
 - **重复块数**: 5 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fhooks%2FuseWorkflows.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fhooks%2FuseWorkflows.test.tsx)
 
 ---
 
@@ -294,7 +294,7 @@
 - **重复率**: 62.2%
 - **重复行数**: 28 行
 - **重复块数**: 47 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fpages%2FWorkflows.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fpages%2FWorkflows.test.tsx)
 
 ---
 

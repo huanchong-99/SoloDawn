@@ -1,6 +1,6 @@
 # Offline / Restricted Network Fallback Mode
 
-When SonarQube is unavailable (network restrictions, air-gapped environments, or service outage), the GitCortex quality gate automatically falls back to local-only analysis.
+When SonarQube is unavailable (network restrictions, air-gapped environments, or service outage), the SoloDawn quality gate automatically falls back to local-only analysis.
 
 ## How Fallback Works
 
@@ -51,7 +51,7 @@ QUALITY_GATE_MODE=shadow # "shadow" logs results without blocking
 Even in offline mode, quality results are:
 
 - Stored in the local SQLite database (`quality_run` table)
-- Visible in the GitCortex UI under the workflow quality tab
+- Visible in the SoloDawn UI under the workflow quality tab
 - Available via the API: `GET /api/quality/runs`
 
 The only difference is that Sonar-specific metrics (duplication %, coverage %, security hotspots) will be absent from the report.
@@ -65,10 +65,10 @@ The only difference is that Sonar-specific metrics (duplication %, coverage %, s
 
 ## Docker Compose Without Sonar
 
-To run GitCortex without the SonarQube stack, start only the gitcortex service:
+To run SoloDawn without the SonarQube stack, start only the solodawn service:
 
 ```bash
-docker compose -f docker/compose/docker-compose.yml up gitcortex
+docker compose -f docker/compose/docker-compose.yml up solodawn
 ```
 
 Or remove the `depends_on.sonarqube` block from the compose file and set `SONAR_HOST_URL=` empty.

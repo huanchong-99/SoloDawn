@@ -1,4 +1,4 @@
-# GitCortex 运维手册
+# SoloDawn 运维手册
 
 > 版本: 0.0.153
 > 更新日期: 2026-01-30
@@ -29,7 +29,7 @@
           │               │               │
           ▼               ▼               ▼
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│  GitCortex      │ │  GitCortex      │ │  GitCortex      │
+│  SoloDawn      │ │  SoloDawn      │ │  SoloDawn      │
 │  Server #1      │ │  Server #2      │ │  Server #N      │
 │  (Port 3001)    │ │  (Port 3001)    │ │  (Port 3001)    │
 └────────┬────────┘ └────────┬────────┘ └────────┬────────┘
@@ -47,33 +47,33 @@
 
 ```bash
 # 1. 准备目录
-mkdir -p /opt/gitcortex/{bin,data,logs,config}
+mkdir -p /opt/solodawn/{bin,data,logs,config}
 
 # 2. 复制二进制文件
-cp target/release/server /opt/gitcortex/bin/
+cp target/release/server /opt/solodawn/bin/
 
 # 3. 创建配置文件
-cat > /opt/gitcortex/config/.env << EOF
-GITCORTEX_ENCRYPTION_KEY=your-32-character-encryption-key
-DATABASE_URL=sqlite:/opt/gitcortex/data/gitcortex.db
+cat > /opt/solodawn/config/.env << EOF
+SOLODAWN_ENCRYPTION_KEY=your-32-character-encryption-key
+DATABASE_URL=sqlite:/opt/solodawn/data/solodawn.db
 SERVER_PORT=3001
 LOG_LEVEL=info
 RUST_LOG=server=info,tower_http=debug
 EOF
 
 # 4. 创建 systemd 服务
-cat > /etc/systemd/system/gitcortex.service << EOF
+cat > /etc/systemd/system/solodawn.service << EOF
 [Unit]
-Description=GitCortex Server
+Description=SoloDawn Server
 After=network.target
 
 [Service]
 Type=simple
-User=gitcortex
-Group=gitcortex
-WorkingDirectory=/opt/gitcortex
-EnvironmentFile=/opt/gitcortex/config/.env
-ExecStart=/opt/gitcortex/bin/server
+User=solodawn
+Group=solodawn
+WorkingDirectory=/opt/solodawn
+EnvironmentFile=/opt/solodawn/config/.env
+ExecStart=/opt/solodawn/bin/server
 Restart=always
 RestartSec=5
 
@@ -83,8 +83,8 @@ EOF
 
 # 5. 启动服务
 systemctl daemon-reload
-systemctl enable gitcortex
-systemctl start gitcortex
+systemctl enable solodawn
+systemctl start solodawn
 ```
 
 ### Docker 部署
@@ -109,21 +109,21 @@ CMD ["server"]
 # docker-compose.yml
 version: '3.8'
 services:
-  gitcortex:
+  solodawn:
     build: .
     ports:
       - "3001:3001"
     environment:
-      - GITCORTEX_ENCRYPTION_KEY=${GITCORTEX_ENCRYPTION_KEY}
-      - DATABASE_URL=sqlite:/data/gitcortex.db
+      - SOLODAWN_ENCRYPTION_KEY=${SOLODAWN_ENCRYPTION_KEY}
+      - DATABASE_URL=sqlite:/data/solodawn.db
       - LOG_LEVEL=info
     volumes:
-      - gitcortex-data:/data
+      - solodawn-data:/data
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
 volumes:
-  gitcortex-data:
+  solodawn-data:
 ```
 
 ---
@@ -134,8 +134,8 @@ volumes:
 
 | 变量名 | 必需 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `GITCORTEX_ENCRYPTION_KEY` | ✓ | - | 32字符加密密钥 |
-| `DATABASE_URL` | - | `sqlite:./data/gitcortex.db` | 数据库连接字符串 |
+| `SOLODAWN_ENCRYPTION_KEY` | ✓ | - | 32字符加密密钥 |
+| `DATABASE_URL` | - | `sqlite:./data/solodawn.db` | 数据库连接字符串 |
 | `SERVER_PORT` | - | `3001` | 服务端口 |
 | `SERVER_HOST` | - | `0.0.0.0` | 监听地址 |
 | `LOG_LEVEL` | - | `info` | 日志级别 |
@@ -197,30 +197,30 @@ curl http://localhost:3001/metrics
 
 | 指标名 | 类型 | 说明 |
 |--------|------|------|
-| `gitcortex_http_requests_total` | Counter | HTTP 请求总数 |
-| `gitcortex_http_request_duration_seconds` | Histogram | 请求延迟 |
-| `gitcortex_websocket_connections` | Gauge | WebSocket 连接数 |
-| `gitcortex_workflows_total` | Counter | 工作流总数 |
-| `gitcortex_terminals_active` | Gauge | 活跃终端数 |
-| `gitcortex_db_query_duration_seconds` | Histogram | 数据库查询延迟 |
+| `solodawn_http_requests_total` | Counter | HTTP 请求总数 |
+| `solodawn_http_request_duration_seconds` | Histogram | 请求延迟 |
+| `solodawn_websocket_connections` | Gauge | WebSocket 连接数 |
+| `solodawn_workflows_total` | Counter | 工作流总数 |
+| `solodawn_terminals_active` | Gauge | 活跃终端数 |
+| `solodawn_db_query_duration_seconds` | Histogram | 数据库查询延迟 |
 
 ### 告警规则
 
 ```yaml
 # prometheus-alerts.yml
 groups:
-  - name: gitcortex
+  - name: solodawn
     rules:
-      - alert: GitCortexDown
-        expr: up{job="gitcortex"} == 0
+      - alert: SoloDawnDown
+        expr: up{job="solodawn"} == 0
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "GitCortex 服务不可用"
+          summary: "SoloDawn 服务不可用"
 
       - alert: HighErrorRate
-        expr: rate(gitcortex_http_requests_total{status=~"5.."}[5m]) > 0.1
+        expr: rate(solodawn_http_requests_total{status=~"5.."}[5m]) > 0.1
         for: 5m
         labels:
           severity: warning
@@ -228,7 +228,7 @@ groups:
           summary: "HTTP 5xx 错误率过高"
 
       - alert: HighLatency
-        expr: histogram_quantile(0.95, rate(gitcortex_http_request_duration_seconds_bucket[5m])) > 1
+        expr: histogram_quantile(0.95, rate(solodawn_http_request_duration_seconds_bucket[5m])) > 1
         for: 5m
         labels:
           severity: warning
@@ -236,7 +236,7 @@ groups:
           summary: "P95 延迟超过 1 秒"
 
       - alert: TooManyConnections
-        expr: gitcortex_websocket_connections > 1000
+        expr: solodawn_websocket_connections > 1000
         for: 5m
         labels:
           severity: warning
@@ -252,13 +252,13 @@ filebeat.inputs:
   - type: log
     enabled: true
     paths:
-      - /opt/gitcortex/logs/*.log
+      - /opt/solodawn/logs/*.log
     json.keys_under_root: true
     json.add_error_key: true
 
 output.elasticsearch:
   hosts: ["elasticsearch:9200"]
-  index: "gitcortex-%{+yyyy.MM.dd}"
+  index: "solodawn-%{+yyyy.MM.dd}"
 ```
 
 ---
@@ -271,10 +271,10 @@ output.elasticsearch:
 #!/bin/bash
 # backup.sh
 
-BACKUP_DIR="/opt/gitcortex/backups"
-DB_PATH="/opt/gitcortex/data/gitcortex.db"
+BACKUP_DIR="/opt/solodawn/backups"
+DB_PATH="/opt/solodawn/data/solodawn.db"
 DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="${BACKUP_DIR}/gitcortex_${DATE}.db"
+BACKUP_FILE="${BACKUP_DIR}/solodawn_${DATE}.db"
 
 # 创建备份目录
 mkdir -p ${BACKUP_DIR}
@@ -296,7 +296,7 @@ echo "Backup completed: ${BACKUP_FILE}.gz"
 ```bash
 # crontab -e
 # 每天凌晨 2 点备份
-0 2 * * * /opt/gitcortex/scripts/backup.sh >> /var/log/gitcortex-backup.log 2>&1
+0 2 * * * /opt/solodawn/scripts/backup.sh >> /var/log/solodawn-backup.log 2>&1
 ```
 
 ### 恢复流程
@@ -306,7 +306,7 @@ echo "Backup completed: ${BACKUP_FILE}.gz"
 # restore.sh
 
 BACKUP_FILE=$1
-DB_PATH="/opt/gitcortex/data/gitcortex.db"
+DB_PATH="/opt/solodawn/data/solodawn.db"
 
 if [ -z "$BACKUP_FILE" ]; then
     echo "Usage: restore.sh <backup_file>"
@@ -314,7 +314,7 @@ if [ -z "$BACKUP_FILE" ]; then
 fi
 
 # 停止服务
-systemctl stop gitcortex
+systemctl stop solodawn
 
 # 备份当前数据库
 mv ${DB_PATH} ${DB_PATH}.old
@@ -327,10 +327,10 @@ else
 fi
 
 # 设置权限
-chown gitcortex:gitcortex ${DB_PATH}
+chown solodawn:solodawn ${DB_PATH}
 
 # 启动服务
-systemctl start gitcortex
+systemctl start solodawn
 
 echo "Restore completed from: ${BACKUP_FILE}"
 ```
@@ -339,8 +339,8 @@ echo "Restore completed from: ${BACKUP_FILE}"
 
 ```bash
 # 备份配置文件
-tar -czvf /opt/gitcortex/backups/config_$(date +%Y%m%d).tar.gz \
-    /opt/gitcortex/config/
+tar -czvf /opt/solodawn/backups/config_$(date +%Y%m%d).tar.gz \
+    /opt/solodawn/config/
 ```
 
 ---
@@ -353,30 +353,30 @@ tar -czvf /opt/gitcortex/backups/config_$(date +%Y%m%d).tar.gz \
 
 ```bash
 # 检查日志
-journalctl -u gitcortex -n 100 --no-pager
+journalctl -u solodawn -n 100 --no-pager
 
 # 常见原因
 # - 端口被占用
 netstat -tlnp | grep 3001
 
 # - 数据库文件权限
-ls -la /opt/gitcortex/data/
+ls -la /opt/solodawn/data/
 
 # - 环境变量未设置
-cat /opt/gitcortex/config/.env
+cat /opt/solodawn/config/.env
 ```
 
 #### 2. 数据库锁定
 
 ```bash
 # 检查数据库状态
-sqlite3 /opt/gitcortex/data/gitcortex.db "PRAGMA integrity_check;"
+sqlite3 /opt/solodawn/data/solodawn.db "PRAGMA integrity_check;"
 
 # 检查 WAL 文件
-ls -la /opt/gitcortex/data/gitcortex.db*
+ls -la /opt/solodawn/data/solodawn.db*
 
 # 强制检查点
-sqlite3 /opt/gitcortex/data/gitcortex.db "PRAGMA wal_checkpoint(TRUNCATE);"
+sqlite3 /opt/solodawn/data/solodawn.db "PRAGMA wal_checkpoint(TRUNCATE);"
 ```
 
 #### 3. WebSocket 连接失败
@@ -386,8 +386,8 @@ sqlite3 /opt/gitcortex/data/gitcortex.db "PRAGMA wal_checkpoint(TRUNCATE);"
 ulimit -n
 
 # 增加文件描述符限制
-echo "gitcortex soft nofile 65535" >> /etc/security/limits.conf
-echo "gitcortex hard nofile 65535" >> /etc/security/limits.conf
+echo "solodawn soft nofile 65535" >> /etc/security/limits.conf
+echo "solodawn hard nofile 65535" >> /etc/security/limits.conf
 
 # 检查防火墙
 iptables -L -n | grep 3001
@@ -400,23 +400,23 @@ iptables -L -n | grep 3001
 ps aux | grep server
 
 # 检查数据库缓存
-sqlite3 /opt/gitcortex/data/gitcortex.db "PRAGMA cache_size;"
+sqlite3 /opt/solodawn/data/solodawn.db "PRAGMA cache_size;"
 
 # 减少缓存大小
-sqlite3 /opt/gitcortex/data/gitcortex.db "PRAGMA cache_size = -2000;"  # 2MB
+sqlite3 /opt/solodawn/data/solodawn.db "PRAGMA cache_size = -2000;"  # 2MB
 ```
 
 ### 日志分析
 
 ```bash
 # 查看错误日志
-grep -i error /opt/gitcortex/logs/server.log | tail -50
+grep -i error /opt/solodawn/logs/server.log | tail -50
 
 # 查看慢查询
-grep "slow_query" /opt/gitcortex/logs/server.log
+grep "slow_query" /opt/solodawn/logs/server.log
 
 # 统计请求状态码
-grep "status=" /opt/gitcortex/logs/server.log | \
+grep "status=" /opt/solodawn/logs/server.log | \
     sed 's/.*status=\([0-9]*\).*/\1/' | sort | uniq -c | sort -rn
 ```
 
@@ -427,7 +427,7 @@ grep "status=" /opt/gitcortex/logs/server.log | \
 perf top -p $(pgrep server)
 
 # 内存分析
-valgrind --tool=massif /opt/gitcortex/bin/server
+valgrind --tool=massif /opt/solodawn/bin/server
 
 # 网络分析
 ss -s
@@ -510,10 +510,10 @@ openssl rand -base64 24 | tr -d '\n' | head -c 32
 
 ```bash
 # 限制服务用户权限
-useradd -r -s /bin/false gitcortex
-chown -R gitcortex:gitcortex /opt/gitcortex
-chmod 700 /opt/gitcortex/config
-chmod 600 /opt/gitcortex/config/.env
+useradd -r -s /bin/false solodawn
+chown -R solodawn:solodawn /opt/solodawn
+chmod 700 /opt/solodawn/config
+chmod 600 /opt/solodawn/config/.env
 ```
 
 ### 日志审计
@@ -546,23 +546,23 @@ export RUST_LOG="server=info,tower_http=info,audit=info"
 
 ```bash
 # 1. 备份数据
-/opt/gitcortex/scripts/backup.sh
+/opt/solodawn/scripts/backup.sh
 
 # 2. 下载新版本
-wget https://releases.gitcortex.io/v0.0.154/server -O /tmp/server
+wget https://releases.solodawn.io/v0.0.154/server -O /tmp/server
 
 # 3. 停止服务
-systemctl stop gitcortex
+systemctl stop solodawn
 
 # 4. 替换二进制文件
-cp /tmp/server /opt/gitcortex/bin/server
-chmod +x /opt/gitcortex/bin/server
+cp /tmp/server /opt/solodawn/bin/server
+chmod +x /opt/solodawn/bin/server
 
 # 5. 运行数据库迁移
-/opt/gitcortex/bin/server migrate
+/opt/solodawn/bin/server migrate
 
 # 6. 启动服务
-systemctl start gitcortex
+systemctl start solodawn
 
 # 7. 验证
 curl http://localhost:3001/api/health
@@ -572,16 +572,16 @@ curl http://localhost:3001/api/health
 
 ```bash
 # 1. 停止服务
-systemctl stop gitcortex
+systemctl stop solodawn
 
 # 2. 恢复旧版本二进制
-cp /opt/gitcortex/bin/server.backup /opt/gitcortex/bin/server
+cp /opt/solodawn/bin/server.backup /opt/solodawn/bin/server
 
 # 3. 恢复数据库（如需要）
-/opt/gitcortex/scripts/restore.sh /opt/gitcortex/backups/latest.db.gz
+/opt/solodawn/scripts/restore.sh /opt/solodawn/backups/latest.db.gz
 
 # 4. 启动服务
-systemctl start gitcortex
+systemctl start solodawn
 ```
 
 ---

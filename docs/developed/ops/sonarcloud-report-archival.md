@@ -2,7 +2,7 @@
 
 ## Overview
 
-SonarCloud/SonarQube analysis results are stored both in the Sonar server and locally in GitCortex's database. This document defines the archival strategy and naming conventions.
+SonarCloud/SonarQube analysis results are stored both in the Sonar server and locally in SoloDawn's database. This document defines the archival strategy and naming conventions.
 
 ## Storage Locations
 
@@ -10,8 +10,8 @@ SonarCloud/SonarQube analysis results are stored both in the Sonar server and lo
 |----------|------|-----------|
 | SonarCloud (cloud) | Full analysis history, issue tracking, trends | Managed by SonarCloud (unlimited for public projects) |
 | SonarQube (self-hosted) | Full analysis history | Configurable in SonarQube admin (`sonar.dbcleaner.*`) |
-| GitCortex `quality_run` table | Run metadata, pass/fail, summary metrics | Manual cleanup (see below) |
-| GitCortex `quality_issue` table | Individual issues per run | Cascades with `quality_run` cleanup |
+| SoloDawn `quality_run` table | Run metadata, pass/fail, summary metrics | Manual cleanup (see below) |
+| SoloDawn `quality_issue` table | Individual issues per run | Cascades with `quality_run` cleanup |
 | CI artifacts | Scanner logs, SARIF exports | GitHub Actions default (90 days) |
 
 ## Naming Conventions
@@ -19,15 +19,15 @@ SonarCloud/SonarQube analysis results are stored both in the Sonar server and lo
 ### SonarCloud/SonarQube Project Keys
 
 ```
-gitcortex                    # Main project
-gitcortex:branch-<name>      # Branch analysis (auto-managed by Sonar)
+solodawn                    # Main project
+solodawn:branch-<name>      # Branch analysis (auto-managed by Sonar)
 ```
 
 ### Quality Profile Names
 
 ```
-GitCortex-Rust-v1            # Rust quality profile
-GitCortex-TypeScript-v1      # TypeScript quality profile
+SoloDawn-Rust-v1            # Rust quality profile
+SoloDawn-TypeScript-v1      # TypeScript quality profile
 ```
 
 Profile exports are stored in `quality/sonar/profiles/` and synced via:
@@ -80,5 +80,5 @@ sonar.dbcleaner.weeksBeforeKeepingOnlyOneSnapshotByMonth=52
 
 1. **SonarCloud**: No backup needed (cloud-managed)
 2. **SonarQube self-hosted**: Include in regular database backup rotation
-3. **GitCortex quality data**: Included in standard SQLite backup (`pnpm run prepare-db` backup procedures in runbook)
+3. **SoloDawn quality data**: Included in standard SQLite backup (`pnpm run prepare-db` backup procedures in runbook)
 4. **Quality profiles**: Version-controlled in `quality/sonar/profiles/` — backed up with Git

@@ -1,7 +1,7 @@
 # Worktrees
 .worktrees/
 worktrees/
-GitCortex/
+SoloDawn/
 
 # Environment
 .env
@@ -85,3 +85,12 @@ rustc-ice-*.txt
 self-test-out.json
 self-test-results.json
 snapshot.txt
+
+# Temporary logs and test outputs
+.codex_logs/
+.runlogs/
+runtime-logs/
+check_output.txt
+test_output.txt
+quality-report-*.md
+test_task.json

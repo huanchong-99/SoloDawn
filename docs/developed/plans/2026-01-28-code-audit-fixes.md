@@ -1,4 +1,4 @@
-# GitCortex 代码审计修复实施计划
+# SoloDawn 代码审计修复实施计划
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -30,13 +30,13 @@
 
 ### 工作区设置要求
 
-⚠️ **重要:** 如果使用 `using-git-worktrees` 创建隔离工作区，**必须复制 `e:\GitCortex\CLAUDE.md` 内容到新工作区**
+⚠️ **重要:** 如果使用 `using-git-worktrees` 创建隔离工作区，**必须复制 `e:\SoloDawn\CLAUDE.md` 内容到新工作区**
 
 ```bash
 # 如果在 worktree 中工作，需要复制项目指令
-git worktree add ../gitcortex-fixes -b audit-fixes
-cd ../gitcortex-fixes
-cp ../GitCortex/CLAUDE.md ./
+git worktree add ../solodawn-fixes -b audit-fixes
+cd ../solodawn-fixes
+cp ../SoloDawn/CLAUDE.md ./
 ```
 
 **原因:** `CLAUDE.md` 包含项目的核心指令（AGENTS.md），特别是：
@@ -376,7 +376,7 @@ mod encryption_tests {
     #[test]
     #[serial]
     fn test_terminal_api_key_encryption_roundtrip() {
-        temp_env::with_var("GITCORTEX_ENCRYPTION_KEY", Some("12345678901234567890123456789012"), || {
+        temp_env::with_var("SOLODAWN_ENCRYPTION_KEY", Some("12345678901234567890123456789012"), || {
             let mut terminal = create_test_terminal();
 
             terminal.set_custom_api_key("sk-test").unwrap();
@@ -412,7 +412,7 @@ use aes_gcm::{Aes256Gcm, Nonce, aead::{Aead, AeadCore, KeyInit, OsRng}};
 use base64::{Engine as _, engine::general_purpose};
 
 impl Terminal {
-    const ENCRYPTION_KEY_ENV: &str = "GITCORTEX_ENCRYPTION_KEY";
+    const ENCRYPTION_KEY_ENV: &str = "SOLODAWN_ENCRYPTION_KEY";
 
     fn get_encryption_key() -> anyhow::Result<[u8; 32]> {
         let key_str = std::env::var(Self::ENCRYPTION_KEY_ENV)
@@ -822,7 +822,7 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn test_requires_auth_header() {
-    std::env::set_var("GITCORTEX_API_TOKEN", "test-token");
+    std::env::set_var("SOLODAWN_API_TOKEN", "test-token");
     let app = server::routes::router(server::DeploymentImpl::new().await.unwrap());
     let response = app.oneshot(
         http::Request::builder()
@@ -846,7 +846,7 @@ cargo test -p server test_requires_auth_header
 use axum::{http::StatusCode, response::Response, middleware::Next, extract::Request};
 
 pub async fn require_api_token(req: Request, next: Next) -> Result<Response, StatusCode> {
-    let token = std::env::var("GITCORTEX_API_TOKEN").ok();
+    let token = std::env::var("SOLODAWN_API_TOKEN").ok();
     if token.is_none() {
         // 如果未配置 token，则允许访问（开发模式）
         return Ok(next.run(req).await);
@@ -1147,13 +1147,13 @@ Phase 4 (P3) → 可与 Phase 3 并行（除 Task 4.5）
 ### 关键环境变量
 ```bash
 # API Key 加密（32 字节）
-export GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
+export SOLODAWN_ENCRYPTION_KEY="12345678901234567890123456789012"
 
 # API 认证（可选）
-export GITCORTEX_API_TOKEN="your-secret-token"
+export SOLODAWN_API_TOKEN="your-secret-token"
 
 # JWT 密钥
-export GITCORTEX_JWT_SECRET="your-jwt-secret"
+export SOLODAWN_JWT_SECRET="your-jwt-secret"
 ```
 
 ### 测试命令速查

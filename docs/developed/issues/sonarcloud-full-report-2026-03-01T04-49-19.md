@@ -1,7 +1,7 @@
 # SonarCloud 代码质量完整报告
 
 **生成时间**: 2026/03/01 12:49
-**项目**: huanchong-99_GitCortex
+**项目**: huanchong-99_SoloDawn
 
 ---
 
@@ -337,7 +337,7 @@
 8: const { getPorts } = require("./setup-dev-environment");
 10: const children = new Set();
 11: let shuttingDown = false;
-12: const devLockPath = path.join(os.tmpdir(), "gitcortex", "run-dev.lock");
+12: const devLockPath = path.join(os.tmpdir(), "solodawn", "run-dev.lock");
 13: let lockFd = null;
 15: function getPathKey(env) {
 16: return Object.keys(env).find((name) => name.toLowerCase() === "path") ?? "PATH";
@@ -462,7 +462,7 @@
 # SonarCloud 重复代码报告
 
 **生成时间**: 2026/03/01 12:49
-**项目**: huanchong-99_GitCortex
+**项目**: huanchong-99_SoloDawn
 **问题文件总数**: 2
 **重复行总数**: 138
 **重复块总数**: 34
@@ -490,7 +490,7 @@
 - **重复率**: 94.5%
 - **重复行数**: 103 行
 - **重复块数**: 26 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Acrates%2Fdb%2Fmigrations%2F20250716143725_add_default_templates.sql)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Acrates%2Fdb%2Fmigrations%2F20250716143725_add_default_templates.sql)
 
 ---
 
@@ -504,7 +504,7 @@
 - **重复率**: 27.3%
 - **重复行数**: 35 行
 - **重复块数**: 8 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fpages%2FWorkflows.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fpages%2FWorkflows.test.tsx)
 
 ---
 
@@ -515,7 +515,7 @@
 # SonarCloud 安全热点报告
 
 **生成时间**: 2026/03/01 12:49
-**项目**: huanchong-99_GitCortex
+**项目**: huanchong-99_SoloDawn
 **安全热点总数**: 1
 
 ---
@@ -548,7 +548,7 @@
 | **规则ID** | [typescript:S5852](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS5852&rule_key=typescript%3AS5852) |
 | **类别** | Denial of Service (DoS) |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 ---
 

@@ -5,7 +5,7 @@
 
 ## 概述
 
-重写 GitCortex 项目的基础文档，包括 LICENSE 和 README.md。
+重写 SoloDawn 项目的基础文档，包括 LICENSE 和 README.md。
 
 ---
 
@@ -16,7 +16,7 @@
 **目标:**
 创建基于 MIT 协议的 LICENSE 文件，声明项目为 Vibe Kanban 和 CC-Switch 的二次开发。
 
-**交付物:** `F:\Project\GitCortex\LICENSE`
+**交付物:** `F:\Project\SoloDawn\LICENSE`
 
 **验收标准:**
 1. 包含 MIT 协议全文
@@ -29,9 +29,9 @@
 **状态:** ✅ 已完成
 
 **目标:**
-创建 GitCortex 项目说明文档，介绍项目功能、架构和使用方法。
+创建 SoloDawn 项目说明文档，介绍项目功能、架构和使用方法。
 
-**交付物:** `F:\Project\GitCortex\README.md`
+**交付物:** `F:\Project\SoloDawn\README.md`
 
 **验收标准:**
 1. 项目介绍清晰

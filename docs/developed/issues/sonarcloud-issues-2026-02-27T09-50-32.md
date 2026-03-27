@@ -37,32 +37,32 @@
 
 ### 按文件统计 (Top 20)
 
-- **huanchong-99GitCortexcrates/db/migrations/20250730000000_add_executor_action_to_execution_processes.sql**: 7 个问题
-- **huanchong-99GitCortexfrontend/src/pages/Workflows.tsx**: 7 个问题
-- **huanchong-99GitCortexcrates/db/migrations/20251209000000_add_project_repositories.sql**: 6 个问题
-- **huanchong-99GitCortexfrontend/.../components/ui-new/containers/NewDisplayConversationEntry.tsx**: 5 个问题
-- **huanchong-99GitCortexcrates/db/migrations/20260119000001_add_performance_indexes.sql**: 4 个问题
-- **huanchong-99GitCortexcrates/db/migrations/20250819000000_move_merge_commit_to_merges_table.sql**: 3 个问题
-- **huanchong-99GitCortexcrates/db/migrations/20260117000001_create_workflow_tables.sql**: 3 个问题
-- **huanchong-99GitCortexfrontend/.../NormalizedConversation/DisplayConversationEntry.tsx**: 3 个问题
-- **huanchong-99GitCortexfrontend/.../ui-new/primitives/conversation/ChatFileEntry.tsx**: 3 个问题
-- **huanchong-99GitCortexfrontend/src/components/ui-new/views/PreviewBrowser.tsx**: 3 个问题
-- **huanchong-99GitCortexfrontend/src/hooks/useConversationHistory.ts**: 3 个问题
-- **huanchong-99GitCortexfrontend/src/hooks/useTodos.ts**: 3 个问题
-- **huanchong-99GitCortexfrontend/src/vscode/bridge.ts**: 3 个问题
-- **huanchong-99GitCortexcrates/db/migrations/20251020120000_convert_templates_to_tags.sql**: 2 个问题
-- **huanchong-99GitCortexcrates/db/migrations/20260107000000_move_scripts_to_repos.sql**: 2 个问题
-- **huanchong-99GitCortexcrates/db/migrations/20260224001000_backfill_workflow_api_key_encrypted.sql**: 2 个问题
-- **huanchong-99GitCortexfrontend/src/components/tasks/Toolbar/GitOperations.tsx**: 2 个问题
-- **huanchong-99GitCortexfrontend/.../components/ui/wysiwyg/plugins/file-tag-typeahead-plugin.tsx**: 2 个问题
-- **huanchong-99GitCortexfrontend/src/hooks/useProjectTasks.ts**: 2 个问题
-- **huanchong-99GitCortexfrontend/src/pages/settings/AgentSettings.tsx**: 2 个问题
+- **huanchong-99SoloDawncrates/db/migrations/20250730000000_add_executor_action_to_execution_processes.sql**: 7 个问题
+- **huanchong-99SoloDawnfrontend/src/pages/Workflows.tsx**: 7 个问题
+- **huanchong-99SoloDawncrates/db/migrations/20251209000000_add_project_repositories.sql**: 6 个问题
+- **huanchong-99SoloDawnfrontend/.../components/ui-new/containers/NewDisplayConversationEntry.tsx**: 5 个问题
+- **huanchong-99SoloDawncrates/db/migrations/20260119000001_add_performance_indexes.sql**: 4 个问题
+- **huanchong-99SoloDawncrates/db/migrations/20250819000000_move_merge_commit_to_merges_table.sql**: 3 个问题
+- **huanchong-99SoloDawncrates/db/migrations/20260117000001_create_workflow_tables.sql**: 3 个问题
+- **huanchong-99SoloDawnfrontend/.../NormalizedConversation/DisplayConversationEntry.tsx**: 3 个问题
+- **huanchong-99SoloDawnfrontend/.../ui-new/primitives/conversation/ChatFileEntry.tsx**: 3 个问题
+- **huanchong-99SoloDawnfrontend/src/components/ui-new/views/PreviewBrowser.tsx**: 3 个问题
+- **huanchong-99SoloDawnfrontend/src/hooks/useConversationHistory.ts**: 3 个问题
+- **huanchong-99SoloDawnfrontend/src/hooks/useTodos.ts**: 3 个问题
+- **huanchong-99SoloDawnfrontend/src/vscode/bridge.ts**: 3 个问题
+- **huanchong-99SoloDawncrates/db/migrations/20251020120000_convert_templates_to_tags.sql**: 2 个问题
+- **huanchong-99SoloDawncrates/db/migrations/20260107000000_move_scripts_to_repos.sql**: 2 个问题
+- **huanchong-99SoloDawncrates/db/migrations/20260224001000_backfill_workflow_api_key_encrypted.sql**: 2 个问题
+- **huanchong-99SoloDawnfrontend/src/components/tasks/Toolbar/GitOperations.tsx**: 2 个问题
+- **huanchong-99SoloDawnfrontend/.../components/ui/wysiwyg/plugins/file-tag-typeahead-plugin.tsx**: 2 个问题
+- **huanchong-99SoloDawnfrontend/src/hooks/useProjectTasks.ts**: 2 个问题
+- **huanchong-99SoloDawnfrontend/src/pages/settings/AgentSettings.tsx**: 2 个问题
 
 ---
 
 ## 问题列表（按文件分组）
 
-## 1. huanchong-99GitCortexcrates/db/migrations/20250617183714_init.sql
+## 1. huanchong-99SoloDawncrates/db/migrations/20250617183714_init.sql
 
 > 该文件共有 **1** 个问题
 
@@ -146,7 +146,7 @@ END;
 
 ---
 
-## 2. huanchong-99GitCortexcrates/db/migrations/20250620212427_execution_processes.sql
+## 2. huanchong-99SoloDawncrates/db/migrations/20250620212427_execution_processes.sql
 
 > 该文件共有 **1** 个问题
 
@@ -216,7 +216,7 @@ END;
 
 ---
 
-## 3. huanchong-99GitCortexcrates/db/migrations/20250716143725_add_default_templates.sql
+## 3. huanchong-99SoloDawncrates/db/migrations/20250716143725_add_default_templates.sql
 
 > 该文件共有 **1** 个问题
 
@@ -311,7 +311,7 @@ END;
 
 ---
 
-## 4. huanchong-99GitCortexcrates/db/migrations/20250730000000_add_executor_action_to_execution_processes.sql
+## 4. huanchong-99SoloDawncrates/db/migrations/20250730000000_add_executor_action_to_execution_processes.sql
 
 > 该文件共有 **7** 个问题
 
@@ -918,7 +918,7 @@ END;
 
 ---
 
-## 5. huanchong-99GitCortexcrates/db/migrations/20250815100344_migrate_old_executor_actions.sql
+## 5. huanchong-99SoloDawncrates/db/migrations/20250815100344_migrate_old_executor_actions.sql
 
 > 该文件共有 **1** 个问题
 
@@ -977,7 +977,7 @@ END;
 
 ---
 
-## 6. huanchong-99GitCortexcrates/db/migrations/20250818150000_refactor_images_to_junction_tables.sql
+## 6. huanchong-99SoloDawncrates/db/migrations/20250818150000_refactor_images_to_junction_tables.sql
 
 > 该文件共有 **1** 个问题
 
@@ -1052,7 +1052,7 @@ END;
 
 ---
 
-## 7. huanchong-99GitCortexcrates/db/migrations/20250819000000_move_merge_commit_to_merges_table.sql
+## 7. huanchong-99SoloDawncrates/db/migrations/20250819000000_move_merge_commit_to_merges_table.sql
 
 > 该文件共有 **3** 个问题
 
@@ -1325,7 +1325,7 @@ END;
 
 ---
 
-## 8. huanchong-99GitCortexcrates/db/migrations/20251020120000_convert_templates_to_tags.sql
+## 8. huanchong-99SoloDawncrates/db/migrations/20251020120000_convert_templates_to_tags.sql
 
 > 该文件共有 **2** 个问题
 
@@ -1417,7 +1417,7 @@ END;
 
 ---
 
-## 9. huanchong-99GitCortexcrates/db/migrations/20251114000000_create_shared_tasks.sql
+## 9. huanchong-99SoloDawncrates/db/migrations/20251114000000_create_shared_tasks.sql
 
 > 该文件共有 **1** 个问题
 
@@ -1500,7 +1500,7 @@ END;
 
 ---
 
-## 10. huanchong-99GitCortexcrates/db/migrations/20251209000000_add_project_repositories.sql
+## 10. huanchong-99SoloDawncrates/db/migrations/20251209000000_add_project_repositories.sql
 
 > 该文件共有 **6** 个问题
 
@@ -1929,7 +1929,7 @@ END;
 
 ---
 
-## 11. huanchong-99GitCortexcrates/db/migrations/20251216142123_refactor_task_attempts_to_workspaces_sessions.sql
+## 11. huanchong-99SoloDawncrates/db/migrations/20251216142123_refactor_task_attempts_to_workspaces_sessions.sql
 
 > 该文件共有 **1** 个问题
 
@@ -2024,7 +2024,7 @@ END;
 
 ---
 
-## 12. huanchong-99GitCortexcrates/db/migrations/20251219000000_add_agent_working_dir_to_projects.sql
+## 12. huanchong-99SoloDawncrates/db/migrations/20251219000000_add_agent_working_dir_to_projects.sql
 
 > 该文件共有 **1** 个问题
 
@@ -2059,7 +2059,7 @@ END;
 
 ---
 
-## 13. huanchong-99GitCortexcrates/db/migrations/20260107000000_move_scripts_to_repos.sql
+## 13. huanchong-99SoloDawncrates/db/migrations/20260107000000_move_scripts_to_repos.sql
 
 > 该文件共有 **2** 个问题
 
@@ -2199,7 +2199,7 @@ END;
 
 ---
 
-## 14. huanchong-99GitCortexcrates/db/migrations/20260117000001_create_workflow_tables.sql
+## 14. huanchong-99SoloDawncrates/db/migrations/20260117000001_create_workflow_tables.sql
 
 > 该文件共有 **3** 个问题
 
@@ -2222,7 +2222,7 @@ END;
 2: -- in this migration. This is acceptable for SQL DDL migrations where each table definition
 3: -- requires its own DEFAULT clause and foreign key references.
 5: -- ============================================================================
-6: -- GitCortex Workflow Tables Migration
+6: -- SoloDawn Workflow Tables Migration
 7: -- Created: 2026-01-17
 8: -- Description: Add workflow coordination tables for multi-terminal orchestration
 9: -- ============================================================================
@@ -2311,7 +2311,7 @@ END;
 2: -- in this migration. This is acceptable for SQL DDL migrations where each table definition
 3: -- requires its own DEFAULT clause and foreign key references.
 5: -- ============================================================================
-6: -- GitCortex Workflow Tables Migration
+6: -- SoloDawn Workflow Tables Migration
 7: -- Created: 2026-01-17
 8: -- Description: Add workflow coordination tables for multi-terminal orchestration
 9: -- ============================================================================
@@ -2400,7 +2400,7 @@ END;
 2: -- in this migration. This is acceptable for SQL DDL migrations where each table definition
 3: -- requires its own DEFAULT clause and foreign key references.
 5: -- ============================================================================
-6: -- GitCortex Workflow Tables Migration
+6: -- SoloDawn Workflow Tables Migration
 7: -- Created: 2026-01-17
 8: -- Description: Add workflow coordination tables for multi-terminal orchestration
 9: -- ============================================================================
@@ -2472,7 +2472,7 @@ END;
 
 ---
 
-## 15. huanchong-99GitCortexcrates/db/migrations/20260119000001_add_performance_indexes.sql
+## 15. huanchong-99SoloDawncrates/db/migrations/20260119000001_add_performance_indexes.sql
 
 > 该文件共有 **4** 个问题
 
@@ -2495,7 +2495,7 @@ END;
 2: -- in this migration. This is acceptable for SQL index definitions where partial index WHERE clauses
 3: -- necessarily repeat the same status enum values across different tables.
 5: -- ============================================================================
-6: -- GitCortex Performance Indexes Migration
+6: -- SoloDawn Performance Indexes Migration
 7: -- Created: 2026-01-19
 8: -- Description: Add composite and partial indexes for workflow query optimization
 9: -- ============================================================================
@@ -2584,7 +2584,7 @@ END;
 2: -- in this migration. This is acceptable for SQL index definitions where partial index WHERE clauses
 3: -- necessarily repeat the same status enum values across different tables.
 5: -- ============================================================================
-6: -- GitCortex Performance Indexes Migration
+6: -- SoloDawn Performance Indexes Migration
 7: -- Created: 2026-01-19
 8: -- Description: Add composite and partial indexes for workflow query optimization
 9: -- ============================================================================
@@ -2673,7 +2673,7 @@ END;
 2: -- in this migration. This is acceptable for SQL index definitions where partial index WHERE clauses
 3: -- necessarily repeat the same status enum values across different tables.
 5: -- ============================================================================
-6: -- GitCortex Performance Indexes Migration
+6: -- SoloDawn Performance Indexes Migration
 7: -- Created: 2026-01-19
 8: -- Description: Add composite and partial indexes for workflow query optimization
 9: -- ============================================================================
@@ -2762,7 +2762,7 @@ END;
 2: -- in this migration. This is acceptable for SQL index definitions where partial index WHERE clauses
 3: -- necessarily repeat the same status enum values across different tables.
 5: -- ============================================================================
-6: -- GitCortex Performance Indexes Migration
+6: -- SoloDawn Performance Indexes Migration
 7: -- Created: 2026-01-19
 8: -- Description: Add composite and partial indexes for workflow query optimization
 9: -- ============================================================================
@@ -2834,7 +2834,7 @@ END;
 
 ---
 
-## 16. huanchong-99GitCortexcrates/db/migrations/20260208020000_fix_terminal_old_foreign_keys.sql
+## 16. huanchong-99SoloDawncrates/db/migrations/20260208020000_fix_terminal_old_foreign_keys.sql
 
 > 该文件共有 **1** 个问题
 
@@ -2929,7 +2929,7 @@ END;
 
 ---
 
-## 17. huanchong-99GitCortexcrates/db/migrations/20260224001000_backfill_workflow_api_key_encrypted.sql
+## 17. huanchong-99SoloDawncrates/db/migrations/20260224001000_backfill_workflow_api_key_encrypted.sql
 
 > 该文件共有 **2** 个问题
 
@@ -3047,7 +3047,7 @@ END;
 
 ---
 
-## 18. huanchong-99GitCortexfrontend/.../NormalizedConversation/DisplayConversationEntry.tsx
+## 18. huanchong-99SoloDawnfrontend/.../NormalizedConversation/DisplayConversationEntry.tsx
 
 > 该文件共有 **3** 个问题
 
@@ -3322,7 +3322,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 19. huanchong-99GitCortexfrontend/.../components/ui-new/containers/DiffViewCardWithComments.tsx
+## 19. huanchong-99SoloDawnfrontend/.../components/ui-new/containers/DiffViewCardWithComments.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -3395,7 +3395,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 20. huanchong-99GitCortexfrontend/.../components/ui-new/containers/NewDisplayConversationEntry.tsx
+## 20. huanchong-99SoloDawnfrontend/.../components/ui-new/containers/NewDisplayConversationEntry.tsx
 
 > 该文件共有 **5** 个问题
 
@@ -3770,7 +3770,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 21. huanchong-99GitCortexfrontend/.../components/ui-new/containers/ProcessListContainer.tsx
+## 21. huanchong-99SoloDawnfrontend/.../components/ui-new/containers/ProcessListContainer.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -3843,7 +3843,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 22. huanchong-99GitCortexfrontend/.../components/ui-new/primitives/SessionChatBox.tsx
+## 22. huanchong-99SoloDawnfrontend/.../components/ui-new/primitives/SessionChatBox.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -3916,7 +3916,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 23. huanchong-99GitCortexfrontend/.../components/ui/wysiwyg/plugins/file-tag-typeahead-plugin.tsx
+## 23. huanchong-99SoloDawnfrontend/.../components/ui/wysiwyg/plugins/file-tag-typeahead-plugin.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -4056,7 +4056,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 24. huanchong-99GitCortexfrontend/.../ui-new/primitives/conversation/ChatFileEntry.tsx
+## 24. huanchong-99SoloDawnfrontend/.../ui-new/primitives/conversation/ChatFileEntry.tsx
 
 > 该文件共有 **3** 个问题
 
@@ -4283,7 +4283,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 25. huanchong-99GitCortexfrontend/src/components/ThemeProvider.tsx
+## 25. huanchong-99SoloDawnfrontend/src/components/ThemeProvider.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -4356,7 +4356,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 26. huanchong-99GitCortexfrontend/src/components/layout/NewDesignLayout.tsx
+## 26. huanchong-99SoloDawnfrontend/src/components/layout/NewDesignLayout.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -4429,7 +4429,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 27. huanchong-99GitCortexfrontend/src/components/tasks/TaskFollowUpSection.tsx
+## 27. huanchong-99SoloDawnfrontend/src/components/tasks/TaskFollowUpSection.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -4502,7 +4502,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 28. huanchong-99GitCortexfrontend/src/components/tasks/Toolbar/GitOperations.tsx
+## 28. huanchong-99SoloDawnfrontend/src/components/tasks/Toolbar/GitOperations.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -4642,7 +4642,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 29. huanchong-99GitCortexfrontend/src/components/terminal/TerminalDebugView.tsx
+## 29. huanchong-99SoloDawnfrontend/src/components/terminal/TerminalDebugView.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -4715,7 +4715,7 @@ function isEligibleForDiscount(user) {
 
 ---
 
-## 30. huanchong-99GitCortexfrontend/src/components/ui-new/dialogs/RebaseDialog.tsx
+## 30. huanchong-99SoloDawnfrontend/src/components/ui-new/dialogs/RebaseDialog.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -4812,7 +4812,7 @@ foo.toString();
 
 ---
 
-## 31. huanchong-99GitCortexfrontend/src/components/ui-new/hooks/usePreviewUrl.ts
+## 31. huanchong-99SoloDawnfrontend/src/components/ui-new/hooks/usePreviewUrl.ts
 
 > 该文件共有 **1** 个问题
 
@@ -4885,7 +4885,7 @@ foo.toString();
 
 ---
 
-## 32. huanchong-99GitCortexfrontend/src/components/ui-new/views/PreviewBrowser.tsx
+## 32. huanchong-99SoloDawnfrontend/src/components/ui-new/views/PreviewBrowser.tsx
 
 > 该文件共有 **3** 个问题
 
@@ -5122,7 +5122,7 @@ foo.toString();
 
 ---
 
-## 33. huanchong-99GitCortexfrontend/src/contexts/EntriesContext.tsx
+## 33. huanchong-99SoloDawnfrontend/src/contexts/EntriesContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -5190,7 +5190,7 @@ foo.toString();
 
 ---
 
-## 34. huanchong-99GitCortexfrontend/src/hooks/useCommandBarShortcut.ts
+## 34. huanchong-99SoloDawnfrontend/src/hooks/useCommandBarShortcut.ts
 
 > 该文件共有 **1** 个问题
 
@@ -5247,7 +5247,7 @@ foo.toString();
 
 ---
 
-## 35. huanchong-99GitCortexfrontend/src/hooks/useConversationHistory.ts
+## 35. huanchong-99SoloDawnfrontend/src/hooks/useConversationHistory.ts
 
 > 该文件共有 **3** 个问题
 
@@ -5454,7 +5454,7 @@ foo.toString();
 
 ---
 
-## 36. huanchong-99GitCortexfrontend/src/hooks/useDevserverUrl.ts
+## 36. huanchong-99SoloDawnfrontend/src/hooks/useDevserverUrl.ts
 
 > 该文件共有 **1** 个问题
 
@@ -5527,7 +5527,7 @@ foo.toString();
 
 ---
 
-## 37. huanchong-99GitCortexfrontend/src/hooks/useProjectTasks.ts
+## 37. huanchong-99SoloDawnfrontend/src/hooks/useProjectTasks.ts
 
 > 该文件共有 **2** 个问题
 
@@ -5667,7 +5667,7 @@ foo.toString();
 
 ---
 
-## 38. huanchong-99GitCortexfrontend/src/hooks/useTodos.ts
+## 38. huanchong-99SoloDawnfrontend/src/hooks/useTodos.ts
 
 > 该文件共有 **3** 个问题
 
@@ -5874,7 +5874,7 @@ foo.toString();
 
 ---
 
-## 39. huanchong-99GitCortexfrontend/src/hooks/useVariant.ts
+## 39. huanchong-99SoloDawnfrontend/src/hooks/useVariant.ts
 
 > 该文件共有 **1** 个问题
 
@@ -5931,7 +5931,7 @@ foo.toString();
 
 ---
 
-## 40. huanchong-99GitCortexfrontend/src/pages/Workflows.tsx
+## 40. huanchong-99SoloDawnfrontend/src/pages/Workflows.tsx
 
 > 该文件共有 **7** 个问题
 
@@ -6572,7 +6572,7 @@ if (await promise) {
 
 ---
 
-## 41. huanchong-99GitCortexfrontend/src/pages/settings/AgentSettings.tsx
+## 41. huanchong-99SoloDawnfrontend/src/pages/settings/AgentSettings.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -6736,7 +6736,7 @@ foo.toString();
 
 ---
 
-## 42. huanchong-99GitCortexfrontend/src/pages/settings/McpSettings.tsx
+## 42. huanchong-99SoloDawnfrontend/src/pages/settings/McpSettings.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -6809,7 +6809,7 @@ foo.toString();
 
 ---
 
-## 43. huanchong-99GitCortexfrontend/src/vscode/ContextMenu.tsx
+## 43. huanchong-99SoloDawnfrontend/src/vscode/ContextMenu.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -6900,7 +6900,7 @@ foo.toString();
 
 ---
 
-## 44. huanchong-99GitCortexfrontend/src/vscode/bridge.ts
+## 44. huanchong-99SoloDawnfrontend/src/vscode/bridge.ts
 
 > 该文件共有 **3** 个问题
 
@@ -7119,7 +7119,7 @@ iframe.contentWindow.postMessage("hello", "https://secure.example.com");
 
 ---
 
-## 45. huanchong-99GitCortexscripts/check-i18n.sh
+## 45. huanchong-99SoloDawnscripts/check-i18n.sh
 
 > 该文件共有 **1** 个问题
 

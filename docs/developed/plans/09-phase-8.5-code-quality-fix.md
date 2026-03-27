@@ -199,7 +199,7 @@ pub struct Workflow {
 }
 
 impl Workflow {
-    const ENCRYPTION_KEY_ENV: &str = "GITCORTEX_ENCRYPTION_KEY";
+    const ENCRYPTION_KEY_ENV: &str = "SOLODAWN_ENCRYPTION_KEY";
 
     /// 获取加密密钥 (从环境变量)
     fn get_encryption_key() -> anyhow::Result<[u8; 32]> {
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_encryption_decryption() {
-        std::env::set_var("GITCORTEX_ENCRYPTION_KEY", "12345678901234567890123456789012");
+        std::env::set_var("SOLODAWN_ENCRYPTION_KEY", "12345678901234567890123456789012");
 
         let mut workflow = Workflow {
             workflow_id: "test".to_string(),
@@ -310,7 +310,7 @@ ALTER TABLE workflow ADD COLUMN orchestrator_api_key_encrypted TEXT;
 ```rust
 // 在 DBService::new 中添加
 pub async fn migrate_api_keys_to_encrypted(pool: &SqlitePool) -> anyhow::Result<()> {
-    let encryption_key = std::env::var("GITCORTEX_ENCRYPTION_KEY")
+    let encryption_key = std::env::var("SOLODAWN_ENCRYPTION_KEY")
         .unwrap_or_default();
 
     if encryption_key.is_empty() || encryption_key.len() != 32 {
@@ -857,7 +857,7 @@ pub const GIT_EVENT_TOPIC_PREFIX: &str = "git_event:";
 
 pub const GIT_COMMIT_METADATA_SEPARATOR: &str = "---METADATA---";
 
-pub const ENCRYPTION_KEY_ENV: &str = "GITCORTEX_ENCRYPTION_KEY";
+pub const ENCRYPTION_KEY_ENV: &str = "SOLODAWN_ENCRYPTION_KEY";
 ```
 
 ---

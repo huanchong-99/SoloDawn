@@ -1,6 +1,6 @@
-# GitCortex Operations Manual
+# SoloDawn Operations Manual
 
-This runbook provides operational procedures for running GitCortex in development and production environments.
+This runbook provides operational procedures for running SoloDawn in development and production environments.
 
 ## Starting the Server
 
@@ -17,10 +17,10 @@ This runbook provides operational procedures for running GitCortex in developmen
 1. Set environment variables:
 ```bash
 # Windows PowerShell
-$env:GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
+$env:SOLODAWN_ENCRYPTION_KEY="12345678901234567890123456789012"
 
 # Linux/macOS
-export GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
+export SOLODAWN_ENCRYPTION_KEY="12345678901234567890123456789012"
 ```
 
 2. Install dependencies:
@@ -59,36 +59,36 @@ cargo build --release
 1. Set environment variables:
 ```bash
 # Windows PowerShell
-$env:GITCORTEX_ENCRYPTION_KEY="your-production-32-byte-hex-key"
+$env:SOLODAWN_ENCRYPTION_KEY="your-production-32-byte-hex-key"
 $env:DATABASE_URL="crates/db/data.db"
 $env:PORT="3001"
 
 # Linux/macOS
-export GITCORTEX_ENCRYPTION_KEY="your-production-32-byte-hex-key"
+export SOLODAWN_ENCRYPTION_KEY="your-production-32-byte-hex-key"
 export DATABASE_URL="crates/db/data.db"
 export PORT="3001"
 ```
 
 2. Start server:
 ```bash
-./target/release/gitcortex-server
+./target/release/solodawn-server
 ```
 
 **Using Process Manager (systemd):**
 
-Create `/etc/systemd/system/gitcortex.service`:
+Create `/etc/systemd/system/solodawn.service`:
 ```ini
 [Unit]
-Description=GitCortex Server
+Description=SoloDawn Server
 After=network.target
 
 [Service]
 Type=simple
-User=gitcortex
-WorkingDirectory=/opt/gitcortex
-Environment="GITCORTEX_ENCRYPTION_KEY=your-production-32-byte-hex-key"
-Environment="DATABASE_URL=/opt/gitcortex/data.db"
-ExecStart=/opt/gitcortex/target/release/gitcortex-server
+User=solodawn
+WorkingDirectory=/opt/solodawn
+Environment="SOLODAWN_ENCRYPTION_KEY=your-production-32-byte-hex-key"
+Environment="DATABASE_URL=/opt/solodawn/data.db"
+ExecStart=/opt/solodawn/target/release/solodawn-server
 Restart=always
 RestartSec=10
 
@@ -98,9 +98,9 @@ WantedBy=multi-user.target
 
 Enable and start:
 ```bash
-sudo systemctl enable gitcortex
-sudo systemctl start gitcortex
-sudo systemctl status gitcortex
+sudo systemctl enable solodawn
+sudo systemctl start solodawn
+sudo systemctl status solodawn
 ```
 
 ## Database Management
@@ -111,7 +111,7 @@ sudo systemctl status gitcortex
 
 1. Stop the server:
 ```bash
-sudo systemctl stop gitcortex
+sudo systemctl stop solodawn
 # Or kill process in dev mode
 ```
 
@@ -126,7 +126,7 @@ cp crates/db/data.db crates/db/data.db.backup.$(date +%Y%m%d_%H%M%S)
 
 3. Restart server:
 ```bash
-sudo systemctl start gitcortex
+sudo systemctl start solodawn
 ```
 
 ### Restore
@@ -135,7 +135,7 @@ sudo systemctl start gitcortex
 
 1. Stop the server:
 ```bash
-sudo systemctl stop gitcortex
+sudo systemctl stop solodawn
 ```
 
 2. Restore database:
@@ -145,7 +145,7 @@ cp crates/db/data.db.backup crates/db/data.db
 
 3. Restart server:
 ```bash
-sudo systemctl start gitcortex
+sudo systemctl start solodawn
 ```
 
 ### Migration
@@ -214,10 +214,10 @@ sqlite3 crates/db/data.db "SELECT id, status, exit_code FROM terminals WHERE tas
 
 ```bash
 # Journal logs (systemd)
-sudo journalctl -u gitcortex -f
+sudo journalctl -u solodawn -f
 
 # Log file location (if configured)
-tail -f /var/log/gitcortex/server.log
+tail -f /var/log/solodawn/server.log
 ```
 
 **Database Statistics:**
@@ -238,7 +238,7 @@ sqlite3 crates/db/data.db "SELECT COUNT(*) FROM terminals WHERE status = 'failed
 Monitor via system tools:
 ```bash
 # CPU and memory
-top -p $(pgrep gitcortex-server)
+top -p $(pgrep solodawn-server)
 
 # Disk usage
 du -sh crates/db/data.db
@@ -258,7 +258,7 @@ For common issues and solutions, see [troubleshooting.md](troubleshooting.md).
 1. **Backup current version:**
 ```bash
 # Stop server
-sudo systemctl stop gitcortex
+sudo systemctl stop solodawn
 
 # Backup database
 cp crates/db/data.db crates/db/data.db.backup.before_upgrade
@@ -284,13 +284,13 @@ pnpm run db:migrate
 
 5. **Start server:**
 ```bash
-sudo systemctl start gitcortex
+sudo systemctl start solodawn
 ```
 
 6. **Verify upgrade:**
 ```bash
 # Check logs
-sudo journalctl -u gitcortex -n 50
+sudo journalctl -u solodawn -n 50
 
 # Check API
 curl http://localhost:3001/api/health
@@ -302,7 +302,7 @@ curl http://localhost:3001/api/health
 
 1. **Stop server:**
 ```bash
-sudo systemctl stop gitcortex
+sudo systemctl stop solodawn
 ```
 
 2. **Revert code:**
@@ -328,7 +328,7 @@ cargo build --release
 
 5. **Start server:**
 ```bash
-sudo systemctl start gitcortex
+sudo systemctl start solodawn
 ```
 
 ## Health Checks
@@ -384,7 +384,7 @@ sqlite3 crates/db/data.db "VACUUM;"
 **Clean logs:**
 ```bash
 # Rotate logs if using file-based logging
-logrotate /etc/logrotate.d/gitcortex
+logrotate /etc/logrotate.d/solodawn
 ```
 
 ### Performance Tuning
@@ -403,10 +403,10 @@ sqlite3 crates/db.data.db "REINDEX;"
 Adjust in `crates/server/src/main.rs` or environment:
 ```bash
 # Max concurrent terminals
-export GITCORTEX_MAX_TERMINALS=50
+export SOLODAWN_MAX_TERMINALS=50
 
 # WebSocket timeout
-export GITCORTEX_WS_TIMEOUT_SECONDS=300
+export SOLODAWN_WS_TIMEOUT_SECONDS=300
 ```
 
 ## Security Checklist
@@ -467,7 +467,7 @@ export SONAR_HOST_URL=http://localhost:9000
 ```yaml
 sonar:
   host_url: "http://localhost:9000"
-  project_key: "gitcortex"
+  project_key: "solodawn"
 ```
 
 5. Sync quality profile:

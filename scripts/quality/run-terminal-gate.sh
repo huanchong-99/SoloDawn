@@ -35,7 +35,7 @@ if [[ -z "$CHANGED_FILES" ]]; then
   exit 1
 fi
 
-echo "=== GitCortex Terminal Quality Gate ==="
+echo "=== SoloDawn Terminal Quality Gate ==="
 echo "Project root: $PROJECT_ROOT"
 echo "Working dir:  $WORKING_DIR"
 echo "Changed files: $CHANGED_FILES"

@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 将 GitCortex 从本机运行形态迁移为 Docker 可运行、可发布、可回滚的形态，容器内原生安装 AI CLI。
+**Goal:** 将 SoloDawn 从本机运行形态迁移为 Docker 可运行、可发布、可回滚的形态，容器内原生安装 AI CLI。
 
 **Architecture:** MVP 单容器架构——Rust server + 嵌入前端 + Node.js/CLI 工具链运行在同一容器内。保留 `LocalDeployment` 不变，通过环境变量覆盖路径使其适配容器环境。不引入新的 `DockerDeployment` 抽象。
 
@@ -27,7 +27,7 @@
 | `/api/health` 仅返回 `"OK"`，无 DB/CLI 检查 | `crates/server/src/routes/health.rs:4` | 编排工具无法判断就绪状态 |
 | `/api/health` 被 API token 中间件保护 | `crates/server/src/routes/mod.rs:72` | Docker 健康检查无法通过 |
 | `asset_dir()` debug 用相对路径，release 用系统目录 | `crates/utils/src/assets.rs:6-23` | 容器内需环境变量覆盖 |
-| `get_gitcortex_temp_dir()` Linux 下用 `/var/tmp/gitcortex` | `crates/utils/src/path.rs:102-119` | 需挂卷持久化。**注意：** `get_worktree_base_dir()` = `get_gitcortex_temp_dir().join("worktrees")`，所以 env 设为 `/var/lib/gitcortex` 即可，**不要**设为 `/var/lib/gitcortex/worktrees`（否则双重嵌套） |
+| `get_solodawn_temp_dir()` Linux 下用 `/var/tmp/solodawn` | `crates/utils/src/path.rs:102-119` | 需挂卷持久化。**注意：** `get_worktree_base_dir()` = `get_solodawn_temp_dir().join("worktrees")`，所以 env 设为 `/var/lib/solodawn` 即可，**不要**设为 `/var/lib/solodawn/worktrees`（否则双重嵌套） |
 | Executor 大量走 `npx -y <pkg>@version` 而非全局命令 | `crates/executors/src/executors/claude.rs` 等 | 全局安装 CLI 是**补充**而非替代 |
 | 前端通过 `rust_embed` 编译时嵌入 `frontend/dist` | `crates/server/src/routes/frontend.rs:10` | Docker 构建必须先产出前端 |
 | Release 模式下自动打开浏览器 | `crates/server/src/main.rs:163-174` | 容器内无浏览器，需跳过 |
@@ -63,12 +63,12 @@
 // In crates/utils/src/assets.rs, add to #[cfg(test)] mod tests
 #[test]
 fn test_asset_dir_env_override() {
-    let test_dir = std::env::temp_dir().join("gitcortex-test-assets");
+    let test_dir = std::env::temp_dir().join("solodawn-test-assets");
     std::fs::create_dir_all(&test_dir).unwrap();
-    unsafe { std::env::set_var("GITCORTEX_ASSET_DIR", &test_dir); }
+    unsafe { std::env::set_var("SOLODAWN_ASSET_DIR", &test_dir); }
     let result = asset_dir().unwrap();
     assert_eq!(result, test_dir);
-    unsafe { std::env::remove_var("GITCORTEX_ASSET_DIR"); }
+    unsafe { std::env::remove_var("SOLODAWN_ASSET_DIR"); }
     std::fs::remove_dir_all(&test_dir).ok();
 }
 ```
@@ -82,12 +82,12 @@ Expected: FAIL — env var not yet read
 
 ```rust
 pub fn asset_dir() -> std::io::Result<std::path::PathBuf> {
-    let path = if let Ok(override_dir) = std::env::var("GITCORTEX_ASSET_DIR") {
+    let path = if let Ok(override_dir) = std::env::var("SOLODAWN_ASSET_DIR") {
         std::path::PathBuf::from(override_dir)
     } else if cfg!(debug_assertions) {
         std::path::PathBuf::from(PROJECT_ROOT).join("../../dev_assets")
     } else {
-        let dirs = ProjectDirs::from("ai", "bloop", "gitcortex").ok_or_else(|| {
+        let dirs = ProjectDirs::from("ai", "bloop", "solodawn").ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, "OS didn't give us a home directory")
         })?;
         dirs.data_dir().to_path_buf()
@@ -97,25 +97,25 @@ pub fn asset_dir() -> std::io::Result<std::path::PathBuf> {
 }
 ```
 
-**Step 4: Write failing test for `get_gitcortex_temp_dir` env override**
+**Step 4: Write failing test for `get_solodawn_temp_dir` env override**
 
 ```rust
 // In crates/utils/src/path.rs, add to #[cfg(test)] mod tests
 #[test]
 fn test_temp_dir_env_override() {
-    let test_dir = std::env::temp_dir().join("gitcortex-test-tmp");
-    unsafe { std::env::set_var("GITCORTEX_TEMP_DIR", &test_dir); }
-    let result = get_gitcortex_temp_dir();
+    let test_dir = std::env::temp_dir().join("solodawn-test-tmp");
+    unsafe { std::env::set_var("SOLODAWN_TEMP_DIR", &test_dir); }
+    let result = get_solodawn_temp_dir();
     assert_eq!(result, test_dir);
-    unsafe { std::env::remove_var("GITCORTEX_TEMP_DIR"); }
+    unsafe { std::env::remove_var("SOLODAWN_TEMP_DIR"); }
 }
 ```
 
-**Step 5: Implement env override in `get_gitcortex_temp_dir()`**
+**Step 5: Implement env override in `get_solodawn_temp_dir()`**
 
 ```rust
-pub fn get_gitcortex_temp_dir() -> std::path::PathBuf {
-    if let Ok(override_dir) = std::env::var("GITCORTEX_TEMP_DIR") {
+pub fn get_solodawn_temp_dir() -> std::path::PathBuf {
+    if let Ok(override_dir) = std::env::var("SOLODAWN_TEMP_DIR") {
         return std::path::PathBuf::from(override_dir);
     }
     // ... existing logic unchanged ...
@@ -131,7 +131,7 @@ Expected: ALL PASS
 
 ```bash
 git add crates/utils/src/assets.rs crates/utils/src/path.rs
-git commit -m "feat(utils): add GITCORTEX_ASSET_DIR and GITCORTEX_TEMP_DIR env overrides for Docker"
+git commit -m "feat(utils): add SOLODAWN_ASSET_DIR and SOLODAWN_TEMP_DIR env overrides for Docker"
 ```
 
 ---
@@ -169,8 +169,8 @@ pub async fn readyz(
 ) -> (axum::http::StatusCode, Json<Value>) {
     let db_ok = sqlx::query("SELECT 1").fetch_one(&deployment.db().pool).await.is_ok();
     let asset_ok = utils::assets::asset_dir().map(|p| p.exists()).unwrap_or(false);
-    let temp_ok = utils::path::get_gitcortex_temp_dir().exists()
-        || std::fs::create_dir_all(utils::path::get_gitcortex_temp_dir()).is_ok();
+    let temp_ok = utils::path::get_solodawn_temp_dir().exists()
+        || std::fs::create_dir_all(utils::path::get_solodawn_temp_dir()).is_ok();
 
     let all_ok = db_ok && asset_ok && temp_ok;
     let status = if all_ok {
@@ -212,7 +212,7 @@ Router::new()
 ```rust
 let host = std::env::var("HOST").unwrap_or_else(|_| {
     // 容器内默认绑定所有接口；本地开发默认 127.0.0.1
-    if std::env::var("GITCORTEX_ASSET_DIR").is_ok() || std::path::Path::new("/.dockerenv").exists() {
+    if std::env::var("SOLODAWN_ASSET_DIR").is_ok() || std::path::Path::new("/.dockerenv").exists() {
         "0.0.0.0".to_string()
     } else {
         "127.0.0.1".to_string()
@@ -318,27 +318,27 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
 
 # Install AI CLIs (core set)
-COPY scripts/docker/install/ /opt/gitcortex/install/
-RUN bash /opt/gitcortex/install/install-ai-clis.sh
+COPY scripts/docker/install/ /opt/solodawn/install/
+RUN bash /opt/solodawn/install/install-ai-clis.sh
 
 # Copy binary and assets
-COPY --from=rust-builder /build/target/release/server /usr/local/bin/gitcortex-server
-COPY assets/scripts/ /opt/gitcortex/assets/scripts/
-COPY assets/sounds/ /opt/gitcortex/assets/sounds/
+COPY --from=rust-builder /build/target/release/server /usr/local/bin/solodawn-server
+COPY assets/scripts/ /opt/solodawn/assets/scripts/
+COPY assets/sounds/ /opt/solodawn/assets/sounds/
 
 # Non-root user for security
-RUN groupadd -r gitcortex && useradd -r -g gitcortex -m gitcortex
+RUN groupadd -r solodawn && useradd -r -g solodawn -m solodawn
 
-# Volumes — GITCORTEX_TEMP_DIR=/var/lib/gitcortex（不是 /worktrees，因为
+# Volumes — SOLODAWN_TEMP_DIR=/var/lib/solodawn（不是 /worktrees，因为
 # get_worktree_base_dir() 会自动 .join("worktrees")）
-RUN mkdir -p /var/lib/gitcortex/assets /var/lib/gitcortex \
-    && chown -R gitcortex:gitcortex /var/lib/gitcortex
-VOLUME ["/var/lib/gitcortex"]
+RUN mkdir -p /var/lib/solodawn/assets /var/lib/solodawn \
+    && chown -R solodawn:solodawn /var/lib/solodawn
+VOLUME ["/var/lib/solodawn"]
 
 # Environment
-ENV GITCORTEX_ASSET_DIR=/var/lib/gitcortex/assets \
-    GITCORTEX_TEMP_DIR=/var/lib/gitcortex \
-    GH_EXTENSIONS_DIR=/opt/gitcortex/gh-extensions \
+ENV SOLODAWN_ASSET_DIR=/var/lib/solodawn/assets \
+    SOLODAWN_TEMP_DIR=/var/lib/solodawn \
+    GH_EXTENSIONS_DIR=/opt/solodawn/gh-extensions \
     HOST=0.0.0.0 \
     PORT=23456 \
     RUST_LOG=info
@@ -346,14 +346,14 @@ ENV GITCORTEX_ASSET_DIR=/var/lib/gitcortex/assets \
 EXPOSE 23456
 
 # Entrypoint
-COPY scripts/docker/entrypoint.sh /opt/gitcortex/entrypoint.sh
-RUN chmod +x /opt/gitcortex/entrypoint.sh
+COPY scripts/docker/entrypoint.sh /opt/solodawn/entrypoint.sh
+RUN chmod +x /opt/solodawn/entrypoint.sh
 
 # Switch to non-root user
-USER gitcortex
+USER solodawn
 
-ENTRYPOINT ["/opt/gitcortex/entrypoint.sh"]
-CMD ["gitcortex-server"]
+ENTRYPOINT ["/opt/solodawn/entrypoint.sh"]
+CMD ["solodawn-server"]
 ```
 
 **Step 3: Commit**
@@ -427,7 +427,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
-log_info "=== GitCortex AI CLI Installation ==="
+log_info "=== SoloDawn AI CLI Installation ==="
 
 # Core CLIs (must succeed)
 CORE_CLIS=(
@@ -460,7 +460,7 @@ done
 # gh extensions are user-scoped — install to shared dir so non-root user can access
 if command -v gh > /dev/null 2>&1; then
     log_info "Installing GitHub Copilot CLI extension..."
-    export GH_EXTENSIONS_DIR="/opt/gitcortex/gh-extensions"
+    export GH_EXTENSIONS_DIR="/opt/solodawn/gh-extensions"
     mkdir -p "$GH_EXTENSIONS_DIR"
     gh extension install github/gh-copilot 2>&1 || log_warn "Skipping gh-copilot"
 fi
@@ -525,11 +525,11 @@ git commit -m "feat(docker): add CLI installation and verification scripts"
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "=== GitCortex Container Starting ==="
+echo "=== SoloDawn Container Starting ==="
 
 # Ensure data directories exist with correct permissions
-mkdir -p "${GITCORTEX_ASSET_DIR:-/var/lib/gitcortex/assets}"
-mkdir -p "${GITCORTEX_TEMP_DIR:-/var/lib/gitcortex}"
+mkdir -p "${SOLODAWN_ASSET_DIR:-/var/lib/solodawn/assets}"
+mkdir -p "${SOLODAWN_TEMP_DIR:-/var/lib/solodawn}"
 
 # Verify critical dependencies
 if ! command -v git > /dev/null 2>&1; then
@@ -545,8 +545,8 @@ fi
 echo "Node.js: $(node --version)"
 echo "npm: $(npm --version)"
 echo "git: $(git --version)"
-echo "Asset dir: ${GITCORTEX_ASSET_DIR:-/var/lib/gitcortex/assets}"
-echo "Temp dir: ${GITCORTEX_TEMP_DIR:-/var/lib/gitcortex}"
+echo "Asset dir: ${SOLODAWN_ASSET_DIR:-/var/lib/solodawn/assets}"
+echo "Temp dir: ${SOLODAWN_TEMP_DIR:-/var/lib/solodawn}"
 
 # Execute the main command
 exec "$@"
@@ -572,22 +572,22 @@ git commit -m "feat(docker): add container entrypoint with pre-flight checks"
 
 ```yaml
 services:
-  gitcortex:
+  solodawn:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
     ports:
       - "${PORT:-23456}:23456"
     volumes:
-      - gitcortex-data:/var/lib/gitcortex
+      - solodawn-data:/var/lib/solodawn
     environment:
-      - GITCORTEX_ASSET_DIR=/var/lib/gitcortex/assets
-      - GITCORTEX_TEMP_DIR=/var/lib/gitcortex
+      - SOLODAWN_ASSET_DIR=/var/lib/solodawn/assets
+      - SOLODAWN_TEMP_DIR=/var/lib/solodawn
       - HOST=0.0.0.0
       - PORT=23456
       - RUST_LOG=${RUST_LOG:-info}
-      - GITCORTEX_ENCRYPTION_KEY=${GITCORTEX_ENCRYPTION_KEY}
-      - GITCORTEX_API_TOKEN=${GITCORTEX_API_TOKEN:-}
+      - SOLODAWN_ENCRYPTION_KEY=${SOLODAWN_ENCRYPTION_KEY}
+      - SOLODAWN_API_TOKEN=${SOLODAWN_API_TOKEN:-}
       # AI CLI API Keys (inject via .env)
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -601,17 +601,17 @@ services:
     restart: unless-stopped
 
 volumes:
-  gitcortex-data:
+  solodawn-data:
 ```
 
 **Step 2: 创建 `.env.example`**
 
 ```env
 # Required
-GITCORTEX_ENCRYPTION_KEY=your-32-char-encryption-key-here
+SOLODAWN_ENCRYPTION_KEY=your-32-char-encryption-key-here
 
 # Optional: API token for /api routes
-GITCORTEX_API_TOKEN=
+SOLODAWN_API_TOKEN=
 
 # AI CLI API Keys
 ANTHROPIC_API_KEY=
@@ -627,26 +627,26 @@ RUST_LOG=info
 
 ```yaml
 services:
-  gitcortex:
+  solodawn:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
     ports:
       - "23456:23456"
     volumes:
-      - gitcortex-dev-data:/var/lib/gitcortex
+      - solodawn-dev-data:/var/lib/solodawn
     environment:
-      - GITCORTEX_ASSET_DIR=/var/lib/gitcortex/assets
-      - GITCORTEX_TEMP_DIR=/var/lib/gitcortex
+      - SOLODAWN_ASSET_DIR=/var/lib/solodawn/assets
+      - SOLODAWN_TEMP_DIR=/var/lib/solodawn
       - HOST=0.0.0.0
       - PORT=23456
       - RUST_LOG=debug
-      - GITCORTEX_ENCRYPTION_KEY=12345678901234567890123456789012
+      - SOLODAWN_ENCRYPTION_KEY=12345678901234567890123456789012
     env_file:
       - .env
 
 volumes:
-  gitcortex-dev-data:
+  solodawn-dev-data:
 ```
 
 **Step 4: Commit**
@@ -680,7 +680,7 @@ git commit -m "feat(docker): add docker-compose production and dev configs"
         context: .
         file: docker/Dockerfile
         push: false
-        tags: gitcortex:ci-test
+        tags: solodawn:ci-test
         cache-from: type=gha
         cache-to: type=gha,mode=max
 ```
@@ -705,10 +705,10 @@ git commit -m "ci: add Docker build verification to baseline check"
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "=== GitCortex Docker E2E Smoke Test ==="
+echo "=== SoloDawn Docker E2E Smoke Test ==="
 
 COMPOSE_FILE="docker/compose/docker-compose.dev.yml"
-SERVICE="gitcortex"
+SERVICE="solodawn"
 BASE_URL="http://localhost:23456"
 MAX_WAIT=120
 
@@ -762,7 +762,7 @@ echo "✅ Frontend serving OK"
 # Test API health (with token if set)
 echo "Checking /api/health..."
 API_CODE=$(curl -so /dev/null -w "%{http_code}" "$BASE_URL/api/health" \
-    -H "Authorization: Bearer ${GITCORTEX_API_TOKEN:-test}")
+    -H "Authorization: Bearer ${SOLODAWN_API_TOKEN:-test}")
 echo "API health: $API_CODE"
 
 # Restart persistence test
@@ -852,7 +852,7 @@ git commit -m "docs: add Docker deployment operations guide"
 
 ## 回滚策略
 
-1. `LocalDeployment` 始终保留，`GITCORTEX_ASSET_DIR` 不设则走原逻辑。
+1. `LocalDeployment` 始终保留，`SOLODAWN_ASSET_DIR` 不设则走原逻辑。
 2. 停止容器 → 直接 `cargo run` 回到本地模式。
 3. SQLite 文件可从 Docker volume `docker cp` 出来恢复。
 4. 所有新增代码通过环境变量开关控制，不设变量 = 零影响。

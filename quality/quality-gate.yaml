@@ -1,4 +1,4 @@
-# GitCortex Quality Gate Configuration
+# SoloDawn Quality Gate Configuration
 #
 # 质量门策略定义 — 控制代码质量的自动检查和阻断行为
 # 质量门模型设计参考 SonarQube (LGPL-3.0)
@@ -162,6 +162,6 @@ providers:
 # ── SonarQube 本地配置 ──
 sonar:
   host_url: "http://localhost:9000"
-  project_key: "gitcortex"
+  project_key: "solodawn"
   # token 建议通过环境变量 SONAR_TOKEN 设置
   # token: null

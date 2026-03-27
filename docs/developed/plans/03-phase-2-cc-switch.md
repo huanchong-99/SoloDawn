@@ -92,8 +92,8 @@
 name = "cc-switch"
 version = "0.1.0"
 edition = "2021"
-description = "CLI configuration switching core for GitCortex"
-authors = ["GitCortex Contributors"]
+description = "CLI configuration switching core for SoloDawn"
+authors = ["SoloDawn Contributors"]
 license = "Apache-2.0"
 
 [dependencies]
@@ -457,7 +457,7 @@ members = [
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p cc-switch
 # 预期: 编译成功
 
@@ -1028,7 +1028,7 @@ pub use gemini::*;
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo test -p cc-switch
 # 预期: 所有测试通过
 ```
@@ -1213,7 +1213,7 @@ pub use switcher::*;
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p cc-switch
 cargo test -p cc-switch
 ```
@@ -1382,7 +1382,7 @@ pub use cc_switch::CCSwitchService;
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p services
 ```
 
@@ -1576,7 +1576,7 @@ mod tests {
 
 **运行测试:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo test -p cc-switch -- --nocapture
 ```
 

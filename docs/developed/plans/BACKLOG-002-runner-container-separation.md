@@ -18,7 +18,7 @@
 
 ```
 ┌─────────────────────────────────────────┐
-│              gitcortex 容器              │
+│              solodawn 容器              │
 │  ┌──────────────┐  ┌──────────────────┐ │
 │  │ Axum Server  │  │ ProcessManager   │ │
 │  │ (API/WS/前端)│  │ (PTY 终端)       │ │
@@ -87,13 +87,13 @@
    - 用于单容器模式和测试
 
 3. **实现 `RedisBus`**
-   - topic 消息 → Redis PubSub channel `gitcortex:topic:{name}`
-   - broadcast 消息 → Redis PubSub channel `gitcortex:broadcast`
+   - topic 消息 → Redis PubSub channel `solodawn:topic:{name}`
+   - broadcast 消息 → Redis PubSub channel `solodawn:broadcast`
    - BusMessage 序列化用 serde_json（已实现 Serialize/Deserialize）
 
 4. **环境变量控制**
-   - `GITCORTEX_MESSAGE_BUS=memory` (默认) | `redis`
-   - `GITCORTEX_REDIS_URL=redis://localhost:6379`
+   - `SOLODAWN_MESSAGE_BUS=memory` (默认) | `redis`
+   - `SOLODAWN_REDIS_URL=redis://localhost:6379`
 
 **验证**：现有 642 个后端测试全部通过，MessageBus 行为无变化。
 
@@ -118,7 +118,7 @@
 
 ```protobuf
 syntax = "proto3";
-package gitcortex.runner;
+package solodawn.runner;
 
 service RunnerService {
   // 终端生命周期
@@ -155,8 +155,8 @@ message SpawnTerminalRequest {
 5. `terminal_ws.rs` WebSocket handler 通过 gRPC stream 代理到 Runner
 
 **环境变量**：
-- `GITCORTEX_RUNNER_MODE=local` (默认，进程内) | `remote`
-- `GITCORTEX_RUNNER_ADDR=http://runner:50051`
+- `SOLODAWN_RUNNER_MODE=local` (默认，进程内) | `remote`
+- `SOLODAWN_RUNNER_ADDR=http://runner:50051`
 
 ---
 
@@ -202,8 +202,8 @@ message SpawnTerminalRequest {
 
 **实施步骤**：
 
-1. **Server 镜像**：基于现有 Dockerfile，移除 AI CLI 安装步骤，仅包含 `gitcortex-server` 二进制
-2. **Runner 镜像**：包含 `gitcortex-runner` 二进制 + 全部 AI CLI + git 工具
+1. **Server 镜像**：基于现有 Dockerfile，移除 AI CLI 安装步骤，仅包含 `solodawn-server` 二进制
+2. **Runner 镜像**：包含 `solodawn-runner` 二进制 + 全部 AI CLI + git 工具
 3. **Compose 配置**：
    ```yaml
    services:
@@ -211,16 +211,16 @@ message SpawnTerminalRequest {
        build: { dockerfile: docker/Dockerfile.server }
        ports: ["23456:23456"]
        environment:
-         GITCORTEX_RUNNER_MODE: remote
-         GITCORTEX_RUNNER_ADDR: http://runner:50051
-         GITCORTEX_MESSAGE_BUS: redis
-         GITCORTEX_REDIS_URL: redis://redis:6379
+         SOLODAWN_RUNNER_MODE: remote
+         SOLODAWN_RUNNER_ADDR: http://runner:50051
+         SOLODAWN_MESSAGE_BUS: redis
+         SOLODAWN_REDIS_URL: redis://redis:6379
      runner:
        build: { dockerfile: docker/Dockerfile.runner }
        volumes: ["${HOST_WORKSPACE_ROOT}:/workspace"]
        environment:
-         GITCORTEX_MESSAGE_BUS: redis
-         GITCORTEX_REDIS_URL: redis://redis:6379
+         SOLODAWN_MESSAGE_BUS: redis
+         SOLODAWN_REDIS_URL: redis://redis:6379
      redis:
        image: redis:7-alpine
    ```

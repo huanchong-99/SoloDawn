@@ -17,7 +17,7 @@ if ($All) {
     $IncludeSecurity = $true
 }
 
-Write-Host "=== GitCortex Quality Gate ==="
+Write-Host "=== SoloDawn Quality Gate ==="
 Write-Host "Project root: $ProjectRoot"
 Write-Host "Tier: $Tier"
 Write-Host "Mode: $Mode"

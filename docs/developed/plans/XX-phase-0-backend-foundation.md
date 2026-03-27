@@ -246,7 +246,7 @@
 | G17-001 | P1 | `WsEvent` / `WsEventType` 有 `#[derive(TS)]` 但未导出到 `shared/types.ts` | 在 generate_types.rs 中添加 `WsEvent::decl()` 和 `WsEventType::decl()` 调用 |
 | G36-003 | P2 | 另有 6 个 Rust 类型有 `#[derive(TS)]` 但未导出 | 优先导出 `WsEventType` / `WsEvent`，审查其余 4 个类型是否需要前端使用，按需添加 |
 | G36-007 | P3 | `git_branch_id` 每次调用编译正则 | 使用 `once_cell::sync::Lazy` 缓存编译后的 Regex |
-| G36-008 | P3 | `port_file.rs` 硬编码 "gitcortex" vs debug 模式 "gitcortex-dev" 路径不一致 | 统一使用 `get_gitcortex_temp_dir()` 函数 |
+| G36-008 | P3 | `port_file.rs` 硬编码 "solodawn" vs debug 模式 "solodawn-dev" 路径不一致 | 统一使用 `get_solodawn_temp_dir()` 函数 |
 | G08-004 | P3 | CLAUDE.md 文档声称 broadcast channel 容量为 32，实际代码中为 1000 | 更新 CLAUDE.md 中的描述（注：CLAUDE.md 已 gitignore，仅本地修改） |
 
 **注意事项：**

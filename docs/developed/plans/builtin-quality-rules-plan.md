@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary
 
-GitCortex's quality gate currently has a solid **framework** (ported from SonarQube's architecture) but
+SoloDawn's quality gate currently has a solid **framework** (ported from SonarQube's architecture) but
 delegates ALL actual code analysis to external tools (cargo clippy CLI, ESLint CLI, SonarQube server).
 This plan adds **fully built-in static analysis rules** in Rust, covering:
 

@@ -1,4 +1,4 @@
-# GitCortex Docker Deployment Guide
+# SoloDawn Docker Deployment Guide
 
 ## Quick Start
 
@@ -18,7 +18,7 @@ Manual flow:
 cd docker/compose
 cp .env.example .env
 # Edit .env and set at least:
-# - GITCORTEX_ENCRYPTION_KEY (32 chars)
+# - SOLODAWN_ENCRYPTION_KEY (32 chars)
 # Optional:
 # - HOST_WORKSPACE_ROOT=E:/test (or another host path containing git repos)
 # - INSTALL_AI_CLIS=1 (install AI CLIs during image build)
@@ -32,14 +32,14 @@ Access: http://localhost:23456
 - Containers are isolated by default and cannot read your full host disk automatically.
 - The app can access:
   - container filesystem
-  - named volume mounted at `/var/lib/gitcortex`
+  - named volume mounted at `/var/lib/solodawn`
   - only the host path you map to `/workspace` (`HOST_WORKSPACE_ROOT`)
 - To expand accessible host files, change `HOST_WORKSPACE_ROOT` and recreate containers.
 
 ## Runtime Path Behavior
 
-- GitCortex now distinguishes containerized runtime from direct host runtime.
-- In Docker mode, repo browsing prefers `GITCORTEX_WORKSPACE_ROOT` (default `/workspace`) so the workflow wizard starts from the mounted workspace instead of a host-only default path.
+- SoloDawn now distinguishes containerized runtime from direct host runtime.
+- In Docker mode, repo browsing prefers `SOLODAWN_WORKSPACE_ROOT` (default `/workspace`) so the workflow wizard starts from the mounted workspace instead of a host-only default path.
 - In direct local mode, the same picker falls back to the backend-selected local browse root instead of assuming Docker paths exist.
 
 ## Update Existing Deployment
@@ -71,30 +71,30 @@ curl http://localhost:23456/readyz
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `GITCORTEX_ENCRYPTION_KEY` | Yes | - | 32-char encryption key for credentials |
-| `GITCORTEX_DOCKER_API_TOKEN` | No | - | Bearer token for `/api` routes (Docker-only variable) |
+| `SOLODAWN_ENCRYPTION_KEY` | Yes | - | 32-char encryption key for credentials |
+| `SOLODAWN_DOCKER_API_TOKEN` | No | - | Bearer token for `/api` routes (Docker-only variable) |
 | `ANTHROPIC_API_KEY` | No | - | Claude Code API key |
 | `OPENAI_API_KEY` | No | - | Codex CLI API key |
 | `GOOGLE_API_KEY` | No | - | Gemini CLI API key |
 | `PORT` | No | 23456 | Host port mapping |
 | `RUST_LOG` | No | info | Log level (debug/info/warn/error) |
 | `HOST_WORKSPACE_ROOT` | No | `../..` | Host path mounted into container for repo discovery |
-| `GITCORTEX_WORKSPACE_ROOT` | No | `/workspace` | Workspace mount point in container |
-| `GITCORTEX_ALLOWED_ROOTS` | No | `/workspace,/var/lib/gitcortex` | Allowed roots for filesystem scanning |
-| `GITCORTEX_IMAGE_REGISTRY` | No | `ghcr.io` | Prebuilt image registry host for pull-first strategy |
-| `GITCORTEX_IMAGE_NAMESPACE` | No | `huanchong-99` | Registry namespace/user for prebuilt images |
-| `GITCORTEX_IMAGE_PULL_POLICY` | No | `missing` | Pull policy: `always` / `missing` / `never` |
+| `SOLODAWN_WORKSPACE_ROOT` | No | `/workspace` | Workspace mount point in container |
+| `SOLODAWN_ALLOWED_ROOTS` | No | `/workspace,/var/lib/solodawn` | Allowed roots for filesystem scanning |
+| `SOLODAWN_IMAGE_REGISTRY` | No | `ghcr.io` | Prebuilt image registry host for pull-first strategy |
+| `SOLODAWN_IMAGE_NAMESPACE` | No | `huanchong-99` | Registry namespace/user for prebuilt images |
+| `SOLODAWN_IMAGE_PULL_POLICY` | No | `missing` | Pull policy: `always` / `missing` / `never` |
 | `INSTALL_AI_CLIS` | No | `0` | Set to `1` to install AI CLIs during image build |
-| `GITCORTEX_AUTO_SETUP_PROJECTS` | No | `1` | Set to `0` to disable auto-creating starter projects on first launch |
+| `SOLODAWN_AUTO_SETUP_PROJECTS` | No | `1` | Set to `0` to disable auto-creating starter projects on first launch |
 
 ## Volumes
 
-Named volume `gitcortex-data` mounted at `/var/lib/gitcortex`:
+Named volume `solodawn-data` mounted at `/var/lib/solodawn`:
 - `assets/` -> SQLite DB, config, credentials
 - `worktrees/` -> Git worktrees (auto-created by app)
 
 Bind mount:
-- `${HOST_WORKSPACE_ROOT}` -> `${GITCORTEX_WORKSPACE_ROOT}` (host git repos visible in container)
+- `${HOST_WORKSPACE_ROOT}` -> `${SOLODAWN_WORKSPACE_ROOT}` (host git repos visible in container)
 
 ## Health Endpoints
 
@@ -131,14 +131,14 @@ docker compose -f docker/compose/docker-compose.dev.yml up -d --build
 
 ```bash
 # Backup SQLite
-docker compose -f docker/compose/docker-compose.yml exec gitcortex \
-  cp /var/lib/gitcortex/assets/gitcortex.db /tmp/backup.db
+docker compose -f docker/compose/docker-compose.yml exec solodawn \
+  cp /var/lib/solodawn/assets/solodawn.db /tmp/backup.db
 docker compose -f docker/compose/docker-compose.yml cp \
-  gitcortex:/tmp/backup.db ./backup.db
+  solodawn:/tmp/backup.db ./backup.db
 
 # Restore
 docker compose -f docker/compose/docker-compose.yml cp \
-  ./backup.db gitcortex:/var/lib/gitcortex/assets/gitcortex.db
+  ./backup.db solodawn:/var/lib/solodawn/assets/solodawn.db
 docker compose -f docker/compose/docker-compose.yml restart
 ```
 
@@ -186,9 +186,9 @@ Then rebuild. After pruning, first build will be cold again; subsequent builds r
 |---|---|---|
 | Port unreachable | HOST not 0.0.0.0 | Check `HOST` env var |
 | `/readyz` returns 503 | DB or dir missing | Check volume mounts |
-| `401` on `/api/*` | Docker API token enabled | Set `GITCORTEX_DOCKER_API_TOKEN` correctly or leave it empty |
+| `401` on `/api/*` | Docker API token enabled | Set `SOLODAWN_DOCKER_API_TOKEN` correctly or leave it empty |
 | Repo scan returns empty | Host workspace not mounted | Set `HOST_WORKSPACE_ROOT` and restart compose |
-| CLI not detected | Install disabled/failed | Set `INSTALL_AI_CLIS=1` and rebuild, or use `Settings -> Agents -> One-click Install AI CLIs`; run `/opt/gitcortex/install/verify-all-clis.sh` |
-| Unexpected starter projects | Old data volume reused or auto-setup enabled | Set `GITCORTEX_AUTO_SETUP_PROJECTS=0`; run `docker compose down -v --remove-orphans` for a clean state |
-| Permission denied | Volume ownership | Ensure volume owned by `gitcortex` user |
+| CLI not detected | Install disabled/failed | Set `INSTALL_AI_CLIS=1` and rebuild, or use `Settings -> Agents -> One-click Install AI CLIs`; run `/opt/solodawn/install/verify-all-clis.sh` |
+| Unexpected starter projects | Old data volume reused or auto-setup enabled | Set `SOLODAWN_AUTO_SETUP_PROJECTS=0`; run `docker compose down -v --remove-orphans` for a clean state |
+| Permission denied | Volume ownership | Ensure volume owned by `solodawn` user |
 | pnpm install stuck at last package | Corrupted pnpm store cache | `docker builder prune --filter type=exec.cachemount` then rebuild |

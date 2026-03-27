@@ -1,7 +1,7 @@
 # Phase 18 端到端测试实施计划
 
 > **创建时间:** 2026-01-30
-> **工作区:** E:/GitCortex-phase-18-e2e
+> **工作区:** E:/SoloDawn-phase-18-e2e
 > **分支:** feature/phase-18-e2e-tests
 
 ## 概述
@@ -59,7 +59,7 @@
 ### 环境变量
 
 ```bash
-GITCORTEX_ENCRYPTION_KEY=12345678901234567890123456789012
+SOLODAWN_ENCRYPTION_KEY=12345678901234567890123456789012
 ```
 
 ## 实施步骤

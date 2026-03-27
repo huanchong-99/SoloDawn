@@ -72,7 +72,7 @@ ANTHROPIC_DEFAULT_OPUS_MODEL=glm-4.7
 ```bash
 OPENAI_API_KEY=sk-xxx
 OPENAI_BASE_URL=https://api.example.com/v1  # 自定义 API endpoint
-CODEX_HOME=/tmp/gitcortex/terminal-xxx      # 隔离本地状态目录
+CODEX_HOME=/tmp/solodawn/terminal-xxx      # 隔离本地状态目录
 ```
 
 **CLI 参数（优先级高于配置文件）：**
@@ -318,7 +318,7 @@ impl CCSwitchService {
 
                 // 设置独立的 CODEX_HOME 目录
                 let codex_home = std::env::temp_dir()
-                    .join("gitcortex")
+                    .join("solodawn")
                     .join(format!("codex-{}", terminal.id));
                 std::fs::create_dir_all(&codex_home)?;
                 env.set.insert("CODEX_HOME".to_string(), codex_home.to_string_lossy().to_string());

@@ -1,4 +1,4 @@
-# GitCortex Full Codebase Audit Report
+# SoloDawn Full Codebase Audit Report
 
 **Date:** 2026-03-15
 **Scope:** Full codebase (~215k LOC across 12 Rust crates + React/TypeScript frontend)

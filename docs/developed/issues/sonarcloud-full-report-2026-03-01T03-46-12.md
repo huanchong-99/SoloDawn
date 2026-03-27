@@ -1,7 +1,7 @@
 # SonarCloud 代码质量完整报告
 
 **生成时间**: 2026/03/01 11:46
-**项目**: huanchong-99_GitCortex
+**项目**: huanchong-99_SoloDawn
 
 ---
 
@@ -145,7 +145,7 @@
 8: const { getPorts } = require("./setup-dev-environment");
 10: const children = new Set();
 11: let shuttingDown = false;
-12: const devLockPath = path.join(os.tmpdir(), "gitcortex", "run-dev.lock");
+12: const devLockPath = path.join(os.tmpdir(), "solodawn", "run-dev.lock");
 13: let lockFd = null;
 15: function isProcessAlive(pid) {
 16: if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -270,7 +270,7 @@
 # SonarCloud 重复代码报告
 
 **生成时间**: 2026/03/01 11:46
-**项目**: huanchong-99_GitCortex
+**项目**: huanchong-99_SoloDawn
 **问题文件总数**: 5
 **重复行总数**: 137
 **重复块总数**: 80
@@ -298,7 +298,7 @@
 - **重复率**: 95.1%
 - **重复行数**: 98 行
 - **重复块数**: 26 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Acrates%2Fdb%2Fmigrations%2F20250716143725_add_default_templates.sql)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Acrates%2Fdb%2Fmigrations%2F20250716143725_add_default_templates.sql)
 
 ---
 
@@ -312,7 +312,7 @@
 - **重复率**: 100%
 - **重复行数**: 4 行
 - **重复块数**: 1 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fcomponents%2Fui-new%2Fcontainers%2FNavbarContainer.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fcomponents%2Fui-new%2Fcontainers%2FNavbarContainer.tsx)
 
 ### 2.2 ContextBarContainer.tsx
 
@@ -320,7 +320,7 @@
 - **重复率**: 66.7%
 - **重复行数**: 4 行
 - **重复块数**: 1 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fcomponents%2Fui-new%2Fcontainers%2FContextBarContainer.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fcomponents%2Fui-new%2Fcontainers%2FContextBarContainer.tsx)
 
 ---
 
@@ -334,7 +334,7 @@
 - **重复率**: 37.5%
 - **重复行数**: 3 行
 - **重复块数**: 5 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fhooks%2FuseWorkflows.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fhooks%2FuseWorkflows.test.tsx)
 
 ---
 
@@ -348,7 +348,7 @@
 - **重复率**: 62.2%
 - **重复行数**: 28 行
 - **重复块数**: 47 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fpages%2FWorkflows.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fpages%2FWorkflows.test.tsx)
 
 ---
 
@@ -359,7 +359,7 @@
 # SonarCloud 安全热点报告
 
 **生成时间**: 2026/03/01 11:46
-**项目**: huanchong-99_GitCortex
+**项目**: huanchong-99_SoloDawn
 **安全热点总数**: 18
 
 ---
@@ -395,7 +395,7 @@
 | **规则ID** | [javascript:S4721](https://sonarcloud.io/organizations/huanchong-99/rules?open=javascript%3AS4721&rule_key=javascript%3AS4721) |
 | **类别** | Command Injection |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 ---
 
@@ -409,7 +409,7 @@
 | **规则ID** | [typescript:S5852](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS5852&rule_key=typescript%3AS5852) |
 | **类别** | Denial of Service (DoS) |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 3. Make sure the regex used here, which is vulnerable to super-linear runtime due to backtracking, cannot lead to denial of service.
 
@@ -419,7 +419,7 @@
 | **规则ID** | [typescript:S5852](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS5852&rule_key=typescript%3AS5852) |
 | **类别** | Denial of Service (DoS) |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 4. Make sure the regex used here, which is vulnerable to super-linear runtime due to backtracking, cannot lead to denial of service.
 
@@ -429,7 +429,7 @@
 | **规则ID** | [typescript:S5852](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS5852&rule_key=typescript%3AS5852) |
 | **类别** | Denial of Service (DoS) |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 5. Make sure that using this pseudorandom number generator is safe here.
 
@@ -439,7 +439,7 @@
 | **规则ID** | [typescript:S2245](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS2245&rule_key=typescript%3AS2245) |
 | **类别** | Weak Cryptography |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 6. Make sure that using this pseudorandom number generator is safe here.
 
@@ -449,7 +449,7 @@
 | **规则ID** | [typescript:S2245](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS2245&rule_key=typescript%3AS2245) |
 | **类别** | Weak Cryptography |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 7. Make sure that using this pseudorandom number generator is safe here.
 
@@ -459,7 +459,7 @@
 | **规则ID** | [typescript:S2245](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS2245&rule_key=typescript%3AS2245) |
 | **类别** | Weak Cryptography |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 8. Make sure that using this pseudorandom number generator is safe here.
 
@@ -469,7 +469,7 @@
 | **规则ID** | [typescript:S2245](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS2245&rule_key=typescript%3AS2245) |
 | **类别** | Weak Cryptography |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 9. Make sure that using this pseudorandom number generator is safe here.
 
@@ -479,7 +479,7 @@
 | **规则ID** | [typescript:S2245](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS2245&rule_key=typescript%3AS2245) |
 | **类别** | Weak Cryptography |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 ---
 
@@ -493,7 +493,7 @@
 | **规则ID** | [githubactions:S7637](https://sonarcloud.io/organizations/huanchong-99/rules?open=githubactions%3AS7637&rule_key=githubactions%3AS7637) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 11. Use full commit SHA hash for this dependency.
 
@@ -503,7 +503,7 @@
 | **规则ID** | [githubactions:S7637](https://sonarcloud.io/organizations/huanchong-99/rules?open=githubactions%3AS7637&rule_key=githubactions%3AS7637) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 12. Use full commit SHA hash for this dependency.
 
@@ -513,7 +513,7 @@
 | **规则ID** | [githubactions:S7637](https://sonarcloud.io/organizations/huanchong-99/rules?open=githubactions%3AS7637&rule_key=githubactions%3AS7637) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 13. Make sure publicly writable directories are used safely here.
 
@@ -523,7 +523,7 @@
 | **规则ID** | [typescript:S5443](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS5443&rule_key=typescript%3AS5443) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 14. Make sure publicly writable directories are used safely here.
 
@@ -533,7 +533,7 @@
 | **规则ID** | [typescript:S5443](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS5443&rule_key=typescript%3AS5443) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 15. Make sure publicly writable directories are used safely here.
 
@@ -543,7 +543,7 @@
 | **规则ID** | [typescript:S5443](https://sonarcloud.io/organizations/huanchong-99/rules?open=typescript%3AS5443&rule_key=typescript%3AS5443) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 16. Make sure the "PATH" variable only contains fixed, unwriteable directories.
 
@@ -553,7 +553,7 @@
 | **规则ID** | [javascript:S4036](https://sonarcloud.io/organizations/huanchong-99/rules?open=javascript%3AS4036&rule_key=javascript%3AS4036) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 17. Make sure the "PATH" variable only contains fixed, unwriteable directories.
 
@@ -563,7 +563,7 @@
 | **规则ID** | [javascript:S4036](https://sonarcloud.io/organizations/huanchong-99/rules?open=javascript%3AS4036&rule_key=javascript%3AS4036) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 18. Make sure the "PATH" variable only contains fixed, unwriteable directories.
 
@@ -573,7 +573,7 @@
 | **规则ID** | [javascript:S4036](https://sonarcloud.io/organizations/huanchong-99/rules?open=javascript%3AS4036&rule_key=javascript%3AS4036) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 ---
 

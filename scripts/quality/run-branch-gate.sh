@@ -27,7 +27,7 @@ if [[ -z "$BRANCH" ]]; then
   BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 fi
 
-echo "=== GitCortex Branch Quality Gate ==="
+echo "=== SoloDawn Branch Quality Gate ==="
 echo "Project root: $PROJECT_ROOT"
 echo "Branch:       $BRANCH"
 echo ""

@@ -706,9 +706,9 @@ CREATE TABLE IF NOT EXISTS feishu_app_config (
 现有 `external_conversation_binding` 表已支持任意 provider 字符串，无需 schema 变更。
 
 **环境变量**：
-- `GITCORTEX_FEISHU_APP_ID` — 飞书 App ID
-- `GITCORTEX_FEISHU_APP_SECRET` — 飞书 App Secret（启动时加密存储）
-- `GITCORTEX_FEISHU_ENABLED` — 功能开关，默认 false
+- `SOLODAWN_FEISHU_APP_ID` — 飞书 App ID
+- `SOLODAWN_FEISHU_APP_SECRET` — 飞书 App Secret（启动时加密存储）
+- `SOLODAWN_FEISHU_ENABLED` — 功能开关，默认 false
 
 **DB Model** 新建 `crates/db/src/models/feishu_config.rs`：
 - `FeishuAppConfig` 结构体 + CRUD 方法
@@ -726,7 +726,7 @@ CREATE TABLE IF NOT EXISTS feishu_app_config (
 **修改文件**: `crates/server/src/main.rs`
 **新建文件**: `crates/server/src/routes/feishu.rs`
 
-1. Server 启动时，如果 `GITCORTEX_FEISHU_ENABLED=true`：
+1. Server 启动时，如果 `SOLODAWN_FEISHU_ENABLED=true`：
    - 从 DB 或环境变量加载飞书配置
    - 创建 `FeishuService` 并启动 WebSocket 连接
    - 注册到 app state

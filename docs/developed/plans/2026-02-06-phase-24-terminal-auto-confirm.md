@@ -37,7 +37,7 @@
 
 Auto-Claude 使用 Claude Agent SDK（Python SDK）与 Claude 交互，不是直接启动 PTY 进程。它的 Orchestrator 是 Python 代码，处理所有 bookkeeping（记忆、提交、进度），Agent 只专注于实现代码。
 
-GitCortex 使用 PTY 方式启动 CLI 工具，需要建立 MessageBus → PTY 输入桥来实现类似功能。
+SoloDawn 使用 PTY 方式启动 CLI 工具，需要建立 MessageBus → PTY 输入桥来实现类似功能。
 
 ---
 
@@ -104,7 +104,7 @@ fn build_arrow_sequence(current: usize, target: usize) -> String {
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      GitCortex 终端交互架构                    │
+│                      SoloDawn 终端交互架构                    │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  路径 A: Claude Code Hooks（权限提示）                        │

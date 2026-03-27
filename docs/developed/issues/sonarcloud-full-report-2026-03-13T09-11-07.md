@@ -2,7 +2,7 @@
 # SonarCloud 代码质量完整报告
 
 **生成时间**: 2026/03/13 17:11
-**项目**: huanchong-99_GitCortex
+**项目**: huanchong-99_SoloDawn
 
 ---
 
@@ -88,7 +88,7 @@
 1: # ============================================================================
 2: # CI Workflow: Notify Orchestrator
 3: # Triggers: workflow_run completion of ci-basic, ci-quality, ci-docker
-4: # Purpose: Posts CI results to GitCortex API for orchestrator consumption
+4: # Purpose: Posts CI results to SoloDawn API for orchestrator consumption
 5: # Required check for: None (notification-only)
 6: # ============================================================================
 7: name: CI Notify Orchestrator
@@ -102,14 +102,14 @@
 16: - completed
 18: jobs:
 19: notify:
-20: name: Notify GitCortex API
+20: name: Notify SoloDawn API
 21: runs-on: ubuntu-latest
 22: timeout-minutes: 5
 24: steps:
-25: - name: Post result to GitCortex orchestrator
+25: - name: Post result to SoloDawn orchestrator
 26: env:
-27: GITCORTEX_API_URL: ${{ vars.GITCORTEX_API_URL || 'http://localhost:23456' }}
-28: GITCORTEX_API_TOKEN: ${{ secrets.GITCORTEX_API_TOKEN }}
+27: SOLODAWN_API_URL: ${{ vars.SOLODAWN_API_URL || 'http://localhost:23456' }}
+28: SOLODAWN_API_TOKEN: ${{ secrets.SOLODAWN_API_TOKEN }}
 29: run: |
 30: PAYLOAD=$(cat <<EOF
 31: {
@@ -124,11 +124,11 @@
 40: )
 42: echo "Sending CI notification:"
 43: echo "$PAYLOAD" | jq .
-45: # POST to GitCortex API (best-effort, non-blocking)
+45: # POST to SoloDawn API (best-effort, non-blocking)
 46: HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-47: -X POST "${GITCORTEX_API_URL}/api/ci/webhook" \
+47: -X POST "${SOLODAWN_API_URL}/api/ci/webhook" \
 48: -H "Content-Type: application/json" \
-49: -H "Authorization: Bearer ${GITCORTEX_API_TOKEN}" \
+49: -H "Authorization: Bearer ${SOLODAWN_API_TOKEN}" \
 50: -d "$PAYLOAD" \
 51: --connect-timeout 10 \
 52: --max-time 30 \
@@ -207,21 +207,21 @@
 **问题代码片段**:
 ```
 110: FROM debian:trixie-slim AS runtime
-111: ARG GITCORTEX_BUILD_NETWORK_PROFILE
+111: ARG SOLODAWN_BUILD_NETWORK_PROFILE
 112: ARG INSTALL_AI_CLIS=0
 113: ARG NODE_MAJOR=22
 115: set -eux; \
-116: if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+116: if [ "$SOLODAWN_BUILD_NETWORK_PROFILE" = "china" ]; then \
 117: sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || \
 118: sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true; \
 119: fi; \
 120: printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
-121: > /etc/apt/apt.conf.d/80gitcortex-retries; \
+121: > /etc/apt/apt.conf.d/80solodawn-retries; \
 122: apt-get update && apt-get install -y --no-install-recommends \
 123: libsqlite3-0 libgit2-1.9 git curl ca-certificates bash gnupg xz-utils \
 124: && rm -rf /var/lib/apt/lists/*
 126: consecutive RUN instruction set -eux; \
-127: if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+127: if [ "$SOLODAWN_BUILD_NETWORK_PROFILE" = "china" ]; then \
 128: NODE_DIST_URL="https://npmmirror.com/mirrors/node"; \
 129: else \
 130: NODE_DIST_URL="https://nodejs.org/dist"; \
@@ -241,7 +241,7 @@
 145: npm config --global set fetch-retry-mintimeout 20000; \
 146: npm config --global set fetch-retry-maxtimeout 120000; \
 147: npm config --global set fetch-timeout 300000; \
-148: if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+148: if [ "$SOLODAWN_BUILD_NETWORK_PROFILE" = "china" ]; then \
 149: npm config --global set registry https://registry.npmmirror.com; \
 150: fi
 152: consecutive RUN instruction set -eux; \
@@ -266,7 +266,7 @@
 **问题代码片段**:
 ```
 1: # syntax=docker/dockerfile:1.7
-3: ARG GITCORTEX_BUILD_NETWORK_PROFILE=official
+3: ARG SOLODAWN_BUILD_NETWORK_PROFILE=official
 4: ARG PNPM_VERSION=10.13.1
 5: ARG RUST_TOOLCHAIN=nightly-2025-12-04
 6: ARG NODE_MAJOR=22
@@ -274,21 +274,21 @@
 9: # Stage 1: Frontend build
 10: # ============================================================
 11: FROM node:${NODE_MAJOR}-slim AS frontend-builder
-12: ARG GITCORTEX_BUILD_NETWORK_PROFILE
+12: ARG SOLODAWN_BUILD_NETWORK_PROFILE
 13: ARG PNPM_VERSION
 15: WORKDIR /build
 17: # Enable corepack pnpm — zero network cost, no npm install -g
 18: RUN corepack enable && corepack prepare "pnpm@${PNPM_VERSION}" --activate
 20: # China mirror for npm/pnpm (only affects pnpm install, not corepack)
 21: RUN set -eux; \
-22: if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+22: if [ "$SOLODAWN_BUILD_NETWORK_PROFILE" = "china" ]; then \
 23: npm config --global set registry https://registry.npmmirror.com; \
 24: pnpm config set registry https://registry.npmmirror.com --global; \
 25: fi
 27: # Layer 1: dependency manifest only → cached unless lockfile changes
 28: COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 29: COPY frontend/package.json frontend/
-31: RUN --mount=type=cache,id=gitcortex-pnpm-store,target=/pnpm/store,sharing=locked \
+31: RUN --mount=type=cache,id=solodawn-pnpm-store,target=/pnpm/store,sharing=locked \
 32: pnpm config set store-dir /pnpm/store && \
 33: cd frontend && \
 34: pnpm install --frozen-lockfile --prefer-offline
@@ -296,21 +296,21 @@
 37: COPY frontend/ frontend/
 38: COPY shared/ shared/
 40: ENV BROWSERSLIST_IGNORE_OLD_DATA=1 \
-41: GITCORTEX_BUILD_SOURCEMAP=0
+41: SOLODAWN_BUILD_SOURCEMAP=0
 43: RUN cd frontend && pnpm run build:docker
 45: # ============================================================
 46: # Stage 2: Rust toolchain + system deps (heavily cached layer)
 47: # ============================================================
 48: FROM rust:slim-trixie AS rust-base
-49: ARG GITCORTEX_BUILD_NETWORK_PROFILE
+49: ARG SOLODAWN_BUILD_NETWORK_PROFILE
 50: ARG RUST_TOOLCHAIN
 52: RUN set -eux; \
-53: if [ "$GITCORTEX_BUILD_NETWORK_PROFILE" = "china" ]; then \
+53: if [ "$SOLODAWN_BUILD_NETWORK_PROFILE" = "china" ]; then \
 54: sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || \
 55: sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true; \
 56: fi; \
 57: printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
-58: > /etc/apt/apt.conf.d/80gitcortex-retries; \
+58: > /etc/apt/apt.conf.d/80solodawn-retries; \
 59: apt-get update && apt-get install -y --no-install-recommends \
 60: git pkg-config libsqlite3-dev libgit2-dev zlib1g-dev \
 61: cmake make ninja-build clang libclang-dev perl nasm libssl-dev \
@@ -341,10 +341,10 @@
 3: # Usage: ./cleanup-quality-data.sh [db_path] [log_dir]
 4: #
 5: # Schedule via cron (host) or a one-shot container:
-6: # 0 3 * * 0 /path/to/cleanup-quality-data.sh /var/lib/gitcortex/data.db /var/log/gitcortex
+6: # 0 3 * * 0 /path/to/cleanup-quality-data.sh /var/lib/solodawn/data.db /var/log/solodawn
 7: set -euo pipefail
-9: DB_PATH="${1:-/var/lib/gitcortex/data.db}"
-10: LOG_DIR="${2:-/var/log/gitcortex}"
+9: DB_PATH="${1:-/var/lib/solodawn/data.db}"
+10: LOG_DIR="${2:-/var/log/solodawn}"
 11: RETENTION_DAYS=90
 12: LOG_COMPRESS_DAYS=7
 14: echo "=== Quality Data Cleanup ==="
@@ -406,10 +406,10 @@
 3: # Usage: ./cleanup-quality-data.sh [db_path] [log_dir]
 4: #
 5: # Schedule via cron (host) or a one-shot container:
-6: # 0 3 * * 0 /path/to/cleanup-quality-data.sh /var/lib/gitcortex/data.db /var/log/gitcortex
+6: # 0 3 * * 0 /path/to/cleanup-quality-data.sh /var/lib/solodawn/data.db /var/log/solodawn
 7: set -euo pipefail
-9: DB_PATH="${1:-/var/lib/gitcortex/data.db}"
-10: LOG_DIR="${2:-/var/log/gitcortex}"
+9: DB_PATH="${1:-/var/lib/solodawn/data.db}"
+10: LOG_DIR="${2:-/var/log/solodawn}"
 11: RETENTION_DAYS=90
 12: LOG_COMPRESS_DAYS=7
 14: echo "=== Quality Data Cleanup ==="
@@ -471,10 +471,10 @@
 3: # Usage: ./cleanup-quality-data.sh [db_path] [log_dir]
 4: #
 5: # Schedule via cron (host) or a one-shot container:
-6: # 0 3 * * 0 /path/to/cleanup-quality-data.sh /var/lib/gitcortex/data.db /var/log/gitcortex
+6: # 0 3 * * 0 /path/to/cleanup-quality-data.sh /var/lib/solodawn/data.db /var/log/solodawn
 7: set -euo pipefail
-9: DB_PATH="${1:-/var/lib/gitcortex/data.db}"
-10: LOG_DIR="${2:-/var/log/gitcortex}"
+9: DB_PATH="${1:-/var/lib/solodawn/data.db}"
+10: LOG_DIR="${2:-/var/log/solodawn}"
 11: RETENTION_DAYS=90
 12: LOG_COMPRESS_DAYS=7
 14: echo "=== Quality Data Cleanup ==="
@@ -536,10 +536,10 @@
 3: # Usage: ./cleanup-quality-data.sh [db_path] [log_dir]
 4: #
 5: # Schedule via cron (host) or a one-shot container:
-6: # 0 3 * * 0 /path/to/cleanup-quality-data.sh /var/lib/gitcortex/data.db /var/log/gitcortex
+6: # 0 3 * * 0 /path/to/cleanup-quality-data.sh /var/lib/solodawn/data.db /var/log/solodawn
 7: set -euo pipefail
-9: DB_PATH="${1:-/var/lib/gitcortex/data.db}"
-10: LOG_DIR="${2:-/var/log/gitcortex}"
+9: DB_PATH="${1:-/var/lib/solodawn/data.db}"
+10: LOG_DIR="${2:-/var/log/solodawn}"
 11: RETENTION_DAYS=90
 12: LOG_COMPRESS_DAYS=7
 14: echo "=== Quality Data Cleanup ==="
@@ -603,13 +603,13 @@
 **问题代码片段**:
 ```
 1: #!/usr/bin/env bash
-2: # init-sonar.sh — Initialize SonarQube for GitCortex
+2: # init-sonar.sh — Initialize SonarQube for SoloDawn
 3: # Usage: ./init-sonar.sh [sonar_url] [admin_password]
 4: set -euo pipefail
 6: SONAR_URL="${1:-http://localhost:9000}"
 7: ADMIN_PASS="${2:-admin}"
-8: PROJECT_KEY="gitcortex"
-9: PROJECT_NAME="GitCortex"
+8: PROJECT_KEY="solodawn"
+9: PROJECT_NAME="SoloDawn"
 10: MAX_WAIT=300
 11: POLL_INTERVAL=5
 13: # ── Step 1: Wait for SonarQube to be healthy ──────────────────────
@@ -668,13 +668,13 @@
 **问题代码片段**:
 ```
 1: #!/usr/bin/env bash
-2: # init-sonar.sh — Initialize SonarQube for GitCortex
+2: # init-sonar.sh — Initialize SonarQube for SoloDawn
 3: # Usage: ./init-sonar.sh [sonar_url] [admin_password]
 4: set -euo pipefail
 6: SONAR_URL="${1:-http://localhost:9000}"
 7: ADMIN_PASS="${2:-admin}"
-8: PROJECT_KEY="gitcortex"
-9: PROJECT_NAME="GitCortex"
+8: PROJECT_KEY="solodawn"
+9: PROJECT_NAME="SoloDawn"
 10: MAX_WAIT=300
 11: POLL_INTERVAL=5
 13: # ── Step 1: Wait for SonarQube to be healthy ──────────────────────
@@ -733,13 +733,13 @@
 **问题代码片段**:
 ```
 1: #!/usr/bin/env bash
-2: # init-sonar.sh — Initialize SonarQube for GitCortex
+2: # init-sonar.sh — Initialize SonarQube for SoloDawn
 3: # Usage: ./init-sonar.sh [sonar_url] [admin_password]
 4: set -euo pipefail
 6: SONAR_URL="${1:-http://localhost:9000}"
 7: ADMIN_PASS="${2:-admin}"
-8: PROJECT_KEY="gitcortex"
-9: PROJECT_NAME="GitCortex"
+8: PROJECT_KEY="solodawn"
+9: PROJECT_NAME="SoloDawn"
 10: MAX_WAIT=300
 11: POLL_INTERVAL=5
 13: # ── Step 1: Wait for SonarQube to be healthy ──────────────────────
@@ -798,13 +798,13 @@
 **问题代码片段**:
 ```
 1: #!/usr/bin/env bash
-2: # init-sonar.sh — Initialize SonarQube for GitCortex
+2: # init-sonar.sh — Initialize SonarQube for SoloDawn
 3: # Usage: ./init-sonar.sh [sonar_url] [admin_password]
 4: set -euo pipefail
 6: SONAR_URL="${1:-http://localhost:9000}"
 7: ADMIN_PASS="${2:-admin}"
-8: PROJECT_KEY="gitcortex"
-9: PROJECT_NAME="GitCortex"
+8: PROJECT_KEY="solodawn"
+9: PROJECT_NAME="SoloDawn"
 10: MAX_WAIT=300
 11: POLL_INTERVAL=5
 13: # ── Step 1: Wait for SonarQube to be healthy ──────────────────────
@@ -863,13 +863,13 @@
 **问题代码片段**:
 ```
 1: #!/usr/bin/env bash
-2: # init-sonar.sh — Initialize SonarQube for GitCortex
+2: # init-sonar.sh — Initialize SonarQube for SoloDawn
 3: # Usage: ./init-sonar.sh [sonar_url] [admin_password]
 4: set -euo pipefail
 6: SONAR_URL="${1:-http://localhost:9000}"
 7: ADMIN_PASS="${2:-admin}"
-8: PROJECT_KEY="gitcortex"
-9: PROJECT_NAME="GitCortex"
+8: PROJECT_KEY="solodawn"
+9: PROJECT_NAME="SoloDawn"
 10: MAX_WAIT=300
 11: POLL_INTERVAL=5
 13: # ── Step 1: Wait for SonarQube to be healthy ──────────────────────
@@ -2970,7 +2970,7 @@
 26: if [[ -z "$BRANCH" ]]; then
 27: BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 28: fi
-30: echo "=== GitCortex Branch Quality Gate ==="
+30: echo "=== SoloDawn Branch Quality Gate ==="
 31: echo "Project root: $PROJECT_ROOT"
 32: echo "Branch: $BRANCH"
 33: echo ""
@@ -3049,7 +3049,7 @@
 33: ;;
 34: esac
 35: done
-37: echo "=== GitCortex Quality Gate ==="
+37: echo "=== SoloDawn Quality Gate ==="
 38: echo "Project root: $PROJECT_ROOT"
 39: echo "Tier: $TIER"
 40: echo "Mode: $MODE"
@@ -3154,7 +3154,7 @@
 33: if [[ -z "$CHANGED_FILES" ]]; then
 35: exit 1
 36: fi
-38: echo "=== GitCortex Terminal Quality Gate ==="
+38: echo "=== SoloDawn Terminal Quality Gate ==="
 39: echo "Project root: $PROJECT_ROOT"
 40: echo "Working dir: $WORKING_DIR"
 41: echo "Changed files: $CHANGED_FILES"
@@ -3218,7 +3218,7 @@
 33: if [[ -z "$CHANGED_FILES" ]]; then
 35: exit 1
 36: fi
-38: echo "=== GitCortex Terminal Quality Gate ==="
+38: echo "=== SoloDawn Terminal Quality Gate ==="
 39: echo "Project root: $PROJECT_ROOT"
 40: echo "Working dir: $WORKING_DIR"
 41: echo "Changed files: $CHANGED_FILES"
@@ -3282,7 +3282,7 @@
 33: if [[ -z "$CHANGED_FILES" ]]; then
 35: exit 1
 36: fi
-38: echo "=== GitCortex Terminal Quality Gate ==="
+38: echo "=== SoloDawn Terminal Quality Gate ==="
 39: echo "Project root: $PROJECT_ROOT"
 40: echo "Working dir: $WORKING_DIR"
 41: echo "Changed files: $CHANGED_FILES"
@@ -3313,7 +3313,7 @@
 # SonarCloud 重复代码报告
 
 **生成时间**: 2026/03/13 17:11
-**项目**: huanchong-99_GitCortex
+**项目**: huanchong-99_SoloDawn
 **问题文件总数**: 10
 **重复行总数**: 258
 **重复块总数**: 63
@@ -3343,7 +3343,7 @@
 - **重复率**: 94.5%
 - **重复行数**: 103 行
 - **重复块数**: 26 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Acrates%2Fdb%2Fmigrations%2F20250716143725_add_default_templates.sql)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Acrates%2Fdb%2Fmigrations%2F20250716143725_add_default_templates.sql)
 
 ---
 
@@ -3357,7 +3357,7 @@
 - **重复率**: 30.4%
 - **重复行数**: 34 行
 - **重复块数**: 2 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fcomponents%2Fquality%2F__tests__%2FQualityIssueList.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fcomponents%2Fquality%2F__tests__%2FQualityIssueList.test.tsx)
 
 ---
 
@@ -3371,7 +3371,7 @@
 - **重复率**: 1.9%
 - **重复行数**: 2 行
 - **重复块数**: 2 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fcomponents%2Fterminal%2FTerminalDebugView.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fcomponents%2Fterminal%2FTerminalDebugView.test.tsx)
 
 ---
 
@@ -3385,7 +3385,7 @@
 - **重复率**: 23.8%
 - **重复行数**: 5 行
 - **重复块数**: 5 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fcomponents%2Fworkflow%2Fsteps%2FStep6Advanced.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fcomponents%2Fworkflow%2Fsteps%2FStep6Advanced.test.tsx)
 
 ### 4.2 Step4Terminals.test.tsx
 
@@ -3393,7 +3393,7 @@
 - **重复率**: 4.0%
 - **重复行数**: 2 行
 - **重复块数**: 1 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fcomponents%2Fworkflow%2Fsteps%2FStep4Terminals.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fcomponents%2Fworkflow%2Fsteps%2FStep4Terminals.test.tsx)
 
 ---
 
@@ -3407,7 +3407,7 @@
 - **重复率**: 72.7%
 - **重复行数**: 8 行
 - **重复块数**: 5 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fpages%2FSlashCommands.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fpages%2FSlashCommands.test.tsx)
 
 ### 5.2 SlashCommands.e2e.test.tsx
 
@@ -3415,7 +3415,7 @@
 - **重复率**: 37.7%
 - **重复行数**: 57 行
 - **重复块数**: 16 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fpages%2FSlashCommands.e2e.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fpages%2FSlashCommands.e2e.test.tsx)
 
 ### 5.3 Board.tsx
 
@@ -3423,7 +3423,7 @@
 - **重复率**: 28.0%
 - **重复行数**: 14 行
 - **重复块数**: 1 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fpages%2FBoard.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fpages%2FBoard.tsx)
 
 ### 5.4 Workflows.test.tsx
 
@@ -3431,7 +3431,7 @@
 - **重复率**: 6.9%
 - **重复行数**: 19 行
 - **重复块数**: 4 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fpages%2FWorkflows.test.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fpages%2FWorkflows.test.tsx)
 
 ### 5.5 Workflows.tsx
 
@@ -3439,7 +3439,7 @@
 - **重复率**: 1.4%
 - **重复行数**: 14 行
 - **重复块数**: 1 个
-- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_GitCortex&metric=new_duplicated_lines_density&selected=huanchong-99_GitCortex%3Afrontend%2Fsrc%2Fpages%2FWorkflows.tsx)
+- **SonarCloud 链接**: [查看详情](https://sonarcloud.io/component_measures?id=huanchong-99_SoloDawn&metric=new_duplicated_lines_density&selected=huanchong-99_SoloDawn%3Afrontend%2Fsrc%2Fpages%2FWorkflows.tsx)
 
 ---
 
@@ -3450,7 +3450,7 @@
 # SonarCloud 安全热点报告
 
 **生成时间**: 2026/03/13 17:11
-**项目**: huanchong-99_GitCortex
+**项目**: huanchong-99_SoloDawn
 **安全热点总数**: 6
 
 ---
@@ -3483,7 +3483,7 @@
 | **规则ID** | [githubactions:S7637](https://sonarcloud.io/organizations/huanchong-99/rules?open=githubactions%3AS7637&rule_key=githubactions%3AS7637) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 2. Use full commit SHA hash for this dependency.
 
@@ -3493,7 +3493,7 @@
 | **规则ID** | [githubactions:S7637](https://sonarcloud.io/organizations/huanchong-99/rules?open=githubactions%3AS7637&rule_key=githubactions%3AS7637) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 3. Use full commit SHA hash for this dependency.
 
@@ -3503,7 +3503,7 @@
 | **规则ID** | [githubactions:S7637](https://sonarcloud.io/organizations/huanchong-99/rules?open=githubactions%3AS7637&rule_key=githubactions%3AS7637) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 4. Use full commit SHA hash for this dependency.
 
@@ -3513,7 +3513,7 @@
 | **规则ID** | [githubactions:S7637](https://sonarcloud.io/organizations/huanchong-99/rules?open=githubactions%3AS7637&rule_key=githubactions%3AS7637) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 5. Use full commit SHA hash for this dependency.
 
@@ -3523,7 +3523,7 @@
 | **规则ID** | [githubactions:S7637](https://sonarcloud.io/organizations/huanchong-99/rules?open=githubactions%3AS7637&rule_key=githubactions%3AS7637) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 #### 6. Use full commit SHA hash for this dependency.
 
@@ -3533,7 +3533,7 @@
 | **规则ID** | [githubactions:S7637](https://sonarcloud.io/organizations/huanchong-99/rules?open=githubactions%3AS7637&rule_key=githubactions%3AS7637) |
 | **类别** | Others |
 | **状态** | To Review |
-| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_GitCortex) |
+| **SonarCloud** | [查看详情](https://sonarcloud.io/project/security_hotspots?id=huanchong-99_SoloDawn) |
 
 ---
 启用team模式，拉起多个Agent并行修复（每一个都是全栈开发），推送

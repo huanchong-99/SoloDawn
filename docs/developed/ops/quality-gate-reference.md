@@ -7,8 +7,8 @@
 | `QUALITY_GATE_MODE` | Override quality gate mode | 覆盖质量门模式 | (from YAML) |
 | `SONAR_TOKEN` | SonarQube/SonarCloud auth token | SonarQube/SonarCloud 认证令牌 | (none) |
 | `SONAR_HOST_URL` | SonarQube server URL | SonarQube 服务器地址 | `http://localhost:9000` |
-| `GITCORTEX_FEISHU_ENABLED` | Enable Feishu connector | 启用飞书连接器 | `false` |
-| `GITCORTEX_ENCRYPTION_KEY` | AES-256-GCM key (32 bytes) | AES-256-GCM 加密密钥（32 字节） | (required) |
+| `SOLODAWN_FEISHU_ENABLED` | Enable Feishu connector | 启用飞书连接器 | `false` |
+| `SOLODAWN_ENCRYPTION_KEY` | AES-256-GCM key (32 bytes) | AES-256-GCM 加密密钥（32 字节） | (required) |
 
 ## Quality Gate Modes / 质量门模式
 

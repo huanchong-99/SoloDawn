@@ -37,32 +37,32 @@
 
 ### 按文件统计 (Top 20)
 
-- **huanchong-99GitCortexfrontend/src/vscode/bridge.ts**: 10 个问题
-- **huanchong-99GitCortexfrontend/src/hooks/useProjectTasks.ts**: 8 个问题
-- **huanchong-99GitCortexfrontend/src/stores/wsStore.ts**: 8 个问题
-- **huanchong-99GitCortexcrates/db/migrations/20250730000000_add_executor_action_to_execution_processes.sql**: 7 个问题
-- **huanchong-99GitCortexfrontend/.../ui-new/primitives/conversation/ChatFileEntry.tsx**: 7 个问题
-- **huanchong-99GitCortexfrontend/.../components/ui/wysiwyg/plugins/file-tag-typeahead-plugin.tsx**: 7 个问题
-- **huanchong-99GitCortexcrates/db/migrations/20251209000000_add_project_repositories.sql**: 6 个问题
-- **huanchong-99GitCortexfrontend/src/components/dialogs/tasks/RestoreLogsDialog.tsx**: 6 个问题
-- **huanchong-99GitCortexfrontend/.../components/ui-new/containers/DiffViewCardWithComments.tsx**: 6 个问题
-- **huanchong-99GitCortexfrontend/src/contexts/ClickedElementsProvider.tsx**: 6 个问题
-- **huanchong-99GitCortexfrontend/src/components/ui-new/views/PreviewBrowser.tsx**: 5 个问题
-- **huanchong-99GitCortexfrontend/src/hooks/useConversationHistory.ts**: 5 个问题
-- **huanchong-99GitCortexcrates/db/migrations/20260119000001_add_performance_indexes.sql**: 4 个问题
-- **huanchong-99GitCortexfrontend/src/components/terminal/TerminalDebugView.tsx**: 4 个问题
-- **huanchong-99GitCortexfrontend/.../components/ui-new/containers/NewDisplayConversationEntry.tsx**: 4 个问题
-- **huanchong-99GitCortexfrontend/.../components/ui-new/containers/SessionChatBoxContainer.tsx**: 4 个问题
-- **huanchong-99GitCortexfrontend/src/hooks/useTodos.ts**: 4 个问题
-- **huanchong-99GitCortexfrontend/src/lib/mcpStrategies.ts**: 4 个问题
-- **huanchong-99GitCortexfrontend/src/pages/settings/AgentSettings.tsx**: 4 个问题
-- **huanchong-99GitCortexfrontend/src/pages/settings/OrganizationSettings.tsx**: 4 个问题
+- **huanchong-99SoloDawnfrontend/src/vscode/bridge.ts**: 10 个问题
+- **huanchong-99SoloDawnfrontend/src/hooks/useProjectTasks.ts**: 8 个问题
+- **huanchong-99SoloDawnfrontend/src/stores/wsStore.ts**: 8 个问题
+- **huanchong-99SoloDawncrates/db/migrations/20250730000000_add_executor_action_to_execution_processes.sql**: 7 个问题
+- **huanchong-99SoloDawnfrontend/.../ui-new/primitives/conversation/ChatFileEntry.tsx**: 7 个问题
+- **huanchong-99SoloDawnfrontend/.../components/ui/wysiwyg/plugins/file-tag-typeahead-plugin.tsx**: 7 个问题
+- **huanchong-99SoloDawncrates/db/migrations/20251209000000_add_project_repositories.sql**: 6 个问题
+- **huanchong-99SoloDawnfrontend/src/components/dialogs/tasks/RestoreLogsDialog.tsx**: 6 个问题
+- **huanchong-99SoloDawnfrontend/.../components/ui-new/containers/DiffViewCardWithComments.tsx**: 6 个问题
+- **huanchong-99SoloDawnfrontend/src/contexts/ClickedElementsProvider.tsx**: 6 个问题
+- **huanchong-99SoloDawnfrontend/src/components/ui-new/views/PreviewBrowser.tsx**: 5 个问题
+- **huanchong-99SoloDawnfrontend/src/hooks/useConversationHistory.ts**: 5 个问题
+- **huanchong-99SoloDawncrates/db/migrations/20260119000001_add_performance_indexes.sql**: 4 个问题
+- **huanchong-99SoloDawnfrontend/src/components/terminal/TerminalDebugView.tsx**: 4 个问题
+- **huanchong-99SoloDawnfrontend/.../components/ui-new/containers/NewDisplayConversationEntry.tsx**: 4 个问题
+- **huanchong-99SoloDawnfrontend/.../components/ui-new/containers/SessionChatBoxContainer.tsx**: 4 个问题
+- **huanchong-99SoloDawnfrontend/src/hooks/useTodos.ts**: 4 个问题
+- **huanchong-99SoloDawnfrontend/src/lib/mcpStrategies.ts**: 4 个问题
+- **huanchong-99SoloDawnfrontend/src/pages/settings/AgentSettings.tsx**: 4 个问题
+- **huanchong-99SoloDawnfrontend/src/pages/settings/OrganizationSettings.tsx**: 4 个问题
 
 ---
 
 ## 问题列表（按文件分组）
 
-## 1. huanchong-99GitCortexcrates/db/migrations/20250617183714_init.sql
+## 1. huanchong-99SoloDawncrates/db/migrations/20250617183714_init.sql
 
 > 该文件共有 **1** 个问题
 
@@ -81,7 +81,7 @@
 
 ---
 
-## 2. huanchong-99GitCortexcrates/db/migrations/20250620212427_execution_processes.sql
+## 2. huanchong-99SoloDawncrates/db/migrations/20250620212427_execution_processes.sql
 
 > 该文件共有 **1** 个问题
 
@@ -100,7 +100,7 @@
 
 ---
 
-## 3. huanchong-99GitCortexcrates/db/migrations/20250716143725_add_default_templates.sql
+## 3. huanchong-99SoloDawncrates/db/migrations/20250716143725_add_default_templates.sql
 
 > 该文件共有 **1** 个问题
 
@@ -119,7 +119,7 @@
 
 ---
 
-## 4. huanchong-99GitCortexcrates/db/migrations/20250730000000_add_executor_action_to_execution_processes.sql
+## 4. huanchong-99SoloDawncrates/db/migrations/20250730000000_add_executor_action_to_execution_processes.sql
 
 > 该文件共有 **7** 个问题
 
@@ -216,7 +216,7 @@
 
 ---
 
-## 5. huanchong-99GitCortexcrates/db/migrations/20250815100344_migrate_old_executor_actions.sql
+## 5. huanchong-99SoloDawncrates/db/migrations/20250815100344_migrate_old_executor_actions.sql
 
 > 该文件共有 **1** 个问题
 
@@ -235,7 +235,7 @@
 
 ---
 
-## 6. huanchong-99GitCortexcrates/db/migrations/20250818150000_refactor_images_to_junction_tables.sql
+## 6. huanchong-99SoloDawncrates/db/migrations/20250818150000_refactor_images_to_junction_tables.sql
 
 > 该文件共有 **1** 个问题
 
@@ -254,7 +254,7 @@
 
 ---
 
-## 7. huanchong-99GitCortexcrates/db/migrations/20250819000000_move_merge_commit_to_merges_table.sql
+## 7. huanchong-99SoloDawncrates/db/migrations/20250819000000_move_merge_commit_to_merges_table.sql
 
 > 该文件共有 **3** 个问题
 
@@ -299,7 +299,7 @@
 
 ---
 
-## 8. huanchong-99GitCortexcrates/db/migrations/20251020120000_convert_templates_to_tags.sql
+## 8. huanchong-99SoloDawncrates/db/migrations/20251020120000_convert_templates_to_tags.sql
 
 > 该文件共有 **2** 个问题
 
@@ -331,7 +331,7 @@
 
 ---
 
-## 9. huanchong-99GitCortexcrates/db/migrations/20251114000000_create_shared_tasks.sql
+## 9. huanchong-99SoloDawncrates/db/migrations/20251114000000_create_shared_tasks.sql
 
 > 该文件共有 **1** 个问题
 
@@ -350,7 +350,7 @@
 
 ---
 
-## 10. huanchong-99GitCortexcrates/db/migrations/20251209000000_add_project_repositories.sql
+## 10. huanchong-99SoloDawncrates/db/migrations/20251209000000_add_project_repositories.sql
 
 > 该文件共有 **6** 个问题
 
@@ -433,7 +433,7 @@
 
 ---
 
-## 11. huanchong-99GitCortexcrates/db/migrations/20251216142123_refactor_task_attempts_to_workspaces_sessions.sql
+## 11. huanchong-99SoloDawncrates/db/migrations/20251216142123_refactor_task_attempts_to_workspaces_sessions.sql
 
 > 该文件共有 **1** 个问题
 
@@ -452,7 +452,7 @@
 
 ---
 
-## 12. huanchong-99GitCortexcrates/db/migrations/20251219000000_add_agent_working_dir_to_projects.sql
+## 12. huanchong-99SoloDawncrates/db/migrations/20251219000000_add_agent_working_dir_to_projects.sql
 
 > 该文件共有 **1** 个问题
 
@@ -471,7 +471,7 @@
 
 ---
 
-## 13. huanchong-99GitCortexcrates/db/migrations/20260107000000_move_scripts_to_repos.sql
+## 13. huanchong-99SoloDawncrates/db/migrations/20260107000000_move_scripts_to_repos.sql
 
 > 该文件共有 **2** 个问题
 
@@ -503,7 +503,7 @@
 
 ---
 
-## 14. huanchong-99GitCortexcrates/db/migrations/20260117000001_create_workflow_tables.sql
+## 14. huanchong-99SoloDawncrates/db/migrations/20260117000001_create_workflow_tables.sql
 
 > 该文件共有 **3** 个问题
 
@@ -548,7 +548,7 @@
 
 ---
 
-## 15. huanchong-99GitCortexcrates/db/migrations/20260119000001_add_performance_indexes.sql
+## 15. huanchong-99SoloDawncrates/db/migrations/20260119000001_add_performance_indexes.sql
 
 > 该文件共有 **4** 个问题
 
@@ -606,7 +606,7 @@
 
 ---
 
-## 16. huanchong-99GitCortexcrates/db/migrations/20260208020000_fix_terminal_old_foreign_keys.sql
+## 16. huanchong-99SoloDawncrates/db/migrations/20260208020000_fix_terminal_old_foreign_keys.sql
 
 > 该文件共有 **1** 个问题
 
@@ -625,7 +625,7 @@
 
 ---
 
-## 17. huanchong-99GitCortexcrates/db/migrations/20260224001000_backfill_workflow_api_key_encrypted.sql
+## 17. huanchong-99SoloDawncrates/db/migrations/20260224001000_backfill_workflow_api_key_encrypted.sql
 
 > 该文件共有 **2** 个问题
 
@@ -657,7 +657,7 @@
 
 ---
 
-## 18. huanchong-99GitCortexfrontend/.../NormalizedConversation/DisplayConversationEntry.tsx
+## 18. huanchong-99SoloDawnfrontend/.../NormalizedConversation/DisplayConversationEntry.tsx
 
 > 该文件共有 **3** 个问题
 
@@ -702,7 +702,7 @@
 
 ---
 
-## 19. huanchong-99GitCortexfrontend/.../NormalizedConversation/NextActionCard.tsx
+## 19. huanchong-99SoloDawnfrontend/.../NormalizedConversation/NextActionCard.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -721,7 +721,7 @@
 
 ---
 
-## 20. huanchong-99GitCortexfrontend/.../components/tasks/TaskDetails/ProcessesTab.tsx
+## 20. huanchong-99SoloDawnfrontend/.../components/tasks/TaskDetails/ProcessesTab.tsx
 
 > 该文件共有 **3** 个问题
 
@@ -766,7 +766,7 @@
 
 ---
 
-## 21. huanchong-99GitCortexfrontend/.../components/ui-new/containers/ConversationListContainer.tsx
+## 21. huanchong-99SoloDawnfrontend/.../components/ui-new/containers/ConversationListContainer.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -798,7 +798,7 @@
 
 ---
 
-## 22. huanchong-99GitCortexfrontend/.../components/ui-new/containers/DiffViewCardWithComments.tsx
+## 22. huanchong-99SoloDawnfrontend/.../components/ui-new/containers/DiffViewCardWithComments.tsx
 
 > 该文件共有 **6** 个问题
 
@@ -882,7 +882,7 @@
 
 ---
 
-## 23. huanchong-99GitCortexfrontend/.../components/ui-new/containers/NewDisplayConversationEntry.tsx
+## 23. huanchong-99SoloDawnfrontend/.../components/ui-new/containers/NewDisplayConversationEntry.tsx
 
 > 该文件共有 **4** 个问题
 
@@ -940,7 +940,7 @@
 
 ---
 
-## 24. huanchong-99GitCortexfrontend/.../components/ui-new/containers/ProcessListContainer.tsx
+## 24. huanchong-99SoloDawnfrontend/.../components/ui-new/containers/ProcessListContainer.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -959,7 +959,7 @@
 
 ---
 
-## 25. huanchong-99GitCortexfrontend/.../components/ui-new/containers/ProjectSelectorContainer.tsx
+## 25. huanchong-99SoloDawnfrontend/.../components/ui-new/containers/ProjectSelectorContainer.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -978,7 +978,7 @@
 
 ---
 
-## 26. huanchong-99GitCortexfrontend/.../components/ui-new/containers/SessionChatBoxContainer.tsx
+## 26. huanchong-99SoloDawnfrontend/.../components/ui-new/containers/SessionChatBoxContainer.tsx
 
 > 该文件共有 **4** 个问题
 
@@ -1036,7 +1036,7 @@
 
 ---
 
-## 27. huanchong-99GitCortexfrontend/.../components/ui-new/primitives/ContextBar.tsx
+## 27. huanchong-99SoloDawnfrontend/.../components/ui-new/primitives/ContextBar.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1055,7 +1055,7 @@
 
 ---
 
-## 28. huanchong-99GitCortexfrontend/.../components/ui-new/primitives/SearchableDropdown.tsx
+## 28. huanchong-99SoloDawnfrontend/.../components/ui-new/primitives/SearchableDropdown.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1074,7 +1074,7 @@
 
 ---
 
-## 29. huanchong-99GitCortexfrontend/.../components/ui-new/primitives/SessionChatBox.tsx
+## 29. huanchong-99SoloDawnfrontend/.../components/ui-new/primitives/SessionChatBox.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1093,7 +1093,7 @@
 
 ---
 
-## 30. huanchong-99GitCortexfrontend/.../components/ui/wysiwyg/nodes/image-node.tsx
+## 30. huanchong-99SoloDawnfrontend/.../components/ui/wysiwyg/nodes/image-node.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1112,7 +1112,7 @@
 
 ---
 
-## 31. huanchong-99GitCortexfrontend/.../components/ui/wysiwyg/nodes/pr-comment-node.tsx
+## 31. huanchong-99SoloDawnfrontend/.../components/ui/wysiwyg/nodes/pr-comment-node.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1131,7 +1131,7 @@
 
 ---
 
-## 32. huanchong-99GitCortexfrontend/.../components/ui/wysiwyg/plugins/file-tag-typeahead-plugin.tsx
+## 32. huanchong-99SoloDawnfrontend/.../components/ui/wysiwyg/plugins/file-tag-typeahead-plugin.tsx
 
 > 该文件共有 **7** 个问题
 
@@ -1228,7 +1228,7 @@
 
 ---
 
-## 33. huanchong-99GitCortexfrontend/.../components/ui/wysiwyg/plugins/toolbar-plugin.tsx
+## 33. huanchong-99SoloDawnfrontend/.../components/ui/wysiwyg/plugins/toolbar-plugin.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1247,7 +1247,7 @@
 
 ---
 
-## 34. huanchong-99GitCortexfrontend/.../components/workflow/validators/step5Commands.ts
+## 34. huanchong-99SoloDawnfrontend/.../components/workflow/validators/step5Commands.ts
 
 > 该文件共有 **1** 个问题
 
@@ -1266,7 +1266,7 @@
 
 ---
 
-## 35. huanchong-99GitCortexfrontend/.../tasks/TaskDetails/preview/PreviewToolbar.tsx
+## 35. huanchong-99SoloDawnfrontend/.../tasks/TaskDetails/preview/PreviewToolbar.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1285,7 +1285,7 @@
 
 ---
 
-## 36. huanchong-99GitCortexfrontend/.../ui-new/primitives/conversation/ChatEntryContainer.tsx
+## 36. huanchong-99SoloDawnfrontend/.../ui-new/primitives/conversation/ChatEntryContainer.tsx
 
 > 该文件共有 **3** 个问题
 
@@ -1330,7 +1330,7 @@
 
 ---
 
-## 37. huanchong-99GitCortexfrontend/.../ui-new/primitives/conversation/ChatFileEntry.tsx
+## 37. huanchong-99SoloDawnfrontend/.../ui-new/primitives/conversation/ChatFileEntry.tsx
 
 > 该文件共有 **7** 个问题
 
@@ -1427,7 +1427,7 @@
 
 ---
 
-## 38. huanchong-99GitCortexfrontend/.../ui-new/primitives/conversation/ChatToolSummary.tsx
+## 38. huanchong-99SoloDawnfrontend/.../ui-new/primitives/conversation/ChatToolSummary.tsx
 
 > 该文件共有 **3** 个问题
 
@@ -1472,7 +1472,7 @@
 
 ---
 
-## 39. huanchong-99GitCortexfrontend/.../ui-new/primitives/conversation/DiffViewCard.tsx
+## 39. huanchong-99SoloDawnfrontend/.../ui-new/primitives/conversation/DiffViewCard.tsx
 
 > 该文件共有 **3** 个问题
 
@@ -1517,7 +1517,7 @@
 
 ---
 
-## 40. huanchong-99GitCortexfrontend/src/components/ThemeProvider.tsx
+## 40. huanchong-99SoloDawnfrontend/src/components/ThemeProvider.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1536,7 +1536,7 @@
 
 ---
 
-## 41. huanchong-99GitCortexfrontend/src/components/dialogs/scripts/ScriptFixerDialog.tsx
+## 41. huanchong-99SoloDawnfrontend/src/components/dialogs/scripts/ScriptFixerDialog.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1555,7 +1555,7 @@
 
 ---
 
-## 42. huanchong-99GitCortexfrontend/src/components/dialogs/tasks/PrCommentsDialog.tsx
+## 42. huanchong-99SoloDawnfrontend/src/components/dialogs/tasks/PrCommentsDialog.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1574,7 +1574,7 @@
 
 ---
 
-## 43. huanchong-99GitCortexfrontend/src/components/dialogs/tasks/RestoreLogsDialog.tsx
+## 43. huanchong-99SoloDawnfrontend/src/components/dialogs/tasks/RestoreLogsDialog.tsx
 
 > 该文件共有 **6** 个问题
 
@@ -1658,7 +1658,7 @@
 
 ---
 
-## 44. huanchong-99GitCortexfrontend/src/components/dialogs/tasks/ShareDialog.tsx
+## 44. huanchong-99SoloDawnfrontend/src/components/dialogs/tasks/ShareDialog.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1677,7 +1677,7 @@
 
 ---
 
-## 45. huanchong-99GitCortexfrontend/src/components/dialogs/tasks/TaskFormDialog.tsx
+## 45. huanchong-99SoloDawnfrontend/src/components/dialogs/tasks/TaskFormDialog.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -1709,7 +1709,7 @@
 
 ---
 
-## 46. huanchong-99GitCortexfrontend/src/components/layout/NewDesignLayout.tsx
+## 46. huanchong-99SoloDawnfrontend/src/components/layout/NewDesignLayout.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1728,7 +1728,7 @@
 
 ---
 
-## 47. huanchong-99GitCortexfrontend/src/components/panels/DiffsPanel.tsx
+## 47. huanchong-99SoloDawnfrontend/src/components/panels/DiffsPanel.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -1760,7 +1760,7 @@
 
 ---
 
-## 48. huanchong-99GitCortexfrontend/src/components/panels/TaskPanel.tsx
+## 48. huanchong-99SoloDawnfrontend/src/components/panels/TaskPanel.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1779,7 +1779,7 @@
 
 ---
 
-## 49. huanchong-99GitCortexfrontend/src/components/tasks/BranchSelector.tsx
+## 49. huanchong-99SoloDawnfrontend/src/components/tasks/BranchSelector.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1798,7 +1798,7 @@
 
 ---
 
-## 50. huanchong-99GitCortexfrontend/src/components/tasks/TaskFollowUpSection.tsx
+## 50. huanchong-99SoloDawnfrontend/src/components/tasks/TaskFollowUpSection.tsx
 
 > 该文件共有 **3** 个问题
 
@@ -1843,7 +1843,7 @@
 
 ---
 
-## 51. huanchong-99GitCortexfrontend/src/components/tasks/Toolbar/GitOperations.tsx
+## 51. huanchong-99SoloDawnfrontend/src/components/tasks/Toolbar/GitOperations.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -1875,7 +1875,7 @@
 
 ---
 
-## 52. huanchong-99GitCortexfrontend/src/components/terminal/TerminalDebugView.tsx
+## 52. huanchong-99SoloDawnfrontend/src/components/terminal/TerminalDebugView.tsx
 
 > 该文件共有 **4** 个问题
 
@@ -1933,7 +1933,7 @@
 
 ---
 
-## 53. huanchong-99GitCortexfrontend/src/components/terminal/TerminalEmulator.test.tsx
+## 53. huanchong-99SoloDawnfrontend/src/components/terminal/TerminalEmulator.test.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1952,7 +1952,7 @@
 
 ---
 
-## 54. huanchong-99GitCortexfrontend/src/components/ui-new/actions/index.ts
+## 54. huanchong-99SoloDawnfrontend/src/components/ui-new/actions/index.ts
 
 > 该文件共有 **1** 个问题
 
@@ -1971,7 +1971,7 @@
 
 ---
 
-## 55. huanchong-99GitCortexfrontend/src/components/ui-new/dialogs/RebaseDialog.tsx
+## 55. huanchong-99SoloDawnfrontend/src/components/ui-new/dialogs/RebaseDialog.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -1990,7 +1990,7 @@
 
 ---
 
-## 56. huanchong-99GitCortexfrontend/src/components/ui-new/dialogs/WorkspacesGuideDialog.tsx
+## 56. huanchong-99SoloDawnfrontend/src/components/ui-new/dialogs/WorkspacesGuideDialog.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -2022,7 +2022,7 @@
 
 ---
 
-## 57. huanchong-99GitCortexfrontend/src/components/ui-new/hooks/usePreviewUrl.ts
+## 57. huanchong-99SoloDawnfrontend/src/components/ui-new/hooks/usePreviewUrl.ts
 
 > 该文件共有 **3** 个问题
 
@@ -2067,7 +2067,7 @@
 
 ---
 
-## 58. huanchong-99GitCortexfrontend/src/components/ui-new/views/FileTreeNode.tsx
+## 58. huanchong-99SoloDawnfrontend/src/components/ui-new/views/FileTreeNode.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -2099,7 +2099,7 @@
 
 ---
 
-## 59. huanchong-99GitCortexfrontend/src/components/ui-new/views/PreviewBrowser.tsx
+## 59. huanchong-99SoloDawnfrontend/src/components/ui-new/views/PreviewBrowser.tsx
 
 > 该文件共有 **5** 个问题
 
@@ -2170,7 +2170,7 @@
 
 ---
 
-## 60. huanchong-99GitCortexfrontend/src/components/ui/breadcrumb.tsx
+## 60. huanchong-99SoloDawnfrontend/src/components/ui/breadcrumb.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2189,7 +2189,7 @@
 
 ---
 
-## 61. huanchong-99GitCortexfrontend/src/components/ui/dialog.tsx
+## 61. huanchong-99SoloDawnfrontend/src/components/ui/dialog.tsx
 
 > 该文件共有 **3** 个问题
 
@@ -2234,7 +2234,7 @@
 
 ---
 
-## 62. huanchong-99GitCortexfrontend/src/components/ui/json-editor.tsx
+## 62. huanchong-99SoloDawnfrontend/src/components/ui/json-editor.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2253,7 +2253,7 @@
 
 ---
 
-## 63. huanchong-99GitCortexfrontend/src/components/ui/multi-file-search-textarea.tsx
+## 63. huanchong-99SoloDawnfrontend/src/components/ui/multi-file-search-textarea.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -2285,7 +2285,7 @@
 
 ---
 
-## 64. huanchong-99GitCortexfrontend/src/components/ui/pr-comment-card.tsx
+## 64. huanchong-99SoloDawnfrontend/src/components/ui/pr-comment-card.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2304,7 +2304,7 @@
 
 ---
 
-## 65. huanchong-99GitCortexfrontend/src/components/ui/table/data-table.tsx
+## 65. huanchong-99SoloDawnfrontend/src/components/ui/table/data-table.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -2336,7 +2336,7 @@
 
 ---
 
-## 66. huanchong-99GitCortexfrontend/src/components/ui/wysiwyg.tsx
+## 66. huanchong-99SoloDawnfrontend/src/components/ui/wysiwyg.tsx
 
 > 该文件共有 **3** 个问题
 
@@ -2380,7 +2380,7 @@
 
 ---
 
-## 67. huanchong-99GitCortexfrontend/src/components/ui/wysiwyg/lib/create-decorator-node.tsx
+## 67. huanchong-99SoloDawnfrontend/src/components/ui/wysiwyg/lib/create-decorator-node.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2399,7 +2399,7 @@
 
 ---
 
-## 68. huanchong-99GitCortexfrontend/src/components/wizard/WorkflowConfigureStep.tsx
+## 68. huanchong-99SoloDawnfrontend/src/components/wizard/WorkflowConfigureStep.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2418,7 +2418,7 @@
 
 ---
 
-## 69. huanchong-99GitCortexfrontend/src/components/wizard/WorkflowWizard.tsx
+## 69. huanchong-99SoloDawnfrontend/src/components/wizard/WorkflowWizard.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2437,7 +2437,7 @@
 
 ---
 
-## 70. huanchong-99GitCortexfrontend/src/components/workflow/PipelineView.tsx
+## 70. huanchong-99SoloDawnfrontend/src/components/workflow/PipelineView.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2456,7 +2456,7 @@
 
 ---
 
-## 71. huanchong-99GitCortexfrontend/src/components/workflow/StepIndicator.tsx
+## 71. huanchong-99SoloDawnfrontend/src/components/workflow/StepIndicator.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2475,7 +2475,7 @@
 
 ---
 
-## 72. huanchong-99GitCortexfrontend/src/components/workflow/TerminalCard.tsx
+## 72. huanchong-99SoloDawnfrontend/src/components/workflow/TerminalCard.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2494,7 +2494,7 @@
 
 ---
 
-## 73. huanchong-99GitCortexfrontend/src/components/workflow/WorkflowPromptDialog.tsx
+## 73. huanchong-99SoloDawnfrontend/src/components/workflow/WorkflowPromptDialog.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2513,7 +2513,7 @@
 
 ---
 
-## 74. huanchong-99GitCortexfrontend/src/components/workflow/WorkflowWizard.tsx
+## 74. huanchong-99SoloDawnfrontend/src/components/workflow/WorkflowWizard.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2532,7 +2532,7 @@
 
 ---
 
-## 75. huanchong-99GitCortexfrontend/src/components/workflow/steps/Step4Terminals.test.tsx
+## 75. huanchong-99SoloDawnfrontend/src/components/workflow/steps/Step4Terminals.test.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2551,7 +2551,7 @@
 
 ---
 
-## 76. huanchong-99GitCortexfrontend/src/contexts/ActionsContext.tsx
+## 76. huanchong-99SoloDawnfrontend/src/contexts/ActionsContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2570,7 +2570,7 @@
 
 ---
 
-## 77. huanchong-99GitCortexfrontend/src/contexts/ApprovalFeedbackContext.tsx
+## 77. huanchong-99SoloDawnfrontend/src/contexts/ApprovalFeedbackContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2589,7 +2589,7 @@
 
 ---
 
-## 78. huanchong-99GitCortexfrontend/src/contexts/ChangesViewContext.tsx
+## 78. huanchong-99SoloDawnfrontend/src/contexts/ChangesViewContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2608,7 +2608,7 @@
 
 ---
 
-## 79. huanchong-99GitCortexfrontend/src/contexts/ClickedElementsProvider.tsx
+## 79. huanchong-99SoloDawnfrontend/src/contexts/ClickedElementsProvider.tsx
 
 > 该文件共有 **6** 个问题
 
@@ -2692,7 +2692,7 @@
 
 ---
 
-## 80. huanchong-99GitCortexfrontend/src/contexts/CreateModeContext.tsx
+## 80. huanchong-99SoloDawnfrontend/src/contexts/CreateModeContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2711,7 +2711,7 @@
 
 ---
 
-## 81. huanchong-99GitCortexfrontend/src/contexts/EntriesContext.tsx
+## 81. huanchong-99SoloDawnfrontend/src/contexts/EntriesContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2730,7 +2730,7 @@
 
 ---
 
-## 82. huanchong-99GitCortexfrontend/src/contexts/ExecutionProcessesContext.tsx
+## 82. huanchong-99SoloDawnfrontend/src/contexts/ExecutionProcessesContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2749,7 +2749,7 @@
 
 ---
 
-## 83. huanchong-99GitCortexfrontend/src/contexts/LogsPanelContext.tsx
+## 83. huanchong-99SoloDawnfrontend/src/contexts/LogsPanelContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2768,7 +2768,7 @@
 
 ---
 
-## 84. huanchong-99GitCortexfrontend/src/contexts/MessageEditContext.tsx
+## 84. huanchong-99SoloDawnfrontend/src/contexts/MessageEditContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2787,7 +2787,7 @@
 
 ---
 
-## 85. huanchong-99GitCortexfrontend/src/contexts/ProcessSelectionContext.tsx
+## 85. huanchong-99SoloDawnfrontend/src/contexts/ProcessSelectionContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2806,7 +2806,7 @@
 
 ---
 
-## 86. huanchong-99GitCortexfrontend/src/contexts/ProjectContext.tsx
+## 86. huanchong-99SoloDawnfrontend/src/contexts/ProjectContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2825,7 +2825,7 @@
 
 ---
 
-## 87. huanchong-99GitCortexfrontend/src/contexts/RetryUiContext.tsx
+## 87. huanchong-99SoloDawnfrontend/src/contexts/RetryUiContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2844,7 +2844,7 @@
 
 ---
 
-## 88. huanchong-99GitCortexfrontend/src/contexts/ReviewProvider.tsx
+## 88. huanchong-99SoloDawnfrontend/src/contexts/ReviewProvider.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2863,7 +2863,7 @@
 
 ---
 
-## 89. huanchong-99GitCortexfrontend/src/contexts/SearchContext.tsx
+## 89. huanchong-99SoloDawnfrontend/src/contexts/SearchContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2882,7 +2882,7 @@
 
 ---
 
-## 90. huanchong-99GitCortexfrontend/src/contexts/WorkspaceContext.tsx
+## 90. huanchong-99SoloDawnfrontend/src/contexts/WorkspaceContext.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -2901,7 +2901,7 @@
 
 ---
 
-## 91. huanchong-99GitCortexfrontend/src/hooks/useCommandBarShortcut.ts
+## 91. huanchong-99SoloDawnfrontend/src/hooks/useCommandBarShortcut.ts
 
 > 该文件共有 **1** 个问题
 
@@ -2920,7 +2920,7 @@
 
 ---
 
-## 92. huanchong-99GitCortexfrontend/src/hooks/useConversationHistory.ts
+## 92. huanchong-99SoloDawnfrontend/src/hooks/useConversationHistory.ts
 
 > 该文件共有 **5** 个问题
 
@@ -2991,7 +2991,7 @@
 
 ---
 
-## 93. huanchong-99GitCortexfrontend/src/hooks/useDevserverPreview.ts
+## 93. huanchong-99SoloDawnfrontend/src/hooks/useDevserverPreview.ts
 
 > 该文件共有 **1** 个问题
 
@@ -3010,7 +3010,7 @@
 
 ---
 
-## 94. huanchong-99GitCortexfrontend/src/hooks/useDevserverUrl.ts
+## 94. huanchong-99SoloDawnfrontend/src/hooks/useDevserverUrl.ts
 
 > 该文件共有 **3** 个问题
 
@@ -3055,7 +3055,7 @@
 
 ---
 
-## 95. huanchong-99GitCortexfrontend/src/hooks/useLogStream.ts
+## 95. huanchong-99SoloDawnfrontend/src/hooks/useLogStream.ts
 
 > 该文件共有 **2** 个问题
 
@@ -3087,7 +3087,7 @@
 
 ---
 
-## 96. huanchong-99GitCortexfrontend/src/hooks/useMediaQuery.ts
+## 96. huanchong-99SoloDawnfrontend/src/hooks/useMediaQuery.ts
 
 > 该文件共有 **3** 个问题
 
@@ -3132,7 +3132,7 @@
 
 ---
 
-## 97. huanchong-99GitCortexfrontend/src/hooks/useNavigateWithSearch.ts
+## 97. huanchong-99SoloDawnfrontend/src/hooks/useNavigateWithSearch.ts
 
 > 该文件共有 **1** 个问题
 
@@ -3151,7 +3151,7 @@
 
 ---
 
-## 98. huanchong-99GitCortexfrontend/src/hooks/usePreviewSettings.ts
+## 98. huanchong-99SoloDawnfrontend/src/hooks/usePreviewSettings.ts
 
 > 该文件共有 **1** 个问题
 
@@ -3170,7 +3170,7 @@
 
 ---
 
-## 99. huanchong-99GitCortexfrontend/src/hooks/usePreviousPath.ts
+## 99. huanchong-99SoloDawnfrontend/src/hooks/usePreviousPath.ts
 
 > 该文件共有 **1** 个问题
 
@@ -3189,7 +3189,7 @@
 
 ---
 
-## 100. huanchong-99GitCortexfrontend/src/hooks/useProjectTasks.ts
+## 100. huanchong-99SoloDawnfrontend/src/hooks/useProjectTasks.ts
 
 > 该文件共有 **8** 个问题
 
@@ -3299,7 +3299,7 @@
 
 ---
 
-## 101. huanchong-99GitCortexfrontend/src/hooks/useRebase.ts
+## 101. huanchong-99SoloDawnfrontend/src/hooks/useRebase.ts
 
 > 该文件共有 **1** 个问题
 
@@ -3318,7 +3318,7 @@
 
 ---
 
-## 102. huanchong-99GitCortexfrontend/src/hooks/useTodos.ts
+## 102. huanchong-99SoloDawnfrontend/src/hooks/useTodos.ts
 
 > 该文件共有 **4** 个问题
 
@@ -3376,7 +3376,7 @@
 
 ---
 
-## 103. huanchong-99GitCortexfrontend/src/hooks/useVariant.ts
+## 103. huanchong-99SoloDawnfrontend/src/hooks/useVariant.ts
 
 > 该文件共有 **3** 个问题
 
@@ -3421,7 +3421,7 @@
 
 ---
 
-## 104. huanchong-99GitCortexfrontend/src/hooks/useWorkflows.test.tsx
+## 104. huanchong-99SoloDawnfrontend/src/hooks/useWorkflows.test.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -3440,7 +3440,7 @@
 
 ---
 
-## 105. huanchong-99GitCortexfrontend/src/i18n/languages.ts
+## 105. huanchong-99SoloDawnfrontend/src/i18n/languages.ts
 
 > 该文件共有 **1** 个问题
 
@@ -3459,7 +3459,7 @@
 
 ---
 
-## 106. huanchong-99GitCortexfrontend/src/keyboard/useSemanticKey.ts
+## 106. huanchong-99SoloDawnfrontend/src/keyboard/useSemanticKey.ts
 
 > 该文件共有 **2** 个问题
 
@@ -3491,7 +3491,7 @@
 
 ---
 
-## 107. huanchong-99GitCortexfrontend/src/lib/devServerUtils.ts
+## 107. huanchong-99SoloDawnfrontend/src/lib/devServerUtils.ts
 
 > 该文件共有 **2** 个问题
 
@@ -3523,7 +3523,7 @@
 
 ---
 
-## 108. huanchong-99GitCortexfrontend/src/lib/mcpStrategies.ts
+## 108. huanchong-99SoloDawnfrontend/src/lib/mcpStrategies.ts
 
 > 该文件共有 **4** 个问题
 
@@ -3581,7 +3581,7 @@
 
 ---
 
-## 109. huanchong-99GitCortexfrontend/src/main.tsx
+## 109. huanchong-99SoloDawnfrontend/src/main.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -3600,7 +3600,7 @@
 
 ---
 
-## 110. huanchong-99GitCortexfrontend/src/pages/SlashCommands.e2e.test.tsx
+## 110. huanchong-99SoloDawnfrontend/src/pages/SlashCommands.e2e.test.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -3619,7 +3619,7 @@
 
 ---
 
-## 111. huanchong-99GitCortexfrontend/src/pages/SlashCommands.tsx
+## 111. huanchong-99SoloDawnfrontend/src/pages/SlashCommands.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -3638,7 +3638,7 @@
 
 ---
 
-## 112. huanchong-99GitCortexfrontend/src/pages/WorkflowDebug.tsx
+## 112. huanchong-99SoloDawnfrontend/src/pages/WorkflowDebug.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -3657,7 +3657,7 @@
 
 ---
 
-## 113. huanchong-99GitCortexfrontend/src/pages/Workflows.test.tsx
+## 113. huanchong-99SoloDawnfrontend/src/pages/Workflows.test.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -3676,7 +3676,7 @@
 
 ---
 
-## 114. huanchong-99GitCortexfrontend/src/pages/Workflows.tsx
+## 114. huanchong-99SoloDawnfrontend/src/pages/Workflows.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -3708,7 +3708,7 @@
 
 ---
 
-## 115. huanchong-99GitCortexfrontend/src/pages/settings/AgentSettings.tsx
+## 115. huanchong-99SoloDawnfrontend/src/pages/settings/AgentSettings.tsx
 
 > 该文件共有 **4** 个问题
 
@@ -3766,7 +3766,7 @@
 
 ---
 
-## 116. huanchong-99GitCortexfrontend/src/pages/settings/GeneralSettings.tsx
+## 116. huanchong-99SoloDawnfrontend/src/pages/settings/GeneralSettings.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -3785,7 +3785,7 @@
 
 ---
 
-## 117. huanchong-99GitCortexfrontend/src/pages/settings/McpSettings.tsx
+## 117. huanchong-99SoloDawnfrontend/src/pages/settings/McpSettings.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -3804,7 +3804,7 @@
 
 ---
 
-## 118. huanchong-99GitCortexfrontend/src/pages/settings/OrganizationSettings.tsx
+## 118. huanchong-99SoloDawnfrontend/src/pages/settings/OrganizationSettings.tsx
 
 > 该文件共有 **4** 个问题
 
@@ -3862,7 +3862,7 @@
 
 ---
 
-## 119. huanchong-99GitCortexfrontend/src/pages/settings/ProjectSettings.tsx
+## 119. huanchong-99SoloDawnfrontend/src/pages/settings/ProjectSettings.tsx
 
 > 该文件共有 **2** 个问题
 
@@ -3894,7 +3894,7 @@
 
 ---
 
-## 120. huanchong-99GitCortexfrontend/src/stores/__tests__/wsStore.test.ts
+## 120. huanchong-99SoloDawnfrontend/src/stores/__tests__/wsStore.test.ts
 
 > 该文件共有 **1** 个问题
 
@@ -3913,7 +3913,7 @@
 
 ---
 
-## 121. huanchong-99GitCortexfrontend/src/stores/wsStore.ts
+## 121. huanchong-99SoloDawnfrontend/src/stores/wsStore.ts
 
 > 该文件共有 **8** 个问题
 
@@ -4023,7 +4023,7 @@
 
 ---
 
-## 122. huanchong-99GitCortexfrontend/src/utils/StyleOverride.tsx
+## 122. huanchong-99SoloDawnfrontend/src/utils/StyleOverride.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -4042,7 +4042,7 @@
 
 ---
 
-## 123. huanchong-99GitCortexfrontend/src/utils/TruncatePath.tsx
+## 123. huanchong-99SoloDawnfrontend/src/utils/TruncatePath.tsx
 
 > 该文件共有 **1** 个问题
 
@@ -4061,7 +4061,7 @@
 
 ---
 
-## 124. huanchong-99GitCortexfrontend/src/utils/fileTreeUtils.ts
+## 124. huanchong-99SoloDawnfrontend/src/utils/fileTreeUtils.ts
 
 > 该文件共有 **1** 个问题
 
@@ -4080,7 +4080,7 @@
 
 ---
 
-## 125. huanchong-99GitCortexfrontend/src/utils/previewBridge.ts
+## 125. huanchong-99SoloDawnfrontend/src/utils/previewBridge.ts
 
 > 该文件共有 **1** 个问题
 
@@ -4099,7 +4099,7 @@
 
 ---
 
-## 126. huanchong-99GitCortexfrontend/src/utils/string.ts
+## 126. huanchong-99SoloDawnfrontend/src/utils/string.ts
 
 > 该文件共有 **1** 个问题
 
@@ -4118,7 +4118,7 @@
 
 ---
 
-## 127. huanchong-99GitCortexfrontend/src/vscode/ContextMenu.tsx
+## 127. huanchong-99SoloDawnfrontend/src/vscode/ContextMenu.tsx
 
 > 该文件共有 **4** 个问题
 
@@ -4176,7 +4176,7 @@
 
 ---
 
-## 128. huanchong-99GitCortexfrontend/src/vscode/bridge.ts
+## 128. huanchong-99SoloDawnfrontend/src/vscode/bridge.ts
 
 > 该文件共有 **10** 个问题
 
@@ -4312,7 +4312,7 @@
 
 ---
 
-## 129. huanchong-99GitCortexscripts/check-i18n.sh
+## 129. huanchong-99SoloDawnscripts/check-i18n.sh
 
 > 该文件共有 **1** 个问题
 

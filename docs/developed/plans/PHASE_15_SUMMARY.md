@@ -8,7 +8,7 @@
 
 ## Overview
 
-Phase 15 successfully implemented terminal execution with WebSocket I/O, output persistence, and lifecycle management for the GitCortex workflow automation system.
+Phase 15 successfully implemented terminal execution with WebSocket I/O, output persistence, and lifecycle management for the SoloDawn workflow automation system.
 
 ---
 

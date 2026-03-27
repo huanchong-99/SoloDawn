@@ -1,4 +1,4 @@
-# GitCortex 全量审计修复 — 当前状态报告
+# SoloDawn 全量审计修复 — 当前状态报告
 
 > 更新时间: 2026-03-15 (verified)
 > 分支: main

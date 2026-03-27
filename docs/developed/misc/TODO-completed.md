@@ -1,4 +1,4 @@
-# GitCortex 已完成任务清单
+# SoloDawn 已完成任务清单
 
 > **基线时间:** 2026-02-23  
 > **来源:** `docs/developed/misc/TODO-legacy-full-2026-02-23.md`

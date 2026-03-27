@@ -1,6 +1,6 @@
-# End-to-End Tests for GitCortex Workflow System
+# End-to-End Tests for SoloDawn Workflow System
 
-This directory contains comprehensive end-to-end tests for the GitCortex workflow orchestration system.
+This directory contains comprehensive end-to-end tests for the SoloDawn workflow orchestration system.
 
 ## Overview
 
@@ -17,7 +17,7 @@ These tests verify the complete workflow system functionality by making actual H
 
 ### 1. Running Server
 
-The tests require the GitCortex server to be running on `http://localhost:3001`.
+The tests require the SoloDawn server to be running on `http://localhost:3001`.
 
 Start the server:
 
@@ -45,12 +45,12 @@ Seed data is typically loaded during server startup or via database migrations.
 
 Some tests may require environment variables:
 
-- `GITCORTEX_ENCRYPTION_KEY` - 32-byte encryption key for API key storage (required for workflows with orchestrator configuration)
+- `SOLODAWN_ENCRYPTION_KEY` - 32-byte encryption key for API key storage (required for workflows with orchestrator configuration)
 
 Example:
 
 ```bash
-export GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
+export SOLODAWN_ENCRYPTION_KEY="12345678901234567890123456789012"
 ```
 
 ## Running Tests
@@ -232,7 +232,7 @@ cargo run --bin server -- --seed
 If tests fail with encryption key errors, set the environment variable:
 
 ```bash
-export GITCORTEX_ENCRYPTION_KEY="12345678901234567890123456789012"
+export SOLODAWN_ENCRYPTION_KEY="12345678901234567890123456789012"
 ```
 
 The key must be exactly 32 bytes (characters).

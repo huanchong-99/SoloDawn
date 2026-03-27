@@ -1,4 +1,4 @@
-# GitCortex 1.0 E2E Smoke Test — Final Report & Issue Tracker
+# SoloDawn 1.0 E2E Smoke Test — Final Report & Issue Tracker
 
 > Last updated: 2026-03-19 02:45
 > **ALL 6 TASKS COMPLETED — 6/6 PASSED**
@@ -123,7 +123,7 @@ npm warn Unknown env config "_jsr-registry". This will stop working in the next 
 
 ### Issue #10: 质量门在 Workspace 模式下完全失效
 
-**现象**: 6个任务全部通过 Workspace 模式执行。GitCortex 内置的三层质量门（Terminal Gate → Branch Gate → Repo Gate）**一次都没有触发**。代码审计发现 6 个任务中 5 个有安全漏洞（XSS、CSRF、SSRF、硬编码密钥、认证绕过等），1 个直接评级不合格（Task 5 = C级），但质量门没有拦截任何一个。
+**现象**: 6个任务全部通过 Workspace 模式执行。SoloDawn 内置的三层质量门（Terminal Gate → Branch Gate → Repo Gate）**一次都没有触发**。代码审计发现 6 个任务中 5 个有安全漏洞（XSS、CSRF、SSRF、硬编码密钥、认证绕过等），1 个直接评级不合格（Task 5 = C级），但质量门没有拦截任何一个。
 
 **根因**: 质量门仅在 Orchestrator Workflow 模式下运行（terminal commit 事件触发 Terminal Gate → task 完成触发 Branch Gate → merge 前触发 Repo Gate）。Workspace 模式将任务直接发给 CLI 执行，完全绕过了 Orchestrator 的事件循环，因此质量门无从触发。
 
@@ -155,7 +155,7 @@ npm warn Unknown env config "_jsr-registry". This will stop working in the next 
 - **Workspace ID**: 9fb0b01f-7ffd-46de-a434-f07f90dee8a8
 - **Branch**: vk/9fb0-node-js-rest-api | **Commit**: 7976057
 - **Duration**: ~30 min | **CLI**: Codex GPT-5.3
-- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/9fb0-node-js-rest-api/rest-api-nodejs-mongodb
+- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/9fb0-node-js-rest-api/rest-api-nodejs-mongodb
 - All 10 requirements met: layered architecture (routes→controllers→services→repositories→models), AppError + global error middleware, Zod validation, config management (dotenv + Zod schema), ESLint + Prettier + Husky pre-commit, unit tests (mock repository), integration tests (mongodb-memory-server), 80%+ coverage, GitHub Actions CI, API preserved
 - **Notes**: Codex自主调试了测试超时问题（mongodb-memory-server慢启动 + open handles），迭代3次后修复
 
@@ -163,7 +163,7 @@ npm warn Unknown env config "_jsr-registry". This will stop working in the next 
 - **Workspace ID**: dfa4586c-669c-4ed4-b768-32845ed4a472
 - **Branch**: vk/dfa4-express-js-rest | **Commit**: 1fdfa85
 - **Duration**: ~30 min | **CLI**: Codex GPT-5.2
-- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/dfa4-express-js-rest/express-rest-boilerplate
+- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/dfa4-express-js-rest/express-rest-boilerplate
 - All 9 requirements met: complete rust-api/ directory with Axum, PostgreSQL + SQLx migrations, JWT (jsonwebtoken), validator crate, tracing + thiserror tower middleware, argon2, Docker configs, integration tests (api_tests.rs), utoipa/swagger at /v1/docs
 - **Output structure**: auth.rs, config.rs, db.rs, docs.rs, error.rs, lib.rs, main.rs, routes/, services.rs, state.rs, validation.rs
 
@@ -171,7 +171,7 @@ npm warn Unknown env config "_jsr-registry". This will stop working in the next 
 - **Workspace ID**: d154d5c3-e35e-4568-9e14-bcaa6e8acf0e
 - **Branch**: vk/d154-notion-github | **Commit**: 9582bf9
 - **Duration**: ~20 min | **CLI**: Codex GPT-5.2
-- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/d154-notion-github/knowledge-base-demo
+- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/d154-notion-github/knowledge-base-demo
 - From vague requirement to full app: Next.js + Prisma + PostgreSQL, auth (credentials + GitHub OAuth), doc editor (rich text + images + auto-save), search, sidebar with document tree, team spaces, Docker Compose one-click deploy
 - **Issue**: 本应触发AI追问流程但直接执行了（见 Issue #1）
 
@@ -179,14 +179,14 @@ npm warn Unknown env config "_jsr-registry". This will stop working in the next 
 - **Workspace ID**: 2b15f26f-6ad9-4de7-b7d4-5dccc563ac22
 - **Branch**: vk/2b15-docker | **Commit**: 4e11f6c
 - **Duration**: ~20 min | **CLI**: Codex GPT-5.2
-- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/2b15-docker/ecommerce-microservices-demo
+- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/2b15-docker/ecommerce-microservices-demo
 - From vague requirement to 4 microservices: svc-auth, svc-catalog, svc-order, svc-admin (FastAPI + PostgreSQL + Nginx API Gateway + Docker Compose)
 - **Issue**: 本应触发AI追问流程但直接执行了（见 Issue #1）
 
 ### Task 6: Security + Performance + Monitoring ✅ PASSED
 - **Branch**: vk/3a25-kutt-url | **Commit**: 9b1bc71
 - **Duration**: ~25 min | **CLI**: Codex GPT-5.2
-- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/3a25-kutt-url/kutt
+- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/3a25-kutt-url/kutt
 - All 3 directions covered:
   - **Security**: URL validation (http/https only + optional private network blocking), CSP/Helmet, CSRF (custom double-submit token), Cookie HttpOnly+Secure+SameSite, login lockout/rate-limiting (IP + user/email), password strength policy, optional JWT refresh token rotation, npm audit fix (0 vulnerabilities)
   - **Performance**: Redis cache for short link redirects + TTL, composite DB indexes (migration), static asset compression
@@ -195,7 +195,7 @@ npm warn Unknown env config "_jsr-registry". This will stop working in the next 
 ### Task 2: Hoppscotch Load Testing Module ✅ PASSED
 - **Branch**: vk/2da2-hoppscotch-api-l | **Files**: 15 (staged, not committed — see Issue #8)
 - **Duration**: ~30 min | **CLI**: Codex GPT-5.2
-- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/2da2-hoppscotch-api-l/hoppscotch
+- **Worktree**: C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/2da2-hoppscotch-api-l/hoppscotch
 - All 8 requirements met:
   - Load testing page: `src/pages/load-testing.vue` (i18n key: navigation.load_testing)
   - Concurrency engine: 1-1000 concurrent, total requests, duration, Ramp-up (linear/none) — `src/helpers/load-testing/runner.ts`
@@ -229,11 +229,11 @@ npm warn Unknown env config "_jsr-registry". This will stop working in the next 
 
 ### Test Environment
 - Test directory: E:\V1test
-- GitCortex dev server: ports 23456 (backend) + 23457 (frontend)
+- SoloDawn dev server: ports 23456 (backend) + 23457 (frontend)
 - Execution order: 4 → 3 → 1 → 5 → 6 → 2
 - 4 repos forked to huanchong-99 (rest-api-nodejs-mongodb, express-rest-boilerplate, kutt, hoppscotch)
 - 2 empty repos created locally (knowledge-base-demo, ecommerce-microservices-demo)
-- All repos in E:\V1test with gitcortex-demo branch (forks) or main branch (empty repos)
+- All repos in E:\V1test with solodawn-demo branch (forks) or main branch (empty repos)
 
 ### Cleanup Before Re-test (修复后重跑前需清理)
 
@@ -248,12 +248,12 @@ npm warn Unknown env config "_jsr-registry". This will stop working in the next 
 | Task 2 | (via hoppscotch project) | vk/2da2-hoppscotch-api-l |
 
 **Git Worktrees (需清理)**:
-- `C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/9fb0-node-js-rest-api/`
-- `C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/dfa4-express-js-rest/`
-- `C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/d154-notion-github/`
-- `C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/2b15-docker/`
-- `C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/3a25-kutt-url/`
-- `C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/worktrees/2da2-hoppscotch-api-l/`
+- `C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/9fb0-node-js-rest-api/`
+- `C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/dfa4-express-js-rest/`
+- `C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/d154-notion-github/`
+- `C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/2b15-docker/`
+- `C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/3a25-kutt-url/`
+- `C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/worktrees/2da2-hoppscotch-api-l/`
 
 **项目 (全部删除)**:
 | Task | Project ID |
@@ -268,7 +268,7 @@ npm warn Unknown env config "_jsr-registry". This will stop working in the next 
 **全部从零清理步骤**:
 1. 删除数据库: `rm crates/db/data.db` → `pnpm run prepare-db`
 2. 删除 E:\V1test 整个目录: `rm -rf E:/V1test`
-3. 清理 worktrees 目录: `rm -rf C:/Users/Administrator/AppData/Local/Temp/gitcortex-dev/`
+3. 清理 worktrees 目录: `rm -rf C:/Users/Administrator/AppData/Local/Temp/solodawn-dev/`
 4. 重新 fork 仓库、clone、创建项目、绑定仓库 — 全部从头来
 
 ### Issue Fix Tracking (Updated 2026-03-19)
@@ -385,6 +385,6 @@ npm warn Unknown env config "_jsr-registry". This will stop working in the next 
 
 ### Quality Gate Status
 
-**结论: 质量门未生效。** 6个任务全部通过Workspace模式执行（非Orchestrator Workflow模式），GitCortex内置的三层质量门（Terminal Gate → Branch Gate → Repo Gate）仅在Workflow模式下触发。Workspace模式直接将任务发给CLI执行，跳过了质量门检测流程。
+**结论: 质量门未生效。** 6个任务全部通过Workspace模式执行（非Orchestrator Workflow模式），SoloDawn内置的三层质量门（Terminal Gate → Branch Gate → Repo Gate）仅在Workflow模式下触发。Workspace模式直接将任务发给CLI执行，跳过了质量门检测流程。
 
 这意味着即使质量门配置为`enforce`模式，上述所有安全漏洞和代码质量问题也不会被拦截。如果要在Workspace模式下也启用质量门，需要在Workspace执行完成后添加质量门检查钩子。

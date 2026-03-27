@@ -204,7 +204,7 @@ data: {"cli_type_id": "cli-claude-code", "previous": "installed", "current": "no
 3. 差异通过 `tokio::sync::broadcast` 推送
 4. SSE handler 订阅 broadcast 推送到前端
 5. 前端 `useCliStatusStream` hook 接收 SSE 事件，自动更新 React Query 缓存
-6. 环境变量 `GITCORTEX_CLI_HEALTH_INTERVAL_SECS` 控制检测间隔（默认 300）
+6. 环境变量 `SOLODAWN_CLI_HEALTH_INTERVAL_SECS` 控制检测间隔（默认 300）
 
 ---
 
@@ -268,7 +268,7 @@ Phase E (前端集成)           ←─ 依赖 Phase A-D
 | 风险 | 缓解措施 |
 |------|---------|
 | npm install 需要网络且耗时 | 超时设置 10 分钟；进度推送让用户知道状态 |
-| 安装脚本需要 root/sudo | Docker 容器内以 gitcortex 用户运行，npm global 使用 `--prefix` |
+| 安装脚本需要 root/sudo | Docker 容器内以 solodawn 用户运行，npm global 使用 `--prefix` |
 | CLI 版本不兼容 | 安装时记录版本号，卸载时精确匹配 |
 | SSE 连接过多 | 所有 CLI 状态共享一个 SSE 流，不按 CLI 分连接 |
 | 并发安装冲突 | per-CLI Mutex 锁 + 前端 disable 已锁定 CLI 的安装按钮 |

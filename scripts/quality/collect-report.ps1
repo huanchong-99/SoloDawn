@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 
 $ApiBase = "http://localhost:23456/api"
 
-Write-Host "=== GitCortex Quality Report ==="
+Write-Host "=== SoloDawn Quality Report ==="
 Write-Host ""
 
 $Response = Invoke-RestMethod -Uri "${ApiBase}/quality/runs?limit=${Limit}" -Method Get

@@ -1,4 +1,4 @@
-# GitCortex 实现计划概览
+# SoloDawn 实现计划概览
 
 > **For Claude:** 使用 `superpowers-automation` skill 自动执行此计划。
 > 进度追踪在 `TODO.md`，详细任务在各 phase 文件中。
@@ -16,8 +16,8 @@
 
 ## 源项目位置
 
-- **Vibe Kanban:** `F:\Project\GitCortex\vibe-kanban-main`
-- **CC-Switch:** `F:\Project\GitCortex\cc-switch-main`
+- **Vibe Kanban:** `F:\Project\SoloDawn\vibe-kanban-main`
+- **CC-Switch:** `F:\Project\SoloDawn\cc-switch-main`
 
 ## 设计文档
 

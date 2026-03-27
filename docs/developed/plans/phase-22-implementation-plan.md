@@ -1,7 +1,7 @@
 # Phase 22: WebSocket 事件广播 - TDD 实现计划
 
 > **创建日期:** 2026-02-04
-> **工作区:** E:\GitCortex-phase-22
+> **工作区:** E:\SoloDawn-phase-22
 > **分支:** phase-22-websocket-broadcast
 
 ---

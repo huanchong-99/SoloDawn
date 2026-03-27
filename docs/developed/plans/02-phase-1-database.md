@@ -52,7 +52,7 @@
 
 ```sql
 -- ============================================================================
--- GitCortex Workflow Tables Migration
+-- SoloDawn Workflow Tables Migration
 -- 创建日期: 2026-01-16
 -- 描述: 添加工作流协调相关表，支持主 Agent 跨终端任务协调
 -- ============================================================================
@@ -334,7 +334,7 @@ CREATE INDEX IF NOT EXISTS idx_git_event_process_status ON git_event(process_sta
 **Step 1.1.3: 验证迁移文件语法**
 
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 # 检查 SQL 语法（使用 sqlite3）
 sqlite3 :memory: < crates/db/migrations/20260116000001_create_workflow_tables.sql
 echo $?  # 应该输出 0
@@ -353,7 +353,7 @@ echo $?  # 应该输出 0
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo sqlx migrate run
 # 预期输出: Applied 20260116000001_create_workflow_tables (xxx ms)
 ```
@@ -989,7 +989,7 @@ pub struct TerminalDetail {
 在文件末尾添加：
 
 ```rust
-// GitCortex Workflow 模型
+// SoloDawn Workflow 模型
 pub mod cli_type;
 pub mod workflow;
 pub mod terminal;
@@ -1014,7 +1014,7 @@ pub use terminal::*;
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p db
 # 预期: 编译成功，无错误
 
@@ -1823,7 +1823,7 @@ pub async fn update_git_event_status(
 在 `vibe-kanban-main/crates/db/src/models/mod.rs` 末尾添加：
 
 ```rust
-// GitCortex DAO 模块
+// SoloDawn DAO 模块
 pub mod cli_type_dao;
 pub mod workflow_dao;
 pub mod terminal_dao;
@@ -1844,7 +1844,7 @@ pub mod terminal_dao;
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p db
 # 预期: 编译成功
 
@@ -2481,7 +2481,7 @@ pub fn api_routes(state: Arc<AppState>) -> Router {
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main
+cd F:\Project\SoloDawn\vibe-kanban-main
 cargo build -p server
 # 预期: 编译成功
 

@@ -1,4 +1,4 @@
-# GitCortex 全量代码深度审计报告（链路驱动版）
+# SoloDawn 全量代码深度审计报告（链路驱动版）
 
 > 审计日期: 2026-03-14
 > 审计方法: 按交互链路分组，6 轮 x 6 并发 = 36 组
@@ -602,7 +602,7 @@
 | G36-005 | P3 | modelStore.fetchModels 绕过统一 API 层 | 认证不一致 | modelStore.ts:98 | 替换为 makeRequest | open |
 | G36-006 | P3 | modelStore 通过 X-API-Key header 传递 key，与 Bearer 模式不一致 | 安全审计 | modelStore.ts:99-101 | 确认设计意图并注释 | open |
 | G36-007 | P3 | text.rs git_branch_id 每次调用编译正则 | 性能 | text.rs:9 | 使用 Lazy 缓存 | open |
-| G36-008 | P3 | port_file.rs 硬编码 "gitcortex" 与 path.rs debug 模式 "gitcortex-dev" 不一致 | 端口冲突 | port_file.rs:6; path.rs:107-111 | 统一使用 get_gitcortex_temp_dir() | open |
+| G36-008 | P3 | port_file.rs 硬编码 "solodawn" 与 path.rs debug 模式 "solodawn-dev" 不一致 | 端口冲突 | port_file.rs:6; path.rs:107-111 | 统一使用 get_solodawn_temp_dir() | open |
 | G36-009 | P2 | TabNavigationContext 仅导出 createContext 无 Provider 和 null guard | useContext 返回 null | TabNavigationContext.tsx:1-9 | 添加 Provider 和 useTabNavigation hook | open |
 | G36-010 | P2 | SearchContext useMemo 依赖数组缺少 clear 函数引用 | exhaustive-deps 违反 | SearchContext.tsx:61-71 | useCallback 包裹并加入 deps | open |
 | G36-011 | P3 | ReviewProvider contextValue useMemo deps 不完整 | 理论过期闭包 | ReviewProvider.tsx:222-233 | useCallback 包裹函数 | open |

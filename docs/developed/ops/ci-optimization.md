@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the CI pipeline optimizations applied to GitCortex. The guiding principles are:
+This document describes the CI pipeline optimizations applied to SoloDawn. The guiding principles are:
 
 1. **Zero check removal** -- every lint, test, and quality gate that existed before the optimization continues to run. Nothing is skipped.
 2. **Faster feedback** -- reduce wall-clock time by eliminating redundant work, caching compilation artifacts, and parallelizing where possible.
@@ -225,7 +225,7 @@ The Docker build caches layers sequentially. Changes to these files cause the co
 | Any file in `crates/` | `chef-planner` + project build (cook layer is preserved if recipe unchanged) |
 | Frontend source (`frontend/`) | `frontend-builder` + final COPY in chef-builder |
 
-BuildKit cache mounts (`--mount=type=cache,id=gitcortex-cargo-registry,...`) persist the cargo registry across builds regardless of layer invalidation, so even a full rebuild avoids re-downloading crates.
+BuildKit cache mounts (`--mount=type=cache,id=solodawn-cargo-registry,...`) persist the cargo registry across builds regardless of layer invalidation, so even a full rebuild avoids re-downloading crates.
 
 ### cargo-nextest compatibility issues
 

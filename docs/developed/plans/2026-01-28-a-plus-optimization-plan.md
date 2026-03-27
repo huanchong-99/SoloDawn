@@ -34,7 +34,7 @@
 ### 🟡 Medium Priority (1个)
 
 #### 2. API鉴权开发模式放行
-**问题:** 当未设置`GITCORTEX_API_TOKEN`环境变量时，认证中间件直接放行所有请求。生产环境一旦配置遗漏即为全开放。
+**问题:** 当未设置`SOLODAWN_API_TOKEN`环境变量时，认证中间件直接放行所有请求。生产环境一旦配置遗漏即为全开放。
 
 **影响:**
 - 生产环境误配置风险
@@ -132,7 +132,7 @@ pub async fn require_jwt_token(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // 验证JWT签名和过期时间
-    let jwt_secret = std::env::var("GITCORTEX_JWT_SECRET")
+    let jwt_secret = std::env::var("SOLODAWN_JWT_SECRET")
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let _user_id = verify_and_extract_subject(token, &jwt_secret)
@@ -187,7 +187,7 @@ pub fn router(deployment: DeploymentImpl) -> Router {
 #### Step 1: 添加生产模式环境变量
 ```rust
 // crates/server/src/main.rs
-const PRODUCTION_MODE: bool = std::env::var("GITCORTEX_PRODUCTION")
+const PRODUCTION_MODE: bool = std::env::var("SOLODAWN_PRODUCTION")
     .unwrap_or_else(|_| "false".to_string())
     == "true";
 ```
@@ -196,15 +196,15 @@ const PRODUCTION_MODE: bool = std::env::var("GITCORTEX_PRODUCTION")
 ```rust
 // crates/server/src/middleware/auth.rs
 pub async fn require_api_token(req: Request, next: Next) -> Result<Response, StatusCode> {
-    let is_production = std::env::var("GITCORTEX_PRODUCTION")
+    let is_production = std::env::var("SOLODAWN_PRODUCTION")
         .unwrap_or_else(|_| "false".to_string()) == "true";
 
-    let token = std::env::var("GITCORTEX_API_TOKEN");
+    let token = std::env::var("SOLODAWN_API_TOKEN");
 
     if is_production {
         // 生产模式：必须设置token
         let token = token.ok_or_else(|| {
-            tracing::error!("PRODUCTION mode enabled but GITCORTEX_API_TOKEN not set");
+            tracing::error!("PRODUCTION mode enabled but SOLODAWN_API_TOKEN not set");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
@@ -244,13 +244,13 @@ pub async fn require_api_token(req: Request, next: Next) -> Result<Response, Sta
 async fn main() -> anyhow::Result<()> {
     // 检查生产环境必需配置
     if PRODUCTION_MODE {
-        std::env::var("GITCORTEX_API_TOKEN").or_else(|_| {
-            eprintln!("ERROR: GITCORTEX_API_TOKEN must be set in production mode");
+        std::env::var("SOLODAWN_API_TOKEN").or_else(|_| {
+            eprintln!("ERROR: SOLODAWN_API_TOKEN must be set in production mode");
             std::process::exit(1);
         })?;
 
-        std::env::var("GITCORTEX_ENCRYPTION_KEY").or_else(|_| {
-            eprintln!("ERROR: GITCORTEX_ENCRYPTION_KEY must be set in production mode");
+        std::env::var("SOLODAWN_ENCRYPTION_KEY").or_else(|_| {
+            eprintln!("ERROR: SOLODAWN_ENCRYPTION_KEY must be set in production mode");
             std::process::exit(1);
         })?;
 
@@ -499,17 +499,17 @@ impl ExecutorProfiles {
 
 ```bash
 # 必需 - API加密密钥（32字节）
-export GITCORTEX_ENCRYPTION_KEY="your-32-byte-key-here"
+export SOLODAWN_ENCRYPTION_KEY="your-32-byte-key-here"
 
 # 必需 - JWT密钥
-export GITCORTEX_JWT_SECRET="your-jwt-secret-here"
+export SOLODAWN_JWT_SECRET="your-jwt-secret-here"
 
 # 生产模式 - 必需（生产环境）
-export GITCORTEX_PRODUCTION="true"
-export GITCORTEX_API_TOKEN="your-production-api-token"
+export SOLODAWN_PRODUCTION="true"
+export SOLODAWN_API_TOKEN="your-production-api-token"
 
 # 可选 - 开发模式token
-# export GITCORTEX_API_TOKEN="dev-token"
+# export SOLODAWN_API_TOKEN="dev-token"
 ```
 
 ### 测试命令

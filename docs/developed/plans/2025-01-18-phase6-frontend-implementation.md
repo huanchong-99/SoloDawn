@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Build a 7-step workflow wizard for creating GitCortex parallel development workflows with TDD approach.
+**Goal:** Build a 7-step workflow wizard for creating SoloDawn parallel development workflows with TDD approach.
 
 **Architecture:**
 - React functional components with TypeScript for type safety
@@ -1045,7 +1045,7 @@ export function Step0Project({ config, onChange, errors }: Props) {
                 <span>未检测到 Git 仓库</span>
               </div>
               <p className="text-sm text-low pl-6">
-                此文件夹不是 Git 仓库。GitCortex 需要 Git 来协调多终端工作流。
+                此文件夹不是 Git 仓库。SoloDawn 需要 Git 来协调多终端工作流。
               </p>
               <div className="flex gap-2 pl-6">
                 <PrimaryButton onClick={handleInitGit} disabled={isChecking}>

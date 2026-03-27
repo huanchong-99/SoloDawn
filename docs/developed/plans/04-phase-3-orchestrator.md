@@ -21,11 +21,11 @@
 
 ## Prerequisites
 
-**Working Directory:** `F:/Project/GitCortex/.worktrees/phase-3-orchestrator/vibe-kanban-main`
+**Working Directory:** `F:/Project/SoloDawn/.worktrees/phase-3-orchestrator/vibe-kanban-main`
 
 **Verification Steps:**
 ```bash
-cd F:/Project/GitCortex/.worktrees/phase-3-orchestrator/vibe-kanban-main
+cd F:/Project/SoloDawn/.worktrees/phase-3-orchestrator/vibe-kanban-main
 cargo build -p services
 cargo test -p services --no-run
 ```

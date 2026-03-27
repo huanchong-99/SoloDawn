@@ -291,7 +291,7 @@ NEW: PTY Reader → OutputFanout → [PromptWatcher, WebSocket] (always works)
 - ✅ All tests passing (176/176)
 
 ### Worktree
-- Location: `E:\GitCortex\.worktrees\phase-25-auto-confirm-fix`
+- Location: `E:\SoloDawn\.worktrees\phase-25-auto-confirm-fix`
 - Status: Can be cleaned up
 - CLAUDE.md: Copied successfully
 

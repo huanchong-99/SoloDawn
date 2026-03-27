@@ -559,7 +559,7 @@ export function WorkflowWizard({ onComplete, onCancel }: Props) {
 
 **测试命令:**
 ```bash
-cd F:\Project\GitCortex\vibe-kanban-main\frontend
+cd F:\Project\SoloDawn\vibe-kanban-main\frontend
 pnpm run check
 # 预期: 无类型错误
 ```
@@ -716,7 +716,7 @@ export function Step0Project({ config, onChange, errors }: Props) {
                 <span>未检测到 Git 仓库</span>
               </div>
               <p className="text-sm text-low pl-6">
-                此文件夹不是 Git 仓库。GitCortex 需要 Git 来协调多终端工作流。
+                此文件夹不是 Git 仓库。SoloDawn 需要 Git 来协调多终端工作流。
               </p>
               <div className="flex gap-2 pl-6">
                 <Button onClick={handleInitGit} disabled={isChecking} size="sm">
