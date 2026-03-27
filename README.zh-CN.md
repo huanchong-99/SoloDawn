@@ -376,4 +376,5 @@ cd frontend && pnpm test:run && cd ..
 - 详见 `LICENSE`
 
 ## 友链
-https://linux.do/
+
+- [LINUX DO](https://linux.do/)

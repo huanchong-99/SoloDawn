@@ -370,10 +370,11 @@ cd frontend && pnpm test:run && cd ..
 ## License
 
 - SoloDawn: Apache-2.0
-
-## Blogroll
-https://linux.do/
 - Vibe Kanban derived parts: Apache-2.0
 - CC-Switch derived parts: MIT
 - Quality Gate models (ported from SonarQube): LGPL-3.0
 - See `LICENSE` for full details.
+
+## Blogroll
+
+- [LINUX DO](https://linux.do/)
