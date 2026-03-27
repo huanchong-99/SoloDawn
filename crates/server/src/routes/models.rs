@@ -15,6 +15,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use utils::url::normalize_base_url;
+
 use crate::{DeploymentImpl, error::ApiError};
 
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com";
@@ -69,15 +71,18 @@ async fn list_models(
     let client = http_client()?;
 
     let models = match query.api_type.as_str() {
-        "openai" => list_openai_models(&client, &ensure_v1(&base_url), &api_key).await?,
-        "openai-compatible" => {
-            // For openai-compatible, use the URL as-is (user provides full path)
-            list_openai_models(&client, &trim_trailing_slash(&base_url), &api_key).await?
+        "openai" | "openai-compatible" => {
+            let url = normalize_base_url(&query.api_type, &base_url);
+            list_openai_models(&client, &url, &api_key).await?
         }
         "anthropic" | "anthropic-compatible" => {
-            list_anthropic_models(&client, &trim_trailing_slash(&base_url), &api_key).await?
+            let url = normalize_base_url(&query.api_type, &base_url);
+            list_anthropic_models(&client, &url, &api_key).await?
         }
-        "google" => list_google_models(&client, &trim_trailing_slash(&base_url), &api_key).await?,
+        "google" => {
+            let url = normalize_base_url("google", &base_url);
+            list_google_models(&client, &url, &api_key).await?
+        }
         other => {
             return Err(ApiError::BadRequest(format!(
                 "Unsupported apiType: {other}"
@@ -96,42 +101,17 @@ async fn verify_model(
     let client = http_client()?;
 
     let verified = match payload.api_type.as_str() {
-        "openai" => {
-            verify_openai_model(
-                &client,
-                &ensure_v1(&payload.base_url),
-                &payload.api_key,
-                &payload.model_id,
-            )
-            .await
-        }
-        "openai-compatible" => {
-            // For openai-compatible, use the URL as-is
-            verify_openai_model(
-                &client,
-                &trim_trailing_slash(&payload.base_url),
-                &payload.api_key,
-                &payload.model_id,
-            )
-            .await
+        "openai" | "openai-compatible" => {
+            let url = normalize_base_url(&payload.api_type, &payload.base_url);
+            verify_openai_model(&client, &url, &payload.api_key, &payload.model_id).await
         }
         "anthropic" | "anthropic-compatible" => {
-            verify_anthropic_model(
-                &client,
-                &trim_trailing_slash(&payload.base_url),
-                &payload.api_key,
-                &payload.model_id,
-            )
-            .await
+            let url = normalize_base_url(&payload.api_type, &payload.base_url);
+            verify_anthropic_model(&client, &url, &payload.api_key, &payload.model_id).await
         }
         "google" => {
-            verify_google_model(
-                &client,
-                &trim_trailing_slash(&payload.base_url),
-                &payload.api_key,
-                &payload.model_id,
-            )
-            .await
+            let url = normalize_base_url("google", &payload.base_url);
+            verify_google_model(&client, &url, &payload.api_key, &payload.model_id).await
         }
         other => {
             return Err(ApiError::BadRequest(format!(
@@ -182,25 +162,6 @@ fn normalized_base_url(api_type: &str, base_url: Option<&str>) -> Result<String,
 
 fn trim_trailing_slash(value: &str) -> String {
     value.trim_end_matches('/').to_string()
-}
-
-fn ensure_v1(base_url: &str) -> String {
-    let trimmed = trim_trailing_slash(base_url);
-    if trimmed.ends_with("/v1") {
-        trimmed
-    } else {
-        format!("{trimmed}/v1")
-    }
-}
-
-fn ensure_anthropic_root(base_url: &str) -> String {
-    let trimmed = trim_trailing_slash(base_url);
-    // If already ends with /v1, use as-is; otherwise append /v1
-    if trimmed.ends_with("/v1") {
-        trimmed
-    } else {
-        format!("{trimmed}/v1")
-    }
 }
 
 fn join_url(base: &str, path: &str) -> String {
@@ -298,9 +259,7 @@ async fn list_anthropic_models(
     base_url: &str,
     api_key: &str,
 ) -> Result<Vec<String>, ApiError> {
-    // Ensure we have the correct API root (handle both with and without /v1)
-    let root = ensure_anthropic_root(base_url);
-    let url = join_url(&root, "models");
+    let url = join_url(base_url, "models");
     tracing::debug!("Fetching Anthropic models from: {}", url);
 
     let response = client
@@ -333,8 +292,7 @@ async fn verify_anthropic_model(
     api_key: &str,
     model_id: &str,
 ) -> Result<bool, ApiError> {
-    let root = ensure_anthropic_root(base_url);
-    let url = join_url(&root, "messages");
+    let url = join_url(base_url, "messages");
     tracing::debug!("Verifying Anthropic model {} at: {}", model_id, url);
 
     let payload = serde_json::json!({

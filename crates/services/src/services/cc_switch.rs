@@ -100,17 +100,12 @@ fn create_codex_config(
     // Use a custom provider when a custom base URL is configured.
     // Normalize base_url: Codex CLI appends endpoint paths (e.g. /responses) directly
     // to base_url, so it must end with /v1 for OpenAI-compatible gateways.
-    // TODO: consolidate with ensure_v1() in crates/server/src/routes/models.rs
     let normalized_base_url;
     let (provider_key, base_url_str) = match base_url {
         Some(url) => {
-            let trimmed = url.trim_end_matches('/');
-            if !trimmed.ends_with("/v1") {
-                normalized_base_url = format!("{trimmed}/v1");
-                ("custom", normalized_base_url.as_str())
-            } else {
-                ("custom", trimmed)
-            }
+            // Codex CLI always uses OpenAI protocol, so "openai" ensures /v1 is appended.
+            normalized_base_url = utils::url::normalize_base_url("openai", url);
+            ("custom", normalized_base_url.as_str())
         }
         None => ("openai", "https://api.openai.com/v1"),
     };
