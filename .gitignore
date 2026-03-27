@@ -3,6 +3,9 @@
 worktrees/
 SoloDawn/
 
+# GitNexus knowledge graph index (auto-generated)
+.gitnexus/
+
 # Environment
 .env
 .env.*
