@@ -98,7 +98,12 @@ async fn handle_raw_logs_ws(
                 LogMsg::JsonPatch(patch).to_ws_message_unchecked()
             }
             LogMsg::Finished => LogMsg::Finished.to_ws_message_unchecked(),
-            _ => unreachable!("Raw stream should only have Stdout/Stderr/Finished"),
+            other => {
+                tracing::error!("Unexpected raw stream variant: {:?}", other.name());
+                Message::Text(
+                    r#"{"error":"unexpected_stream_variant"}"#.to_string().into(),
+                )
+            }
         }
     });
 

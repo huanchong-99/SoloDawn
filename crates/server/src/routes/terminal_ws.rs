@@ -253,7 +253,11 @@ async fn handle_terminal_socket(
                 .to_string(),
         };
         let _ = ws_sender
-            .send(Message::Text(serde_json::to_string(&msg).unwrap().into()))
+            .send(Message::Text(
+                serde_json::to_string(&msg)
+                    .unwrap_or_else(|_| r#"{"type":"error","message":"serialization failed"}"#.to_string())
+                    .into(),
+            ))
             .await;
         let _ = ws_sender.close().await;
         tracing::warn!("Terminal {} has no running process", terminal_id);

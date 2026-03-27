@@ -282,7 +282,7 @@ async fn get_sound(Path(sound): Path<SoundFile>) -> Result<Response, ApiError> {
             http::HeaderValue::from_static("audio/wav"),
         )
         .body(Body::from(sound.data.into_owned()))
-        .unwrap();
+        .map_err(|e| DeploymentError::Other(e.into()))?;
     Ok(response)
 }
 
@@ -484,20 +484,32 @@ fn set_mcp_servers_in_config_path(
         if current.get(part).is_none() {
             current
                 .as_object_mut()
-                .unwrap()
+                .ok_or_else(|| std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Expected JSON object at path segment '{part}'"),
+                ))?
                 .insert(part.clone(), serde_json::json!({}));
         }
-        current = current.get_mut(part).unwrap();
+        current = current.get_mut(part).ok_or_else(|| std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Failed to navigate to path segment '{part}'"),
+        ))?;
         if !current.is_object() {
             *current = serde_json::json!({});
         }
     }
 
     // Set the final attribute
-    let final_attr = path.last().unwrap();
+    let final_attr = path.last().ok_or_else(|| std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "MCP servers path is empty after validation",
+    ))?;
     current
         .as_object_mut()
-        .unwrap()
+        .ok_or_else(|| std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Final config node is not a JSON object",
+        ))?
         .insert(final_attr.clone(), serde_json::to_value(servers)?);
 
     Ok(())
