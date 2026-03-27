@@ -70,12 +70,12 @@ Source: "..\scripts\setup-windows.ps1"; DestDir: "{app}\scripts"; Flags: ignorev
 Source: "assets\solodawn.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Components: tray
-Name: "{group}\Open {#MyAppName} Web UI"; Filename: "http://127.0.0.1:{#DefaultPort}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\solodawn.ico"; Components: tray
+Name: "{group}\Open {#MyAppName} Web UI"; Filename: "http://127.0.0.1:{#DefaultPort}"; IconFilename: "{app}\assets\solodawn.ico"
 Name: "{group}\Setup Dev Environment"; Filename: "{app}\scripts\setup-windows.cmd"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; Components: tray
-Name: "{commonstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startupicon; Components: tray
+Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\solodawn.ico"; Tasks: desktopicon; Components: tray
+Name: "{commonstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\solodawn.ico"; Tasks: startupicon; Components: tray
 
 [Run]
 ; Generate encryption key and .env
