@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="SoloDawn" width="120" />
+  <img src="installer/assets/solodawn.ico" alt="SoloDawn" width="120" />
 </p>
 
 <h1 align="center">SoloDawn</h1>
