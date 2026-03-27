@@ -319,4 +319,139 @@ mod tests {
         let prompt = system_prompt_for_profile(PromptProfile::WorkspacePlanning);
         assert!(prompt.contains("must NOT write, read, or review any code"));
     }
+
+    // ----- OrchestratorConfig::validate tests -----
+
+    #[test]
+    fn validate_rejects_empty_api_key() {
+        let config = OrchestratorConfig {
+            api_type: "openai".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            api_key: String::new(),
+            model: "gpt-4".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            config.validate().is_err(),
+            "Empty API key should fail validation"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_empty_base_url() {
+        let config = OrchestratorConfig {
+            api_type: "openai".to_string(),
+            base_url: String::new(),
+            api_key: "sk-test".to_string(),
+            model: "gpt-4".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            config.validate().is_err(),
+            "Empty base URL should fail validation"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_empty_model() {
+        let config = OrchestratorConfig {
+            api_type: "openai".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            api_key: "sk-test".to_string(),
+            model: String::new(),
+            ..Default::default()
+        };
+        assert!(
+            config.validate().is_err(),
+            "Empty model should fail validation"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_valid_config() {
+        let config = OrchestratorConfig {
+            api_type: "openai-compatible".to_string(),
+            base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+            api_key: "sk-test-key".to_string(),
+            model: "glm-5".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            config.validate().is_ok(),
+            "Valid config should pass validation"
+        );
+    }
+
+    // ----- OrchestratorConfig::from_workflow tests -----
+
+    #[test]
+    fn from_workflow_returns_none_when_all_missing() {
+        assert!(
+            OrchestratorConfig::from_workflow(None, None, None, None).is_none(),
+            "All None inputs should return None"
+        );
+    }
+
+    #[test]
+    fn from_workflow_returns_none_when_key_missing() {
+        assert!(
+            OrchestratorConfig::from_workflow(
+                Some("openai"),
+                Some("https://api.openai.com"),
+                None,
+                Some("gpt-4"),
+            )
+            .is_none(),
+            "Missing API key should return None"
+        );
+    }
+
+    #[test]
+    fn from_workflow_returns_none_when_model_missing() {
+        assert!(
+            OrchestratorConfig::from_workflow(
+                Some("openai"),
+                Some("https://api.openai.com"),
+                Some("sk-test"),
+                None,
+            )
+            .is_none(),
+            "Missing model should return None"
+        );
+    }
+
+    #[test]
+    fn from_workflow_valid_zhipuai() {
+        let config = OrchestratorConfig::from_workflow(
+            Some("openai-compatible"),
+            Some("https://open.bigmodel.cn/api/paas/v4"),
+            Some("sk-test-key"),
+            Some("glm-5"),
+        );
+        assert!(config.is_some(), "Valid inputs should produce Some(config)");
+        let config = config.unwrap();
+        assert_eq!(config.api_type, "openai-compatible");
+        assert_eq!(config.base_url, "https://open.bigmodel.cn/api/paas/v4");
+        assert_eq!(config.api_key, "sk-test-key");
+        assert_eq!(config.model, "glm-5");
+    }
+
+    #[test]
+    fn from_workflow_inherits_defaults() {
+        let config = OrchestratorConfig::from_workflow(
+            Some("anthropic"),
+            Some("https://api.anthropic.com"),
+            Some("sk-ant-test"),
+            Some("claude-sonnet-4-20250514"),
+        )
+        .unwrap();
+        // Verify default fields are populated
+        let defaults = OrchestratorConfig::default();
+        assert_eq!(config.max_retries, defaults.max_retries);
+        assert_eq!(config.timeout_secs, defaults.timeout_secs);
+        assert_eq!(
+            config.rate_limit_requests_per_second,
+            defaults.rate_limit_requests_per_second
+        );
+    }
 }

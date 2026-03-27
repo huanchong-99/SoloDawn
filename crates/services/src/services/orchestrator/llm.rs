@@ -744,3 +744,265 @@ mod url_normalization_tests {
         );
     }
 }
+
+/// Integration tests that verify the full chain from OrchestratorConfig
+/// through URL normalization and protocol selection — prevents regressions
+/// of the 401 auth bug caused by blind `/v1` URL normalization.
+#[cfg(test)]
+mod full_chain_tests {
+    use super::*;
+
+    #[test]
+    fn test_full_chain_zhipuai_openai_compatible() {
+        let config = OrchestratorConfig {
+            api_type: "openai-compatible".to_string(),
+            base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+            api_key: "test-key".to_string(),
+            model: "glm-5".to_string(),
+            ..Default::default()
+        };
+
+        // Verify config is valid
+        assert!(config.validate().is_ok(), "Config should be valid");
+
+        // Verify protocol selection
+        assert!(
+            !should_use_anthropic_protocol(&config),
+            "ZhipuAI openai-compatible should NOT use Anthropic protocol"
+        );
+
+        // Verify URL normalization preserves provider path (no /v1 appended)
+        let normalized = normalize_llm_base_url(&config.api_type, &config.base_url);
+        assert_eq!(
+            normalized, "https://open.bigmodel.cn/api/paas/v4",
+            "openai-compatible must NOT append /v1 to provider URL"
+        );
+
+        // Verify the final request URL that would be constructed
+        let expected_chat_url = format!("{normalized}/chat/completions");
+        assert_eq!(
+            expected_chat_url,
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            "Final chat URL must use provider's v4 path"
+        );
+    }
+
+    #[test]
+    fn test_full_chain_zhipuai_anthropic_compatible() {
+        let config = OrchestratorConfig {
+            api_type: "anthropic-compatible".to_string(),
+            base_url: "https://open.bigmodel.cn/api/anthropic".to_string(),
+            api_key: "test-key".to_string(),
+            model: "glm-5".to_string(),
+            ..Default::default()
+        };
+
+        assert!(config.validate().is_ok(), "Config should be valid");
+
+        assert!(
+            should_use_anthropic_protocol(&config),
+            "ZhipuAI anthropic-compatible SHOULD use Anthropic protocol"
+        );
+
+        // Verify URL normalization preserves provider path
+        let normalized = normalize_llm_base_url(&config.api_type, &config.base_url);
+        assert_eq!(
+            normalized, "https://open.bigmodel.cn/api/anthropic",
+            "anthropic-compatible must NOT append /v1 to provider URL"
+        );
+
+        // Verify the final messages URL for Anthropic protocol
+        let expected_msg_url = format!("{normalized}/messages");
+        assert_eq!(
+            expected_msg_url,
+            "https://open.bigmodel.cn/api/anthropic/messages",
+            "Final messages URL must use provider's anthropic path"
+        );
+    }
+
+    #[test]
+    fn test_full_chain_official_openai() {
+        let config = OrchestratorConfig {
+            api_type: "openai".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            api_key: "sk-test".to_string(),
+            model: "gpt-4o".to_string(),
+            ..Default::default()
+        };
+
+        assert!(config.validate().is_ok(), "Config should be valid");
+
+        assert!(
+            !should_use_anthropic_protocol(&config),
+            "Official OpenAI should NOT use Anthropic protocol"
+        );
+
+        let normalized = normalize_llm_base_url(&config.api_type, &config.base_url);
+        assert_eq!(
+            normalized, "https://api.openai.com/v1",
+            "Official openai MUST append /v1"
+        );
+
+        let expected_chat_url = format!("{normalized}/chat/completions");
+        assert_eq!(
+            expected_chat_url,
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_full_chain_official_anthropic() {
+        let config = OrchestratorConfig {
+            api_type: "anthropic".to_string(),
+            base_url: "https://api.anthropic.com".to_string(),
+            api_key: "sk-ant-test".to_string(),
+            model: "claude-sonnet-4-20250514".to_string(),
+            ..Default::default()
+        };
+
+        assert!(config.validate().is_ok(), "Config should be valid");
+
+        assert!(
+            should_use_anthropic_protocol(&config),
+            "Official Anthropic SHOULD use Anthropic protocol"
+        );
+
+        let normalized = normalize_llm_base_url(&config.api_type, &config.base_url);
+        assert_eq!(
+            normalized, "https://api.anthropic.com/v1",
+            "Official anthropic MUST append /v1"
+        );
+
+        let expected_msg_url = format!("{normalized}/messages");
+        assert_eq!(
+            expected_msg_url,
+            "https://api.anthropic.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn test_protocol_detection_all_explicit_types() {
+        let cases = vec![
+            ("anthropic", true),
+            ("anthropic-compatible", true),
+            ("openai", false),
+            ("openai-compatible", false),
+            ("google", false),
+        ];
+
+        for (api_type, expected_anthropic) in cases {
+            let config = OrchestratorConfig {
+                api_type: api_type.to_string(),
+                base_url: "https://example.com".to_string(),
+                api_key: "test".to_string(),
+                model: "test".to_string(),
+                ..Default::default()
+            };
+            assert_eq!(
+                should_use_anthropic_protocol(&config),
+                expected_anthropic,
+                "api_type '{}' should {}use Anthropic protocol",
+                api_type,
+                if expected_anthropic { "" } else { "NOT " }
+            );
+        }
+    }
+
+    #[test]
+    fn test_create_llm_client_rejects_empty_key() {
+        let config = OrchestratorConfig {
+            api_type: "openai".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            api_key: String::new(),
+            model: "gpt-4".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            create_llm_client(&config).is_err(),
+            "Empty API key should fail validation via create_llm_client"
+        );
+    }
+
+    #[test]
+    fn test_create_llm_client_rejects_empty_base_url() {
+        let config = OrchestratorConfig {
+            api_type: "openai".to_string(),
+            base_url: String::new(),
+            api_key: "sk-test".to_string(),
+            model: "gpt-4".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            create_llm_client(&config).is_err(),
+            "Empty base URL should fail validation via create_llm_client"
+        );
+    }
+
+    #[test]
+    fn test_create_llm_client_rejects_empty_model() {
+        let config = OrchestratorConfig {
+            api_type: "openai".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            api_key: "sk-test".to_string(),
+            model: String::new(),
+            ..Default::default()
+        };
+        assert!(
+            create_llm_client(&config).is_err(),
+            "Empty model should fail validation via create_llm_client"
+        );
+    }
+
+    /// Verify that build_single_client creates clients successfully for all
+    /// provider types. Requires rustls crypto provider to be installed since
+    /// reqwest uses `rustls-tls-webpki-roots-no-provider`.
+    #[tokio::test]
+    async fn test_build_single_client_all_provider_types() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        let cases = vec![
+            ("openai", "https://api.openai.com"),
+            ("openai-compatible", "https://open.bigmodel.cn/api/paas/v4"),
+            ("anthropic", "https://api.anthropic.com"),
+            ("anthropic-compatible", "https://open.bigmodel.cn/api/anthropic"),
+            ("google", "https://generativelanguage.googleapis.com"),
+        ];
+
+        for (api_type, base_url) in cases {
+            let config = OrchestratorConfig {
+                api_type: api_type.to_string(),
+                base_url: base_url.to_string(),
+                api_key: "test-key".to_string(),
+                model: "test-model".to_string(),
+                ..Default::default()
+            };
+            let result = build_single_client(&config);
+            assert!(
+                result.is_ok(),
+                "build_single_client should succeed for api_type '{api_type}'"
+            );
+        }
+    }
+
+    /// Verify create_llm_client (the public entry point) works end-to-end
+    /// for a ZhipuAI configuration — the exact scenario that triggered the
+    /// original 401 bug.
+    #[tokio::test]
+    async fn test_create_llm_client_zhipuai_e2e() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        let config = OrchestratorConfig {
+            api_type: "openai-compatible".to_string(),
+            base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+            api_key: "test-key".to_string(),
+            model: "glm-5".to_string(),
+            ..Default::default()
+        };
+
+        let client = create_llm_client(&config);
+        assert!(
+            client.is_ok(),
+            "create_llm_client should succeed for ZhipuAI openai-compatible config"
+        );
+    }
+}

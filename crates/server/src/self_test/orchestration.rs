@@ -27,6 +27,15 @@ fn e2e_base_url() -> String {
         .unwrap_or_else(|_| "https://open.bigmodel.cn/api/anthropic".to_string())
 }
 
+fn e2e_api_type() -> String {
+    std::env::var("E2E_API_TYPE").unwrap_or_else(|_| {
+        // Default base URL points to ZhipuAI, which is a compatible provider
+        // (not official Anthropic). Using "anthropic-compatible" ensures
+        // normalize_llm_base_url does NOT append /v1 to the provider URL.
+        "anthropic-compatible".to_string()
+    })
+}
+
 fn e2e_model() -> String {
     std::env::var("E2E_MODEL").unwrap_or_else(|_| "glm-5".to_string())
 }
@@ -49,6 +58,7 @@ pub async fn run_orchestration_tests(
 
     eprintln!("Running orchestration E2E tests...");
     eprintln!("  Model: {}", e2e_model());
+    eprintln!("  API Type: {}", e2e_api_type());
     eprintln!("  Base URL: {}", e2e_base_url());
 
     let client = reqwest::Client::builder()
@@ -251,7 +261,7 @@ async fn test_configure_model(
             "apiModelId": e2e_model(),
             "baseUrl": e2e_base_url(),
             "apiKey": e2e_api_key(),
-            "apiType": "anthropic"
+            "apiType": e2e_api_type()
         }))
         .send()
         .await
@@ -359,7 +369,7 @@ async fn test_full_workflow(
             "executionMode": "diy",
             "useSlashCommands": false,
             "orchestratorConfig": {
-                "apiType": "anthropic",
+                "apiType": e2e_api_type(),
                 "baseUrl": e2e_base_url(),
                 "apiKey": e2e_api_key(),
                 "model": e2e_model()
