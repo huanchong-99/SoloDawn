@@ -122,6 +122,32 @@ where
     }
 }
 
+/// Provider-aware URL normalization for OpenAI-style endpoints.
+///
+/// - Official OpenAI (`api_type = "openai"`) requires `/v1` prefix.
+/// - Compatible providers (ZhipuAI, etc.) use their own path schemes
+///   (e.g. `/api/paas/v4/chat/completions`) -- appending `/v1` corrupts
+///   the URL and causes 401/404 errors.
+/// - Official Anthropic (`api_type = "anthropic"`) requires `/v1` prefix.
+/// - Anthropic-compatible providers use their own paths.
+///
+/// Trailing slashes are always stripped.
+fn normalize_llm_base_url(api_type: &str, raw_url: &str) -> String {
+    let trimmed = raw_url.trim_end_matches('/');
+    match api_type {
+        // Official APIs require /v1
+        "openai" | "anthropic" => {
+            if trimmed.ends_with("/v1") {
+                trimmed.to_string()
+            } else {
+                format!("{trimmed}/v1")
+            }
+        }
+        // For compatible/custom providers, use URL exactly as configured
+        _ => trimmed.to_string(),
+    }
+}
+
 /// LLM client for OpenAI-compatible chat endpoints.
 pub struct OpenAICompatibleClient {
     client: Client,
@@ -228,15 +254,15 @@ impl OpenAICompatibleClient {
             .build()
             .expect("Failed to create HTTP client");
 
-        // Normalize base_url: ensure it ends with /v1 for OpenAI-compatible endpoints.
-        // The client appends /chat/completions directly, so base_url must include /v1.
         // TODO: consolidate with ensure_v1() in crates/server/src/routes/models.rs
-        let trimmed = config.base_url.trim_end_matches('/');
-        let base_url = if trimmed.ends_with("/v1") {
-            trimmed.to_string()
-        } else {
-            format!("{trimmed}/v1")
-        };
+        let base_url = normalize_llm_base_url(&config.api_type, &config.base_url);
+
+        tracing::info!(
+            api_type = %config.api_type,
+            input_url = %config.base_url,
+            final_base_url = %base_url,
+            "OpenAI-compatible LLM client URL normalized"
+        );
 
         Self {
             client,
@@ -382,13 +408,14 @@ impl AnthropicCompatibleClient {
             .build()
             .expect("Failed to create HTTP client");
 
-        // Normalize base_url: ensure it ends with /v1 for Anthropic endpoints.
-        let trimmed = config.base_url.trim_end_matches('/');
-        let base_url = if trimmed.ends_with("/v1") {
-            trimmed.to_string()
-        } else {
-            format!("{trimmed}/v1")
-        };
+        let base_url = normalize_llm_base_url(&config.api_type, &config.base_url);
+
+        tracing::info!(
+            api_type = %config.api_type,
+            input_url = %config.base_url,
+            final_base_url = %base_url,
+            "Anthropic-compatible LLM client URL normalized"
+        );
 
         Self {
             client,
@@ -669,5 +696,79 @@ mod anthropic_protocol_tests {
             ..Default::default()
         };
         assert!(!should_use_anthropic_protocol(&config));
+    }
+}
+
+#[cfg(test)]
+mod url_normalization_tests {
+    use super::normalize_llm_base_url;
+
+    #[test]
+    fn test_openai_official_gets_v1() {
+        let url = normalize_llm_base_url("openai", "https://api.openai.com");
+        assert_eq!(url, "https://api.openai.com/v1");
+    }
+
+    #[test]
+    fn test_openai_compatible_no_v1_append() {
+        let url = normalize_llm_base_url(
+            "openai-compatible",
+            "https://open.bigmodel.cn/api/paas/v4",
+        );
+        assert_eq!(url, "https://open.bigmodel.cn/api/paas/v4");
+    }
+
+    #[test]
+    fn test_openai_already_has_v1_not_doubled() {
+        let url = normalize_llm_base_url("openai", "https://api.openai.com/v1");
+        assert_eq!(url, "https://api.openai.com/v1");
+    }
+
+    #[test]
+    fn test_anthropic_official_gets_v1() {
+        let url = normalize_llm_base_url("anthropic", "https://api.anthropic.com");
+        assert_eq!(url, "https://api.anthropic.com/v1");
+    }
+
+    #[test]
+    fn test_anthropic_compatible_no_v1_append() {
+        let url = normalize_llm_base_url(
+            "anthropic-compatible",
+            "https://open.bigmodel.cn/api/anthropic",
+        );
+        assert_eq!(url, "https://open.bigmodel.cn/api/anthropic");
+    }
+
+    #[test]
+    fn test_trailing_slash_stripped() {
+        let url = normalize_llm_base_url("openai-compatible", "https://example.com/api/");
+        assert_eq!(url, "https://example.com/api");
+    }
+
+    #[test]
+    fn test_zhipuai_v4_preserved() {
+        // The exact scenario that caused the 401 bug
+        let url = normalize_llm_base_url(
+            "openai-compatible",
+            "https://open.bigmodel.cn/api/paas/v4",
+        );
+        assert_eq!(url, "https://open.bigmodel.cn/api/paas/v4");
+        // Final request URL should be: .../v4/chat/completions (NOT .../v4/v1/chat/completions)
+    }
+
+    #[test]
+    fn test_empty_api_type_no_v1_append() {
+        // Unknown api_type should not blindly append /v1
+        let url = normalize_llm_base_url("", "https://custom.provider.com/api");
+        assert_eq!(url, "https://custom.provider.com/api");
+    }
+
+    #[test]
+    fn test_google_type_no_v1_append() {
+        let url = normalize_llm_base_url("google", "https://generativelanguage.googleapis.com");
+        assert_eq!(
+            url,
+            "https://generativelanguage.googleapis.com"
+        );
     }
 }
