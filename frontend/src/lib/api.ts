@@ -1222,10 +1222,7 @@ export const profilesApi = {
   save: async (content: string): Promise<string> => {
     const response = await makeRequest('/api/profiles', {
       method: 'PUT',
-      body: JSON.stringify(content),
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      body: content,
     });
     return handleApiResponse<string>(response);
   },
