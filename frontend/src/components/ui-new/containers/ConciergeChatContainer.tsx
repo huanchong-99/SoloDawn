@@ -35,7 +35,7 @@ export function ConciergeChatContainer({
   const wsStatus = useConciergeWsStore((s) => s.connectionStatus);
   const { data: messages, isLoading: messagesLoading } =
     useConciergeMessages(activeSessionId, {
-      refetchInterval: wsStatus !== 'connected' ? 5000 : false,
+      refetchInterval: wsStatus === 'connected' ? false : 5000,
     });
 
   // Mutations

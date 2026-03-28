@@ -127,10 +127,8 @@ export function CreateChatBoxContainer() {
 
   // Sync materializedWorkflowId from draft data when switching drafts
   useEffect(() => {
-    if (planningDraft?.materializedWorkflowId) {
-      setMaterializedWorkflowId(planningDraft.materializedWorkflowId);
-    } else if (planningDraft && !planningDraft.materializedWorkflowId) {
-      setMaterializedWorkflowId(null);
+    if (planningDraft) {
+      setMaterializedWorkflowId(planningDraft.materializedWorkflowId ?? null);
     }
   }, [planningDraft]);
 
@@ -152,17 +150,12 @@ export function CreateChatBoxContainer() {
   const effectiveProfile = useMemo<ExecutorProfileId | null>(() => {
     if (selectedProfile) return selectedProfile;
     if (config?.executor_profile) return config.executor_profile;
-    if (profiles) {
-      const firstExecutor = Object.keys(profiles)[0] as BaseCodingAgent;
-      if (firstExecutor) {
-        const variants = Object.keys(profiles[firstExecutor]);
-        return {
-          executor: firstExecutor,
-          variant: variants[0] ?? null,
-        };
-      }
-    }
-    return null;
+    const firstExecutor = profiles
+      ? (Object.keys(profiles)[0] as BaseCodingAgent | undefined)
+      : undefined;
+    if (!firstExecutor) return null;
+    const variants = Object.keys(profiles![firstExecutor]);
+    return { executor: firstExecutor, variant: variants[0] ?? null };
   }, [selectedProfile, config?.executor_profile, profiles]);
 
   // Model config selection

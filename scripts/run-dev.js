@@ -456,8 +456,8 @@ async function main() {
   let protoc = process.env.PROTOC;
   if (!protoc) {
     const candidates = [
-      "C:\\protoc\\bin\\protoc.exe",
-      "C:\\tools\\protoc\\bin\\protoc.exe",
+      String.raw`C:\protoc\bin\protoc.exe`,
+      String.raw`C:\tools\protoc\bin\protoc.exe`,
       path.join(os.homedir(), "protoc", "bin", "protoc.exe"),
     ];
     for (const c of candidates) {
