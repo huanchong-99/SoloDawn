@@ -48,6 +48,15 @@ function WorkflowStatusBadge({ workflowId }: Readonly<{ workflowId: string | nul
   );
 }
 
+function extractPlannerModelConfig(
+  config: Record<string, unknown> | null | undefined,
+): WorkflowModelConfig | null {
+  const lib = (config as Record<string, unknown>)
+    ?.workflow_model_library as WorkflowModelConfig[] | undefined;
+  if (!lib || lib.length === 0) return null;
+  return lib.find((m) => m.apiKey) ?? lib[0] ?? null;
+}
+
 function resolveVariantForExecutor(
   executor: BaseCodingAgent,
   profiles: Record<string, Record<string, unknown>> | null | undefined,
@@ -226,13 +235,10 @@ export function CreateChatBoxContainer() {
     [profiles, setSelectedProfile, config?.executor_profile]
   );
 
-  // Get planner model config from workflow_model_library
-  const getPlannerModelConfig = useCallback((): WorkflowModelConfig | null => {
-    const lib = (config as Record<string, unknown>)
-      ?.workflow_model_library as WorkflowModelConfig[] | undefined;
-    if (!lib || lib.length === 0) return null;
-    return lib.find((m) => m.apiKey) ?? lib[0] ?? null;
-  }, [config]);
+  const plannerModelConfig = useMemo(
+    () => extractPlannerModelConfig(config),
+    [config],
+  );
 
   // === Phase 1: Initial submit — create planning draft ===
   const handleInitialSubmit = useCallback(async () => {
@@ -247,7 +253,7 @@ export function CreateChatBoxContainer() {
     setIsCreatingDraft(true);
     setIsThinking(true);
     try {
-      const modelConfig = getPlannerModelConfig();
+      const modelConfig = plannerModelConfig;
       const draft = await planningDraftsApi.create({
         projectId,
         name: message.slice(0, 100),
@@ -283,7 +289,7 @@ export function CreateChatBoxContainer() {
     hasChangedFromDefault,
     effectiveProfile,
     updateAndSaveConfig,
-    getPlannerModelConfig,
+    plannerModelConfig,
     setPlanningDraftId,
     setMessage,
     clearAttachments,
