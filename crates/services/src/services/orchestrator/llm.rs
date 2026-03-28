@@ -350,29 +350,14 @@ struct AnthropicRequest {
     max_tokens: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
+    /// Always true — some Anthropic-compatible proxies only support streaming.
+    stream: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct AnthropicMessage {
     role: String,
     content: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct AnthropicResponse {
-    content: Vec<AnthropicContentBlock>,
-    usage: Option<AnthropicUsage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AnthropicContentBlock {
-    text: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AnthropicUsage {
-    input_tokens: i32,
-    output_tokens: i32,
 }
 
 impl AnthropicCompatibleClient {
@@ -423,13 +408,14 @@ impl AnthropicCompatibleClient {
             messages: api_messages,
             max_tokens: 2048,
             system: system_prompt,
+            stream: true,
         };
 
         tracing::debug!(
             url = %url,
             model = %self.model,
             msg_count = msg_count,
-            "Anthropic-compatible LLM request starting"
+            "Anthropic-compatible LLM request starting (streaming)"
         );
 
         // Send both x-api-key (official Anthropic) and Authorization: Bearer
@@ -457,23 +443,57 @@ impl AnthropicCompatibleClient {
             return Err(anyhow::anyhow!("LLM API error: {status} - {body}"));
         }
 
-        let api_response: AnthropicResponse = response.json().await?;
-        let content = api_response
-            .content
-            .iter()
-            .filter_map(|block| block.text.as_deref())
-            .collect::<Vec<_>>()
-            .join("");
+        // Parse SSE stream and accumulate text content + usage
+        let body = response.text().await?;
+        let mut content = String::new();
+        let mut input_tokens: i32 = 0;
+        let mut output_tokens: i32 = 0;
+
+        for line in body.lines() {
+            let line = line.trim();
+            if let Some(data) = line.strip_prefix("data: ") {
+                if data == "[DONE]" {
+                    break;
+                }
+                if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+                    match event.get("type").and_then(|t| t.as_str()) {
+                        Some("content_block_delta") => {
+                            if let Some(text) = event
+                                .pointer("/delta/text")
+                                .and_then(|t| t.as_str())
+                            {
+                                content.push_str(text);
+                            }
+                        }
+                        Some("message_start") => {
+                            if let Some(u) = event.pointer("/message/usage/input_tokens").and_then(|v| v.as_i64()) {
+                                input_tokens = u as i32;
+                            }
+                        }
+                        Some("message_delta") => {
+                            if let Some(u) = event.pointer("/usage/output_tokens").and_then(|v| v.as_i64()) {
+                                output_tokens = u as i32;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
 
         if content.is_empty() {
             return Err(anyhow::anyhow!("Anthropic API returned empty content"));
         }
 
-        let usage = api_response.usage.map(|u| LLMUsage {
-            prompt_tokens: u.input_tokens,
-            completion_tokens: u.output_tokens,
-            total_tokens: u.input_tokens + u.output_tokens,
-        });
+        let usage = if input_tokens > 0 || output_tokens > 0 {
+            Some(LLMUsage {
+                prompt_tokens: input_tokens,
+                completion_tokens: output_tokens,
+                total_tokens: input_tokens + output_tokens,
+            })
+        } else {
+            None
+        };
 
         Ok(LLMResponse { content, usage })
     }
