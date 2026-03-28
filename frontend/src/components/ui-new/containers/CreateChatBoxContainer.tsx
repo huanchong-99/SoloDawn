@@ -137,11 +137,7 @@ export function CreateChatBoxContainer() {
   const setPlanningDraftId = useCallback(
     (id: string | null) => {
       setSearchParams((prev) => {
-        if (id) {
-          prev.set('draftId', id);
-        } else {
-          prev.delete('draftId');
-        }
+        id ? prev.set('draftId', id) : prev.delete('draftId');
         return prev;
       }, { replace: true });
     },
@@ -161,10 +157,10 @@ export function CreateChatBoxContainer() {
 
   const feishuConnected = useFeishuConnectionStatus(planningDraftId);
 
-  // Use serverMessages only when it has content; otherwise fall back to localMessages.
-  // This prevents a race condition where React Query resolves with [] before the
-  // sendMessage POST returns, causing [] ?? localMessages to evaluate to [].
-  const planningMessages = (serverMessages && serverMessages.length > 0) ? serverMessages : localMessages;
+  // Prefer serverMessages when available; fall back to localMessages during
+  // the window between POST return and React Query cache invalidation.
+  const hasServerMessages = !!serverMessages && serverMessages.length > 0;
+  const planningMessages = hasServerMessages ? serverMessages : localMessages;
 
   // Sync right sidebar project when a draft is loaded from the sidebar
   useEffect(() => {
@@ -264,9 +260,8 @@ export function CreateChatBoxContainer() {
     setSubmitError(null);
     if (!canSubmit || !projectId) return;
 
-    if (saveAsDefault && hasChangedFromDefault && effectiveProfile) {
-      await updateAndSaveConfig({ executor_profile: effectiveProfile });
-    }
+    const shouldSaveDefault = saveAsDefault && hasChangedFromDefault && effectiveProfile;
+    if (shouldSaveDefault) await updateAndSaveConfig({ executor_profile: effectiveProfile });
 
     setIsCreatingDraft(true);
     setIsThinking(true);
