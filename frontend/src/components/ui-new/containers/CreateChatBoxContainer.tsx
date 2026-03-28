@@ -48,6 +48,20 @@ function WorkflowStatusBadge({ workflowId }: Readonly<{ workflowId: string | nul
   );
 }
 
+function resolveVariantForExecutor(
+  executor: BaseCodingAgent,
+  profiles: Record<string, Record<string, unknown>> | null | undefined,
+  savedProfile: ExecutorProfileId | null | undefined,
+): string | null {
+  const executorConfig = profiles?.[executor];
+  if (!executorConfig) return null;
+  const variants = Object.keys(executorConfig);
+  const savedVariant =
+    savedProfile?.executor === executor ? savedProfile.variant : null;
+  if (savedVariant && variants.includes(savedVariant)) return savedVariant;
+  return variants.includes('DEFAULT') ? 'DEFAULT' : (variants[0] ?? null);
+}
+
 export function CreateChatBoxContainer() {
   const { t } = useTranslation('common');
   const { t: tTasks } = useTranslation('tasks');
@@ -202,26 +216,12 @@ export function CreateChatBoxContainer() {
 
   const handleExecutorChange = useCallback(
     (executor: BaseCodingAgent) => {
-      const executorConfig = profiles?.[executor];
-      if (!executorConfig) {
-        setSelectedProfile({ executor, variant: null });
-        return;
-      }
-      const variants = Object.keys(executorConfig);
-      let targetVariant: string | null = null;
-      if (
-        config?.executor_profile?.executor === executor &&
-        config?.executor_profile?.variant
-      ) {
-        const savedVariant = config.executor_profile.variant;
-        if (variants.includes(savedVariant)) targetVariant = savedVariant;
-      }
-      if (!targetVariant) {
-        targetVariant = variants.includes('DEFAULT')
-          ? 'DEFAULT'
-          : (variants[0] ?? null);
-      }
-      setSelectedProfile({ executor, variant: targetVariant });
+      const variant = resolveVariantForExecutor(
+        executor,
+        profiles,
+        config?.executor_profile,
+      );
+      setSelectedProfile({ executor, variant });
     },
     [profiles, setSelectedProfile, config?.executor_profile]
   );
