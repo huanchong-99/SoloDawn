@@ -48,6 +48,21 @@ function WorkflowStatusBadge({ workflowId }: Readonly<{ workflowId: string | nul
   );
 }
 
+function useFeishuConnectionStatus(planningDraftId: string | null): boolean {
+  const [connected, setConnected] = useState(false);
+  useEffect(() => {
+    if (!planningDraftId) return;
+    let cancelled = false;
+    feishuApi.getStatus().then((status) => {
+      if (!cancelled) setConnected(status.connectionStatus === 'connected');
+    }).catch(() => {
+      if (!cancelled) setConnected(false);
+    });
+    return () => { cancelled = true; };
+  }, [planningDraftId]);
+  return connected;
+}
+
 function extractPlannerModelConfig(
   config: Record<string, unknown> | null | undefined,
 ): WorkflowModelConfig | null {
@@ -121,20 +136,7 @@ export function CreateChatBoxContainer() {
   const materializeMutation = useMaterializeDraft();
   const feishuSyncMutation = useTogglePlanningFeishuSync();
 
-  // Feishu connection status (only checked when in planning mode)
-  const [feishuConnected, setFeishuConnected] = useState(false);
-  useEffect(() => {
-    if (!planningDraftId) return;
-    let cancelled = false;
-    feishuApi.getStatus().then((status) => {
-      if (!cancelled) {
-        setFeishuConnected(status.connectionStatus === 'connected');
-      }
-    }).catch(() => {
-      if (!cancelled) setFeishuConnected(false);
-    });
-    return () => { cancelled = true; };
-  }, [planningDraftId]);
+  const feishuConnected = useFeishuConnectionStatus(planningDraftId);
 
   // Use serverMessages only when it has content; otherwise fall back to localMessages.
   // This prevents a race condition where React Query resolves with [] before the
