@@ -1343,9 +1343,10 @@ mod tests {
             settings["env"]["ANTHROPIC_MODEL"],
             "claude-sonnet-4-20250514"
         );
+        // CC-Switch strips trailing /v1 because Claude Code SDK appends /v1/messages
         assert_eq!(
             settings["env"]["ANTHROPIC_BASE_URL"],
-            "https://api.example.com/v1"
+            "https://api.example.com"
         );
     }
 
