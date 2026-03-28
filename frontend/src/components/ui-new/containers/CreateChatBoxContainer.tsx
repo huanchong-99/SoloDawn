@@ -63,6 +63,21 @@ function useFeishuConnectionStatus(planningDraftId: string | null): boolean {
   return connected;
 }
 
+function resolveEffectiveProfile(
+  selectedProfile: ExecutorProfileId | null,
+  savedProfile: ExecutorProfileId | undefined,
+  profiles: Record<string, Record<string, unknown>> | null | undefined,
+): ExecutorProfileId | null {
+  if (selectedProfile) return selectedProfile;
+  if (savedProfile) return savedProfile;
+  const firstExecutor = profiles
+    ? (Object.keys(profiles)[0] as BaseCodingAgent | undefined)
+    : undefined;
+  if (!firstExecutor) return null;
+  const variants = Object.keys(profiles![firstExecutor]);
+  return { executor: firstExecutor, variant: variants[0] ?? null };
+}
+
 function checkProfileChanged(
   effectiveProfile: ExecutorProfileId | null,
   savedProfile: ExecutorProfileId | undefined,
@@ -179,17 +194,10 @@ export function CreateChatBoxContainer() {
   const { uploadFiles, clearAttachments, localImages } =
     useCreateAttachments(handleInsertMarkdown);
 
-  // Default to user's config profile or first available executor
-  const effectiveProfile = useMemo<ExecutorProfileId | null>(() => {
-    if (selectedProfile) return selectedProfile;
-    if (config?.executor_profile) return config.executor_profile;
-    const firstExecutor = profiles
-      ? (Object.keys(profiles)[0] as BaseCodingAgent | undefined)
-      : undefined;
-    if (!firstExecutor) return null;
-    const variants = Object.keys(profiles![firstExecutor]);
-    return { executor: firstExecutor, variant: variants[0] ?? null };
-  }, [selectedProfile, config?.executor_profile, profiles]);
+  const effectiveProfile = useMemo(
+    () => resolveEffectiveProfile(selectedProfile, config?.executor_profile, profiles),
+    [selectedProfile, config?.executor_profile, profiles],
+  );
 
   // Model config selection
   const {
