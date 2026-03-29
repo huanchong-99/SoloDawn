@@ -795,6 +795,14 @@ async fn create_workflow(
     let project_id = Uuid::parse_str(&req.project_id)
         .map_err(|_| ApiError::BadRequest("projectId must be a valid UUID".to_string()))?;
 
+    // Validate project exists in database to prevent FK constraint failure
+    let _project = Project::find_by_id(&deployment.db().pool, project_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error checking project: {e}")))?
+        .ok_or_else(|| {
+            ApiError::BadRequest(format!("Project {project_id} not found"))
+        })?;
+
     // Validate CLI types and model configs exist in database
     validate_cli_and_model_configs(&deployment.db().pool, &req).await?;
 
@@ -812,6 +820,10 @@ async fn create_workflow(
     );
 
     // 1. Create workflow with encrypted API key
+    // DIY mode never uses the orchestrator agent, even if orchestratorConfig
+    // is provided (the wizard always sends it for the LLM key).
+    let is_diy = req.execution_mode == "diy";
+    let is_orchestrator_enabled = !is_diy && req.orchestrator_config.is_some();
     let mut workflow = Workflow {
         id: workflow_id.clone(),
         project_id,
@@ -821,7 +833,7 @@ async fn create_workflow(
         execution_mode: req.execution_mode,
         initial_goal: req.initial_goal,
         use_slash_commands: req.use_slash_commands,
-        orchestrator_enabled: req.orchestrator_config.is_some(),
+        orchestrator_enabled: is_orchestrator_enabled,
         orchestrator_api_type: req.orchestrator_config.as_ref().map(|c| c.api_type.clone()),
         orchestrator_base_url: req.orchestrator_config.as_ref().map(|c| c.base_url.clone()),
         orchestrator_api_key: None, // Will be set encrypted below
@@ -1755,15 +1767,58 @@ async fn start_workflow(
                 ApiError::Internal("Failed to start workflow".to_string())
             })?;
     } else {
-        // DIY mode: no orchestrator agent needed — just transition to "running".
-        // Terminals are already prepared; the user drives them manually.
+        // DIY mode: no orchestrator agent needed — transition workflow to "running"
+        // AND activate all tasks/terminals so the user can interact with them.
         Workflow::set_started(&deployment.db().pool, &workflow_id)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to start DIY workflow {}: {:?}", workflow_id, e);
                 ApiError::Internal("Failed to start DIY workflow".to_string())
             })?;
-        tracing::info!(workflow_id = %workflow_id, "DIY workflow started (no orchestrator)");
+
+        // Transition all tasks from "pending" → "running" and terminals from
+        // "waiting" → "working" so the user can send instructions via the
+        // terminal WebSocket.
+        let tasks =
+            WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
+        for task in &tasks {
+            if task.status == "pending" {
+                WorkflowTask::update_status(&deployment.db().pool, &task.id, "running")
+                    .await
+                    .map_err(|e| {
+                        ApiError::Internal(format!(
+                            "Failed to activate DIY task {}: {e}",
+                            task.id
+                        ))
+                    })?;
+            }
+        }
+
+        let terminals =
+            Terminal::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
+        for terminal in &terminals {
+            if terminal.status == "waiting" {
+                Terminal::update_status(
+                    &deployment.db().pool,
+                    &terminal.id,
+                    "working",
+                )
+                .await
+                .map_err(|e| {
+                    ApiError::Internal(format!(
+                        "Failed to activate DIY terminal {}: {e}",
+                        terminal.id
+                    ))
+                })?;
+            }
+        }
+
+        tracing::info!(
+            workflow_id = %workflow_id,
+            tasks = tasks.len(),
+            terminals_activated = terminals.iter().filter(|t| t.status == "waiting").count(),
+            "DIY workflow started (no orchestrator)"
+        );
     }
 
     refresh_prompt_watcher_registrations(&deployment, &workflow_id).await;

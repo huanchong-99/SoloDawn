@@ -319,6 +319,8 @@ impl ModelConfig {
         let name = id.to_string();
 
         // Insert or update model fields on conflict (ensures latest model ID is always stored)
+        // Also update cli_type_id on conflict to fix mismatches from startup sync
+        // (e.g., sync defaulted to "cli-codex" but wizard uses "cli-claude-code").
         let item = sqlx::query_as::<_, ModelConfig>(
             r"
             INSERT INTO model_config (
@@ -326,6 +328,7 @@ impl ModelConfig {
                 is_default, is_official, created_at, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7)
             ON CONFLICT(id) DO UPDATE SET
+                cli_type_id = excluded.cli_type_id,
                 display_name = excluded.display_name,
                 api_model_id = excluded.api_model_id,
                 updated_at = excluded.updated_at
