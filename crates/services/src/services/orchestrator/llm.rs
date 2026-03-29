@@ -466,12 +466,12 @@ impl AnthropicCompatibleClient {
                             }
                         }
                         Some("message_start") => {
-                            if let Some(u) = event.pointer("/message/usage/input_tokens").and_then(|v| v.as_i64()) {
+                            if let Some(u) = event.pointer("/message/usage/input_tokens").and_then(serde_json::Value::as_i64) {
                                 input_tokens = u as i32;
                             }
                         }
                         Some("message_delta") => {
-                            if let Some(u) = event.pointer("/usage/output_tokens").and_then(|v| v.as_i64()) {
+                            if let Some(u) = event.pointer("/usage/output_tokens").and_then(serde_json::Value::as_i64) {
                                 output_tokens = u as i32;
                             }
                         }
