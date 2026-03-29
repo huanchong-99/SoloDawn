@@ -35,12 +35,13 @@
 | 3rd | Task 1 (Knowledge Base) | ✅ Completed | 6 tasks |
 | 4th | Task 7 (Web Memo) | ⏸ Skipped | Re-testing deferred |
 | 5th | Task 5 (Microservices) | ⏳ Pending | |
-| 6th | Task 6 (Kutt Security) | 🔄 IN PROGRESS | DIY mode, 3 tasks parallel, GLM-5 |
-| 7th | Task 2 (Hoppscotch) | ⏳ Pending | |
+| 6th | Task 6 (Kutt Security) | ✅ Completed | DIY mode, 3 tasks parallel, GLM-5, ~46min |
+| 7th | Task 2 (Hoppscotch) | 🔄 IN PROGRESS | Agent-Planned: Task1 done (commit ba06e58c7), Task2 engine-dev 3h+ running |
 
 ## Known Issues
 1. haiio.xyz proxy has 60s gateway timeout — long requests may 504 even with streaming
 2. "signal timed out" raw error shown in workspace chat (should be user-friendly message)
-3. Workflow auto-sync to completed can happen while tasks still running
+3. ~~Workflow auto-sync to completed can happen while tasks still running~~ (fixed: premature completion guard)
+4. DIY mode bypass permissions status line causes PromptWatcher false positives (sends unnecessary Enter keys, harmless but noisy)
 
 ## Step 4: Docker Testing — NOT STARTED
