@@ -3553,6 +3553,25 @@ impl OrchestratorAgent {
                     state.workflow_id.clone()
                 };
 
+                // Guard: verify ALL tasks are completed before marking workflow as completed.
+                // The LLM may emit CompleteWorkflow prematurely while tasks are still running.
+                let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, &workflow_id).await
+                    .map_err(|e| anyhow::anyhow!("Failed to fetch tasks for completion check: {e}"))?;
+                let incomplete_tasks: Vec<_> = tasks.iter()
+                    .filter(|t| t.status != TASK_STATUS_COMPLETED && t.status != TASK_STATUS_FAILED)
+                    .collect();
+                if !incomplete_tasks.is_empty() {
+                    let incomplete_ids: Vec<&str> = incomplete_tasks.iter().map(|t| t.id.as_str()).collect();
+                    tracing::warn!(
+                        workflow_id = %workflow_id,
+                        incomplete_task_ids = ?incomplete_ids,
+                        "CompleteWorkflow rejected: {} task(s) still not finished",
+                        incomplete_tasks.len()
+                    );
+                    // Do not complete — let the event loop continue until tasks finish
+                    return Ok(());
+                }
+
                 // Update workflow status to completed
                 db::models::Workflow::update_status(
                     &self.db.pool,

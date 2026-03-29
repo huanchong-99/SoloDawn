@@ -1712,13 +1712,6 @@ async fn start_workflow(
         }
     }
 
-    // Verify orchestrator is enabled (only check needed at API level)
-    if !workflow.orchestrator_enabled {
-        return Err(ApiError::BadRequest(
-            "Cannot start workflow: orchestrator is not enabled".to_string(),
-        ));
-    }
-
     // Validate workflow status - allow starting from ready or resuming from paused
     let valid_start_statuses = ["ready", WORKFLOW_STATUS_PAUSED];
     if !valid_start_statuses.contains(&workflow.status.as_str()) {
@@ -1751,18 +1744,27 @@ async fn start_workflow(
         tracing::info!(workflow_id = %workflow_id, "Resuming workflow from paused state (CAS: paused → ready)");
     }
 
-    // Call orchestrator runtime to start workflow
-    // Runtime handles all status validation atomically
-    deployment
-        .orchestrator_runtime()
-        .start_workflow(&workflow_id)
-        .await
-        .map_err(|e| {
-            // Log full error internally
-            tracing::error!("Failed to start workflow {}: {:?}", workflow_id, e);
-            // Return generic message to client
-            ApiError::Internal("Failed to start workflow".to_string())
-        })?;
+    if workflow.orchestrator_enabled {
+        // Agent-Planned mode: start via orchestrator runtime (manages agent event loop)
+        deployment
+            .orchestrator_runtime()
+            .start_workflow(&workflow_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to start workflow {}: {:?}", workflow_id, e);
+                ApiError::Internal("Failed to start workflow".to_string())
+            })?;
+    } else {
+        // DIY mode: no orchestrator agent needed — just transition to "running".
+        // Terminals are already prepared; the user drives them manually.
+        Workflow::set_started(&deployment.db().pool, &workflow_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to start DIY workflow {}: {:?}", workflow_id, e);
+                ApiError::Internal("Failed to start DIY workflow".to_string())
+            })?;
+        tracing::info!(workflow_id = %workflow_id, "DIY workflow started (no orchestrator)");
+    }
 
     refresh_prompt_watcher_registrations(&deployment, &workflow_id).await;
 
