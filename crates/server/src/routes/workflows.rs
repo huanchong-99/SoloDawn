@@ -1884,6 +1884,110 @@ async fn start_workflow(
                 }
             }
         }
+
+        // Spawn background quiet-window monitor for DIY terminals.
+        // Without an orchestrator agent, nothing detects when Claude Code
+        // finishes. This task polls terminal output and marks terminals
+        // completed after 60s of silence, then completes tasks/workflow.
+        let diy_db = deployment.db().pool.clone();
+        let diy_wf_id = workflow_id.clone();
+        let diy_process_manager = deployment.process_manager().clone();
+        tokio::spawn(async move {
+            const QUIET_SECS: u64 = 60;
+            const POLL_SECS: u64 = 15;
+            // Wait for initial instructions to be processed
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(POLL_SECS)).await;
+
+                // Check workflow still running
+                let _wf = match db::models::Workflow::find_by_id(&diy_db, &diy_wf_id).await {
+                    Ok(Some(w)) if w.status == "running" => w,
+                    _ => break,
+                };
+
+                let tasks = match db::models::WorkflowTask::find_by_workflow(&diy_db, &diy_wf_id).await {
+                    Ok(t) => t,
+                    Err(_) => break,
+                };
+
+                let mut all_tasks_done = true;
+                for task in &tasks {
+                    if task.status == "completed" || task.status == "failed" {
+                        continue;
+                    }
+                    all_tasks_done = false;
+
+                    let terminals = match db::models::Terminal::find_by_task(&diy_db, &task.id).await {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    };
+
+                    for terminal in &terminals {
+                        if terminal.status != "working" {
+                            continue;
+                        }
+                        // Check if terminal has been quiet
+                        let latest_seq = diy_process_manager.latest_output_seq(&terminal.id).await;
+                        if latest_seq.is_none() {
+                            continue;
+                        }
+                        // Use log timestamp from DB
+                        let latest_logs = db::models::TerminalLog::find_by_terminal(
+                            &diy_db,
+                            &terminal.id,
+                            Some(1),
+                        )
+                        .await;
+                        let is_quiet = match latest_logs {
+                            Ok(logs) if !logs.is_empty() => {
+                                let age = chrono::Utc::now().signed_duration_since(logs[0].created_at);
+                                age.num_seconds() > QUIET_SECS as i64
+                            }
+                            _ => false,
+                        };
+
+                        if is_quiet {
+                            tracing::info!(
+                                terminal_id = %terminal.id,
+                                task_name = %task.name,
+                                quiet_secs = QUIET_SECS,
+                                "DIY: terminal quiet for {}s, marking completed", QUIET_SECS
+                            );
+                            let _ = db::models::Terminal::update_status(
+                                &diy_db, &terminal.id, "completed",
+                            ).await;
+                        }
+                    }
+
+                    // Check if all terminals in this task are done
+                    let refreshed = db::models::Terminal::find_by_task(&diy_db, &task.id).await;
+                    if let Ok(terms) = refreshed {
+                        let all_done = terms.iter().all(|t| t.status == "completed" || t.status == "failed");
+                        if all_done && !terms.is_empty() {
+                            tracing::info!(task_id = %task.id, task_name = %task.name, "DIY: all terminals done, marking task completed");
+                            let _ = db::models::WorkflowTask::update_status(&diy_db, &task.id, "completed").await;
+                        }
+                    }
+                }
+
+                // Re-check: are ALL tasks now completed?
+                if let Ok(refreshed_tasks) = db::models::WorkflowTask::find_by_workflow(&diy_db, &diy_wf_id).await {
+                    let all_done = refreshed_tasks.iter().all(|t| t.status == "completed" || t.status == "failed");
+                    if all_done && !refreshed_tasks.is_empty() {
+                        tracing::info!(workflow_id = %diy_wf_id, "DIY: all tasks completed, marking workflow completed");
+                        let _ = db::models::Workflow::update_status(&diy_db, &diy_wf_id, "completed").await;
+                        break;
+                    }
+                }
+
+                if all_tasks_done {
+                    break;
+                }
+            }
+            tracing::info!(workflow_id = %diy_wf_id, "DIY quiet-window monitor exited");
+        });
     }
 
     refresh_prompt_watcher_registrations(&deployment, &workflow_id).await;
