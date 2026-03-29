@@ -148,6 +148,7 @@ fn is_bypass_permissions_prompt(line: &str) -> bool {
     BYPASS_PERMISSIONS_PROMPT_RE.is_match(line)
 }
 
+#[allow(dead_code)]
 fn is_bypass_permissions_enter_confirm_context(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower.contains("interrupted")
@@ -1451,10 +1452,11 @@ next_action: handoff\n"
         // Chunk-level fallback for bypass-permissions toggle prompt.
         // Some terminal frames are emitted as dense ANSI chunks without stable
         // line boundaries, so line-based detection can miss this interaction.
+        // When auto_confirm is enabled, the bypass prompt alone is sufficient
+        // (no need for explicit "enter to confirm" context text).
         if state.auto_confirm
             && !state.should_debounce()
             && is_bypass_permissions_prompt(&normalized_output)
-            && is_bypass_permissions_enter_confirm_context(&normalized_output)
         {
             let decision = PromptDecision::auto_enter();
             let detected_prompt =
@@ -1955,11 +1957,10 @@ next_action: handoff\n"
                 return;
             }
 
-            // Fallback for bypass-permissions prompts only when explicit confirmation context appears.
+            // Fallback for bypass-permissions prompts — auto-enter when auto_confirm is on.
             if state.auto_confirm
                 && !state.should_debounce()
                 && is_bypass_permissions_prompt(&normalized_line)
-                && is_bypass_permissions_enter_confirm_context(&normalized_line)
             {
                 let decision = PromptDecision::auto_enter();
                 let detected_prompt =

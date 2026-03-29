@@ -1834,6 +1834,10 @@ async fn start_workflow(
             "DIY workflow started (no orchestrator)"
         );
 
+        // Register prompt watcher BEFORE dispatching instructions so that
+        // auto-confirm can handle any permission prompts that appear immediately.
+        refresh_prompt_watcher_registrations(&deployment, &workflow_id).await;
+
         // Auto-dispatch task descriptions as initial instructions to each terminal.
         // This makes DIY mode fully automated — terminals receive their instructions
         // without manual user intervention via WebSocket.
