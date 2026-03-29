@@ -1454,9 +1454,13 @@ next_action: handoff\n"
         // line boundaries, so line-based detection can miss this interaction.
         // When auto_confirm is enabled, the bypass prompt alone is sufficient
         // (no need for explicit "enter to confirm" context text).
+        // Skip if the chunk also contains a handoff stall prompt — let the
+        // line-level processor handle the stall first (it sends the continue
+        // instruction which takes priority over a bare Enter).
         if state.auto_confirm
             && !state.should_debounce()
             && is_bypass_permissions_prompt(&normalized_output)
+            && !has_handoff_stall_context
         {
             let decision = PromptDecision::auto_enter();
             let detected_prompt =
@@ -1958,9 +1962,11 @@ next_action: handoff\n"
             }
 
             // Fallback for bypass-permissions prompts — auto-enter when auto_confirm is on.
+            // Skip when handoff stall context is present (handled above with higher priority).
             if state.auto_confirm
                 && !state.should_debounce()
                 && is_bypass_permissions_prompt(&normalized_line)
+                && !has_handoff_stall_context
             {
                 let decision = PromptDecision::auto_enter();
                 let detected_prompt =
