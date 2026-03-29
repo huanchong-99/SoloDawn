@@ -884,12 +884,13 @@ export const useConversationHistory = ({
       }
     }
 
+    const controllers = activeStreamControllersRef.current;
     return () => {
       // Close all active streaming WebSocket connections on unmount
-      for (const controller of activeStreamControllersRef.current.values()) {
+      for (const controller of controllers.values()) {
         controller.close();
       }
-      activeStreamControllersRef.current.clear();
+      controllers.clear();
     };
   }, [
     attempt.id,

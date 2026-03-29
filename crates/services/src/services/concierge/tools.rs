@@ -61,15 +61,15 @@ fn extract_fenced_json(text: &str) -> Option<&str> {
 /// the parser is inside a quoted string literal (with backslash-escape awareness).
 fn extract_inline_json(text: &str) -> Option<&str> {
     // Fast path: try parsing the entire text as a ToolCall directly
-    if text.trim().starts_with('{') {
-        if serde_json::from_str::<serde_json::Value>(text.trim()).is_ok() {
-            let trimmed = text.trim();
-            // Verify it has a "tool" field before returning
-            if trimmed.contains(r#""tool""#) {
-                // Return slice of original text
-                let offset = text.find(trimmed)?;
-                return Some(&text[offset..offset + trimmed.len()]);
-            }
+    if text.trim().starts_with('{')
+        && serde_json::from_str::<serde_json::Value>(text.trim()).is_ok()
+    {
+        let trimmed = text.trim();
+        // Verify it has a "tool" field before returning
+        if trimmed.contains(r#""tool""#) {
+            // Return slice of original text
+            let offset = text.find(trimmed)?;
+            return Some(&text[offset..offset + trimmed.len()]);
         }
     }
 

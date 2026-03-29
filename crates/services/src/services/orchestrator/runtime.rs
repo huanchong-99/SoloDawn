@@ -444,7 +444,7 @@ impl OrchestratorRuntime {
                     handle.watcher.stop();
                     let mut watcher_task = handle.task_handle;
                     let shutdown_result = timeout(Duration::from_secs(5), &mut watcher_task).await;
-                    if let Ok(_) = shutdown_result {} else {
+                    if shutdown_result.is_err() {
                         watcher_task.abort();
                         watcher_task.await.ok();
                     }
@@ -1130,7 +1130,7 @@ impl OrchestratorRuntime {
                     handle.watcher.stop();
                     let mut watcher_task = handle.task_handle;
                     let shutdown_result = timeout(Duration::from_secs(5), &mut watcher_task).await;
-                    if let Ok(_) = shutdown_result {} else {
+                    if shutdown_result.is_err() {
                         watcher_task.abort();
                         watcher_task.await.ok();
                     }

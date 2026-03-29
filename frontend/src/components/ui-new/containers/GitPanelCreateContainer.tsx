@@ -75,7 +75,7 @@ export function GitPanelCreateContainer({
       }
     };
     loadBoundRepo();
-  }, [selectedProjectId, boundRepoPath, clearRepos, addRepo]);
+  }, [selectedProjectId, boundRepoPath, clearRepos, addRepo, showToast]);
 
   const registeredRepoPaths = useMemo(() => repos.map((r) => r.path), [repos]);
 
@@ -104,7 +104,7 @@ export function GitPanelCreateContainer({
     } finally {
       setIsBinding(false);
     }
-  }, [selectedProjectId, repos, updateProject]);
+  }, [selectedProjectId, repos, updateProject, showToast]);
 
   return (
     <GitPanelCreate

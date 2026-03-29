@@ -171,7 +171,7 @@ function usePlanningDraftActions({
     } finally {
       setIsThinking(false);
     }
-  }, [message, planningDraftId, setMessage, sendMessageMutation, setIsThinking, setLocalMessages]);
+  }, [message, planningDraftId, setMessage, sendMessageMutation, setIsThinking, setLocalMessages, showToast]);
 
   const handleConfirm = useCallback(async () => {
     if (!planningDraftId) return;

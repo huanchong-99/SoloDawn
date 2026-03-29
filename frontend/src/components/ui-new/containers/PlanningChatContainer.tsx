@@ -109,6 +109,7 @@ export function PlanningChatContainer() {
     getFirstModelConfig,
     setMessage,
     sendMessageMutation,
+    showToast,
   ]);
 
   // Confirm the spec
