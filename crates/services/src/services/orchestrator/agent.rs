@@ -364,6 +364,57 @@ impl OrchestratorAgent {
             .await
             .unwrap_or_default();
         tracing::info!(task_count = tasks_after.len(), "Tasks found after initial planning");
+
+        // If parsing failed and zero tasks were created, retry with explicit JSON-only instruction
+        if tasks_after.is_empty() {
+            tracing::warn!("Initial planning created ZERO tasks — retrying LLM with strict JSON-only prompt");
+            let retry_prompt = format!(
+                "Your previous response could not be parsed. You MUST respond with ONLY a raw JSON array, no markdown, no ```json blocks, no explanation. \
+                 Create tasks for the project goal: {}\n\n\
+                 Example format (respond with ONLY this, nothing else):\n\
+                 [{{\"type\":\"create_task\",\"name\":\"Task Name\",\"branch\":\"feat/branch-name\",\"order_index\":0}}]",
+                workflow.initial_goal.as_deref().unwrap_or("(see conversation history)")
+            );
+            if let Ok(retry_resp) = self.call_llm(&retry_prompt).await {
+                tracing::info!("Retry planning LLM response received");
+                if let Err(e) = self.execute_instruction(&retry_resp).await {
+                    tracing::warn!("Retry planning instruction execution had errors: {e}");
+                }
+                let tasks_retry = db::models::WorkflowTask::find_by_workflow(&self.db.pool, &workflow.id)
+                    .await
+                    .unwrap_or_default();
+                tracing::info!(task_count = tasks_retry.len(), "Tasks found after retry planning");
+                if tasks_retry.is_empty() {
+                    tracing::error!("Still zero tasks after retry — orchestrator cannot proceed");
+                    return Ok(());
+                }
+                // Continue with the retry tasks for terminal dispatch check below
+                let tasks_after = tasks_retry;
+                let mut any_without_terminals = false;
+                for task in &tasks_after {
+                    let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id.clone())
+                        .await
+                        .unwrap_or_default();
+                    if terminals.is_empty() {
+                        any_without_terminals = true;
+                        break;
+                    }
+                }
+                if any_without_terminals {
+                    tracing::info!("Retry planning created tasks without terminals, re-prompting LLM for terminal dispatch");
+                    let task_names: Vec<String> = tasks_after.iter().map(|t| format!("- {} (id: {}, branch: {})", t.name, t.id, &t.branch)).collect();
+                    let follow_up = format!(
+                        "The following tasks have been created but have NO terminals yet:\n{}\n\nFor each task, create at least one terminal using create_terminal (with cli_type_id and model_config_id from the available pool) and then start it with start_terminal. Return raw JSON instructions only, no markdown.",
+                        task_names.join("\n")
+                    );
+                    if let Ok(resp2) = self.call_llm(&follow_up).await {
+                        let _ = self.execute_instruction(&resp2).await;
+                    }
+                }
+                return Ok(());
+            }
+        }
+
         if !tasks_after.is_empty() {
             let mut any_without_terminals = false;
             for task in &tasks_after {
