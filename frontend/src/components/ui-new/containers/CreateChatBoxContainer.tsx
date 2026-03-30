@@ -125,6 +125,94 @@ function resolveVariantForExecutor(
   return variants.includes('DEFAULT') ? 'DEFAULT' : (variants[0] ?? null);
 }
 
+interface PlanningStatusBarProps {
+  readonly draftStatus: string | undefined;
+  readonly feishuConnected: boolean;
+  readonly feishuSyncEnabled: boolean;
+  readonly isSpecReady: boolean;
+  readonly isConfirmed: boolean;
+  readonly isMaterialized: boolean;
+  readonly materializedWorkflowId: string | null;
+  readonly confirmMutation: ReturnType<typeof useConfirmDraft>;
+  readonly materializeMutation: ReturnType<typeof useMaterializeDraft>;
+  readonly handleConfirm: () => void;
+  readonly handleMaterialize: () => void;
+  readonly handleToggleFeishuSync: () => void;
+  readonly handleSyncHistory: () => void;
+}
+
+function PlanningStatusBar({
+  draftStatus,
+  feishuConnected,
+  feishuSyncEnabled,
+  isSpecReady,
+  isConfirmed,
+  isMaterialized,
+  materializedWorkflowId,
+  confirmMutation,
+  materializeMutation,
+  handleConfirm,
+  handleMaterialize,
+  handleToggleFeishuSync,
+  handleSyncHistory,
+}: PlanningStatusBarProps) {
+  const { t: tTasks } = useTranslation('tasks');
+  return (
+    <div className="shrink-0 px-double py-half border-b flex items-center gap-half">
+      <span className="text-xs text-low">{tTasks('conversation.planning.title')}</span>
+      {draftStatus && (
+        <span className="text-xs px-1 py-px rounded bg-brand/10 text-brand">
+          {tTasks(`conversation.planning.status.${draftStatus}`)}
+        </span>
+      )}
+      {feishuConnected && (
+        <button
+          type="button"
+          onClick={handleToggleFeishuSync}
+          className={`flex items-center gap-1 rounded px-half py-px text-xs transition-colors ${
+            feishuSyncEnabled
+              ? 'bg-brand/20 text-brand hover:bg-brand/30'
+              : 'bg-secondary text-low hover:text-normal'
+          }`}
+          title={feishuSyncEnabled ? '飞书同步已开启' : '飞书同步已关闭'}
+        >
+          <span className={`inline-block size-1.5 rounded-full ${feishuSyncEnabled ? 'bg-brand' : 'bg-secondary'}`} />{' '}
+          飞书同步
+        </button>
+      )}
+      {feishuConnected && (
+        <button
+          type="button"
+          onClick={handleSyncHistory}
+          className="flex items-center gap-1 rounded px-half py-px text-xs bg-secondary text-low hover:text-normal hover:bg-tertiary transition-colors disabled:opacity-50"
+          title="将历史消息全量发送到飞书"
+        >
+          同步历史
+        </button>
+      )}
+      {isSpecReady && (
+        <button
+          onClick={handleConfirm}
+          disabled={confirmMutation.isPending}
+          className="ml-auto text-xs px-base py-half rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50"
+        >
+          {confirmMutation.isPending ? '...' : tTasks('conversation.planning.confirmButton')}
+        </button>
+      )}
+      {isConfirmed && (
+        <button
+          onClick={handleMaterialize}
+          disabled={materializeMutation.isPending}
+          className="ml-auto text-xs px-base py-half rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50"
+        >
+          {materializeMutation.isPending ? '...' : tTasks('conversation.planning.materializeButton')}
+        </button>
+      )}
+      {isMaterialized && <WorkflowStatusBadge key={materializedWorkflowId} workflowId={materializedWorkflowId} />}
+    </div>
+  );
+}
+
 function usePlanningDraftActions({
   planningDraftId,
   planningDraft,
@@ -487,60 +575,21 @@ export function CreateChatBoxContainer() {
       {isInPlanningMode && (
         <>
           {/* Status badge */}
-          <div className="shrink-0 px-double py-half border-b flex items-center gap-half">
-            <span className="text-xs text-low">{tTasks('conversation.planning.title')}</span>
-            {draftStatus && (
-              <span className="text-xs px-1 py-px rounded bg-brand/10 text-brand">
-                {tTasks(`conversation.planning.status.${draftStatus}`)}
-              </span>
-            )}
-            {feishuConnected && (
-              <button
-                type="button"
-                onClick={handleToggleFeishuSync}
-                disabled={feishuSyncMutation.isPending}
-                className={`flex items-center gap-1 rounded px-half py-px text-xs transition-colors ${
-                  planningDraft?.feishuSync
-                    ? 'bg-brand/20 text-brand hover:bg-brand/30'
-                    : 'bg-secondary text-low hover:text-normal'
-                }`}
-                title={planningDraft?.feishuSync ? '飞书同步已开启' : '飞书同步已关闭'}
-              >
-                <span className={`inline-block size-1.5 rounded-full ${planningDraft?.feishuSync ? 'bg-brand' : 'bg-secondary'}`} />{' '}
-                飞书同步
-              </button>
-            )}
-            {feishuConnected && (
-              <button
-                type="button"
-                onClick={handleSyncHistory}
-                disabled={feishuSyncMutation.isPending}
-                className="flex items-center gap-1 rounded px-half py-px text-xs bg-secondary text-low hover:text-normal hover:bg-tertiary transition-colors disabled:opacity-50"
-                title="将历史消息全量发送到飞书"
-              >
-                同步历史
-              </button>
-            )}
-            {isSpecReady && (
-              <button
-                onClick={handleConfirm}
-                disabled={confirmMutation.isPending}
-                className="ml-auto text-xs px-base py-half rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50"
-              >
-                {confirmMutation.isPending ? '...' : tTasks('conversation.planning.confirmButton')}
-              </button>
-            )}
-            {isConfirmed && (
-              <button
-                onClick={handleMaterialize}
-                disabled={materializeMutation.isPending}
-                className="ml-auto text-xs px-base py-half rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50"
-              >
-                {materializeMutation.isPending ? '...' : tTasks('conversation.planning.materializeButton')}
-              </button>
-            )}
-            {isMaterialized && <WorkflowStatusBadge key={materializedWorkflowId} workflowId={materializedWorkflowId} />}
-          </div>
+          <PlanningStatusBar
+            draftStatus={draftStatus}
+            feishuConnected={feishuConnected}
+            feishuSyncEnabled={planningDraft?.feishuSync ?? false}
+            isSpecReady={isSpecReady}
+            isConfirmed={isConfirmed}
+            isMaterialized={isMaterialized}
+            materializedWorkflowId={materializedWorkflowId}
+            confirmMutation={confirmMutation}
+            materializeMutation={materializeMutation}
+            handleConfirm={handleConfirm}
+            handleMaterialize={handleMaterialize}
+            handleToggleFeishuSync={handleToggleFeishuSync}
+            handleSyncHistory={handleSyncHistory}
+          />
 
           {/* Scrollable message list */}
           <div className="flex-1 min-h-0 overflow-y-auto px-double py-base space-y-base">

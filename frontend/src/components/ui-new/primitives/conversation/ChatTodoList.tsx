@@ -1,6 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { ListChecksIcon, CaretDownIcon } from '@phosphor-icons/react';
-import { CircleIcon, CheckCircleIcon, CircleHalfIcon } from '@phosphor-icons/react';
+import { ListChecksIcon, CaretDownIcon, CircleIcon, CheckCircleIcon, CircleHalfIcon } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
 import type { TodoItem } from 'shared/types';
 
