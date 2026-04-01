@@ -83,7 +83,7 @@ $script:Messages = @{
         PROMPT_CREATE_MISSING_PATH = "目录不存在，是否立即创建"
         PROMPT_OVERWRITE_ENV = ".env 已存在，是否覆盖"
         PROMPT_RUN_UPDATE_FLOW = "检测到已有 Docker 配置，是否改为执行更新流程"
-        PROMPT_USE_PREBUILT_IMAGE = "优先尝试拉取预构建镜像（推荐弱网用户开启）"
+        PROMPT_USE_PREBUILT_IMAGE = "拉取预构建镜像（推荐，免去本地编译）"
 
         INFO_KEY_GENERATED = "已生成加密密钥。"
         INFO_KEY_GENERATED_NON_INTERACTIVE = "非交互模式：已自动生成 32 位加密密钥。"
@@ -169,7 +169,7 @@ $script:Messages = @{
         PROMPT_CREATE_MISSING_PATH = "Path does not exist. Create it now"
         PROMPT_OVERWRITE_ENV = ".env already exists. Overwrite it"
         PROMPT_RUN_UPDATE_FLOW = "Existing Docker config detected. Switch to update flow instead"
-        PROMPT_USE_PREBUILT_IMAGE = "Prefer pulling prebuilt image first (recommended on weak networks)"
+        PROMPT_USE_PREBUILT_IMAGE = "Pull prebuilt image (recommended, skips local compilation)"
 
         INFO_KEY_GENERATED = "Encryption key generated."
         INFO_KEY_GENERATED_NON_INTERACTIVE = "Non-interactive mode: generated 32-char encryption key."
@@ -887,7 +887,7 @@ if (-not $NonInteractive) {
     else {
         "official"
     }
-    $preferPrebuiltImageEnabled = Read-YesNo (T "PROMPT_USE_PREBUILT_IMAGE") ($resolvedBuildNetworkProfile -eq "china")
+    $preferPrebuiltImageEnabled = Read-YesNo (T "PROMPT_USE_PREBUILT_IMAGE") $true
     $autoSetupProjectsEnabled = Read-YesNo (T "PROMPT_AUTO_SETUP_PROJECTS") $autoSetupProjectsEnabled
     $resetDataVolume = Read-YesNo (T "PROMPT_RESET_DATA_VOLUME") $resetDataVolume
     $SkipBuild = -not (Read-YesNo (T "PROMPT_RUN_BUILD") (-not $SkipBuild.IsPresent))
