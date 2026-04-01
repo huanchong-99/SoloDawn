@@ -24,7 +24,7 @@
     [string]$ImageRegistry = "",
     [string]$ImageNamespace = "",
     [ValidateSet("always", "missing", "never")]
-    [string]$ImagePullPolicy = "missing",
+    [string]$ImagePullPolicy = "always",
     [switch]$PreferPrebuiltImage,
     [ValidateSet("zh", "en")]
     [string]$Lang = ""
