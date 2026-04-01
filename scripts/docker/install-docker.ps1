@@ -725,39 +725,81 @@ function Try-PullPrebuiltImage {
         [string]$TargetTag
     )
 
+    # ── Diagnostic: show ALL solodawn-related images currently on disk ──
+    Write-Host ""
+    Write-Host "╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║  Docker Local Image Scan (solodawn)                 ║" -ForegroundColor Cyan
+    Write-Host "╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    try {
+        $localImages = & docker images --format "{{.Repository}}:{{.Tag}}  ID={{.ID}}  Created={{.CreatedSince}}  Size={{.Size}}" 2>$null |
+            Where-Object { $_ -match "solodawn" }
+        if ($localImages) {
+            foreach ($img in $localImages) {
+                Write-Host "  [LOCAL] $img" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "  [LOCAL] (none — no solodawn images found locally)" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "  [LOCAL] (scan failed: $_)" -ForegroundColor Red
+    }
+    Write-Host "  [TARGET] Compose expects: $TargetTag" -ForegroundColor Cyan
+    $targetExists = Test-ImageExistsLocal -Image $TargetTag
+    Write-Host "  [TARGET] $TargetTag exists locally: $targetExists" -ForegroundColor $(if ($targetExists) { "Yellow" } else { "Green" })
+    Write-Host ""
+
     foreach ($candidate in $Candidates) {
         if ([string]::IsNullOrWhiteSpace($candidate)) {
             continue
         }
 
-        # Always try pull first to get the latest image
+        $candidateLocal = Test-ImageExistsLocal -Image $candidate
+        Write-Host "  [CHECK] $candidate exists locally: $candidateLocal" -ForegroundColor $(if ($candidateLocal) { "Yellow" } else { "DarkGray" })
+
+        # Always try pull first to get the latest image from remote
         Write-Info (Tf "INFO_TRY_PULL_PREBUILT" @($candidate))
+        Write-Host "  [PULL]  Running: docker pull $candidate" -ForegroundColor Cyan
         $pullOk = $false
         try {
             & docker pull $candidate 2>&1
-            if ($LASTEXITCODE -eq 0) { $pullOk = $true }
-        } catch { }
+            if ($LASTEXITCODE -eq 0) {
+                $pullOk = $true
+                Write-Host "  [PULL]  SUCCESS — pulled from remote" -ForegroundColor Green
+            } else {
+                Write-Host "  [PULL]  FAILED — docker pull exited with code $LASTEXITCODE" -ForegroundColor Red
+            }
+        } catch {
+            Write-Host "  [PULL]  EXCEPTION — $_" -ForegroundColor Red
+        }
 
         if (-not $pullOk) {
-            Write-Warn "[WARN] Pull failed for $candidate"
             # Fall back to local image only if pull fails
-            if (Test-ImageExistsLocal -Image $candidate) {
-                Write-Info (Tf "INFO_PREBUILT_PRESENT" @($candidate))
+            if ($candidateLocal) {
+                Write-Host "  [FALLBACK] Pull failed, but local copy exists — using local" -ForegroundColor Yellow
             } else {
+                Write-Host "  [SKIP] Pull failed and no local copy — trying next candidate" -ForegroundColor Red
                 continue
             }
         }
 
         # Tag the (pulled or local-fallback) image as compose target
+        Write-Host "  [TAG]   Tagging $candidate → $TargetTag" -ForegroundColor Cyan
         try {
             & docker image tag $candidate $TargetTag 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) {
+                Write-Host "  [TAG]   SUCCESS" -ForegroundColor Green
                 Write-Info (T "INFO_PREBUILT_USED")
+                Write-Host ""
                 return $true
+            } else {
+                Write-Host "  [TAG]   FAILED — exit code $LASTEXITCODE" -ForegroundColor Red
             }
-        } catch { }
+        } catch {
+            Write-Host "  [TAG]   EXCEPTION — $_" -ForegroundColor Red
+        }
     }
 
+    Write-Host ""
     Write-Warn (T "INFO_PREBUILT_PULL_FAILED")
     return $false
 }
