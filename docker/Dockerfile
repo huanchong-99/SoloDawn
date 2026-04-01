@@ -60,6 +60,12 @@ RUN set -eux; \
             >> /usr/local/cargo/config.toml; \
     fi
 
+# Install cargo-chef in rust-base (not a separate stage) to prevent
+# BuildKit from running cargo-chef install in parallel with pnpm install.
+RUN --mount=type=cache,id=solodawn-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=solodawn-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo install cargo-chef --locked
+
 # ============================================================
 # Stage 2: Frontend build
 # ============================================================
@@ -107,21 +113,12 @@ ENV BROWSERSLIST_IGNORE_OLD_DATA=1 \
 RUN cd frontend && pnpm run build:docker
 
 # ============================================================
-# Stage 3: Install cargo-chef (shared by planner and builder)
-# ============================================================
-FROM rust-base AS rust-with-chef
-
-RUN --mount=type=cache,id=solodawn-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=solodawn-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    cargo install cargo-chef --locked
-
-# ============================================================
-# Stage 3a: cargo-chef planner
+# Stage 3: cargo-chef planner
 # Produces recipe.json — a dependency-only build plan.
 # This stage is lightweight and rebuilds whenever Cargo
 # manifests or crate structure changes.
 # ============================================================
-FROM rust-with-chef AS chef-planner
+FROM rust-base AS chef-planner
 
 WORKDIR /build
 
@@ -138,7 +135,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 # First: cook dependencies from recipe.json (heavily cached).
 # Then:  build project source (only recompiles on src changes).
 # ============================================================
-FROM rust-with-chef AS rust-builder
+FROM rust-base AS rust-builder
 
 WORKDIR /build
 
