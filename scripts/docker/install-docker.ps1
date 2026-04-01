@@ -547,9 +547,10 @@ function Invoke-ComposeBuildWithRetry {
         $result = Invoke-ProcessWithWatchdog -FilePath "docker" -ArgumentList $buildArgs `
             -StallTimeoutSeconds $stallTimeoutSeconds -PollIntervalSeconds $pollIntervalSeconds
 
+        $retryable = $false
         if (-not $result.Stalled -and $result.ExitCode -eq 0) {
             # Verify image actually exists (BuildKit RPC disconnect can exit 0 without producing image)
-            $imageCheck = & docker image inspect compose-solodawn:latest 2>&1
+            $null = & docker image inspect compose-solodawn:latest 2>$null
             if ($LASTEXITCODE -ne 0) {
                 Write-Warn "Build reported success but image not found. Treating as retryable failure."
                 $retryable = $true

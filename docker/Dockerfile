@@ -169,6 +169,13 @@ ARG SOLODAWN_BUILD_NETWORK_PROFILE
 ARG INSTALL_AI_CLIS=0
 ARG NODE_MAJOR=22
 
+# Force BuildKit to wait for rust-base before starting runtime apt-get.
+# Without this, BuildKit runs rust-base apt-get, runtime apt-get, and
+# pnpm install all in parallel, which can crash the daemon on machines
+# with limited resources (RPC EOF disconnect).
+COPY --from=rust-base /etc/os-release /tmp/.buildkit-sync
+RUN rm -f /tmp/.buildkit-sync
+
 RUN set -eux; \
     if [ "$SOLODAWN_BUILD_NETWORK_PROFILE" = "china" ]; then \
         sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || \
