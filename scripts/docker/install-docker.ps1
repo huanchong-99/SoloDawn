@@ -427,7 +427,10 @@ function Test-RetryableBuildFailure {
         "failed to clone into",
         "could not execute process `git fetch",
         "failed to resolve source metadata",
-        "error pulling image configuration"
+        "error pulling image configuration",
+        "error reading from server: EOF",
+        "rpc error: code = Unavailable",
+        "failed to receive status"
     )
 
     foreach ($pattern in $patterns) {
@@ -537,10 +540,20 @@ function Invoke-ComposeBuildWithRetry {
             -StallTimeoutSeconds $stallTimeoutSeconds -PollIntervalSeconds $pollIntervalSeconds
 
         if (-not $result.Stalled -and $result.ExitCode -eq 0) {
-            return
+            # Verify image actually exists (BuildKit RPC disconnect can exit 0 without producing image)
+            $imageCheck = & docker image inspect compose-solodawn:latest 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "Build reported success but image not found. Treating as retryable failure."
+                $retryable = $true
+            }
+            else {
+                return
+            }
         }
 
-        $retryable = Test-RetryableBuildFailure -Output $result.Output -Stalled $result.Stalled
+        if (-not $retryable) {
+            $retryable = Test-RetryableBuildFailure -Output $result.Output -Stalled $result.Stalled
+        }
         if (-not $retryable -or $attempt -eq $maxAttempts) {
             $tail = Get-OutputTail -Output $result.Output
             if (-not [string]::IsNullOrWhiteSpace($tail)) {
