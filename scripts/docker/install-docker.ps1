@@ -884,6 +884,8 @@ if ($Mode -eq "update") {
     if ($AllowDirty) {
         $updateArgs.AllowDirty = $true
     }
+    # Always pass PreferPrebuiltImage to update flow — default is to use prebuilt
+    $updateArgs.PreferPrebuiltImage = $true
 
     & $updateScript @updateArgs
     exit $LASTEXITCODE
