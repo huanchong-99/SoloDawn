@@ -310,6 +310,15 @@ pub struct AnthropicCompatibleClient {
 }
 
 #[derive(Debug, Serialize)]
+struct AnthropicThinkingConfig {
+    #[serde(rename = "type")]
+    thinking_type: String,
+    /// Required when type = "enabled"; omitted when "disabled".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    budget_tokens: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
 struct AnthropicRequest {
     model: String,
     messages: Vec<AnthropicMessage>,
@@ -318,6 +327,10 @@ struct AnthropicRequest {
     system: Option<String>,
     /// Always true — some Anthropic-compatible proxies only support streaming.
     stream: bool,
+    /// Explicitly disable thinking to satisfy providers (e.g. SiliconFlow)
+    /// that require this field to be present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<AnthropicThinkingConfig>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -375,6 +388,10 @@ impl AnthropicCompatibleClient {
             max_tokens: 2048,
             system: system_prompt,
             stream: true,
+            thinking: Some(AnthropicThinkingConfig {
+                thinking_type: "disabled".to_string(),
+                budget_tokens: None,
+            }),
         };
 
         tracing::debug!(
