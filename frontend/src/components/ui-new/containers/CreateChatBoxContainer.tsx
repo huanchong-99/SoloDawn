@@ -438,6 +438,15 @@ export function CreateChatBoxContainer() {
     [config],
   );
 
+  /** Resolve the model config that matches the user's dropdown selection. */
+  const selectedPlannerModelConfig = useMemo(() => {
+    if (!selectedModelConfigId) return plannerModelConfig;
+    const lib = (config as Record<string, unknown>)
+      ?.workflow_model_library as WorkflowModelConfig[] | undefined;
+    if (!lib) return plannerModelConfig;
+    return lib.find((m) => m.id === selectedModelConfigId) ?? plannerModelConfig;
+  }, [selectedModelConfigId, config, plannerModelConfig]);
+
   // === Phase 1: Initial submit — create planning draft ===
   const handleInitialSubmit = useCallback(async () => {
     setHasAttemptedSubmit(true);
@@ -450,7 +459,7 @@ export function CreateChatBoxContainer() {
     setIsCreatingDraft(true);
     setIsThinking(true);
     try {
-      const modelConfig = plannerModelConfig;
+      const modelConfig = selectedPlannerModelConfig;
       const draft = await planningDraftsApi.create({
         projectId,
         name: message.slice(0, 100),
@@ -486,7 +495,7 @@ export function CreateChatBoxContainer() {
     hasChangedFromDefault,
     effectiveProfile,
     updateAndSaveConfig,
-    plannerModelConfig,
+    selectedPlannerModelConfig,
     setPlanningDraftId,
     setMessage,
     clearAttachments,
