@@ -541,20 +541,29 @@ function Try-PullPrebuiltImage {
         $candidateLocal = Test-ImageExistsLocal -Image $candidate
         Write-Host "  [CHECK] $candidate exists locally: $candidateLocal" -ForegroundColor $(if ($candidateLocal) { "Yellow" } else { "DarkGray" })
 
-        # Always try pull first to get the latest image from remote
+        # Always try pull first to get the latest image from remote (with retry)
         Write-Info (Tf "INFO_TRY_PULL_PREBUILT" @($candidate))
-        Write-Host "  [PULL]  Running: docker pull $candidate" -ForegroundColor Cyan
         $pullOk = $false
-        try {
-            & docker pull $candidate 2>&1
-            if ($LASTEXITCODE -eq 0) {
-                $pullOk = $true
-                Write-Host "  [PULL]  SUCCESS — pulled from remote" -ForegroundColor Green
-            } else {
-                Write-Host "  [PULL]  FAILED — docker pull exited with code $LASTEXITCODE" -ForegroundColor Red
+        $pullMaxRetries = 3
+        for ($pullAttempt = 1; $pullAttempt -le $pullMaxRetries; $pullAttempt++) {
+            Write-Host "  [PULL]  Running: docker pull $candidate (attempt $pullAttempt/$pullMaxRetries)" -ForegroundColor Cyan
+            try {
+                & docker pull $candidate 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    $pullOk = $true
+                    Write-Host "  [PULL]  SUCCESS — pulled from remote" -ForegroundColor Green
+                    break
+                } else {
+                    Write-Host "  [PULL]  FAILED — exit code $LASTEXITCODE" -ForegroundColor Red
+                }
+            } catch {
+                Write-Host "  [PULL]  EXCEPTION — $_" -ForegroundColor Red
             }
-        } catch {
-            Write-Host "  [PULL]  EXCEPTION — $_" -ForegroundColor Red
+            if ($pullAttempt -lt $pullMaxRetries) {
+                $retrySec = $pullAttempt * 10
+                Write-Host "  [PULL]  Retrying in ${retrySec}s..." -ForegroundColor Yellow
+                Start-Sleep -Seconds $retrySec
+            }
         }
 
         if (-not $pullOk) {
