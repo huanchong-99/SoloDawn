@@ -1149,6 +1149,7 @@ export const configApi = {
   }> => {
     const response = await makeRequest('/api/agents/install-ai-clis', {
       method: 'POST',
+      signal: AbortSignal.timeout(30 * 60 * 1000), // 30 min — CLI installation is slow
     });
     return handleApiResponse<{
       installed: boolean;
