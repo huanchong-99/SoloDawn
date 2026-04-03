@@ -1143,6 +1143,17 @@ try {
     }
     Write-Ok (T "OK_COMPOSE_VALID")
 
+    # Clean up old containers BEFORE pulling new image to free memory.
+    # Running containers + new image download can exhaust WSL2 memory,
+    # causing docker compose down to OOM crash.
+    if ($resetDataVolume) {
+        Write-Info (T "INFO_RESETTING_DATA")
+        & docker compose --ansi never -f $composeFile --env-file $envFile down -v --remove-orphans
+        if ($LASTEXITCODE -ne 0) {
+            throw (T "ERR_DOWN_FAILED")
+        }
+    }
+
     if (-not $SkipBuild) {
         $targetComposeImage = "compose-solodawn:latest"
         $usedPrebuilt = $false
@@ -1197,14 +1208,6 @@ try {
         }
         else {
             Write-Info (T "INFO_BUILD_SKIPPED")
-        }
-    }
-
-    if ($resetDataVolume) {
-        Write-Info (T "INFO_RESETTING_DATA")
-        & docker compose --ansi never -f $composeFile --env-file $envFile down -v --remove-orphans
-        if ($LASTEXITCODE -ne 0) {
-            throw (T "ERR_DOWN_FAILED")
         }
     }
 
