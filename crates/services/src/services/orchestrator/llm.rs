@@ -447,7 +447,37 @@ impl AnthropicCompatibleClient {
             }
         }
 
+        // Fallback: if SSE parsing yielded nothing, the provider may have
+        // returned a standard (non-streaming) JSON response despite stream=true.
+        // Try to extract content from the raw body as a regular Anthropic response.
         if content.is_empty() {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                // Standard Anthropic response: { "content": [{ "type": "text", "text": "..." }] }
+                if let Some(blocks) = json.get("content").and_then(|c| c.as_array()) {
+                    for block in blocks {
+                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                                content.push_str(text);
+                            }
+                        }
+                    }
+                }
+                // Also try extracting usage from the non-streaming response
+                if let Some(u) = json.pointer("/usage/input_tokens").and_then(serde_json::Value::as_i64) {
+                    input_tokens = u as i32;
+                }
+                if let Some(u) = json.pointer("/usage/output_tokens").and_then(serde_json::Value::as_i64) {
+                    output_tokens = u as i32;
+                }
+            }
+        }
+
+        if content.is_empty() {
+            tracing::warn!(
+                body_len = body.len(),
+                body_preview = %body.chars().take(500).collect::<String>(),
+                "Anthropic API returned empty content after SSE + JSON fallback parsing"
+            );
             return Err(anyhow::anyhow!("Anthropic API returned empty content"));
         }
 
