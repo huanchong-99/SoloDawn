@@ -318,7 +318,7 @@ async fn verify_anthropic_model(
         return Ok(false);
     }
 
-    if !verify_response_body_ok(&response.text().await.unwrap_or_default(), &[], "Anthropic") {
+    if !verify_response_body_ok(&response.text().await.unwrap_or_default(), &["content", "id"], "Anthropic") {
         return Ok(false);
     }
 
@@ -385,17 +385,26 @@ async fn verify_google_model(
 /// and (optionally) contains at least one of the `expected_keys`.
 /// Some providers (e.g., BigModel.cn) return HTTP 200 with error payloads.
 fn verify_response_body_ok(body: &str, expected_keys: &[&str], label: &str) -> bool {
-    if let Ok(json) = serde_json::from_str::<Value>(body) {
-        if json.get("error").is_some() {
-            tracing::warn!("{label} verification returned 200 but body contains error: {body}");
-            return false;
+    match serde_json::from_str::<Value>(body) {
+        Ok(json) => {
+            if json.get("error").is_some() {
+                tracing::warn!("{label} verification returned 200 but body contains error: {body}");
+                return false;
+            }
+            if !expected_keys.is_empty() && expected_keys.iter().all(|k| json.get(*k).is_none()) {
+                tracing::warn!("{label} verification returned 200 but body has no {expected_keys:?}: {body}");
+                return false;
+            }
+            true
         }
-        if !expected_keys.is_empty() && expected_keys.iter().all(|k| json.get(*k).is_none()) {
-            tracing::warn!("{label} verification returned 200 but body has no {expected_keys:?}: {body}");
-            return false;
+        Err(_) => {
+            tracing::warn!(
+                "{label} verification returned 200 but body is not valid JSON (likely wrong URL): {}",
+                &body[..body.len().min(200)]
+            );
+            false
         }
     }
-    true
 }
 
 // ============================================================================
