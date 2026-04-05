@@ -4829,11 +4829,17 @@ impl OrchestratorAgent {
         }
 
         // G15-001: Do not auto-sync to completed while the Agent is still planning.
-        // The LLM may dynamically create new tasks (e.g. Integration Review) after
-        // the initial tasks complete. Wait until planning_complete is set.
+        // G15-002: Even after planning_complete, the LLM event loop may still create
+        // new tasks on terminal completion events. Only auto-sync after a grace period
+        // where no new tasks have been created and the LLM is idle.
         {
             let state = self.state.read().await;
             if !state.workflow_planning_complete {
+                return Ok(());
+            }
+            // Check if the LLM is currently processing (run_state != Idle).
+            // If the agent is actively handling events, it may create new tasks.
+            if !matches!(state.run_state, OrchestratorRunState::Idle) {
                 return Ok(());
             }
         }
