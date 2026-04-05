@@ -3658,6 +3658,13 @@ impl OrchestratorAgent {
                     return Ok(());
                 }
 
+                // Auto-merge task branches before marking completed
+                if self.config.auto_merge_on_completion {
+                    if let Err(e) = self.execute_auto_merge().await {
+                        tracing::warn!(error = %e, "Auto-merge failed during CompleteWorkflow");
+                    }
+                }
+
                 // Update workflow status to completed
                 db::models::Workflow::update_status(
                     &self.db.pool,
