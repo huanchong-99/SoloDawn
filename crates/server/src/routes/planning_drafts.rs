@@ -301,7 +301,30 @@ async fn send_message(
         ));
     }
 
-    // 1. Store user message
+    // 1. Auto-fill planner config from workflow_model_library if missing
+    let mut draft = draft;
+    let missing_planner = draft.planner_model_id.as_deref().map_or(true, str::is_empty)
+        || draft.planner_base_url.as_deref().map_or(true, str::is_empty);
+    if missing_planner {
+        {
+            let cfg = deployment.config().read().await;
+            if let Some(model) = cfg.workflow_model_library.iter().find(|m| !m.api_key.is_empty()) {
+                tracing::info!(
+                    draft_id = %draft_id,
+                    model_id = %model.model_id,
+                    "Auto-filling planner config from workflow_model_library"
+                );
+                draft.planner_model_id = Some(model.model_id.clone());
+                draft.planner_api_type = Some(model.api_type.clone());
+                draft.planner_base_url = Some(model.base_url.clone());
+                if let Err(e) = draft.set_api_key(&model.api_key) {
+                    tracing::warn!(draft_id = %draft_id, "Failed to encrypt auto-filled API key: {e}");
+                }
+            }
+        }
+    }
+
+    // 2. Store user message
     let user_msg = PlanningDraftMessage::new(&draft_id, "user", req.message.trim());
     PlanningDraftMessage::insert(&deployment.db().pool, &user_msg)
         .await
@@ -309,7 +332,7 @@ async fn send_message(
 
     let mut result = vec![MessageResponse::from(user_msg)];
 
-    // 2. Try to call LLM and store assistant reply
+    // 3. Try to call LLM and store assistant reply
     if let Some(llm_client) = build_llm_client_from_draft(&draft) {
         let all_messages = PlanningDraftMessage::list_by_draft(&deployment.db().pool, &draft_id)
             .await

@@ -229,7 +229,7 @@ impl OpenAICompatibleClient {
             model: self.model.clone(),
             messages: chat_messages,
             temperature: Some(0.7),
-            max_tokens: Some(2048),
+            max_tokens: Some(16384),
         };
 
         tracing::info!(
@@ -372,7 +372,7 @@ impl AnthropicCompatibleClient {
         let request = AnthropicRequest {
             model: self.model.clone(),
             messages: api_messages,
-            max_tokens: 2048,
+            max_tokens: 16384,
             system: system_prompt,
             stream: true,
         };

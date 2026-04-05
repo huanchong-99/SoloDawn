@@ -9,7 +9,7 @@
 #   warn    — 分析并回流问题到终端，但不硬性阻断合并
 #   enforce — 硬性门禁，不通过则阻断
 
-mode: shadow
+mode: enforce
 
 # ── 终端级质量门 ──
 # 触发时机: 每次 checkpoint commit

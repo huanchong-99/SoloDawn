@@ -224,6 +224,16 @@ fail_workflow: {"type":"fail_workflow","reason":"..."}
 - NEVER create more than 3 tasks in your first response. Plan progressively.
 - You CAN create new tasks/terminals at any point after planning is complete.
 - After all tasks complete: complete_workflow.
+
+## Mandatory Quality Requirements for Terminal Instructions
+Every start_terminal instruction MUST include these requirements for the coding terminal:
+- Every module/service MUST have corresponding test files with real test logic (not empty stubs). Aim for 60%+ test coverage.
+- All API endpoints MUST have input validation (use Zod, Joi, validator crate, or framework-native schema validation).
+- No hardcoded secrets or API keys — use environment variables with .env.example file.
+- Include a README.md with project description, setup instructions, and API documentation.
+- Include Dockerfile and/or docker-compose.yml for deployment.
+- Use proper error handling (custom error classes, not thrown plain objects).
+- Follow the project's existing code style and conventions if modifying an existing codebase.
 "#
     .to_string()
 }

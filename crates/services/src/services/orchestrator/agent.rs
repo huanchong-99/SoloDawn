@@ -3075,14 +3075,60 @@ impl OrchestratorAgent {
             if result.is_some() {
                 return result;
             }
+
+            // Element-by-element fallback: parse each JSON array element individually,
+            // skip malformed ones instead of discarding the entire batch.
+            if let Some(partial) = Self::parse_instructions_individually(&extracted) {
+                return Some(partial);
+            }
+
             tracing::warn!(
-                extracted_preview = &extracted[..extracted.len().min(300)],
+                extracted_preview = &extracted[..extracted.len().min(2000)],
                 "Extracted JSON did not parse as orchestrator instructions"
             );
         }
 
-        tracing::warn!(response_preview = &response[..response.len().min(500)], "Could not parse any instructions from LLM response");
+        // Also try element-by-element on the normalized payload directly
+        if let Some(partial) = Self::parse_instructions_individually(normalized) {
+            return Some(partial);
+        }
+
+        tracing::warn!(response_preview = &response[..response.len().min(2000)], "Could not parse any instructions from LLM response");
         None
+    }
+
+    /// Parse a JSON array element-by-element, skipping items that fail to
+    /// deserialize.  Returns `Some` when at least one instruction was recovered.
+    fn parse_instructions_individually(json_str: &str) -> Option<Vec<OrchestratorInstruction>> {
+        let arr: Vec<serde_json::Value> = serde_json::from_str(json_str).ok()?;
+        if arr.is_empty() {
+            return None;
+        }
+        let mut instructions = Vec::new();
+        let mut skipped = 0u32;
+        for (idx, val) in arr.iter().enumerate() {
+            match serde_json::from_value::<OrchestratorInstruction>(val.clone()) {
+                Ok(inst) => instructions.push(inst),
+                Err(err) => {
+                    skipped += 1;
+                    let type_hint = val.get("type").and_then(|t| t.as_str()).unwrap_or("?");
+                    tracing::warn!(
+                        index = idx,
+                        instruction_type = type_hint,
+                        error = %err,
+                        "Skipping unparseable instruction element"
+                    );
+                }
+            }
+        }
+        if instructions.is_empty() {
+            tracing::warn!(total = arr.len(), skipped, "All instruction elements failed to parse individually");
+            return None;
+        }
+        if skipped > 0 {
+            tracing::info!(parsed = instructions.len(), skipped, "Partially recovered instructions from LLM response");
+        }
+        Some(instructions)
     }
 
     fn instruction_type_name(instruction: &OrchestratorInstruction) -> &'static str {
@@ -4781,9 +4827,18 @@ impl OrchestratorAgent {
         if has_runnable_terminals {
             return Ok(());
         }
-        // Auto-sync to completed when all tasks are done and no terminals are running,
-        // regardless of planning_complete flag. The LLM sometimes fails to emit
-        // set_workflow_planning_complete, but if all work is done, we should complete.
+
+        // G15-001: Do not auto-sync to completed while the Agent is still planning.
+        // The LLM may dynamically create new tasks (e.g. Integration Review) after
+        // the initial tasks complete. Wait until planning_complete is set.
+        {
+            let state = self.state.read().await;
+            if !state.workflow_planning_complete {
+                return Ok(());
+            }
+        }
+
+        // Auto-sync to completed when all tasks are done and no terminals are running.
         if tasks.is_empty() || tasks.iter().any(|task| task.status != TASK_STATUS_COMPLETED) {
             return Ok(());
         }
