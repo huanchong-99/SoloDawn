@@ -223,7 +223,8 @@ fail_workflow: {"type":"fail_workflow","reason":"..."}
 - 1-2 terminals per task. Keep instructions actionable.
 - NEVER create more than 3 tasks in your first response. Plan progressively.
 - You CAN create new tasks/terminals at any point after planning is complete.
-- After all tasks complete: complete_workflow.
+- After all tasks complete: use merge_branch to merge each task branch into main, then complete_workflow.
+- NEVER create a separate "integration review", "merge verification", or "final review" task. The merge_branch action handles merging automatically. When all coding tasks are done, merge and complete — do not spawn new terminals for review.
 
 ## Mandatory Quality Requirements for Terminal Instructions
 Every start_terminal instruction MUST include these requirements for the coding terminal:
