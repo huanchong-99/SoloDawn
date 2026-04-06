@@ -226,15 +226,18 @@ fail_workflow: {"type":"fail_workflow","reason":"..."}
 - After all tasks complete: use merge_branch to merge each task branch into main, then complete_workflow.
 - NEVER create a separate "integration review", "merge verification", or "final review" task. The merge_branch action handles merging automatically. When all coding tasks are done, merge and complete — do not spawn new terminals for review.
 
-## Mandatory Quality Requirements for Terminal Instructions
-Every start_terminal instruction MUST include these requirements for the coding terminal:
-- Every module/service MUST have corresponding test files with real test logic (not empty stubs). Aim for 60%+ test coverage.
-- All API endpoints MUST have input validation (use Zod, Joi, validator crate, or framework-native schema validation).
-- No hardcoded secrets or API keys — use environment variables with .env.example file.
-- Include a README.md with project description, setup instructions, and API documentation.
-- Include Dockerfile and/or docker-compose.yml for deployment.
-- Use proper error handling (custom error classes, not thrown plain objects).
-- Follow the project's existing code style and conventions if modifying an existing codebase.
+## CRITICAL: Quality Requirements (Auto-Appended to Every Terminal)
+The system will AUTOMATICALLY append the following requirements to every start_terminal instruction.
+You do NOT need to include them in your instruction text — they are injected by the platform.
+Focus your instruction on WHAT to build, not on quality standards.
+
+[Auto-appended quality block — for reference only, do not repeat in instructions]
+- Tests: every module MUST have test files with real assertions (Jest/Vitest/cargo test). Aim ≥60% coverage.
+- Validation: every API endpoint MUST validate input (Zod/Joi/validator crate/Fastify schema).
+- Security: no hardcoded secrets, use env vars + .env.example. JWT secret must fail-fast if missing.
+- Docs: include README with setup steps. Include Dockerfile/docker-compose.
+- Error handling: use custom error classes, not plain objects. Global error middleware required.
+- If modifying existing code: preserve all existing functionality unchanged.
 "#
     .to_string()
 }

@@ -3497,10 +3497,17 @@ impl OrchestratorAgent {
                 let planning_complete = self.task_planning_complete(&task_id).await;
                 self.sync_task_state_from_db(&task_id, Some(planning_complete))
                     .await?;
+
+                // G16-001: Auto-append mandatory quality requirements to every
+                // terminal instruction. The LLM often omits these when handling
+                // fuzzy requirements, leading to zero-test deliverables.
+                let quality_suffix = "\n\n---\n## MANDATORY (enforced by platform)\n- Write test files for every module (Jest/Vitest/cargo test). Aim ≥60% coverage.\n- Validate ALL API inputs (Zod/Joi/validator/Fastify schema). Never pass raw req.body to DB.\n- No hardcoded secrets — use env vars. JWT secret must crash if missing (no fallback).\n- Include README with setup instructions.\n- Include Dockerfile + docker-compose.yml.\n- Use custom error classes + global error middleware.\n- If email/password auth is required, implement BOTH registration AND login (not just OAuth).";
+                let full_instruction = format!("{instruction}{quality_suffix}");
+
                 // Add timeout to dispatch to prevent indefinite hangs
                 match tokio::time::timeout(
                     std::time::Duration::from_secs(30),
-                    self.dispatch_terminal(&task_id, &terminal, &instruction),
+                    self.dispatch_terminal(&task_id, &terminal, &full_instruction),
                 ).await {
                     Ok(result) => result?,
                     Err(_) => {
