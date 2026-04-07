@@ -611,7 +611,7 @@ impl ClaudeCodeNativeClient {
     /// Algorithm: xxhash64(body_with_cch=00000, seed=0x6E52736AC806831E) & 0xFFFFF
     /// Result is a 5-character lowercase hex string.
     fn compute_cch(body_with_placeholder: &str) -> String {
-        const CCH_SEED: u64 = 0x6E52736AC806831E;
+        const CCH_SEED: u64 = 0x6E52_736A_C806_831E;
         let hash = XxHash64::oneshot(CCH_SEED, body_with_placeholder.as_bytes());
         let masked = hash & 0xFFFFF;
         format!("{masked:05x}")
@@ -1383,7 +1383,7 @@ mod claude_code_native_tests {
     #[test]
     fn test_cch_masked_to_20_bits() {
         // The cch value is hash & 0xFFFFF, so max value is 0xFFFFF = 1048575
-        let body = r#"test body with cch=00000 placeholder"#;
+        let body = r"test body with cch=00000 placeholder";
         let cch = ClaudeCodeNativeClient::compute_cch(body);
         let val = u64::from_str_radix(&cch, 16).expect("cch must be valid hex");
         assert!(val <= 0xFFFFF, "cch value {val} exceeds 20-bit mask");
