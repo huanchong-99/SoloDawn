@@ -487,24 +487,24 @@ impl OrchestratorAgent {
         // When none exist but native credentials are available, inject
         // a synthetic Claude Code model so the agent can create terminals.
         let mut model_configs = db::models::ModelConfig::find_user_configured(&self.db.pool).await?;
-        if model_configs.is_empty() {
-            if create_claude_code_native_client("claude-sonnet-4-20250514").is_some() {
-                model_configs.push(db::models::ModelConfig {
-                    id: "model-claude-sonnet".to_string(),
-                    cli_type_id: "cli-claude-code".to_string(),
-                    name: "sonnet".to_string(),
-                    display_name: "Claude Sonnet (Native)".to_string(),
-                    api_model_id: Some("claude-sonnet-4-20250514".to_string()),
-                    is_default: true,
-                    is_official: false,
-                    created_at: chrono::Utc::now(),
-                    updated_at: chrono::Utc::now(),
-                    encrypted_api_key: None,
-                    base_url: None,
-                    api_type: None,
-                    has_api_key: false,
-                });
-            }
+        if model_configs.is_empty()
+            && create_claude_code_native_client("claude-sonnet-4-20250514").is_some()
+        {
+            model_configs.push(db::models::ModelConfig {
+                id: "model-claude-sonnet".to_string(),
+                cli_type_id: "cli-claude-code".to_string(),
+                name: "sonnet".to_string(),
+                display_name: "Claude Sonnet (Native)".to_string(),
+                api_model_id: Some("claude-sonnet-4-20250514".to_string()),
+                is_default: true,
+                is_official: false,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+                encrypted_api_key: None,
+                base_url: None,
+                api_type: None,
+                has_api_key: false,
+            });
         }
         let workflow_commands =
             db::models::WorkflowCommand::find_by_workflow(&self.db.pool, &workflow.id).await?;

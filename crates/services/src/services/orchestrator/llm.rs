@@ -812,7 +812,7 @@ fn detect_cc_version() -> Option<String> {
         .or_else(|| version.strip_prefix("claude/"))
         .or_else(|| {
             // Try to extract version number from anywhere in the string
-            version.split_whitespace().find(|s| s.chars().next().map_or(false, |c| c.is_ascii_digit()))
+            version.split_whitespace().find(|s| s.chars().next().is_some_and(|c| c.is_ascii_digit()))
         })
         .map(|v| v.trim().to_string())
 }
