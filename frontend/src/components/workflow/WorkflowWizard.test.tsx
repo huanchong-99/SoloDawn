@@ -16,6 +16,10 @@ vi.mock('@/hooks/useProjectRepos', () => ({
   useProjectRepos: () => ({ data: undefined, isLoading: false }),
 }));
 
+vi.mock('@/hooks/useNativeCredentials', () => ({
+  useNativeCredentials: () => ({ data: undefined, isLoading: false }),
+}));
+
 const fetchMock = vi.fn();
 
 describe('WorkflowWizard', () => {

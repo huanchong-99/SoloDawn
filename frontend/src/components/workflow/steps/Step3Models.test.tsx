@@ -11,6 +11,10 @@ vi.mock('@/components/ui-new/dialogs/ConfirmDialog', () => ({
   },
 }));
 
+vi.mock('@/hooks/useNativeCredentials', () => ({
+  useNativeCredentials: () => ({ data: undefined, isLoading: false }),
+}));
+
 describe('Step3Models', () => {
   const mockOnUpdate = vi.fn();
 
