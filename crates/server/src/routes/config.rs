@@ -1023,13 +1023,13 @@ async fn get_native_credentials_status(
             .and_then(|out| {
                 let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 s.strip_prefix("claude v")
-                    .or_else(|| s.strip_prefix("claude/"))
+                    .or(s.strip_prefix("claude/"))
                     .or_else(|| {
                         s.split_whitespace()
                             .find(|w| w.chars().next().is_some_and(|c| c.is_ascii_digit()))
                     })
                     .map(|v| v.to_string())
-                    .or_else(|| if s.is_empty() { None } else { Some(s) })
+                    .or(if s.is_empty() { None } else { Some(s) })
             });
 
         NativeCredentialsStatus {
