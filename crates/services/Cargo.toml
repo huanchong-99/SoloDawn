@@ -63,6 +63,7 @@ portable-pty = "0.8"
 redis = { version = "0.27", features = ["tokio-comp", "aio"] }
 tonic = "0.12"
 prost = "0.13"
+twox-hash = "2.1.2"
 
 [build-dependencies]
 tonic-build = "0.12"

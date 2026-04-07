@@ -21,7 +21,8 @@ pub use config::OrchestratorConfig;
 #[cfg(test)]
 pub use llm::MockLLMClient;
 pub use llm::{
-    LLMClient, OpenAICompatibleClient, build_terminal_completion_prompt, create_llm_client,
+    LLMClient, OpenAICompatibleClient, build_terminal_completion_prompt,
+    create_claude_code_native_client, create_llm_client,
 };
 pub use resilient_llm::{ProviderEvent, ProviderStatusReport, ResilientLLMClient};
 pub use message_bus::{BusMessage, MessageBus, SharedMessageBus};

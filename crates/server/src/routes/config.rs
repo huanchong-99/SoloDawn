@@ -48,6 +48,10 @@ pub fn router() -> Router<DeploymentImpl> {
         .route("/agents/check-availability", get(check_agent_availability))
         .route("/agents/install-ai-clis", post(install_ai_clis))
         .route("/system/prerequisites", get(get_system_prerequisites))
+        .route(
+            "/native-credentials-status",
+            get(get_native_credentials_status),
+        )
 }
 
 const REMOTE_FEATURES_ENABLED: bool = false;
@@ -972,4 +976,74 @@ async fn get_system_prerequisites() -> ResponseJson<ApiResponse<SystemPrerequisi
     .unwrap_or_default();
 
     ResponseJson(ApiResponse::success(SystemPrerequisites { items }))
+}
+
+// ============================================================================
+// Native Claude Code credentials detection
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeCredentialsStatus {
+    /// Whether valid Claude Code OAuth credentials were found.
+    pub available: bool,
+    /// Claude Code CLI version, if detected.
+    pub cli_version: Option<String>,
+    /// Suggested model to use with native credentials.
+    pub default_model: Option<String>,
+}
+
+/// `GET /api/native-credentials-status`
+///
+/// Checks whether the local Claude Code CLI has valid OAuth credentials
+/// in `~/.claude/.credentials.json`. This enables the "Native Subscription"
+/// model option in the frontend without requiring manual API key configuration.
+async fn get_native_credentials_status(
+) -> ResponseJson<ApiResponse<NativeCredentialsStatus>> {
+    let status = tokio::task::spawn_blocking(|| {
+        let home = dirs::home_dir();
+        let creds_available = home
+            .as_ref()
+            .map(|h| {
+                let creds_path = h.join(".claude").join(".credentials.json");
+                if let Ok(content) = std::fs::read_to_string(&creds_path) {
+                    // Check for valid OAuth token without logging it
+                    content.contains("accessToken")
+                        && content.contains("claudeAiOauth")
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
+
+        let cli_version = std::process::Command::new("claude")
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|out| {
+                let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                s.strip_prefix("claude v")
+                    .or_else(|| s.strip_prefix("claude/"))
+                    .or_else(|| {
+                        s.split_whitespace()
+                            .find(|w| w.chars().next().is_some_and(|c| c.is_ascii_digit()))
+                    })
+                    .map(|v| v.to_string())
+                    .or_else(|| if s.is_empty() { None } else { Some(s) })
+            });
+
+        NativeCredentialsStatus {
+            available: creds_available,
+            cli_version,
+            default_model: None,
+        }
+    })
+    .await
+    .unwrap_or(NativeCredentialsStatus {
+        available: false,
+        cli_version: None,
+        default_model: None,
+    });
+
+    ResponseJson(ApiResponse::success(status))
 }

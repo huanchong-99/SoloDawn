@@ -136,12 +136,20 @@
     "addModel": "添加模型",
     "emptyTitle": "尚未配置任何模型",
     "emptyDescription": "点击上方按钮添加第一个模型。",
+    "nativeModelAuto": "自动（基于订阅等级）",
     "editLabel": "编辑",
     "deleteLabel": "删除",
     "dialog": {
       "addTitle": "添加模型",
       "editTitle": "编辑模型",
-      "description": "填写模型信息并验证连接。"
+      "description": "填写模型信息并验证连接。",
+      "nativeTab": "订阅登录",
+      "manualTab": "API 密钥",
+      "nativeDetected": "已检测到 Claude Code 订阅",
+      "nativeModelLabel": "模型",
+      "nativeVersionLabel": "CLI 版本",
+      "nativeHint": "将直接使用您已登录的 Claude Code 账号，无需填写 API 密钥。",
+      "nativeAlreadyAdded": "订阅模型已配置。切换到「API 密钥」标签页可添加其他模型。"
     },
     "fields": {
       "displayName": {

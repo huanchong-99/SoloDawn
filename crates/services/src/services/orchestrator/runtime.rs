@@ -345,21 +345,16 @@ impl OrchestratorRuntime {
             ));
         }
 
-        // Build orchestrator config from workflow settings
+        // Build orchestrator config from workflow settings.
+        // When API key is missing, fall through with a partial config —
+        // OrchestratorAgent::new() will try Claude Code native credentials.
         let orchestrator_config = if workflow.orchestrator_enabled {
-            // Decrypt API key if needed
-            let api_key = workflow
-                .get_api_key()?
-                .ok_or_else(|| anyhow!("Orchestrator API key not configured"))?;
-
-            Some(
-                OrchestratorConfig::from_workflow(
-                    workflow.orchestrator_api_type.as_deref(),
-                    workflow.orchestrator_base_url.as_deref(),
-                    Some(&api_key),
-                    workflow.orchestrator_model.as_deref(),
-                )
-                .ok_or_else(|| anyhow!("Invalid orchestrator configuration"))?,
+            let api_key = workflow.get_api_key().ok().flatten().unwrap_or_default();
+            OrchestratorConfig::from_workflow(
+                workflow.orchestrator_api_type.as_deref(),
+                workflow.orchestrator_base_url.as_deref(),
+                if api_key.is_empty() { None } else { Some(&api_key) },
+                workflow.orchestrator_model.as_deref(),
             )
         } else {
             None
@@ -1021,20 +1016,15 @@ impl OrchestratorRuntime {
             .await?
             .ok_or_else(|| anyhow!("Workflow {workflow_id} not found during recovery"))?;
 
-        // Build orchestrator config (mirrors start_workflow_reserved logic)
+        // Build orchestrator config (mirrors start_workflow_reserved logic).
+        // Missing API key falls through — native credentials handle it.
         let orchestrator_config = if workflow.orchestrator_enabled {
-            let api_key = workflow
-                .get_api_key()?
-                .ok_or_else(|| anyhow!("Orchestrator API key not configured for recovery"))?;
-
-            Some(
-                OrchestratorConfig::from_workflow(
-                    workflow.orchestrator_api_type.as_deref(),
-                    workflow.orchestrator_base_url.as_deref(),
-                    Some(&api_key),
-                    workflow.orchestrator_model.as_deref(),
-                )
-                .ok_or_else(|| anyhow!("Invalid orchestrator configuration during recovery"))?,
+            let api_key = workflow.get_api_key().ok().flatten().unwrap_or_default();
+            OrchestratorConfig::from_workflow(
+                workflow.orchestrator_api_type.as_deref(),
+                workflow.orchestrator_base_url.as_deref(),
+                if api_key.is_empty() { None } else { Some(&api_key) },
+                workflow.orchestrator_model.as_deref(),
             )
         } else {
             None

@@ -12,6 +12,10 @@ export function validateStep3Models(config: WizardConfig): Record<string, string
   }
 
   config.models.forEach((model, index) => {
+    // Native models are auto-detected and pre-validated — skip field checks
+    if (model.isNative) {
+      return;
+    }
     const modelKey = model.id.trim() || String(index);
     if (!model.cliTypeId?.trim()) {
       errors[`model-${modelKey}-cli`] = 'validation.terminals.cliRequired';

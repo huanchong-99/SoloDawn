@@ -3,8 +3,12 @@ import { useTranslation } from 'react-i18next';
 
 import { useUserSystem } from '@/components/ConfigProvider';
 import { useModelVerification } from '@/hooks/useModelVerification';
+import { useNativeCredentials } from '@/hooks/useNativeCredentials';
 import type { ApiType, ModelConfig } from '@/components/workflow/types';
+import { createNativeModelConfig, NATIVE_MODEL_ID } from '@/components/workflow/types';
 import { SetupWizardStep2Model } from './SetupWizardStep2Model';
+
+export type SetupModelMode = 'native' | 'manual';
 
 const DEFAULT_BASE_URLS: Record<string, string> = {
   anthropic: 'https://api.anthropic.com',
@@ -26,8 +30,15 @@ export function SetupWizardStep2ModelContainer({
 }: Readonly<SetupWizardStep2ModelContainerProps>) {
   const { t } = useTranslation('workflow');
   const { config, updateAndSaveConfig } = useUserSystem();
+  const { data: nativeStatus, isLoading: isNativeLoading } = useNativeCredentials();
+
+  const nativeAvailable = nativeStatus?.available === true;
+
+  // Default to native mode when subscription is detected
+  const [mode, setMode] = useState<SetupModelMode>('native');
 
   const [displayName, setDisplayName] = useState('');
+  const [cliTypeId, setCliTypeId] = useState('cli-claude-code');
   const [apiType, setApiType] = useState<string>('anthropic');
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URLS.anthropic);
@@ -47,7 +58,9 @@ export function SetupWizardStep2ModelContainer({
 
   // Allow proceeding if model ID is manually entered, even without verification.
   // Third-party OpenAI-compatible endpoints may not support the verification API.
-  const canProceed = modelId.trim() !== '' && apiKey.trim() !== '';
+  const canProceed = mode === 'native'
+    ? nativeAvailable
+    : modelId.trim() !== '' && apiKey.trim() !== '';
 
   const urlWarning = useMemo(() => {
     const url = baseUrl.trim();
@@ -122,30 +135,41 @@ export function SetupWizardStep2ModelContainer({
   }, [apiType, apiKey, baseUrl, modelId, verifyModel]);
 
   const handleNext = useCallback(async () => {
-    const trimmedKey = apiKey.trim();
-    const trimmedUrl = baseUrl.trim();
-    const newModel: ModelConfig = {
-      id: `model-${crypto.randomUUID()}`,
-      displayName: (displayName || modelId).trim(),
-      cliTypeId: 'cli-claude-code',
-      apiType: apiType as ApiType,
-      baseUrl: trimmedUrl || DEFAULT_BASE_URLS[apiType] || '',
-      apiKey: trimmedKey,
-      modelId: modelId.trim(),
-      isVerified,
-    };
-
-    // Merge with existing models (do NOT overwrite)
     const existingModels = (config as Record<string, unknown>)?.workflow_model_library;
     const currentModels = Array.isArray(existingModels) ? existingModels as ModelConfig[] : [];
-    await updateAndSaveConfig({
-      workflow_model_library: [...currentModels, newModel],
-    } as Parameters<typeof updateAndSaveConfig>[0]);
+
+    if (mode === 'native') {
+      // Add the native subscription model (skip if already present)
+      if (!currentModels.some((m) => m.id === NATIVE_MODEL_ID)) {
+        const nativeModel = createNativeModelConfig();
+        await updateAndSaveConfig({
+          workflow_model_library: [...currentModels, nativeModel],
+        } as Parameters<typeof updateAndSaveConfig>[0]);
+      }
+    } else {
+      const trimmedKey = apiKey.trim();
+      const trimmedUrl = baseUrl.trim();
+      const newModel: ModelConfig = {
+        id: `model-${crypto.randomUUID()}`,
+        displayName: (displayName || modelId).trim(),
+        cliTypeId,
+        apiType: apiType as ApiType,
+        baseUrl: trimmedUrl || DEFAULT_BASE_URLS[apiType] || '',
+        apiKey: trimmedKey,
+        modelId: modelId.trim(),
+        isVerified,
+      };
+      await updateAndSaveConfig({
+        workflow_model_library: [...currentModels, newModel],
+      } as Parameters<typeof updateAndSaveConfig>[0]);
+    }
 
     onNext();
   }, [
     config,
+    mode,
     displayName,
+    cliTypeId,
     apiType,
     baseUrl,
     apiKey,
@@ -157,7 +181,14 @@ export function SetupWizardStep2ModelContainer({
 
   return (
     <SetupWizardStep2Model
+      mode={mode}
+      onModeChange={setMode}
+      nativeAvailable={nativeAvailable}
+      isNativeLoading={isNativeLoading}
+      nativeCliVersion={nativeStatus?.cliVersion ?? null}
       displayName={displayName}
+      cliTypeId={cliTypeId}
+      onCliTypeIdChange={setCliTypeId}
       apiType={apiType}
       apiKey={apiKey}
       baseUrl={baseUrl}

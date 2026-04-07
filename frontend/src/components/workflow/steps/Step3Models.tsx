@@ -8,6 +8,8 @@ import {
   EyeIcon,
   EyeSlashIcon,
   WarningIcon,
+  LightningIcon,
+  KeyIcon,
 } from '@phosphor-icons/react';
 import { Field, FieldLabel, FieldError } from '../../ui-new/primitives/Field';
 import {
@@ -22,7 +24,9 @@ import { IconButton } from '../../ui-new/primitives/IconButton';
 import { cn } from '@/lib/utils';
 import { CLI_TYPES } from '../constants';
 import type { WizardConfig, ModelConfig, ApiType } from '../types';
+import { NATIVE_MODEL_ID, createNativeModelConfig } from '../types';
 import { useTranslation } from 'react-i18next';
+import { useNativeCredentials } from '@/hooks/useNativeCredentials';
 import { ConfirmDialog } from '@/components/ui-new/dialogs/ConfirmDialog';
 import { useModelStore } from '@/stores/modelStore';
 import { useToast } from '@/components/ui/toast';
@@ -89,6 +93,13 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
 }) => {
   const { t } = useTranslation('workflow');
   const { showToast } = useToast();
+  const { data: nativeStatus } = useNativeCredentials();
+  const nativeAvailable = nativeStatus?.available === true;
+  const nativeAlreadyAdded = useMemo(
+    () => config.models.some((m) => m.id === NATIVE_MODEL_ID),
+    [config.models]
+  );
+  const [dialogMode, setDialogMode] = useState<'native' | 'manual'>('manual');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<ModelConfig | null>(null);
   const [formData, setFormData] = useState<ModelFormData>(initialFormData);
@@ -123,6 +134,7 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
 
   const handleOpenAddDialog = () => {
     setEditingModel(null);
+    setDialogMode(nativeAvailable ? 'native' : 'manual');
     setFormData({
       displayName: '',
       cliTypeId: '',
@@ -273,6 +285,12 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
     return Object.keys(errors).length === 0;
   };
 
+  const handleSaveNative = () => {
+    const nativeModel = createNativeModelConfig();
+    onUpdate({ models: [nativeModel, ...config.models] });
+    handleCloseDialog();
+  };
+
   const handleSave = () => {
     if (!validateForm()) {
       return;
@@ -340,7 +358,10 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
           {config.models.map((model) => (
             <div
               key={model.id}
-              className="bg-secondary border rounded-sm p-base flex items-center justify-between"
+              className={cn(
+                "bg-secondary border rounded-sm p-base flex items-center justify-between",
+                model.isNative && "border-brand/30 bg-brand/5"
+              )}
             >
               <div className="flex items-center gap-base flex-1">
                 {model.isVerified && (
@@ -351,33 +372,42 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
                   />
                 )}
                 <div className="flex-1">
-                  <div className="text-base font-medium text-high">{model.displayName}</div>
+                  <div className="text-base font-medium text-high">
+                    {model.displayName}
+                    {model.isNative && (
+                      <span className="ml-half text-xs text-brand font-normal">
+                        Auto-detected
+                      </span>
+                    )}
+                  </div>
                   <div className="text-sm text-low mt-quarter">
-                    {API_TYPES[model.apiType].label} - {model.modelId}
+                    {API_TYPES[model.apiType]?.label ?? model.apiType} - {model.isNative ? t('step3.nativeModelAuto') : model.modelId}
                     {model.cliTypeId
                       ? ` · ${(CLI_TYPES as Record<string, { label: string }>)[model.cliTypeId]?.label ?? model.cliTypeId}`
                       : ''}
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-half">
-                <IconButton
-                  icon={PencilSimpleIcon}
-                  onClick={() => {
-                    handleOpenEditDialog(model);
-                  }}
-                  aria-label={`${t('step3.editLabel')} ${model.displayName}`}
-                  title={t('step3.editLabel')}
-                />
-                <IconButton
-                  icon={TrashIcon}
-                  onClick={() => {
-                    handleDelete(model.id);
-                  }}
-                  aria-label={`${t('step3.deleteLabel')} ${model.displayName}`}
-                  title={t('step3.deleteLabel')}
-                />
-              </div>
+              {!model.isNative && (
+                <div className="flex items-center gap-half">
+                  <IconButton
+                    icon={PencilSimpleIcon}
+                    onClick={() => {
+                      handleOpenEditDialog(model);
+                    }}
+                    aria-label={`${t('step3.editLabel')} ${model.displayName}`}
+                    title={t('step3.editLabel')}
+                  />
+                  <IconButton
+                    icon={TrashIcon}
+                    onClick={() => {
+                      handleDelete(model.id);
+                    }}
+                    aria-label={`${t('step3.deleteLabel')} ${model.displayName}`}
+                    title={t('step3.deleteLabel')}
+                  />
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -407,6 +437,67 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
 
           {/* 表单内容区：增加容器内边距和表单项间距，设置为内部滚动并隐藏原生滚动条 */}
           <div className="flex-1 flex flex-col gap-4 px-8 py-2 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            {/* Mode tabs: show in Add mode (not Edit) when native credentials are available */}
+            {!editingModel && nativeAvailable && (
+              <div className="flex rounded border border-border overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setDialogMode('native')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-half px-base py-half text-base transition-colors',
+                    dialogMode === 'native'
+                      ? 'bg-brand/10 text-high border-b-2 border-brand font-medium'
+                      : 'bg-secondary text-low hover:text-normal'
+                  )}
+                >
+                  <LightningIcon className="size-icon-sm" weight="fill" />
+                  {t('step3.dialog.nativeTab')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDialogMode('manual')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-half px-base py-half text-base transition-colors',
+                    dialogMode === 'manual'
+                      ? 'bg-brand/10 text-high border-b-2 border-brand font-medium'
+                      : 'bg-secondary text-low hover:text-normal'
+                  )}
+                >
+                  <KeyIcon className="size-icon-sm" weight="fill" />
+                  {t('step3.dialog.manualTab')}
+                </button>
+              </div>
+            )}
+
+            {/* Native subscription panel */}
+            {!editingModel && dialogMode === 'native' && nativeAvailable ? (
+              <div className="rounded border border-brand/30 bg-brand/5 p-base space-y-base">
+                <div className="flex items-center gap-half">
+                  <CheckCircleIcon className="size-icon-sm text-success" weight="fill" />
+                  <span className="text-high text-base font-medium">
+                    {t('step3.dialog.nativeDetected')}
+                  </span>
+                </div>
+                <div className="space-y-half text-base text-normal">
+                  <div className="flex justify-between">
+                    <span className="text-low">{t('step3.dialog.nativeModelLabel')}</span>
+                    <span className="font-mono text-high">{t('step3.nativeModelAuto')}</span>
+                  </div>
+                  {nativeStatus?.cliVersion && (
+                    <div className="flex justify-between">
+                      <span className="text-low">{t('step3.dialog.nativeVersionLabel')}</span>
+                      <span className="font-mono text-high">{nativeStatus.cliVersion}</span>
+                    </div>
+                  )}
+                </div>
+                <p className="text-sm text-low">
+                  {nativeAlreadyAdded
+                    ? t('step3.dialog.nativeAlreadyAdded')
+                    : t('step3.dialog.nativeHint')}
+                </p>
+              </div>
+            ) : dialogMode === 'manual' || editingModel ? (
+            <>
             {/* Display Name */}
             <Field>
               <FieldLabel htmlFor="displayName">{t('step3.fields.displayName.label')}</FieldLabel>
@@ -634,6 +725,8 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
               </button>
               {formErrors.verify && <FieldError>{formErrors.verify}</FieldError>}
             </Field>
+            </>
+            ) : null}
           </div>
 
           <DialogFooter className="shrink-0 border-t border-border bg-[hsl(var(--card))] px-8 py-5">
@@ -651,10 +744,12 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
               </button>
               <button
                 type="button"
-                onClick={handleSave}
+                onClick={!editingModel && dialogMode === 'native' ? handleSaveNative : handleSave}
+                disabled={!editingModel && dialogMode === 'native' && nativeAlreadyAdded}
                 className={cn(
                   'w-full sm:w-auto min-w-[5.5rem] px-base py-half rounded-sm text-base whitespace-nowrap',
                   'bg-brand text-on-brand hover:bg-brand-hover',
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
                   'transition-colors'
                 )}
               >

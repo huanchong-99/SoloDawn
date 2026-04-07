@@ -12,7 +12,7 @@ use db::models::planning_draft::{PlanningDraft, PlanningDraftMessage, PLANNING_D
 use deployment::Deployment;
 use serde::{Deserialize, Serialize};
 use services::services::orchestrator::{
-    LLMMessage, OrchestratorConfig, create_llm_client,
+    LLMMessage, OrchestratorConfig, create_claude_code_native_client, create_llm_client,
     config::{PromptProfile, system_prompt_for_profile},
 };
 use utils::response::ApiResponse;
@@ -333,7 +333,12 @@ async fn send_message(
     let mut result = vec![MessageResponse::from(user_msg)];
 
     // 3. Try to call LLM and store assistant reply
-    if let Some(llm_client) = build_llm_client_from_draft(&draft) {
+    // Fallback chain: configured model → Claude Code native credentials
+    let llm_client = build_llm_client_from_draft(&draft).or_else(|| {
+        tracing::info!(draft_id = %draft_id, "No model configured, trying Claude Code native credentials");
+        create_claude_code_native_client("claude-sonnet-4-20250514")
+    });
+    if let Some(llm_client) = llm_client {
         let all_messages = PlanningDraftMessage::list_by_draft(&deployment.db().pool, &draft_id)
             .await
             .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
@@ -737,14 +742,14 @@ async fn materialize_draft(
         (None, None) => None,
     };
 
-    // Use the first user-configured model for merge terminal defaults
-    // so we never reference official preset IDs that lack API keys.
+    // Use the first user-configured model for merge terminal defaults.
+    // Fallback to an official Claude Code model if no user models exist.
     let (default_cli_id, default_model_id) =
         db::models::ModelConfig::first_user_configured_ids(&deployment.db().pool)
             .await
             .ok()
             .flatten()
-            .unwrap_or_else(|| ("cli-codex".to_string(), "cli-codex".to_string()));
+            .unwrap_or_else(|| ("cli-claude-code".to_string(), "model-claude-sonnet".to_string()));
 
     let mut workflow = Workflow {
         id: workflow_id.clone(),

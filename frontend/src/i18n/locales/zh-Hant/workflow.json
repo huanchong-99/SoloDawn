@@ -137,12 +137,20 @@
     "addModel": "Add model",
     "emptyTitle": "No models configured yet",
     "emptyDescription": "Click the button above to add your first model.",
+    "nativeModelAuto": "自動（基於訂閱等級）",
     "editLabel": "Edit",
     "deleteLabel": "Delete",
     "dialog": {
       "addTitle": "Add model",
       "editTitle": "Edit model",
-      "description": "Provide model details and verify access."
+      "description": "Provide model details and verify access.",
+      "nativeTab": "訂閱登入",
+      "manualTab": "API 金鑰",
+      "nativeDetected": "已偵測到 Claude Code 訂閱",
+      "nativeModelLabel": "模型",
+      "nativeVersionLabel": "CLI 版本",
+      "nativeHint": "將直接使用您已登入的 Claude Code 帳號，無需填寫 API 金鑰。",
+      "nativeAlreadyAdded": "訂閱模型已設定。切換到「API 金鑰」標籤頁可新增其他模型。"
     },
     "fields": {
       "displayName": {

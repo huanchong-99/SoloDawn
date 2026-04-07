@@ -137,12 +137,20 @@
     "addModel": "Add model",
     "emptyTitle": "No models configured yet",
     "emptyDescription": "Click the button above to add your first model.",
+    "nativeModelAuto": "Auto (según suscripción)",
     "editLabel": "Edit",
     "deleteLabel": "Delete",
     "dialog": {
       "addTitle": "Add model",
       "editTitle": "Edit model",
-      "description": "Provide model details and verify access."
+      "description": "Provide model details and verify access.",
+      "nativeTab": "Suscripción",
+      "manualTab": "Clave de API",
+      "nativeDetected": "Suscripción de Claude Code detectada",
+      "nativeModelLabel": "Modelo",
+      "nativeVersionLabel": "Versión del CLI",
+      "nativeHint": "Se utilizará directamente tu cuenta de Claude Code ya iniciada — no se necesita clave de API.",
+      "nativeAlreadyAdded": "El modelo de suscripción ya está configurado. Cambia a la pestaña \"Clave de API\" para agregar otro modelo."
     },
     "fields": {
       "displayName": {

@@ -37,7 +37,7 @@ use super::{
         WORKFLOW_STATUS_RUNNING, WORKFLOW_TOPIC_PREFIX,
     },
     persistence::StatePersistence,
-    llm::{LLMClient, build_terminal_completion_prompt, create_llm_client},
+    llm::{LLMClient, build_terminal_completion_prompt, create_claude_code_native_client, create_llm_client},
     message_bus::{BusMessage, SharedMessageBus},
     prompt_handler::PromptHandler,
     runtime_actions::{RuntimeActionService, RuntimeTaskSpec, RuntimeTerminalSpec},
@@ -148,13 +148,32 @@ impl OrchestratorAgent {
     const STALL_RECOVERY_SUFFIX: &str = "Watchdog notice: execution appears stalled. Resume this same task from current workspace state immediately and continue implementation; do not wait for a new task.";
 
     /// Builds a new orchestrator agent with a configured LLM client.
+    /// Falls back to Claude Code native credentials when the configured
+    /// API key / base URL are missing or invalid.
     pub fn new(
         config: OrchestratorConfig,
         workflow_id: String,
         message_bus: SharedMessageBus,
         db: Arc<DBService>,
     ) -> anyhow::Result<Self> {
-        let llm_client = create_llm_client(&config)?;
+        let llm_client = create_llm_client(&config).or_else(|e| {
+            tracing::info!(
+                error = %e,
+                model = %config.model,
+                "Configured LLM client failed, trying Claude Code native credentials"
+            );
+            // Use a Claude model for native credentials — ignore non-Claude
+            // model names (e.g. "gpt-4o" from default config).
+            let model = if config.model.starts_with("claude-") {
+                &config.model
+            } else {
+                "claude-sonnet-4-20250514"
+            };
+            create_claude_code_native_client(model)
+                .ok_or_else(|| anyhow::anyhow!(
+                    "No LLM available: configured client failed ({e}) and Claude Code native credentials not found"
+                ))
+        })?;
         let state = Arc::new(RwLock::new(OrchestratorState::new(workflow_id)));
         let error_handler = ErrorHandler::new(db.clone(), message_bus.clone());
         let prompt_handler = PromptHandler::new(message_bus.clone());
@@ -392,7 +411,7 @@ impl OrchestratorAgent {
                 let tasks_after = tasks_retry;
                 let mut any_without_terminals = false;
                 for task in &tasks_after {
-                    let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id.clone())
+                    let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id)
                         .await
                         .unwrap_or_default();
                     if terminals.is_empty() {
@@ -418,7 +437,7 @@ impl OrchestratorAgent {
         if !tasks_after.is_empty() {
             let mut any_without_terminals = false;
             for task in &tasks_after {
-                let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id.clone())
+                let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id)
                     .await
                     .unwrap_or_default();
                 if terminals.is_empty() {
@@ -452,7 +471,7 @@ impl OrchestratorAgent {
             .unwrap_or(&workflow.name);
         let context = self.build_agent_planned_context(workflow).await?;
         Ok(format!(
-            "Workflow {} has just started in agent_planned mode with no predefined tasks.\n\nPrimary goal:\n{}\n\n{}\n\nPlan the initial execution graph now. If work should begin immediately, create tasks and terminals, then start those terminals in the same JSON array. When you are confident that no more tasks need to be created later, emit set_workflow_planning_complete.",
+            "Workflow {} has just started in agent_planned mode with no predefined tasks.\n\nPrimary goal:\n{}\n\n{}\n\nIMPORTANT: Analyze ALL requirements listed in the goal. Create 3-5 tasks that collectively cover EVERY requirement. Each task should have a clear, non-overlapping scope. Do NOT create a single catch-all task. Start all terminals immediately. Emit set_workflow_planning_complete at the end.",
             workflow.id, goal, context
         ))
     }
@@ -464,9 +483,29 @@ impl OrchestratorAgent {
         let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, &workflow.id).await?;
         let terminals = db::models::Terminal::find_by_workflow(&self.db.pool, &workflow.id).await?;
         let cli_types = db::models::CliType::find_all(&self.db.pool).await?;
-        // Only show user-configured models with API keys to the agent.
-        // Official preset models without credentials must never appear.
-        let model_configs = db::models::ModelConfig::find_user_configured(&self.db.pool).await?;
+        // Show user-configured models with API keys to the agent.
+        // When none exist but native credentials are available, inject
+        // a synthetic Claude Code model so the agent can create terminals.
+        let mut model_configs = db::models::ModelConfig::find_user_configured(&self.db.pool).await?;
+        if model_configs.is_empty() {
+            if create_claude_code_native_client("claude-sonnet-4-20250514").is_some() {
+                model_configs.push(db::models::ModelConfig {
+                    id: "model-claude-sonnet".to_string(),
+                    cli_type_id: "cli-claude-code".to_string(),
+                    name: "sonnet".to_string(),
+                    display_name: "Claude Sonnet (Native)".to_string(),
+                    api_model_id: Some("claude-sonnet-4-20250514".to_string()),
+                    is_default: true,
+                    is_official: false,
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                    encrypted_api_key: None,
+                    base_url: None,
+                    api_type: None,
+                    has_api_key: false,
+                });
+            }
+        }
         let workflow_commands =
             db::models::WorkflowCommand::find_by_workflow(&self.db.pool, &workflow.id).await?;
 
@@ -2994,8 +3033,16 @@ impl OrchestratorAgent {
             let context = self.build_agent_planned_context(&workflow).await?;
             prompt.push_str("\n\nAgent-planned runtime context:\n");
             prompt.push_str(&context);
+
+            // Remind the LLM of the original goal so it checks completion against requirements
+            if let Some(ref goal) = workflow.initial_goal {
+                let goal_preview: String = goal.chars().take(2000).collect();
+                prompt.push_str("\n\nOriginal project goal (check ALL requirements before completing):\n");
+                prompt.push_str(&goal_preview);
+            }
+
             prompt.push_str(
-                "\n\nDecide whether to add more tasks/terminals, start new terminals, close finished terminals, mark the current task complete, or mark workflow planning complete.",
+                "\n\nDecide next action. IMPORTANT: Do NOT complete_workflow unless ALL original requirements have been addressed. If requirements remain, create new tasks to cover them. If this task is done, mark it complete_task and wait for others.",
             );
         }
         Ok(prompt)
@@ -3451,7 +3498,7 @@ impl OrchestratorAgent {
                         .await
                         .ok()
                         .flatten()
-                        .unwrap_or_else(|| ("cli-codex".to_string(), "cli-codex".to_string()));
+                        .unwrap_or_else(|| ("cli-claude-code".to_string(), "model-claude-sonnet".to_string()));
                     tracing::warn!(invalid_cli = %cli_type_id, fallback = %fb_cli, "LLM provided invalid cli_type_id, using fallback");
                     fb_cli
                 };
@@ -3462,7 +3509,7 @@ impl OrchestratorAgent {
                         .await
                         .ok()
                         .flatten()
-                        .unwrap_or_else(|| ("cli-codex".to_string(), "cli-codex".to_string()));
+                        .unwrap_or_else(|| ("cli-claude-code".to_string(), "model-claude-sonnet".to_string()));
                     tracing::warn!(invalid_model = %model_config_id, fallback = %fb_model, "LLM provided invalid model_config_id, using fallback");
                     fb_model
                 };

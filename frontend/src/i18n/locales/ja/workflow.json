@@ -137,12 +137,20 @@
     "addModel": "Add model",
     "emptyTitle": "No models configured yet",
     "emptyDescription": "Click the button above to add your first model.",
+    "nativeModelAuto": "自動（サブスクリプションに基づく）",
     "editLabel": "Edit",
     "deleteLabel": "Delete",
     "dialog": {
       "addTitle": "Add model",
       "editTitle": "Edit model",
-      "description": "Provide model details and verify access."
+      "description": "Provide model details and verify access.",
+      "nativeTab": "サブスクリプション",
+      "manualTab": "API キー",
+      "nativeDetected": "Claude Code サブスクリプションを検出しました",
+      "nativeModelLabel": "モデル",
+      "nativeVersionLabel": "CLI バージョン",
+      "nativeHint": "ログイン済みの Claude Code アカウントをそのまま使用します。API キーの入力は不要です。",
+      "nativeAlreadyAdded": "サブスクリプションモデルは設定済みです。「API キー」タブに切り替えて別のモデルを追加してください。"
     },
     "fields": {
       "displayName": {

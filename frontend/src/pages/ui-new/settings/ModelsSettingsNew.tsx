@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { SpinnerGapIcon, WarningCircleIcon } from '@phosphor-icons/react';
 
 import { Step3Models } from '@/components/workflow/steps/Step3Models';
-import { getDefaultWizardConfig } from '@/components/workflow/types';
+import { getDefaultWizardConfig, NATIVE_MODEL_ID } from '@/components/workflow/types';
 import { useUserSystem } from '@/components/ConfigProvider';
 import type {
   ModelConfig as WorkflowModelConfig,
@@ -40,7 +40,11 @@ const parseWorkflowModelLibrary = (config: unknown): WorkflowModelConfig[] => {
 
   return rawLibrary
     .filter(isWorkflowModelConfig)
-    .map((model) => ({ ...model }));
+    .map((model) =>
+      !model.isNative && model.id === NATIVE_MODEL_ID
+        ? { ...model, isNative: true }
+        : model
+    );
 };
 
 export function ModelsSettingsNew() {

@@ -1158,6 +1158,18 @@ export const configApi = {
       output: string;
     }>(response);
   },
+  getNativeCredentialsStatus: async (): Promise<{
+    available: boolean;
+    cliVersion: string | null;
+    defaultModel: string | null;
+  }> => {
+    const response = await makeRequest('/api/native-credentials-status');
+    return handleApiResponse<{
+      available: boolean;
+      cliVersion: string | null;
+      defaultModel: string | null;
+    }>(response);
+  },
 };
 
 // Task Tags APIs (all tags are global)

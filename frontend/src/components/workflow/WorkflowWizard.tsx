@@ -8,6 +8,8 @@ import {
   getDefaultWizardConfig,
   getVisibleWizardStepIds,
   getVisibleWizardSteps,
+  NATIVE_MODEL_ID,
+  createNativeModelConfig,
 } from './types';
 import type { ModelConfig } from './types';
 import { useWizardNavigation } from './hooks/useWizardNavigation';
@@ -15,6 +17,7 @@ import { useWizardValidation } from './hooks/useWizardValidation';
 import { validateAllWizardSteps } from './validators';
 import { useTranslation } from 'react-i18next';
 import { useUserSystem } from '@/components/ConfigProvider';
+import { useNativeCredentials } from '@/hooks/useNativeCredentials';
 import {
   Step0Project,
   Step1Basic,
@@ -107,6 +110,7 @@ export function WorkflowWizard({
   const { errors } = validation;
   const { t } = useTranslation('workflow');
   const { config: userConfig, updateAndSaveConfig } = useUserSystem();
+  const { data: nativeStatus } = useNativeCredentials();
 
   const globalModelLibrary = useMemo<ModelConfig[]>(() => {
     const rawLibrary = (userConfig as { workflow_model_library?: unknown } | null)
@@ -133,28 +137,62 @@ export function WorkflowWizard({
           typeof candidate.isVerified === 'boolean'
         );
       })
-      .map((item) => ({ ...item }));
+      .map((item) =>
+        !item.isNative && item.id === NATIVE_MODEL_ID
+          ? { ...item, isNative: true }
+          : item
+      );
   }, [userConfig]);
 
   useEffect(() => {
-    if (globalModelLibrary.length === 0) {
-      return;
-    }
-
     setState((prevState) => {
-      if (prevState.config.models.length > 0) {
+      // Start from global library or existing models
+      let models =
+        prevState.config.models.length > 0
+          ? prevState.config.models
+          : globalModelLibrary.length > 0
+            ? globalModelLibrary
+            : [];
+
+      // Inject native model when credentials are detected and not yet present
+      if (
+        nativeStatus?.available &&
+        !models.some((m) => m.id === NATIVE_MODEL_ID)
+      ) {
+        const nativeModel = createNativeModelConfig();
+        models = [nativeModel, ...models];
+      }
+
+      // No change needed
+      if (models === prevState.config.models || models.length === 0) {
         return prevState;
+      }
+
+      // Auto-fill orchestrator + merge terminal model when empty
+      const advanced = { ...prevState.config.advanced };
+      const firstModelId = models[0]?.id ?? '';
+      const firstCliTypeId = models[0]?.cliTypeId ?? '';
+      if (!advanced.orchestrator.modelConfigId && firstModelId) {
+        advanced.orchestrator = { modelConfigId: firstModelId };
+      }
+      if (!advanced.mergeTerminal.modelConfigId && firstModelId) {
+        advanced.mergeTerminal = {
+          ...advanced.mergeTerminal,
+          cliTypeId: firstCliTypeId || advanced.mergeTerminal.cliTypeId,
+          modelConfigId: firstModelId,
+        };
       }
 
       return {
         ...prevState,
         config: {
           ...prevState.config,
-          models: globalModelLibrary,
+          models,
+          advanced,
         },
       };
     });
-  }, [globalModelLibrary]);
+  }, [globalModelLibrary, nativeStatus]);
 
   const persistWorkflowModelLibrary = useCallback(
     async (models: ModelConfig[]) => {
@@ -163,8 +201,10 @@ export function WorkflowWizard({
       }
 
       try {
+        // Don't persist native models to config — they're auto-detected
+        const persistable = models.filter((m) => !m.isNative);
         await updateAndSaveConfig({
-          workflow_model_library: models,
+          workflow_model_library: persistable,
         } as Partial<typeof userConfig>);
       } catch (error) {
         console.error('Failed to persist workflow model library', error);

@@ -871,7 +871,11 @@ impl CCSwitchService {
                             };
 
                         if can_use_fallback {
-                            fallback_api_key = orchestrator_api_key.clone();
+                            // Filter empty keys — native auth sets empty orchestrator key
+                            fallback_api_key = orchestrator_api_key
+                                .as_ref()
+                                .filter(|k| !k.trim().is_empty())
+                                .cloned();
                             if fallback_api_key.is_some() {
                                 tracing::info!(
                                     terminal_id = %terminal.id,
@@ -899,40 +903,71 @@ impl CCSwitchService {
                     "none"
                 };
 
-                let api_key = custom_api_key.or(fallback_api_key).ok_or_else(|| {
-                    if effective_base_url.is_some() {
-                        anyhow::anyhow!(
-                            "Claude Code auth token not configured for custom API endpoint. Please set terminal custom_api_key"
-                        )
-                    } else {
-                        anyhow::anyhow!(
-                            "Claude Code auth token not configured. Please login via CLI (claude login), set terminal custom_api_key, or configure workflow orchestrator API key"
-                        )
-                    }
-                })?;
+                let api_key = custom_api_key.or(fallback_api_key);
 
-                // Log API key source for debugging
-                tracing::info!(
-                    terminal_id = %terminal.id,
-                    api_key_source = api_key_source,
-                    has_custom_base_url = terminal.custom_base_url.is_some(),
-                    custom_base_url = ?terminal.custom_base_url,
-                    api_key_prefix = "***",
-                    "Resolved API key for Claude Code terminal"
-                );
+                // When no API key is configured but Claude Code CLI has native
+                // OAuth credentials (~/.claude/.credentials.json), skip config
+                // creation and let the CLI use its own auth.
+                let using_native_auth = api_key.is_none() && {
+                    let home = dirs::home_dir();
+                    home.map_or(false, |h| h.join(".claude").join(".credentials.json").exists())
+                };
 
-                // G22-003: Propagate config creation failure instead of silently swallowing it.
-                // A missing config.json can cause Claude Code to fall back to global auth,
-                // leading to unexpected billing or auth errors.
-                create_claude_config(&claude_home, &api_key, effective_base_url.as_deref())
-                    .map_err(|e| {
-                    tracing::error!(
+                if let Some(ref key) = api_key {
+                    tracing::info!(
                         terminal_id = %terminal.id,
-                        error = %e,
-                        "Failed to create Claude config.json for authentication skip"
+                        api_key_source = api_key_source,
+                        has_custom_base_url = terminal.custom_base_url.is_some(),
+                        "Resolved API key for Claude Code terminal"
                     );
-                    e
-                })?;
+                    create_claude_config(&claude_home, key, effective_base_url.as_deref())
+                        .map_err(|e| {
+                        tracing::error!(
+                            terminal_id = %terminal.id,
+                            error = %e,
+                            "Failed to create Claude config.json for authentication skip"
+                        );
+                        e
+                    })?;
+                } else if using_native_auth {
+                    // Copy native credentials into the isolated CLAUDE_HOME
+                    // so the CLI can authenticate in the sandboxed environment.
+                    if let Some(home) = dirs::home_dir() {
+                        let global_creds = home.join(".claude").join(".credentials.json");
+                        let isolated_creds = claude_home.join(".credentials.json");
+                        if global_creds.exists() {
+                            if let Err(e) = std::fs::copy(&global_creds, &isolated_creds) {
+                                tracing::warn!(
+                                    terminal_id = %terminal.id,
+                                    error = %e,
+                                    "Failed to copy native credentials to isolated CLAUDE_HOME"
+                                );
+                            }
+                        }
+                        // Also copy settings.json if it exists (for user preferences)
+                        let global_settings = home.join(".claude").join("settings.json");
+                        let isolated_settings = claude_home.join("settings.json");
+                        if global_settings.exists() && !isolated_settings.exists() {
+                            let _ = std::fs::copy(&global_settings, &isolated_settings);
+                        }
+                    }
+                    tracing::info!(
+                        terminal_id = %terminal.id,
+                        claude_home = %claude_home.display(),
+                        "Using Claude Code native OAuth credentials (copied to isolated home)"
+                    );
+                    // Mark that we need to remove --bare later (after apply_auto_confirm_args).
+                    // --bare flag breaks OAuth token loading in Claude Code CLI.
+                    env.set.insert("__SOLODAWN_NATIVE_AUTH".to_string(), "1".to_string());
+                } else if effective_base_url.is_some() {
+                    return Err(anyhow::anyhow!(
+                        "Claude Code auth token not configured for custom API endpoint. Please set terminal custom_api_key"
+                    ));
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Claude Code auth token not configured. Please login via CLI (claude login), set terminal custom_api_key, or configure workflow orchestrator API key"
+                    ));
+                }
 
                 let model = self
                     .resolve_claude_launch_model(
@@ -942,33 +977,30 @@ impl CCSwitchService {
                     )
                     .await?;
 
-                // Create settings.json and force Claude CLI to load it via --settings.
-                // This prevents global ~/.claude/settings.json from overriding isolated auth config.
-                // Use effective_base_url (which considers orchestrator fallback) instead of just
-                // terminal-level URL, so the settings file reflects the actual endpoint in use.
-                let settings_path = create_claude_settings(
-                    &claude_home,
-                    &api_key,
-                    effective_base_url.as_deref(),
-                    &model,
-                )?;
-                args.push("--settings".to_string());
-                args.push(settings_path.to_string_lossy().to_string());
+                // Native auth: skip settings/env injection — CLI uses its own credentials.
+                // Non-native: create settings.json and inject auth env vars.
+                if let Some(ref api_key) = api_key {
+                    let settings_path = create_claude_settings(
+                        &claude_home,
+                        api_key,
+                        effective_base_url.as_deref(),
+                        &model,
+                    )?;
+                    args.push("--settings".to_string());
+                    args.push(settings_path.to_string_lossy().to_string());
+                }
 
-                // Inject auth env var based on key format and endpoint:
-                // - Non-sk- key + custom base_url → use apiKeyHelper (set in settings.json),
-                //   do NOT set env var (Claude Code rejects non-sk- format in ANTHROPIC_API_KEY)
-                // - Custom base_url + sk- prefix → ANTHROPIC_API_KEY
-                // - Official Anthropic API + sk- prefix → ANTHROPIC_API_KEY
-                // - Official Anthropic API + other format → ANTHROPIC_AUTH_TOKEN
-                let uses_api_key_helper = effective_base_url.is_some() && !api_key.starts_with("sk-");
-                if !uses_api_key_helper {
-                    if effective_base_url.is_some() || api_key.starts_with("sk-") {
-                        env.set
-                            .insert("ANTHROPIC_API_KEY".to_string(), api_key.clone());
-                    } else {
-                        env.set
-                            .insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.clone());
+                // Inject auth env var based on key format and endpoint
+                if let Some(ref api_key) = api_key {
+                    let uses_api_key_helper = effective_base_url.is_some() && !api_key.starts_with("sk-");
+                    if !uses_api_key_helper {
+                        if effective_base_url.is_some() || api_key.starts_with("sk-") {
+                            env.set
+                                .insert("ANTHROPIC_API_KEY".to_string(), api_key.clone());
+                        } else {
+                            env.set
+                                .insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.clone());
+                        }
                     }
                 }
 
@@ -1160,6 +1192,12 @@ impl CCSwitchService {
 
         // Apply auto-confirm flags if enabled
         apply_auto_confirm_args(&cli, &mut args, auto_confirm);
+
+        // Remove --bare when using native OAuth credentials — the flag
+        // prevents Claude Code CLI from loading its OAuth token.
+        if env.set.remove("__SOLODAWN_NATIVE_AUTH").is_some() {
+            args.retain(|a| a != "--bare");
+        }
 
         tracing::info!(
             terminal_id = %terminal.id,

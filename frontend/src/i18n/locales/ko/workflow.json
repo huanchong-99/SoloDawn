@@ -137,12 +137,20 @@
     "addModel": "Add model",
     "emptyTitle": "No models configured yet",
     "emptyDescription": "Click the button above to add your first model.",
+    "nativeModelAuto": "자동 (구독 등급 기반)",
     "editLabel": "Edit",
     "deleteLabel": "Delete",
     "dialog": {
       "addTitle": "Add model",
       "editTitle": "Edit model",
-      "description": "Provide model details and verify access."
+      "description": "Provide model details and verify access.",
+      "nativeTab": "구독 로그인",
+      "manualTab": "API 키",
+      "nativeDetected": "Claude Code 구독이 감지되었습니다",
+      "nativeModelLabel": "모델",
+      "nativeVersionLabel": "CLI 버전",
+      "nativeHint": "이미 로그인된 Claude Code 계정을 바로 사용합니다. API 키를 입력할 필요가 없습니다.",
+      "nativeAlreadyAdded": "구독 모델이 이미 구성되어 있습니다. \"API 키\" 탭으로 전환하여 다른 모델을 추가하세요."
     },
     "fields": {
       "displayName": {

@@ -183,19 +183,21 @@ RESPOND ONLY WITH A JSON ARRAY. No explanation text. The "type" field is REQUIRE
 ## Execution Model
 Workflow → Task (own Git branch) → Terminal (PTY AI agent)
 
-## Planning Strategy — Progressive Decomposition
-- Start small: create only 1-3 most critical tasks+terminals initially, then call set_workflow_planning_complete.
-- After each terminal completes, evaluate results before deciding next steps.
-- Create additional tasks/terminals dynamically as needed based on completed work.
-- Only plan everything upfront if the total scope is trivially small (≤3 tasks).
-- This prevents wasted work and lets you adapt to discoveries during execution.
+## Planning Strategy — Comprehensive Upfront Decomposition
+- Analyze the full scope of the user's requirements and create ALL necessary tasks upfront.
+- Each distinct requirement or feature area should be its own task with its own branch.
+- For a 10-point requirement list, create 3-5 tasks that cover ALL points (group related items).
+- Call set_workflow_planning_complete after creating all tasks and starting their terminals.
+- Do NOT create a single catch-all task. Split work so terminals can run in parallel.
 
 ## Your Job
-1. Create initial tasks with create_task (prefer 1-3, not all at once)
-2. Create terminals for each task with create_terminal
-3. Start terminals with instructions via start_terminal
-4. Call set_workflow_planning_complete when initial batch is dispatched
-5. On terminal completion events: evaluate results, then decide — create new tasks/terminals, complete_task, merge_branch, or complete_workflow
+1. Analyze ALL user requirements — identify every deliverable
+2. Create tasks covering ALL requirements (3-5 tasks, each with clear scope)
+3. Create terminals for each task with create_terminal
+4. Start terminals with detailed instructions via start_terminal
+5. Call set_workflow_planning_complete after ALL tasks are dispatched
+6. On terminal completion: complete_task, then wait for ALL tasks to finish
+7. Only complete_workflow after ALL tasks are completed and merged
 
 ## Action Types
 create_task: {"type":"create_task","task_id":"t1","name":"...", "branch":"feat/x","order_index":0}
@@ -220,9 +222,10 @@ fail_workflow: {"type":"fail_workflow","reason":"..."}
 ## Rules
 - ONLY output JSON. No markdown, no explanation.
 - Use explicit task_id and terminal_id so later actions can reference them.
-- 1-2 terminals per task. Keep instructions actionable.
-- NEVER create more than 3 tasks in your first response. Plan progressively.
+- 1-2 terminals per task. Keep instructions actionable and specific.
+- Create 3-5 tasks upfront to cover ALL user requirements. Do not leave requirements uncovered.
 - You CAN create new tasks/terminals at any point after planning is complete.
+- NEVER complete_workflow until ALL user requirements have been addressed by tasks.
 - After all tasks complete: use merge_branch to merge each task branch into main, then complete_workflow.
 - NEVER create a separate "integration review", "merge verification", or "final review" task. The merge_branch action handles merging automatically. When all coding tasks are done, merge and complete — do not spawn new terminals for review.
 

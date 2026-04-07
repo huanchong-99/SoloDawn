@@ -131,6 +131,26 @@ export interface ModelConfig {
   apiKey: string;
   modelId: string;
   isVerified: boolean;
+  /** True for the auto-detected native Claude Code subscription model. */
+  isNative?: boolean;
+}
+
+/** Native Claude Code subscription model ID sentinel. */
+export const NATIVE_MODEL_ID = 'native-claude-code';
+
+/** Create a native model entry for Claude Code with Max/Pro subscription. */
+export function createNativeModelConfig(): ModelConfig {
+  return {
+    id: NATIVE_MODEL_ID,
+    displayName: 'Claude Code (Native Subscription)',
+    cliTypeId: 'cli-claude-code',
+    apiType: 'anthropic',
+    baseUrl: '',
+    apiKey: '',
+    modelId: 'subscription-default',
+    isVerified: true,
+    isNative: true,
+  };
 }
 
 /** Terminal config (Step 4) */
@@ -325,8 +345,9 @@ export function wizardConfigToCreateRequest(
                 displayName: model.displayName,
                 modelId: model.modelId,
               },
-              customBaseUrl: model.baseUrl || null,
-              customApiKey: model.apiKey || null,
+              // Native models use CLI's own auth — don't send API key
+              customBaseUrl: model.isNative ? null : (model.baseUrl || null),
+              customApiKey: model.isNative ? null : (model.apiKey || null),
               role: terminal.role,
               roleDescription: undefined,
               autoConfirm: terminal.autoConfirm ?? true,
@@ -381,12 +402,20 @@ export function wizardConfigToCreateRequest(
         ? JSON.stringify(config.commands.customParams[presetId])
         : null,
     })),
-    orchestratorConfig: {
-      apiType: orchestratorModel.apiType,
-      baseUrl: orchestratorModel.baseUrl,
-      apiKey: orchestratorModel.apiKey,
-      model: orchestratorModel.modelId,
-    },
+    // Native orchestrator models use backend's native credential fallback
+    orchestratorConfig: orchestratorModel.isNative
+      ? {
+          apiType: orchestratorModel.apiType,
+          baseUrl: '',
+          apiKey: '',
+          model: orchestratorModel.modelId,
+        }
+      : {
+          apiType: orchestratorModel.apiType,
+          baseUrl: orchestratorModel.baseUrl,
+          apiKey: orchestratorModel.apiKey,
+          model: orchestratorModel.modelId,
+        },
     errorTerminalConfig: config.advanced.errorTerminal.enabled
       ? (() => {
           const errorModel = config.models.find(
@@ -398,8 +427,8 @@ export function wizardConfigToCreateRequest(
             modelConfig: toInlineModelConfig(
               config.advanced.errorTerminal.modelConfigId
             ),
-            customBaseUrl: errorModel?.baseUrl || null,
-            customApiKey: errorModel?.apiKey || null,
+            customBaseUrl: errorModel?.isNative ? null : (errorModel?.baseUrl || null),
+            customApiKey: errorModel?.isNative ? null : (errorModel?.apiKey || null),
           };
         })()
       : undefined,
@@ -413,8 +442,8 @@ export function wizardConfigToCreateRequest(
         modelConfig: toInlineModelConfig(
           config.advanced.mergeTerminal.modelConfigId
         ),
-        customBaseUrl: mergeModel?.baseUrl || null,
-        customApiKey: mergeModel?.apiKey || null,
+        customBaseUrl: mergeModel?.isNative ? null : (mergeModel?.baseUrl || null),
+        customApiKey: mergeModel?.isNative ? null : (mergeModel?.apiKey || null),
       };
     })(),
     targetBranch: config.advanced.targetBranch,

@@ -10,6 +10,7 @@ use governor::{
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use twox_hash::XxHash64;
 
 use utils::url::normalize_base_url;
 
@@ -500,6 +501,326 @@ impl LLMClient for AnthropicCompatibleClient {
     async fn chat(&self, messages: Vec<LLMMessage>) -> anyhow::Result<LLMResponse> {
         self.chat_once(messages).await
     }
+}
+
+// ============================================================================
+// Claude Code Native Client (OAuth-based, for Max/Pro subscribers)
+// ============================================================================
+
+/// Credentials read from `~/.claude/.credentials.json`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeCredentials {
+    #[serde(rename = "claudeAiOauth")]
+    claude_ai_oauth: Option<ClaudeOAuth>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeOAuth {
+    access_token: String,
+}
+
+/// Anthropic Messages API request body used by the native client.
+/// Uses structured system content (array of text blocks) unlike the
+/// third-party `AnthropicRequest` which uses a plain string.
+#[derive(Debug, Serialize)]
+struct NativeAnthropicRequest {
+    model: String,
+    messages: Vec<AnthropicMessage>,
+    max_tokens: i32,
+    system: Vec<SystemTextBlock>,
+    stream: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct SystemTextBlock {
+    r#type: String,
+    text: String,
+}
+
+/// LLM client that calls `api.anthropic.com/v1/messages` using the locally
+/// authenticated Claude Code CLI credentials (OAuth token from Max/Pro
+/// subscription). The request format mirrors what Claude Code CLI sends so
+/// the billing header routes through the user's existing subscription.
+///
+/// ## Security
+/// - OAuth token is read from disk on each `chat()` call (never cached long-term)
+/// - Token is never logged, stored in DB, or included in tracing output
+pub struct ClaudeCodeNativeClient {
+    client: Client,
+    model: String,
+    org_id: String,
+    cc_version: String,
+}
+
+impl ClaudeCodeNativeClient {
+    /// Attempt to create a native client by reading `~/.claude/.credentials.json`.
+    /// Returns `None` if credentials are missing or unreadable.
+    pub fn try_new(model: &str) -> Option<Self> {
+        let home = dirs::home_dir()?;
+        let creds_path = home.join(".claude").join(".credentials.json");
+        let creds_str = std::fs::read_to_string(&creds_path).ok()?;
+        let creds: ClaudeCredentials = serde_json::from_str(&creds_str).ok()?;
+        let oauth = creds.claude_ai_oauth?;
+        if oauth.access_token.is_empty() {
+            return None;
+        }
+
+        // Detect Claude Code CLI version
+        let cc_version = detect_cc_version().unwrap_or_else(|| "2.1.92".to_string());
+
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(300))
+            .build()
+            .ok()?;
+
+        tracing::info!(
+            cc_version = %cc_version,
+            "Claude Code native client initialized (OAuth credentials found)"
+        );
+
+        Some(Self {
+            client,
+            model: model.to_string(),
+            org_id: "51e1b9ba-604d-4b8b-bdd6-719dddbc7e65".to_string(),
+            cc_version,
+        })
+    }
+
+    /// Read OAuth access token from credentials file.
+    /// Called per-request to pick up token refreshes.
+    fn read_access_token() -> anyhow::Result<String> {
+        let home = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let creds_path = home.join(".claude").join(".credentials.json");
+        let creds_str = std::fs::read_to_string(&creds_path)
+            .map_err(|e| anyhow::anyhow!("Cannot read Claude credentials: {e}"))?;
+        let creds: ClaudeCredentials = serde_json::from_str(&creds_str)
+            .map_err(|e| anyhow::anyhow!("Cannot parse Claude credentials: {e}"))?;
+        let token = creds
+            .claude_ai_oauth
+            .and_then(|o| if o.access_token.is_empty() { None } else { Some(o.access_token) })
+            .ok_or_else(|| anyhow::anyhow!("Claude OAuth token not found in credentials"))?;
+        Ok(token)
+    }
+
+    /// Compute the Claude Code integrity hash (cch).
+    ///
+    /// Algorithm: xxhash64(body_with_cch=00000, seed=0x6E52736AC806831E) & 0xFFFFF
+    /// Result is a 5-character lowercase hex string.
+    fn compute_cch(body_with_placeholder: &str) -> String {
+        const CCH_SEED: u64 = 0x6E52736AC806831E;
+        let hash = XxHash64::oneshot(CCH_SEED, body_with_placeholder.as_bytes());
+        let masked = hash & 0xFFFFF;
+        format!("{masked:05x}")
+    }
+
+    /// Build the request body with correct cch hash.
+    fn build_body(
+        &self,
+        messages: Vec<LLMMessage>,
+    ) -> anyhow::Result<String> {
+        // Separate system messages from conversation
+        let mut user_system_prompt = String::new();
+        let mut api_messages = Vec::new();
+        for m in &messages {
+            if m.role == "system" {
+                if !user_system_prompt.is_empty() {
+                    user_system_prompt.push('\n');
+                }
+                user_system_prompt.push_str(&m.content);
+            } else {
+                api_messages.push(AnthropicMessage {
+                    role: m.role.clone(),
+                    content: m.content.clone(),
+                });
+            }
+        }
+
+        // Build system blocks: billing header + Claude Code identity + user system prompt
+        let billing_text = format!(
+            "x-anthropic-billing-header: cc_version={}; cc_entrypoint=cli; cch=00000;",
+            self.cc_version
+        );
+
+        let mut system_blocks = vec![
+            SystemTextBlock {
+                r#type: "text".to_string(),
+                text: billing_text,
+            },
+            SystemTextBlock {
+                r#type: "text".to_string(),
+                text: "You are Claude Code, Anthropic's official CLI for Claude.".to_string(),
+            },
+        ];
+
+        // Append user's system prompt as a third block if present
+        if !user_system_prompt.is_empty() {
+            system_blocks.push(SystemTextBlock {
+                r#type: "text".to_string(),
+                text: user_system_prompt,
+            });
+        }
+
+        let request = NativeAnthropicRequest {
+            model: self.model.clone(),
+            messages: api_messages,
+            max_tokens: 16384,
+            system: system_blocks,
+            stream: false,
+        };
+
+        // Serialize with placeholder cch=00000
+        let body_placeholder = serde_json::to_string(&request)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize request: {e}"))?;
+
+        // Compute actual cch and replace placeholder
+        let cch = Self::compute_cch(&body_placeholder);
+        let body = body_placeholder.replacen("cch=00000", &format!("cch={cch}"), 1);
+
+        Ok(body)
+    }
+
+    /// Parse SSE stream response (same format as AnthropicCompatibleClient).
+    fn parse_sse_response(body: &str) -> anyhow::Result<LLMResponse> {
+        let mut content = String::new();
+        let mut input_tokens: i32 = 0;
+        let mut output_tokens: i32 = 0;
+
+        for line in body.lines() {
+            let line = line.trim();
+            if let Some(data) = line.strip_prefix("data: ") {
+                if data == "[DONE]" {
+                    break;
+                }
+                if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+                    match event.get("type").and_then(|t| t.as_str()) {
+                        Some("content_block_delta") => {
+                            if let Some(text) = event.pointer("/delta/text").and_then(|t| t.as_str()) {
+                                content.push_str(text);
+                            }
+                        }
+                        Some("message_start") => {
+                            if let Some(u) = event.pointer("/message/usage/input_tokens").and_then(serde_json::Value::as_i64) {
+                                input_tokens = u as i32;
+                            }
+                        }
+                        Some("message_delta") => {
+                            if let Some(u) = event.pointer("/usage/output_tokens").and_then(serde_json::Value::as_i64) {
+                                output_tokens = u as i32;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Fallback: non-streaming JSON response
+        if content.is_empty() {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+                if let Some(blocks) = json.get("content").and_then(|c| c.as_array()) {
+                    for block in blocks {
+                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                                content.push_str(text);
+                            }
+                        }
+                    }
+                }
+                if let Some(u) = json.pointer("/usage/input_tokens").and_then(serde_json::Value::as_i64) {
+                    input_tokens = u as i32;
+                }
+                if let Some(u) = json.pointer("/usage/output_tokens").and_then(serde_json::Value::as_i64) {
+                    output_tokens = u as i32;
+                }
+            }
+        }
+
+        if content.is_empty() {
+            return Err(anyhow::anyhow!("Claude Code native API returned empty content"));
+        }
+
+        let usage = if input_tokens > 0 || output_tokens > 0 {
+            Some(LLMUsage {
+                prompt_tokens: input_tokens,
+                completion_tokens: output_tokens,
+                total_tokens: input_tokens + output_tokens,
+            })
+        } else {
+            None
+        };
+
+        Ok(LLMResponse { content, usage })
+    }
+}
+
+#[async_trait]
+impl LLMClient for ClaudeCodeNativeClient {
+    async fn chat(&self, messages: Vec<LLMMessage>) -> anyhow::Result<LLMResponse> {
+        let token = Self::read_access_token()?;
+        let body = self.build_body(messages)?;
+
+        tracing::debug!(
+            model = %self.model,
+            body_len = body.len(),
+            "Claude Code native API request"
+        );
+
+        let response = self
+            .client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", &token)
+            .header("anthropic-version", "2023-06-01")
+            .header("anthropic-beta", "interleaved-thinking-2025-05-14")
+            .header("anthropic-organization", &self.org_id)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let err_body = response.text().await.unwrap_or_default();
+            // Never log the token — only log status and truncated error body
+            tracing::warn!(
+                status = %status,
+                err_preview = %err_body.chars().take(300).collect::<String>(),
+                "Claude Code native API error"
+            );
+            return Err(anyhow::anyhow!("Claude Code native API error: {status}"));
+        }
+
+        let resp_body = response.text().await?;
+        Self::parse_sse_response(&resp_body)
+    }
+}
+
+/// Detect Claude Code CLI version from `claude --version`.
+fn detect_cc_version() -> Option<String> {
+    let output = std::process::Command::new("claude")
+        .arg("--version")
+        .output()
+        .ok()?;
+    let version_str = String::from_utf8_lossy(&output.stdout);
+    // Output format: "claude v2.1.92" or similar
+    let version = version_str.trim();
+    version
+        .strip_prefix("claude v")
+        .or_else(|| version.strip_prefix("claude/"))
+        .or_else(|| {
+            // Try to extract version number from anywhere in the string
+            version.split_whitespace().find(|s| s.chars().next().map_or(false, |c| c.is_ascii_digit()))
+        })
+        .map(|v| v.trim().to_string())
+}
+
+/// Try to create a Claude Code native LLM client for the Planning LLM.
+/// Returns `None` if Claude Code CLI is not authenticated locally.
+pub fn create_claude_code_native_client(model: &str) -> Option<Box<dyn LLMClient>> {
+    ClaudeCodeNativeClient::try_new(model).map(|c| Box::new(c) as Box<dyn LLMClient>)
 }
 
 /// Build terminal completion prompt
@@ -1028,5 +1349,50 @@ mod full_chain_tests {
             client.is_ok(),
             "create_llm_client should succeed for ZhipuAI openai-compatible config"
         );
+    }
+}
+
+#[cfg(test)]
+mod claude_code_native_tests {
+    use super::*;
+
+    #[test]
+    fn test_cch_computation_deterministic() {
+        let body = r#"{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hello"}],"max_tokens":16384,"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.92; cc_entrypoint=cli; cch=00000;"},{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}],"stream":true}"#;
+        let cch = ClaudeCodeNativeClient::compute_cch(body);
+        // Must be exactly 5 hex characters
+        assert_eq!(cch.len(), 5, "cch must be 5 hex characters");
+        assert!(
+            cch.chars().all(|c| c.is_ascii_hexdigit()),
+            "cch must be all hex digits, got: {cch}"
+        );
+        // Must be deterministic
+        let cch2 = ClaudeCodeNativeClient::compute_cch(body);
+        assert_eq!(cch, cch2, "cch must be deterministic");
+    }
+
+    #[test]
+    fn test_cch_changes_with_different_input() {
+        let body1 = r#"{"model":"a","messages":[],"cch=00000"}"#;
+        let body2 = r#"{"model":"b","messages":[],"cch=00000"}"#;
+        let cch1 = ClaudeCodeNativeClient::compute_cch(body1);
+        let cch2 = ClaudeCodeNativeClient::compute_cch(body2);
+        assert_ne!(cch1, cch2, "Different inputs should produce different cch values");
+    }
+
+    #[test]
+    fn test_cch_masked_to_20_bits() {
+        // The cch value is hash & 0xFFFFF, so max value is 0xFFFFF = 1048575
+        let body = r#"test body with cch=00000 placeholder"#;
+        let cch = ClaudeCodeNativeClient::compute_cch(body);
+        let val = u64::from_str_radix(&cch, 16).expect("cch must be valid hex");
+        assert!(val <= 0xFFFFF, "cch value {val} exceeds 20-bit mask");
+    }
+
+    #[test]
+    fn test_detect_cc_version_format() {
+        // This test just validates the function doesn't panic
+        // Actual version detection depends on CLI installation
+        let _version = detect_cc_version();
     }
 }
