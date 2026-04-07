@@ -910,7 +910,7 @@ impl CCSwitchService {
                 // creation and let the CLI use its own auth.
                 let using_native_auth = api_key.is_none() && {
                     let home = dirs::home_dir();
-                    home.map_or(false, |h| h.join(".claude").join(".credentials.json").exists())
+                    home.is_some_and(|h| h.join(".claude").join(".credentials.json").exists())
                 };
 
                 if let Some(ref key) = api_key {
