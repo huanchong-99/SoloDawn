@@ -471,7 +471,7 @@ impl OrchestratorAgent {
             .unwrap_or(&workflow.name);
         let context = self.build_agent_planned_context(workflow).await?;
         Ok(format!(
-            "Workflow {} has just started in agent_planned mode with no predefined tasks.\n\nPrimary goal:\n{}\n\n{}\n\nIMPORTANT: Analyze ALL requirements listed in the goal. Create 3-5 tasks that collectively cover EVERY requirement. Each task should have a clear, non-overlapping scope. Do NOT create a single catch-all task. Start all terminals immediately. Emit set_workflow_planning_complete at the end.",
+            "Workflow {} has just started in agent_planned mode with no predefined tasks.\n\nPrimary goal:\n{}\n\n{}\n\nDECIDE your approach:\n- If this is a FROM-SCRATCH project (empty repo, no existing codebase): Create ONLY ONE \"Foundation\" task covering project skeleton, shared types, schema, config, and base directory structure. Start its terminal. Then emit set_workflow_planning_complete. Feature tasks will be created after the foundation task completes.\n- If this is a MODIFY-EXISTING project (codebase already has consistent structure): Create tasks covering ALL requirements. Each task has clear non-overlapping scope. Start all terminals. Emit set_workflow_planning_complete at the end.\nDo NOT create a single catch-all task for from-scratch projects — use the phased approach instead.",
             workflow.id, goal, context
         ))
     }
@@ -3548,7 +3548,7 @@ impl OrchestratorAgent {
                 // G16-001: Auto-append mandatory quality requirements to every
                 // terminal instruction. The LLM often omits these when handling
                 // fuzzy requirements, leading to zero-test deliverables.
-                let quality_suffix = "\n\n---\n## MANDATORY (enforced by platform)\n- Write test files for every module (Jest/Vitest/cargo test). Aim ≥60% coverage.\n- Validate ALL API inputs (Zod/Joi/validator/Fastify schema). Never pass raw req.body to DB.\n- No hardcoded secrets — use env vars. JWT secret must crash if missing (no fallback).\n- Include README with setup instructions.\n- Include Dockerfile + docker-compose.yml.\n- Use custom error classes + global error middleware.\n- If email/password auth is required, implement BOTH registration AND login (not just OAuth).";
+                let quality_suffix = "\n\n---\n## MANDATORY (enforced by platform)\n- Write test files for every module (Jest/Vitest/cargo test). Aim ≥60% coverage.\n- Validate ALL API inputs (Zod/Joi/validator/Fastify schema). Never pass raw req.body to DB.\n- No hardcoded secrets — use env vars. JWT secret must crash if missing (no fallback).\n- Include README with setup instructions.\n- Include Dockerfile + docker-compose.yml.\n- Use custom error classes + global error middleware.\n- If email/password auth is required, implement BOTH registration AND login (not just OAuth).\n- For TypeScript projects: run `npx tsc --noEmit` before your final commit and fix ALL type errors. Zero errors allowed.\n- Do NOT redefine types, interfaces, or schemas that already exist in the codebase. Import and extend them instead.";
                 let full_instruction = format!("{instruction}{quality_suffix}");
 
                 // Add timeout to dispatch to prevent indefinite hangs

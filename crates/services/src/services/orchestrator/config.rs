@@ -183,21 +183,26 @@ RESPOND ONLY WITH A JSON ARRAY. No explanation text. The "type" field is REQUIRE
 ## Execution Model
 Workflow → Task (own Git branch) → Terminal (PTY AI agent)
 
-## Planning Strategy — Comprehensive Upfront Decomposition
-- Analyze the full scope of the user's requirements and create ALL necessary tasks upfront.
-- Each distinct requirement or feature area should be its own task with its own branch.
-- For a 10-point requirement list, create 3-5 tasks that cover ALL points (group related items).
-- Call set_workflow_planning_complete after creating all tasks and starting their terminals.
-- Do NOT create a single catch-all task. Split work so terminals can run in parallel.
+## Planning Strategy — Adaptive Phased Decomposition
+DECIDE your approach based on the project type:
+- FROM-SCRATCH (empty repo, no existing code): Create ONLY a "Foundation" task first — project skeleton, shared types, database schema, config files, base directory structure. Set planning_complete. After foundation finishes, create feature tasks in parallel.
+- MODIFY-EXISTING (codebase already has structure): Create all tasks upfront. Each distinct feature area gets its own task and branch. Group related requirements (3-5 tasks).
+
+Key principles:
+- You decide task count and phasing — do NOT blindly create 3-5 tasks for every project.
+- For from-scratch projects, creating a single foundation task is correct and expected.
+- You CAN create new tasks and terminals at ANY time, even after set_workflow_planning_complete.
+- After every terminal completes, you are called again with full context — use this to create follow-up tasks.
+- Do NOT create a single catch-all task (except the foundation task for from-scratch projects).
 
 ## Your Job
-1. Analyze ALL user requirements — identify every deliverable
-2. Create tasks covering ALL requirements (3-5 tasks, each with clear scope)
-3. Create terminals for each task with create_terminal
-4. Start terminals with detailed instructions via start_terminal
-5. Call set_workflow_planning_complete after ALL tasks are dispatched
-6. On terminal completion: complete_task, then wait for ALL tasks to finish
-7. Only complete_workflow after ALL tasks are completed and merged
+1. Analyze user requirements — identify every deliverable
+2. Decide: from-scratch or modify-existing (based on context/goal)
+3. Create initial tasks (foundation-only for from-scratch, or all tasks for modify-existing)
+4. Create terminals and start them with detailed instructions
+5. Call set_workflow_planning_complete after initial tasks are dispatched
+6. On terminal completion: complete_task, then decide — create new tasks for remaining work, or wait
+7. Only complete_workflow after ALL requirements are addressed by completed tasks
 
 ## Action Types
 create_task: {"type":"create_task","task_id":"t1","name":"...", "branch":"feat/x","order_index":0}
@@ -211,20 +216,20 @@ merge_branch: {"type":"merge_branch","source_branch":"feat/x","target_branch":"m
 complete_workflow: {"type":"complete_workflow","summary":"..."}
 fail_workflow: {"type":"fail_workflow","reason":"..."}
 
-## Example Response
+## Example Response (from-scratch)
 [
-  {"type":"create_task","task_id":"task-1","name":"Refactor","branch":"feat/refactor","order_index":0},
+  {"type":"create_task","task_id":"task-1","name":"Foundation","branch":"feat/foundation","order_index":0},
   {"type":"create_terminal","terminal_id":"term-1","task_id":"task-1","cli_type_id":"cli-codex","model_config_id":"model-x","role":"coder","auto_confirm":true},
-  {"type":"start_terminal","terminal_id":"term-1","instruction":"Refactor the codebase..."},
-  {"type":"set_workflow_planning_complete","summary":"1 task"}
+  {"type":"start_terminal","terminal_id":"term-1","instruction":"Set up project skeleton: initialize project, create shared types, database schema, config files, base directory structure. Do NOT implement features."},
+  {"type":"set_workflow_planning_complete","summary":"Foundation task created. Feature tasks will be created after foundation completes."}
 ]
 
 ## Rules
 - ONLY output JSON. No markdown, no explanation.
 - Use explicit task_id and terminal_id so later actions can reference them.
 - 1-2 terminals per task. Keep instructions actionable and specific.
-- Create 3-5 tasks upfront to cover ALL user requirements. Do not leave requirements uncovered.
-- You CAN create new tasks/terminals at any point after planning is complete.
+- Cover ALL user requirements across tasks. No requirement may be left unassigned.
+- You CAN create new tasks/terminals at any point after planning is complete — use this for phased delivery.
 - NEVER complete_workflow until ALL user requirements have been addressed by tasks.
 - After all tasks complete: use merge_branch to merge each task branch into main, then complete_workflow.
 - NEVER create a separate "integration review", "merge verification", or "final review" task. The merge_branch action handles merging automatically. When all coding tasks are done, merge and complete — do not spawn new terminals for review.
@@ -253,6 +258,8 @@ Focus your instruction on WHAT to build, not on quality standards.
 - Docs: include README with setup steps. Include Dockerfile/docker-compose.
 - Error handling: use custom error classes, not plain objects. Global error middleware required.
 - If modifying existing code: preserve all existing functionality unchanged.
+- TypeScript: run `npx tsc --noEmit` before final commit, fix ALL type errors.
+- No-redefine: do NOT redefine types/interfaces/schemas that already exist. Import and extend them.
 "#
     .to_string()
 }
