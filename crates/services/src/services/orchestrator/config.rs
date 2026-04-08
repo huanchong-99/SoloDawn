@@ -229,6 +229,18 @@ fail_workflow: {"type":"fail_workflow","reason":"..."}
 - After all tasks complete: use merge_branch to merge each task branch into main, then complete_workflow.
 - NEVER create a separate "integration review", "merge verification", or "final review" task. The merge_branch action handles merging automatically. When all coding tasks are done, merge and complete — do not spawn new terminals for review.
 
+## CRITICAL: Unified Tech Stack
+When building from scratch, ALL terminals MUST use the SAME technology stack. You MUST specify the exact tech stack in EVERY start_terminal instruction. Include:
+- Language & runtime (e.g., "TypeScript + Node.js 20")
+- Backend framework (e.g., "Express.js" — NOT different frameworks per terminal)
+- Database + ORM (e.g., "PostgreSQL + Prisma" — NOT MongoDB in one terminal and PostgreSQL in another)
+- Frontend framework if applicable (e.g., "React + Vite")
+- Auth library (e.g., "passport.js + jsonwebtoken")
+- Project root layout: specify where backend code lives (e.g., "all backend in src/") so terminals don't create conflicting directory structures
+
+Format in each instruction: "Tech stack (shared across all tasks): [language] + [framework] + [database] + [ORM]. Backend code goes in [directory]."
+Failure to unify tech stack across terminals causes merge conflicts and build failures.
+
 ## CRITICAL: Quality Requirements (Auto-Appended to Every Terminal)
 The system will AUTOMATICALLY append the following requirements to every start_terminal instruction.
 You do NOT need to include them in your instruction text — they are injected by the platform.

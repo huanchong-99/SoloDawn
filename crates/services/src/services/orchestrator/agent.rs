@@ -1042,7 +1042,7 @@ impl OrchestratorAgent {
 
         let instruction = format!(
             "{} | {}",
-            Self::build_task_instruction(workflow_id, task, terminal, total_terminals, None),
+            Self::build_task_instruction(workflow_id, task, terminal, total_terminals, None, &[]),
             Self::STALL_RECOVERY_SUFFIX
         );
 
@@ -2307,7 +2307,7 @@ impl OrchestratorAgent {
             &self.db, &task.id, &workflow_id, active_terminal.order_index,
         ).await.unwrap_or(None);
         let instruction =
-            Self::build_task_instruction(&workflow_id, &task, &active_terminal, terminals.len(), prev_context.as_ref());
+            Self::build_task_instruction(&workflow_id, &task, &active_terminal, terminals.len(), prev_context.as_ref(), &[]);
         self.dispatch_terminal(task_id, &active_terminal, &instruction)
             .await
     }
@@ -4490,8 +4490,28 @@ impl OrchestratorAgent {
         terminal: &db::models::Terminal,
         total_terminals: usize,
         prev_context: Option<&PreviousTerminalContext>,
+        sibling_tasks: &[db::models::WorkflowTask],
     ) -> String {
         let mut parts = vec![format!("Start task: {} ({})", task.name, task.id)];
+
+        // Include sibling task overview so each terminal knows the full project plan
+        if sibling_tasks.len() > 1 {
+            let siblings: Vec<String> = sibling_tasks
+                .iter()
+                .map(|t| {
+                    let marker = if t.id == task.id { " ← YOU" } else { "" };
+                    format!("  - {} (branch: {}){}", t.name, t.branch, marker)
+                })
+                .collect();
+            parts.push(format!(
+                "Project plan — all parallel tasks:\n{}",
+                siblings.join("\n")
+            ));
+            parts.push(
+                "IMPORTANT: You share the same repository with other terminals. Do NOT create conflicting directory structures or choose a different tech stack. Stay within your scoped task only."
+                    .to_string(),
+            );
+        }
 
         if let Some(description) = &task.description {
             let normalized = description.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -4625,7 +4645,7 @@ impl OrchestratorAgent {
         // State initialization requires the write lock, so this must remain sequential.
         let mut dispatch_queue: Vec<(String, db::models::Terminal, String)> = Vec::new();
 
-        for task in tasks {
+        for task in &tasks {
             // Skip tasks that are already completed, failed, or cancelled
             if task.status == TASK_STATUS_COMPLETED
                 || task.status == TASK_STATUS_FAILED
@@ -4693,7 +4713,7 @@ impl OrchestratorAgent {
 
             // Build instruction and enqueue for parallel dispatch
             let instruction =
-                Self::build_task_instruction(&workflow_id, &task, &terminal, terminals.len(), None);
+                Self::build_task_instruction(&workflow_id, &task, &terminal, terminals.len(), None, &tasks);
             dispatch_queue.push((task.id.clone(), terminal, instruction));
         }
 
@@ -5839,7 +5859,7 @@ mod tests {
         let terminal = make_terminal(0);
 
         let instruction =
-            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 3, None);
+            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 3, None, &[]);
 
         assert!(instruction.contains("Task objective:"));
         assert!(!instruction.contains("Task description:"));
@@ -5861,7 +5881,7 @@ mod tests {
         let terminal = make_terminal(0);
 
         let instruction =
-            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 1, None);
+            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 1, None, &[]);
 
         assert!(instruction.contains("Task description: Complete full implementation end-to-end"));
         assert!(!instruction.contains("Task objective:"));
