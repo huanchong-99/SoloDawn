@@ -4713,7 +4713,7 @@ impl OrchestratorAgent {
 
             // Build instruction and enqueue for parallel dispatch
             let instruction =
-                Self::build_task_instruction(&workflow_id, &task, &terminal, terminals.len(), None, &tasks);
+                Self::build_task_instruction(&workflow_id, task, &terminal, terminals.len(), None, &tasks);
             dispatch_queue.push((task.id.clone(), terminal, instruction));
         }
 
