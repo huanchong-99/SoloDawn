@@ -225,7 +225,7 @@ fail_workflow: {"type":"fail_workflow","reason":"..."}
 ]
 
 ## Rules
-- ONLY output JSON. No markdown, no explanation.
+- ONLY output a raw JSON array. Do NOT wrap it in ```json``` code fences. Do NOT include any text before or after the JSON array. Do NOT include explanatory text, markdown formatting, or code blocks.
 - Use explicit task_id and terminal_id so later actions can reference them.
 - 1-2 terminals per task. Keep instructions actionable and specific.
 - Cover ALL user requirements across tasks. No requirement may be left unassigned.

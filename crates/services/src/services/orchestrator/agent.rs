@@ -3042,7 +3042,7 @@ impl OrchestratorAgent {
             }
 
             prompt.push_str(
-                "\n\nDecide next action. IMPORTANT: Do NOT complete_workflow unless ALL original requirements have been addressed. If requirements remain, create new tasks to cover them. If this task is done, mark it complete_task and wait for others.",
+                "\n\nDecide next action. IMPORTANT: Do NOT complete_workflow unless ALL original requirements have been addressed. If requirements remain, create new tasks to cover them. If this task is done, mark it complete_task and wait for others.\n\nRESPOND WITH A RAW JSON ARRAY ONLY. No markdown, no code fences, no explanatory text.",
             );
         }
         Ok(prompt)
@@ -3064,7 +3064,28 @@ impl OrchestratorAgent {
 
     /// Extract JSON from a response that may contain explanatory text around it.
     fn extract_json_from_mixed_response(response: &str) -> Option<String> {
-        // Try extracting from ```json ... ``` fenced block
+        // Strategy 1: bracket matching — find first [ to last ] (or { to }).
+        // This is the most robust approach because LLMs often include ``` markers
+        // INSIDE the JSON content (e.g., instruction text with code blocks),
+        // which breaks ```json extraction by prematurely closing the fence.
+        let first_bracket = response.find('[').unwrap_or(usize::MAX);
+        let first_brace = response.find('{').unwrap_or(usize::MAX);
+        let start = first_bracket.min(first_brace);
+        if start < response.len() {
+            let remaining = &response[start..];
+            let end_char = if remaining.starts_with('[') { ']' } else { '}' };
+            if let Some(end) = remaining.rfind(end_char) {
+                let candidate = remaining[..=end].to_string();
+                // Only use if the extracted JSON is large enough (avoids grabbing
+                // small inline brackets from explanatory text).
+                if candidate.len() > 50 {
+                    return Some(candidate);
+                }
+            }
+        }
+
+        // Strategy 2: ```json fenced block (fallback — less reliable due to
+        // nested backticks in instruction text, but handles simple cases).
         if let Some(start) = response.find("```json") {
             let after_fence = &response[start + 7..];
             if let Some(end) = after_fence.find("```") {
@@ -3080,18 +3101,7 @@ impl OrchestratorAgent {
                 }
             }
         }
-        // Try finding the first [ or { and matching to its end
-        let first_bracket = response.find('[').unwrap_or(usize::MAX);
-        let first_brace = response.find('{').unwrap_or(usize::MAX);
-        let start = first_bracket.min(first_brace);
-        if start < response.len() {
-            let remaining = &response[start..];
-            // Find the last matching ] or }
-            let end_char = if remaining.starts_with('[') { ']' } else { '}' };
-            if let Some(end) = remaining.rfind(end_char) {
-                return Some(remaining[..=end].to_string());
-            }
-        }
+
         None
     }
 
