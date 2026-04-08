@@ -1051,12 +1051,12 @@ mod url_normalization_tests {
     }
 
     #[test]
-    fn test_anthropic_compatible_no_v1_append() {
+    fn test_anthropic_compatible_appends_v1() {
         let url = normalize_base_url(
             "anthropic-compatible",
             "https://open.bigmodel.cn/api/anthropic",
         );
-        assert_eq!(url, "https://open.bigmodel.cn/api/anthropic");
+        assert_eq!(url, "https://open.bigmodel.cn/api/anthropic/v1");
     }
 
     #[test]
@@ -1149,19 +1149,19 @@ mod full_chain_tests {
             "ZhipuAI anthropic-compatible SHOULD use Anthropic protocol"
         );
 
-        // Verify URL normalization preserves provider path
+        // Verify URL normalization appends /v1 for anthropic-compatible
         let normalized = normalize_base_url(&config.api_type, &config.base_url);
         assert_eq!(
-            normalized, "https://open.bigmodel.cn/api/anthropic",
-            "anthropic-compatible must NOT append /v1 to provider URL"
+            normalized, "https://open.bigmodel.cn/api/anthropic/v1",
+            "anthropic-compatible must append /v1 (Anthropic protocol requires /v1/messages)"
         );
 
         // Verify the final messages URL for Anthropic protocol
         let expected_msg_url = format!("{normalized}/messages");
         assert_eq!(
             expected_msg_url,
-            "https://open.bigmodel.cn/api/anthropic/messages",
-            "Final messages URL must use provider's anthropic path"
+            "https://open.bigmodel.cn/api/anthropic/v1/messages",
+            "Final messages URL must use provider's anthropic path with /v1"
         );
     }
 

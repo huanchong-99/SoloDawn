@@ -16,8 +16,16 @@ pub fn normalize_base_url(api_type: &str, raw_url: &str) -> String {
                 format!("{trimmed}/v1")
             }
         }
-        // For "openai-compatible", "anthropic-compatible", "google", etc.
-        // use the URL exactly as provided
+        // For "openai-compatible", "google", etc. — use the URL as provided.
+        // For "anthropic-compatible" — Anthropic protocol always POSTs to
+        // {base}/v1/messages, so ensure /v1 is present (matches official behavior).
+        "anthropic-compatible" => {
+            if trimmed.ends_with("/v1") {
+                trimmed.to_string()
+            } else {
+                format!("{trimmed}/v1")
+            }
+        }
         _ => trimmed.to_string(),
     }
 }
@@ -70,13 +78,24 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_compatible_no_v1() {
+    fn anthropic_compatible_gets_v1() {
         assert_eq!(
             normalize_base_url(
                 "anthropic-compatible",
                 "https://open.bigmodel.cn/api/anthropic"
             ),
-            "https://open.bigmodel.cn/api/anthropic"
+            "https://open.bigmodel.cn/api/anthropic/v1"
+        );
+    }
+
+    #[test]
+    fn anthropic_compatible_already_has_v1() {
+        assert_eq!(
+            normalize_base_url(
+                "anthropic-compatible",
+                "https://open.bigmodel.cn/api/anthropic/v1"
+            ),
+            "https://open.bigmodel.cn/api/anthropic/v1"
         );
     }
 
