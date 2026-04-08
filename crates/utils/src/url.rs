@@ -9,7 +9,8 @@
 pub fn normalize_base_url(api_type: &str, raw_url: &str) -> String {
     let trimmed = raw_url.trim_end_matches('/');
     match api_type {
-        "openai" | "anthropic" => {
+        // All types that use the /v1 path convention.
+        "openai" | "anthropic" | "anthropic-compatible" => {
             if trimmed.ends_with("/v1") {
                 trimmed.to_string()
             } else {
@@ -17,15 +18,6 @@ pub fn normalize_base_url(api_type: &str, raw_url: &str) -> String {
             }
         }
         // For "openai-compatible", "google", etc. — use the URL as provided.
-        // For "anthropic-compatible" — Anthropic protocol always POSTs to
-        // {base}/v1/messages, so ensure /v1 is present (matches official behavior).
-        "anthropic-compatible" => {
-            if trimmed.ends_with("/v1") {
-                trimmed.to_string()
-            } else {
-                format!("{trimmed}/v1")
-            }
-        }
         _ => trimmed.to_string(),
     }
 }
