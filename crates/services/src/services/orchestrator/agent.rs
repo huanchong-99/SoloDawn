@@ -26,7 +26,9 @@ use super::{
         COMPLETION_CONTEXT_LOG_LINES, COMPLETION_CONTEXT_LOG_MAX_CHARS,
         GIT_COMMIT_METADATA_SEPARATOR, HANDOFF_COMMIT_MAX_CHARS, HANDOFF_NOTES_MAX_CHARS,
         MAX_CONSECUTIVE_LLM_FAILURES, QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
-        QUALITY_GATE_MODE_SHADOW, STATE_SAVE_DEBOUNCE_SECS, TASK_STATUS_CANCELLED,
+        QUALITY_GATE_MODE_SHADOW, QUALITY_GATE_STATUS_SKIPPED,
+        QUALITY_REQUIREMENTS_SUFFIX,
+        STATE_SAVE_DEBOUNCE_SECS, TASK_STATUS_CANCELLED,
         TASK_STATUS_COMPLETED, TASK_STATUS_FAILED, TASK_STATUS_PENDING, TASK_STATUS_RUNNING,
         TERMINAL_STATUS_CANCELLED, TERMINAL_STATUS_COMPLETED, TERMINAL_STATUS_FAILED,
         TERMINAL_STATUS_NOT_STARTED, TERMINAL_STATUS_QUALITY_PENDING, TERMINAL_STATUS_REVIEW_PASSED,
@@ -1895,7 +1897,10 @@ impl OrchestratorAgent {
 
                 if let Some(session_id) = session_id_opt {
                     let fix_message = format!(
-                        "Quality gate BLOCKED: {}\n\nFix instructions:\n{}",
+                        "Your commit was BLOCKED by the quality gate.\n\n{}\n\n{}\n\n\
+                         Fix ALL issues listed above, then commit again. \
+                         The quality gate will re-run automatically on your next commit.\n\n\
+                         Tip: Run the project's build/type-check command to verify your fixes before committing.",
                         event.summary, fix_instructions
                     );
                     // G31-001: targeted delivery to specific terminal PTY.
@@ -1922,6 +1927,12 @@ impl OrchestratorAgent {
                 tracing::info!(
                     terminal_id = %event.terminal_id,
                     "Quality gate shadow mode: promoting to completed (result logged only)"
+                );
+            } else if event.gate_status == QUALITY_GATE_STATUS_SKIPPED {
+                tracing::warn!(
+                    terminal_id = %event.terminal_id,
+                    mode = %event.mode,
+                    "Quality gate was skipped (engine failure/timeout) — promoting terminal but quality was NOT verified"
                 );
             } else if !event.passed {
                 tracing::warn!(
@@ -3555,16 +3566,11 @@ impl OrchestratorAgent {
                 self.sync_task_state_from_db(&task_id, Some(planning_complete))
                     .await?;
 
-                // G16-001: Auto-append mandatory quality requirements to every
-                // terminal instruction. The LLM often omits these when handling
-                // fuzzy requirements, leading to zero-test deliverables.
-                let quality_suffix = "\n\n---\n## MANDATORY (enforced by platform)\n- Write test files for every module (Jest/Vitest/cargo test). Aim ≥60% coverage.\n- Validate ALL API inputs (Zod/Joi/validator/Fastify schema). Never pass raw req.body to DB.\n- No hardcoded secrets — use env vars. JWT secret must crash if missing (no fallback).\n- Include README with setup instructions.\n- Include Dockerfile + docker-compose.yml.\n- Use custom error classes + global error middleware.\n- If email/password auth is required, implement BOTH registration AND login (not just OAuth).\n- For TypeScript projects: run `npx tsc --noEmit` before your final commit and fix ALL type errors. Zero errors allowed.\n- Do NOT redefine types, interfaces, or schemas that already exist in the codebase. Import and extend them instead.";
-                let full_instruction = format!("{instruction}{quality_suffix}");
-
+                // G16-001: Quality suffix is now appended centrally in dispatch_terminal().
                 // Add timeout to dispatch to prevent indefinite hangs
                 match tokio::time::timeout(
                     std::time::Duration::from_secs(30),
-                    self.dispatch_terminal(&task_id, &terminal, &full_instruction),
+                    self.dispatch_terminal(&task_id, &terminal, &instruction),
                 ).await {
                     Ok(result) => result?,
                     Err(_) => {
@@ -4077,6 +4083,12 @@ impl OrchestratorAgent {
         terminal: &db::models::Terminal,
         instruction: &str,
     ) -> anyhow::Result<()> {
+        // G16-001: Append mandatory quality requirements to EVERY terminal instruction,
+        // regardless of dispatch path (auto-dispatch, LLM-driven, manual start, review, fix).
+        // This is the single chokepoint through which ALL terminal dispatches flow.
+        let instruction = format!("{instruction}{QUALITY_REQUIREMENTS_SUFFIX}");
+        let instruction = instruction.as_str();
+
         let workflow_id = {
             let state = self.state.read().await;
             state.workflow_id.clone()

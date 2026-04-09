@@ -58,6 +58,18 @@ impl QualityProvider for FrontendProvider {
         let mut all_issues = Vec::new();
         let frontend_dir = project_root.join(&self.frontend_dir);
 
+        // Detect if the project is a monolithic TS project (tsconfig.json at root, no frontend/ subdir)
+        // or a split project (frontend/ subdir with its own tsconfig).
+        let tsc_check_dir = if frontend_dir.join("tsconfig.json").exists() {
+            frontend_dir.clone()
+        } else if project_root.join("tsconfig.json").exists() {
+            // Monolithic TS project — run tsc at project root
+            debug!("No frontend/tsconfig.json found, using project root for TypeScript checks");
+            project_root.to_path_buf()
+        } else {
+            frontend_dir.clone()
+        };
+
         // 1. pnpm lint (ESLint)
         if self.enable_lint {
             debug!("Running pnpm lint...");
@@ -76,19 +88,34 @@ impl QualityProvider for FrontendProvider {
             }
         }
 
-        // 2. pnpm check (TypeScript tsc)
+        // 2. TypeScript type-check — try pnpm check first, fall back to npx tsc --noEmit
         if self.enable_check {
-            debug!("Running pnpm check...");
-            let output = run_frontend_command(&frontend_dir, &["check"]).await;
+            debug!("Running TypeScript check in {}...", tsc_check_dir.display());
+            let output = run_frontend_command(&tsc_check_dir, &["check"]).await;
             match output {
                 Ok(out) => {
-                    let (errors, issues) = parse_tsc_output(&out.stdout);
+                    let combined = format!("{}\n{}", out.stdout, out._stderr);
+                    let (errors, issues) = parse_tsc_output(&combined);
                     report.metrics.insert(MetricKey::TscErrors, MeasureValue::Int(errors));
                     all_issues.extend(issues);
                 }
                 Err(e) => {
-                    warn!("pnpm check failed: {}", e);
-                    report.metrics.insert(MetricKey::TscErrors, MeasureValue::Int(-1));
+                    // Fallback: pnpm check failed (pnpm not installed, no "check" script, etc.)
+                    // Try npx tsc --noEmit directly — works for any TS project with tsconfig.json
+                    warn!("pnpm check failed: {}, falling back to npx tsc --noEmit", e);
+                    let tsc_output = run_command(&tsc_check_dir, "npx", &["tsc", "--noEmit"]).await;
+                    match tsc_output {
+                        Ok(out) => {
+                            let combined = format!("{}\n{}", out.stdout, out._stderr);
+                            let (errors, issues) = parse_tsc_output(&combined);
+                            report.metrics.insert(MetricKey::TscErrors, MeasureValue::Int(errors));
+                            all_issues.extend(issues);
+                        }
+                        Err(e2) => {
+                            warn!("npx tsc --noEmit also failed: {}", e2);
+                            report.metrics.insert(MetricKey::TscErrors, MeasureValue::Int(-1));
+                        }
+                    }
                 }
             }
         }
@@ -247,9 +274,9 @@ struct CommandOutput {
     _success: bool,
 }
 
-/// 执行前端 pnpm 命令
-async fn run_frontend_command(cwd: &Path, args: &[&str]) -> anyhow::Result<CommandOutput> {
-    let output = tokio::process::Command::new("pnpm")
+/// 执行任意命令
+async fn run_command(cwd: &Path, cmd: &str, args: &[&str]) -> anyhow::Result<CommandOutput> {
+    let output = tokio::process::Command::new(cmd)
         .args(args)
         .current_dir(cwd)
         .output()
@@ -260,4 +287,9 @@ async fn run_frontend_command(cwd: &Path, args: &[&str]) -> anyhow::Result<Comma
         _stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         _success: output.status.success(),
     })
+}
+
+/// 执行前端 pnpm 命令（convenience wrapper）
+async fn run_frontend_command(cwd: &Path, args: &[&str]) -> anyhow::Result<CommandOutput> {
+    run_command(cwd, "pnpm", args).await
 }

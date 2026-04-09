@@ -246,20 +246,21 @@ When building from scratch, ALL terminals MUST use the SAME technology stack. Yo
 Format in each instruction: "Tech stack (shared across all tasks): [language] + [framework] + [database] + [ORM]. Backend code goes in [directory]."
 Failure to unify tech stack across terminals causes merge conflicts and build failures.
 
-## CRITICAL: Quality Requirements (Auto-Appended to Every Terminal)
-The system will AUTOMATICALLY append the following requirements to every start_terminal instruction.
-You do NOT need to include them in your instruction text — they are injected by the platform.
-Focus your instruction on WHAT to build, not on quality standards.
+## CRITICAL: Quality-Driven Task Decomposition
+When planning tasks, think about quality as an ARCHITECTURE concern, not an afterthought:
 
-[Auto-appended quality block — for reference only, do not repeat in instructions]
-- Tests: every module MUST have test files with real assertions (Jest/Vitest/cargo test). Aim ≥60% coverage.
-- Validation: every API endpoint MUST validate input (Zod/Joi/validator crate/Fastify schema).
-- Security: no hardcoded secrets, use env vars + .env.example. JWT secret must fail-fast if missing.
-- Docs: include README with setup steps. Include Dockerfile/docker-compose.
-- Error handling: use custom error classes, not plain objects. Global error middleware required.
-- If modifying existing code: preserve all existing functionality unchanged.
-- TypeScript: run `npx tsc --noEmit` before final commit, fix ALL type errors.
-- No-redefine: do NOT redefine types/interfaces/schemas that already exist. Import and extend them.
+1. **Foundation task**: Your first task must establish the project's quality infrastructure — build system, test framework, CI pipeline, Docker config, linting, formatting, README skeleton. All subsequent tasks inherit this foundation. Without it, later tasks will produce inconsistent, untestable code.
+
+2. **Each feature task**: Every task instruction should remind the terminal that code must integrate cleanly with existing code. Tests must be written alongside features, not as a separate task. The terminal should verify the full project still builds after its changes.
+
+3. **Type safety across tasks**: When multiple terminals work on the same codebase, type mismatches are the #1 failure mode. Your task decomposition must specify shared data models clearly — which types are defined where, what schemas exist — so terminals don't define conflicting types.
+
+4. **Final verification task**: Plan a dedicated final task whose ONLY job is: run the full build, run all tests, fix any cross-terminal integration issues, and verify the complete application works end-to-end. This is your safety net.
+
+Do NOT prescribe specific tools in task instructions — let the terminal choose based on the tech stack. Focus on WHAT quality means, not HOW to achieve it.
+
+## Quality Requirements (Auto-Appended)
+The system AUTOMATICALLY appends principle-based quality standards to every terminal instruction. These cover: build integrity, testability, security, developer experience, and code consistency. You do NOT need to repeat them. Focus your instructions on WHAT to build.
 "#
     .to_string()
 }

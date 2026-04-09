@@ -1486,7 +1486,8 @@ mod orchestrator_tests {
         let msg = timeout.unwrap().unwrap();
         match msg {
             BusMessage::TerminalMessage { message } => {
-                assert_eq!(message, "echo start");
+                assert!(message.starts_with("echo start"), "Instruction should start with original text, got: {}", &message[..message.len().min(50)]);
+                assert!(message.contains("MANDATORY"), "Quality suffix should be appended");
             }
             other => panic!("Expected TerminalMessage, got {other:?}"),
         }
@@ -1648,7 +1649,8 @@ mod orchestrator_tests {
 
         match new_msg {
             BusMessage::TerminalMessage { message } => {
-                assert_eq!(message, "echo latest-pty");
+                assert!(message.starts_with("echo latest-pty"), "Instruction should start with original text");
+                assert!(message.contains("MANDATORY"), "Quality suffix should be appended");
             }
             other => panic!("Expected TerminalMessage, got {other:?}"),
         }
@@ -1882,7 +1884,8 @@ mod orchestrator_tests {
 
         match first_dispatch {
             BusMessage::TerminalMessage { message } => {
-                assert_eq!(message, "echo start");
+                assert!(message.starts_with("echo start"), "Instruction should start with original text");
+                assert!(message.contains("MANDATORY"), "Quality suffix should be appended");
             }
             other => panic!("Expected TerminalMessage for first dispatch, got {other:?}"),
         }
@@ -1983,7 +1986,8 @@ mod orchestrator_tests {
             } => {
                 assert_eq!(tid, terminal_id);
                 assert_eq!(session_id, pty_session_id);
-                assert_eq!(input, "echo start");
+                assert!(input.starts_with("echo start"), "Instruction should start with original text");
+                assert!(input.contains("MANDATORY"), "Quality suffix should be appended");
             }
             other => panic!("Expected TerminalInput for codex instruction, got {other:?}"),
         }
