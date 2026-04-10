@@ -87,9 +87,11 @@ pub struct QualityGateDecision {
 }
 
 impl QualityGateDecision {
-    /// 是否通过
+    /// 是否通过 — only `Ok` counts as passed.
+    /// `Warn` (missing metrics / provider failure) is NOT passed in enforce mode
+    /// because quality was not actually verified.
     pub fn is_passed(&self) -> bool {
-        self.status == QualityGateStatus::Ok || self.status == QualityGateStatus::Warn
+        self.status == QualityGateStatus::Ok
     }
 
     /// 是否被阻断

@@ -29,16 +29,18 @@ impl ConditionEvaluator {
     /// # 返回
     /// - `EvaluationResult`: 求值等级和实际值
     pub fn evaluate(condition: &Condition, measure_value: Option<&MeasureValue>) -> EvaluationResult {
-        // Missing metric → WARN (provider may have failed or metric not collected).
-        // Previously returned OK, which silently passed the gate when all providers failed.
+        // Missing metric → ERROR (fail-closed).  If a metric is defined as a gate
+        // condition but has no value, quality was NOT verified — this must block in
+        // enforce mode.  Previously returned WARN which `is_passed()` treated as
+        // passed, silently letting unverified code through.
         let measure = match measure_value {
             Some(v) => v,
             None => {
-                return EvaluationResult::warn(
+                return EvaluationResult::error_with_message(
                     condition.metric,
                     None,
                     format!(
-                        "Metric {} has no value — provider may have failed or is not configured",
+                        "Metric {} has no value — provider failed or metric not collected; quality cannot be verified",
                         condition.metric
                     ),
                 );
@@ -169,7 +171,7 @@ mod tests {
     fn test_evaluate_no_measure() {
         let condition = Condition::new(MetricKey::ClippyWarnings, Operator::GreaterThan, "0");
         let result = ConditionEvaluator::evaluate(&condition, None);
-        assert_eq!(result.level, Level::Warn);
+        assert_eq!(result.level, Level::Error);
         assert!(result.message.is_some());
     }
 

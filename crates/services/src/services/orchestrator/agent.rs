@@ -1192,20 +1192,17 @@ impl OrchestratorAgent {
         if event.status != TerminalCompletionStatus::Failed
             && qg_mode != QUALITY_GATE_MODE_OFF
         {
-            // Only trigger quality gate if terminal is still active (not yet completed).
-            // - working: first commit from terminal, needs quality check
-            // - quality_pending: already in quality flow (dedup will handle)
-            // - failed: quality gate previously rejected, terminal submitted fix — MUST re-check
-            // - completed: quality gate already passed, this is a re-entry from result
-            //   promotion — SKIP and fall through to normal completion flow
-            let is_active = db::models::Terminal::find_by_id(&self.db.pool, &event.terminal_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|t| t.status.as_str() != TERMINAL_STATUS_COMPLETED)
-                .unwrap_or(true);
+            // G16-003: Prevent re-entry swallow — if this commit already has a
+            // quality_run in the DB, the gate already evaluated it. Skip and fall
+            // through to the normal completion flow. Without this, the re-entry from
+            // handle_quality_gate_result → handle_terminal_completed_skip_quiet_window
+            // → handle_terminal_completed hits dedup inside handle_checkpoint_quality_gate,
+            // returns Ok(()), and the `return` below prevents completion from ever executing.
+            let already_gated = self
+                .is_checkpoint_duplicate(&event.terminal_id, event.commit_hash.as_deref())
+                .await;
 
-            if is_active {
+            if !already_gated {
                 tracing::info!(
                     terminal_id = %event.terminal_id,
                     status = ?event.status,
@@ -1214,8 +1211,13 @@ impl OrchestratorAgent {
                 );
                 return self.handle_checkpoint_quality_gate(event).await;
             }
-            // Terminal already completed — quality gate already passed.
-            // Fall through to normal completion flow below.
+            // Quality gate already evaluated for this commit — fall through
+            // to normal completion flow (mark terminal completed, dispatch next, etc.)
+            tracing::info!(
+                terminal_id = %event.terminal_id,
+                commit_hash = ?event.commit_hash,
+                "Quality gate already passed for this commit, proceeding to completion"
+            );
         }
 
         tracing::info!(

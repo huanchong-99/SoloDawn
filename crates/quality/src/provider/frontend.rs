@@ -84,6 +84,13 @@ impl QualityProvider for FrontendProvider {
                 Err(e) => {
                     warn!("pnpm lint failed: {}", e);
                     report.metrics.insert(MetricKey::EslintErrors, MeasureValue::Int(-1));
+                    all_issues.push(QualityIssue::new(
+                        "eslint::unavailable",
+                        RuleType::Bug,
+                        Severity::Major,
+                        AnalyzerSource::EsLint,
+                        &format!("ESLint could not run: {}", e),
+                    ));
                 }
             }
         }
@@ -114,6 +121,13 @@ impl QualityProvider for FrontendProvider {
                         Err(e2) => {
                             warn!("npx tsc --noEmit also failed: {}", e2);
                             report.metrics.insert(MetricKey::TscErrors, MeasureValue::Int(-1));
+                            all_issues.push(QualityIssue::new(
+                                "tsc::unavailable",
+                                RuleType::Bug,
+                                Severity::Critical,
+                                AnalyzerSource::TypeScript,
+                                &format!("TypeScript check could not run (pnpm check and npx tsc --noEmit both failed): {}", e2),
+                            ));
                         }
                     }
                 }
