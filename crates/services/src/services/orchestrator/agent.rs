@@ -1185,10 +1185,18 @@ impl OrchestratorAgent {
         &self,
         event: TerminalCompletionEvent,
     ) -> anyhow::Result<()> {
-        if event.status == TerminalCompletionStatus::Checkpoint {
+        // G16-002: Quality gate triggers on EVERY git commit, not just checkpoints.
+        // Every commit is a git event — quality must be verified unconditionally.
+        // Only Failed terminals and quality-gate-off mode are excluded.
+        let qg_mode = &self.config.quality_gate_mode;
+        if event.status != TerminalCompletionStatus::Failed
+            && qg_mode != QUALITY_GATE_MODE_OFF
+        {
             tracing::info!(
                 terminal_id = %event.terminal_id,
-                "Terminal checkpoint detected. Triggering Quality Gate..."
+                status = ?event.status,
+                quality_gate_mode = %qg_mode,
+                "Git commit detected — triggering quality gate (100% coverage)"
             );
             return self.handle_checkpoint_quality_gate(event).await;
         }

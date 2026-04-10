@@ -172,6 +172,7 @@ mod orchestrator_tests {
             api_key: "sk-test-123".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
         assert!(config.validate().is_ok());
@@ -181,6 +182,7 @@ mod orchestrator_tests {
             api_key: String::new(),
             base_url: "https://api.openai.com/v1".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
         assert!(config.validate().is_err());
@@ -190,6 +192,7 @@ mod orchestrator_tests {
             api_key: "sk-test-123".to_string(),
             base_url: String::new(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
         assert!(config.validate().is_err());
@@ -199,6 +202,7 @@ mod orchestrator_tests {
             api_key: "sk-test-123".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
             model: String::new(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
         assert!(config.validate().is_err());
@@ -394,6 +398,7 @@ mod orchestrator_tests {
             base_url: mock_server.uri(),
             api_key: "test-key".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -433,6 +438,7 @@ mod orchestrator_tests {
             base_url: mock_server.uri(),
             api_key: "invalid-key".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -466,6 +472,7 @@ mod orchestrator_tests {
             base_url: mock_server.uri(),
             api_key: "test-key".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -778,6 +785,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "test-key".to_string(),
             model: "gpt-4o".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -884,7 +892,8 @@ mod orchestrator_tests {
         let mut agent = OrchestratorAgent::with_llm_client(
             OrchestratorConfig {
                 api_key: "test-key".to_string(),
-                ..Default::default()
+                quality_gate_mode: "off".to_string(),
+            ..Default::default()
             },
             workflow.id.clone(),
             message_bus.clone(),
@@ -1042,6 +1051,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -1155,6 +1165,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -1280,6 +1291,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -1454,6 +1466,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -1524,6 +1537,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -1593,6 +1607,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -1678,6 +1693,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -1798,6 +1814,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -1846,6 +1863,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -1943,6 +1961,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -2037,6 +2056,7 @@ mod orchestrator_tests {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -2235,7 +2255,7 @@ mod orchestrator_tests {
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
@@ -2327,7 +2347,7 @@ next_action: handoff",
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
@@ -2413,7 +2433,7 @@ next_action: handoff",
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
@@ -2515,7 +2535,7 @@ next_action: handoff",
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
@@ -2591,7 +2611,7 @@ next_action: handoff",
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
@@ -2678,7 +2698,7 @@ next_action: handoff",
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
@@ -2763,7 +2783,7 @@ next_action: handoff",
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
@@ -2838,7 +2858,7 @@ reviewed_terminal: {}",
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
@@ -2898,6 +2918,7 @@ next_action: handoff";
             base_url: mock_server.uri(),
             api_key: "sk-test".to_string(),
             model: "gpt-4".to_string(),
+            quality_gate_mode: "off".to_string(),
             ..Default::default()
         };
 
@@ -3014,7 +3035,7 @@ next_action: handoff";
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
@@ -3103,7 +3124,7 @@ next_action: handoff",
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
@@ -3249,7 +3270,7 @@ next_action: handoff",
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
@@ -3362,7 +3383,7 @@ next_action: handoff",
             system_prompt: String::new(),
             auto_merge_on_completion: true,
             fallback_providers: Vec::new(),
-            quality_gate_mode: "shadow".to_string(),
+            quality_gate_mode: "off".to_string(),
         };
 
         let message_bus = Arc::new(MessageBus::new(100));
