@@ -89,7 +89,7 @@ impl QualityProvider for FrontendProvider {
                         RuleType::Bug,
                         Severity::Major,
                         AnalyzerSource::EsLint,
-                        &format!("ESLint could not run: {}", e),
+                        format!("ESLint could not run: {}", e),
                     ));
                 }
             }
@@ -126,7 +126,7 @@ impl QualityProvider for FrontendProvider {
                                 RuleType::Bug,
                                 Severity::Critical,
                                 AnalyzerSource::TypeScript,
-                                &format!("TypeScript check could not run (pnpm check and npx tsc --noEmit both failed): {}", e2),
+                                format!("TypeScript check could not run (pnpm check and npx tsc --noEmit both failed): {}", e2),
                             ));
                         }
                     }
