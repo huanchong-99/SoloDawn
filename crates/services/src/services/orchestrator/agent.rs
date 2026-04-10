@@ -1192,13 +1192,30 @@ impl OrchestratorAgent {
         if event.status != TerminalCompletionStatus::Failed
             && qg_mode != QUALITY_GATE_MODE_OFF
         {
-            tracing::info!(
-                terminal_id = %event.terminal_id,
-                status = ?event.status,
-                quality_gate_mode = %qg_mode,
-                "Git commit detected — triggering quality gate (100% coverage)"
-            );
-            return self.handle_checkpoint_quality_gate(event).await;
+            // Only trigger quality gate if terminal is still active (not yet completed).
+            // - working: first commit from terminal, needs quality check
+            // - quality_pending: already in quality flow (dedup will handle)
+            // - failed: quality gate previously rejected, terminal submitted fix — MUST re-check
+            // - completed: quality gate already passed, this is a re-entry from result
+            //   promotion — SKIP and fall through to normal completion flow
+            let is_active = db::models::Terminal::find_by_id(&self.db.pool, &event.terminal_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|t| t.status.as_str() != TERMINAL_STATUS_COMPLETED)
+                .unwrap_or(true);
+
+            if is_active {
+                tracing::info!(
+                    terminal_id = %event.terminal_id,
+                    status = ?event.status,
+                    quality_gate_mode = %qg_mode,
+                    "Git commit detected — triggering quality gate (100% coverage)"
+                );
+                return self.handle_checkpoint_quality_gate(event).await;
+            }
+            // Terminal already completed — quality gate already passed.
+            // Fall through to normal completion flow below.
         }
 
         tracing::info!(
