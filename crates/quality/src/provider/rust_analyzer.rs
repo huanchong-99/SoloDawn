@@ -225,14 +225,22 @@ impl QualityProvider for RustProvider {
             let output = run_command(project_root, "cargo", &["check", "--workspace", "--message-format=json"]).await;
             match output {
                 Ok(out) => {
-                    let errors = out.stderr.lines().filter(|l| l.contains("error")).count() as i64;
-                    report.metrics.insert(MetricKey::CargoCheckErrors, MeasureValue::Int(errors));
-                    if errors > 0 {
-                        report.success = false;
+                    // G16-005: Detect non-Rust projects (no Cargo.toml) to avoid
+                    // false positives from "error: could not find Cargo.toml".
+                    if !out._success && out.stderr.contains("could not find") && out.stderr.contains("Cargo.toml") {
+                        debug!("cargo check: not a Rust project (no Cargo.toml), skipping");
+                        report.metrics.insert(MetricKey::CargoCheckErrors, MeasureValue::Int(-1));
+                    } else {
+                        let errors = out.stderr.lines().filter(|l| l.contains("error[")).count() as i64;
+                        report.metrics.insert(MetricKey::CargoCheckErrors, MeasureValue::Int(errors));
+                        if errors > 0 {
+                            report.success = false;
+                        }
                     }
                 }
                 Err(e) => {
-                    warn!("cargo check failed: {}", e);
+                    warn!("cargo check failed to execute: {}", e);
+                    report.metrics.insert(MetricKey::CargoCheckErrors, MeasureValue::Int(-1));
                     report.success = false;
                     report.error = Some(format!("cargo check failed: {}", e));
                 }
@@ -250,13 +258,21 @@ impl QualityProvider for RustProvider {
             .await;
             match output {
                 Ok(out) => {
-                    let (issues, warnings, errors) = Self::parse_clippy_output(&out.stdout);
-                    report.metrics.insert(MetricKey::ClippyWarnings, MeasureValue::Int(warnings));
-                    report.metrics.insert(MetricKey::ClippyErrors, MeasureValue::Int(errors));
-                    all_issues.extend(issues);
+                    if !out._success && out.stderr.contains("could not find") && out.stderr.contains("Cargo.toml") {
+                        debug!("cargo clippy: not a Rust project, skipping");
+                        report.metrics.insert(MetricKey::ClippyWarnings, MeasureValue::Int(-1));
+                        report.metrics.insert(MetricKey::ClippyErrors, MeasureValue::Int(-1));
+                    } else {
+                        let (issues, warnings, errors) = Self::parse_clippy_output(&out.stdout);
+                        report.metrics.insert(MetricKey::ClippyWarnings, MeasureValue::Int(warnings));
+                        report.metrics.insert(MetricKey::ClippyErrors, MeasureValue::Int(errors));
+                        all_issues.extend(issues);
+                    }
                 }
                 Err(e) => {
-                    warn!("cargo clippy failed: {}", e);
+                    warn!("cargo clippy failed to execute: {}", e);
+                    report.metrics.insert(MetricKey::ClippyWarnings, MeasureValue::Int(-1));
+                    report.metrics.insert(MetricKey::ClippyErrors, MeasureValue::Int(-1));
                 }
             }
         }
@@ -267,12 +283,18 @@ impl QualityProvider for RustProvider {
             let output = run_command(project_root, "cargo", &["fmt", "--check"]).await;
             match output {
                 Ok(out) => {
-                    let (issues, violations) = Self::parse_fmt_output(&out.stdout);
-                    report.metrics.insert(MetricKey::FmtViolations, MeasureValue::Int(violations));
-                    all_issues.extend(issues);
+                    if !out._success && out.stderr.contains("could not find") && out.stderr.contains("Cargo.toml") {
+                        debug!("cargo fmt: not a Rust project, skipping");
+                        report.metrics.insert(MetricKey::FmtViolations, MeasureValue::Int(-1));
+                    } else {
+                        let (issues, violations) = Self::parse_fmt_output(&out.stdout);
+                        report.metrics.insert(MetricKey::FmtViolations, MeasureValue::Int(violations));
+                        all_issues.extend(issues);
+                    }
                 }
                 Err(e) => {
-                    warn!("cargo fmt --check failed: {}", e);
+                    warn!("cargo fmt --check failed to execute: {}", e);
+                    report.metrics.insert(MetricKey::FmtViolations, MeasureValue::Int(-1));
                 }
             }
         }
@@ -283,12 +305,17 @@ impl QualityProvider for RustProvider {
             let output = run_command(project_root, "cargo", &["test", "--workspace", "--no-fail-fast"]).await;
             match output {
                 Ok(out) => {
-                    let (issues, failures) = Self::parse_test_output(&out.stdout);
-                    report.metrics.insert(MetricKey::RustTestFailures, MeasureValue::Int(failures));
-                    all_issues.extend(issues);
+                    if !out._success && out.stderr.contains("could not find") && out.stderr.contains("Cargo.toml") {
+                        debug!("cargo test: not a Rust project, skipping");
+                        report.metrics.insert(MetricKey::RustTestFailures, MeasureValue::Int(-1));
+                    } else {
+                        let (issues, failures) = Self::parse_test_output(&out.stdout);
+                        report.metrics.insert(MetricKey::RustTestFailures, MeasureValue::Int(failures));
+                        all_issues.extend(issues);
+                    }
                 }
                 Err(e) => {
-                    warn!("cargo test failed: {}", e);
+                    warn!("cargo test failed to execute: {}", e);
                     report.metrics.insert(MetricKey::RustTestFailures, MeasureValue::Int(-1));
                 }
             }

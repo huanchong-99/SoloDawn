@@ -1691,34 +1691,69 @@ impl OrchestratorAgent {
                 ("skipped", 0i32, 0i32, 0i32, true, None, None)
             }
 
-            // Resolve the project working directory for quality analysis
-            let working_dir = match db::models::Workflow::find_by_id(&db.pool, &workflow_id).await {
-                Ok(Some(wf)) => {
-                    match db::models::project::Project::find_by_id(&db.pool, wf.project_id).await {
-                        Ok(Some(proj)) => {
-                            match &proj.default_agent_working_dir {
-                                Some(path) if !path.trim().is_empty() => Some(PathBuf::from(path)),
-                                _ => {
-                                    // Fall back to first project repo
-                                    db::models::project_repo::ProjectRepo::find_repos_for_project(
-                                        &db.pool,
-                                        proj.id,
-                                    )
-                                    .await
-                                    .ok()
-                                    .and_then(|repos| {
-                                        repos.into_iter()
-                                            .map(|r| r.path.to_string_lossy().into_owned())
-                                            .find(|p| !p.trim().is_empty())
-                                            .map(PathBuf::from)
-                                    })
+            // G16-004: Resolve quality gate working directory to the WORKTREE
+            // where the terminal actually works, not the original repo path.
+            // This matches the merge flow (trigger_merge, ~line 5197) which uses
+            // WorktreeManager::get_worktree_base_dir().join(&task_branch).
+            let working_dir = {
+                // Step 1: Try to resolve worktree from task branch (preferred)
+                let worktree_dir = match db::models::WorkflowTask::find_by_id(&db.pool, &task_id).await {
+                    Ok(Some(task)) => {
+                        let managed = crate::services::worktree_manager::WorktreeManager
+                            ::get_worktree_base_dir()
+                            .join(&task.branch);
+                        if managed.exists() {
+                            Some(managed)
+                        } else {
+                            // Managed worktree doesn't exist — will fall back to
+                            // project repo path below (no-worktree mode)
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+
+                // Step 2: Worktree found → use it; otherwise fall back to project repo
+                match worktree_dir {
+                    Some(wd) => {
+                        tracing::info!(
+                            task_id = %task_id,
+                            worktree = %wd.display(),
+                            "Quality gate using worktree directory"
+                        );
+                        Some(wd)
+                    }
+                    None => {
+                        // No-worktree mode or worktree not yet created — fall back to project repo
+                        match db::models::Workflow::find_by_id(&db.pool, &workflow_id).await {
+                            Ok(Some(wf)) => {
+                                match db::models::project::Project::find_by_id(&db.pool, wf.project_id).await {
+                                    Ok(Some(proj)) => {
+                                        match &proj.default_agent_working_dir {
+                                            Some(path) if !path.trim().is_empty() => Some(PathBuf::from(path)),
+                                            _ => {
+                                                db::models::project_repo::ProjectRepo::find_repos_for_project(
+                                                    &db.pool,
+                                                    proj.id,
+                                                )
+                                                .await
+                                                .ok()
+                                                .and_then(|repos| {
+                                                    repos.into_iter()
+                                                        .map(|r| r.path.to_string_lossy().into_owned())
+                                                        .find(|p| !p.trim().is_empty())
+                                                        .map(PathBuf::from)
+                                                })
+                                            }
+                                        }
+                                    }
+                                    _ => None,
                                 }
                             }
+                            _ => None,
                         }
-                        _ => None,
                     }
                 }
-                _ => None,
             };
 
             // G31-003: wrap engine run in timeout.

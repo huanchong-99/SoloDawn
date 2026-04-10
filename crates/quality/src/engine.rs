@@ -3,7 +3,7 @@
 //! 编排 Provider → 收集报告 → 求值 → 决策
 //! 这是质量门的顶层入口
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -182,8 +182,31 @@ impl QualityEngine {
             all_metrics.extend(provider_report.metrics.clone());
         }
 
-        // 条件求值
-        let eval_results = ConditionEvaluator::evaluate_all(&gate.conditions, &all_metrics);
+        // G16-005: Only evaluate conditions whose metric is supported by at least
+        // one active provider. This prevents cross-stack false positives (e.g.,
+        // CargoCheckErrors blocking a pure TypeScript project).
+        let supported: HashSet<MetricKey> = self.providers.iter()
+            .flat_map(|p| p.supported_metrics())
+            .collect();
+
+        let applicable_conditions: Vec<_> = gate.conditions.iter()
+            .filter(|c| supported.contains(&c.metric))
+            .cloned()
+            .collect();
+
+        if applicable_conditions.len() < gate.conditions.len() {
+            let skipped: Vec<_> = gate.conditions.iter()
+                .filter(|c| !supported.contains(&c.metric))
+                .map(|c| format!("{:?}", c.metric))
+                .collect();
+            info!(
+                "Skipping {} gate conditions with no active provider: [{}]",
+                skipped.len(),
+                skipped.join(", ")
+            );
+        }
+
+        let eval_results = ConditionEvaluator::evaluate_all(&applicable_conditions, &all_metrics);
 
         // 生成质量门决策
         let decision = gate.evaluate(&eval_results);
