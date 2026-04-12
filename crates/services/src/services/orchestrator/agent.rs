@@ -1937,16 +1937,31 @@ impl OrchestratorAgent {
             state.pending_quality_checks.remove(&event.terminal_id);
         }
 
-        let promote_status = if event.mode == QUALITY_GATE_MODE_ENFORCE && !event.passed {
-            // Enforce mode with failure: send fix instructions directly to terminal PTY stdin.
-            // G31-001: use publish_terminal_input (targeted) instead of publish_workflow_event
-            // (broadcast) so the message reaches the correct PTY process.
+        // G32-001: Distinguish two kinds of enforce-mode gate failure:
+        //   - real issues (blocking_issues>0 or total_issues>0): terminal must retry
+        //   - metric-collection failure (all counts zero): tooling couldn't run
+        //     (e.g. npm install not executed) — fail-closed should not punish the
+        //     terminal for tooling gaps.
+        let is_metric_collection_failure = event.mode == QUALITY_GATE_MODE_ENFORCE
+            && !event.passed
+            && event.blocking_issues == 0
+            && event.total_issues == 0;
+
+        // G32-001: enforce + real issues — send fix instructions and leave the
+        // terminal working for a retry. The previous behavior ("send fix AND mark
+        // Failed") created a race where subsequent fix-up commits were rejected by
+        // out-of-order protection.
+        if event.mode == QUALITY_GATE_MODE_ENFORCE
+            && !event.passed
+            && !is_metric_collection_failure
+        {
             if let Some(fix_instructions) = &event.fix_instructions {
                 tracing::warn!(
                     terminal_id = %event.terminal_id,
-                    "Quality gate enforce mode: terminal blocked, sending fix instructions to PTY"
+                    blocking_issues = event.blocking_issues,
+                    total_issues = event.total_issues,
+                    "Quality gate enforce mode: real issues found, sending fix instructions; terminal remains working for retry"
                 );
-                // Resolve the PTY session ID for the terminal.
                 let session_id_opt = db::models::Terminal::find_by_id(
                     &self.db.pool,
                     &event.terminal_id,
@@ -1982,40 +1997,50 @@ impl OrchestratorAgent {
                     );
                 }
             }
-            TerminalCompletionStatus::Failed
-        } else {
-            // Shadow/warn modes or enforce mode with pass: promote to completed
-            if event.mode == QUALITY_GATE_MODE_SHADOW {
-                tracing::info!(
-                    terminal_id = %event.terminal_id,
-                    "Quality gate shadow mode: promoting to completed (result logged only)"
-                );
-            } else if event.gate_status == QUALITY_GATE_STATUS_SKIPPED {
-                tracing::warn!(
-                    terminal_id = %event.terminal_id,
-                    mode = %event.mode,
-                    "Quality gate was skipped (engine failure/timeout) — promoting terminal but quality was NOT verified"
-                );
-            } else if !event.passed {
-                tracing::warn!(
-                    terminal_id = %event.terminal_id,
-                    gate_status = %event.gate_status,
-                    blocking_issues = event.blocking_issues,
-                    "Quality gate warn mode: issues found but proceeding"
-                );
-            }
-            TerminalCompletionStatus::Completed
-        };
+            // Leave terminal in its current working/waiting state; the next commit
+            // will re-trigger the gate. PTY exit is handled by the normal
+            // terminal-lifecycle path.
+            return Ok(());
+        }
 
+        // All remaining paths promote the terminal to Completed (with appropriate
+        // logging): pass, shadow/warn modes, metric-collection failure, skipped gate.
+        if is_metric_collection_failure {
+            tracing::warn!(
+                terminal_id = %event.terminal_id,
+                gate_status = %event.gate_status,
+                "Quality gate enforce mode: gate failed with no reported issues \
+                 (metric-collection failure — e.g. dependencies not installed). \
+                 Promoting terminal to completed; quality was NOT verified for this commit."
+            );
+        } else if event.mode == QUALITY_GATE_MODE_SHADOW {
+            tracing::info!(
+                terminal_id = %event.terminal_id,
+                "Quality gate shadow mode: promoting to completed (result logged only)"
+            );
+        } else if event.gate_status == QUALITY_GATE_STATUS_SKIPPED {
+            tracing::warn!(
+                terminal_id = %event.terminal_id,
+                mode = %event.mode,
+                "Quality gate was skipped (engine failure/timeout) — promoting terminal but quality was NOT verified"
+            );
+        } else if !event.passed {
+            tracing::warn!(
+                terminal_id = %event.terminal_id,
+                gate_status = %event.gate_status,
+                blocking_issues = event.blocking_issues,
+                "Quality gate warn mode: issues found but proceeding"
+            );
+        }
         // G31-005: Re-enter the completion pipeline, but skip the quiet window check.
         // The quality gate evaluation already took 10-300 seconds; the terminal has been
-        // quiescent for at least that long.  Re-running the quiet-window check would
+        // quiescent for at least that long. Re-running the quiet-window check would
         // incorrectly delay completion again.
         let completion_event = TerminalCompletionEvent {
             terminal_id: event.terminal_id,
             task_id: event.task_id,
             workflow_id: event.workflow_id,
-            status: promote_status,
+            status: TerminalCompletionStatus::Completed,
             commit_hash: event.commit_hash,
             commit_message: None,
             metadata: None,
