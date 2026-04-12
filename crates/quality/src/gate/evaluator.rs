@@ -47,6 +47,21 @@ impl ConditionEvaluator {
             }
         };
 
+        // G33-001: Sentinel MeasureValue::Int(-1) means "metric was not collected"
+        // (tool couldn't run, dependencies missing, command failed silently, etc.).
+        // Previously `-1 GT 0` evaluated to false and silently passed the gate.
+        // Treat -1 as Unknown and fail-closed — the gate CANNOT verify quality.
+        if let MeasureValue::Int(-1) = measure {
+            return EvaluationResult::error_with_message(
+                condition.metric,
+                Some(measure.clone()),
+                format!(
+                    "Metric {} unavailable (-1 sentinel) — tool did not run, quality cannot be verified",
+                    condition.metric
+                ),
+            );
+        }
+
         // 解析阈值为可比较值
         let threshold = match Self::parse_threshold(condition) {
             Ok(t) => t,
@@ -173,6 +188,17 @@ mod tests {
         let result = ConditionEvaluator::evaluate(&condition, None);
         assert_eq!(result.level, Level::Error);
         assert!(result.message.is_some());
+    }
+
+    #[test]
+    fn test_evaluate_minus_one_is_unknown() {
+        // G33-001: -1 means the metric was not collected; gate must fail-closed,
+        // not silently pass via `-1 GT 0 = false`.
+        let condition = Condition::new(MetricKey::TscErrors, Operator::GreaterThan, "0");
+        let measure = MeasureValue::Int(-1);
+        let result = ConditionEvaluator::evaluate(&condition, Some(&measure));
+        assert_eq!(result.level, Level::Error);
+        assert!(result.message.unwrap().to_lowercase().contains("unavailable"));
     }
 
     #[test]

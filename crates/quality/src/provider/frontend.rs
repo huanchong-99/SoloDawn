@@ -75,19 +75,42 @@ impl QualityProvider for FrontendProvider {
             debug!("Running pnpm lint...");
             let output = run_frontend_command(&frontend_dir, &["lint"]).await;
             match output {
-                Ok(out) => {
-                    let (errors, warnings, issues) = parse_eslint_output(&out.stdout);
-                    report.metrics.insert(MetricKey::EslintErrors, MeasureValue::Int(errors));
-                    report.metrics.insert(MetricKey::EslintWarnings, MeasureValue::Int(warnings));
-                    all_issues.extend(issues);
-                }
+                Ok(out) => match classify_outcome(&out, ESLINT_ERROR_PATTERNS) {
+                    ToolOutcome::Usable => {
+                        let (errors, warnings, issues) = parse_eslint_output(&out.stdout);
+                        report
+                            .metrics
+                            .insert(MetricKey::EslintErrors, MeasureValue::Int(errors));
+                        report
+                            .metrics
+                            .insert(MetricKey::EslintWarnings, MeasureValue::Int(warnings));
+                        all_issues.extend(issues);
+                    }
+                    ToolOutcome::Unavailable => {
+                        warn!(
+                            "pnpm lint failed to run (exit!=0, no ESLint output pattern). stderr head: {}",
+                            stderr_head(&out.stderr)
+                        );
+                        report
+                            .metrics
+                            .insert(MetricKey::EslintErrors, MeasureValue::Int(-1));
+                        all_issues.push(unavailable_issue(
+                            "eslint::unavailable",
+                            AnalyzerSource::EsLint,
+                            "ESLint did not run (exit code non-zero, no ESLint summary in output)",
+                            &out.stderr,
+                        ));
+                    }
+                },
                 Err(e) => {
-                    warn!("pnpm lint failed: {}", e);
-                    report.metrics.insert(MetricKey::EslintErrors, MeasureValue::Int(-1));
+                    warn!("pnpm lint failed to spawn: {}", e);
+                    report
+                        .metrics
+                        .insert(MetricKey::EslintErrors, MeasureValue::Int(-1));
                     all_issues.push(QualityIssue::new(
                         "eslint::unavailable",
                         RuleType::Bug,
-                        Severity::Major,
+                        Severity::Critical,
                         AnalyzerSource::EsLint,
                         format!("ESLint could not run: {}", e),
                     ));
@@ -98,37 +121,70 @@ impl QualityProvider for FrontendProvider {
         // 2. TypeScript type-check — try pnpm check first, fall back to npx tsc --noEmit
         if self.enable_check {
             debug!("Running TypeScript check in {}...", tsc_check_dir.display());
+            let mut tsc_settled = false;
             let output = run_frontend_command(&tsc_check_dir, &["check"]).await;
-            match output {
-                Ok(out) => {
-                    let combined = format!("{}\n{}", out.stdout, out._stderr);
+            if let Ok(out) = &output {
+                if matches!(classify_outcome(out, TSC_ERROR_PATTERNS), ToolOutcome::Usable) {
+                    let combined = format!("{}\n{}", out.stdout, out.stderr);
                     let (errors, issues) = parse_tsc_output(&combined);
-                    report.metrics.insert(MetricKey::TscErrors, MeasureValue::Int(errors));
+                    report
+                        .metrics
+                        .insert(MetricKey::TscErrors, MeasureValue::Int(errors));
                     all_issues.extend(issues);
+                    tsc_settled = true;
                 }
-                Err(e) => {
-                    // Fallback: pnpm check failed (pnpm not installed, no "check" script, etc.)
-                    // Try npx tsc --noEmit directly — works for any TS project with tsconfig.json
+            }
+
+            if !tsc_settled {
+                // `pnpm check` either spawn-failed or ran but produced no TSC output.
+                // Try `npx tsc --noEmit` directly — works for any TS project with tsconfig.json.
+                if let Err(ref e) = output {
                     warn!("pnpm check failed: {}, falling back to npx tsc --noEmit", e);
-                    let tsc_output = run_command(&tsc_check_dir, "npx", &["tsc", "--noEmit"]).await;
-                    match tsc_output {
-                        Ok(out) => {
-                            let combined = format!("{}\n{}", out.stdout, out._stderr);
+                } else {
+                    warn!("pnpm check produced no tsc output, falling back to npx tsc --noEmit");
+                }
+                let tsc_output = run_command(&tsc_check_dir, "npx", &["tsc", "--noEmit"]).await;
+                match tsc_output {
+                    Ok(out) => match classify_outcome(&out, TSC_ERROR_PATTERNS) {
+                        ToolOutcome::Usable => {
+                            let combined = format!("{}\n{}", out.stdout, out.stderr);
                             let (errors, issues) = parse_tsc_output(&combined);
-                            report.metrics.insert(MetricKey::TscErrors, MeasureValue::Int(errors));
+                            report
+                                .metrics
+                                .insert(MetricKey::TscErrors, MeasureValue::Int(errors));
                             all_issues.extend(issues);
                         }
-                        Err(e2) => {
-                            warn!("npx tsc --noEmit also failed: {}", e2);
-                            report.metrics.insert(MetricKey::TscErrors, MeasureValue::Int(-1));
-                            all_issues.push(QualityIssue::new(
+                        ToolOutcome::Unavailable => {
+                            warn!(
+                                "npx tsc --noEmit did not run (exit!=0, no 'error TS' output). stderr head: {}",
+                                stderr_head(&out.stderr)
+                            );
+                            report
+                                .metrics
+                                .insert(MetricKey::TscErrors, MeasureValue::Int(-1));
+                            all_issues.push(unavailable_issue(
                                 "tsc::unavailable",
-                                RuleType::Bug,
-                                Severity::Critical,
                                 AnalyzerSource::TypeScript,
-                                format!("TypeScript check could not run (pnpm check and npx tsc --noEmit both failed): {}", e2),
+                                "TypeScript check did not run (npx tsc exit code non-zero, no 'error TS' in output)",
+                                &out.stderr,
                             ));
                         }
+                    },
+                    Err(e2) => {
+                        warn!("npx tsc --noEmit also failed to spawn: {}", e2);
+                        report
+                            .metrics
+                            .insert(MetricKey::TscErrors, MeasureValue::Int(-1));
+                        all_issues.push(QualityIssue::new(
+                            "tsc::unavailable",
+                            RuleType::Bug,
+                            Severity::Critical,
+                            AnalyzerSource::TypeScript,
+                            format!(
+                                "TypeScript check could not run (pnpm check and npx tsc --noEmit both failed): {}",
+                                e2
+                            ),
+                        ));
                     }
                 }
             }
@@ -139,14 +195,42 @@ impl QualityProvider for FrontendProvider {
             debug!("Running pnpm test:run...");
             let output = run_frontend_command(&frontend_dir, &["test:run"]).await;
             match output {
-                Ok(out) => {
-                    let (failures, issues) = parse_vitest_output(&out.stdout);
-                    report.metrics.insert(MetricKey::FrontendTestFailures, MeasureValue::Int(failures));
-                    all_issues.extend(issues);
-                }
+                Ok(out) => match classify_outcome(&out, VITEST_ERROR_PATTERNS) {
+                    ToolOutcome::Usable => {
+                        let (failures, issues) = parse_vitest_output(&out.stdout);
+                        report
+                            .metrics
+                            .insert(MetricKey::FrontendTestFailures, MeasureValue::Int(failures));
+                        all_issues.extend(issues);
+                    }
+                    ToolOutcome::Unavailable => {
+                        warn!(
+                            "pnpm test:run did not run (exit!=0, no Vitest output). stderr head: {}",
+                            stderr_head(&out.stderr)
+                        );
+                        report
+                            .metrics
+                            .insert(MetricKey::FrontendTestFailures, MeasureValue::Int(-1));
+                        all_issues.push(unavailable_issue(
+                            "vitest::unavailable",
+                            AnalyzerSource::Vitest,
+                            "Vitest did not run (exit code non-zero, no Vitest output pattern)",
+                            &out.stderr,
+                        ));
+                    }
+                },
                 Err(e) => {
-                    warn!("pnpm test:run failed: {}", e);
-                    report.metrics.insert(MetricKey::FrontendTestFailures, MeasureValue::Int(-1));
+                    warn!("pnpm test:run failed to spawn: {}", e);
+                    report
+                        .metrics
+                        .insert(MetricKey::FrontendTestFailures, MeasureValue::Int(-1));
+                    all_issues.push(QualityIssue::new(
+                        "vitest::unavailable",
+                        RuleType::Bug,
+                        Severity::Critical,
+                        AnalyzerSource::Vitest,
+                        format!("Vitest could not run: {}", e),
+                    ));
                 }
             }
         }
@@ -156,6 +240,68 @@ impl QualityProvider for FrontendProvider {
 
         Ok(report)
     }
+}
+
+/// G33-001: outcome classification for a subprocess that exited non-zero.
+///
+/// `Usable` = safe to parse the output (either the tool ran successfully, or it
+/// failed *because* it reported quality issues — both cases leave the tool's
+/// diagnostic strings in stdout/stderr).
+/// `Unavailable` = the tool did not actually run (script missing, binary not
+/// found, dependencies missing). The -1 sentinel is emitted and a Critical
+/// QualityIssue is recorded so the gate fails closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolOutcome {
+    Usable,
+    Unavailable,
+}
+
+// Tool-specific "I actually ran" signatures. Kept narrow to avoid false-positive
+// Usable classification on unrelated exit-code-nonzero output (e.g. shell errors
+// that happen to contain the word "error").
+const ESLINT_ERROR_PATTERNS: &[&str] = &["problems"];
+const TSC_ERROR_PATTERNS: &[&str] = &["error TS"];
+const VITEST_ERROR_PATTERNS: &[&str] = &["FAIL ", "Tests:"];
+
+fn classify_outcome(out: &CommandOutput, error_patterns: &[&str]) -> ToolOutcome {
+    if out.success {
+        return ToolOutcome::Usable;
+    }
+    let combined_lower = format!("{}\n{}", out.stdout, out.stderr);
+    if error_patterns
+        .iter()
+        .any(|p| combined_lower.contains(p))
+    {
+        ToolOutcome::Usable
+    } else {
+        ToolOutcome::Unavailable
+    }
+}
+
+fn unavailable_issue(
+    rule_id: &str,
+    source: AnalyzerSource,
+    reason: &str,
+    stderr: &str,
+) -> QualityIssue {
+    QualityIssue::new(
+        rule_id,
+        RuleType::Bug,
+        Severity::Critical,
+        source,
+        format!("{}. stderr: {}", reason, stderr_head(stderr)),
+    )
+}
+
+fn stderr_head(stderr: &str) -> String {
+    stderr
+        .lines()
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" | ")
+        .chars()
+        .take(300)
+        .collect()
 }
 
 /// 解析 ESLint 输出
@@ -284,8 +430,8 @@ fn extract_number_before(text: &str, keyword: &str) -> Option<i64> {
 /// 命令输出
 struct CommandOutput {
     stdout: String,
-    _stderr: String,
-    _success: bool,
+    stderr: String,
+    success: bool,
 }
 
 /// 执行任意命令
@@ -298,12 +444,121 @@ async fn run_command(cwd: &Path, cmd: &str, args: &[&str]) -> anyhow::Result<Com
 
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        _stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        _success: output.status.success(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        success: output.status.success(),
     })
 }
 
 /// 执行前端 pnpm 命令（convenience wrapper）
 async fn run_frontend_command(cwd: &Path, args: &[&str]) -> anyhow::Result<CommandOutput> {
     run_command(cwd, "pnpm", args).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fake_output(stdout: &str, stderr: &str, success: bool) -> CommandOutput {
+        CommandOutput {
+            stdout: stdout.to_string(),
+            stderr: stderr.to_string(),
+            success,
+        }
+    }
+
+    #[test]
+    fn classify_success_is_usable() {
+        let out = fake_output("0 problems", "", true);
+        assert_eq!(
+            classify_outcome(&out, ESLINT_ERROR_PATTERNS),
+            ToolOutcome::Usable
+        );
+    }
+
+    #[test]
+    fn classify_tsc_failure_with_errors_is_usable() {
+        // tsc exits non-zero when it reports type errors — but output is valid
+        let out = fake_output(
+            "src/foo.ts(12,5): error TS2322: Type mismatch.",
+            "",
+            false,
+        );
+        assert_eq!(
+            classify_outcome(&out, TSC_ERROR_PATTERNS),
+            ToolOutcome::Usable
+        );
+    }
+
+    #[test]
+    fn classify_pnpm_missing_script_is_unavailable() {
+        // pnpm reports ERR_PNPM_NO_SCRIPT with empty stdout — must NOT be mistaken for "0 errors"
+        let out = fake_output(
+            "",
+            "ERR_PNPM_NO_SCRIPT  Missing script: check",
+            false,
+        );
+        assert_eq!(
+            classify_outcome(&out, TSC_ERROR_PATTERNS),
+            ToolOutcome::Unavailable
+        );
+    }
+
+    #[test]
+    fn classify_eslint_failure_with_problems_summary_is_usable() {
+        let out = fake_output(
+            "/src/foo.ts\n  1:1  error  Unexpected var  no-var\n\n1 problems (1 errors, 0 warnings)",
+            "",
+            false,
+        );
+        assert_eq!(
+            classify_outcome(&out, ESLINT_ERROR_PATTERNS),
+            ToolOutcome::Usable
+        );
+    }
+
+    #[test]
+    fn classify_vitest_fail_line_is_usable() {
+        let out = fake_output("FAIL  src/foo.test.ts > works", "", false);
+        assert_eq!(
+            classify_outcome(&out, VITEST_ERROR_PATTERNS),
+            ToolOutcome::Usable
+        );
+    }
+
+    #[test]
+    fn classify_silent_failure_is_unavailable() {
+        // Command exits non-zero but produces no diagnostic output at all
+        let out = fake_output("", "", false);
+        assert_eq!(
+            classify_outcome(&out, TSC_ERROR_PATTERNS),
+            ToolOutcome::Unavailable
+        );
+        assert_eq!(
+            classify_outcome(&out, ESLINT_ERROR_PATTERNS),
+            ToolOutcome::Unavailable
+        );
+        assert_eq!(
+            classify_outcome(&out, VITEST_ERROR_PATTERNS),
+            ToolOutcome::Unavailable
+        );
+    }
+
+    #[test]
+    fn unavailable_issue_is_critical_blocking() {
+        let issue = unavailable_issue(
+            "tsc::unavailable",
+            AnalyzerSource::TypeScript,
+            "TypeScript check did not run",
+            "ERR_PNPM_NO_SCRIPT",
+        );
+        assert_eq!(issue.severity, Severity::Critical);
+        assert!(issue.is_blocking());
+    }
+
+    #[test]
+    fn stderr_head_truncates_long_output() {
+        let long = "a".repeat(1000);
+        let head = stderr_head(&long);
+        assert!(head.len() <= 300);
+    }
 }
