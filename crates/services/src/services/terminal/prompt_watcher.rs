@@ -1330,7 +1330,7 @@ next_action: handoff\n"
 
         if state.auto_confirm && !state.should_debounce() && has_claude_custom_api_key_context {
             let decision = PromptDecision::LLMDecision {
-                response: "\u{1b}[A\n".to_string(),
+                response: "\u{1b}[A\r".to_string(),
                 reasoning: "Auto-select 'Yes' for custom API key prompt via ArrowUp + Enter"
                     .to_string(),
                 target_index: Some(0),
@@ -1358,7 +1358,7 @@ next_action: handoff\n"
                     .publish_terminal_input(
                         &response_terminal_id,
                         &response_session_id,
-                        "\u{1b}[A\n",
+                        "\u{1b}[A\r",
                         Some(decision),
                     )
                     .await;
@@ -1746,7 +1746,7 @@ next_action: handoff\n"
                 && is_claude_custom_api_key_prompt(&normalized_line)
             {
                 let decision = PromptDecision::LLMDecision {
-                    response: "\u{1b}[A\n".to_string(),
+                    response: "\u{1b}[A\r".to_string(),
                     reasoning: "Auto-select 'Yes' for custom API key prompt via ArrowUp + Enter"
                         .to_string(),
                     target_index: Some(0),
@@ -1782,7 +1782,7 @@ next_action: handoff\n"
                     .publish_terminal_input(
                         &response_terminal_id,
                         &response_session_id,
-                        "\u{1b}[A\n",
+                        "\u{1b}[A\r",
                         Some(decision),
                     )
                     .await;
@@ -2246,7 +2246,7 @@ next_action: handoff\n"
                 {
                     if has_claude_custom_api_key_context {
                         let decision = PromptDecision::LLMDecision {
-                            response: "\u{1b}[A\n".to_string(),
+                            response: "\u{1b}[A\r".to_string(),
                             reasoning:
                                 "Auto-select 'Yes' for custom API key prompt via ArrowUp + Enter"
                                     .to_string(),
@@ -2271,7 +2271,7 @@ next_action: handoff\n"
                             .publish_terminal_input(
                                 &response_terminal_id,
                                 &response_session_id,
-                                "\u{1b}[A\n",
+                                "\u{1b}[A\r",
                                 Some(decision),
                             )
                             .await;
@@ -4039,7 +4039,7 @@ WARNING: Claude Code running in Bypass Permissions mode
             } => {
                 assert_eq!(terminal_id, "term-1");
                 assert_eq!(session_id, "session-1");
-                assert_eq!(input, "\u{1b}[A\n");
+                assert_eq!(input, "\u{1b}[A\r");
                 assert!(matches!(
                     decision,
                     Some(crate::services::orchestrator::types::PromptDecision::LLMDecision { .. })
@@ -4091,7 +4091,7 @@ WARNING: Claude Code running in Bypass Permissions mode
             } => {
                 assert_eq!(terminal_id, "term-1");
                 assert_eq!(session_id, "session-1");
-                assert_eq!(input, "\u{1b}[A\n");
+                assert_eq!(input, "\u{1b}[A\r");
                 assert!(matches!(
                     decision,
                     Some(crate::services::orchestrator::types::PromptDecision::LLMDecision { .. })
