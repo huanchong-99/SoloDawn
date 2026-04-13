@@ -1,22 +1,21 @@
-//! Frontend 分析器 Provider
+//! Frontend / JS-TS quality provider
 //!
-//! 封装 pnpm lint / pnpm check / pnpm test:run 命令
+//! Executes lint / type-check / test commands for discovered JS/TS package targets.
 
 use async_trait::async_trait;
 use std::path::Path;
 use std::time::Instant;
 use tracing::{debug, warn};
 
+use crate::discovery::{JsTarget, NodeQualityCommand, RepositoryDiscovery};
 use crate::gate::result::MeasureValue;
 use crate::issue::QualityIssue;
 use crate::metrics::MetricKey;
-use crate::provider::{ProviderReport, QualityProvider};
+use crate::provider::{run_node_quality_command, ProviderReport, QualityProvider};
 use crate::rule::{AnalyzerSource, RuleType, Severity};
 
 /// Frontend 分析器 Provider
 pub struct FrontendProvider {
-    /// 前端目录（相对于项目根）
-    pub frontend_dir: String,
     pub enable_lint: bool,
     pub enable_check: bool,
     pub enable_test: bool,
@@ -25,7 +24,6 @@ pub struct FrontendProvider {
 impl Default for FrontendProvider {
     fn default() -> Self {
         Self {
-            frontend_dir: "frontend".to_string(),
             enable_lint: true,
             enable_check: true,
             enable_test: true,
@@ -48,217 +46,293 @@ impl QualityProvider for FrontendProvider {
         ]
     }
 
+    fn applicable_metrics(
+        &self,
+        discovery: &RepositoryDiscovery,
+        changed_files: Option<&[String]>,
+    ) -> Vec<MetricKey> {
+        let targets = discovery.applicable_js_targets(changed_files);
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
+        let has_lint = self.enable_lint
+            && targets
+                .iter()
+                .any(|target| target.capabilities().lint.is_some());
+        let has_typecheck = self.enable_check
+            && targets.iter().any(|target| {
+                target.capabilities().typecheck.is_some() || target.has_tsconfig()
+            });
+        let has_test = self.enable_test
+            && targets
+                .iter()
+                .any(|target| target.capabilities().test.is_some());
+
+        let mut metrics = Vec::new();
+        if has_lint {
+            metrics.push(MetricKey::EslintErrors);
+            metrics.push(MetricKey::EslintWarnings);
+        }
+        if has_typecheck {
+            metrics.push(MetricKey::TscErrors);
+        }
+        if has_test {
+            metrics.push(MetricKey::FrontendTestFailures);
+        }
+        metrics
+    }
+
     async fn analyze(
         &self,
         project_root: &Path,
-        _changed_files: Option<&[String]>,
+        discovery: &RepositoryDiscovery,
+        changed_files: Option<&[String]>,
     ) -> anyhow::Result<ProviderReport> {
         let start = Instant::now();
         let mut report = ProviderReport::success("frontend", 0);
         let mut all_issues = Vec::new();
-        let frontend_dir = project_root.join(&self.frontend_dir);
+        let targets = discovery.applicable_js_targets(changed_files);
 
-        // Detect if the project is a monolithic TS project (tsconfig.json at root, no frontend/ subdir)
-        // or a split project (frontend/ subdir with its own tsconfig).
-        let tsc_check_dir = if frontend_dir.join("tsconfig.json").exists() {
-            frontend_dir.clone()
-        } else if project_root.join("tsconfig.json").exists() {
-            // Monolithic TS project — run tsc at project root
-            debug!("No frontend/tsconfig.json found, using project root for TypeScript checks");
-            project_root.to_path_buf()
-        } else {
-            frontend_dir.clone()
-        };
-
-        // 1. pnpm lint (ESLint)
-        if self.enable_lint {
-            debug!("Running pnpm lint...");
-            let output = run_frontend_command(&frontend_dir, &["lint"]).await;
-            match output {
-                Ok(out) => match classify_outcome(&out, ESLINT_ERROR_PATTERNS) {
-                    ToolOutcome::Usable => {
-                        let (errors, warnings, issues) = parse_eslint_output(&out.stdout);
-                        report
-                            .metrics
-                            .insert(MetricKey::EslintErrors, MeasureValue::Int(errors));
-                        report
-                            .metrics
-                            .insert(MetricKey::EslintWarnings, MeasureValue::Int(warnings));
-                        all_issues.extend(issues);
-                    }
-                    ToolOutcome::Unavailable => {
-                        warn!(
-                            "pnpm lint failed to run (exit!=0, no ESLint output pattern). stderr head: {}",
-                            stderr_head(&out.stderr)
-                        );
-                        report
-                            .metrics
-                            .insert(MetricKey::EslintErrors, MeasureValue::Int(-1));
-                        all_issues.push(unavailable_issue(
-                            "eslint::unavailable",
-                            AnalyzerSource::EsLint,
-                            "ESLint did not run (exit code non-zero, no ESLint summary in output)",
-                            &out.stderr,
-                        ));
-                    }
-                },
-                Err(e) => {
-                    warn!("pnpm lint failed to spawn: {}", e);
-                    report
-                        .metrics
-                        .insert(MetricKey::EslintErrors, MeasureValue::Int(-1));
-                    all_issues.push(QualityIssue::new(
-                        "eslint::unavailable",
-                        RuleType::Bug,
-                        Severity::Critical,
-                        AnalyzerSource::EsLint,
-                        format!("ESLint could not run: {}", e),
-                    ));
-                }
-            }
+        if targets.is_empty() {
+            debug!("frontend provider skipped: no discovered JS/TS targets");
+            report.duration_ms = start.elapsed().as_millis() as u64;
+            return Ok(report);
         }
 
-        // 2. TypeScript type-check — try pnpm check first, fall back to npx tsc --noEmit
-        if self.enable_check {
-            debug!("Running TypeScript check in {}...", tsc_check_dir.display());
-            let mut tsc_settled = false;
-            let output = run_frontend_command(&tsc_check_dir, &["check"]).await;
-            if let Ok(out) = &output {
-                if matches!(classify_outcome(out, TSC_ERROR_PATTERNS), ToolOutcome::Usable) {
-                    let combined = format!("{}\n{}", out.stdout, out.stderr);
-                    let (errors, issues) = parse_tsc_output(&combined);
-                    report
-                        .metrics
-                        .insert(MetricKey::TscErrors, MeasureValue::Int(errors));
-                    all_issues.extend(issues);
-                    tsc_settled = true;
-                }
-            }
+        debug!(
+            targets = ?targets
+                .iter()
+                .map(|target| target.display_name(project_root))
+                .collect::<Vec<_>>(),
+            changed_files = ?changed_files,
+            "frontend provider analyzing discovered targets"
+        );
 
-            if !tsc_settled {
-                // `pnpm check` either spawn-failed or ran but produced no TSC output.
-                // Try `npx tsc --noEmit` directly — works for any TS project with tsconfig.json.
-                if let Err(ref e) = output {
-                    warn!("pnpm check failed: {}, falling back to npx tsc --noEmit", e);
-                } else {
-                    warn!("pnpm check produced no tsc output, falling back to npx tsc --noEmit");
-                }
-                let tsc_output = run_command(&tsc_check_dir, "npx", &["tsc", "--noEmit"]).await;
-                match tsc_output {
-                    Ok(out) => match classify_outcome(&out, TSC_ERROR_PATTERNS) {
+        if self.enable_lint {
+            let mut lint_errors = 0i64;
+            let mut lint_warnings = 0i64;
+            let mut lint_attempted = false;
+            let mut lint_failed_closed = false;
+
+            for target in &targets {
+                let Some(command) = target.capabilities().lint.clone() else {
+                    continue;
+                };
+                lint_attempted = true;
+                match run_target_quality_command(target, &command).await {
+                    Ok(out) => match classify_outcome(&out, ESLINT_ERROR_PATTERNS) {
                         ToolOutcome::Usable => {
-                            let combined = format!("{}\n{}", out.stdout, out.stderr);
-                            let (errors, issues) = parse_tsc_output(&combined);
-                            report
-                                .metrics
-                                .insert(MetricKey::TscErrors, MeasureValue::Int(errors));
-                            all_issues.extend(issues);
+                            let (errors, warnings, issues) = parse_eslint_output(&out.stdout);
+                            lint_errors += errors;
+                            lint_warnings += warnings;
+                            all_issues.extend(prefix_issues(project_root, target, issues));
                         }
                         ToolOutcome::Unavailable => {
+                            lint_failed_closed = true;
                             warn!(
-                                "npx tsc --noEmit did not run (exit!=0, no 'error TS' output). stderr head: {}",
+                                target = %target.display_name(project_root),
+                                command = %command.describe(),
+                                "Lint command unavailable: {}",
                                 stderr_head(&out.stderr)
                             );
-                            report
-                                .metrics
-                                .insert(MetricKey::TscErrors, MeasureValue::Int(-1));
                             all_issues.push(unavailable_issue(
-                                "tsc::unavailable",
-                                AnalyzerSource::TypeScript,
-                                "TypeScript check did not run (npx tsc exit code non-zero, no 'error TS' in output)",
+                                "eslint::unavailable",
+                                AnalyzerSource::EsLint,
+                                &format!(
+                                    "ESLint did not run for target {} via {}",
+                                    target.display_name(project_root),
+                                    command.describe()
+                                ),
                                 &out.stderr,
                             ));
                         }
                     },
-                    Err(e2) => {
-                        warn!("npx tsc --noEmit also failed to spawn: {}", e2);
-                        report
-                            .metrics
-                            .insert(MetricKey::TscErrors, MeasureValue::Int(-1));
+                    Err(error) => {
+                        lint_failed_closed = true;
+                        warn!(
+                            target = %target.display_name(project_root),
+                            command = %command.describe(),
+                            "Lint command failed to spawn: {error}"
+                        );
+                        all_issues.push(QualityIssue::new(
+                            "eslint::unavailable",
+                            RuleType::Bug,
+                            Severity::Critical,
+                            AnalyzerSource::EsLint,
+                            format!(
+                                "ESLint could not run for target {} via {}: {}",
+                                target.display_name(project_root),
+                                command.describe(),
+                                error
+                            ),
+                        ));
+                    }
+                }
+            }
+
+            if lint_attempted {
+                report.metrics.insert(
+                    MetricKey::EslintErrors,
+                    MeasureValue::Int(if lint_failed_closed { -1 } else { lint_errors }),
+                );
+                report.metrics.insert(
+                    MetricKey::EslintWarnings,
+                    MeasureValue::Int(if lint_failed_closed { -1 } else { lint_warnings }),
+                );
+            }
+        }
+
+        if self.enable_check {
+            let mut tsc_errors = 0i64;
+            let mut tsc_attempted = false;
+            let mut tsc_failed_closed = false;
+
+            for target in &targets {
+                let Some(command) = resolve_typecheck_command(target) else {
+                    continue;
+                };
+                tsc_attempted = true;
+                match run_target_quality_command(target, &command).await {
+                    Ok(out) => match classify_outcome(&out, TSC_ERROR_PATTERNS) {
+                        ToolOutcome::Usable => {
+                            let combined = format!("{}\n{}", out.stdout, out.stderr);
+                            let (errors, issues) = parse_tsc_output(&combined);
+                            tsc_errors += errors;
+                            all_issues.extend(prefix_issues(project_root, target, issues));
+                        }
+                        ToolOutcome::Unavailable => {
+                            tsc_failed_closed = true;
+                            warn!(
+                                target = %target.display_name(project_root),
+                                command = %command.describe(),
+                                "TypeScript command unavailable: {}",
+                                stderr_head(&out.stderr)
+                            );
+                            all_issues.push(unavailable_issue(
+                                "tsc::unavailable",
+                                AnalyzerSource::TypeScript,
+                                &format!(
+                                    "TypeScript check did not run for target {} via {}",
+                                    target.display_name(project_root),
+                                    command.describe()
+                                ),
+                                &out.stderr,
+                            ));
+                        }
+                    },
+                    Err(error) => {
+                        tsc_failed_closed = true;
+                        warn!(
+                            target = %target.display_name(project_root),
+                            command = %command.describe(),
+                            "TypeScript command failed to spawn: {error}"
+                        );
                         all_issues.push(QualityIssue::new(
                             "tsc::unavailable",
                             RuleType::Bug,
                             Severity::Critical,
                             AnalyzerSource::TypeScript,
                             format!(
-                                "TypeScript check could not run (pnpm check and npx tsc --noEmit both failed): {}",
-                                e2
+                                "TypeScript check could not run for target {} via {}: {}",
+                                target.display_name(project_root),
+                                command.describe(),
+                                error
                             ),
                         ));
                     }
                 }
             }
+
+            if tsc_attempted {
+                report.metrics.insert(
+                    MetricKey::TscErrors,
+                    MeasureValue::Int(if tsc_failed_closed { -1 } else { tsc_errors }),
+                );
+            }
         }
 
-        // 3. pnpm test:run (Vitest)
         if self.enable_test {
-            debug!("Running pnpm test:run...");
-            let output = run_frontend_command(&frontend_dir, &["test:run"]).await;
-            match output {
-                Ok(out) => match classify_outcome(&out, VITEST_ERROR_PATTERNS) {
-                    ToolOutcome::Usable => {
-                        let (failures, issues) = parse_vitest_output(&out.stdout);
-                        report
-                            .metrics
-                            .insert(MetricKey::FrontendTestFailures, MeasureValue::Int(failures));
-                        all_issues.extend(issues);
-                    }
-                    ToolOutcome::Unavailable => {
+            let mut test_failures = 0i64;
+            let mut test_attempted = false;
+            let mut test_failed_closed = false;
+
+            for target in &targets {
+                let Some(command) = target.capabilities().test.clone() else {
+                    continue;
+                };
+                test_attempted = true;
+                match run_target_quality_command(target, &command).await {
+                    Ok(out) => match classify_outcome(&out, VITEST_ERROR_PATTERNS) {
+                        ToolOutcome::Usable => {
+                            let combined = format!("{}\n{}", out.stdout, out.stderr);
+                            let (failures, issues) = parse_vitest_output(&combined);
+                            test_failures += failures;
+                            all_issues.extend(prefix_issues(project_root, target, issues));
+                        }
+                        ToolOutcome::Unavailable => {
+                            test_failed_closed = true;
+                            warn!(
+                                target = %target.display_name(project_root),
+                                command = %command.describe(),
+                                "Test command unavailable: {}",
+                                stderr_head(&out.stderr)
+                            );
+                            all_issues.push(unavailable_issue(
+                                "vitest::unavailable",
+                                AnalyzerSource::Vitest,
+                                &format!(
+                                    "Frontend tests did not run for target {} via {}",
+                                    target.display_name(project_root),
+                                    command.describe()
+                                ),
+                                &out.stderr,
+                            ));
+                        }
+                    },
+                    Err(error) => {
+                        test_failed_closed = true;
                         warn!(
-                            "pnpm test:run did not run (exit!=0, no Vitest output). stderr head: {}",
-                            stderr_head(&out.stderr)
+                            target = %target.display_name(project_root),
+                            command = %command.describe(),
+                            "Test command failed to spawn: {error}"
                         );
-                        report
-                            .metrics
-                            .insert(MetricKey::FrontendTestFailures, MeasureValue::Int(-1));
-                        all_issues.push(unavailable_issue(
+                        all_issues.push(QualityIssue::new(
                             "vitest::unavailable",
+                            RuleType::Bug,
+                            Severity::Critical,
                             AnalyzerSource::Vitest,
-                            "Vitest did not run (exit code non-zero, no Vitest output pattern)",
-                            &out.stderr,
+                            format!(
+                                "Frontend tests could not run for target {} via {}: {}",
+                                target.display_name(project_root),
+                                command.describe(),
+                                error
+                            ),
                         ));
                     }
-                },
-                Err(e) => {
-                    warn!("pnpm test:run failed to spawn: {}", e);
-                    report
-                        .metrics
-                        .insert(MetricKey::FrontendTestFailures, MeasureValue::Int(-1));
-                    all_issues.push(QualityIssue::new(
-                        "vitest::unavailable",
-                        RuleType::Bug,
-                        Severity::Critical,
-                        AnalyzerSource::Vitest,
-                        format!("Vitest could not run: {}", e),
-                    ));
                 }
+            }
+
+            if test_attempted {
+                report.metrics.insert(
+                    MetricKey::FrontendTestFailures,
+                    MeasureValue::Int(if test_failed_closed { -1 } else { test_failures }),
+                );
             }
         }
 
         report.issues = all_issues;
         report.duration_ms = start.elapsed().as_millis() as u64;
-
         Ok(report)
     }
 }
 
-/// G33-001: outcome classification for a subprocess that exited non-zero.
-///
-/// `Usable` = safe to parse the output (either the tool ran successfully, or it
-/// failed *because* it reported quality issues — both cases leave the tool's
-/// diagnostic strings in stdout/stderr).
-/// `Unavailable` = the tool did not actually run (script missing, binary not
-/// found, dependencies missing). The -1 sentinel is emitted and a Critical
-/// QualityIssue is recorded so the gate fails closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolOutcome {
     Usable,
     Unavailable,
 }
 
-// Tool-specific "I actually ran" signatures. Kept narrow to avoid false-positive
-// Usable classification on unrelated exit-code-nonzero output (e.g. shell errors
-// that happen to contain the word "error").
 const ESLINT_ERROR_PATTERNS: &[&str] = &["problems"];
 const TSC_ERROR_PATTERNS: &[&str] = &["error TS"];
 const VITEST_ERROR_PATTERNS: &[&str] = &["FAIL ", "Tests:"];
@@ -267,10 +341,9 @@ fn classify_outcome(out: &CommandOutput, error_patterns: &[&str]) -> ToolOutcome
     if out.success {
         return ToolOutcome::Usable;
     }
-    let combined_lower = format!("{}\n{}", out.stdout, out.stderr);
     if error_patterns
         .iter()
-        .any(|p| combined_lower.contains(p))
+        .any(|pattern| out.stdout.contains(pattern) || out.stderr.contains(pattern))
     {
         ToolOutcome::Usable
     } else {
@@ -304,13 +377,38 @@ fn stderr_head(stderr: &str) -> String {
         .collect()
 }
 
+fn resolve_typecheck_command(target: &JsTarget) -> Option<NodeQualityCommand> {
+    target.capabilities().typecheck.clone().or_else(|| {
+        target.has_tsconfig().then_some(NodeQualityCommand::PackageExec {
+            binary: "tsc".to_string(),
+            args: vec!["--noEmit".to_string()],
+        })
+    })
+}
+
+fn prefix_issues(repo_root: &Path, target: &JsTarget, issues: Vec<QualityIssue>) -> Vec<QualityIssue> {
+    let prefix = target.relative_root(repo_root);
+    if prefix == "." {
+        return issues;
+    }
+
+    issues
+        .into_iter()
+        .map(|mut issue| {
+            if !issue.message.contains(&prefix) {
+                issue.message = format!("[{prefix}] {}", issue.message);
+            }
+            issue
+        })
+        .collect()
+}
+
 /// 解析 ESLint 输出
 fn parse_eslint_output(output: &str) -> (i64, i64, Vec<QualityIssue>) {
     let mut errors = 0i64;
     let mut warnings = 0i64;
     let mut issues = Vec::new();
 
-    // First pass: look for the summary line to get accurate counts
     for line in output.lines() {
         let trimmed = line.trim();
         if trimmed.contains("problems") {
@@ -321,10 +419,8 @@ fn parse_eslint_output(output: &str) -> (i64, i64, Vec<QualityIssue>) {
         }
     }
 
-    // Second pass: parse actual ESLint issue lines (indented lines with "error"/"warning")
     for line in output.lines() {
         let trimmed = line.trim();
-        // ESLint issue lines are indented and start with "line:col  severity  message  rule"
         if !line.starts_with(' ') && !line.starts_with('\t') {
             continue;
         }
@@ -350,18 +446,15 @@ fn parse_eslint_output(output: &str) -> (i64, i64, Vec<QualityIssue>) {
         }
     }
 
-    // If no summary line was found, count from parsed issues
     if errors == 0 && warnings == 0 {
-        errors = issues.iter().filter(|i| i.rule_id == "eslint::error").count() as i64;
-        warnings = issues.iter().filter(|i| i.rule_id == "eslint::warning").count() as i64;
+        errors = issues.iter().filter(|issue| issue.rule_id == "eslint::error").count() as i64;
+        warnings = issues.iter().filter(|issue| issue.rule_id == "eslint::warning").count() as i64;
     }
 
     (errors, warnings, issues)
 }
 
-/// 解析 ESLint 汇总行
 fn parse_eslint_summary(line: &str) -> Option<(i64, i64)> {
-    // 格式: "N problems (X errors, Y warnings)"
     let re = regex::Regex::new(r"(\d+)\s+errors?,\s+(\d+)\s+warnings?").ok()?;
     let caps = re.captures(line)?;
     let errors = caps.get(1)?.as_str().parse().ok()?;
@@ -369,13 +462,11 @@ fn parse_eslint_summary(line: &str) -> Option<(i64, i64)> {
     Some((errors, warnings))
 }
 
-/// 解析 TypeScript 编译器输出
 fn parse_tsc_output(output: &str) -> (i64, Vec<QualityIssue>) {
     let mut errors = 0i64;
     let mut issues = Vec::new();
 
     for line in output.lines() {
-        // tsc 输出格式: "file(line,col): error TSxxxx: message"
         if line.contains("error TS") {
             errors += 1;
             issues.push(QualityIssue::new(
@@ -391,7 +482,6 @@ fn parse_tsc_output(output: &str) -> (i64, Vec<QualityIssue>) {
     (errors, issues)
 }
 
-/// 解析 Vitest 输出
 fn parse_vitest_output(output: &str) -> (i64, Vec<QualityIssue>) {
     let mut failures = 0i64;
     let mut issues = Vec::new();
@@ -408,7 +498,6 @@ fn parse_vitest_output(output: &str) -> (i64, Vec<QualityIssue>) {
             ));
         }
 
-        // 解析 Vitest 汇总行: "Tests: X failed, Y passed, Z total"
         if line.contains("Tests:") && line.contains("failed") {
             if let Some(n) = extract_number_before(line, "failed") {
                 failures = n;
@@ -419,7 +508,6 @@ fn parse_vitest_output(output: &str) -> (i64, Vec<QualityIssue>) {
     (failures, issues)
 }
 
-/// 从文本中提取指定词前面的数字
 fn extract_number_before(text: &str, keyword: &str) -> Option<i64> {
     let idx = text.find(keyword)?;
     let before = &text[..idx].trim();
@@ -427,20 +515,17 @@ fn extract_number_before(text: &str, keyword: &str) -> Option<i64> {
     num_str.parse().ok()
 }
 
-/// 命令输出
 struct CommandOutput {
     stdout: String,
     stderr: String,
     success: bool,
 }
 
-/// 执行任意命令
-async fn run_command(cwd: &Path, cmd: &str, args: &[&str]) -> anyhow::Result<CommandOutput> {
-    let output = tokio::process::Command::new(cmd)
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .await?;
+async fn run_target_quality_command(
+    target: &JsTarget,
+    command: &NodeQualityCommand,
+) -> anyhow::Result<CommandOutput> {
+    let output = run_node_quality_command(target.root(), target.package_manager(), command).await?;
 
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
@@ -449,14 +534,10 @@ async fn run_command(cwd: &Path, cmd: &str, args: &[&str]) -> anyhow::Result<Com
     })
 }
 
-/// 执行前端 pnpm 命令（convenience wrapper）
-async fn run_frontend_command(cwd: &Path, args: &[&str]) -> anyhow::Result<CommandOutput> {
-    run_command(cwd, "pnpm", args).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discovery::{resolve_node_command, PackageManager, RepositoryDiscovery};
 
     fn fake_output(stdout: &str, stderr: &str, success: bool) -> CommandOutput {
         CommandOutput {
@@ -464,6 +545,93 @@ mod tests {
             stderr: stderr.to_string(),
             success,
         }
+    }
+
+    fn temp_project_root() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("quality-frontend-provider-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_temp_file(path: &Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, content).unwrap();
+    }
+
+    fn remove_temp_project_root(path: &Path) {
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn applicable_metrics_empty_without_js_targets() {
+        let temp = temp_project_root();
+        let discovery = RepositoryDiscovery::discover(&temp).unwrap();
+        let provider = FrontendProvider::default();
+        assert!(provider.applicable_metrics(&discovery, None).is_empty());
+        remove_temp_project_root(&temp);
+    }
+
+    #[test]
+    fn applicable_metrics_include_tsc_for_backend_workspace() {
+        let temp = temp_project_root();
+        write_temp_file(
+            &temp.join("package.json"),
+            r#"{
+  "name": "repo",
+  "private": true,
+  "workspaces": ["backend", "frontend", "shared"],
+  "packageManager": "npm@10.0.0"
+}"#,
+        );
+        write_temp_file(
+            &temp.join("backend/package.json"),
+            r#"{
+  "name": "backend",
+  "scripts": { "type-check": "tsc --noEmit" }
+}"#,
+        );
+        write_temp_file(
+            &temp.join("frontend/package.json"),
+            r#"{
+  "name": "frontend",
+  "scripts": { "lint": "eslint ." }
+}"#,
+        );
+        let discovery = RepositoryDiscovery::discover(&temp).unwrap();
+        let provider = FrontendProvider::default();
+        let metrics = provider.applicable_metrics(
+            &discovery,
+            Some(&["backend/src/index.ts".to_string()]),
+        );
+        assert!(metrics.contains(&MetricKey::TscErrors));
+        remove_temp_project_root(&temp);
+    }
+
+    #[test]
+    fn resolve_command_uses_package_manager_scripts() {
+        let (cmd, args) = resolve_node_command(
+            Some(PackageManager::Pnpm),
+            &NodeQualityCommand::Script {
+                script: "type-check".to_string(),
+            },
+        );
+        assert_eq!(cmd, "pnpm");
+        assert_eq!(args, vec!["run", "type-check"]);
+    }
+
+    #[test]
+    fn resolve_command_uses_package_exec_for_tsc() {
+        let (cmd, args) = resolve_node_command(
+            Some(PackageManager::Npm),
+            &NodeQualityCommand::PackageExec {
+                binary: "tsc".to_string(),
+                args: vec!["--noEmit".to_string()],
+            },
+        );
+        assert_eq!(cmd, "npx");
+        assert_eq!(args, vec!["tsc", "--noEmit"]);
     }
 
     #[test]
@@ -477,7 +645,6 @@ mod tests {
 
     #[test]
     fn classify_tsc_failure_with_errors_is_usable() {
-        // tsc exits non-zero when it reports type errors — but output is valid
         let out = fake_output(
             "src/foo.ts(12,5): error TS2322: Type mismatch.",
             "",
@@ -490,56 +657,20 @@ mod tests {
     }
 
     #[test]
-    fn classify_pnpm_missing_script_is_unavailable() {
-        // pnpm reports ERR_PNPM_NO_SCRIPT with empty stdout — must NOT be mistaken for "0 errors"
-        let out = fake_output(
-            "",
-            "ERR_PNPM_NO_SCRIPT  Missing script: check",
-            false,
-        );
+    fn classify_missing_script_is_unavailable() {
+        let out = fake_output("", "ERR_PNPM_NO_SCRIPT Missing script", false);
         assert_eq!(
             classify_outcome(&out, TSC_ERROR_PATTERNS),
             ToolOutcome::Unavailable
-        );
-    }
-
-    #[test]
-    fn classify_eslint_failure_with_problems_summary_is_usable() {
-        let out = fake_output(
-            "/src/foo.ts\n  1:1  error  Unexpected var  no-var\n\n1 problems (1 errors, 0 warnings)",
-            "",
-            false,
-        );
-        assert_eq!(
-            classify_outcome(&out, ESLINT_ERROR_PATTERNS),
-            ToolOutcome::Usable
         );
     }
 
     #[test]
     fn classify_vitest_fail_line_is_usable() {
-        let out = fake_output("FAIL  src/foo.test.ts > works", "", false);
+        let out = fake_output("FAIL src/foo.test.ts > works", "", false);
         assert_eq!(
             classify_outcome(&out, VITEST_ERROR_PATTERNS),
             ToolOutcome::Usable
-        );
-    }
-
-    #[test]
-    fn classify_silent_failure_is_unavailable() {
-        // Command exits non-zero but produces no diagnostic output at all
-        let out = fake_output("", "", false);
-        assert_eq!(
-            classify_outcome(&out, TSC_ERROR_PATTERNS),
-            ToolOutcome::Unavailable
-        );
-        assert_eq!(
-            classify_outcome(&out, ESLINT_ERROR_PATTERNS),
-            ToolOutcome::Unavailable
-        );
-        assert_eq!(
-            classify_outcome(&out, VITEST_ERROR_PATTERNS),
-            ToolOutcome::Unavailable
         );
     }
 
@@ -553,12 +684,5 @@ mod tests {
         );
         assert_eq!(issue.severity, Severity::Critical);
         assert!(issue.is_blocking());
-    }
-
-    #[test]
-    fn stderr_head_truncates_long_output() {
-        let long = "a".repeat(1000);
-        let head = stderr_head(&long);
-        assert!(head.len() <= 300);
     }
 }

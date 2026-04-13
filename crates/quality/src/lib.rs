@@ -24,6 +24,7 @@
 
 pub mod analysis;
 pub mod config;
+pub mod discovery;
 pub mod engine;
 pub mod gate;
 pub mod issue;

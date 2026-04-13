@@ -5370,6 +5370,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures",
+ "glob",
  "proc-macro2",
  "regex",
  "reqwest",

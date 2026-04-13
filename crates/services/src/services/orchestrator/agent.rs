@@ -1759,9 +1759,54 @@ impl OrchestratorAgent {
             // G31-003: wrap engine run in timeout.
             let engine_future = async {
                 if let Some(ref wd) = working_dir {
+                    let changed_files = match commit_hash.as_deref() {
+                        Some(hash) => {
+                            let base = format!("{hash}~1");
+                            match TerminalGateChangedFiles::from_collection_result(
+                                Some(hash),
+                                collect_changed_files_for_quality_gate(wd, &base, hash).await,
+                            ) {
+                                Ok(changed_files) => changed_files,
+                                Err(error) => {
+                                    tracing::warn!(
+                                        terminal_id = %terminal_id,
+                                        commit_hash = %hash,
+                                        error = %error,
+                                        "Terminal quality gate changed-files collection failed"
+                                    );
+                                    return skipped_outcome(&run_id, &error.to_string(), &run_id);
+                                }
+                            }
+                        }
+                        None => TerminalGateChangedFiles::Unscoped,
+                    };
+
+                    tracing::info!(
+                        terminal_id = %terminal_id,
+                        commit_hash = ?commit_hash,
+                        changed_files_scope = changed_files.scope_label(),
+                        changed_files_count = changed_files.count(),
+                        "Terminal quality gate changed-files collected"
+                    );
+                    if let TerminalGateChangedFiles::Scoped(files) = &changed_files {
+                        tracing::debug!(
+                            terminal_id = %terminal_id,
+                            commit_hash = ?commit_hash,
+                            changed_files = ?files,
+                            "Terminal quality gate changed-files detail"
+                        );
+                    }
+
                     match quality::engine::QualityEngine::from_project(wd) {
                         Ok(engine) => {
-                            match engine.run(wd, quality::gate::QualityGateLevel::Terminal, None).await {
+                            match engine
+                                .run(
+                                    wd,
+                                    quality::gate::QualityGateLevel::Terminal,
+                                    changed_files.as_deref(),
+                                )
+                                .await
+                            {
                                 Ok(report) => {
                                     let status = report.overall_status();
                                     let gate_str = match status {
@@ -5734,6 +5779,76 @@ fn truncate_with_marker(s: &str, max_chars: usize) -> String {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TerminalGateChangedFiles {
+    Unscoped,
+    Scoped(Vec<String>),
+}
+
+impl TerminalGateChangedFiles {
+    fn from_collection_result(
+        commit_hash: Option<&str>,
+        result: anyhow::Result<Vec<String>>,
+    ) -> anyhow::Result<Self> {
+        match (commit_hash, result) {
+            (Some(_), Ok(files)) => Ok(Self::Scoped(files)),
+            (Some(hash), Err(error)) => Err(anyhow::anyhow!(
+                "terminal gate changed-file collection failed for commit {hash}: {error}"
+            )),
+            (None, _) => Ok(Self::Unscoped),
+        }
+    }
+
+    fn as_deref(&self) -> Option<&[String]> {
+        match self {
+            Self::Unscoped => None,
+            Self::Scoped(files) => Some(files.as_slice()),
+        }
+    }
+
+    fn scope_label(&self) -> &'static str {
+        match self {
+            Self::Unscoped => "unscoped",
+            Self::Scoped(_) => "commit",
+        }
+    }
+
+    fn count(&self) -> usize {
+        match self {
+            Self::Unscoped => 0,
+            Self::Scoped(files) => files.len(),
+        }
+    }
+}
+
+async fn collect_changed_files_for_quality_gate(
+    repo_root: &Path,
+    base_commit: &str,
+    head_commit: &str,
+) -> anyhow::Result<Vec<String>> {
+    let output = tokio::process::Command::new("git")
+        .arg("diff")
+        .arg("--name-only")
+        .arg(format!("{base_commit}..{head_commit}"))
+        .current_dir(repo_root)
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "git diff --name-only failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect())
+}
+
 /// Collect terminal completion context (log summary, diff stat, commit body)
 /// for injection into LLM completion prompts.
 async fn fetch_terminal_completion_context(
@@ -5901,17 +6016,50 @@ fn extract_handoff_notes(commit_message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, sync::Arc};
+    use std::{fs, path::{Path, PathBuf}, process::Command, sync::Arc};
 
     use chrono::Utc;
     use db::DBService;
     use sqlx::sqlite::SqlitePoolOptions;
+    use tempfile::TempDir;
     use uuid::Uuid;
 
     use super::{OrchestratorAgent, StallRecoveryTracker};
     use crate::services::orchestrator::{
         BusMessage, MessageBus, MockLLMClient, OrchestratorConfig,
     };
+
+    fn run_git(repo_path: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo_path)
+            .output()
+            .expect("git command failed to start");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn init_test_repo() -> (TempDir, PathBuf) {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let repo_path = temp_dir.path().to_path_buf();
+
+        run_git(&repo_path, &["init"]);
+        run_git(&repo_path, &["config", "user.name", "Test User"]);
+        run_git(&repo_path, &["config", "user.email", "test@example.com"]);
+
+        (temp_dir, repo_path)
+    }
+
+    fn commit_all(repo_path: &Path, message: &str) -> String {
+        run_git(repo_path, &["add", "."]);
+        run_git(repo_path, &["commit", "-m", message]);
+        run_git(repo_path, &["rev-parse", "HEAD"])
+    }
 
     fn make_task(description: Option<&str>) -> db::models::WorkflowTask {
         let now = Utc::now();
@@ -5929,6 +6077,69 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[tokio::test]
+    async fn test_terminal_quality_gate_collects_changed_files_for_commit() {
+        let (_temp_dir, repo_path) = init_test_repo();
+
+        let frontend_dir = repo_path.join("frontend").join("src");
+        fs::create_dir_all(&frontend_dir).expect("create frontend dir");
+        fs::write(frontend_dir.join("App.tsx"), "export const x = 1;\n").expect("write base app");
+        let base = commit_all(&repo_path, "base");
+
+        fs::write(frontend_dir.join("App.tsx"), "export const x = 2;\n").expect("write head app");
+        fs::write(repo_path.join("README.md"), "docs\n").expect("write readme");
+        let head = commit_all(&repo_path, "head");
+
+        let changed = super::collect_changed_files_for_quality_gate(&repo_path, &base, &head)
+            .await
+            .expect("changed files");
+
+        assert!(changed.iter().any(|p| p == "frontend/src/App.tsx"));
+        assert!(changed.iter().any(|p| p == "README.md"));
+    }
+
+    #[tokio::test]
+    async fn test_terminal_quality_gate_collects_empty_changed_files_for_empty_diff() {
+        let (_temp_dir, repo_path) = init_test_repo();
+
+        fs::write(repo_path.join("README.md"), "docs\n").expect("write readme");
+        let base = commit_all(&repo_path, "base");
+
+        let changed = super::collect_changed_files_for_quality_gate(&repo_path, &base, &base)
+            .await
+            .expect("empty changed files");
+
+        assert!(changed.is_empty());
+    }
+
+    #[test]
+    fn terminal_gate_changed_files_preserves_empty_and_error_semantics() {
+        let empty = super::TerminalGateChangedFiles::from_collection_result(Some("abc123"), Ok(vec![]))
+            .expect("empty diff should stay scoped");
+        assert!(matches!(empty, super::TerminalGateChangedFiles::Scoped(ref files) if files.is_empty()));
+        assert_eq!(empty.as_deref(), Some([].as_slice()));
+        assert_eq!(empty.scope_label(), "commit");
+        assert_eq!(empty.count(), 0);
+
+        let error = super::TerminalGateChangedFiles::from_collection_result(
+            Some("abc123"),
+            Err(anyhow::anyhow!("boom")),
+        )
+        .expect_err("collection failure should remain explicit");
+        assert!(error.to_string().contains("abc123"));
+        assert!(error.to_string().contains("boom"));
+
+        let unscoped = super::TerminalGateChangedFiles::from_collection_result(
+            None,
+            Err(anyhow::anyhow!("ignored when unscoped")),
+        )
+        .expect("missing commit hash should remain unscoped");
+        assert!(matches!(unscoped, super::TerminalGateChangedFiles::Unscoped));
+        assert_eq!(unscoped.as_deref(), None);
+        assert_eq!(unscoped.scope_label(), "unscoped");
+        assert_eq!(unscoped.count(), 0);
     }
 
     fn make_terminal(order_index: i32) -> db::models::Terminal {

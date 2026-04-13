@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::config::{QualityGateConfig, QualityGateMode};
+use crate::discovery::RepositoryDiscovery;
 use crate::gate::evaluator::ConditionEvaluator;
 use crate::gate::result::MeasureValue;
 use crate::gate::QualityGateLevel;
@@ -117,6 +118,15 @@ impl QualityEngine {
 
         info!("Starting quality gate analysis: {} (mode={:?})", level, self.config.mode);
 
+        let discovery = Arc::new(RepositoryDiscovery::discover(project_root)?);
+        info!(
+            js_targets = discovery.js_targets().len(),
+            has_rust_targets = discovery.has_rust_targets(),
+            repo_package_manager = ?discovery.repo_package_manager(),
+            repo_checks = ?discovery.repo_checks(),
+            "Repository discovery completed"
+        );
+
         // 并发运行所有启用的 providers
         let mut handles = Vec::new();
         for provider in &self.providers {
@@ -126,10 +136,11 @@ impl QualityEngine {
             let provider = Arc::clone(provider);
             let root = project_root.to_path_buf();
             let files = changed_files.map(|f| f.to_vec());
+            let discovery = Arc::clone(&discovery);
 
             handles.push(tokio::spawn(async move {
                 let files_ref = files.as_deref();
-                provider.analyze(&root, files_ref).await
+                provider.analyze(&root, &discovery, files_ref).await
             }));
         }
 
@@ -186,7 +197,7 @@ impl QualityEngine {
         // one active provider. This prevents cross-stack false positives (e.g.,
         // CargoCheckErrors blocking a pure TypeScript project).
         let supported: HashSet<MetricKey> = self.providers.iter()
-            .flat_map(|p| p.supported_metrics())
+            .flat_map(|p| p.applicable_metrics(&discovery, changed_files))
             .collect();
 
         let applicable_conditions: Vec<_> = gate.conditions.iter()

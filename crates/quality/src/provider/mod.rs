@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::discovery::{resolve_node_command, NodeQualityCommand, PackageManager, RepositoryDiscovery};
 use crate::gate::result::MeasureValue;
 use crate::issue::QualityIssue;
 use crate::metrics::MetricKey;
@@ -86,6 +87,20 @@ impl ProviderReport {
     }
 }
 
+pub async fn run_node_quality_command(
+    cwd: &Path,
+    package_manager: Option<PackageManager>,
+    command: &NodeQualityCommand,
+) -> anyhow::Result<std::process::Output> {
+    let (cmd, args) = resolve_node_command(package_manager, command);
+    tokio::process::Command::new(cmd)
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .await
+        .map_err(Into::into)
+}
+
 /// 分析器 Provider trait
 ///
 /// 每个 provider 封装一个代码分析工具（clippy、eslint、sonar 等）
@@ -110,9 +125,23 @@ pub trait QualityProvider: Send + Sync {
     async fn analyze(
         &self,
         project_root: &Path,
+        discovery: &RepositoryDiscovery,
         changed_files: Option<&[String]>,
     ) -> anyhow::Result<ProviderReport>;
 
     /// 获取 provider 支持的度量指标
     fn supported_metrics(&self) -> Vec<MetricKey>;
+
+    /// 获取当前仓库/作用域下真正适用的度量指标。
+    ///
+    /// 与 `supported_metrics` 不同，这里允许 provider 根据 discovery 结果
+    /// 将“不适用”的指标从 gate 过滤掉，避免跨技术栈误报。
+    fn applicable_metrics(
+        &self,
+        _discovery: &RepositoryDiscovery,
+        _changed_files: Option<&[String]>,
+    ) -> Vec<MetricKey> {
+        self.supported_metrics()
+    }
 }
+

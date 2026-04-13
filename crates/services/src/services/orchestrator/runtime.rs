@@ -1682,7 +1682,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_recover_running_workflows_marks_interrupted_workflows_failed() {
+    async fn test_recover_running_workflows_resumes_when_persisted_state_exists() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         let (runtime, workflow_id) = setup_runtime_with_ready_workflow().await;
 
         Workflow::update_status(&runtime.db.pool, &workflow_id, "running")
@@ -1708,7 +1710,16 @@ mod tests {
             .await
             .expect("should query recovered workflow")
             .expect("workflow should still exist");
-        assert_eq!(workflow.status, WORKFLOW_STATUS_FAILED);
+        assert_eq!(workflow.status, "running");
+
+        let running = runtime.running_workflows.lock().await;
+        assert!(
+            running.contains_key(&workflow_id),
+            "workflow should be re-registered as running after recovery"
+        );
+        drop(running);
+
+        runtime.stop_workflow(&workflow_id).await.unwrap();
     }
 
     #[tokio::test]

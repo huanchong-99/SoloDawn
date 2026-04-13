@@ -40,8 +40,7 @@ mod tests {
             .list_directory(None)
             .expect("workspace root should be browsable");
 
-        let canonical_workspace =
-            std::fs::canonicalize(workspace.path()).expect("canonical workspace");
+        let canonical_workspace = dunce::canonicalize(workspace.path()).expect("canonical workspace");
         assert_eq!(
             result.current_path,
             canonical_workspace.to_string_lossy().to_string()
@@ -71,7 +70,7 @@ mod tests {
             .list_directory(None)
             .expect("should fall back to allowed root");
 
-        let canonical_allowed = std::fs::canonicalize(allowed.path()).expect("canonical allowed");
+        let canonical_allowed = dunce::canonicalize(allowed.path()).expect("canonical allowed");
         assert_eq!(
             result.current_path,
             canonical_allowed.to_string_lossy().to_string()

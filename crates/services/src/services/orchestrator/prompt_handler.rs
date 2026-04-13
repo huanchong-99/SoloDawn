@@ -31,6 +31,141 @@ use super::{
 const AUTO_CONFIRM_CONFIDENCE_THRESHOLD: f32 = 0.85;
 
 const SPINNER_NOISE_MARKERS: [&str; 2] = ["brewing", "loading"];
+const ADVISORY_CHECKLIST_PREFIXES: [&str; 5] = ["[ ]", "[x]", "[X]", "- [ ]", "* [ ]"];
+const ENTER_CONFIRM_MARKERS: [&str; 6] = [
+    "press enter to continue",
+    "press enter to confirm",
+    "enter to continue",
+    "enter to confirm",
+    "hit enter to continue",
+    "hit enter to confirm",
+];
+const DESTRUCTIVE_WARNING_MARKERS: [&str; 7] = [
+    "permanently delete",
+    "delete the remote branch",
+    "delete remote branch",
+    "permanent",
+    "irreversible",
+    "force push",
+    "destroy",
+];
+const DANGEROUS_CONFIRMATION_OPTIONS: [&str; 9] = [
+    "yes",
+    "no",
+    "cancel",
+    "abort",
+    "continue",
+    "proceed",
+    "confirm",
+    "delete",
+    "keep",
+];
+const DANGEROUS_CONFIRMATION_QUESTION_MARKERS: [&str; 14] = [
+    "delete",
+    "remove",
+    "destroy",
+    "wipe",
+    "drop",
+    "overwrite",
+    "reset",
+    "merge",
+    "push",
+    "deploy",
+    "publish",
+    "force",
+    "permanent",
+    "irreversible",
+];
+
+fn advisory_checklist_item_count(raw_text: &str) -> usize {
+    raw_text
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| ADVISORY_CHECKLIST_PREFIXES.iter().any(|prefix| line.starts_with(prefix)))
+        .count()
+}
+
+fn normalize_confirmation_option_line(line: &str) -> String {
+    let trimmed = line.trim_start();
+    let without_select_marker = trimmed
+        .strip_prefix('>')
+        .or_else(|| trimmed.strip_prefix('❯'))
+        .or_else(|| trimmed.strip_prefix('▶'))
+        .or_else(|| trimmed.strip_prefix('→'))
+        .map(str::trim_start)
+        .or_else(|| {
+            trimmed
+                .strip_prefix('*')
+                .or_else(|| trimmed.strip_prefix('-'))
+                .map(str::trim_start)
+                .filter(|rest| {
+                    !rest.starts_with("[ ]") && !rest.starts_with("[x]") && !rest.starts_with("[X]")
+                })
+        })
+        .unwrap_or(trimmed);
+
+    without_select_marker.to_ascii_lowercase()
+}
+
+fn has_destructive_confirmation_signal(raw_text: &str) -> bool {
+    let normalized = raw_text.to_ascii_lowercase();
+    if normalized.contains("[y/n]")
+        || normalized.contains("(y/n)")
+        || normalized.contains("yes/no")
+        || normalized.contains("are you sure")
+    {
+        return true;
+    }
+
+    raw_text.lines().any(|line| {
+        let normalized_line = normalize_confirmation_option_line(line);
+
+        DANGEROUS_CONFIRMATION_OPTIONS
+            .iter()
+            .any(|option| normalized_line.starts_with(option))
+            || (normalized_line.contains('?')
+                && DANGEROUS_CONFIRMATION_QUESTION_MARKERS
+                    .iter()
+                    .any(|marker| normalized_line.contains(marker)))
+    })
+}
+
+fn has_destructive_warning_text(raw_text: &str) -> bool {
+    let normalized = raw_text.to_ascii_lowercase();
+    DESTRUCTIVE_WARNING_MARKERS
+        .iter()
+        .any(|marker| normalized.contains(marker))
+}
+
+fn has_enter_confirm_text(raw_text: &str) -> bool {
+    let normalized = raw_text.to_ascii_lowercase();
+    ENTER_CONFIRM_MARKERS
+        .iter()
+        .any(|marker| normalized.contains(marker))
+}
+
+fn should_escalate_despite_safe_checklist(prompt: &DetectedPrompt) -> bool {
+    if advisory_checklist_item_count(&prompt.raw_text) < 2 {
+        return false;
+    }
+
+    let has_destructive_warning = has_destructive_warning_text(&prompt.raw_text);
+    if !has_destructive_warning {
+        return false;
+    }
+
+    has_destructive_confirmation_signal(&prompt.raw_text)
+        || (prompt.kind == PromptKind::EnterConfirm && has_enter_confirm_text(&prompt.raw_text))
+}
+
+fn is_advisory_checklist_prompt(raw_text: &str) -> bool {
+    advisory_checklist_item_count(raw_text) >= 2 && !has_destructive_confirmation_signal(raw_text)
+}
+
+fn should_require_user_confirmation(prompt: &DetectedPrompt) -> bool {
+    (prompt.has_dangerous_keywords && !is_advisory_checklist_prompt(&prompt.raw_text))
+        || should_escalate_despite_safe_checklist(prompt)
+}
 
 // ============================================================================
 // LLM Prompt Decision Request/Response
@@ -222,12 +357,14 @@ impl PromptHandler {
             };
         }
 
-        // Rule 3: Dangerous keywords escalate to user (conservative approach)
-        if prompt.has_dangerous_keywords {
+        // Rule 3: Dangerous prompts escalate to user. Advisory checklist text is
+        // ignored unless it carries a live destructive confirmation signal.
+        if should_require_user_confirmation(prompt) {
             tracing::warn!(
                 prompt_kind = ?prompt.kind,
                 raw_text = %prompt.raw_text,
-                "Dangerous keywords detected - requiring user confirmation"
+                detector_flag = prompt.has_dangerous_keywords,
+                "Dangerous prompt detected - requiring user confirmation"
             );
             return PromptDecision::AskUser {
                 reason: format!(
@@ -236,6 +373,14 @@ impl PromptHandler {
                 ),
                 suggestions: self.get_suggestions_for_prompt(prompt),
             };
+        }
+
+        if prompt.has_dangerous_keywords {
+            tracing::debug!(
+                prompt_kind = ?prompt.kind,
+                raw_text = %prompt.raw_text,
+                "Dangerous keywords detected inside advisory checklist; skipping AskUser escalation"
+            );
         }
 
         // Rule 4: EnterConfirm with high confidence - auto-confirm
@@ -729,6 +874,127 @@ mod tests {
             }
             _ => panic!("Expected AskUser decision for dangerous prompt"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_advisory_checklist_enter_confirm_auto_confirms() {
+        let handler = create_test_handler();
+        let prompt = create_test_prompt(
+            PromptKind::EnterConfirm,
+            "Checklist:\n- [ ] Verify cleanup target\n- [ ] Confirm backup exists\n\nPress Enter to continue",
+            0.95,
+        );
+
+        let decision = handler.make_decision(&prompt, true).await;
+
+        match decision {
+            PromptDecision::AutoConfirm { response, .. } => {
+                assert_eq!(response, "\n");
+            }
+            _ => panic!("Expected AutoConfirm decision for advisory checklist EnterConfirm"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_checklist_with_destructive_yes_no_asks_user_even_without_danger_flag() {
+        let handler = create_test_handler();
+        let mut prompt = create_test_prompt(
+            PromptKind::YesNo,
+            "Checklist:\n- [ ] Verify cleanup target\n- [ ] Confirm backup exists\n\nDelete the remote branch? [y/n]",
+            0.95,
+        );
+        prompt.has_dangerous_keywords = false;
+
+        let decision = handler.make_decision(&prompt, true).await;
+
+        match decision {
+            PromptDecision::AskUser { reason, .. } => {
+                assert!(reason.contains("Dangerous"));
+            }
+            _ => panic!("Expected AskUser decision for destructive checklist YesNo prompt"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mixed_checklist_warning_and_enter_confirm_asks_user() {
+        let handler = create_test_handler();
+        let mut prompt = create_test_prompt(
+            PromptKind::EnterConfirm,
+            "Checklist:\n- [ ] Verify cleanup target\n- [ ] Confirm backup exists\n\nThis will permanently delete the remote branch.\nPress Enter to continue",
+            0.95,
+        );
+        prompt.has_dangerous_keywords = false;
+
+        let decision = handler.make_decision(&prompt, true).await;
+
+        match decision {
+            PromptDecision::AskUser { reason, .. } => {
+                assert!(reason.contains("Dangerous"));
+            }
+            _ => panic!(
+                "Expected AskUser decision for mixed checklist with dangerous enter-confirm"
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_advisory_checklist_arrow_select_does_not_escalate() {
+        let handler = create_test_handler();
+        let prompt = DetectedPrompt::arrow_select(
+            "### PRE-FLIGHT CHECKLIST\n[ ] Review merge target before push\n[ ] Verify no force push is required"
+                .to_string(),
+            0.95,
+            vec![
+                crate::services::terminal::ArrowSelectOption {
+                    index: 0,
+                    label: "Review merge target before push".to_string(),
+                    selected: true,
+                },
+                crate::services::terminal::ArrowSelectOption {
+                    index: 1,
+                    label: "Verify no force push is required".to_string(),
+                    selected: false,
+                },
+            ],
+            0,
+        );
+
+        let decision = handler.make_decision(&prompt, true).await;
+
+        assert!(
+            !matches!(decision, PromptDecision::AskUser { .. }),
+            "pure advisory checklist text should not escalate to AskUser"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mixed_checklist_arrow_select_with_delete_option_asks_user() {
+        let handler = create_test_handler();
+        let prompt = DetectedPrompt::arrow_select(
+            "### PRE-FLIGHT CHECKLIST\n[ ] Review merge target before push\n[ ] Verify no force push is required\nDelete remote branch now?\n> Yes, delete it\n  No, keep branch"
+                .to_string(),
+            0.95,
+            vec![
+                crate::services::terminal::ArrowSelectOption {
+                    index: 0,
+                    label: "Yes, delete it".to_string(),
+                    selected: true,
+                },
+                crate::services::terminal::ArrowSelectOption {
+                    index: 1,
+                    label: "No, keep branch".to_string(),
+                    selected: false,
+                },
+            ],
+            0,
+        );
+
+        let decision = handler.make_decision(&prompt, true).await;
+
+        assert!(
+            matches!(decision, PromptDecision::AskUser { .. }),
+            "mixed checklist + destructive confirmation must still escalate"
+        );
     }
 
     #[tokio::test]

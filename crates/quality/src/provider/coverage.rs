@@ -48,6 +48,7 @@ impl QualityProvider for CoverageProvider {
     async fn analyze(
         &self,
         project_root: &Path,
+        _discovery: &crate::discovery::RepositoryDiscovery,
         _changed_files: Option<&[String]>,
     ) -> anyhow::Result<ProviderReport> {
         let start = Instant::now();
