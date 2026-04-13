@@ -69,7 +69,7 @@ twox-hash = "2.1.2"
 tonic-build = "0.12"
 
 [target.'cfg(unix)'.dependencies]
-nix = "0.29"
+nix = { version = "0.29", features = ["signal"] }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winbase", "handleapi", "namedpipeapi"] }

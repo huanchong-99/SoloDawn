@@ -219,12 +219,16 @@ fn create_claude_settings(
 
     let mut env_obj = serde_json::Map::new();
 
-    // For third-party APIs with non-sk- keys (e.g., ZhipuAI), Claude Code validates
-    // ANTHROPIC_API_KEY format (requires sk- prefix) and rejects other keys.
-    // Use ANTHROPIC_AUTH_TOKEN instead — it bypasses format validation and is sent
-    // as a raw Bearer token. This is the official approach used by ZhipuAI's own
-    // coding-helper tool. Also remove ANTHROPIC_API_KEY to avoid conflicts.
-    let use_auth_token = base_url.is_some() && !api_key.starts_with("sk-");
+    // For ANY custom base_url (third-party proxy / reseller / ZhipuAI / Packycode /
+    // AnyRouter / DuckCoding), route auth via ANTHROPIC_AUTH_TOKEN. Claude Code
+    // unconditionally shows a "Detected a custom API key in your environment"
+    // confirmation TUI whenever ANTHROPIC_API_KEY is present, which blocks
+    // execution (the default selection is "No"). ANTHROPIC_AUTH_TOKEN is sent as
+    // a raw Bearer token, bypasses the sk- format validation, and does NOT trigger
+    // the confirmation prompt. The previous heuristic (only use AUTH_TOKEN for
+    // non-sk- keys) was wrong: many third-party proxies issue sk-ant-* keys for
+    // client compatibility, which still belong to a custom endpoint.
+    let use_auth_token = base_url.is_some();
 
     if use_auth_token {
         env_obj.insert(
@@ -377,12 +381,12 @@ fn apply_auto_confirm_args(cli: &CcCliType, args: &mut Vec<String>, auto_confirm
     }
 
     if cli == &CcCliType::Codex {
-        // Codex: use --full-auto for sandboxed auto-execution + -a never to skip approval
-        for flag in ["--full-auto", "-a", "never"] {
-            if !args.contains(&flag.to_string()) {
-                args.push(flag.to_string());
-            }
-        }
+        // Codex is launched in app-server (JSON-RPC) mode, which does not accept
+        // the TUI-only flags --full-auto / -a / never. Injecting them caused Codex
+        // to exit immediately with an "unknown flag" error. Approval bypass for
+        // app-server mode is already wired via the JSON-RPC approval_policy field
+        // (set to Never in build_new_conversation_params when auto_confirm), so no
+        // argv mutation is needed here.
         return;
     }
 
@@ -978,13 +982,18 @@ impl CCSwitchService {
                     args.push(settings_path.to_string_lossy().to_string());
                 }
 
-                // For non-sk- keys with custom base_url: use ANTHROPIC_AUTH_TOKEN
-                // (bypasses Claude Code's sk- format validation, same approach as
-                // ZhipuAI's official coding-helper). For sk- keys: use ANTHROPIC_API_KEY.
+                // For ANY custom base_url: route auth via ANTHROPIC_AUTH_TOKEN
+                // (raw Bearer token) to avoid Claude Code's "Detected a custom API
+                // key in your environment" TUI prompt, which unconditionally fires
+                // when ANTHROPIC_API_KEY is set and blocks execution on its default
+                // "No" selection. Also defensively unset ANTHROPIC_API_KEY so any
+                // value inherited from the parent shell cannot re-trigger the prompt.
+                // Only use ANTHROPIC_API_KEY when talking to the official endpoint.
                 if let Some(ref api_key) = api_key {
-                    if effective_base_url.is_some() && !api_key.starts_with("sk-") {
+                    if effective_base_url.is_some() {
                         env.set
                             .insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.clone());
+                        env.unset.push("ANTHROPIC_API_KEY".to_string());
                     } else {
                         env.set
                             .insert("ANTHROPIC_API_KEY".to_string(), api_key.clone());
@@ -1361,9 +1370,12 @@ mod tests {
             settings.get("primaryApiKey").is_none() || settings["primaryApiKey"].is_null(),
             "primaryApiKey should be omitted for custom base_url"
         );
-        // Custom base_url: always use ANTHROPIC_API_KEY (not AUTH_TOKEN)
-        assert_eq!(settings["env"]["ANTHROPIC_API_KEY"], "sk-ant-test");
-        assert!(settings["env"]["ANTHROPIC_AUTH_TOKEN"].is_null());
+        // Custom base_url: ALWAYS use ANTHROPIC_AUTH_TOKEN (raw Bearer token) so
+        // Claude Code does not show its "Detected a custom API key in your
+        // environment" confirmation TUI, which fires unconditionally when
+        // ANTHROPIC_API_KEY is set and defaults to "No".
+        assert_eq!(settings["env"]["ANTHROPIC_AUTH_TOKEN"], "sk-ant-test");
+        assert!(settings["env"]["ANTHROPIC_API_KEY"].is_null());
         assert_eq!(
             settings["env"]["ANTHROPIC_MODEL"],
             "claude-sonnet-4-20250514"
@@ -1373,6 +1385,119 @@ mod tests {
             settings["env"]["ANTHROPIC_BASE_URL"],
             "https://api.example.com"
         );
+    }
+
+    #[test]
+    fn test_create_claude_settings_sk_ant_proxy_key_with_custom_base_url_uses_auth_token() {
+        // Third-party proxies (Packycode, AnyRouter, DuckCoding, reseller proxies)
+        // often issue keys with the sk-ant- prefix for client compatibility.
+        // With a custom base_url, auth MUST still route via ANTHROPIC_AUTH_TOKEN
+        // to avoid Claude Code's custom-API-key confirmation TUI.
+        let dir = tempdir().expect("failed to create temp dir");
+        let claude_home = dir.path();
+        std::fs::create_dir_all(claude_home).expect("failed to create claude home");
+
+        let settings_path = create_claude_settings(
+            claude_home,
+            "sk-ant-proxy-abcdef1234567890",
+            Some("https://proxy.example.com/v1"),
+            "claude-sonnet-4-20250514",
+        )
+        .expect("create_claude_settings should succeed");
+
+        let settings: Value = serde_json::from_str(
+            &std::fs::read_to_string(settings_path).expect("failed to read settings.json"),
+        )
+        .expect("settings.json should be valid JSON");
+
+        assert_eq!(
+            settings["env"]["ANTHROPIC_AUTH_TOKEN"],
+            "sk-ant-proxy-abcdef1234567890"
+        );
+        assert!(
+            settings["env"]["ANTHROPIC_API_KEY"].is_null(),
+            "ANTHROPIC_API_KEY must not be set for custom base_url (would trigger TUI prompt)"
+        );
+        assert!(
+            settings.get("primaryApiKey").is_none() || settings["primaryApiKey"].is_null(),
+            "primaryApiKey must be omitted for custom base_url"
+        );
+    }
+
+    #[test]
+    fn test_create_claude_settings_non_sk_key_with_custom_base_url_uses_auth_token() {
+        // ZhipuAI-style keys (aa.bb.cc) with a custom base_url must use
+        // ANTHROPIC_AUTH_TOKEN (unchanged behavior).
+        let dir = tempdir().expect("failed to create temp dir");
+        let claude_home = dir.path();
+        std::fs::create_dir_all(claude_home).expect("failed to create claude home");
+
+        let settings_path = create_claude_settings(
+            claude_home,
+            "aa.bb.cc",
+            Some("https://open.bigmodel.cn/api/anthropic"),
+            "glm-4.6",
+        )
+        .expect("create_claude_settings should succeed");
+
+        let settings: Value = serde_json::from_str(
+            &std::fs::read_to_string(settings_path).expect("failed to read settings.json"),
+        )
+        .expect("settings.json should be valid JSON");
+
+        assert_eq!(settings["env"]["ANTHROPIC_AUTH_TOKEN"], "aa.bb.cc");
+        assert!(settings["env"]["ANTHROPIC_API_KEY"].is_null());
+    }
+
+    #[test]
+    fn test_create_claude_settings_official_endpoint_uses_api_key() {
+        // With NO custom base_url (official Anthropic endpoint), keep using
+        // ANTHROPIC_API_KEY and set primaryApiKey for Claude Code's internal
+        // Anthropic account system.
+        let dir = tempdir().expect("failed to create temp dir");
+        let claude_home = dir.path();
+        std::fs::create_dir_all(claude_home).expect("failed to create claude home");
+
+        let settings_path = create_claude_settings(
+            claude_home,
+            "sk-ant-official-1234567890",
+            None,
+            "claude-sonnet-4-20250514",
+        )
+        .expect("create_claude_settings should succeed");
+
+        let settings: Value = serde_json::from_str(
+            &std::fs::read_to_string(settings_path).expect("failed to read settings.json"),
+        )
+        .expect("settings.json should be valid JSON");
+
+        assert_eq!(
+            settings["env"]["ANTHROPIC_API_KEY"],
+            "sk-ant-official-1234567890"
+        );
+        assert!(settings["env"]["ANTHROPIC_AUTH_TOKEN"].is_null());
+        assert!(settings["env"].get("ANTHROPIC_BASE_URL").is_none());
+        assert_eq!(settings["primaryApiKey"], "sk-ant-official-1234567890");
+    }
+
+    #[test]
+    fn test_apply_auto_confirm_args_codex_does_not_mutate_args() {
+        // Codex runs in app-server (JSON-RPC) mode and approval bypass is handled
+        // via the approval_policy JSON-RPC field, not argv. Injecting TUI-only
+        // flags (--full-auto / -a / never) caused the PTY to exit immediately.
+        let mut args = vec!["app-server".to_string()];
+        let before = args.clone();
+
+        apply_auto_confirm_args(&CcCliType::Codex, &mut args, true);
+
+        assert_eq!(
+            args, before,
+            "apply_auto_confirm_args must not mutate argv for Codex (app-server mode)"
+        );
+
+        // auto_confirm = false is also a no-op.
+        apply_auto_confirm_args(&CcCliType::Codex, &mut args, false);
+        assert_eq!(args, before);
     }
 
     #[test]
