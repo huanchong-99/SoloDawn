@@ -1826,6 +1826,13 @@ impl OrchestratorAgent {
                         );
                     }
 
+                    // R4 Fix A: pre-gate JS dep bootstrap. If the worktree has a
+                    // package.json but no node_modules yet, install once using
+                    // the detected package manager. Infallible — failure just
+                    // means the gate will report the same `*::unavailable`
+                    // blockers, now classified as infra (R4 Fix E/B).
+                    ensure_js_deps_installed_for_gate(wd).await;
+
                     match quality::engine::QualityEngine::from_project(wd) {
                         Ok(engine) => {
                             match engine
@@ -2111,6 +2118,19 @@ impl OrchestratorAgent {
             && event.blocking_issues == 0
             && event.total_issues == 0;
 
+        // R4 Fix B: further distinguish environment blockers from code blockers
+        // when blocking_issues > 0 but all blocking issues are `*::unavailable`
+        // (tool program not found at gate execution time). These are an infra
+        // gap, not a code gap — telling the terminal to "fix ALL issues listed
+        // above" is wrong advice because the terminal CAN'T make `npx tsc`
+        // available from inside a gate process spawned after the commit.
+        // Fix A (bootstrap) should already have installed deps; if we still
+        // see unavailable blockers, Fix C's N-failure escalator should trigger.
+        let is_environment_blocker = event.mode == QUALITY_GATE_MODE_ENFORCE
+            && !event.passed
+            && event.blocking_issues > 0
+            && is_quality_run_only_infra_blockers(&self.db, &event.quality_run_id).await;
+
         // G32-001: enforce + real issues — send fix instructions and leave the
         // terminal working for a retry. The previous behavior ("send fix AND mark
         // Failed") created a race where subsequent fix-up commits were rejected by
@@ -2118,6 +2138,7 @@ impl OrchestratorAgent {
         if event.mode == QUALITY_GATE_MODE_ENFORCE
             && !event.passed
             && !is_metric_collection_failure
+            && !is_environment_blocker
         {
             if let Some(fix_instructions) = &event.fix_instructions {
                 tracing::warn!(
@@ -2164,6 +2185,121 @@ impl OrchestratorAgent {
             // Leave terminal in its current working/waiting state; the next commit
             // will re-trigger the gate. PTY exit is handled by the normal
             // terminal-lifecycle path.
+            return Ok(());
+        }
+
+        // R4 Fix C: detect N-consecutive-identical-blocker-fingerprint stall
+        // BEFORE dispatching more fix/infra messages. If the same wall has
+        // blocked the last 3 runs, no more prodding will help — escalate the
+        // task + workflow to `failed` so operators see a real error.
+        if let Some(stuck_fp) =
+            detect_n_failure_stuck_fingerprint(&self.db, &event.task_id).await
+        {
+            let category_label = if is_environment_blocker {
+                "environment"
+            } else {
+                "code"
+            };
+            tracing::error!(
+                terminal_id = %event.terminal_id,
+                task_id = %event.task_id,
+                workflow_id = %event.workflow_id,
+                consecutive_failures = N_FAILURE_ESCALATION_THRESHOLD,
+                fingerprint = %stuck_fp,
+                category = category_label,
+                "R4 Fix C: escalating task + workflow to failed — same blocker fingerprint \
+                 persisted for {} consecutive quality runs without progress",
+                N_FAILURE_ESCALATION_THRESHOLD,
+            );
+            // Mark task failed.
+            if let Err(e) = db::models::WorkflowTask::update_status(
+                &self.db.pool,
+                &event.task_id,
+                TASK_STATUS_FAILED,
+            )
+            .await
+            {
+                tracing::error!(task_id = %event.task_id, error = %e, "Fix C: failed to mark task as failed");
+            }
+            // Mark workflow failed.
+            if let Err(e) = db::models::Workflow::update_status(
+                &self.db.pool,
+                &event.workflow_id,
+                WORKFLOW_STATUS_FAILED,
+            )
+            .await
+            {
+                tracing::error!(workflow_id = %event.workflow_id, error = %e, "Fix C: failed to mark workflow as failed");
+            }
+            // Publish an error event on the bus so operators see it.
+            let err_msg = BusMessage::Error {
+                workflow_id: event.workflow_id.clone(),
+                error: format!(
+                    "R4 Fix C escalation: task {} stuck for {} consecutive quality runs \
+                     ({}-blocker fingerprint `{}`) — task + workflow marked failed.",
+                    event.task_id,
+                    N_FAILURE_ESCALATION_THRESHOLD,
+                    category_label,
+                    stuck_fp,
+                ),
+            };
+            if let Err(e) = self
+                .message_bus
+                .publish_workflow_event(&event.workflow_id, err_msg)
+                .await
+            {
+                tracing::warn!(workflow_id = %event.workflow_id, error = %e, "Fix C: failed to publish escalation event");
+            }
+            return Ok(());
+        }
+
+        // R4 Fix B: environment blocker (all blocking issues are infra / tool
+        // unavailability). The terminal cannot fix these from its PTY session;
+        // we send a concise infra-oriented note, log the situation, and LEAVE
+        // the terminal working so the next commit still re-triggers the gate.
+        // Fix A's bootstrap cache means re-running the gate at this point
+        // should retry npm install once more if something transient caused the
+        // initial bootstrap to fail; Fix C escalates if it keeps repeating.
+        if is_environment_blocker {
+            tracing::warn!(
+                terminal_id = %event.terminal_id,
+                gate_status = %event.gate_status,
+                blocking_issues = event.blocking_issues,
+                quality_run_id = %event.quality_run_id,
+                "Quality gate enforce mode: ALL blocking issues are infra/tooling \
+                 (*::unavailable). Treating as environment blocker, not code blocker. \
+                 Terminal remains working; next commit re-triggers gate (bootstrap \
+                 cache may retry install). Fix C will escalate after N repeats."
+            );
+            let session_id_opt = db::models::Terminal::find_by_id(
+                &self.db.pool,
+                &event.terminal_id,
+            )
+            .await
+            .ok()
+            .flatten()
+            .and_then(|t| t.pty_session_id.or(t.session_id))
+            .filter(|s| !s.trim().is_empty());
+            if let Some(session_id) = session_id_opt {
+                let infra_message = format!(
+                    "Your commit was BLOCKED by the quality gate due to an ENVIRONMENT \
+                     issue (not a code issue): the gate cannot find required tools \
+                     (e.g. tsc/eslint/vitest). This is a SoloDawn orchestrator-side \
+                     dependency bootstrap problem. Do NOT modify your code to silence \
+                     the gate. Continue producing clean commits as normal — the \
+                     orchestrator will retry dependency installation on the next gate \
+                     pass. (Summary: {})",
+                    event.summary
+                );
+                self.message_bus
+                    .publish_terminal_input(
+                        &event.terminal_id,
+                        &session_id,
+                        &infra_message,
+                        None,
+                    )
+                    .await;
+            }
             return Ok(());
         }
 
@@ -5968,6 +6104,252 @@ async fn collect_changed_files_for_quality_gate(
         .collect())
 }
 
+// ──────────────────────────── R4 Fix A ────────────────────────────
+//
+// Pre-gate JS dependency bootstrap. If the worktree looks like a JS project
+// (package.json present) and `node_modules` does NOT exist, install deps
+// once using the package manager implied by the lockfile, before the
+// quality engine fires. Prevents the R4 failure mode where the gate kept
+// reporting `eslint::unavailable` / `tsc::unavailable` / `vitest::unavailable`
+// forever because the coder terminal's PATH hacks didn't affect the gate's
+// fresh-process command execution.
+//
+// Cache is keyed by canonical worktree path; success is cached so
+// subsequent gate passes don't re-install. A later "lockfile changed"
+// detector can be layered on top if needed.
+
+static JS_BOOTSTRAP_CACHE: Lazy<tokio::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+    Lazy::new(|| tokio::sync::Mutex::new(std::collections::HashSet::new()));
+
+const JS_BOOTSTRAP_TIMEOUT_SECS: u64 = 600;
+
+#[derive(Debug, Clone, Copy)]
+enum JsPackageManager {
+    Npm,
+    Pnpm,
+    Yarn,
+    Bun,
+}
+
+impl JsPackageManager {
+    fn detect_from_worktree(wd: &Path) -> Self {
+        // Prefer lockfile presence; falls back to npm for safety.
+        if wd.join("pnpm-lock.yaml").exists() {
+            Self::Pnpm
+        } else if wd.join("yarn.lock").exists() {
+            Self::Yarn
+        } else if wd.join("bun.lockb").exists() || wd.join("bun.lock").exists() {
+            Self::Bun
+        } else {
+            Self::Npm
+        }
+    }
+
+    /// Install command + args tuned to run under CI-ish constraints:
+    /// no audit / no fund / prefer offline where supported.
+    fn install_command(self) -> (&'static str, Vec<&'static str>) {
+        match self {
+            Self::Npm => ("npm", vec!["install", "--no-audit", "--no-fund", "--prefer-offline"]),
+            Self::Pnpm => ("pnpm", vec!["install", "--reporter=silent"]),
+            Self::Yarn => ("yarn", vec!["install", "--non-interactive"]),
+            Self::Bun => ("bun", vec!["install", "--no-progress"]),
+        }
+    }
+}
+
+/// Ensure JS deps are installed in `wd`. Infallible: logs+returns Ok(())
+/// on failure so the quality gate still runs and its own `*::unavailable`
+/// rule surfaces the real problem (classified as an infra blocker by
+/// the R4 Fix E rule-id suffix, dispatched by Fix B).
+async fn ensure_js_deps_installed_for_gate(wd: &Path) {
+    let pkg_path = wd.join("package.json");
+    if !pkg_path.exists() {
+        return;
+    }
+    if wd.join("node_modules").is_dir() {
+        return;
+    }
+
+    let canonical = match dunce::canonicalize(wd) {
+        Ok(p) => p,
+        Err(_) => wd.to_path_buf(),
+    };
+
+    {
+        let cache = JS_BOOTSTRAP_CACHE.lock().await;
+        if cache.contains(&canonical) {
+            tracing::debug!(
+                worktree = %canonical.display(),
+                "R4 Fix A: skipping JS bootstrap — already attempted in this process"
+            );
+            return;
+        }
+    }
+
+    let pm = JsPackageManager::detect_from_worktree(wd);
+    let (cmd, args) = pm.install_command();
+    tracing::info!(
+        worktree = %canonical.display(),
+        package_manager = ?pm,
+        cmd = %cmd,
+        args = ?args,
+        "R4 Fix A: bootstrapping JS deps before quality gate"
+    );
+
+    let run = tokio::time::timeout(
+        Duration::from_secs(JS_BOOTSTRAP_TIMEOUT_SECS),
+        tokio::process::Command::new(cmd)
+            .args(&args)
+            .current_dir(wd)
+            .output(),
+    )
+    .await;
+
+    match run {
+        Ok(Ok(output)) if output.status.success() => {
+            tracing::info!(
+                worktree = %canonical.display(),
+                package_manager = ?pm,
+                "R4 Fix A: JS bootstrap succeeded"
+            );
+            let mut cache = JS_BOOTSTRAP_CACHE.lock().await;
+            cache.insert(canonical);
+        }
+        Ok(Ok(output)) => {
+            tracing::warn!(
+                worktree = %canonical.display(),
+                package_manager = ?pm,
+                code = ?output.status.code(),
+                stderr_tail = %String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .rev()
+                    .take(5)
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+                "R4 Fix A: JS bootstrap exited non-zero — quality gate will surface real tool unavailability"
+            );
+        }
+        Ok(Err(e)) => {
+            tracing::warn!(
+                worktree = %canonical.display(),
+                error = %e,
+                "R4 Fix A: JS bootstrap failed to spawn"
+            );
+        }
+        Err(_elapsed) => {
+            tracing::warn!(
+                worktree = %canonical.display(),
+                timeout_secs = JS_BOOTSTRAP_TIMEOUT_SECS,
+                "R4 Fix A: JS bootstrap timed out"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+async fn reset_js_bootstrap_cache_for_test() {
+    let mut cache = JS_BOOTSTRAP_CACHE.lock().await;
+    cache.clear();
+}
+
+/// R4 Fix B: classify a completed `quality_run` as environment-blocker-only
+/// iff it has at least one blocking issue AND every blocking issue's rule_id
+/// ends in `::unavailable` (the infra-suffix contract established by Fix E).
+///
+/// Returns `false` on DB errors (fail-safe: treat as code blocker so the
+/// terminal still gets fix instructions — no silent mislabeling).
+async fn is_quality_run_only_infra_blockers(
+    db: &Arc<DBService>,
+    quality_run_id: &str,
+) -> bool {
+    use quality::provider::frontend::UNAVAILABLE_RULE_SUFFIX;
+    let issues = match db::models::QualityIssueRecord::find_blocking_by_run(
+        &db.pool,
+        quality_run_id,
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!(
+                quality_run_id = %quality_run_id,
+                error = %e,
+                "Fix B: failed to load blocking issues; defaulting to code-blocker classification"
+            );
+            return false;
+        }
+    };
+    if issues.is_empty() {
+        return false;
+    }
+    issues
+        .iter()
+        .all(|i| i.rule_id.ends_with(UNAVAILABLE_RULE_SUFFIX))
+}
+
+/// R4 Fix C: N-failure-with-same-fingerprint escalation.
+///
+/// Fingerprint = sorted, de-duplicated list of `rule_id` values across the
+/// blocking issues of a given quality_run. Two runs that produce the same
+/// fingerprint are "stuck in the same wall" — the terminal didn't make
+/// progress between attempts. After N=3 consecutive stuck runs on the same
+/// task we stop pretending the loop will converge and mark the task /
+/// workflow as `failed` so the deadlock surfaces as a real error rather
+/// than silent infinite retry.
+///
+/// Returns `Some(fingerprint)` if the last N quality_runs of `task_id` all
+/// have identical non-empty blocker fingerprints AND all have gate_status =
+/// "error". Returns `None` in every other case (progress, too few runs,
+/// DB error, etc.).
+const N_FAILURE_ESCALATION_THRESHOLD: usize = 3;
+
+async fn compute_blocker_fingerprint(
+    db: &Arc<DBService>,
+    quality_run_id: &str,
+) -> Option<String> {
+    let issues =
+        db::models::QualityIssueRecord::find_blocking_by_run(&db.pool, quality_run_id)
+            .await
+            .ok()?;
+    if issues.is_empty() {
+        return None;
+    }
+    let mut rule_ids: Vec<String> = issues.into_iter().map(|i| i.rule_id).collect();
+    rule_ids.sort();
+    rule_ids.dedup();
+    Some(rule_ids.join("|"))
+}
+
+async fn detect_n_failure_stuck_fingerprint(
+    db: &Arc<DBService>,
+    task_id: &str,
+) -> Option<String> {
+    let runs = db::models::QualityRun::find_by_task(&db.pool, task_id)
+        .await
+        .ok()?;
+    // DESC-ordered; take the most recent N.
+    let recent: Vec<_> = runs.into_iter().take(N_FAILURE_ESCALATION_THRESHOLD).collect();
+    if recent.len() < N_FAILURE_ESCALATION_THRESHOLD {
+        return None;
+    }
+    // Require every one to be an enforce-mode failure.
+    if !recent.iter().all(|r| r.gate_status == "error") {
+        return None;
+    }
+    let mut fps: Vec<String> = Vec::with_capacity(recent.len());
+    for r in &recent {
+        match compute_blocker_fingerprint(db, &r.id).await {
+            Some(fp) if !fp.is_empty() => fps.push(fp),
+            _ => return None,
+        }
+    }
+    if fps.iter().all(|fp| fp == &fps[0]) {
+        Some(fps.remove(0))
+    } else {
+        None
+    }
+}
+
 /// Collect terminal completion context (log summary, diff stat, commit body)
 /// for injection into LLM completion prompts.
 async fn fetch_terminal_completion_context(
@@ -6143,7 +6525,12 @@ mod tests {
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    use super::{OrchestratorAgent, StallRecoveryTracker};
+    use super::{
+        compute_blocker_fingerprint, detect_n_failure_stuck_fingerprint,
+        ensure_js_deps_installed_for_gate, is_quality_run_only_infra_blockers,
+        reset_js_bootstrap_cache_for_test, Duration, JsPackageManager, OrchestratorAgent,
+        StallRecoveryTracker,
+    };
     use crate::services::orchestrator::{
         BusMessage, MessageBus, MockLLMClient, OrchestratorConfig,
     };
@@ -6607,6 +6994,297 @@ mod tests {
         assert!(
             !tracker.last_recoveries.contains_key(&terminal_id),
             "non-working terminals should be removed from cooldown tracker"
+        );
+    }
+
+    // ───────────────────────── R4 Fix A tests ─────────────────────────
+
+    #[tokio::test]
+    async fn fix_a_detects_package_manager_from_lockfile() {
+        let root = tempfile::tempdir().expect("tempdir");
+        // pnpm-lock.yaml wins.
+        std::fs::write(root.path().join("pnpm-lock.yaml"), "").unwrap();
+        assert!(matches!(
+            JsPackageManager::detect_from_worktree(root.path()),
+            JsPackageManager::Pnpm
+        ));
+
+        let root2 = tempfile::tempdir().expect("tempdir");
+        std::fs::write(root2.path().join("yarn.lock"), "").unwrap();
+        assert!(matches!(
+            JsPackageManager::detect_from_worktree(root2.path()),
+            JsPackageManager::Yarn
+        ));
+
+        let root3 = tempfile::tempdir().expect("tempdir");
+        std::fs::write(root3.path().join("bun.lockb"), "").unwrap();
+        assert!(matches!(
+            JsPackageManager::detect_from_worktree(root3.path()),
+            JsPackageManager::Bun
+        ));
+
+        let root4 = tempfile::tempdir().expect("tempdir");
+        // No lockfile → default npm.
+        assert!(matches!(
+            JsPackageManager::detect_from_worktree(root4.path()),
+            JsPackageManager::Npm
+        ));
+    }
+
+    #[tokio::test]
+    async fn fix_a_bootstrap_skips_when_no_package_json() {
+        reset_js_bootstrap_cache_for_test().await;
+        let root = tempfile::tempdir().expect("tempdir");
+        // No package.json — bootstrap must be a no-op (doesn't try to run npm).
+        let before = std::time::Instant::now();
+        ensure_js_deps_installed_for_gate(root.path()).await;
+        let elapsed = before.elapsed();
+        // If the helper tried to spawn `npm install` we'd see seconds, not <500ms.
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "bootstrap must short-circuit without package.json; actual elapsed={:?}",
+            elapsed
+        );
+    }
+
+    #[tokio::test]
+    async fn fix_a_bootstrap_skips_when_node_modules_exists() {
+        reset_js_bootstrap_cache_for_test().await;
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::write(root.path().join("package.json"), r#"{"name":"x"}"#).unwrap();
+        std::fs::create_dir_all(root.path().join("node_modules")).unwrap();
+        let before = std::time::Instant::now();
+        ensure_js_deps_installed_for_gate(root.path()).await;
+        let elapsed = before.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "bootstrap must short-circuit when node_modules exists; actual elapsed={:?}",
+            elapsed
+        );
+    }
+
+    // ─────────────────── R4 Fix B + Fix C shared helpers ───────────────────
+
+    async fn in_memory_db() -> Arc<DBService> {
+        let pool = SqlitePoolOptions::new().connect(":memory:").await.unwrap();
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let migration_dir = manifest_dir
+            .ancestors()
+            .nth(1)
+            .unwrap()
+            .join("db")
+            .join("migrations");
+        let migrator = sqlx::migrate::Migrator::new(migration_dir).await.unwrap();
+        migrator.run(&pool).await.unwrap();
+        Arc::new(DBService { pool })
+    }
+
+    async fn insert_failed_quality_run_with_blockers(
+        db: &Arc<DBService>,
+        workflow_id: &str,
+        task_id: &str,
+        commit_hash: &str,
+        blocker_rule_ids: &[&str],
+    ) -> String {
+        let run = db::models::QualityRun::new_pending(
+            workflow_id,
+            Some(task_id),
+            None,
+            Some(commit_hash),
+            "terminal",
+            "enforce",
+        );
+        db::models::QualityRun::insert(&db.pool, &run).await.unwrap();
+        db::models::QualityRun::complete(
+            &db.pool,
+            &run.id,
+            "error",
+            blocker_rule_ids.len() as i32,
+            blocker_rule_ids.len() as i32,
+            0,
+            10,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        for rid in blocker_rule_ids {
+            let mut issue = db::models::QualityIssueRecord::new(
+                &run.id,
+                rid,
+                "BUG",
+                "CRITICAL",
+                "quality-test",
+                "synthetic blocker",
+            );
+            issue.is_blocking = true;
+            db::models::QualityIssueRecord::insert(&db.pool, &issue)
+                .await
+                .unwrap();
+        }
+        run.id
+    }
+
+    // ───────────────────────── R4 Fix B tests ─────────────────────────
+
+    #[tokio::test]
+    async fn fix_b_detects_only_unavailable_blockers_as_environment() {
+        let db = in_memory_db().await;
+        let run_id = insert_failed_quality_run_with_blockers(
+            &db,
+            "wf-b1",
+            "task-b1",
+            "commit-b1",
+            &["eslint::unavailable", "tsc::unavailable", "vitest::unavailable"],
+        )
+        .await;
+        assert!(
+            is_quality_run_only_infra_blockers(&db, &run_id).await,
+            "all-unavailable blockers must classify as environment blocker"
+        );
+    }
+
+    #[tokio::test]
+    async fn fix_b_mixed_blockers_are_not_environment() {
+        let db = in_memory_db().await;
+        let run_id = insert_failed_quality_run_with_blockers(
+            &db,
+            "wf-b2",
+            "task-b2",
+            "commit-b2",
+            &["tsc::unavailable", "common:secret-detection"],
+        )
+        .await;
+        assert!(
+            !is_quality_run_only_infra_blockers(&db, &run_id).await,
+            "mixed blockers (one non-unavailable) must NOT be environment-only"
+        );
+    }
+
+    #[tokio::test]
+    async fn fix_b_zero_blockers_is_not_environment() {
+        let db = in_memory_db().await;
+        let run = db::models::QualityRun::new_pending(
+            "wf-b3",
+            Some("task-b3"),
+            None,
+            Some("commit-b3"),
+            "terminal",
+            "enforce",
+        );
+        db::models::QualityRun::insert(&db.pool, &run).await.unwrap();
+        db::models::QualityRun::complete(
+            &db.pool, &run.id, "ok", 0, 0, 0, 5, None, None, None,
+        )
+        .await
+        .unwrap();
+        assert!(
+            !is_quality_run_only_infra_blockers(&db, &run.id).await,
+            "zero-blocker runs should not be tagged environment (there's nothing to classify)"
+        );
+    }
+
+    // ───────────────────────── R4 Fix C tests ─────────────────────────
+
+    #[tokio::test]
+    async fn fix_c_compute_fingerprint_sorted_dedup() {
+        let db = in_memory_db().await;
+        // Insert duplicates intentionally — ordering and dedup MUST be stable.
+        let run_id = insert_failed_quality_run_with_blockers(
+            &db,
+            "wf-c1",
+            "task-c1",
+            "commit-c1",
+            &["vitest::unavailable", "tsc::unavailable", "tsc::unavailable"],
+        )
+        .await;
+        let fp = compute_blocker_fingerprint(&db, &run_id).await.unwrap();
+        assert_eq!(fp, "tsc::unavailable|vitest::unavailable");
+    }
+
+    #[tokio::test]
+    async fn fix_c_escalates_after_three_identical_failed_runs() {
+        let db = in_memory_db().await;
+        let fp_rules = ["tsc::unavailable", "vitest::unavailable"];
+        for i in 0..3 {
+            insert_failed_quality_run_with_blockers(
+                &db,
+                "wf-c2",
+                "task-c2",
+                &format!("commit-c2-{i}"),
+                &fp_rules,
+            )
+            .await;
+        }
+        let out = detect_n_failure_stuck_fingerprint(&db, "task-c2").await;
+        assert!(
+            out.is_some(),
+            "three consecutive identical-fingerprint failed runs must escalate"
+        );
+    }
+
+    #[tokio::test]
+    async fn fix_c_does_not_escalate_when_fingerprint_changes() {
+        let db = in_memory_db().await;
+        // Run 1: two blockers. Run 2: same two. Run 3: one blocker removed (progress!)
+        insert_failed_quality_run_with_blockers(
+            &db,
+            "wf-c3",
+            "task-c3",
+            "commit-c3-0",
+            &["tsc::unavailable", "vitest::unavailable"],
+        )
+        .await;
+        insert_failed_quality_run_with_blockers(
+            &db,
+            "wf-c3",
+            "task-c3",
+            "commit-c3-1",
+            &["tsc::unavailable", "vitest::unavailable"],
+        )
+        .await;
+        insert_failed_quality_run_with_blockers(
+            &db,
+            "wf-c3",
+            "task-c3",
+            "commit-c3-2",
+            &["tsc::unavailable"],
+        )
+        .await;
+        assert!(
+            detect_n_failure_stuck_fingerprint(&db, "task-c3")
+                .await
+                .is_none(),
+            "fingerprint progress (fewer blockers) must NOT escalate"
+        );
+    }
+
+    #[tokio::test]
+    async fn fix_c_does_not_escalate_on_fewer_than_n_runs() {
+        let db = in_memory_db().await;
+        insert_failed_quality_run_with_blockers(
+            &db,
+            "wf-c4",
+            "task-c4",
+            "commit-c4-0",
+            &["tsc::unavailable"],
+        )
+        .await;
+        insert_failed_quality_run_with_blockers(
+            &db,
+            "wf-c4",
+            "task-c4",
+            "commit-c4-1",
+            &["tsc::unavailable"],
+        )
+        .await;
+        // Only 2 runs < N=3 threshold.
+        assert!(
+            detect_n_failure_stuck_fingerprint(&db, "task-c4")
+                .await
+                .is_none(),
+            "two runs must NOT escalate (below N threshold)"
         );
     }
 }

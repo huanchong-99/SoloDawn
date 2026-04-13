@@ -386,12 +386,34 @@ fn classify_outcome(out: &CommandOutput, error_patterns: &[&str]) -> ToolOutcome
     }
 }
 
+/// Stable suffix used on every frontend `*::unavailable` rule_id so the
+/// orchestrator's environment-vs-code blocker classifier (see R4 Fix B in
+/// `agent.rs`) can dispatch differently without re-parsing messages.
+///
+/// Rule IDs currently produced by this provider that MUST keep this suffix:
+///   eslint::unavailable, tsc::unavailable, vitest::unavailable
+/// Adding a new "tool program not found" issue? Append `::unavailable` too.
+pub const UNAVAILABLE_RULE_SUFFIX: &str = "::unavailable";
+
 fn unavailable_issue(
     rule_id: &str,
     source: AnalyzerSource,
     reason: &str,
     stderr: &str,
 ) -> QualityIssue {
+    debug_assert!(
+        rule_id.ends_with(UNAVAILABLE_RULE_SUFFIX),
+        "unavailable issue rule_id `{}` must end with `{}` — orchestrator relies on this suffix \
+         to classify environment blockers vs code blockers",
+        rule_id,
+        UNAVAILABLE_RULE_SUFFIX,
+    );
+    // Per primary-brain R4 diagnosis: keep this as Critical/blocking in enforce
+    // mode (demoting to Warn would recreate R3-style false-pass risk), but
+    // the `::unavailable` rule-id suffix lets the orchestrator classify it as
+    // an environment/tooling blocker rather than a "fix your code" blocker —
+    // so the bootstrap path in Fix A handles it instead of looping the
+    // terminal forever on code-fix instructions.
     QualityIssue::new(
         rule_id,
         RuleType::Bug,
@@ -866,6 +888,34 @@ mod tests {
         );
         assert_eq!(issue.severity, Severity::Critical);
         assert!(issue.is_blocking());
+    }
+
+    #[test]
+    fn unavailable_rule_ids_use_stable_infra_suffix() {
+        // R4 Fix E contract: orchestrator relies on the `::unavailable` suffix
+        // to tell environment blockers from code blockers. All three current
+        // producers in analyze() MUST honor it; losing the suffix breaks the
+        // bootstrap classifier in agent.rs Fix B.
+        for rule_id in ["eslint::unavailable", "tsc::unavailable", "vitest::unavailable"] {
+            assert!(
+                rule_id.ends_with(UNAVAILABLE_RULE_SUFFIX),
+                "expected `{}` to end with `{}`",
+                rule_id,
+                UNAVAILABLE_RULE_SUFFIX
+            );
+            let issue = unavailable_issue(
+                rule_id,
+                AnalyzerSource::TypeScript,
+                "tool not found",
+                "",
+            );
+            assert!(issue.is_blocking(), "{} must stay blocking", rule_id);
+            assert!(
+                issue.rule_id.ends_with(UNAVAILABLE_RULE_SUFFIX),
+                "constructed issue rule_id `{}` missing infra suffix",
+                issue.rule_id,
+            );
+        }
     }
 
     #[test]

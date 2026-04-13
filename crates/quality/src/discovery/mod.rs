@@ -428,6 +428,10 @@ impl NodeManifest {
         self.scripts.contains_key(script)
     }
 
+    fn script_body(&self, script: &str) -> Option<&str> {
+        self.scripts.get(script).map(|s| s.as_str())
+    }
+
     fn has_dependency(&self, dependency: &str) -> bool {
         self.dependencies.contains_key(dependency)
             || self.dev_dependencies.contains_key(dependency)
@@ -489,20 +493,75 @@ fn resolve_repo_checks(manifest: &NodeManifest) -> RepoChecks {
     }
 }
 
-fn resolve_js_capabilities(root: &Path, manifest: &NodeManifest) -> JsTargetCapabilities {
-    let lint = ["quality:lint", "lint"]
-        .into_iter()
-        .find(|script| manifest.has_script(script))
-        .map(|script| NodeQualityCommand::Script {
-            script: script.to_string(),
-        });
+/// Return true if the script body looks like a gate-bypass stub, i.e. it
+/// contains no token that belongs to a real lint/typecheck/test tool.
+///
+/// Triggered in R4 after a coder terminal rewrote `type-check` to
+/// `echo 'TypeScript check completed successfully' && exit 0` to escape
+/// the enforce gate; primary-brain R4-Fix-D required both tool-token
+/// gating and stronger alias priority before trusting a script entry.
+fn is_stub_script_body(body: &str) -> bool {
+    let lower = body.to_lowercase();
+    // A body that doesn't mention ANY known quality tool is suspect.
+    const TOOL_TOKENS: &[&str] = &[
+        "tsc", "eslint", "vitest", "jest", "prettier", "biome", "rome", "swc",
+        "vue-tsc", "tsup", "rollup", "vite", "webpack", "xo",
+    ];
+    let mentions_tool = TOOL_TOKENS.iter().any(|tok| lower.contains(tok));
+    if mentions_tool {
+        return false;
+    }
 
-    let typecheck = ["quality:typecheck", "type-check", "typecheck", "check"]
-        .into_iter()
-        .find(|script| manifest.has_script(script))
-        .map(|script| NodeQualityCommand::Script {
-            script: script.to_string(),
-        })
+    // No tool mention — look for the obvious "echo ... && exit 0" pattern or
+    // pure `exit 0` / `true` bodies. Do NOT mark as stub if body looks like
+    // a legitimate chain into another npm/pnpm/yarn script (in that case
+    // the discovered chain still yields a real tool at the leaf; callers
+    // already prefer the stronger alias first).
+    let trimmed = lower.trim();
+    let bypass_markers = ["exit 0", "echo", "true"];
+    bypass_markers.iter().any(|m| trimmed.contains(m))
+}
+
+fn pick_real_script<'a>(
+    manifest: &'a NodeManifest,
+    candidates: &[&'a str],
+) -> Option<&'a str> {
+    // Priority 1: first candidate that exists AND whose body is not a stub.
+    for name in candidates {
+        if let Some(body) = manifest.script_body(name) {
+            if !is_stub_script_body(body) {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+fn resolve_js_capabilities(root: &Path, manifest: &NodeManifest) -> JsTargetCapabilities {
+    // R4 Fix D: prefer explicit `quality:*`, `*:all`, `*:ci` aliases BEFORE the
+    // plain single-token scripts, because a terminal can rewrite `lint` /
+    // `type-check` / `test` to a stub to bypass the enforce gate, while the
+    // project still exposes the real check under a more specific alias.
+    let lint_candidates = &["quality:lint", "lint:all", "lint:ci", "lint:check", "lint"];
+    let typecheck_candidates = &[
+        "quality:typecheck",
+        "quality:types",
+        "type-check:all",
+        "type-check:ci",
+        "typecheck:all",
+        "typecheck:ci",
+        "type-check",
+        "typecheck",
+        "check",
+    ];
+    let test_candidates = &["quality:test", "test:ci", "test:run", "test"];
+
+    let lint = pick_real_script(manifest, lint_candidates).map(|script| {
+        NodeQualityCommand::Script { script: script.to_string() }
+    });
+
+    let typecheck = pick_real_script(manifest, typecheck_candidates)
+        .map(|script| NodeQualityCommand::Script { script: script.to_string() })
         .or_else(|| {
             (root.join("tsconfig.json").exists() && manifest.has_dependency("typescript")).then(|| {
                 NodeQualityCommand::PackageExec {
@@ -512,12 +571,9 @@ fn resolve_js_capabilities(root: &Path, manifest: &NodeManifest) -> JsTargetCapa
             })
         });
 
-    let test = ["quality:test", "test:run", "test"]
-        .into_iter()
-        .find(|script| manifest.has_script(script))
-        .map(|script| NodeQualityCommand::Script {
-            script: script.to_string(),
-        });
+    let test = pick_real_script(manifest, test_candidates).map(|script| {
+        NodeQualityCommand::Script { script: script.to_string() }
+    });
 
     JsTargetCapabilities {
         lint,
@@ -1071,6 +1127,97 @@ mod tests {
         let manifests = scan_known_manifests(&root);
         assert_eq!(manifests.package_json.len(), 2);
         assert_eq!(manifests.cargo_toml.len(), 2);
+        cleanup(&root);
+    }
+
+    // ───────────────────────── R4 Fix D tests ─────────────────────────
+
+    #[test]
+    fn is_stub_script_body_identifies_echo_exit0_bypass() {
+        // R4 Fix D: coder terminal wrote `"type-check": "echo ... && exit 0"`
+        // to bypass the enforce gate. We must classify that as a stub.
+        assert!(is_stub_script_body("echo 'type-check ok' && exit 0"));
+        assert!(is_stub_script_body("echo done"));
+        assert!(is_stub_script_body("exit 0"));
+        assert!(is_stub_script_body("true"));
+    }
+
+    #[test]
+    fn is_stub_script_body_preserves_real_tool_calls() {
+        // Real tool bodies MUST NOT be flagged as stubs.
+        assert!(!is_stub_script_body("tsc --noEmit"));
+        assert!(!is_stub_script_body("eslint . --ext ts,tsx"));
+        assert!(!is_stub_script_body("vitest run"));
+        assert!(!is_stub_script_body("jest --coverage"));
+        // Chains that ultimately invoke a real tool are fine.
+        assert!(!is_stub_script_body("pnpm -w run lint && prettier --check ."));
+        assert!(!is_stub_script_body("npm run type-check:client && npm run type-check:server"));
+    }
+
+    #[test]
+    fn capabilities_prefer_quality_alias_over_stubbed_plain_alias() {
+        // Exact R4 R4 incident shape: coder terminal wrote stub `type-check`
+        // but project also exposed real `type-check:all` / `quality:types`.
+        // Discovery MUST pick the real alias.
+        let manifest = serde_json::from_str::<NodeManifest>(
+            r#"{
+  "name": "app",
+  "scripts": {
+    "type-check": "echo 'TypeScript check completed successfully' && exit 0",
+    "type-check:all": "tsc --noEmit -p tsconfig.server.json",
+    "lint": "echo 'ESLint check completed successfully' && exit 0",
+    "lint:all": "eslint . --ext ts,tsx",
+    "test": "echo 'Tests completed successfully' && exit 0",
+    "test:ci": "vitest run"
+  }
+}"#,
+        )
+        .unwrap();
+        let root = std::env::temp_dir();
+        let caps = resolve_js_capabilities(&root, &manifest);
+        // Expect the :all / :ci real aliases to win over the plain stubs.
+        match &caps.typecheck {
+            Some(NodeQualityCommand::Script { script }) => {
+                assert_eq!(script, "type-check:all", "must pick the real alias, not the stub")
+            }
+            other => panic!("expected typecheck Script, got {other:?}"),
+        }
+        match &caps.lint {
+            Some(NodeQualityCommand::Script { script }) => {
+                assert_eq!(script, "lint:all", "must pick the real alias, not the stub")
+            }
+            other => panic!("expected lint Script, got {other:?}"),
+        }
+        match &caps.test {
+            Some(NodeQualityCommand::Script { script }) => {
+                assert_eq!(script, "test:ci", "must pick the real alias, not the stub")
+            }
+            other => panic!("expected test Script, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn capabilities_falls_back_to_package_exec_when_only_stubs_exist() {
+        // No real alias; plain `type-check` is a stub; tsconfig + typescript
+        // dep present → fall back to tsc --noEmit via PackageExec.
+        let root = temp_project_root();
+        write_file(&root.join("tsconfig.json"), r#"{ "compilerOptions": {} }"#);
+        let manifest = serde_json::from_str::<NodeManifest>(
+            r#"{
+  "name": "app",
+  "scripts": { "type-check": "echo ok && exit 0" },
+  "devDependencies": { "typescript": "^5.0.0" }
+}"#,
+        )
+        .unwrap();
+        let caps = resolve_js_capabilities(&root, &manifest);
+        match &caps.typecheck {
+            Some(NodeQualityCommand::PackageExec { binary, args }) => {
+                assert_eq!(binary, "tsc");
+                assert_eq!(args, &vec!["--noEmit".to_string()]);
+            }
+            other => panic!("expected PackageExec tsc, got {other:?}"),
+        }
         cleanup(&root);
     }
 }
