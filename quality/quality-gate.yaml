@@ -32,6 +32,10 @@ terminal_gate:
     - metric: frontend_test_failures
       operator: "GT"
       threshold: "0"
+    # Fix #4: test files importing undeclared @testing-library/* etc. must block.
+    - metric: frontend_test_deps_missing
+      operator: "GT"
+      threshold: "0"
     # Built-in rules: block on critical issues
     - metric: builtin_rust_critical
       operator: "GT"

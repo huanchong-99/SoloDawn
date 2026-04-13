@@ -137,6 +137,15 @@ fn default_project_key() -> String {
     "solodawn".to_string()
 }
 
+/// SoloDawn 自带的中央 `quality/quality-gate.yaml` 策略 — 编译期嵌入。
+///
+/// 外部输出仓库（orchestrator 跑出来的项目）通常不会自带 `quality/quality-gate.yaml`，
+/// 不应该让 gate 静默跌回到内部的 `default_config`（一个会被空扫描"绿过"的空清单）。
+/// `include_str!` 在编译时把 SoloDawn 仓库根的策略嵌进二进制，作为最后兜底之前的
+/// 一道有效防线。
+pub const BUNDLED_CENTRAL_POLICY: &str =
+    include_str!("../../../quality/quality-gate.yaml");
+
 impl QualityGateConfig {
     /// 从 YAML 文件加载配置
     pub fn load_from_file(path: &Path) -> anyhow::Result<Self> {
@@ -152,6 +161,11 @@ impl QualityGateConfig {
     }
 
     /// 从项目根目录自动查找并加载
+    ///
+    /// 解析顺序：
+    /// 1. 项目自带的 `quality/quality-gate.yaml` / `.yml` / `.quality-gate.yaml`
+    /// 2. SoloDawn 编译期嵌入的中央策略 `BUNDLED_CENTRAL_POLICY`
+    /// 3. 最后兜底：`Self::default_config()`（仅当中央策略也解析失败时）
     pub fn load_from_project(project_root: &Path) -> anyhow::Result<Self> {
         let paths = [
             project_root.join("quality/quality-gate.yaml"),
@@ -161,12 +175,33 @@ impl QualityGateConfig {
 
         for path in &paths {
             if path.exists() {
+                tracing::debug!(
+                    project_root = %project_root.display(),
+                    policy = %path.display(),
+                    "Loaded quality gate policy from project file",
+                );
                 return Self::load_from_file(path);
             }
         }
 
-        // 默认配置
-        Ok(Self::default_config())
+        // Repo 没有本地策略 → 用编译期嵌入的中央 SoloDawn 严格策略
+        match Self::from_yaml(BUNDLED_CENTRAL_POLICY) {
+            Ok(cfg) => {
+                tracing::info!(
+                    project_root = %project_root.display(),
+                    "Quality gate using bundled central policy (no repo-local quality-gate.yaml found)"
+                );
+                Ok(cfg)
+            }
+            Err(e) => {
+                // 中央策略本身坏了 → 退到最朴素的 default，避免 orchestrator 整体崩
+                tracing::error!(
+                    error = %e,
+                    "BUNDLED_CENTRAL_POLICY failed to parse; falling back to default_config"
+                );
+                Ok(Self::default_config())
+            }
+        }
     }
 
     /// 默认无硬性配置
@@ -310,5 +345,89 @@ mod tests {
         let config = QualityGateConfig::default_config();
         let gate = config.get_gate(QualityGateLevel::Terminal).unwrap();
         assert!(!gate.conditions.is_empty());
+    }
+
+    #[test]
+    fn bundled_central_policy_parses_in_enforce_mode() {
+        // Compile-time include must always be a valid YAML and configure enforce mode.
+        let cfg = QualityGateConfig::from_yaml(BUNDLED_CENTRAL_POLICY)
+            .expect("BUNDLED_CENTRAL_POLICY is a hard contract — must always parse");
+        assert_eq!(
+            cfg.mode,
+            QualityGateMode::Enforce,
+            "central SoloDawn policy must default to enforce"
+        );
+        assert!(!cfg.terminal_gate.conditions.is_empty());
+        assert!(!cfg.branch_gate.conditions.is_empty());
+        assert!(!cfg.repo_gate.conditions.is_empty());
+    }
+
+    #[test]
+    fn load_from_project_falls_back_to_bundled_when_repo_has_no_policy() {
+        // Simulate an external orchestrator-output repo that does NOT carry any
+        // local quality-gate.yaml. The loader must hand back the bundled
+        // central enforce policy, NOT the lenient shadow default_config.
+        let dir = std::env::temp_dir().join(format!(
+            "quality-config-fallback-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let cfg = QualityGateConfig::load_from_project(&dir).unwrap();
+        assert_eq!(
+            cfg.mode,
+            QualityGateMode::Enforce,
+            "external repo without local policy must inherit central enforce mode \
+             (root cause of Task 1 R3 false-pass)"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_from_project_prefers_repo_local_policy_over_bundled() {
+        // If the repo brings its own policy, that wins.
+        let dir = std::env::temp_dir().join(format!(
+            "quality-config-local-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(dir.join("quality")).unwrap();
+        std::fs::write(
+            dir.join("quality/quality-gate.yaml"),
+            r#"mode: shadow
+terminal_gate:
+  name: "Local Override"
+  conditions:
+    - metric: cargo_check_errors
+      operator: "GT"
+      threshold: "0"
+branch_gate:
+  name: "Local Branch"
+  conditions: []
+repo_gate:
+  name: "Local Repo"
+  conditions: []
+providers:
+  rust: true
+  frontend: true
+  repo: false
+  security: false
+  sonar: false
+  builtin_rust: true
+  builtin_frontend: true
+  builtin_common: true
+  coverage: false
+sonar:
+  host_url: ""
+  project_key: ""
+"#,
+        )
+        .unwrap();
+
+        let cfg = QualityGateConfig::load_from_project(&dir).unwrap();
+        assert_eq!(cfg.mode, QualityGateMode::Shadow);
+        assert_eq!(cfg.terminal_gate.name, "Local Override");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

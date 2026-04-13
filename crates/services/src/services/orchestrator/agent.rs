@@ -1675,20 +1675,49 @@ impl OrchestratorAgent {
             // G31-003: wrap entire quality engine execution in a 5-minute timeout.
             const QUALITY_GATE_TIMEOUT_SECS: u64 = 300;
 
+            /// Structured outcome from the quality engine future.
+            ///
+            /// Replaces the prior 7-field tuple so we can also carry the
+            /// providers-run summary, decision JSON, and per-issue records
+            /// without the call sites turning into a positional puzzle.
+            struct GateOutcome {
+                gate_status: &'static str,
+                total_issues: i32,
+                blocking_issues: i32,
+                new_issues: i32,
+                passed: bool,
+                fix_instructions: Option<String>,
+                report_json: Option<String>,
+                providers_json: Option<String>,
+                decision_json: Option<String>,
+                issues: Vec<db::models::QualityIssueRecord>,
+            }
+
             /// Helper: produces the fall-open (skipped) outcome used when the
             /// quality engine fails or times out (G31-006).
             fn skipped_outcome(
                 run_id: &str,
                 reason: &str,
                 quality_run_id_for_warn: &str,
-            ) -> (&'static str, i32, i32, i32, bool, Option<String>, Option<String>) {
+            ) -> GateOutcome {
                 tracing::warn!(
                     quality_run_id = %quality_run_id_for_warn,
                     reason = %reason,
                     "Quality engine unavailable — gate_status set to 'skipped' (fail-open, G31-006)"
                 );
-                let _ = run_id; // silence unused warning
-                ("skipped", 0i32, 0i32, 0i32, true, None, None)
+                let _ = run_id;
+                GateOutcome {
+                    gate_status: "skipped",
+                    total_issues: 0,
+                    blocking_issues: 0,
+                    new_issues: 0,
+                    passed: true,
+                    fix_instructions: None,
+                    report_json: None,
+                    providers_json: None,
+                    decision_json: None,
+                    issues: Vec::new(),
+                }
             }
 
             // G16-004: Resolve quality gate working directory to the WORKTREE
@@ -1820,7 +1849,71 @@ impl OrchestratorAgent {
                                     let is_passed = report.is_passed();
                                     let fix = if is_passed { None } else { Some(report.to_fix_instructions()) };
                                     let rjson = serde_json::to_string(&report).ok();
-                                    (gate_str, total, blocking, new_i, is_passed, fix, rjson)
+
+                                    // Fix #3 (audit completeness): persist
+                                    // providers_run + decision_json + per-issue
+                                    // rows so future investigators can see WHAT
+                                    // ran, WHAT it decided, and WHICH issues
+                                    // were involved — not just a status totals
+                                    // row. This is the gap that masked the
+                                    // Task 1 R3 empty-scan false-pass.
+                                    let providers_json = serde_json::to_string(
+                                        &report
+                                            .provider_reports
+                                            .iter()
+                                            .map(|pr| serde_json::json!({
+                                                "name": pr.provider_name,
+                                                "success": pr.success,
+                                                "duration_ms": pr.duration_ms,
+                                                "metric_count": pr.metrics.len(),
+                                                "issue_count": pr.issues.len(),
+                                                "error": pr.error,
+                                            }))
+                                            .collect::<Vec<_>>(),
+                                    )
+                                    .ok();
+                                    let decision_json = report
+                                        .decision
+                                        .as_ref()
+                                        .and_then(|d| serde_json::to_string(d).ok());
+                                    let issues = report
+                                        .all_issues
+                                        .iter()
+                                        .map(|q| {
+                                            let mut rec =
+                                                db::models::QualityIssueRecord::new(
+                                                    &run_id,
+                                                    &q.rule_id,
+                                                    q.rule_type.as_str(),
+                                                    q.severity.as_str(),
+                                                    &format!("{}", q.source),
+                                                    &q.message,
+                                                );
+                                            rec.file_path = q.file_path.clone();
+                                            rec.line = q.line.map(|v| v as i32);
+                                            rec.end_line = q.end_line.map(|v| v as i32);
+                                            rec.column_start = q.column.map(|v| v as i32);
+                                            rec.column_end = q.end_column.map(|v| v as i32);
+                                            rec.is_new = q.is_new;
+                                            rec.is_blocking = q.is_blocking();
+                                            rec.effort_minutes = q.effort_minutes;
+                                            rec.context = q.context.clone();
+                                            rec
+                                        })
+                                        .collect::<Vec<_>>();
+
+                                    GateOutcome {
+                                        gate_status: gate_str,
+                                        total_issues: total,
+                                        blocking_issues: blocking,
+                                        new_issues: new_i,
+                                        passed: is_passed,
+                                        fix_instructions: fix,
+                                        report_json: rjson,
+                                        providers_json,
+                                        decision_json,
+                                        issues,
+                                    }
                                 }
                                 Err(e) => {
                                     skipped_outcome(&run_id, &format!("engine.run failed: {e}"), &run_id)
@@ -1836,26 +1929,36 @@ impl OrchestratorAgent {
                 }
             };
 
-            let (gate_status, total_issues, blocking_issues, new_issues, passed, fix_instructions, report_json) =
-                match tokio::time::timeout(
-                    Duration::from_secs(QUALITY_GATE_TIMEOUT_SECS),
-                    engine_future,
-                )
-                .await
-                {
-                    Ok(outcome) => outcome,
-                    Err(_elapsed) => {
-                        skipped_outcome(
-                            &run_id,
-                            &format!("quality engine timed out after {QUALITY_GATE_TIMEOUT_SECS}s"),
-                            &run_id,
-                        )
-                    }
-                };
+            let GateOutcome {
+                gate_status,
+                total_issues,
+                blocking_issues,
+                new_issues,
+                passed,
+                fix_instructions,
+                report_json,
+                providers_json,
+                decision_json,
+                issues,
+            } = match tokio::time::timeout(
+                Duration::from_secs(QUALITY_GATE_TIMEOUT_SECS),
+                engine_future,
+            )
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(_elapsed) => {
+                    skipped_outcome(
+                        &run_id,
+                        &format!("quality engine timed out after {QUALITY_GATE_TIMEOUT_SECS}s"),
+                        &run_id,
+                    )
+                }
+            };
 
             let duration_ms = start.elapsed().as_millis() as i32;
 
-            // Complete the quality_run record
+            // Complete the quality_run record (Fix #3: providers_run + decision_json now populated)
             if let Err(e) = db::models::QualityRun::complete(
                 &db.pool,
                 &run_id,
@@ -1864,9 +1967,9 @@ impl OrchestratorAgent {
                 blocking_issues,
                 new_issues,
                 duration_ms,
-                None, // providers_run
+                providers_json.as_deref(),
                 report_json.as_deref(),
-                None, // decision_json
+                decision_json.as_deref(),
             )
             .await
             {
@@ -1875,6 +1978,22 @@ impl OrchestratorAgent {
                     error = %e,
                     "Failed to complete quality_run record"
                 );
+            }
+
+            // Fix #3: persist per-issue audit rows so investigators can see
+            // exactly which findings drove the gate verdict (instead of only a
+            // totals summary in quality_run).
+            if !issues.is_empty() {
+                if let Err(e) =
+                    db::models::QualityIssueRecord::insert_batch(&db.pool, &issues).await
+                {
+                    tracing::error!(
+                        quality_run_id = %run_id,
+                        issue_count = issues.len(),
+                        error = %e,
+                        "Failed to persist quality_issue rows for audit trail"
+                    );
+                }
             }
 
             // G31-006: if gate was skipped (engine failure/timeout), emit a warn event

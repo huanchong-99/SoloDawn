@@ -11,13 +11,13 @@ use tracing::{info, warn};
 use crate::config::{QualityGateConfig, QualityGateMode};
 use crate::discovery::RepositoryDiscovery;
 use crate::gate::evaluator::ConditionEvaluator;
-use crate::gate::result::MeasureValue;
+use crate::gate::result::{EvaluationResult, MeasureValue};
 use crate::gate::QualityGateLevel;
 use crate::issue::QualityIssue;
 use crate::metrics::MetricKey;
 use crate::provider::QualityProvider;
 use crate::report::QualityReport;
-use crate::rule::AnalyzerSource;
+use crate::rule::{AnalyzerSource, RuleType, Severity};
 use crate::sarif;
 
 /// 质量门执行引擎
@@ -219,8 +219,62 @@ impl QualityEngine {
 
         let eval_results = ConditionEvaluator::evaluate_all(&applicable_conditions, &all_metrics);
 
+        // Empty-scan fail-closed (enforce only).
+        //
+        // Trigger: the repo has discoverable code targets (JS/Rust) **and** the
+        // configured gate has rules **but** no provider claims to evaluate any
+        // of them. In that scenario the evaluator runs over an empty condition
+        // list and returns no error/warn — which would silently produce an OK
+        // decision, i.e. "the security guard's checklist was empty so nothing
+        // looked suspicious". In `enforce` mode that is unsafe: quality was not
+        // actually verified, so we synthesize a single ERROR result on the
+        // sentinel metric `QualityGateEmptyScan` and inject a matching blocking
+        // QualityIssue so the orchestrator's audit trail reflects the cause.
+        let has_targets = discovery.has_js_targets() || discovery.has_rust_targets();
+        let gate_has_rules = !gate.conditions.is_empty();
+        let no_provider_metric_matched = applicable_conditions.is_empty();
+        let trigger_empty_scan_block =
+            self.config.is_enforcing() && has_targets && gate_has_rules && no_provider_metric_matched;
+
+        let final_eval_results: Vec<EvaluationResult> = if trigger_empty_scan_block {
+            let js_count = discovery.js_targets().len();
+            let rust_count = if discovery.has_rust_targets() { 1 } else { 0 };
+            let detail = format!(
+                "Quality gate is in enforce mode but no enabled provider claims to evaluate any of \
+                 the {} configured condition(s) for this repository (discovered: {} JS target(s), \
+                 {} Rust workspace(s)). Refusing to pass — quality was not actually verified.",
+                gate.conditions.len(),
+                js_count,
+                rust_count,
+            );
+            warn!(
+                gate = %gate.name,
+                js_targets = js_count,
+                has_rust_targets = discovery.has_rust_targets(),
+                gate_conditions = gate.conditions.len(),
+                "Empty-scan fail-closed triggered (enforce mode + discovered targets + zero applicable provider metrics)"
+            );
+            quality_report.all_issues.push(
+                QualityIssue::new(
+                    "quality_engine::empty_scan",
+                    RuleType::Bug,
+                    Severity::Blocker,
+                    AnalyzerSource::Other("quality-engine".to_string()),
+                    detail.clone(),
+                )
+                .with_effort(5),
+            );
+            vec![EvaluationResult::error_with_message(
+                MetricKey::QualityGateEmptyScan,
+                None,
+                detail,
+            )]
+        } else {
+            eval_results
+        };
+
         // 生成质量门决策
-        let decision = gate.evaluate(&eval_results);
+        let decision = gate.evaluate(&final_eval_results);
 
         info!("{}", quality_report.status_line());
 
@@ -309,5 +363,158 @@ impl QualityEngine {
         }
 
         all_issues
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::QualityGateMode;
+    use crate::gate::status::QualityGateStatus;
+    use std::path::Path as StdPath;
+    use uuid::Uuid;
+    use async_trait::async_trait;
+
+    fn temp_root() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("quality-engine-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write(path: &StdPath, content: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, content).unwrap();
+    }
+
+    /// Provider that intentionally claims zero applicable metrics — simulates
+    /// the real Task 1 scenario where the discovered repo has no provider that
+    /// can evaluate any gate condition.
+    struct EmptyProvider;
+    #[async_trait]
+    impl QualityProvider for EmptyProvider {
+        fn name(&self) -> &str {
+            "empty-provider"
+        }
+        fn supported_metrics(&self) -> Vec<MetricKey> {
+            vec![]
+        }
+        fn applicable_metrics(
+            &self,
+            _discovery: &RepositoryDiscovery,
+            _changed_files: Option<&[String]>,
+        ) -> Vec<MetricKey> {
+            vec![]
+        }
+        async fn analyze(
+            &self,
+            _project_root: &Path,
+            _discovery: &RepositoryDiscovery,
+            _changed_files: Option<&[String]>,
+        ) -> anyhow::Result<crate::provider::ProviderReport> {
+            Ok(crate::provider::ProviderReport::success("empty-provider", 0))
+        }
+    }
+
+    fn enforce_config_with_terminal_gate() -> QualityGateConfig {
+        let mut cfg = QualityGateConfig::default_config();
+        cfg.mode = QualityGateMode::Enforce;
+        cfg
+    }
+
+    fn shadow_config_with_terminal_gate() -> QualityGateConfig {
+        let mut cfg = QualityGateConfig::default_config();
+        cfg.mode = QualityGateMode::Shadow;
+        cfg
+    }
+
+    #[tokio::test]
+    async fn enforce_empty_scan_with_discovered_target_fails_closed() {
+        // Repo has a JS target (frontend package.json) → discovery is non-empty,
+        // but the only registered provider claims zero applicable metrics, so
+        // the gate's evaluator would otherwise see an empty condition list and
+        // return Ok. The empty-scan fail-closed path should override that.
+        let root = temp_root();
+        write(
+            &root.join("package.json"),
+            r#"{ "name":"app", "scripts": {"type-check":"tsc --noEmit"} }"#,
+        );
+        write(&root.join("tsconfig.json"), r#"{ "compilerOptions": {} }"#);
+
+        let providers: Vec<std::sync::Arc<dyn QualityProvider>> =
+            vec![std::sync::Arc::new(EmptyProvider)];
+        let engine = QualityEngine::new(enforce_config_with_terminal_gate(), providers);
+
+        let report = engine
+            .run(&root, QualityGateLevel::Terminal, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            report.overall_status(),
+            QualityGateStatus::Error,
+            "enforce + discovered target + zero provider metrics must NOT pass"
+        );
+        let blocking = report.blocking_issues();
+        assert!(
+            blocking.iter().any(|i| i.rule_id == "quality_engine::empty_scan"),
+            "expected synthetic empty_scan blocking issue in report.all_issues"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn shadow_empty_scan_with_discovered_target_does_not_fail_closed() {
+        // Same shape, but mode=shadow → fail-closed must NOT trigger.
+        let root = temp_root();
+        write(
+            &root.join("package.json"),
+            r#"{ "name":"app", "scripts": {"type-check":"tsc --noEmit"} }"#,
+        );
+        write(&root.join("tsconfig.json"), r#"{ "compilerOptions": {} }"#);
+
+        let providers: Vec<std::sync::Arc<dyn QualityProvider>> =
+            vec![std::sync::Arc::new(EmptyProvider)];
+        let engine = QualityEngine::new(shadow_config_with_terminal_gate(), providers);
+
+        let report = engine
+            .run(&root, QualityGateLevel::Terminal, None)
+            .await
+            .unwrap();
+
+        assert_ne!(
+            report.overall_status(),
+            QualityGateStatus::Error,
+            "shadow mode should not fail-closed on empty scan"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn enforce_empty_scan_without_discovered_targets_does_not_block() {
+        // No JS, no Rust, no targets discovered → fail-closed must NOT trigger
+        // (no code = nothing to verify, vacuously fine).
+        let root = temp_root();
+        // Intentionally no package.json / Cargo.toml.
+
+        let providers: Vec<std::sync::Arc<dyn QualityProvider>> =
+            vec![std::sync::Arc::new(EmptyProvider)];
+        let engine = QualityEngine::new(enforce_config_with_terminal_gate(), providers);
+
+        let report = engine
+            .run(&root, QualityGateLevel::Terminal, None)
+            .await
+            .unwrap();
+
+        assert_ne!(
+            report.overall_status(),
+            QualityGateStatus::Error,
+            "no targets at all should not trigger empty-scan fail-closed"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

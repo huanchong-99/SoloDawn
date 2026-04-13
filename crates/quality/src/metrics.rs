@@ -40,6 +40,9 @@ pub enum MetricKey {
     /// Frontend 测试失败数
     #[serde(rename = "frontend_test_failures")]
     FrontendTestFailures,
+    /// 测试代码引入了 `@testing-library/*` 之类，但 package.json 未声明对应依赖
+    #[serde(rename = "frontend_test_deps_missing")]
+    FrontendTestDepsMissing,
 
     // ── 通用指标（SonarQube 风格）──
     /// 测试失败总数
@@ -129,6 +132,12 @@ pub enum MetricKey {
     /// 分支覆盖率 (%)
     #[serde(rename = "branch_coverage")]
     BranchCoverage,
+
+    // ── Quality engine internal sentinels ──
+    /// 强制模式下，仓库已发现 target 但没有任何 provider 能评估任一 gate condition
+    /// 的兜底信号。等同于"安检员手里没拿到清单"，必须 fail-closed。
+    #[serde(rename = "quality_gate_empty_scan")]
+    QualityGateEmptyScan,
 }
 
 impl MetricKey {
@@ -144,6 +153,7 @@ impl MetricKey {
             Self::EslintWarnings => "eslint_warnings",
             Self::TscErrors => "tsc_errors",
             Self::FrontendTestFailures => "frontend_test_failures",
+            Self::FrontendTestDepsMissing => "frontend_test_deps_missing",
             Self::TestFailures => "test_failures",
             Self::TestCoverage => "test_coverage",
             Self::Bugs => "bugs",
@@ -169,6 +179,7 @@ impl MetricKey {
             Self::SecretsDetected => "secrets_detected",
             Self::LineCoverage => "line_coverage",
             Self::BranchCoverage => "branch_coverage",
+            Self::QualityGateEmptyScan => "quality_gate_empty_scan",
         }
     }
 
@@ -184,6 +195,7 @@ impl MetricKey {
             Self::EslintWarnings => "ESLint Warnings",
             Self::TscErrors => "TypeScript Errors",
             Self::FrontendTestFailures => "Frontend Test Failures",
+            Self::FrontendTestDepsMissing => "Frontend Test Deps Missing",
             Self::TestFailures => "Test Failures",
             Self::TestCoverage => "Test Coverage",
             Self::Bugs => "Bugs",
@@ -209,6 +221,7 @@ impl MetricKey {
             Self::SecretsDetected => "Secrets Detected",
             Self::LineCoverage => "Line Coverage (%)",
             Self::BranchCoverage => "Branch Coverage (%)",
+            Self::QualityGateEmptyScan => "Empty Quality Scan",
         }
     }
 }

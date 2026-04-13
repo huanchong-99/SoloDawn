@@ -191,6 +191,13 @@ impl JsTarget {
         self.has_tsconfig
     }
 
+    /// Declared dependency names from the target's `package.json` (deps, devDeps,
+    /// peerDeps, optionalDeps merged). Used by Fix #4 to detect imports of
+    /// undeclared packages such as `@testing-library/react`.
+    pub fn dependency_names(&self) -> &HashSet<String> {
+        &self.dependency_names
+    }
+
     pub fn display_name(&self, repo_root: &Path) -> String {
         self.name.clone().unwrap_or_else(|| self.relative_root(repo_root))
     }
