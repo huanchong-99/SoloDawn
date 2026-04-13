@@ -516,11 +516,19 @@ fn extract_imported_modules(source: &str) -> Vec<String> {
     use std::sync::OnceLock;
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        // Matches `from "X"` / `from 'X'` / `require("X")` / `require('X')`
-        // AND side-effect form `import "X"` / `import 'X'`. Word-boundary on
-        // `import` so we don't match `importable` etc.
-        regex::Regex::new(r#"(?:(?:from|require)\s*\(?|\bimport)\s*['"]([^'"]+)['"]"#)
-            .expect("import regex must compile")
+        // Matches all of:
+        //   - `from "X"` / `from 'X'`            (named/default import)
+        //   - `require("X")` / `require('X')`    (CommonJS)
+        //   - `import "X"` / `import 'X'`        (ES side-effect import)
+        //   - `import("X")` / `import('X')`      (ES dynamic import)
+        // Word-boundary on `import` keeps `importable()` etc. from matching.
+        // Primary-brain rejection v1 follow-up: dynamic `import('x')` was
+        // missed by v1 — adding explicit `\bimport\s*\(` branch closes the
+        // hole.
+        regex::Regex::new(
+            r#"(?:(?:from|require)\s*\(?|\bimport\s*\(|\bimport)\s*['"]([^'"]+)['"]"#,
+        )
+        .expect("import regex must compile")
     });
     let mut out = Vec::new();
     for cap in re.captures_iter(source) {
@@ -873,6 +881,36 @@ mod tests {
         assert!(mods.contains(&"@testing-library/jest-dom/matchers".to_string()));
         assert!(mods.contains(&"@playwright/test".to_string()));
         assert!(!mods.iter().any(|m| m.starts_with('.')));
+    }
+
+    #[test]
+    fn extract_imports_handles_dynamic_and_type_only() {
+        // Primary-brain rejection v1 follow-up: dynamic `import('x')` and
+        // `import type ... from 'x'` must both be detected.
+        let src = r#"
+            import type { Renderer } from '@testing-library/react';
+            const lib = await import('@playwright/test');
+            const userEvent = await import("@testing-library/user-event");
+            function importable() { return 0; }   // must NOT be matched
+        "#;
+        let mods = extract_imported_modules(src);
+        assert!(
+            mods.contains(&"@testing-library/react".to_string()),
+            "type-only import should match via `from`"
+        );
+        assert!(
+            mods.contains(&"@playwright/test".to_string()),
+            "single-quote dynamic import should match"
+        );
+        assert!(
+            mods.contains(&"@testing-library/user-event".to_string()),
+            "double-quote dynamic import should match"
+        );
+        // The function name `importable` must not produce a phantom module.
+        assert!(
+            !mods.iter().any(|m| m == "importable"),
+            "word-boundary on `import` must prevent `importable` from matching"
+        );
     }
 
     #[test]

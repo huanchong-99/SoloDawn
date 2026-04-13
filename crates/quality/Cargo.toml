@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Quality gate engine for SoloDawn — code quality analysis, condition evaluation, and report aggregation"
 license = "Apache-2.0 AND LGPL-3.0-or-later"
+build = "build.rs"
 
 # Quality gate model design inspired by SonarQube (LGPL-3.0)
 # See: https://github.com/SonarSource/sonarqube

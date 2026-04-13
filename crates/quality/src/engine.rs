@@ -254,6 +254,14 @@ impl QualityEngine {
                 gate_conditions = gate.conditions.len(),
                 "Empty-scan fail-closed triggered (enforce mode + discovered targets + zero applicable provider metrics)"
             );
+            // PRIMARY-BRAIN-REJECT-V1: append the synthetic blocker AND
+            // recompute summary. Before this fix the issue went into
+            // `all_issues` but `quality_report.summary` had already been
+            // frozen by `aggregate()`, so downstream agent.rs saw
+            // total_issues=0/blocking_issues=0 and reclassified the ERROR
+            // decision as a "metric-collection failure" → terminal got
+            // promoted instead of blocked. Recomputing summary closes that
+            // gap so the empty-scan signal reaches the orchestrator intact.
             quality_report.all_issues.push(
                 QualityIssue::new(
                     "quality_engine::empty_scan",
@@ -264,6 +272,8 @@ impl QualityEngine {
                 )
                 .with_effort(5),
             );
+            quality_report.summary =
+                crate::issue::IssueSummary::from_issues(&quality_report.all_issues);
             vec![EvaluationResult::error_with_message(
                 MetricKey::QualityGateEmptyScan,
                 None,
@@ -460,6 +470,22 @@ mod tests {
         assert!(
             blocking.iter().any(|i| i.rule_id == "quality_engine::empty_scan"),
             "expected synthetic empty_scan blocking issue in report.all_issues"
+        );
+        // Primary-brain rejection v1 follow-up: summary must be recomputed
+        // after the synthetic blocker is appended, otherwise agent.rs sees
+        // total_issues=0/blocking_issues=0 and reclassifies the failure as
+        // a metric-collection skip — promoting the terminal instead of
+        // blocking it. Verify the audit-visible counters reflect the block.
+        assert!(
+            report.summary.blocking_issues >= 1,
+            "summary.blocking_issues must be >=1 after empty-scan injection \
+             (was {})",
+            report.summary.blocking_issues
+        );
+        assert!(
+            report.summary.total >= 1,
+            "summary.total must be >=1 after empty-scan injection (was {})",
+            report.summary.total
         );
 
         let _ = std::fs::remove_dir_all(&root);

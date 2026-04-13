@@ -141,10 +141,11 @@ fn default_project_key() -> String {
 ///
 /// 外部输出仓库（orchestrator 跑出来的项目）通常不会自带 `quality/quality-gate.yaml`，
 /// 不应该让 gate 静默跌回到内部的 `default_config`（一个会被空扫描"绿过"的空清单）。
-/// `include_str!` 在编译时把 SoloDawn 仓库根的策略嵌进二进制，作为最后兜底之前的
-/// 一道有效防线。
+/// 通过 `build.rs` 把策略文件复制到 `$OUT_DIR/quality-gate.yaml`，编译期 inline。
+/// 这种做法在 in-workspace / vendored / out-of-tree 三种构建场景下都安全（v1 因
+/// 直接 `include_str!("../../../quality/...")` 在 out-of-tree 时崩溃，被主脑驳回）。
 pub const BUNDLED_CENTRAL_POLICY: &str =
-    include_str!("../../../quality/quality-gate.yaml");
+    include_str!(concat!(env!("OUT_DIR"), "/quality-gate.yaml"));
 
 impl QualityGateConfig {
     /// 从 YAML 文件加载配置
