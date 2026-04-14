@@ -5543,6 +5543,10 @@ impl OrchestratorAgent {
                             target_branch,
                         ])
                         .current_dir(base_repo_path)
+                        // R6 port-leak hygiene — uniform strip across every child spawn.
+                        .env_remove("PORT")
+                        .env_remove("BACKEND_PORT")
+                        .env_remove("FRONTEND_PORT")
                         .output()
                         .await;
                     matches!(output, Ok(o) if o.status.success())
@@ -6022,6 +6026,10 @@ impl OrchestratorAgent {
                 "--stat",
             ])
             .current_dir(&working_dir)
+            // R6 port-leak hygiene — uniform strip across every child spawn.
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
             .output()
             .await?;
         let diff = String::from_utf8_lossy(&output.stdout).to_string();
@@ -6095,6 +6103,10 @@ async fn collect_changed_files_for_quality_gate(
         .arg("--name-only")
         .arg(format!("{base_commit}..{head_commit}"))
         .current_dir(repo_root)
+        // R6 port-leak hygiene — uniform strip across every child spawn.
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
         .output()
         .await?;
 
@@ -6432,6 +6444,10 @@ async fn fetch_terminal_completion_context(
     let diff_stat = match tokio::process::Command::new("git")
         .args(["diff", "--stat", "HEAD~1..HEAD"])
         .current_dir(working_dir)
+        // R6 port-leak hygiene — uniform strip across every child spawn.
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
         .output()
         .await
     {
@@ -6453,6 +6469,10 @@ async fn fetch_terminal_completion_context(
         match tokio::process::Command::new("git")
             .args(["show", "-s", "--format=%B", commit_hash])
             .current_dir(working_dir)
+            // R6 port-leak hygiene — uniform strip across every child spawn.
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
             .output()
             .await
         {
