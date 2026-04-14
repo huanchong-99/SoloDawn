@@ -187,7 +187,18 @@ mod tests {
                 script: "generate-types:check".to_string(),
             },
         );
-        assert_eq!(cmd, "pnpm");
+        // R5 Fix 6: resolve_node_command now Windows-resolves the PM shim
+        // (e.g. `pnpm.cmd`). Assert on basename to stay portable.
+        let basename = std::path::Path::new(&cmd)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&cmd)
+            .trim_end_matches(".cmd")
+            .trim_end_matches(".exe")
+            .trim_end_matches(".CMD")
+            .trim_end_matches(".EXE")
+            .to_string();
+        assert_eq!(basename, "pnpm");
         assert_eq!(args, vec!["run", "generate-types:check"]);
     }
 }

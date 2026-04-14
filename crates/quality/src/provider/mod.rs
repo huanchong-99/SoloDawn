@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::discovery::{resolve_node_command, NodeQualityCommand, PackageManager, RepositoryDiscovery};
+use crate::discovery::{
+    NodeQualityCommand, PackageManager, RepositoryDiscovery, resolve_node_command, resolve_node_exe,
+};
 use crate::gate::result::MeasureValue;
 use crate::issue::QualityIssue;
 use crate::metrics::MetricKey;
@@ -93,6 +95,7 @@ pub async fn run_node_quality_command(
     command: &NodeQualityCommand,
 ) -> anyhow::Result<std::process::Output> {
     let (cmd, args) = resolve_node_command(package_manager, command);
+    let cmd = resolve_node_exe(&cmd);
     tokio::process::Command::new(cmd)
         .args(args)
         .current_dir(cwd)
@@ -144,4 +147,3 @@ pub trait QualityProvider: Send + Sync {
         self.supported_metrics()
     }
 }
-

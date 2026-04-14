@@ -813,6 +813,23 @@ mod tests {
         remove_temp_project_root(&temp);
     }
 
+    fn command_basename(cmd: &str) -> String {
+        // R5 Fix 6: resolve_node_command now routes cmd through
+        // `resolve_node_exe` which on Windows returns an absolute
+        // .cmd path if npm/pnpm/yarn are installed. Tests assert on
+        // the basename without extension so they stay portable across
+        // Windows (with shims) and Unix (plain names).
+        let tail = std::path::Path::new(cmd)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(cmd);
+        tail.trim_end_matches(".cmd")
+            .trim_end_matches(".exe")
+            .trim_end_matches(".CMD")
+            .trim_end_matches(".EXE")
+            .to_string()
+    }
+
     #[test]
     fn resolve_command_uses_package_manager_scripts() {
         let (cmd, args) = resolve_node_command(
@@ -821,7 +838,7 @@ mod tests {
                 script: "type-check".to_string(),
             },
         );
-        assert_eq!(cmd, "pnpm");
+        assert_eq!(command_basename(&cmd), "pnpm");
         assert_eq!(args, vec!["run", "type-check"]);
     }
 
@@ -834,7 +851,7 @@ mod tests {
                 args: vec!["--noEmit".to_string()],
             },
         );
-        assert_eq!(cmd, "npx");
+        assert_eq!(command_basename(&cmd), "npx");
         assert_eq!(args, vec!["tsc", "--noEmit"]);
     }
 

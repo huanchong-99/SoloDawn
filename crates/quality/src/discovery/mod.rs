@@ -33,22 +33,22 @@ impl PackageManager {
             Self::Npm => {
                 let mut full_args = vec![binary.to_string()];
                 full_args.extend(args.iter().cloned());
-                ("npx".to_string(), full_args)
+                (resolve_node_exe("npx"), full_args)
             }
             Self::Pnpm => {
                 let mut full_args = vec!["exec".to_string(), binary.to_string()];
                 full_args.extend(args.iter().cloned());
-                ("pnpm".to_string(), full_args)
+                (resolve_node_exe("pnpm"), full_args)
             }
             Self::Yarn => {
                 let mut full_args = vec!["exec".to_string(), binary.to_string()];
                 full_args.extend(args.iter().cloned());
-                ("yarn".to_string(), full_args)
+                (resolve_node_exe("yarn"), full_args)
             }
             Self::Bun => {
                 let mut full_args = vec![binary.to_string()];
                 full_args.extend(args.iter().cloned());
-                ("bunx".to_string(), full_args)
+                (resolve_node_exe("bunx"), full_args)
             }
         }
     }
@@ -100,6 +100,50 @@ impl PackageManager {
     }
 }
 
+pub fn resolve_node_exe(name: &str) -> String {
+    #[cfg(windows)]
+    {
+        if is_explicit_command_path(name) {
+            return name.to_string();
+        }
+
+        if let Some(path_var) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&path_var) {
+                for candidate in [format!("{name}.cmd"), format!("{name}.exe"), name.to_string()] {
+                    let path = dir.join(&candidate);
+                    if path.is_file() {
+                        return path.to_string_lossy().into_owned();
+                    }
+                }
+            }
+        }
+
+        format!("{name}.cmd")
+    }
+
+    #[cfg(not(windows))]
+    {
+        name.to_string()
+    }
+}
+
+#[cfg(windows)]
+fn is_explicit_command_path(name: &str) -> bool {
+    // R5 Fix 6 note: primary-brain v1 used `Path::new(name).parent().is_some()`
+    // which WRONGLY returns true for bare names like "npm" because Rust's
+    // `Path::parent()` returns `Some("")` for any non-root path. That short-
+    // circuited the PATH lookup and made the resolver return the bare name
+    // — defeating the whole point of the Windows-aware resolver.
+    //
+    // Explicit paths are detected by:
+    //   1. Absolute path (C:\..., \\?\..., etc.), OR
+    //   2. Contains a path separator (implies user gave us a relative path), OR
+    //   3. Has a file extension the OS can execute directly.
+    let has_separator = name.contains('/') || name.contains('\\');
+    let has_extension = Path::new(name).extension().is_some();
+    Path::new(name).is_absolute() || has_separator || has_extension
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeQualityCommand {
     Script { script: String },
@@ -128,7 +172,7 @@ pub fn resolve_node_command(
     let package_manager = package_manager.unwrap_or(PackageManager::Npm);
     match command {
         NodeQualityCommand::Script { script } => {
-            (package_manager.command().to_string(), package_manager.script_args(script))
+            (resolve_node_exe(package_manager.command()), package_manager.script_args(script))
         }
         NodeQualityCommand::PackageExec { binary, args } => {
             package_manager.exec_command(binary, args)
@@ -1194,6 +1238,49 @@ mod tests {
             }
             other => panic!("expected test Script, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn resolve_node_exe_returns_plain_name_on_non_windows() {
+        #[cfg(not(windows))]
+        {
+            // On Unix, resolver is a pass-through.
+            assert_eq!(resolve_node_exe("npm"), "npm".to_string());
+            assert_eq!(resolve_node_exe("pnpm"), "pnpm".to_string());
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resolve_node_exe_produces_runnable_shape_on_windows() {
+        // R5 Fix 6: On Windows, `tokio::process::Command::new("npm")`
+        // silently fails because CreateProcessW won't pick up `npm.cmd` on
+        // its own. Resolver must return either:
+        //  (1) a concrete path ending in .cmd/.exe (when PATH lookup hit),
+        //  (2) or the fallback literal "{name}.cmd" (when nothing in PATH
+        //      matched — still better than the bare name the gate used to
+        //      pass before Fix 6).
+        let resolved = resolve_node_exe("npm");
+        let lower = resolved.to_lowercase();
+        assert!(
+            lower.ends_with(".cmd") || lower.ends_with(".exe"),
+            "resolver must always return a .cmd/.exe suffix on Windows; got `{resolved}`"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resolve_node_exe_passes_through_explicit_paths() {
+        // Caller-provided explicit paths must NOT be rewritten.
+        assert_eq!(
+            resolve_node_exe("C:\\Program Files\\nodejs\\npm.cmd"),
+            "C:\\Program Files\\nodejs\\npm.cmd".to_string()
+        );
+        assert_eq!(resolve_node_exe("tool.exe"), "tool.exe".to_string());
+        assert_eq!(
+            resolve_node_exe(".\\local\\tool"),
+            ".\\local\\tool".to_string()
+        );
     }
 
     #[test]

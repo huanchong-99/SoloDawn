@@ -6213,17 +6213,23 @@ async fn ensure_js_deps_installed_for_gate(wd: &Path) {
 
     let pm = JsPackageManager::detect_from_worktree(wd);
     let (cmd, args) = pm.install_command();
+    // R5 Fix 6: on Windows, tokio::process::Command::new("npm") silently
+    // fails because `CreateProcessW` only resolves `.exe`/`.com` extensions
+    // without shell assistance, while npm is distributed as `npm.cmd`.
+    // Route through the shared `resolve_node_exe` helper so the bootstrap
+    // consistently finds the PM shim.
+    let resolved_cmd = quality::discovery::resolve_node_exe(cmd);
     tracing::info!(
         worktree = %canonical.display(),
         package_manager = ?pm,
-        cmd = %cmd,
+        cmd = %resolved_cmd,
         args = ?args,
-        "R4 Fix A: bootstrapping JS deps before quality gate"
+        "R4 Fix A: bootstrapping JS deps before quality gate (R5 Fix 6: Windows-aware exe resolution)"
     );
 
     let run = tokio::time::timeout(
         Duration::from_secs(JS_BOOTSTRAP_TIMEOUT_SECS),
-        tokio::process::Command::new(cmd)
+        tokio::process::Command::new(&resolved_cmd)
             .args(&args)
             .current_dir(wd)
             .output(),
