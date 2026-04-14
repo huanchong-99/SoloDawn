@@ -27,11 +27,19 @@ export function Board() {
 
   useEffect(() => {
     if (projects.length > 0 && projectIdFromUrl !== validProjectId) {
-      const next = new URLSearchParams(searchParams);
-      next.set('projectId', validProjectId);
-      setSearchParams(next, { replace: true });
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (next.get('projectId') === validProjectId) {
+            return prev;
+          }
+          next.set('projectId', validProjectId);
+          return next;
+        },
+        { replace: true }
+      );
     }
-  }, [projectIdFromUrl, validProjectId, projects.length, searchParams, setSearchParams]);
+  }, [projectIdFromUrl, validProjectId, projects.length, setSearchParams]);
 
   const handleProjectChange = useCallback(
     (newProjectId: string) => {
@@ -48,6 +56,13 @@ export function Board() {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
     workflowIdFromUrl
   );
+
+  // E01-03: Re-sync local state when URL workflowId changes externally
+  useEffect(() => {
+    setSelectedWorkflowId((prev) =>
+      prev === workflowIdFromUrl ? prev : workflowIdFromUrl
+    );
+  }, [workflowIdFromUrl]);
 
   useEffect(() => {
     if (selectedWorkflowId === workflowIdFromUrl) {

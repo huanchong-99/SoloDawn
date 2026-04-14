@@ -456,7 +456,7 @@ impl StandardCodingAgentExecutor for CursorAgent {
                                                     ToolStatus::Success
                                                 }
                                             }
-                                            Err(_) => ToolStatus::Success,
+                                            Err(_) => ToolStatus::Failed,
                                         }
                                     } else {
                                         ToolStatus::Success

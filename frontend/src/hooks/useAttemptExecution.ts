@@ -34,6 +34,13 @@ export function useAttemptExecution(attemptId?: string, taskId?: string) {
   // Extract data from queries so useMemo has a stable dependency
   const processDetailData = processDetailQueries.map((q) => q.data);
 
+  // Create a primitive signature of the detail data to use as a stable dep
+  // so the attemptData memo does not recompute from a fresh array identity
+  // on every render.
+  const processDetailSignature = processDetailData
+    .map((d) => (d ? `${d.id}:${d.updatedAt ?? ''}` : 'none'))
+    .join('|');
+
   // Build attempt data combining processes and details
   const attemptData: AttemptData = useMemo(() => {
     if (!executionProcesses.length) {
@@ -54,7 +61,8 @@ export function useAttemptExecution(attemptId?: string, taskId?: string) {
       processes: executionProcesses,
       runningProcessDetails,
     };
-  }, [executionProcesses, setupProcesses, processDetailData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [executionProcesses, setupProcesses, processDetailSignature]);
 
   // Stop execution function
   const stopExecution = useCallback(async () => {

@@ -327,15 +327,24 @@ impl TaskServer {
             container_ref: normalized_path.to_string_lossy().to_string(),
         };
 
-        let response = tokio::time::timeout(
+        let response = match tokio::time::timeout(
             std::time::Duration::from_millis(500),
             self.apply_api_token(self.client.get(&url))
                 .query(&query)
                 .send(),
         )
         .await
-        .ok()?
-        .ok()?;
+        {
+            Ok(Ok(resp)) => resp,
+            Ok(Err(e)) => {
+                tracing::debug!("attempt-context request failed: {e}");
+                return None;
+            }
+            Err(_) => {
+                tracing::debug!("attempt-context request timed out after 500ms");
+                return None;
+            }
+        };
 
         if !response.status().is_success() {
             return None;
@@ -814,8 +823,8 @@ impl TaskServer {
         };
 
         let details = TaskDetails::from_task(updated_task);
-        let repsonse = UpdateTaskResponse { task: details };
-        Ok(TaskServer::success(&repsonse))
+        let response = UpdateTaskResponse { task: details };
+        Ok(TaskServer::success(&response))
     }
 
     #[tool(

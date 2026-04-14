@@ -312,6 +312,7 @@ impl GhCli {
         let raw = Self::run(
             [
                 "api",
+                "--paginate",
                 &format!("repos/{owner}/{repo}/pulls/{pr_number}/comments"),
             ],
             None,

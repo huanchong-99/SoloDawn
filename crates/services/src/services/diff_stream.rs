@@ -209,7 +209,10 @@ impl DiffStreamManager {
 
     async fn reset_stream(&mut self) -> Result<(), DiffStreamError> {
         let paths_to_clear: Vec<String> = {
-            let mut guard = self.known_paths.write().unwrap();
+            let mut guard = self
+                .known_paths
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             guard.drain().collect()
         };
 
@@ -217,13 +220,17 @@ impl DiffStreamManager {
             let prefixed = prefix_path(raw_path, self.args.path_prefix.as_deref());
             let entry_index = escape_json_pointer_segment(&prefixed);
             let patch = ConversationPatch::remove_diff(&entry_index);
-            if self.tx.send(Ok(LogMsg::JsonPatch(patch))).await.is_err() {
+            if let Err(e) = self.tx.send(Ok(LogMsg::JsonPatch(patch))).await {
+                tracing::debug!("diff_stream: reset_stream send failed (receiver dropped): {e}");
                 return Ok(());
             }
         }
 
         self.cumulative.store(0, Ordering::Relaxed);
-        self.full_sent.write().unwrap().clear();
+        self.full_sent
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
 
         let diffs = self.fetch_diffs().await?;
         self.send_diffs(diffs).await?;
@@ -262,12 +269,18 @@ impl DiffStreamManager {
             let raw_path = GitService::diff_path(&diff);
 
             {
-                let mut guard = self.known_paths.write().unwrap();
+                let mut guard = self
+                    .known_paths
+                    .write()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 guard.insert(raw_path.clone());
             }
 
             if !diff.content_omitted {
-                let mut guard = self.full_sent.write().unwrap();
+                let mut guard = self
+                    .full_sent
+                    .write()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 guard.insert(raw_path.clone());
             }
 
@@ -282,7 +295,8 @@ impl DiffStreamManager {
 
             let entry_index = escape_json_pointer_segment(&prefixed_entry);
             let patch = ConversationPatch::add_diff(&entry_index, diff);
-            if self.tx.send(Ok(LogMsg::JsonPatch(patch))).await.is_err() {
+            if let Err(e) = self.tx.send(Ok(LogMsg::JsonPatch(patch))).await {
+                tracing::debug!("diff_stream: send_diffs send failed (receiver dropped): {e}");
                 return Ok(());
             }
         }
@@ -328,7 +342,8 @@ impl DiffStreamManager {
         .await??;
 
         for msg in messages {
-            if self.tx.send(Ok(msg)).await.is_err() {
+            if let Err(e) = self.tx.send(Ok(msg)).await {
+                tracing::debug!("diff_stream: handle_fs_events send failed (receiver dropped): {e}");
                 return Ok(());
             }
         }
@@ -482,14 +497,18 @@ fn process_file_changes(
         let raw_file_path = GitService::diff_path(&diff);
         files_with_diffs.insert(raw_file_path.clone());
         {
-            let mut guard = known_paths.write().unwrap();
+            let mut guard = known_paths
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             guard.insert(raw_file_path.clone());
         }
 
         apply_stream_omit_policy(&mut diff, cumulative_bytes, stats_only);
 
         if !diff.content_omitted {
-            let mut guard = full_sent_paths.write().unwrap();
+            let mut guard = full_sent_paths
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             guard.insert(raw_file_path.clone());
         }
 
@@ -514,7 +533,9 @@ fn process_file_changes(
             let patch = ConversationPatch::remove_diff(&entry_index);
             msgs.push(LogMsg::JsonPatch(patch));
             {
-                let mut guard = known_paths.write().unwrap();
+                let mut guard = known_paths
+                    .write()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 guard.remove(changed_path);
             }
         }

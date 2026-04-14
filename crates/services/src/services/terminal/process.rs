@@ -834,6 +834,32 @@ impl ProcessManager {
             };
             signal::kill(Pid::from_raw(pid as i32), Signal::SIGTERM)
                 .map_err(|e| anyhow::anyhow!("Failed to kill process {pid}: {e}"))?;
+
+            // [E26-01] Grace period: poll for exit, then escalate to SIGKILL.
+            // Mirrors the Windows path (graceful attempt -> force). We cannot
+            // use try_wait() here because we only have the PID, not a Child,
+            // so we probe liveness by sending signal 0.
+            tokio::task::spawn_blocking(move || {
+                let target = Pid::from_raw(pid as i32);
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+                let exited_gracefully = loop {
+                    if std::time::Instant::now() >= deadline {
+                        break false;
+                    }
+                    // signal::kill with None acts as a liveness probe (signal 0).
+                    match signal::kill(target, None) {
+                        Err(_) => break true, // process gone
+                        Ok(()) => {}
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                };
+
+                if !exited_gracefully {
+                    let _ = signal::kill(target, Signal::SIGKILL);
+                }
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))?;
         }
 
         #[cfg(windows)]
@@ -918,9 +944,14 @@ impl ProcessManager {
         };
         // Try to reap the child non-blockingly; if it has exited, treat as not running.
         match tracked.child.try_wait() {
-            Ok(Some(_)) => false, // process has exited
-            Ok(None) => true,     // process is still running
-            Err(_) => true,       // cannot determine; assume still running to be safe
+            Ok(Some(_)) => {
+                // [E26-06] Remove dead process from the map so subsequent
+                // lookups don't resurrect it. We already hold a write lock.
+                processes.remove(terminal_id);
+                false
+            }
+            Ok(None) => true, // process is still running
+            Err(_) => true,   // cannot determine; assume still running to be safe
         }
     }
 
@@ -928,11 +959,20 @@ impl ProcessManager {
     pub async fn list_running(&self) -> Vec<String> {
         let mut processes = self.processes.write().await;
         let mut running = Vec::new();
+        let mut dead: Vec<String> = Vec::new();
         for (id, tracked) in processes.iter_mut() {
             match tracked.child.try_wait() {
-                Ok(Some(_)) => {} // exited
-                _ => running.push(id.clone()),
+                // [M18] Only include truly-running processes (try_wait == Ok(None)).
+                // Ok(Some(_)) means the child already exited; Err(_) means we cannot
+                // confirm liveness, so we conservatively exclude it from "running".
+                Ok(None) => running.push(id.clone()),
+                Ok(Some(_)) => dead.push(id.clone()),
+                Err(_) => {}
             }
+        }
+        // Reap exited entries so they don't linger until the next cleanup cycle.
+        for id in dead {
+            processes.remove(&id);
         }
         running
     }

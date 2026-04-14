@@ -61,6 +61,7 @@ impl GitHostError {
                 | GitHostError::RepoNotFoundOrNoAccess(_)
                 | GitHostError::CliNotInstalled { .. }
                 | GitHostError::UnsupportedProvider
+                | GitHostError::Repository(_)
         )
     }
 }

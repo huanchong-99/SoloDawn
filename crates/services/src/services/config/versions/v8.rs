@@ -42,6 +42,12 @@ pub struct Config {
     pub executor_profile: ExecutorProfileId,
     pub disclaimer_acknowledged: bool,
     pub onboarding_acknowledged: bool,
+    #[serde(default)]
+    pub github_login_acknowledged: bool,
+    #[serde(default)]
+    pub login_acknowledged: bool,
+    #[serde(default)]
+    pub telemetry_acknowledged: bool,
     pub notifications: NotificationConfig,
     pub editor: EditorConfig,
     pub github: GitHubConfig,
@@ -78,6 +84,9 @@ impl Config {
             executor_profile: old_config.executor_profile,
             disclaimer_acknowledged: old_config.disclaimer_acknowledged,
             onboarding_acknowledged: old_config.onboarding_acknowledged,
+            github_login_acknowledged: old_config.github_login_acknowledged,
+            login_acknowledged: old_config.login_acknowledged,
+            telemetry_acknowledged: old_config.telemetry_acknowledged,
             notifications: old_config.notifications,
             editor: old_config.editor,
             github: old_config.github,
@@ -124,6 +133,9 @@ impl Default for Config {
             executor_profile: ExecutorProfileId::new(BaseCodingAgent::ClaudeCode),
             disclaimer_acknowledged: false,
             onboarding_acknowledged: false,
+            github_login_acknowledged: false,
+            login_acknowledged: false,
+            telemetry_acknowledged: false,
             notifications: NotificationConfig::default(),
             editor: EditorConfig::default(),
             github: GitHubConfig::default(),

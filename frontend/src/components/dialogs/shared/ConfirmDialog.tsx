@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Dialog,
@@ -33,7 +34,10 @@ const ConfirmDialogImpl = NiceModal.create<ConfirmDialogProps>((props) => {
     icon = true,
   } = props;
 
+  const didConfirmRef = useRef(false);
+
   const handleConfirm = () => {
+    didConfirmRef.current = true;
     modal.resolve('confirmed' as ConfirmResult);
     modal.hide();
   };
@@ -63,7 +67,14 @@ const ConfirmDialogImpl = NiceModal.create<ConfirmDialogProps>((props) => {
   };
 
   return (
-    <Dialog open={modal.visible} onOpenChange={handleCancel}>
+    <Dialog
+      open={modal.visible}
+      onOpenChange={(open) => {
+        if (!open && !didConfirmRef.current) {
+          handleCancel();
+        }
+      }}
+    >
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <div className="flex items-center gap-3">

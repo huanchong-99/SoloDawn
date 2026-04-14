@@ -74,8 +74,9 @@ pub async fn get_workspace_summaries(
     let pool = &deployment.db().pool;
     let archived = request.archived;
 
-    // 1. Fetch all workspaces with the given archived status
-    let workspaces: Vec<Workspace> = Workspace::find_all_with_status(pool, Some(archived), None)
+    // 1. Fetch workspaces with the given archived status.
+    // E29-14: Bound the query to avoid unbounded scans on large datasets.
+    let workspaces: Vec<Workspace> = Workspace::find_all_with_status(pool, Some(archived), Some(1000))
         .await?
         .into_iter()
         .map(|ws| ws.workspace)

@@ -814,7 +814,7 @@ impl OrchestratorAgent {
             BusMessage::Shutdown => {
                 return Ok(true);
             }
-            BusMessage::Instruction(..)
+            other @ (BusMessage::Instruction(..)
             | BusMessage::StatusUpdate { .. }
             | BusMessage::TerminalStatusUpdate { .. }
             | BusMessage::TaskStatusUpdate { .. }
@@ -822,8 +822,16 @@ impl OrchestratorAgent {
             | BusMessage::TerminalMessage { .. }
             | BusMessage::TerminalInput { .. }
             | BusMessage::TerminalPromptDecision { .. }
-            | BusMessage::ProviderStateChanged { .. } => {
-                // Outbound-only or UI-notification events — no action needed in agent loop
+            | BusMessage::ProviderStateChanged { .. }) => {
+                // Outbound-only or UI-notification events — no action needed in agent loop.
+                // TODO(M16): Out-of-order completion-like events (e.g. TerminalStatusUpdate /
+                // TaskStatusUpdate) arriving before their corresponding TerminalCompleted are
+                // currently dropped here. Buffer them by terminal_id/task_id and re-check against
+                // state when the expected completion arrives so they can be re-emitted in order.
+                tracing::warn!(
+                    message_variant = std::any::type_name_of_val(&other),
+                    "Agent loop received outbound/UI-only event; ignoring (see M16 TODO for out-of-order completion buffering)"
+                );
             }
         }
         Ok(false)
@@ -1408,7 +1416,10 @@ impl OrchestratorAgent {
                 .await;
         }
 
-        // Update state and get next terminal info
+        // Update state and get next terminal info.
+        // E21-01: clone needed values inside the lock scope, then explicitly drop the write
+        // guard BEFORE any awaits (including publish_workflow_event below) so the state lock
+        // is never held across `.await` points that perform bus I/O.
         let (next_terminal_index, task_completed, has_next, task_failed) = {
             let mut state = self.state.write().await;
             state.run_state = OrchestratorRunState::Processing;
@@ -1425,7 +1436,9 @@ impl OrchestratorAgent {
             let task_completed = state.is_task_completed(&event.task_id);
             let task_failed = state.task_has_failures(&event.task_id);
 
-            (next_index, task_completed, has_next, task_failed)
+            let result = (next_index, task_completed, has_next, task_failed);
+            drop(state);
+            result
         };
 
         // Update task status based on completion/failure
@@ -7001,10 +7014,17 @@ async fn fetch_previous_terminal_context(
             .unwrap_or_default()
     };
 
-    // 5. Extract handoff notes from the commit message
+    // 5. Extract handoff notes from the commit message.
+    //    E21-03: Extraction MUST run against the untruncated commit_message so the
+    //    HANDOFF: / METADATA markers aren't clipped off by `truncate_with_marker`
+    //    before we've had a chance to parse them. Do not move this below the
+    //    truncation step.
     let handoff_notes = extract_handoff_notes(&commit_message);
 
-    // 6. Truncate fields
+    // 6. Truncate fields.
+    //    E21-03: Truncate the commit_message AFTER extraction, using the untruncated
+    //    value as input. `handoff_notes` is stored separately, so we already have
+    //    the handoff content preserved even if the commit body gets clipped here.
     let commit_message = truncate_with_marker(&commit_message, HANDOFF_COMMIT_MAX_CHARS);
     let handoff_notes = truncate_with_marker(&handoff_notes, HANDOFF_NOTES_MAX_CHARS);
 

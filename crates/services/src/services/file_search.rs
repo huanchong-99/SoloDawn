@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use thiserror::Error;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 use ts_rs::TS;
 
@@ -85,7 +86,24 @@ pub struct FileSearchCache {
     git_service: GitService,
     file_ranker: FileRanker,
     build_queue: mpsc::UnboundedSender<PathBuf>,
-    watchers: DashMap<PathBuf, Debouncer<RecommendedWatcher, RecommendedCache>>,
+    watchers: Arc<DashMap<PathBuf, Debouncer<RecommendedWatcher, RecommendedCache>>>,
+    watcher_tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
+    worker_task: std::sync::Mutex<Option<JoinHandle<()>>>,
+}
+
+impl Drop for FileSearchCache {
+    fn drop(&mut self) {
+        if let Ok(mut tasks) = self.watcher_tasks.lock() {
+            for handle in tasks.drain(..) {
+                handle.abort();
+            }
+        }
+        if let Ok(mut worker) = self.worker_task.lock()
+            && let Some(handle) = worker.take()
+        {
+            handle.abort();
+        }
+    }
 }
 
 impl FileSearchCache {
@@ -101,16 +119,22 @@ impl FileSearchCache {
         let cache_for_worker = cache.clone();
         let git_service = GitService::new();
         let file_ranker = FileRanker::new();
+        let watchers: Arc<DashMap<PathBuf, Debouncer<RecommendedWatcher, RecommendedCache>>> =
+            Arc::new(DashMap::new());
 
         // Spawn background worker
         let worker_git_service = git_service.clone();
         let worker_file_ranker = file_ranker.clone();
-        tokio::spawn(async move {
+        let worker_build_sender = build_sender.clone();
+        let worker_watchers = Arc::clone(&watchers);
+        let worker_task = tokio::spawn(async move {
             Self::background_worker(
                 build_receiver,
                 cache_for_worker,
                 worker_git_service,
                 worker_file_ranker,
+                worker_build_sender,
+                worker_watchers,
             )
             .await;
         });
@@ -120,7 +144,9 @@ impl FileSearchCache {
             git_service,
             file_ranker,
             build_queue: build_sender,
-            watchers: DashMap::new(),
+            watchers,
+            watcher_tasks: std::sync::Mutex::new(Vec::new()),
+            worker_task: std::sync::Mutex::new(Some(worker_task)),
         }
     }
 
@@ -568,14 +594,18 @@ impl FileSearchCache {
         cache: Cache<PathBuf, CachedRepo>,
         git_service: GitService,
         file_ranker: FileRanker,
+        build_queue: mpsc::UnboundedSender<PathBuf>,
+        watchers: Arc<DashMap<PathBuf, Debouncer<RecommendedWatcher, RecommendedCache>>>,
     ) {
         while let Some(repo_path) = build_receiver.recv().await {
             let cache_builder = FileSearchCache {
                 cache: cache.clone(),
                 git_service: git_service.clone(),
                 file_ranker: file_ranker.clone(),
-                build_queue: mpsc::unbounded_channel().0, // Dummy sender
-                watchers: DashMap::new(),
+                build_queue: build_queue.clone(),
+                watchers: Arc::clone(&watchers),
+                watcher_tasks: std::sync::Mutex::new(Vec::new()),
+                worker_task: std::sync::Mutex::new(None),
             };
 
             match cache_builder.build_repo_cache(&repo_path).await {
@@ -634,7 +664,7 @@ impl FileSearchCache {
             .map_err(|e| format!("Failed to watch HEAD file: {e}"))?;
 
         // Spawn task to handle HEAD changes
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             while rx.recv().await.is_some() {
                 info!("HEAD changed for repo: {:?}", watched_path);
                 if let Err(e) = build_queue.send(watched_path.clone()) {
@@ -642,6 +672,9 @@ impl FileSearchCache {
                 }
             }
         });
+        if let Ok(mut tasks) = self.watcher_tasks.lock() {
+            tasks.push(handle);
+        }
 
         // Keep debouncer alive for the lifetime of the watcher registration.
         self.watchers.insert(repo_path_buf, debouncer);

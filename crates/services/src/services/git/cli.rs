@@ -794,7 +794,7 @@ impl GitCli {
             let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
             let combined = match (stdout.is_empty(), stderr.is_empty()) {
                 (true, true) => "Command failed with no output".to_string(),
-                (false, false) => format!("--- stderr\n{stderr}\n--- stdout\n{stdout}"),
+                (false, false) => format!("--- stdout\n{stdout}\n--- stderr\n{stderr}"),
                 (false, true) => format!("--- stdout\n{stdout}"),
                 (true, false) => format!("--- stderr\n{stderr}"),
             };

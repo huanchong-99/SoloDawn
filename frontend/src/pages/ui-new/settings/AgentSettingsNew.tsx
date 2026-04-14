@@ -928,8 +928,8 @@ export function AgentSettingsNew() {
           <SettingsToggle
             label={t('settings.agents.editor.formLabel')}
             description={undefined}
-            checked={!useFormEditor}
-            onChange={(checked) => setUseFormEditor(!checked)}
+            checked={useFormEditor}
+            onChange={(checked) => setUseFormEditor(checked)}
             disabled={profilesLoading || !localParsedProfiles}
           />
 

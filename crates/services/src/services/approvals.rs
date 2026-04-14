@@ -51,6 +51,7 @@ pub struct Approvals {
     pending: Arc<DashMap<String, PendingApproval>>,
     completed: Arc<DashMap<String, ApprovalStatus>>,
     msg_stores: Arc<RwLock<HashMap<Uuid, Arc<MsgStore>>>>,
+    pool: Option<SqlitePool>,
 }
 
 #[derive(Debug, Error)]
@@ -75,7 +76,13 @@ impl Approvals {
             pending: Arc::new(DashMap::new()),
             completed: Arc::new(DashMap::new()),
             msg_stores,
+            pool: None,
         }
+    }
+
+    pub fn with_pool(mut self, pool: SqlitePool) -> Self {
+        self.pool = Some(pool);
+        self
     }
 
     pub async fn create_with_waiter(
@@ -145,7 +152,19 @@ impl Approvals {
         req: ApprovalResponse,
     ) -> Result<(ApprovalStatus, ToolContext), ApprovalError> {
         if let Some((_, p)) = self.pending.remove(id) {
-            self.completed.insert(id.to_string(), req.status.clone());
+            // E25-01: Atomic first-writer-wins on `completed`. If the timeout
+            // watcher already recorded a status, treat as AlreadyCompleted and
+            // drop our sender so the watcher's notification (if any) stands.
+            use dashmap::mapref::entry::Entry;
+            match self.completed.entry(id.to_string()) {
+                Entry::Vacant(e) => {
+                    e.insert(req.status.clone());
+                }
+                Entry::Occupied(_) => {
+                    drop(p.response_tx);
+                    return Err(ApprovalError::AlreadyCompleted);
+                }
+            }
             let _ = p.response_tx.send(req.status.clone());
 
             if let Some(store) = self.msg_store_by_id(&p.execution_process_id).await {
@@ -203,6 +222,7 @@ impl Approvals {
         let pending = self.pending.clone();
         let completed = self.completed.clone();
         let msg_stores = self.msg_stores.clone();
+        let pool = self.pool.clone();
 
         let now = chrono::Utc::now();
         let to_wait = (timeout_at - now)
@@ -219,11 +239,26 @@ impl Approvals {
             };
 
             let is_timeout = matches!(&status, ApprovalStatus::TimedOut);
-            completed.insert(id.clone(), status.clone());
+            // E25-01: First-writer-wins. If `respond()` already recorded a
+            // status, don't overwrite it and skip timeout-only side effects.
+            use dashmap::mapref::entry::Entry;
+            let we_wrote = match completed.entry(id.clone()) {
+                Entry::Vacant(e) => {
+                    e.insert(status.clone());
+                    true
+                }
+                Entry::Occupied(_) => false,
+            };
 
-            if is_timeout && let Some((_, pending_approval)) = pending.remove(&id) {
+            if is_timeout && we_wrote && let Some((_, pending_approval)) = pending.remove(&id) {
+                // E25-02: Receiver may already be consumed / dropped by a
+                // racing `respond()`. `oneshot::Sender::send` is non-blocking;
+                // just log and ignore if nobody is listening.
                 if pending_approval.response_tx.send(status.clone()).is_err() {
-                    tracing::debug!("approval '{}' timeout notification receiver dropped", id);
+                    tracing::debug!(
+                        "approval '{}' timeout notification ignored: receiver already dropped/consumed",
+                        id
+                    );
                 }
 
                 let store = {
@@ -250,6 +285,46 @@ impl Approvals {
                     tracing::warn!(
                         "No msg_store found for execution_process_id: {}",
                         pending_approval.execution_process_id
+                    );
+                }
+
+                // E25-11: Persist task status transition out of InReview
+                // regardless of msg_store presence. There is no
+                // `TaskStatus::TimedOut`; move the task back to InProgress so
+                // it isn't stuck in InReview after a timed-out approval.
+                if let Some(pool) = &pool {
+                    match ExecutionProcess::load_context(
+                        pool,
+                        pending_approval.execution_process_id,
+                    )
+                    .await
+                    {
+                        Ok(ctx) if ctx.task.status == TaskStatus::InReview => {
+                            if let Err(e) = Task::update_status(
+                                pool,
+                                ctx.task.id,
+                                TaskStatus::InProgress,
+                            )
+                            .await
+                            {
+                                tracing::warn!(
+                                    "Failed to update task status after approval '{}' timeout: {}",
+                                    id,
+                                    e
+                                );
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!(
+                            "Failed to load execution context for approval '{}' timeout: {}",
+                            id,
+                            e
+                        ),
+                    }
+                } else {
+                    tracing::warn!(
+                        "No DB pool configured on Approvals; cannot persist task status for timed-out approval '{}'",
+                        id
                     );
                 }
             }

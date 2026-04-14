@@ -194,12 +194,47 @@ pub trait ContainerService {
                     Ok(ws_repos) if !ws_repos.is_empty() => {
                         match Repo::find_by_id(&pool, ws_repos[0].repo_id).await {
                             Ok(Some(repo)) => repo.path,
-                            _ => return,
+                            Ok(None) => {
+                                tracing::error!(
+                                    task_id = %task_id,
+                                    repo_id = %ws_repos[0].repo_id,
+                                    "Quality gate skipped: workspace repo row references missing repo"
+                                );
+                                return;
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    task_id = %task_id,
+                                    "Quality gate skipped: failed to load repo: {e}"
+                                );
+                                return;
+                            }
                         }
                     }
-                    _ => return,
+                    Ok(_) => {
+                        tracing::debug!(
+                            task_id = %task_id,
+                            "Quality gate skipped: workspace has no repos"
+                        );
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            task_id = %task_id,
+                            "Quality gate skipped: failed to query workspace repos: {e}"
+                        );
+                        return;
+                    }
                 };
                 let path = std::path::Path::new(&repo_path);
+                if !path.exists() {
+                    tracing::error!(
+                        task_id = %task_id,
+                        repo_path = %repo_path,
+                        "Quality gate skipped: resolved repo path does not exist on disk"
+                    );
+                    return;
+                }
                 match quality::engine::QualityEngine::from_project(path) {
                     Ok(engine) => {
                         match engine.run(path, quality::gate::QualityGateLevel::Terminal, None).await {
@@ -815,16 +850,14 @@ pub trait ContainerService {
                 }
                 #[cfg(not(feature = "qa-mode"))]
                 ExecutorActionType::ReviewRequest(request) => {
-                    let effective_dir = match request.effective_dir(&current_dir) {
-                        Ok(dir) => dir,
-                        Err(e) => {
-                            tracing::warn!("Invalid working_dir for log normalization: {}", e);
-                            return None;
-                        }
-                    };
+                    // Review runs against the full workspace; the persisted
+                    // `working_dir` on the DB-loaded request may be stale or
+                    // point at a subdirectory that no longer exists after the
+                    // worktree was recreated. Normalize against the workspace
+                    // root (current_dir), matching the qa-mode branch above.
                     let executor = ExecutorConfigs::get_cached()
                         .get_coding_agent_or_default(&request.executor_profile_id);
-                    executor.normalize_logs(temp_store.clone(), &effective_dir);
+                    executor.normalize_logs(temp_store.clone(), &current_dir);
                 }
                 _ => {
                     tracing::debug!(

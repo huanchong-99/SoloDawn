@@ -87,7 +87,6 @@ export function FeishuSettingsNew() {
       setError(null);
       setSuccess(null);
       await updateSystemSettings({ feishu_enabled: checked });
-      setFeishuEnabled(checked);
       await fetchStatus();
     } catch {
       setError(t('settings.feishu.form.saveError'));

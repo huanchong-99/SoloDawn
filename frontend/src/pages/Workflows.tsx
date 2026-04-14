@@ -1115,16 +1115,30 @@ export function Workflows() {
   // Update URL when projectId is invalid or missing
   useEffect(() => {
     if (projects.length > 0 && projectIdFromUrl !== validProjectId) {
-      const newParams = new URLSearchParams(searchParams);
-      newParams.set('projectId', validProjectId);
-      setSearchParams(newParams, { replace: true });
+      setSearchParams(
+        (prev) => {
+          const newParams = new URLSearchParams(prev);
+          if (validProjectId) {
+            if (newParams.get('projectId') === validProjectId) {
+              return prev;
+            }
+            newParams.set('projectId', validProjectId);
+          } else {
+            if (!newParams.has('projectId')) {
+              return prev;
+            }
+            newParams.delete('projectId');
+          }
+          return newParams;
+        },
+        { replace: true }
+      );
       setSelectedWorkflowId(null);
     }
   }, [
     projectIdFromUrl,
     validProjectId,
     projects.length,
-    searchParams,
     setSearchParams,
   ]);
 

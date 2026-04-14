@@ -442,6 +442,18 @@ impl TerminalBridge {
                 }
                 result = &mut writer_task => {
                     writer_finished = true;
+                    // [E26-03] Writer task has exited; its `writer_rx` is now dropped,
+                    // so any messages still buffered in the mpsc channel will be
+                    // discarded. Surface the count so we know when writes were lost.
+                    let pending = tx.max_capacity().saturating_sub(tx.capacity());
+                    if pending > 0 {
+                        tracing::warn!(
+                            terminal_id = %terminal_id,
+                            pty_session_id = %pty_session_id,
+                            discarded_messages = pending,
+                            "Writer task exited with buffered messages still in channel; they will be dropped"
+                        );
+                    }
                     match result {
                         Ok(Ok(())) => {}
                         Ok(Err(e)) => return Err(e),

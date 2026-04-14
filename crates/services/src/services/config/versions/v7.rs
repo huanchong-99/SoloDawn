@@ -59,9 +59,11 @@ impl Config {
         let old_config = match serde_json::from_str::<v6::Config>(raw_config) {
             Ok(cfg) => cfg,
             Err(e) => {
-                tracing::error!("❌ Failed to parse config: {}", e);
-                tracing::error!("   at line {}, column {}", e.line(), e.column());
-                return Err(e.into());
+                tracing::warn!(
+                    "Direct v6 parse failed ({}), falling back to chained migration",
+                    e
+                );
+                v6::Config::from(raw_config.to_string())
             }
         };
 

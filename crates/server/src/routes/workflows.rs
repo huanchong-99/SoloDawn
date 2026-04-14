@@ -2768,7 +2768,12 @@ pub struct SubmitOrchestratorChatResponse {
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ListOrchestratorMessagesQuery {
+    // M13: mark pagination params as serde-default so missing query strings fall
+    // back to defaults cleanly, matching the pattern used by other request
+    // structs in this file (e.g., `SubmitOrchestratorChatRequest`).
+    #[serde(default)]
     pub cursor: Option<usize>,
+    #[serde(default)]
     pub limit: Option<usize>,
 }
 
@@ -3269,29 +3274,36 @@ async fn list_orchestrator_messages(
         ));
     }
 
-    let limit = params.limit.unwrap_or(50).clamp(1, 200);
-    let cursor = match params.cursor {
-        Some(c) => c,
-        None => {
-            let total: (i64,) = sqlx::query_as(
-                "SELECT COUNT(*) FROM workflow_orchestrator_message WHERE workflow_id = ?1",
-            )
-            .bind(&workflow_id)
-            .fetch_one(&deployment.db().pool)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Failed to count orchestrator messages: {e}")))?;
-            (total.0 as usize).saturating_sub(limit)
-        }
-    };
-
-    let persisted_messages = WorkflowOrchestratorMessage::list_by_workflow_paginated(
-        &deployment.db().pool,
-        &workflow_id,
-        cursor,
-        limit,
+    // E29-03/E29-10, M13: compute total first, then apply the same pagination math
+    // (`paginate_orchestrator_messages`) used for the runtime branch. This keeps
+    // default-cursor semantics consistent with the runtime path and applies the
+    // cursor/limit clamps (fixing start=0 when total<limit and properly paging
+    // even when `persisted_messages` is non-empty).
+    let total: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM workflow_orchestrator_message WHERE workflow_id = ?1",
     )
+    .bind(&workflow_id)
+    .fetch_one(&deployment.db().pool)
     .await
-    .map_err(|e| ApiError::Internal(format!("Failed to query orchestrator messages: {e}")))?;
+    .map_err(|e| ApiError::Internal(format!("Failed to count orchestrator messages: {e}")))?;
+    let persisted_total = total.0.max(0) as usize;
+
+    let (start, end) =
+        paginate_orchestrator_messages(persisted_total, params.cursor, params.limit);
+    let page_len = end.saturating_sub(start);
+
+    let persisted_messages = if page_len == 0 {
+        Vec::new()
+    } else {
+        WorkflowOrchestratorMessage::list_by_workflow_paginated(
+            &deployment.db().pool,
+            &workflow_id,
+            start,
+            page_len,
+        )
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to query orchestrator messages: {e}")))?
+    };
 
     if !persisted_messages.is_empty() {
         let response = persisted_messages

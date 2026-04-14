@@ -407,6 +407,19 @@ async fn fork_session(
     directory: &str,
     session_id: &str,
 ) -> Result<String, ExecutorError> {
+    // Validate session_id is safe for direct URL-segment interpolation.
+    // OpenCode session ids are alphanumeric with `-`/`_`; reject anything
+    // else to avoid path traversal or URL injection.
+    if session_id.is_empty()
+        || !session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(ExecutorError::Io(io::Error::other(format!(
+            "OpenCode session.fork refused: invalid session_id {session_id:?}"
+        ))));
+    }
+
     let resp = client
         .post(format!("{base_url}/session/{session_id}/fork"))
         .query(&[("directory", directory)])
@@ -516,6 +529,11 @@ async fn send_abort(client: &reqwest::Client, base_url: &str, directory: &str, s
 }
 
 fn parse_model(model: &str) -> ModelSpec {
+    // OpenCode expects `providerID/modelID` (e.g. `anthropic/claude-3-5-sonnet`).
+    // When no `/` separator is present, we treat the bare string as the model
+    // id and leave provider empty so the server can resolve a default provider.
+    // NOTE: test-intent — if the OpenCode spec instead expects a bare string
+    // to be the provider id, swap the branches below.
     let (provider_id, model_id) = match model.split_once('/') {
         Some((provider, rest)) => (provider.to_string(), rest.to_string()),
         None => (String::new(), model.to_string()),

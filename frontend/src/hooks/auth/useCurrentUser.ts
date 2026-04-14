@@ -17,11 +17,13 @@ export function useCurrentUser() {
 
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (isSignedIn) {
-      queryClient.invalidateQueries({ queryKey: ['auth', 'user'] });
-    } else {
+    if (!isSignedIn) return;
+    queryClient.invalidateQueries({ queryKey: ['auth', 'user'] });
+    // Cleanup runs when isSignedIn flips to false (or on unmount); this
+    // ensures stale user data is cleared on sign-out.
+    return () => {
       queryClient.removeQueries({ queryKey: ['auth', 'user'] });
-    }
+    };
   }, [queryClient, isSignedIn]);
 
   return query;

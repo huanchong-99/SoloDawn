@@ -95,6 +95,12 @@ impl JsonRpcPeer {
                             Ok(JSONRPCMessage::Response(response)) => {
                                 let request_id = response.id.clone();
                                 let result = response.result.clone();
+                                // Resolve the pending entry BEFORE invoking the
+                                // callback so the `pending` map stays consistent
+                                // even if the callback errors and we break out.
+                                reader_peer
+                                    .resolve(request_id, PendingResponse::Result(result))
+                                    .await;
                                 if callbacks
                                     .on_response(&reader_peer, line, &response)
                                     .await
@@ -103,23 +109,23 @@ impl JsonRpcPeer {
                                     had_error = true;
                                     break;
                                 }
-                                reader_peer
-                                    .resolve(request_id, PendingResponse::Result(result))
-                                    .await;
                             }
                             Ok(JSONRPCMessage::Error(error)) => {
                                 let request_id = error.id.clone();
+                                let error_for_callback = error.clone();
+                                // Resolve pending first to keep map consistent
+                                // regardless of callback outcome.
+                                reader_peer
+                                    .resolve(request_id, PendingResponse::Error(error))
+                                    .await;
                                 if callbacks
-                                    .on_error(&reader_peer, line, &error)
+                                    .on_error(&reader_peer, line, &error_for_callback)
                                     .await
                                     .is_err()
                                 {
                                     had_error = true;
                                     break;
                                 }
-                                reader_peer
-                                    .resolve(request_id, PendingResponse::Error(error))
-                                    .await;
                             }
                             Ok(JSONRPCMessage::Request(request)) => {
                                 if callbacks

@@ -69,6 +69,14 @@ const CLAUDE_BYPASS_ACCEPT_RETRY_MAX_AGE_SECS: u64 = 8;
 /// Limit retry count to avoid repeated accidental injections.
 const CLAUDE_BYPASS_ACCEPT_MAX_RETRIES: u8 = 1;
 
+/// [E26-09] Hardcoded response for the Claude bypass permissions menu.
+/// This assumes "Yes, I accept" is always the second item (`2`) in the
+/// rendered menu. If Claude CLI ever reorders or rewords the menu this
+/// constant must be updated (or replaced with dynamic menu parsing).
+/// Exposed at file scope so it is easy to grep for when debugging
+/// bypass-prompt regressions.
+const CLAUDE_BYPASS_ACCEPT_RESPONSE: &str = "2\r";
+
 /// Max age for "clean repo but waiting for next instruction" context.
 const HANDOFF_STALL_CONTEXT_MAX_AGE_SECS: u64 = 20;
 
@@ -361,9 +369,20 @@ fn is_claude_bypass_accept_prompt(text: &str) -> bool {
 /// second menu item. If Claude CLI reorders the menu in a future version this
 /// will break. TODO: implement regex-based matching that scans the rendered
 /// menu lines for the "Yes" option index instead of hardcoding the position.
+///
+/// [E26-09] Until dynamic detection is implemented, emit a warn! whenever this
+/// path fires so fragility is visible in logs. The hardcoded payload is also
+/// surfaced as the file-scope `CLAUDE_BYPASS_ACCEPT_RESPONSE` constant for
+/// grepability.
 fn claude_bypass_accept_response(_text: &str) -> (&'static str, &'static str, &'static str) {
+    tracing::warn!(
+        response = CLAUDE_BYPASS_ACCEPT_RESPONSE,
+        "Using hardcoded Claude bypass accept response ('2\\r'); this assumes \
+         'Yes, I accept' is always menu item 2 and will break if the CLI \
+         reorders the menu. See CLAUDE_BYPASS_ACCEPT_RESPONSE / [E26-09]."
+    );
     (
-        "2\r",
+        CLAUDE_BYPASS_ACCEPT_RESPONSE,
         "select 'Yes, I accept' via numeric shortcut and confirm",
         "Select 'Yes, I accept' via numeric shortcut (2) and confirm for Claude bypass permissions prompt",
     )

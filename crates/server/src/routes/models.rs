@@ -236,13 +236,13 @@ async fn verify_openai_model(
         })?;
 
     let status = response.status();
+    let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
         tracing::warn!("Model verification failed: {} - {}", status, body);
         return Ok(false);
     }
 
-    if !verify_response_body_ok(&response.text().await.unwrap_or_default(), &["choices", "content"], "OpenAI") {
+    if !verify_response_body_ok(&body, &["choices", "content"], "OpenAI") {
         return Ok(false);
     }
 
@@ -312,13 +312,13 @@ async fn verify_anthropic_model(
         .map_err(|e| ApiError::Internal(format!("Failed to verify model: {e}")))?;
 
     let status = response.status();
+    let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
         tracing::warn!("Anthropic model verification failed: {} - {}", status, body);
         return Ok(false);
     }
 
-    if !verify_response_body_ok(&response.text().await.unwrap_or_default(), &["content", "id"], "Anthropic") {
+    if !verify_response_body_ok(&body, &["content", "id"], "Anthropic") {
         return Ok(false);
     }
 

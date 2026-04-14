@@ -86,21 +86,24 @@ export function streamJsonPatchEntries<E = unknown>(
     }
   };
 
-  ws.addEventListener('open', () => {
+  const handleOpen = () => {
     connected = true;
     opts.onConnect?.();
-  });
+  };
 
-  ws.addEventListener('message', handleMessage);
-
-  ws.addEventListener('error', (err) => {
+  const handleError = (err: Event) => {
     connected = false;
     opts.onError?.(err);
-  });
+  };
 
-  ws.addEventListener('close', () => {
+  const handleClose = () => {
     connected = false;
-  });
+  };
+
+  ws.addEventListener('open', handleOpen);
+  ws.addEventListener('message', handleMessage);
+  ws.addEventListener('error', handleError);
+  ws.addEventListener('close', handleClose);
 
   return {
     getEntries(): E[] {
@@ -119,6 +122,10 @@ export function streamJsonPatchEntries<E = unknown>(
       return () => subscribers.delete(cb);
     },
     close(): void {
+      ws.removeEventListener('open', handleOpen);
+      ws.removeEventListener('message', handleMessage);
+      ws.removeEventListener('error', handleError);
+      ws.removeEventListener('close', handleClose);
       ws.close();
       subscribers.clear();
       connected = false;

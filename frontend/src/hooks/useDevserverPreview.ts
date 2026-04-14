@@ -55,6 +55,8 @@ export function useDevserverPreview(
     )[0];
   }, [executionProcesses]);
 
+  // Reset state whenever the attemptId changes so stale url/port/status
+  // from a previous attempt do not leak into the new attempt.
   useEffect(() => {
     if (prevAttemptIdRef.current !== attemptId) {
       prevAttemptIdRef.current = attemptId;
@@ -64,6 +66,13 @@ export function useDevserverPreview(
         url: undefined,
         port: undefined,
       });
+    }
+  }, [attemptId]);
+
+  useEffect(() => {
+    if (prevAttemptIdRef.current !== attemptId) {
+      // The reset effect above will handle this render; skip until the
+      // attemptId ref is synced.
       return;
     }
 

@@ -64,6 +64,10 @@ impl SubscriptionHub {
     ///
     /// Returns a receiver that will receive all events published to this workflow.
     pub async fn subscribe(&self, workflow_id: &str) -> broadcast::Receiver<WsEvent> {
+        // E27-09: hold the senders write lock across channel creation, receiver
+        // registration, and pending-event replay so no concurrent publish can
+        // observe an inconsistent state (e.g. cache a new event after we've
+        // drained pending_events but before the receiver is registered).
         let mut senders = self.senders.write().await;
         let sender = if let Some(sender) = senders.get(workflow_id).cloned() {
             sender
@@ -74,12 +78,16 @@ impl SubscriptionHub {
             sender
         };
 
-        let should_replay_pending = sender.receiver_count() == 0;
+        // Register the receiver *before* replaying so cached events are
+        // guaranteed to be delivered to this subscriber.
         let receiver = sender.subscribe();
 
-        if should_replay_pending {
-            self.replay_pending_events(workflow_id, &sender).await;
-        }
+        // Always drain any pending events for this workflow; a new subscriber
+        // should receive buffered events regardless of whether other
+        // receivers exist. Drain is atomic w.r.t. publish because publish
+        // caches only when there are no receivers, and we hold the senders
+        // write lock here (publish takes a senders read lock).
+        self.replay_pending_events(workflow_id, &sender).await;
 
         drop(senders);
 
@@ -200,8 +208,16 @@ impl SubscriptionHub {
     async fn cache_pending_event(&self, workflow_id: &str, event: WsEvent) {
         let mut pending_events = self.pending_events.write().await;
         let queue = pending_events.entry(workflow_id.to_string()).or_default();
-        queue.push_back((event, Instant::now()));
+        let now = Instant::now();
 
+        // E27-15: evict expired entries on every publish so pending_events
+        // cannot accumulate indefinitely for workflows whose cleanup_if_idle
+        // is rarely called (e.g. long-lived active workflows).
+        queue.retain(|(_, inserted_at)| now.duration_since(*inserted_at) < PENDING_EVENT_TTL);
+
+        queue.push_back((event, now));
+
+        // E27-15: also enforce the hard size bound as a safety net.
         while queue.len() > self.pending_limit {
             queue.pop_front();
         }
