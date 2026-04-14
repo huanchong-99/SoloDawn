@@ -17,7 +17,7 @@ use std::{
 use db::DBService;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::{
-    sync::{Mutex as AsyncMutex, RwLock, oneshot},
+    sync::{Mutex as AsyncMutex, OnceCell, RwLock, oneshot},
     task::JoinHandle,
 };
 use uuid::Uuid;
@@ -225,8 +225,12 @@ struct TrackedProcess {
     child: Box<dyn Child + Send + Sync>,
     /// PTY master for I/O and resize operations (wrapped in Mutex for Sync)
     master: Mutex<Box<dyn MasterPty + Send>>,
-    /// Shared PTY writer (initialized on first get_handle call, then reused for reconnections)
-    shared_writer: Option<Arc<Mutex<PtyWriter>>>,
+    /// Shared PTY writer (initialized on first get_handle call, then reused for reconnections).
+    ///
+    /// E26-10: stored in a `tokio::sync::OnceCell` so that concurrent callers of
+    /// `get_handle` cannot race on check-and-init. The first caller to reach
+    /// `get_or_try_init` wins; all others observe the initialized value.
+    shared_writer: OnceCell<Arc<Mutex<PtyWriter>>>,
     /// Isolated CODEX_HOME path (for Codex terminals, cleaned up on exit)
     codex_home: Option<PathBuf>,
     /// Output fanout hub (single reader -> multi-subscriber)
@@ -766,7 +770,7 @@ impl ProcessManager {
                 session_id: session_id.clone(),
                 child,
                 master: Mutex::new(pair.master),
-                shared_writer: None,
+                shared_writer: OnceCell::new(),
                 codex_home,
                 output_fanout,
                 reader_task,
@@ -1066,71 +1070,58 @@ impl ProcessManager {
     /// - Reader is cloned on each call (portable-pty supports multiple readers)
     /// - Writer is shared via Arc<Mutex> (initialized on first call, then reused)
     pub async fn get_handle(&self, terminal_id: &str) -> Option<ProcessHandle> {
-        // E26-10: shared_writer initialization uses the surrounding processes write
-        // lock as the single synchronization point. Prior callers at one point
-        // checked `is_none()` outside the lock and then initialized, which is a
-        // TOCTOU race. We now take `processes.write().await` up front and perform
-        // the check-and-init under that exclusive guard (double-check pattern):
-        // once the lock is held, `shared_writer.is_none()` cannot change beneath
-        // us, so initialization is race-free. If this call path ever becomes
-        // contended enough to warrant releasing the processes lock during init,
-        // switch to `Arc<OnceCell<Arc<Mutex<PtyWriter>>>>` on TrackedProcess so
-        // the first initializer wins atomically without holding the map lock.
-        let mut processes = self.processes.write().await;
+        // E26-10: shared_writer is a `tokio::sync::OnceCell`, which guarantees
+        // atomic init-or-get: the first caller to reach `get_or_try_init` wins
+        // and performs initialization while all others await and then observe
+        // the initialized value. This eliminates the TOCTOU race present when
+        // check-and-init was split into two separate steps on an `Option`.
+        //
+        // We acquire `processes` with a read lock only (we no longer need a
+        // write lock to mutate the shared_writer slot itself — OnceCell handles
+        // interior mutability correctly under a shared reference).
+        let processes = self.processes.read().await;
+        let tracked = processes.get(terminal_id)?;
+        let session_id = tracked.session_id.clone();
+        let pid = tracked.child.process_id().unwrap_or(0);
 
-        if let Some(tracked) = processes.get_mut(terminal_id) {
-            let session_id = tracked.session_id.clone();
-
-            // Initialize shared writer on first call, then reuse for reconnections
-            // (double-checked under the processes write lock; see E26-10 above).
-            if tracked.shared_writer.is_none() {
-                let master = match tracked.master.lock() {
-                    Ok(m) => m,
-                    Err(e) => {
-                        tracing::error!(
-                            terminal_id = %terminal_id,
-                            error = %e,
-                            "Failed to lock PTY master"
-                        );
-                        return None;
-                    }
-                };
-
-                match master.take_writer() {
-                    Ok(w) => {
-                        tracked.shared_writer = Some(Arc::new(Mutex::new(PtyWriter(w))));
-                        tracing::debug!(
-                            terminal_id = %terminal_id,
-                            "Initialized shared PTY writer"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            terminal_id = %terminal_id,
-                            error = %e,
-                            "Failed to take PTY writer"
-                        );
-                    }
-                }
-            }
-
-            // Clone the Arc reference for the caller
-            let writer = tracked.shared_writer.as_ref().map(Arc::clone);
-
-            // Get PID from child
-            let pid = tracked.child.process_id().unwrap_or(0);
-
-            Some(ProcessHandle {
-                pid,
-                session_id,
-                terminal_id: terminal_id.to_string(),
-                // Reader is now owned by background fanout task (single-reader constraint)
-                reader: None,
-                writer,
+        // Atomic init-or-get of the shared PTY writer.
+        let writer = tracked
+            .shared_writer
+            .get_or_try_init(|| async {
+                let master = tracked.master.lock().map_err(|e| {
+                    tracing::error!(
+                        terminal_id = %terminal_id,
+                        error = %e,
+                        "Failed to lock PTY master"
+                    );
+                    anyhow::anyhow!("PTY master lock poisoned: {e}")
+                })?;
+                let w = master.take_writer().map_err(|e| {
+                    tracing::error!(
+                        terminal_id = %terminal_id,
+                        error = %e,
+                        "Failed to take PTY writer"
+                    );
+                    anyhow::anyhow!("take_writer failed: {e}")
+                })?;
+                tracing::debug!(
+                    terminal_id = %terminal_id,
+                    "Initialized shared PTY writer"
+                );
+                Ok::<_, anyhow::Error>(Arc::new(Mutex::new(PtyWriter(w))))
             })
-        } else {
-            None
-        }
+            .await
+            .ok()
+            .map(Arc::clone);
+
+        Some(ProcessHandle {
+            pid,
+            session_id,
+            terminal_id: terminal_id.to_string(),
+            // Reader is now owned by background fanout task (single-reader constraint)
+            reader: None,
+            writer,
+        })
     }
 
     /// Subscribe to terminal output stream with replay support.
@@ -1431,6 +1422,11 @@ pub struct TerminalLogger {
     db: Arc<DBService>,
     terminal_id: String,
     log_type: String,
+    // [W2-19-05] The `Arc<Mutex<Option<JoinHandle<_>>>>` double indirection is
+    // intentional: `TerminalLogger` implements `Clone` (see below) so the spawned
+    // flush task handle and its shutdown channel must be shared across clones.
+    // A bare `Mutex<Option<JoinHandle<_>>>` would not allow that sharing. Same
+    // reasoning applies to `flush_shutdown_tx`.
     flush_task: Arc<Mutex<Option<JoinHandle<()>>>>,
     flush_shutdown_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     persistence_disabled: Arc<AtomicBool>,

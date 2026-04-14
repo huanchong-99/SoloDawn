@@ -1401,7 +1401,21 @@ export const useWsStore = create<WsState>((set, get) => ({
   // (note: _manualDisconnect is left false so a subsequent connect() is
   // treated as a fresh session rather than a reconnection-after-manual-close).
   reset: () => {
-    get().disconnect();
+    // W2-22-02: Warn if reset() is called while a live connection is open.
+    // `disconnect()` below will tear it down cleanly, but callers generally
+    // should not hit reset() mid-session — it usually indicates a sign-out
+    // race or missed disconnect, and in-flight messages may be dropped.
+    const state = get();
+    const hasLiveConnection =
+      state.connectionStatus === 'connected' ||
+      state.connectionStatus === 'connecting' ||
+      state.connectionStatus === 'reconnecting';
+    if (hasLiveConnection) {
+      console.warn(
+        `[wsStore] reset() called while connectionStatus="${state.connectionStatus}"; forcing disconnect. In-flight messages may be lost.`
+      );
+    }
+    state.disconnect();
     set({ _manualDisconnect: false });
   },
 

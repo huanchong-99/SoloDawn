@@ -154,7 +154,11 @@ export const conciergeApi = {
     chatId: string | null;
   }> => {
     const response = await makeRequest(`${BASE}/sessions/feishu-channel`);
-    return handleApiResponse(response);
+    return handleApiResponse<{
+      activeSessionId: string | null;
+      activeSessionName: string | null;
+      chatId: string | null;
+    }>(response);
   },
 
   switchFeishuChannel: async (
@@ -168,7 +172,11 @@ export const conciergeApi = {
       method: 'POST',
       body: JSON.stringify({ sessionId }),
     });
-    return handleApiResponse(response);
+    return handleApiResponse<{
+      activeSessionId: string | null;
+      activeSessionName: string | null;
+      chatId: string | null;
+    }>(response);
   },
 
   updateSettings: async (

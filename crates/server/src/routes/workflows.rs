@@ -1059,6 +1059,12 @@ async fn create_workflow(
         .map_err(|e| ApiError::BadRequest(format!("Failed to create workflow: {e}")))?;
 
     // 4. Create slash command associations inside a transaction (G01-003)
+    //
+    // [W2-19-10] `pool.begin()` returns a `sqlx::Transaction` whose `Drop` impl
+    // schedules an automatic ROLLBACK if the transaction has not been explicitly
+    // committed. This gives us panic-safety for free: any `?` early return or
+    // panic between `begin()` and `commit()` below leaves the DB consistent.
+    // No manual rollback plumbing required (same pattern as K03 / E29-15).
     let mut commands: Vec<WorkflowCommand> = Vec::new();
     if let Some(command_reqs) = req.commands {
         let mut tx = deployment.db().pool.begin().await.map_err(|e| {

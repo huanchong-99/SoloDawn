@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { oauthApi } from '@/lib/api';
 import { useEffect } from 'react';
 import { useAuth } from '@/hooks/auth/useAuth';
+import { useWsStore } from '@/stores/wsStore';
 
 export function useCurrentUser() {
   const { isSignedIn } = useAuth();
@@ -23,6 +24,9 @@ export function useCurrentUser() {
     // ensures stale user data is cleared on sign-out.
     return () => {
       queryClient.removeQueries({ queryKey: ['auth', 'user'] });
+      // W2-22-12: Reset WS store on sign-out so mutated handler Maps and
+      // cached connection state don't leak across user sessions.
+      useWsStore.getState().reset();
     };
   }, [queryClient, isSignedIn]);
 

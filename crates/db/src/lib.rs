@@ -55,7 +55,15 @@ async fn run_migrations(pool: &Pool<Sqlite>) -> Result<(), Error> {
 
                 // Find the migration with the mismatched version and get its current checksum
                 if let Some(migration) = migrator.iter().find(|m| m.version == version) {
-                    // Update the checksum in _sqlx_migrations to match the current file
+                    // Windows line-ending workaround: CRLF on checkout causes embedded
+                    // migration bytes to differ from the checksum stored in
+                    // `_sqlx_migrations`, even when the logical SQL is unchanged.
+                    // We use dynamic `sqlx::query` (not the `query!` macro) here on
+                    // purpose so that this self-healing path does not depend on
+                    // sqlx offline query caching (no `.sqlx/` entry is generated
+                    // or required), keeping builds reproducible without a live
+                    // database. The parameters are fully bound, so this is not
+                    // vulnerable to SQL injection.
                     sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
                         .bind(&*migration.checksum)
                         .bind(version)

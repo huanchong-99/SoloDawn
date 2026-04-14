@@ -7,9 +7,16 @@ type NavigatorWithUserAgentData = Navigator & {
 };
 
 function getPlatformIdentifier(): string {
+  if (typeof navigator === 'undefined') return '';
   const nav = navigator as NavigatorWithUserAgentData;
   return nav.userAgentData?.platform ?? navigator.userAgent;
 }
+
+// Hoist platform detection to module scope: it cannot change within a
+// session, so repeating the lookup per-render (and per-keystroke) wastes
+// work. [E17-10]
+const PLATFORM_IDENTIFIER = getPlatformIdentifier();
+const IS_MAC_PLATFORM = PLATFORM_IDENTIFIER.toUpperCase().includes('MAC');
 
 /**
  * Hook that listens for CMD+K (Mac) or Ctrl+K (Windows/Linux) to open the command bar.
@@ -23,9 +30,7 @@ export function useCommandBarShortcut(
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       // CMD+K (Mac) or Ctrl+K (Windows/Linux)
-      const platform = getPlatformIdentifier();
-      const isMac = platform.toUpperCase().includes('MAC');
-      const modifier = isMac ? event.metaKey : event.ctrlKey;
+      const modifier = IS_MAC_PLATFORM ? event.metaKey : event.ctrlKey;
 
       if (modifier && event.key.toLowerCase() === 'k') {
         event.preventDefault();

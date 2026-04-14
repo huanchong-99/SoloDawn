@@ -47,8 +47,10 @@ impl NotificationService {
         };
 
         // Use platform-specific sound notification
-        // Note: spawn() calls are intentionally not awaited - sound notifications should be fire-and-forget.
-        // Errors are logged at debug level so failures don't spam logs but are still observable.
+        // [W2-19-01] spawn() calls are intentionally not awaited - sound notifications
+        // are fire-and-forget. The returned `Child` handles are dropped deliberately;
+        // the OS reaps the short-lived audio player process. Spawn errors are logged at
+        // debug level so failures don't spam logs but remain observable. (See H12/H10.)
         if cfg!(target_os = "macos") {
             if let Err(e) = tokio::process::Command::new("afplay")
                 .arg(&file_path)
@@ -160,7 +162,10 @@ impl NotificationService {
                 tracing::error!("Failed to send Linux notification: {}", e);
             }
         });
-        // Track the spawn_blocking handle so panics surface in logs instead of being silently dropped.
+        // [W2-19-02] Track the spawn_blocking handle so panics surface in logs instead
+        // of being silently dropped. The outer `tokio::spawn` JoinHandle is intentionally
+        // dropped — this is the standard "detached supervisor" pattern for fire-and-forget
+        // notifications. `handle.await` here converts a JoinError (panic) into a warn log.
         tokio::spawn(async move {
             if let Err(e) = handle.await {
                 tracing::warn!("Linux notification task failed: {}", e);

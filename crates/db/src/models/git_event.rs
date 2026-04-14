@@ -37,6 +37,15 @@ pub struct GitEvent {
 }
 
 impl GitEvent {
+    // NOTE: These methods intentionally use dynamic `sqlx::query` / `query_as`
+    // rather than the compile-time `query!` / `query_as!` macros. The macro
+    // variants require `DATABASE_URL` or a committed `.sqlx/` offline cache at
+    // build time, which complicates CI and contributor builds (the schema is
+    // created from embedded migrations at runtime). `FromRow` on `GitEvent`
+    // plus explicit `bind()` calls give adequate type safety for this model.
+    // TODO(W2-35-03): If we adopt `cargo sqlx prepare` in CI and commit the
+    // offline cache, migrate these to `query!` / `query_as!` for full
+    // compile-time checking against the migration schema.
     /// Insert a new git event record
     pub async fn insert(pool: &SqlitePool, event: &GitEvent) -> sqlx::Result<()> {
         sqlx::query(

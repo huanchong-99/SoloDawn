@@ -26,6 +26,7 @@ serial_test = "0.3.0"
 criterion = "0.5"
 tokio = { workspace = true }
 temp-env = "0.3"
+tempfile = "3"
 
 [[bench]]
 name = "workflow_bench"

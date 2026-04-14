@@ -6,7 +6,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use tokio::{
-    sync::{RwLock, mpsc},
+    sync::{RwLock, mpsc, oneshot},
     task::JoinHandle,
     time::MissedTickBehavior,
 };
@@ -94,6 +94,32 @@ impl TerminalBridge {
     /// Returns `Ok(())` if registration succeeds, or an error if the session ID
     /// is empty or registration fails.
     pub async fn register(&self, terminal_id: &str, pty_session_id: &str) -> anyhow::Result<()> {
+        // Backward-compatible shim: await the ready signal internally so existing
+        // callers still observe the old blocking semantics.
+        let ready_rx = self
+            .register_with_ready(terminal_id, pty_session_id)
+            .await?;
+        // Await readiness with a bounded timeout; readiness fires once the bridge
+        // task has begun executing. If the task was aborted immediately (e.g. on
+        // a registration race), the sender is dropped and `ready_rx` returns Err,
+        // which we treat as benign for backward-compat callers.
+        let _ = tokio::time::timeout(Duration::from_secs(2), ready_rx).await;
+        Ok(())
+    }
+
+    /// Registers a bridge task and returns a [`oneshot::Receiver`] that completes
+    /// once the bridge task has started executing.
+    ///
+    /// Callers can await the receiver (ideally with a timeout) to obtain a
+    /// deterministic "bridge ready" signal instead of polling or sleeping.
+    ///
+    /// Note: the receiver yields `Err(_)` if the bridge task is aborted before it
+    /// can signal readiness (e.g. registration race with another caller).
+    pub async fn register_with_ready(
+        &self,
+        terminal_id: &str,
+        pty_session_id: &str,
+    ) -> anyhow::Result<oneshot::Receiver<()>> {
         let session_id = pty_session_id.trim();
         if session_id.is_empty() {
             return Err(anyhow::anyhow!("pty_session_id is empty"));
@@ -101,6 +127,14 @@ impl TerminalBridge {
         if terminal_id.trim().is_empty() {
             return Err(anyhow::anyhow!("terminal_id is empty"));
         }
+
+        // Helper: a pre-completed ready receiver for early-return paths where no
+        // new bridge task is spawned (the bridge is effectively "already ready").
+        let already_ready = || {
+            let (tx, rx) = oneshot::channel::<()>();
+            let _ = tx.send(());
+            rx
+        };
 
         // Keep exactly one active bridge per terminal.
         // A terminal restart may produce a new PTY session while an old bridge task
@@ -113,7 +147,7 @@ impl TerminalBridge {
                     pty_session_id = %session_id,
                     "Terminal bridge already registered"
                 );
-                return Ok(());
+                return Ok(already_ready());
             }
 
             let stale_session_ids: Vec<String> = active
@@ -149,8 +183,17 @@ impl TerminalBridge {
         let terminal_id_for_task = terminal_id.to_string();
         let active_sessions = Arc::clone(&self.active_sessions);
 
+        // E26-07: channel-based ready signal. The bridge task sends `()` once it
+        // begins executing, letting callers await a deterministic readiness
+        // notification instead of polling `is_registered` after a fixed sleep.
+        let (ready_tx, ready_rx) = oneshot::channel::<()>();
+
         // Spawn bridge task
         let task_handle = tokio::spawn(async move {
+            // Signal readiness as soon as the task is scheduled. Ignore send errors
+            // (receiver may have been dropped if the caller gave up waiting).
+            let _ = ready_tx.send(());
+
             let result = Self::run_bridge(
                 process_manager,
                 terminal_id_for_task.clone(),
@@ -197,7 +240,7 @@ impl TerminalBridge {
                     pty_session_id = %session_id,
                     "Terminal bridge registration race: existing session kept"
                 );
-                return Ok(());
+                return Ok(already_ready());
             }
 
             active.insert(
@@ -216,7 +259,7 @@ impl TerminalBridge {
             "Terminal bridge registered"
         );
 
-        Ok(())
+        Ok(ready_rx)
     }
 
     /// Unregisters a bridge task for a PTY session.
@@ -381,32 +424,50 @@ impl TerminalBridge {
         let terminal_id_writer = terminal_id.clone();
 
         // Spawn blocking writer task
-        // TODO(E26-04): This spawn_blocking task holds Arc<Mutex<PtyWriter>> for its
-        // entire lifetime (until writer_rx closes), which can outlive the bridge loop.
-        // If writer_rx is never dropped (e.g. on abnormal shutdown paths), the Arc ref
-        // count stays >0 and the PTY writer is not released. Consider bounding the task
-        // lifetime with an explicit shutdown signal and dropping the Arc promptly.
+        //
+        // E26-04: the mutex guard is acquired *inside* the loop and explicitly
+        // dropped after each write+flush, so the `PtyWriter` is never held across
+        // iterations or await points. In addition, the `Arc<Mutex<PtyWriter>>`
+        // itself is explicitly dropped once the channel closes so the writer's
+        // ref count is released promptly rather than at task-exit unwind.
         let mut writer_task = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            while let Some(data) = writer_rx.blocking_recv() {
-                let mut writer_guard = match writer.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => {
-                        tracing::warn!(
-                            terminal_id = %terminal_id_writer,
-                            "PTY writer lock poisoned; recovering"
-                        );
-                        poisoned.into_inner()
-                    }
-                };
+            // Move the Arc into an Option so we can explicitly drop it at the
+            // end of the loop before returning, ensuring the ref count is
+            // released as soon as we stop writing.
+            let mut writer_slot = Some(writer);
+            let result = (|| -> anyhow::Result<()> {
+                while let Some(data) = writer_rx.blocking_recv() {
+                    let writer_arc = writer_slot
+                        .as_ref()
+                        .expect("writer_slot populated for the duration of the loop");
+                    let mut writer_guard = match writer_arc.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => {
+                            tracing::warn!(
+                                terminal_id = %terminal_id_writer,
+                                "PTY writer lock poisoned; recovering"
+                            );
+                            poisoned.into_inner()
+                        }
+                    };
 
-                if let Err(e) = writer_guard.write_all(&data) {
-                    return Err(anyhow::anyhow!("PTY write error: {e}"));
+                    if let Err(e) = writer_guard.write_all(&data) {
+                        return Err(anyhow::anyhow!("PTY write error: {e}"));
+                    }
+                    if let Err(e) = writer_guard.flush() {
+                        return Err(anyhow::anyhow!("PTY flush error: {e}"));
+                    }
+
+                    // Explicitly drop the mutex guard before the next
+                    // `blocking_recv()` so we never hold the lock while idle.
+                    drop(writer_guard);
                 }
-                if let Err(e) = writer_guard.flush() {
-                    return Err(anyhow::anyhow!("PTY flush error: {e}"));
-                }
-            }
-            Ok(())
+                Ok(())
+            })();
+            // Drop the Arc<Mutex<PtyWriter>> before returning so the ref count
+            // is released immediately, independent of task join timing.
+            drop(writer_slot.take());
+            result
         });
 
         let mut writer_finished = false;

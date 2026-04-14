@@ -11,7 +11,7 @@ use std::{
     io,
     sync::{
         Arc,
-        atomic::{AtomicI64, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
 };
 
@@ -81,6 +81,11 @@ impl JsonRpcPeer {
             let mut buffer = String::new();
 
             let mut had_error = false;
+            // Track repeated identical non-JSON parse errors so we can log at
+            // warn! once the same error has recurred many times (persistent)
+            // but stay at debug! for transient / sporadic cases.
+            let mut last_non_json_err: Option<String> = None;
+            let mut non_json_err_streak: u32 = 0;
             loop {
                 buffer.clear();
                 match reader.read_line(&mut buffer).await {

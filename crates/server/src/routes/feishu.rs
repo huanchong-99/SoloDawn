@@ -221,6 +221,12 @@ async fn update_config(
     // principal/user context is wired through (G24), replace the placeholder
     // actor with the authenticated user id.
     tracing::info!(
+        event = "feishu_config_updated",
+        by_actor = "api_token",
+        app_id = %payload.app_id,
+        "Feishu config updated"
+    );
+    tracing::info!(
         target: "audit.feishu_config",
         actor = "api_token",
         config_id = %config_id,

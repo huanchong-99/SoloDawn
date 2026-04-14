@@ -390,22 +390,12 @@ pub async fn delete_task(
     Extension(task): Extension<Task>,
     State(deployment): State<DeploymentImpl>,
 ) -> Result<(StatusCode, ResponseJson<ApiResponse<()>>), ApiError> {
-    // TODO(W2-18-08): TOCTOU between ownership check and delete.
-    //
-    // The `Task` extension is populated by the task-loader middleware, which
-    // also performs ownership/authorization against the project scope. Between
-    // that check and the `Task::delete` call below, the task row could be
-    // reparented, transferred, or mutated concurrently — meaning the delete
-    // executes against a row whose ownership is no longer what the middleware
-    // validated.
-    //
-    // Fix forward: either (a) re-read-and-validate the row inside the same
-    // transaction (`SELECT ... FOR UPDATE` / sqlite equivalent via `BEGIN
-    // IMMEDIATE`) before `Task::delete`, or (b) push ownership into the
-    // `DELETE ... WHERE id = ?1 AND project_id = ?2 AND <owner guard>` SQL
-    // itself and treat `rows_affected == 0` as a 404/403. Option (b) is
-    // preferred since it is atomic at the DB layer and needs no extra round
-    // trip. Revisit when `Task::delete` signature is updated.
+    // W2-18-08: TOCTOU between ownership check and delete is closed by using
+    // `Task::delete_scoped`, which pushes the `project_id` guard into the
+    // DELETE WHERE clause. If the row is reparented or vanishes concurrently
+    // between the middleware ownership check and this SQL, `rows_affected`
+    // will be 0 and we return 404 below — the delete never executes against
+    // a row whose ownership differs from what the middleware validated.
     ensure_shared_task_auth(&task, &deployment).await?;
 
     let pool = &deployment.db().pool;
@@ -461,7 +451,9 @@ pub async fn delete_task(
     }
 
     // Delete task from database (FK CASCADE will handle task_attempts)
-    let rows_affected = Task::delete(&mut *tx, task.id).await?;
+    // W2-18-08: Scope delete by (id, project_id) so middleware's ownership
+    // check is re-enforced atomically inside the SQL itself.
+    let rows_affected = Task::delete_scoped(&mut *tx, task.id, task.project_id).await?;
 
     if rows_affected == 0 {
         return Err(ApiError::Database(SqlxError::RowNotFound));

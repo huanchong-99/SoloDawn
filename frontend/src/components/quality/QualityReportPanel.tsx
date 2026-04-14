@@ -87,7 +87,7 @@ export function QualityReportPanel({ terminalId, className, onRefresh }: Readonl
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={() => { refetch(); onRefresh?.(); }}>
+          <Button variant="outline" size="sm" onClick={async () => { await refetch(); onRefresh?.(); }}>
             {t('panel.refresh')}
           </Button>
           <QualityBadge gateStatus={(latestRun?.gateStatus ?? 'pending') as GateStatus} />

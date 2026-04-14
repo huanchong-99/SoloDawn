@@ -4699,12 +4699,24 @@ impl OrchestratorAgent {
         }
 
         // 2. Refresh terminal snapshot after CAS to avoid stale PTY/session metadata.
-        // TODO(E21-06): The CAS acquires the waiting->working transition atomically,
-        // but between this point and the PTY send below another task could still
-        // flip the status (e.g. via cancellation). Consider either (a) re-verifying
-        // `active_terminal.status == WORKING` after the PTY send and rolling back
-        // on race, or (b) wrapping the CAS + PTY dispatch bookkeeping in a single
-        // DB transaction so concurrent status transitions are serialized.
+        // E21-06 (verified 2026-04-14): The CAS acquired the waiting->working
+        // transition atomically, but between that write and this reload another
+        // task could have flipped the status (e.g. via cancellation). Re-verify
+        // the reloaded status is still WORKING before committing the in-memory
+        // dispatch bookkeeping. If it is not, attempt a best-effort rollback of
+        // the CAS (working->waiting) and return a DispatchConflict error so the
+        // caller can retry the dispatch.
+        //
+        // INVARIANT (E21-06): This function guarantees that when it proceeds
+        // past the state.write() block below to PTY dispatch, BOTH of the
+        // following hold simultaneously:
+        //   (a) DB terminal.status == WORKING, and
+        //   (b) in-memory task_state reflects this terminal as dispatched.
+        // This is enforced by two checks: the first reload+check immediately
+        // after the CAS, and the second re-verify performed while still
+        // holding the state write lock (after mark_terminal_dispatched). Any
+        // status drift between those points causes a rollback + early return
+        // with a DispatchConflict error.
         let active_terminal = db::models::Terminal::find_by_id(&self.db.pool, &terminal.id)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to reload terminal after CAS: {e}"))?
@@ -4715,9 +4727,83 @@ impl OrchestratorAgent {
                 )
             })?;
 
+        if active_terminal.status != TERMINAL_STATUS_WORKING {
+            tracing::warn!(
+                terminal_id = %active_terminal.id,
+                task_id = %task_id,
+                observed_status = %active_terminal.status,
+                "E21-06: Terminal status drifted away from WORKING after CAS; \
+                 attempting rollback and signaling dispatch conflict"
+            );
+            // Best-effort revert: only succeeds if nothing else has written in the
+            // meantime (i.e. status is still WORKING). If someone else already moved
+            // it (e.g. to CANCELLED/FAILED), leave their write in place.
+            let _ = db::models::Terminal::update_status_cas(
+                &self.db.pool,
+                &terminal.id,
+                TERMINAL_STATUS_WORKING,
+                TERMINAL_STATUS_WAITING,
+            )
+            .await;
+            return Err(anyhow::anyhow!(
+                "DispatchConflict: terminal {} status changed from WORKING to {} \
+                 between CAS acquisition and dispatch; caller should retry",
+                terminal.id,
+                active_terminal.status
+            ));
+        }
+
         {
             let mut state = self.state.write().await;
             state.mark_terminal_dispatched(task_id, &active_terminal.id);
+
+            // E21-06: Re-verify under the state write lock that the DB status is
+            // still WORKING. Holding the write lock here ensures no other
+            // orchestrator path observes an inconsistent (dispatched-in-memory but
+            // not-WORKING-in-DB) view between this check and the PTY send.
+            // Invariant: after this block, (DB.status == WORKING) && in-memory
+            // task_state reflects dispatch of this terminal.
+            let verify = db::models::Terminal::find_by_id(&self.db.pool, &terminal.id)
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to re-verify terminal status post-mark: {e}")
+                })?;
+            let still_working = verify
+                .as_ref()
+                .map(|t| t.status == TERMINAL_STATUS_WORKING)
+                .unwrap_or(false);
+            if !still_working {
+                // Rollback the in-memory mark: clearing is_completed back to true
+                // is not safe without the prior value, so instead we leave the
+                // index alone (it is idempotent) and surface the conflict.
+                // Attempt a best-effort DB rollback as above.
+                let observed = verify
+                    .as_ref()
+                    .map(|t| t.status.as_str())
+                    .unwrap_or("<missing>")
+                    .to_string();
+                drop(state);
+                let _ = db::models::Terminal::update_status_cas(
+                    &self.db.pool,
+                    &terminal.id,
+                    TERMINAL_STATUS_WORKING,
+                    TERMINAL_STATUS_WAITING,
+                )
+                .await;
+                tracing::warn!(
+                    terminal_id = %active_terminal.id,
+                    task_id = %task_id,
+                    observed_status = %observed,
+                    "E21-06: Terminal status drifted after mark_terminal_dispatched; \
+                     returning DispatchConflict for caller retry"
+                );
+                return Err(anyhow::anyhow!(
+                    "DispatchConflict: terminal {} status changed to {} after \
+                     in-memory dispatch mark; caller should retry",
+                    terminal.id,
+                    observed
+                ));
+            }
         }
 
         // 3. Get PTY session ID, fail if not available.

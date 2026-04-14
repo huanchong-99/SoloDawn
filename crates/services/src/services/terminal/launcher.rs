@@ -396,22 +396,43 @@ impl TerminalLauncher {
 
                 // Register terminal bridge for MessageBus -> PTY stdin forwarding
                 if let Some(ref bridge) = self.terminal_bridge {
-                    if let Err(e) = bridge.register(&terminal_id, &handle.session_id).await {
-                        return self
-                            .rollback_launch_after_spawn(
-                                &terminal_id,
-                                format!("Failed to register terminal bridge: {e}"),
-                            )
-                            .await;
+                    // E26-07: use a channel-based ready signal rather than a fixed
+                    // sleep before verification. `register_with_ready` returns a
+                    // oneshot receiver that fires once the bridge task has begun
+                    // executing, making verification deterministic.
+                    let ready_rx = match bridge
+                        .register_with_ready(&terminal_id, &handle.session_id)
+                        .await
+                    {
+                        Ok(rx) => rx,
+                        Err(e) => {
+                            return self
+                                .rollback_launch_after_spawn(
+                                    &terminal_id,
+                                    format!("Failed to register terminal bridge: {e}"),
+                                )
+                                .await;
+                        }
+                    };
+
+                    match tokio::time::timeout(Duration::from_secs(2), ready_rx).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(_)) => {
+                            // Sender was dropped before signalling readiness: this
+                            // typically means the bridge task was aborted (e.g. a
+                            // registration race). Fall through to `is_registered`
+                            // verification below to confirm state.
+                        }
+                        Err(_elapsed) => {
+                            return self
+                                .rollback_launch_after_spawn(
+                                    &terminal_id,
+                                    "Terminal bridge did not become ready within 2s".to_string(),
+                                )
+                                .await;
+                        }
                     }
-                    // E26-07: the ideal fix is a channel-based ready signal from
-                    // `bridge.register` so verification is deterministic rather than
-                    // timing-dependent. Until `register` exposes such a signal we
-                    // widen the sleep from 50ms to 200ms to reduce false negatives
-                    // on slower hosts / CI under load. TODO: plumb a oneshot "ready"
-                    // sender through TerminalBridge::register and await it here
-                    // instead of sleeping.
-                    tokio::time::sleep(Duration::from_millis(200)).await;
+
                     if !bridge.is_registered(&handle.session_id).await {
                         return self
                             .rollback_launch_after_spawn(

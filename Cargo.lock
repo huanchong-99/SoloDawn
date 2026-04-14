@@ -1558,6 +1558,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "temp-env",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

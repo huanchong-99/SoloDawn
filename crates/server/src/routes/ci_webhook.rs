@@ -46,7 +46,7 @@ pub async fn ci_webhook(
                 StatusCode::UNAUTHORIZED,
                 Json(json!({
                     "status": "rejected",
-                    "message": "CI webhook is not configured on this server"
+                    "message": "CI webhook requires SOLODAWN_CI_WEBHOOK_SECRET to be configured"
                 })),
             );
         }

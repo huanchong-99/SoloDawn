@@ -434,6 +434,29 @@ ORDER BY t.created_at DESC"#,
         Ok(result.rows_affected())
     }
 
+    /// W2-18-08: Atomic delete that enforces project ownership in the SQL
+    /// itself, closing the TOCTOU gap between the middleware ownership check
+    /// and the DELETE statement. Callers should treat `rows_affected == 0` as
+    /// a 404/403 — either the row vanished concurrently or the project_id
+    /// guard failed because the row was reparented between check and delete.
+    pub async fn delete_scoped<'e, E>(
+        executor: E,
+        id: Uuid,
+        project_id: Uuid,
+    ) -> Result<u64, sqlx::Error>
+    where
+        E: Executor<'e, Database = Sqlite>,
+    {
+        let result = sqlx::query!(
+            "DELETE FROM tasks WHERE id = $1 AND project_id = $2",
+            id,
+            project_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn set_shared_task_id<'e, E>(
         executor: E,
         id: Uuid,

@@ -34,10 +34,13 @@ use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
-/// Benchmark database query performance
+/// Benchmark database query performance.
+///
+/// W2-05-05: the previous version built a `tokio::runtime::Runtime` it never
+/// used. These benches are placeholders that measure allocator throughput, not
+/// database work; the runtime has been removed and the whole module should be
+/// replaced with real benches when the perf harness is set up.
 fn bench_db_queries(c: &mut Criterion) {
-    let _rt = tokio::runtime::Runtime::new().unwrap();
-
     let mut group = c.benchmark_group("database_queries");
     group.measurement_time(Duration::from_secs(10));
     group.sample_size(50);

@@ -146,11 +146,19 @@ export function WorkspaceProvider({ children }: Readonly<WorkspaceProviderProps>
     [diffs]
   );
 
-  // Sync diffPaths to store for expand/collapse all functionality
+  // Sync diffPaths to store for expand/collapse all functionality.
+  // W2-22-01: subscribe to the setter via selector so the unmount cleanup
+  // captures the current slice rather than whatever `getState()` returns
+  // later (avoids stale-store bugs if the store is re-created, e.g. in
+  // tests or after a reset).
+  // W2-22-05: include `setDiffPaths` in deps so the effect re-runs if the
+  // slice identity changes (e.g. after a store reset), keeping the synced
+  // paths consistent with the live store.
+  const setDiffPaths = useDiffViewStore((s) => s.setDiffPaths);
   useEffect(() => {
-    useDiffViewStore.getState().setDiffPaths(Array.from(diffPaths));
-    return () => useDiffViewStore.getState().setDiffPaths([]);
-  }, [diffPaths]);
+    setDiffPaths(Array.from(diffPaths));
+    return () => setDiffPaths([]);
+  }, [diffPaths, setDiffPaths]);
 
   const diffStats: DiffStats = useMemo(
     () => ({
