@@ -265,6 +265,66 @@ impl RuntimeActionService {
         Ok(terminal)
     }
 
+    /// R8-B1 access shim: lets the orchestrator query "is this terminal's
+    /// PTY in stop-hook shutdown right now?" without exposing the
+    /// PromptWatcher field directly. Returns false on unknown terminals.
+    pub async fn has_recent_stop_hook(&self, terminal_id: &str) -> bool {
+        self.prompt_watcher.has_recent_stop_hook(terminal_id).await
+    }
+
+    /// R8-B2: clean-context relaunch of the SAME terminal record.
+    ///
+    /// Use this when a fix-prompt injection cannot succeed via the running
+    /// PTY — typically because Claude Code has entered its post-turn
+    /// "stop hook" shutdown sequence and the input box silently drops
+    /// submit signals. Closing the existing PTY + resetting the runtime
+    /// fields + starting a fresh PTY restores a usable session while
+    /// preserving the per-terminal blocker history that R8-A's progress
+    /// classifier depends on (terminal_id is unchanged, so previous
+    /// quality_runs still count).
+    ///
+    /// Returns the freshly-launched Terminal record. Caller is responsible
+    /// for re-delivering the fix prompt via `dispatch_terminal` (the
+    /// dispatcher honours waiting/working transitions and quiet-window
+    /// safety which raw `publish_terminal_input` does not).
+    pub async fn relaunch_terminal_clean_context(
+        &self,
+        terminal_id: &str,
+    ) -> Result<Terminal> {
+        // Step 1: stop any running PTY + unregister bridge/prompt-watcher.
+        // Use cancelled as the intermediate status so close_terminal cleans
+        // up but reset_for_restart immediately wipes it back to not_started
+        // for a fresh start.
+        let _ = self
+            .close_terminal(terminal_id, Some("cancelled"))
+            .await?;
+
+        // Step 2: clear all runtime state on the row so STARTABLE_TERMINAL_STATUSES
+        // accepts it again (reset_for_restart sets status='not_started' and
+        // clears process/session/execution-process pointers).
+        Terminal::reset_for_restart(&self.db.pool, terminal_id).await?;
+
+        // Re-emit not_started so dashboard/event subscribers see the cycle.
+        let task_workflow_id = {
+            let term = Terminal::find_by_id(&self.db.pool, terminal_id)
+                .await?
+                .ok_or_else(|| {
+                    anyhow!("Terminal {terminal_id} not found after reset_for_restart")
+                })?;
+            let task = WorkflowTask::find_by_id(&self.db.pool, &term.workflow_task_id)
+                .await?
+                .ok_or_else(|| anyhow!("Task {} not found", term.workflow_task_id))?;
+            task.workflow_id
+        };
+        self.publish_terminal_status(&task_workflow_id, terminal_id, "not_started")
+            .await?;
+
+        // Step 3: spawn a fresh PTY via the normal start path. This re-runs
+        // launcher.launch_terminal which re-applies cc-switch env, prompt-
+        // watcher registration, MCP injection, etc.
+        self.start_terminal(terminal_id).await
+    }
+
     pub async fn close_terminal(
         &self,
         terminal_id: &str,

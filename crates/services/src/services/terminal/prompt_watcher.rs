@@ -75,6 +75,13 @@ const HANDOFF_STALL_CONTEXT_MAX_AGE_SECS: u64 = 20;
 /// Max age for handoff reminder submit-assist context.
 const HANDOFF_SUBMIT_CONTEXT_MAX_AGE_SECS: u64 = 12;
 
+/// R8-B1: max age for treating a recent "stop hook" PTY observation as
+/// still relevant. After this window, any new fix-prompt injection should
+/// once again use the normal `publish_terminal_input` path. The window is
+/// intentionally generous (terminal stop-hook can take 30-90s of cleanup),
+/// so the relaunch trigger doesn't expire mid-shutdown.
+const STOP_HOOK_RECENT_WINDOW_SECS: u64 = 120;
+
 /// Auto-reply used when CLI reports clean workspace and asks what to do next.
 /// This prevents orchestrated terminals from idling forever instead of creating
 /// the required completion/handoff commit.
@@ -582,6 +589,13 @@ struct TerminalWatchState {
     pending_claude_bypass_retry_since: Option<Instant>,
     /// Number of Claude bypass retries sent for current prompt.
     claude_bypass_retry_count: u8,
+    /// R8-B1: timestamp of the most recent observation of a "stop hook" marker
+    /// in PTY output. When present and recent (≤ STOP_HOOK_RECENT_WINDOW_SECS),
+    /// the orchestrator must NOT try to recover via plain `publish_terminal_input`
+    /// — Claude Code is already in its post-turn shutdown sequence and will
+    /// drop submit signals (`\r`). Use this as the trigger to spawn a clean-
+    /// context terminal relaunch instead.
+    last_stop_hook_observed_at: Option<Instant>,
 }
 
 impl TerminalWatchState {
@@ -607,6 +621,7 @@ impl TerminalWatchState {
             pending_handoff_submit_at: None,
             pending_claude_bypass_retry_since: None,
             claude_bypass_retry_count: 0,
+            last_stop_hook_observed_at: None,
         }
     }
 
@@ -796,6 +811,23 @@ impl PromptWatcher {
             active_subscriptions: Arc::new(RwLock::new(HashMap::new())),
             next_task_id: Arc::new(AtomicU64::new(1)),
         }
+    }
+
+    /// R8-B1: returns true iff this terminal's PTY has shown a "stop hook"
+    /// marker within the past `STOP_HOOK_RECENT_WINDOW_SECS`. The orchestrator
+    /// uses this to decide whether to deliver a fix prompt via the normal
+    /// `publish_terminal_input` path (no recent stop-hook → safe) OR via
+    /// clean-context relaunch (recent stop-hook → safe). Returns false for
+    /// unregistered terminals.
+    pub async fn has_recent_stop_hook(&self, terminal_id: &str) -> bool {
+        let terminals = self.terminals.read().await;
+        let Some(state) = terminals.get(terminal_id) else {
+            return false;
+        };
+        let Some(ts) = state.last_stop_hook_observed_at else {
+            return false;
+        };
+        ts.elapsed() < Duration::from_secs(STOP_HOOK_RECENT_WINDOW_SECS)
     }
 
     /// Register a terminal for watching
@@ -1182,6 +1214,24 @@ next_action: handoff\n"
         state.observe_claude_bypass_context(&normalized_output_lower);
         state.observe_unexpected_changes_context(&normalized_output);
         state.observe_handoff_stall_context(&normalized_output);
+
+        // R8-B1: detect stop-hook indicators. When Claude Code finishes a
+        // turn it enters its post-turn shutdown sequence ("running stop
+        // hook"); the input box still accepts paste but submit signals
+        // (`\r`) are dropped, which silently destroyed R8-A's fix-prompt
+        // delivery (R8 retry workflow `94ab3e66`). Recording the most-
+        // recent observation lets the orchestrator query
+        // `has_recent_stop_hook` and choose clean-context relaunch instead
+        // of the normal `publish_terminal_input` path.
+        if normalized_output_lower.contains("stop hook")
+            || normalized_output_lower.contains("running stop hook")
+        {
+            state.last_stop_hook_observed_at = Some(Instant::now());
+            tracing::debug!(
+                terminal_id = %state.terminal_id,
+                "R8-B1: observed stop-hook marker — clean-context relaunch is now the right recovery"
+            );
+        }
         let bypass_needs_enter_context = normalized_output_lower.contains("interrupted")
             || normalized_output_lower.contains("press ctrl-c again to exit");
         let has_claude_bypass_accept_context = is_claude_bypass_accept_prompt(&normalized_output)

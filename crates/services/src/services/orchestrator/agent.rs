@@ -863,6 +863,27 @@ impl OrchestratorAgent {
                         .iter()
                         .all(|t| t.status == "completed" || t.status == "failed");
                     if all_done {
+                        // R8-B3 guard #2: don't auto-complete a task whose
+                        // terminals technically exited but whose enforce
+                        // quality gate still has unresolved blockers.
+                        let mut blocked_by_gate = false;
+                        for t in &task_terminals {
+                            if terminal_has_unresolved_enforce_blockers(
+                                &self.db, &t.id,
+                            )
+                            .await
+                            {
+                                blocked_by_gate = true;
+                                break;
+                            }
+                        }
+                        if blocked_by_gate {
+                            tracing::warn!(
+                                task_id = %task.id, task_name = %task.name,
+                                "R8-B3: refusing to auto-complete task — at least one terminal has unresolved enforce quality blockers"
+                            );
+                            continue;
+                        }
                         tracing::info!(
                             task_id = %task.id, task_name = %task.name,
                             "Auto-completing task: all terminals finished but task still running"
@@ -1324,6 +1345,24 @@ impl OrchestratorAgent {
         } else {
             TERMINAL_STATUS_FAILED
         };
+
+        // R8-B3 guard #1: do NOT cascade a clean PTY exit into terminal
+        // completion if the most recent enforce quality gate still reports
+        // unresolved blockers. R8 retry workflow `94ab3e66` got marked
+        // `completed` despite blocking_issues=4 because Claude Code's
+        // stop-hook sequence looked like a normal exit. The fix here keeps
+        // the terminal in its current state (working/waiting); the next
+        // quality gate event or stall recovery will re-drive progress.
+        if success
+            && terminal_has_unresolved_enforce_blockers(&self.db, &event.terminal_id).await
+        {
+            tracing::warn!(
+                terminal_id = %event.terminal_id,
+                task_id = %event.task_id,
+                "R8-B3: refusing to mark terminal completed — last enforce quality_run still has unresolved blockers. Terminal stays in current state; gate-loop or stall recovery will re-drive."
+            );
+            return Ok(());
+        }
 
         let completion_updated = self
             .try_finalize_terminal(&event.terminal_id, &event.task_id, terminal_final_status)
@@ -2254,24 +2293,73 @@ impl OrchestratorAgent {
                 .and_then(|t| t.pty_session_id.or(t.session_id))
                 .filter(|s| !s.trim().is_empty());
 
-                if let Some(session_id) = session_id_opt {
-                    // R8: prepend progress-aware hint (MakingProgress /
-                    // Plateau / Regression). Empty when there's not enough
-                    // history yet, so the prompt looks identical to the
-                    // pre-R8 one for the first 1-2 attempts.
-                    let progress_prefix = loop_progress_hint_text
-                        .as_deref()
-                        .map(|h| format!("{h}\n\n"))
-                        .unwrap_or_default();
-                    let fix_message = format!(
-                        "{}Your commit was BLOCKED by the quality gate.\n\n{}\n\n{}\n\n\
-                         Fix ALL issues listed above, then commit again. \
-                         The quality gate will re-run automatically on your next commit.\n\n\
-                         Tip: Run the project's build/type-check command to verify your fixes before committing.",
-                        progress_prefix, event.summary, fix_instructions
+                // R8: prepend progress-aware hint (MakingProgress /
+                // Plateau / Regression). Empty when there's not enough
+                // history yet, so the prompt looks identical to the
+                // pre-R8 one for the first 1-2 attempts.
+                let progress_prefix = loop_progress_hint_text
+                    .as_deref()
+                    .map(|h| format!("{h}\n\n"))
+                    .unwrap_or_default();
+                let fix_message = format!(
+                    "{}Your commit was BLOCKED by the quality gate.\n\n{}\n\n{}\n\n\
+                     Fix ALL issues listed above, then commit again. \
+                     The quality gate will re-run automatically on your next commit.\n\n\
+                     Tip: Run the project's build/type-check command to verify your fixes before committing.",
+                    progress_prefix, event.summary, fix_instructions
+                );
+
+                // R8-B1+B2+B4: decide between in-place PTY injection and
+                // clean-context relaunch. The PTY-injection path silently
+                // failed in R8 retry workflow `94ab3e66` because Claude Code
+                // was already in stop-hook shutdown when the fix prompt
+                // arrived — `\r` was dropped, terminal exited cleanly.
+                //
+                // Relaunch trigger conditions (any one):
+                //   - PTY session is missing (terminal already exited)
+                //   - PromptWatcher saw a recent "stop hook" marker
+                let has_recent_stop_hook = match self.runtime_actions() {
+                    Ok(ra) => ra.has_recent_stop_hook(&event.terminal_id).await,
+                    Err(_) => false,
+                };
+                let needs_relaunch = session_id_opt.is_none() || has_recent_stop_hook;
+
+                if needs_relaunch {
+                    let trigger = if session_id_opt.is_none() {
+                        "no_pty_session"
+                    } else {
+                        "stop_hook_detected"
+                    };
+                    tracing::warn!(
+                        terminal_id = %event.terminal_id,
+                        trigger,
+                        "R8-B4: triggering clean-context terminal relaunch — in-place fix-prompt injection would be dropped"
                     );
+                    let relaunch_outcome: anyhow::Result<()> = async {
+                        let ra = self.runtime_actions()?;
+                        let restarted = ra
+                            .relaunch_terminal_clean_context(&event.terminal_id)
+                            .await?;
+                        // dispatch_terminal CAS-updates waiting → working
+                        // and routes through the proper start path; it
+                        // honours QUALITY_REQUIREMENTS_SUFFIX append.
+                        self.dispatch_terminal(&event.task_id, &restarted, &fix_message)
+                            .await?;
+                        Ok(())
+                    }
+                    .await;
+                    if let Err(e) = relaunch_outcome {
+                        tracing::error!(
+                            terminal_id = %event.terminal_id,
+                            error = %e,
+                            "R8-B4: clean-context relaunch failed; fix prompt could not be delivered. Workflow stays running and stall-recovery / next gate event will retry."
+                        );
+                    }
+                } else if let Some(session_id) = session_id_opt {
+                    // Healthy PTY without stop-hook — original path.
                     // G31-001: targeted delivery to specific terminal PTY.
-                    self.message_bus
+                    let delivered = self
+                        .message_bus
                         .publish_terminal_input(
                             &event.terminal_id,
                             &session_id,
@@ -2279,12 +2367,24 @@ impl OrchestratorAgent {
                             None,
                         )
                         .await;
-                } else {
-                    tracing::warn!(
-                        terminal_id = %event.terminal_id,
-                        "Quality gate enforce mode: no PTY session found for terminal, \
-                         fix instructions not delivered"
-                    );
+                    if !delivered {
+                        // R8-B4 fallback: bus delivery failed despite a
+                        // valid session — try clean-context relaunch as a
+                        // last resort instead of silently dropping.
+                        tracing::warn!(
+                            terminal_id = %event.terminal_id,
+                            "R8-B4: publish_terminal_input returned false; falling back to clean-context relaunch"
+                        );
+                        if let Ok(ra) = self.runtime_actions() {
+                            if let Ok(restarted) =
+                                ra.relaunch_terminal_clean_context(&event.terminal_id).await
+                            {
+                                let _ = self
+                                    .dispatch_terminal(&event.task_id, &restarted, &fix_message)
+                                    .await;
+                            }
+                        }
+                    }
                 }
             }
             // Leave terminal in its current working/waiting state; the next commit
@@ -4155,6 +4255,18 @@ impl OrchestratorAgent {
                     return Ok(());
                 }
 
+                // R8-B3 guard #4: even with all tasks "completed", the
+                // enforce quality gate may have unresolved blockers from
+                // the most recent run. Treat that as a hard refusal — the
+                // LLM emitted CompleteWorkflow prematurely.
+                if workflow_has_unresolved_enforce_blockers(&self.db, &workflow_id).await {
+                    tracing::warn!(
+                        workflow_id = %workflow_id,
+                        "R8-B3: CompleteWorkflow rejected — at least one terminal has unresolved enforce quality blockers"
+                    );
+                    return Ok(());
+                }
+
                 // Auto-merge task branches before marking completed
                 if self.config.auto_merge_on_completion {
                     if let Err(e) = self.execute_auto_merge().await {
@@ -5385,6 +5497,17 @@ impl OrchestratorAgent {
             return Ok(());
         }
 
+        // R8-B3 guard #3: workflow may have all-tasks-completed locally but
+        // any terminal with unresolved enforce blockers means the gate was
+        // never cleared. Refuse to auto-sync to `completed` in that case.
+        if workflow_has_unresolved_enforce_blockers(&self.db, workflow_id).await {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                "R8-B3: refusing to auto-sync workflow to completed — at least one terminal has unresolved enforce quality blockers"
+            );
+            return Ok(());
+        }
+
         // CAS: only transition running → completed to prevent overwriting concurrent
         // state changes (e.g., pause or merge already in progress).
         let transitioned =
@@ -6381,6 +6504,56 @@ async fn is_quality_run_only_infra_blockers(
     issues
         .iter()
         .all(|i| i.rule_id.ends_with(UNAVAILABLE_RULE_SUFFIX))
+}
+
+/// R8-B3: returns true iff this terminal's most recent enforce-mode quality
+/// run reports unresolved blockers (gate still pending/running, OR gate
+/// finished with `blocking_issues > 0`). Used to BLOCK premature task /
+/// workflow completion cascades when the user-facing invariant is "task
+/// complete = quality gate passed at least once + zero blockers".
+///
+/// Returns false (don't block) if:
+///   - terminal has no quality_run history (gate disabled or never fired)
+///   - latest run is shadow/warn/off (mode != enforce — not a hard gate)
+///   - latest run is gate_status=ok / skipped (passed cleanly)
+///   - DB error (fail-safe: don't block on infra glitch)
+async fn terminal_has_unresolved_enforce_blockers(
+    db: &Arc<DBService>,
+    terminal_id: &str,
+) -> bool {
+    let latest =
+        match db::models::QualityRun::find_latest_by_terminal(&db.pool, terminal_id).await {
+            Ok(Some(run)) => run,
+            _ => return false,
+        };
+    if latest.mode != QUALITY_GATE_MODE_ENFORCE {
+        return false;
+    }
+    match latest.gate_status.as_str() {
+        "pending" | "running" => true,
+        "error" => latest.blocking_issues > 0,
+        _ => false, // ok / skipped / warn — gate cleared
+    }
+}
+
+/// R8-B3: workflow-level rollup. Returns true iff ANY terminal in the
+/// workflow currently has unresolved enforce blockers per the per-terminal
+/// helper. Used to block workflow → completed transitions.
+async fn workflow_has_unresolved_enforce_blockers(
+    db: &Arc<DBService>,
+    workflow_id: &str,
+) -> bool {
+    let terminals =
+        match db::models::Terminal::find_by_workflow(&db.pool, workflow_id).await {
+            Ok(t) => t,
+            Err(_) => return false,
+        };
+    for t in terminals {
+        if terminal_has_unresolved_enforce_blockers(db, &t.id).await {
+            return true;
+        }
+    }
+    false
 }
 
 /// R8: Quality-gate progress classification (replaces R4 Fix C N-failure escalation).
@@ -7797,6 +7970,89 @@ mod tests {
         assert!(
             matches!(class, LoopProgressClass::FirstFew { .. }),
             "single-run history must classify as FirstFew, got {class:?}"
+        );
+    }
+
+    /// R8-B3: terminal_has_unresolved_enforce_blockers must return true
+    /// only when the latest enforce run has unresolved blockers
+    /// (pending/running OR error+blocking>0).
+    #[tokio::test]
+    async fn r8_b3_unresolved_blockers_detection_contract() {
+        use super::{terminal_has_unresolved_enforce_blockers, workflow_has_unresolved_enforce_blockers};
+        let db = in_memory_db().await;
+        let term_id = "term-b3";
+        let wf_id = "wf-b3";
+        let task_id = "task-b3";
+
+        // No history yet → false (don't block, gate may not have run).
+        assert!(
+            !terminal_has_unresolved_enforce_blockers(&db, term_id).await,
+            "terminal with no quality_run history must not be flagged unresolved"
+        );
+
+        // Insert an enforce run with status=error + blocking=4 → true.
+        insert_failed_quality_run_for_terminal_with_files(
+            &db,
+            wf_id,
+            task_id,
+            Some(term_id),
+            "commit-b3-1",
+            &[("tsc::error", Some("src/a.ts")); 4],
+        )
+        .await;
+        assert!(
+            terminal_has_unresolved_enforce_blockers(&db, term_id).await,
+            "terminal with enforce error + blocking>0 must be flagged unresolved"
+        );
+
+        // Now insert a NEWER enforce run with status=ok (gate cleared) → false.
+        let run = db::models::QualityRun::new_pending(
+            wf_id,
+            Some(task_id),
+            Some(term_id),
+            Some("commit-b3-2"),
+            "terminal",
+            "enforce",
+        );
+        db::models::QualityRun::insert(&db.pool, &run).await.unwrap();
+        db::models::QualityRun::complete(
+            &db.pool, &run.id, "ok", 0, 0, 0, 50, None, None, None,
+        )
+        .await
+        .unwrap();
+        assert!(
+            !terminal_has_unresolved_enforce_blockers(&db, term_id).await,
+            "terminal whose LATEST enforce run is gate_status=ok must NOT be flagged"
+        );
+
+        // workflow_has_unresolved_enforce_blockers needs at least the
+        // workflow + terminal + task tables seeded; without those the
+        // helper returns false (terminals lookup returns empty), which is
+        // the correct fail-safe.
+        assert!(
+            !workflow_has_unresolved_enforce_blockers(&db, wf_id).await,
+            "workflow rollup with no terminal records must default to safe (false)"
+        );
+    }
+
+    /// R8-B1: has_recent_stop_hook returns false for unregistered terminals
+    /// (fail-safe — never trigger relaunch on unknown ids). The full
+    /// register → process_output → query path is exercised end-to-end by
+    /// the R8 retry integration run; doing that as a unit test would
+    /// require a live PTY subscription which `PromptWatcher::register`
+    /// transitively requires.
+    #[tokio::test]
+    async fn r8_b1_stop_hook_query_safe_for_unregistered() {
+        use crate::services::terminal::{
+            process::ProcessManager, prompt_watcher::PromptWatcher,
+        };
+        let bus = std::sync::Arc::new(MessageBus::new(1000));
+        let pm = std::sync::Arc::new(ProcessManager::new());
+        let watcher = PromptWatcher::new(bus, pm);
+
+        assert!(
+            !watcher.has_recent_stop_hook("term-b1-unknown").await,
+            "unregistered terminal must return false (fail-safe — never trigger relaunch on unknown ids)"
         );
     }
 
