@@ -1239,7 +1239,7 @@ export function Workflows() {
 
       setPromptSubmitError(null);
     },
-    []
+    [pendingPromptDecisionsRef]
   );
 
   const handleTerminalPromptDecision = useCallback(
@@ -1270,7 +1270,7 @@ export function Workflows() {
         setPromptSubmitError(null);
       }
     },
-    []
+    [pendingPromptDecisionsRef]
   );
 
   const handleRealtimeWorkflowSignal = useCallback(() => {

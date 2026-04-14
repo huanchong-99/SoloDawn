@@ -11,8 +11,11 @@ use std::os::windows::io::{FromRawHandle, IntoRawHandle, OwnedHandle};
 use command_group::AsyncGroupChild;
 use futures::{StreamExt, stream::BoxStream};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::ReaderStream;
+
+/// Bound for duplicate-stdout and injector channels (W2-30-06).
+const STDOUT_DUP_CHANNEL_BOUND: usize = 512;
 
 use crate::executors::ExecutorError;
 

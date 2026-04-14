@@ -18,10 +18,86 @@
 
 use axum::{
     extract::Request,
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
 };
+
+/// Per-request authentication context inserted by `require_api_token`.
+///
+/// `authenticated` reflects whether the request passed the bearer-token check.
+/// When `SOLODAWN_API_TOKEN` is unset/empty the middleware permits the request
+/// and this flag is `false` (i.e. no principal was proven). Downstream
+/// defense-in-depth checks (see `assert_authorized`) can opt in to reject
+/// un-authenticated callers when a stricter posture is desired.
+#[derive(Clone, Debug)]
+pub struct RequestContext {
+    pub authenticated: bool,
+}
+
+/// Helper for handlers / middleware that want to require an authenticated
+/// caller regardless of dev-mode token passthrough.
+///
+/// Returns `Ok(())` when the request was authenticated, or an `ApiError`-style
+/// response when it was not. When `SOLODAWN_REQUIRE_AUTH` is **not** set (the
+/// default today), this is a no-op and returns `Ok(())` to preserve
+/// backward-compatible "development mode" behavior. When set to a truthy
+/// value, missing authentication is rejected with 401.
+pub fn assert_authorized(ctx: &RequestContext) -> Result<(), Response> {
+    let require = std::env::var("SOLODAWN_REQUIRE_AUTH")
+        .ok()
+        .map(|v| {
+            let t = v.trim().to_ascii_lowercase();
+            !t.is_empty() && t != "0" && t != "false" && t != "no"
+        })
+        .unwrap_or(false);
+
+    if require && !ctx.authenticated {
+        tracing::warn!("assert_authorized: rejecting un-authenticated request (SOLODAWN_REQUIRE_AUTH set)");
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "error": "Unauthorized: authentication required"
+            })),
+        )
+            .into_response());
+    }
+    Ok(())
+}
+
+/// Defense-in-depth admin gate for sensitive mutating endpoints.
+///
+/// Opt-in: if `SOLODAWN_ADMIN_TOKEN` is unset/empty, this is a no-op and
+/// returns `Ok(())` (preserves current behavior). If set, the request must
+/// include an `X-Admin-Token` header whose value matches exactly; otherwise a
+/// `403 Forbidden` response is returned. This is additive to — not a
+/// replacement for — the bearer-token layer in `require_api_token`.
+pub fn check_admin(_ctx: &RequestContext, headers: &HeaderMap) -> Result<(), Response> {
+    let admin_token = match std::env::var("SOLODAWN_ADMIN_TOKEN") {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => return Ok(()),
+    };
+
+    let provided = headers
+        .get("X-Admin-Token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if constant_time_eq(provided.as_bytes(), admin_token.as_bytes()) {
+        Ok(())
+    } else {
+        tracing::warn!("check_admin: rejecting request with missing/invalid X-Admin-Token");
+        Err((
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "error": "Forbidden: admin token required"
+            })),
+        )
+            .into_response())
+    }
+}
 
 /// Middleware that requires API token authentication.
 ///
@@ -48,7 +124,7 @@ use axum::{
 /// // SOLODAWN_API_TOKEN="my-secret-token"
 /// // Request: Authorization: Bearer my-secret-token
 /// ```
-pub async fn require_api_token(req: Request, next: Next) -> Result<Response, Response> {
+pub async fn require_api_token(mut req: Request, next: Next) -> Result<Response, Response> {
     // Check if API token is configured.
     // NOTE(G35-002): std::env::var() is called per-request intentionally. The cost is
     // negligible (< 1µs on all platforms) and allows runtime token rotation without restart.
@@ -62,6 +138,7 @@ pub async fn require_api_token(req: Request, next: Next) -> Result<Response, Res
                      Set SOLODAWN_API_TOKEN to secure API access."
                 );
             }
+            req.extensions_mut().insert(RequestContext { authenticated: false });
             return Ok(next.run(req).await);
         }
         _ => {
@@ -71,6 +148,7 @@ pub async fn require_api_token(req: Request, next: Next) -> Result<Response, Res
                      Set a non-empty SOLODAWN_API_TOKEN to secure API access."
                 );
             }
+            req.extensions_mut().insert(RequestContext { authenticated: false });
             return Ok(next.run(req).await);
         }
     };
@@ -93,6 +171,7 @@ pub async fn require_api_token(req: Request, next: Next) -> Result<Response, Res
     if is_valid {
         // Authentication successful
         tracing::trace!("API request authenticated successfully");
+        req.extensions_mut().insert(RequestContext { authenticated: true });
         Ok(next.run(req).await)
     } else {
         // Authentication failed — return a JSON error body (G16-002)

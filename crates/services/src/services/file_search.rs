@@ -93,7 +93,7 @@ pub struct FileSearchCache {
     cache: Cache<PathBuf, CachedRepo>,
     git_service: GitService,
     file_ranker: FileRanker,
-    build_queue: mpsc::UnboundedSender<PathBuf>,
+    build_queue: mpsc::Sender<PathBuf>,
     watchers: Arc<DashMap<PathBuf, Debouncer<RecommendedWatcher, RecommendedCache>>>,
     watcher_tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
     worker_task: std::sync::Mutex<Option<JoinHandle<()>>>,
@@ -122,11 +122,13 @@ impl Drop for FileSearchCache {
 
 impl FileSearchCache {
     pub fn new() -> Self {
-        // TODO(W2-30-03): Replace this unbounded build queue with a bounded
-        // channel (capacity ~1024) using `try_send` + warn-on-full. The
-        // `UnboundedSender<PathBuf>` type leaks into `build_queue` struct
-        // fields and several call sites, so this is a dedicated refactor.
-        let (build_sender, build_receiver) = mpsc::unbounded_channel();
+        // [W2-30-03] Bounded build queue (capacity 256). All senders use
+        // `try_send` and warn on `Full`, so a backed-up worker coalesces
+        // rather than growing memory without bound. Cache misses and watcher
+        // refreshes are idempotent — dropping a duplicate enqueue is safe
+        // because the worker will rebuild from the latest HEAD on the next
+        // admitted request.
+        let (build_sender, build_receiver) = mpsc::channel(256);
 
         // Create cache with 100MB limit and 1 hour TTL
         let cache = Cache::builder()
@@ -187,8 +189,18 @@ impl FileSearchCache {
         }
 
         // Cache miss - trigger background refresh and return error
-        if let Err(e) = self.build_queue.send(repo_path_buf) {
-            warn!("Failed to enqueue cache build: {}", e);
+        // [W2-30-03] Bounded queue: drop on Full rather than await, since we
+        // are in a hot search path and a backlogged worker will pick up the
+        // repo on its next successful enqueue or watcher event.
+        if let Err(e) = self.build_queue.try_send(repo_path_buf) {
+            match e {
+                mpsc::error::TrySendError::Full(path) => {
+                    warn!("Build queue full, dropping cache build for {:?}", path);
+                }
+                mpsc::error::TrySendError::Closed(path) => {
+                    warn!("Build queue closed, cannot enqueue {:?}", path);
+                }
+            }
         }
 
         Err(CacheError::Miss)
@@ -197,11 +209,18 @@ impl FileSearchCache {
     /// Pre-warm cache for given repositories
     pub fn warm_repos(&self, repo_paths: Vec<PathBuf>) -> Result<(), String> {
         for repo_path in repo_paths {
-            if let Err(e) = self.build_queue.send(repo_path.clone()) {
-                error!(
-                    "Failed to enqueue repo for warming: {:?} - {}",
-                    repo_path, e
-                );
+            // [W2-30-03] Bounded queue: warn-and-drop on Full. Warming is
+            // best-effort; if the worker is busy building other repos the
+            // next search miss will re-enqueue this path.
+            if let Err(e) = self.build_queue.try_send(repo_path.clone()) {
+                match e {
+                    mpsc::error::TrySendError::Full(path) => {
+                        warn!("Build queue full, skipping warm for {:?}", path);
+                    }
+                    mpsc::error::TrySendError::Closed(path) => {
+                        error!("Build queue closed, cannot warm {:?}", path);
+                    }
+                }
             }
         }
         Ok(())
@@ -608,11 +627,11 @@ impl FileSearchCache {
 
     /// Background worker for cache building
     async fn background_worker(
-        mut build_receiver: mpsc::UnboundedReceiver<PathBuf>,
+        mut build_receiver: mpsc::Receiver<PathBuf>,
         cache: Cache<PathBuf, CachedRepo>,
         git_service: GitService,
         file_ranker: FileRanker,
-        build_queue: mpsc::UnboundedSender<PathBuf>,
+        build_queue: mpsc::Sender<PathBuf>,
         watchers: Arc<DashMap<PathBuf, Debouncer<RecommendedWatcher, RecommendedCache>>>,
     ) {
         while let Some(repo_path) = build_receiver.recv().await {
@@ -671,11 +690,12 @@ impl FileSearchCache {
         let build_queue = self.build_queue.clone();
         let watched_path = repo_path_buf.clone();
 
-        // TODO(W2-30-03): Bound this HEAD-watcher channel (e.g. capacity 64)
-        // and drop oldest / coalesce events on overflow. Currently unbounded
-        // because the debouncer callback is sync and cannot await a bounded
-        // `send`; switching requires `try_send` with warn-on-full.
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        // [W2-30-03] Bounded HEAD-watcher channel (capacity 64). The
+        // debouncer callback is sync, so we use `try_send` and drop events
+        // on `Full`. Dropping is safe: HEAD events are idempotent signals
+        // to re-enqueue the repo build, and the debouncer already coalesces
+        // bursts of filesystem activity within its 500ms window.
+        let (tx, mut rx) = mpsc::channel::<()>(64);
 
         let mut debouncer = new_debouncer(
             Duration::from_millis(500),
@@ -691,8 +711,22 @@ impl FileSearchCache {
                         // check is cross-platform.
                         for path in &event.event.paths {
                             if path.file_name().is_some_and(|name| name == "HEAD") {
-                                if let Err(e) = tx.send(()) {
-                                    error!("Failed to send HEAD change event: {}", e);
+                                // [W2-30-03] Bounded channel: drop on Full
+                                // (another HEAD event is already queued; the
+                                // worker will re-read HEAD once drained).
+                                if let Err(e) = tx.try_send(()) {
+                                    match e {
+                                        mpsc::error::TrySendError::Full(_) => {
+                                            warn!(
+                                                "HEAD watcher channel full, dropping event"
+                                            );
+                                        }
+                                        mpsc::error::TrySendError::Closed(_) => {
+                                            warn!(
+                                                "HEAD watcher channel closed, dropping event"
+                                            );
+                                        }
+                                    }
                                 }
                                 break;
                             }

@@ -2,7 +2,11 @@
 //!
 //! Provides session management and message handling for the Concierge Agent.
 
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use axum::{
     Extension, Json, Router,
@@ -12,11 +16,60 @@ use axum::{
 };
 use db::models::concierge::{ConciergeMessage, ConciergeSession, ConciergeSessionChannel};
 use deployment::Deployment;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use services::services::concierge::ConciergeAgent;
 use utils::response::ApiResponse;
 
 use crate::{DeploymentImpl, error::ApiError, feishu_handle::SharedFeishuHandle};
+
+// W2-18-09: Basic per-session rate limit on concierge LLM-backed endpoints.
+// Mirrors the token-bucket pattern in workflows.rs
+// (`ORCHESTRATOR_RATE_LIMIT_WINDOW` / `ORCHESTRATOR_RATE_LIMIT_MAX_REQUESTS`).
+// Keyed by session id (concierge sessions are not scoped to a project today;
+// switch the key to `project_id` once concierge sessions grow a project
+// association — see ConciergeSession schema).
+const CONCIERGE_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
+const CONCIERGE_RATE_LIMIT_MAX_REQUESTS: usize = 12;
+
+#[derive(Debug, Default)]
+struct ConciergeRateLimitState {
+    rate_windows: HashMap<String, VecDeque<Instant>>,
+}
+
+static CONCIERGE_RATE_LIMIT_STATE: Lazy<tokio::sync::Mutex<ConciergeRateLimitState>> =
+    Lazy::new(|| tokio::sync::Mutex::new(ConciergeRateLimitState::default()));
+
+async fn enforce_concierge_rate_limit(key: &str) -> Result<(), ApiError> {
+    let now = Instant::now();
+    let mut state = CONCIERGE_RATE_LIMIT_STATE.lock().await;
+
+    // Opportunistic pruning: drop buckets whose newest entry is older than the
+    // window so the map does not grow unboundedly as sessions accumulate.
+    state.rate_windows.retain(|_, bucket| {
+        bucket
+            .back()
+            .copied()
+            .is_some_and(|ts| now.duration_since(ts) <= CONCIERGE_RATE_LIMIT_WINDOW)
+    });
+
+    let bucket = state.rate_windows.entry(key.to_string()).or_default();
+    while let Some(ts) = bucket.front().copied() {
+        if now.duration_since(ts) <= CONCIERGE_RATE_LIMIT_WINDOW {
+            break;
+        }
+        bucket.pop_front();
+    }
+    if bucket.len() >= CONCIERGE_RATE_LIMIT_MAX_REQUESTS {
+        return Err(ApiError::Conflict(format!(
+            "Concierge rate limit exceeded: max {} requests per {}s",
+            CONCIERGE_RATE_LIMIT_MAX_REQUESTS,
+            CONCIERGE_RATE_LIMIT_WINDOW.as_secs()
+        )));
+    }
+    bucket.push_back(now);
+    Ok(())
+}
 
 pub type SharedConciergeAgent = Arc<ConciergeAgent>;
 
@@ -121,18 +174,18 @@ pub struct FeishuChannelStatus {
 // Handlers
 // ============================================================================
 
-// TODO(W2-18-09): No rate limit on concierge session creation or on the
-// downstream LLM-backed endpoints in this module. A malicious or misbehaving
-// client holding a valid API token could burn concierge LLM quota. Mirror
-// the per-principal token-bucket pattern used in workflows.rs
-// (`ORCHESTRATOR_RATE_LIMIT_WINDOW` / `ORCHESTRATOR_RATE_LIMIT_MAX_REQUESTS`
-// + `ORCHESTRATOR_GOVERNANCE_STATE`) once a shared governance module is
-// extracted, then apply it to `create_session` and any message-submit
-// handlers in this file.
+// W2-18-09: Rate limit applied via `enforce_concierge_rate_limit` on
+// `create_session` (global bucket) and on `send_message` (per-session bucket)
+// to cap concierge LLM quota burn from a misbehaving or malicious client.
 async fn create_session(
     State(deployment): State<DeploymentImpl>,
     Json(payload): Json<CreateSessionRequest>,
 ) -> Result<ResponseJson<ApiResponse<ConciergeSession>>, ApiError> {
+    // Session creation is not yet tied to a project; use a single global
+    // bucket so a runaway loop cannot flood session inserts. Replace the
+    // "__global__" key with the project id once concierge sessions grow a
+    // project scope.
+    enforce_concierge_rate_limit("__global__:create_session").await?;
     let pool = &deployment.db().pool;
     let name = payload.name.as_deref().unwrap_or("");
     let mut session = ConciergeSession::new(name);
@@ -194,6 +247,9 @@ async fn send_message(
     if message.is_empty() {
         return Err(ApiError::BadRequest("message is required".to_string()));
     }
+
+    // W2-18-09: cap concierge LLM submissions per session/minute.
+    enforce_concierge_rate_limit(&format!("session:{id}")).await?;
 
     let source = payload.source.as_deref().unwrap_or("web");
     let pool = &deployment.db().pool;

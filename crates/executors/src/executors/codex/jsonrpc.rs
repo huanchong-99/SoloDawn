@@ -59,7 +59,7 @@ impl ExitSignalSender {
 pub struct JsonRpcPeer {
     stdin: Arc<Mutex<ChildStdin>>,
     pending: Arc<Mutex<HashMap<RequestId, oneshot::Sender<PendingResponse>>>>,
-    id_counter: Arc<AtomicI64>,
+    id_counter: Arc<AtomicU64>,
 }
 
 impl JsonRpcPeer {
@@ -72,7 +72,7 @@ impl JsonRpcPeer {
         let peer = Self {
             stdin: Arc::new(Mutex::new(stdin)),
             pending: Arc::new(Mutex::new(HashMap::new())),
-            id_counter: Arc::new(AtomicI64::new(1)),
+            id_counter: Arc::new(AtomicU64::new(1)),
         };
 
         let reader_peer = peer.clone();
@@ -156,7 +156,32 @@ impl JsonRpcPeer {
                                     }
                                 }
                             }
-                            Err(_) => {
+                            Err(parse_err) => {
+                                // E33-04: categorise repeated non-JSON parse
+                                // errors. Transient blips log at debug; a run
+                                // of 5+ consecutive identical parse errors
+                                // escalates to warn so operators can see a
+                                // persistent protocol-level problem.
+                                let err_kind = parse_err.to_string();
+                                let is_same = last_non_json_err.as_deref() == Some(err_kind.as_str());
+                                if is_same {
+                                    non_json_err_streak = non_json_err_streak.saturating_add(1);
+                                } else {
+                                    non_json_err_streak = 1;
+                                    last_non_json_err = Some(err_kind.clone());
+                                }
+                                if non_json_err_streak >= 5 {
+                                    tracing::warn!(
+                                        streak = non_json_err_streak,
+                                        error = %err_kind,
+                                        "persistent non-JSON parse errors on Codex stdout"
+                                    );
+                                } else {
+                                    tracing::debug!(
+                                        error = %err_kind,
+                                        "non-JSON line on Codex stdout"
+                                    );
+                                }
                                 if callbacks.on_non_json(line).await.is_err() {
                                     had_error = true;
                                     break;
@@ -185,7 +210,13 @@ impl JsonRpcPeer {
     }
 
     pub fn next_request_id(&self) -> RequestId {
-        RequestId::Integer(self.id_counter.fetch_add(1, Ordering::Relaxed))
+        // Use AtomicU64 so we never produce negative ids; take modulo
+        // i64::MAX to stay within the positive i64 range that JSONRPC ids
+        // are expected to occupy. This effectively wraps but only to a
+        // positive sentinel value rather than a negative one.
+        let raw = self.id_counter.fetch_add(1, Ordering::Relaxed);
+        let bounded = (raw % (i64::MAX as u64)) as i64;
+        RequestId::Integer(bounded)
     }
 
     pub async fn register(&self, request_id: RequestId) -> PendingReceiver {

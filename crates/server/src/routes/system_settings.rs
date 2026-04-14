@@ -1,11 +1,15 @@
-use axum::{Json, Router, extract::State, routing::get};
+use axum::{Extension, Json, Router, extract::State, http::HeaderMap, routing::get};
 use db::models::system_settings::SystemSetting;
 use deployment::Deployment;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use utils::response::ApiResponse;
 
-use crate::{DeploymentImpl, error::ApiError};
+use crate::{
+    DeploymentImpl,
+    error::ApiError,
+    middleware::auth::{RequestContext, check_admin},
+};
 
 #[derive(Deserialize)]
 struct UpdateSettings {
@@ -39,8 +43,17 @@ async fn get_settings(
 // ApiError::Forbidden before mutating.
 async fn update_settings(
     State(deployment): State<DeploymentImpl>,
+    headers: HeaderMap,
+    ctx: Option<Extension<RequestContext>>,
     Json(body): Json<UpdateSettings>,
 ) -> Result<Json<ApiResponse<Value>>, ApiError> {
+    // Defense-in-depth: opt-in admin gate. When SOLODAWN_ADMIN_TOKEN is unset,
+    // this is a no-op. When set, require a matching X-Admin-Token header.
+    let ctx = ctx.map(|Extension(c)| c).unwrap_or(RequestContext { authenticated: false });
+    if check_admin(&ctx, &headers).is_err() {
+        return Err(ApiError::Forbidden("admin token required".to_string()));
+    }
+
     let pool = &deployment.db().pool;
     if let Some(enabled) = body.feishu_enabled {
         SystemSetting::set(

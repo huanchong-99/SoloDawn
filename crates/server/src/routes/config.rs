@@ -6,10 +6,10 @@ use std::{
 };
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     body::Body,
     extract::{Path, Query, State},
-    http::{self, StatusCode},
+    http::{self, HeaderMap, StatusCode},
     response::{Json as ResponseJson, Response},
     routing::{get, post, put},
 };
@@ -32,7 +32,11 @@ use tokio::{fs, process::Command};
 use ts_rs::TS;
 use utils::{api::oauth::LoginStatus, assets::config_path, response::ApiResponse};
 
-use crate::{DeploymentImpl, error::ApiError};
+use crate::{
+    DeploymentImpl,
+    error::ApiError,
+    middleware::auth::{RequestContext, check_admin},
+};
 
 pub fn router() -> Router<DeploymentImpl> {
     Router::new()

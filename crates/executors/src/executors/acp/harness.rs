@@ -195,11 +195,9 @@ impl AcpAgentHarness {
         // Create a fresh stdout pipe for logs
         let writer = crate::stdout_dup::create_stdout_pipe_writer(child)?;
         let shared_writer = Arc::new(tokio::sync::Mutex::new(writer));
-        // TODO(W2-30-05): Bound this log channel to ~512 and use `try_send`
-        // with a warn-on-full fallback so a slow writer cannot grow the
-        // queue without limit. `log_tx` is cloned into several producers
-        // so changing the type is non-local.
-        let (log_tx, mut log_rx) = mpsc::unbounded_channel::<String>();
+        // W2-30-05: Bounded log channel with warn-on-full to prevent a slow
+        // writer from growing the queue without limit.
+        let (log_tx, mut log_rx) = mpsc::channel::<String>(512);
 
         // Spawn log -> stdout writer task
         tokio::spawn(async move {
@@ -282,13 +280,10 @@ impl AcpAgentHarness {
                     .run_until(async move {
                         // Create event and raw channels
                         // Typed events available for future use; raw lines forwarded and persisted
-                        // TODO(W2-30-05): Bound this event channel to ~512 and
-                        // use `try_send` with warn-on-full so a slow consumer
-                        // cannot grow the queue without limit. `event_tx` is
-                        // cloned into the ACP client and several producers,
-                        // so the type change is non-local.
+                        // W2-30-05: Bounded event channel with warn-on-full so
+                        // a slow consumer cannot grow the queue without limit.
                         let (event_tx, mut event_rx) =
-                            mpsc::unbounded_channel::<crate::executors::acp::AcpEvent>();
+                            mpsc::channel::<crate::executors::acp::AcpEvent>(512);
 
                         // Create session manager
                         let session_manager = match SessionManager::new(session_namespace) {
@@ -371,7 +366,8 @@ impl AcpAgentHarness {
 
                         // Emit session ID
                         let _ = log_tx
-                            .send(AcpEvent::SessionStart(display_session_id.clone()).to_string());
+                            .send(AcpEvent::SessionStart(display_session_id.clone()).to_string())
+                            .await;
 
                         if let Some(model) = model.clone() {
                             match conn
@@ -424,7 +420,7 @@ impl AcpAgentHarness {
 
                                 let line = event.to_string();
                                 // Forward to stdout
-                                let _ = app_tx_clone.send(line.clone());
+                                let _ = app_tx_clone.send(line.clone()).await;
                                 // Persist to session file
                                 let _ = sm_for_writer.append_raw_line(&sess_id_for_writer, &line);
                             }
@@ -456,7 +452,9 @@ impl AcpAgentHarness {
                                     // Emit done with stop_reason
                                     let stop_reason = serde_json::to_string(&resp.stop_reason)
                                         .unwrap_or_default();
-                                    let _ = log_tx.send(AcpEvent::Done(stop_reason).to_string());
+                                    let _ = log_tx
+                                        .send(AcpEvent::Done(stop_reason).to_string())
+                                        .await;
                                 }
                                 Err(e) => {
                                     had_error = true;
@@ -470,7 +468,8 @@ impl AcpAgentHarness {
                                         tracing::debug!("ACP server killed");
                                     } else {
                                         let _ = log_tx
-                                            .send(AcpEvent::Error(format!("{e}")).to_string());
+                                            .send(AcpEvent::Error(format!("{e}")).to_string())
+                                            .await;
                                     }
                                 }
                             }

@@ -235,8 +235,10 @@ export function WorkflowWizard({
 
   const handleBack = () => {
     if (navigation.canGoPrevious()) {
-      navigation.previous();
+      // E11-09: Clear errors BEFORE navigating so the previous step never
+      // renders a one-frame flash of stale validation messages.
       validation.clearErrors();
+      navigation.previous();
     }
   };
 

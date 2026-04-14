@@ -2058,6 +2058,7 @@ dependencies = [
  "toml 0.8.2",
  "tracing",
  "ts-rs 11.0.1",
+ "urlencoding",
  "utils",
  "uuid",
  "walkdir",

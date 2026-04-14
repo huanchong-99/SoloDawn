@@ -515,10 +515,11 @@ fn request_id(request: &ClientRequest) -> RequestId {
                 tracing::warn!(
                     "request_id called for unknown ClientRequest variant; returning sentinel id"
                 );
-                // Reserved sentinel value; avoids colliding with real ids (which start at 1
-                // and increment positively). Using a string makes the unknown origin explicit
-                // in logs / server-side dispatch.
-                RequestId::String("unknown_request_type".to_string())
+                // E33-03: reserved sentinel value; avoids colliding with real
+                // ids (which start at 1 and increment positively). `i64::MIN`
+                // is never produced by `next_request_id`, so an unknown-origin
+                // id is unambiguous without polluting the id type space.
+                RequestId::Integer(i64::MIN)
             }
     }
 }

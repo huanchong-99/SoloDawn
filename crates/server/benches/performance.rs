@@ -6,9 +6,10 @@
 // production code; the caveats below are intentional but should frame how
 // results are read:
 //
-// - W2-05-01: `bench_db_queries` constructs a `tokio::runtime::Runtime` that
-//   is never used (the `_rt` binding is leaked for the lifetime of the bench
-//   process). Cosmetic, but don't mirror this in real code.
+// - W2-05-01: FIXED. `bench_db_queries` previously constructed a
+//   `tokio::runtime::Runtime` that was never used (leaking threads for the
+//   life of the process). The unused `_rt` binding has been removed; don't
+//   mirror the old pattern in real code.
 // - W2-05-02: No real SQLite (not even in-memory) is exercised here. Any DB
 //   numbers reported are synthetic and will not catch regressions in sqlx,
 //   the query planner, or index usage.

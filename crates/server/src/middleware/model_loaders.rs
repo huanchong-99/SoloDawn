@@ -10,7 +10,7 @@ use db::models::{
 use deployment::Deployment;
 use uuid::Uuid;
 
-use crate::{DeploymentImpl, error::ApiError};
+use crate::{DeploymentImpl, error::ApiError, middleware::auth::{RequestContext, assert_authorized}};
 
 // TODO(W2-18-02): Missing ownership/access check on project load.
 // This middleware loads a Project by ID for any authenticated caller. Today,
@@ -33,6 +33,18 @@ pub async fn load_project_middleware(
     request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Defense-in-depth: opt-in authz gate. Falls through to the legacy
+    // "dev mode" behavior unless SOLODAWN_REQUIRE_AUTH is set.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     // Load the project from the database
     let project = match Project::find_by_id(&deployment.db().pool, project_id).await {
         Ok(Some(project)) => project,
@@ -73,6 +85,18 @@ pub async fn load_task_middleware(
     request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Defense-in-depth: opt-in authz gate. Falls through to the legacy
+    // "dev mode" behavior unless SOLODAWN_REQUIRE_AUTH is set.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     // Load the task and validate it belongs to the project
     let task = match Task::find_by_id(&deployment.db().pool, task_id).await {
         Ok(Some(task)) => task,

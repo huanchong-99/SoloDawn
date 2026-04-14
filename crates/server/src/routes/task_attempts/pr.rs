@@ -498,15 +498,14 @@ pub async fn attach_existing_pr(
     let mut sorted_prs = prs;
     sorted_prs.sort_by_key(|pr| status_priority(&pr.status));
     if let Some(pr_info) = sorted_prs.into_iter().next() {
-        // TODO(E29-06): Merge::create_pr and Merge::update_status below are not
-        // wrapped in a single transaction. Their signatures take `&SqlitePool`,
-        // so making them atomic requires making those db model methods generic
-        // over a sqlx executor (ripples across db crate and all call sites).
-        // Track as a follow-up: if create_pr succeeds but update_status fails,
-        // the merge row is left in 'open' status even though the real PR is
-        // merged/closed. Mitigation: the PR monitor reconciles status later.
-        let merge = Merge::create_pr(
-            pool,
+        // E29-06: wrap create_pr + update_status in a single sqlx transaction
+        // so the merge row's initial status reflects the real PR status
+        // atomically. Prior to this, if create_pr succeeded but update_status
+        // failed, the row stayed 'open' even when the PR was merged/closed
+        // (the monitor would later reconcile, but the window was observable).
+        let mut tx = pool.begin().await?;
+        let merge = Merge::create_pr_tx(
+            &mut *tx,
             workspace.id,
             workspace_repo.repo_id,
             &workspace_repo.target_branch,
@@ -517,14 +516,15 @@ pub async fn attach_existing_pr(
 
         // Update status if not open
         if !matches!(pr_info.status, MergeStatus::Open) {
-            Merge::update_status(
-                pool,
+            Merge::update_status_tx(
+                &mut *tx,
                 merge.id,
                 pr_info.status.clone(),
                 pr_info.merge_commit_sha.clone(),
             )
             .await?;
         }
+        tx.commit().await?;
 
         // If PR is merged, only mark task done/archive after all repos are merged
         if matches!(pr_info.status, MergeStatus::Merged) {

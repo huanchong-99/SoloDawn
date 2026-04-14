@@ -1,11 +1,26 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::{Executor, FromRow, Sqlite, SqlitePool, Type};
 use strum_macros::{Display, EnumString};
 use ts_rs::TS;
 use uuid::Uuid;
 
 use super::{project::Project, workspace::Workspace};
+
+/// M38: Tri-state deserializer for `Option<Option<T>>` fields.
+///
+/// - Field absent in JSON  -> outer `None`            (leave unchanged)
+/// - Field present as null -> `Some(None)`            (clear to NULL)
+/// - Field present w/ value -> `Some(Some(value))`    (update to value)
+///
+/// Use with `#[serde(default, deserialize_with = "deserialize_some")]`.
+pub fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
 
 #[derive(
     Debug, Clone, Type, Serialize, Deserialize, PartialEq, TS, EnumString, Display, Default,
@@ -122,7 +137,12 @@ pub struct UpdateTask {
     pub title: Option<String>,
     pub description: Option<String>,
     pub status: Option<TaskStatus>,
-    pub parent_workspace_id: Option<Uuid>,
+    // M38: Tri-state. Outer `None` = field omitted (leave unchanged);
+    // `Some(None)` = explicit null (clear to NULL);
+    // `Some(Some(id))` = update to the given id.
+    #[serde(default, deserialize_with = "deserialize_some")]
+    #[ts(optional, type = "string | null")]
+    pub parent_workspace_id: Option<Option<Uuid>>,
     pub image_ids: Option<Vec<Uuid>>,
 }
 
@@ -303,6 +323,10 @@ ORDER BY t.created_at DESC"#,
         .await
     }
 
+    /// M38: `parent_workspace_id` is a tri-state patch:
+    /// - `None`             -> do not touch the column
+    /// - `Some(None)`       -> SET parent_workspace_id = NULL
+    /// - `Some(Some(id))`   -> SET parent_workspace_id = $id
     pub async fn update(
         pool: &SqlitePool,
         id: Uuid,
@@ -310,23 +334,45 @@ ORDER BY t.created_at DESC"#,
         title: String,
         description: Option<String>,
         status: TaskStatus,
-        parent_workspace_id: Option<Uuid>,
+        parent_workspace_id: Option<Option<Uuid>>,
     ) -> Result<Self, sqlx::Error> {
-        sqlx::query_as!(
-            Task,
-            r#"UPDATE tasks
-               SET title = $3, description = $4, status = $5, parent_workspace_id = $6
-               WHERE id = $1 AND project_id = $2
-               RETURNING id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", parent_workspace_id as "parent_workspace_id: Uuid", shared_task_id as "shared_task_id: Uuid", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>""#,
-            id,
-            project_id,
-            title,
-            description,
-            status,
-            parent_workspace_id
-        )
-        .fetch_one(pool)
-        .await
+        match parent_workspace_id {
+            None => {
+                // Leave parent_workspace_id untouched.
+                sqlx::query_as!(
+                    Task,
+                    r#"UPDATE tasks
+                       SET title = $3, description = $4, status = $5
+                       WHERE id = $1 AND project_id = $2
+                       RETURNING id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", parent_workspace_id as "parent_workspace_id: Uuid", shared_task_id as "shared_task_id: Uuid", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>""#,
+                    id,
+                    project_id,
+                    title,
+                    description,
+                    status,
+                )
+                .fetch_one(pool)
+                .await
+            }
+            Some(new_parent) => {
+                // Set parent_workspace_id to the provided value (which may be NULL).
+                sqlx::query_as!(
+                    Task,
+                    r#"UPDATE tasks
+                       SET title = $3, description = $4, status = $5, parent_workspace_id = $6
+                       WHERE id = $1 AND project_id = $2
+                       RETURNING id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", parent_workspace_id as "parent_workspace_id: Uuid", shared_task_id as "shared_task_id: Uuid", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>""#,
+                    id,
+                    project_id,
+                    title,
+                    description,
+                    status,
+                    new_parent
+                )
+                .fetch_one(pool)
+                .await
+            }
+        }
     }
 
     pub async fn update_status(

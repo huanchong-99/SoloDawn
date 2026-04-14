@@ -1592,23 +1592,6 @@ impl OrchestratorAgent {
             }
         }
 
-        // --- Dedup: check DB for existing quality_run for this terminal+commit ---
-        // (done before acquiring write lock to avoid holding the lock during DB I/O)
-        // TODO(E21-08): There is a TOCTOU window between this DB dedup query and
-        // the subsequent write-lock block below where a concurrent checkpoint
-        // for the same (terminal_id, commit_hash) could slip through. Structural
-        // fix: move this query inside the write-lock scope (accepting the DB I/O
-        // under the lock) or wrap the dedup + insert sequence in a single DB
-        // transaction with a unique constraint on (terminal_id, commit_hash).
-        if self.is_checkpoint_duplicate(&event.terminal_id, event.commit_hash.as_deref()).await {
-            tracing::info!(
-                terminal_id = %event.terminal_id,
-                commit_hash = ?event.commit_hash,
-                "Duplicate checkpoint detected in DB, skipping"
-            );
-            return Ok(());
-        }
-
         // Off mode: skip quality gate entirely, treat as Completed
         if mode == QUALITY_GATE_MODE_OFF {
             tracing::info!(
@@ -1623,12 +1606,19 @@ impl OrchestratorAgent {
             return Ok(());
         }
 
-        // G31-004: merge replay check + idempotent check + insert into a single write-lock
-        // scope to eliminate the TOCTOU window between "check" and "insert".
+        // E21-08: merge DB dedup + replay check + idempotent check + insert into a single
+        // write-lock scope. We accept holding the lock across the DB dedup query because
+        // this is the only way to close the TOCTOU window between "check DB for existing
+        // quality_run" and "insert pending marker": acquire lock -> check in-memory sets
+        // -> if absent, check DB -> if absent, atomically register pending + processed
+        // markers in memory -> release lock -> insert DB row. Chosen over a UNIQUE
+        // constraint on (terminal_id, commit_hash) because that would require a schema
+        // migration and would only surface duplicates at insert time (after side-effects
+        // like pending_quality_checks insertion may already have occurred).
         {
             let mut state = self.state.write().await;
 
-            // Replay protection (under write lock).
+            // Replay protection (in-memory, under write lock).
             if let Some(ref hash) = event.commit_hash {
                 let checkpoint_key = format!("{}:{}", event.terminal_id, hash);
                 if state.processed_checkpoints.contains(&checkpoint_key) {
@@ -1641,7 +1631,7 @@ impl OrchestratorAgent {
                 }
             }
 
-            // Idempotent check (under write lock).
+            // Idempotent check (in-memory, under write lock).
             if state.pending_quality_checks.contains(&event.terminal_id) {
                 tracing::info!(
                     terminal_id = %event.terminal_id,
@@ -1650,7 +1640,18 @@ impl OrchestratorAgent {
                 return Ok(());
             }
 
-            // Both checks passed atomically — register the pending entry and checkpoint.
+            // Dedup: check DB for existing quality_run for this terminal+commit
+            // (under write lock to close TOCTOU window with the insert below).
+            if self.is_checkpoint_duplicate(&event.terminal_id, event.commit_hash.as_deref()).await {
+                tracing::info!(
+                    terminal_id = %event.terminal_id,
+                    commit_hash = ?event.commit_hash,
+                    "Duplicate checkpoint detected in DB, skipping"
+                );
+                return Ok(());
+            }
+
+            // All checks passed atomically — register the pending entry and checkpoint.
             state.pending_quality_checks.insert(event.terminal_id.clone());
             if let Some(ref hash) = event.commit_hash {
                 state

@@ -431,16 +431,9 @@ impl TerminalBridge {
         // itself is explicitly dropped once the channel closes so the writer's
         // ref count is released promptly rather than at task-exit unwind.
         let mut writer_task = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            // Move the Arc into an Option so we can explicitly drop it at the
-            // end of the loop before returning, ensuring the ref count is
-            // released as soon as we stop writing.
-            let mut writer_slot = Some(writer);
-            let result = (|| -> anyhow::Result<()> {
+            let result: anyhow::Result<()> = 'writer_loop: {
                 while let Some(data) = writer_rx.blocking_recv() {
-                    let writer_arc = writer_slot
-                        .as_ref()
-                        .expect("writer_slot populated for the duration of the loop");
-                    let mut writer_guard = match writer_arc.lock() {
+                    let mut writer_guard = match writer.lock() {
                         Ok(guard) => guard,
                         Err(poisoned) => {
                             tracing::warn!(
@@ -452,10 +445,10 @@ impl TerminalBridge {
                     };
 
                     if let Err(e) = writer_guard.write_all(&data) {
-                        return Err(anyhow::anyhow!("PTY write error: {e}"));
+                        break 'writer_loop Err(anyhow::anyhow!("PTY write error: {e}"));
                     }
                     if let Err(e) = writer_guard.flush() {
-                        return Err(anyhow::anyhow!("PTY flush error: {e}"));
+                        break 'writer_loop Err(anyhow::anyhow!("PTY flush error: {e}"));
                     }
 
                     // Explicitly drop the mutex guard before the next
@@ -463,10 +456,10 @@ impl TerminalBridge {
                     drop(writer_guard);
                 }
                 Ok(())
-            })();
-            // Drop the Arc<Mutex<PtyWriter>> before returning so the ref count
-            // is released immediately, independent of task join timing.
-            drop(writer_slot.take());
+            };
+            // Drop the `Arc<Mutex<PtyWriter>>` before returning so the ref count
+            // is released immediately rather than waiting for task-exit unwind.
+            drop(writer);
             result
         });
 

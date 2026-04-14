@@ -849,6 +849,8 @@ impl TaskServer {
             title,
             description: expanded_description,
             status,
+            // M38: Outer `None` = leave `parent_workspace_id` unchanged.
+            // `Some(None)` would clear it; `Some(Some(id))` would update it.
             parent_workspace_id: None,
             image_ids: None,
         };

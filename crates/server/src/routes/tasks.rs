@@ -339,16 +339,10 @@ pub async fn update_task(
         None => existing_task.description,      // Field omitted = keep existing
     };
     let status = payload.status.unwrap_or(existing_task.status);
-    // M38 (known limitation): `parent_workspace_id: Option<Uuid>` is a two-state field,
-    // so callers cannot distinguish "leave unchanged" from "clear to NULL" — omitting the
-    // field and sending `null` both deserialize to `None`, which currently overwrites the
-    // existing value with NULL on every update. A proper fix requires a tri-state
-    // (`Option<Option<Uuid>>` with `#[serde(default, deserialize_with = "deserialize_some")]`
-    // or a `Patch<T>` wrapper) and would ripple through `Task::update`, the MCP task server
-    // (`crates/server/src/mcp/task_server.rs`), generated TS types (`shared/types.ts`), and
-    // the frontend (`frontend/src/lib/api.ts`, `useTaskMutations`). Deferred until those
-    // call sites can be updated atomically. For now, clients MUST always send the current
-    // `parent_workspace_id` value when updating a task to avoid accidentally clearing it.
+    // M38: `parent_workspace_id` is now a tri-state (`Option<Option<Uuid>>`). The outer
+    // `None` means "field omitted, leave unchanged"; `Some(None)` means "explicit null,
+    // clear to NULL"; `Some(Some(id))` means "update to the given id". `Task::update`
+    // handles all three cases in SQL (see its implementation in `crates/db/src/models/task.rs`).
     let parent_workspace_id = payload.parent_workspace_id;
 
     let task = Task::update(

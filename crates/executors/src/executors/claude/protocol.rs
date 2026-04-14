@@ -61,6 +61,12 @@ impl ProtocolPeer {
                     match line_result {
                         Ok(0) => break, // EOF
                         Ok(_) => {
+                            // E33-07: `trim()` strips both leading and trailing
+                            // whitespace (including the `\n` terminator). This
+                            // is acceptable here because the Claude CLI emits
+                            // one JSON object per line, and any leading/
+                            // trailing whitespace is never semantically
+                            // significant inside the line framing.
                             let line = buffer.trim();
                             if line.is_empty() {
                                 continue;
