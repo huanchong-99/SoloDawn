@@ -537,7 +537,11 @@ export function AgentSettingsNew() {
         setProfilesSuccess(true);
         setTimeout(() => setProfilesSuccess(false), 3000);
 
-        reloadSystem();
+        try {
+          reloadSystem();
+        } catch (reloadError: unknown) {
+          console.error('Failed to reload system after deletion:', reloadError);
+        }
       } catch (delSaveError: unknown) {
         console.error('Failed to save deletion to backend:', delSaveError);
         setSaveError(t('settings.agents.errors.deleteFailed'));

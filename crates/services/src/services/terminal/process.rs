@@ -241,6 +241,14 @@ struct TrackedProcess {
     logger_task: Option<JoinHandle<()>>,
     /// Shutdown signal for graceful terminal log task stop
     logger_shutdown_tx: Option<oneshot::Sender<()>>,
+    /// E26-05: EOF flag set by the background PTY reader task once `read()`
+    /// returns `Ok(0)`. Consulted by `is_running` / `list_running` so that
+    /// callers observe a terminal as "not running" the moment the PTY closes,
+    /// even if `child.try_wait()` has not yet reported an exit status (which
+    /// can lag EOF on some platforms). Note: `Ok(0)` can be transient on a
+    /// few platforms (see reader-task comment), so this flag is treated as a
+    /// hint that augments — rather than replaces — `try_wait()`.
+    pty_eof: Arc<AtomicBool>,
 }
 
 impl Drop for TrackedProcess {
@@ -510,6 +518,7 @@ impl ProcessManager {
         terminal_id: &str,
         mut reader: PtyReader,
         output_fanout: Arc<OutputFanout>,
+        pty_eof: Arc<AtomicBool>,
     ) -> JoinHandle<()> {
         let terminal_id = terminal_id.to_string();
         tokio::task::spawn_blocking(move || {
@@ -530,9 +539,15 @@ impl ProcessManager {
                         // the PTY is closed. Downstream cleanup code must therefore not
                         // rely on this break as proof the PTY is gone; it should verify
                         // via try_wait() / process_id() on the child.
+                        //
+                        // We additionally publish EOF via the shared `pty_eof`
+                        // AtomicBool so `is_running` / `list_running` can treat
+                        // this terminal as closed immediately, without waiting
+                        // for `try_wait()` to catch up.
                         if let Some(tail_text) = decoder.flush_lossy_tail() {
                             let _ = output_fanout.publish(tail_text, 0);
                         }
+                        pty_eof.store(true, Ordering::Release);
                         tracing::debug!(
                             terminal_id = %terminal_id,
                             "Background PTY reader reached EOF"
@@ -547,6 +562,10 @@ impl ProcessManager {
                         }
                     }
                     Err(e) => {
+                        // Treat hard read errors as terminal closure as well,
+                        // so callers don't see a "running" process that can
+                        // no longer produce output.
+                        pty_eof.store(true, Ordering::Release);
                         tracing::warn!(
                             terminal_id = %terminal_id,
                             error = %e,

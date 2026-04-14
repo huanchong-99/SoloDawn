@@ -91,6 +91,7 @@ export function Board() {
 
   const handleRealtimeWorkflowSignal = useCallback(() => {
     if (!selectedWorkflowId) return;
+    if (!validProjectId) return;
 
     if (invalidationTimerRef.current) {
       clearTimeout(invalidationTimerRef.current);

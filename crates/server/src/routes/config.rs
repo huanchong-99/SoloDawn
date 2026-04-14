@@ -150,8 +150,19 @@ async fn get_user_system_info(
 // or the in-memory config handle.
 async fn update_config(
     State(deployment): State<DeploymentImpl>,
+    headers: HeaderMap,
+    ctx: Option<Extension<RequestContext>>,
     Json(new_config): Json<Config>,
 ) -> Result<ResponseJson<ApiResponse<Config>>, ApiError> {
+    // Defense-in-depth: opt-in admin gate. When SOLODAWN_ADMIN_TOKEN is unset,
+    // this is a no-op. When set, require a matching X-Admin-Token header.
+    let ctx = ctx
+        .map(|Extension(c)| c)
+        .unwrap_or(RequestContext { authenticated: false });
+    if check_admin(&ctx, &headers).is_err() {
+        return Err(ApiError::Forbidden("admin token required".to_string()));
+    }
+
     let config_path = match config_path() {
         Ok(path) => path,
         Err(e) => {
