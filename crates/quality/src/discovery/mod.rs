@@ -129,19 +129,26 @@ pub fn resolve_node_exe(name: &str) -> String {
 
 #[cfg(windows)]
 fn is_explicit_command_path(name: &str) -> bool {
-    // R5 Fix 6 note: primary-brain v1 used `Path::new(name).parent().is_some()`
-    // which WRONGLY returns true for bare names like "npm" because Rust's
-    // `Path::parent()` returns `Some("")` for any non-root path. That short-
-    // circuited the PATH lookup and made the resolver return the bare name
-    // — defeating the whole point of the Windows-aware resolver.
+    // R5 Fix 6 v3: "explicit" means the caller gave us a path we should
+    // hand to `CreateProcessW` verbatim. That is:
+    //   1. An absolute path (C:\..., \\?\...), OR
+    //   2. Contains a path separator (relative with dirs, e.g. `./local/tool`).
     //
-    // Explicit paths are detected by:
-    //   1. Absolute path (C:\..., \\?\..., etc.), OR
-    //   2. Contains a path separator (implies user gave us a relative path), OR
-    //   3. Has a file extension the OS can execute directly.
+    // v2 also short-circuited on "has_extension", but that was too eager:
+    // bare names like `tool.exe` (no separator, just an extension) would
+    // skip PATH lookup and return verbatim even when `tool.exe` only exists
+    // in a PATH dir, not in cwd. CreateProcessW doesn't do PATH lookup on
+    // bare names, so that spawn would fail. By removing the extension check,
+    // bare `tool.exe` now flows through the PATH-scan path: the resolver
+    // tries `tool.exe.cmd`, `tool.exe.exe`, then `tool.exe` in each PATH
+    // directory and returns the first hit — correctly resolving the shim.
+    //
+    // Primary-brain v1 also used `Path::new(name).parent().is_some()` which
+    // returns `Some("")` for every non-root path including "npm" — wrongly
+    // classifying bare names as explicit and short-circuiting PATH lookup.
+    // This v3 form keeps only the two genuine "explicit path" signals.
     let has_separator = name.contains('/') || name.contains('\\');
-    let has_extension = Path::new(name).extension().is_some();
-    Path::new(name).is_absolute() || has_separator || has_extension
+    Path::new(name).is_absolute() || has_separator
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1271,15 +1278,40 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn resolve_node_exe_passes_through_explicit_paths() {
-        // Caller-provided explicit paths must NOT be rewritten.
+        // R5 Fix 6 v3: "explicit" = absolute path OR contains a separator.
+        // Primary-brain v2 review caught the v2 bug where a bare extension-
+        // bearing name like `tool.exe` short-circuited the PATH scan even
+        // when `tool.exe` was only discoverable via PATH. Now only absolute
+        // paths and separator-bearing relative paths are passed verbatim;
+        // a bare `tool.exe` flows through the PATH scan like any other
+        // name the helper hasn't seen before.
         assert_eq!(
             resolve_node_exe("C:\\Program Files\\nodejs\\npm.cmd"),
             "C:\\Program Files\\nodejs\\npm.cmd".to_string()
         );
-        assert_eq!(resolve_node_exe("tool.exe"), "tool.exe".to_string());
         assert_eq!(
             resolve_node_exe(".\\local\\tool"),
             ".\\local\\tool".to_string()
+        );
+        assert_eq!(
+            resolve_node_exe("/usr/local/bin/npm"),
+            "/usr/local/bin/npm".to_string()
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resolve_node_exe_bare_extension_goes_through_path_scan() {
+        // v3 regression guard: a bare extension-bearing name must NOT
+        // short-circuit. The resolver should run its PATH scan; for an
+        // arbitrary unlikely-in-PATH name like this, the scan won't hit
+        // any candidate, so the function returns the fallback literal
+        // `{name}.cmd` — still distinct from the input verbatim.
+        let resolved = resolve_node_exe("extremely-unlikely-shim-name-for-test");
+        assert_eq!(
+            resolved,
+            "extremely-unlikely-shim-name-for-test.cmd".to_string(),
+            "bare name with no PATH hit must fall back to `.cmd` suffix"
         );
     }
 
