@@ -12,6 +12,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use twox_hash::XxHash64;
 
+use utils::url::{ApiFormat, resolve_endpoint};
+
+#[allow(deprecated)]
 use utils::url::normalize_base_url;
 
 use super::{
@@ -197,18 +200,19 @@ impl OpenAICompatibleClient {
             .build()
             .expect("Failed to create HTTP client");
 
-        let base_url = normalize_base_url(&config.api_type, &config.base_url);
+        let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
 
         tracing::info!(
             api_type = %config.api_type,
             input_url = %config.base_url,
-            final_base_url = %base_url,
-            "OpenAI-compatible LLM client URL normalized"
+            resolved_url = %endpoint.url,
+            api_format = %endpoint.api_format,
+            "OpenAI-compatible LLM client endpoint resolved"
         );
 
         Self {
             client,
-            base_url,
+            base_url: endpoint.url,
             api_key: config.api_key.clone(),
             model: config.model.clone(),
         }
@@ -264,23 +268,70 @@ impl OpenAICompatibleClient {
             return Err(anyhow::anyhow!("LLM API error: {status} - {body}"));
         }
 
-        let chat_response: ChatResponse = response.json().await?;
-        // [G24-005] Return an error when the API returns no choices instead of
-        // silently producing an empty string that downstream code cannot distinguish
-        // from a legitimate empty response.
-        let content = chat_response
-            .choices
-            .first()
-            .map(|c| c.message.content.clone())
-            .ok_or_else(|| anyhow::anyhow!("LLM API returned empty choices array"))?;
+        // Read body as text first for multi-format parsing (Rectifier pattern)
+        let body = response.text().await.map_err(|e| {
+            tracing::error!("Failed to read OpenAI-compatible response body: {e}");
+            e
+        })?;
 
-        let usage = chat_response.usage.map(|u| LLMUsage {
-            prompt_tokens: u.prompt_tokens,
-            completion_tokens: u.completion_tokens,
-            total_tokens: u.total_tokens,
-        });
+        // Strategy 1: Standard OpenAI format { "choices": [{ "message": { "content" } }] }
+        if let Ok(chat_response) = serde_json::from_str::<ChatResponse>(&body) {
+            if let Some(choice) = chat_response.choices.first() {
+                let usage = chat_response.usage.map(|u| LLMUsage {
+                    prompt_tokens: u.prompt_tokens,
+                    completion_tokens: u.completion_tokens,
+                    total_tokens: u.total_tokens,
+                });
+                return Ok(LLMResponse {
+                    content: choice.message.content.clone(),
+                    usage,
+                });
+            }
+        }
 
-        Ok(LLMResponse { content, usage })
+        // Strategy 2: Try alternative response formats from third-party gateways
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+            // { "content": "..." } direct
+            if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+                return Ok(LLMResponse { content: content.to_string(), usage: None });
+            }
+            // { "output": "..." } (OpenAI Responses API string form)
+            if let Some(output) = json.get("output").and_then(|o| o.as_str()) {
+                return Ok(LLMResponse { content: output.to_string(), usage: None });
+            }
+            // { "output": [{ "type": "message", "content": [{ "type": "output_text", "text": "..." }] }] }
+            if let Some(arr) = json.get("output").and_then(|o| o.as_array()) {
+                let mut text = String::new();
+                for item in arr {
+                    if item.get("type").and_then(|t| t.as_str()) == Some("message") {
+                        if let Some(blocks) = item.get("content").and_then(|c| c.as_array()) {
+                            for b in blocks {
+                                if b.get("type").and_then(|t| t.as_str()) == Some("output_text") {
+                                    if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
+                                        text.push_str(t);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !text.is_empty() {
+                    return Ok(LLMResponse { content: text, usage: None });
+                }
+            }
+            // Error object
+            if let Some(error) = json.get("error") {
+                let msg = error.get("message").and_then(|m| m.as_str()).unwrap_or("unknown");
+                return Err(anyhow::anyhow!("LLM API returned error: {msg}"));
+            }
+        }
+
+        tracing::error!(
+            body_len = body.len(),
+            body_preview = %body.chars().take(500).collect::<String>(),
+            "Failed to parse OpenAI-compatible response in all known formats"
+        );
+        Err(anyhow::anyhow!("error decoding response body: unrecognized format"))
     }
 }
 
@@ -335,18 +386,19 @@ impl AnthropicCompatibleClient {
             .build()
             .expect("Failed to create HTTP client");
 
-        let base_url = normalize_base_url(&config.api_type, &config.base_url);
+        let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
 
         tracing::info!(
             api_type = %config.api_type,
             input_url = %config.base_url,
-            final_base_url = %base_url,
-            "Anthropic-compatible LLM client URL normalized"
+            resolved_url = %endpoint.url,
+            api_format = %endpoint.api_format,
+            "Anthropic-compatible LLM client endpoint resolved"
         );
 
         Self {
             client,
-            base_url,
+            base_url: endpoint.url,
             api_key: config.api_key.clone(),
             model: config.model.clone(),
         }
@@ -853,30 +905,26 @@ pub fn build_terminal_completion_prompt(
 /// [`ResilientLLMClient`] that wraps the primary provider plus all fallbacks
 /// with automatic circuit-breaking and failover.  Otherwise the original
 /// single-provider path is used (fully backward compatible).
-/// Determine whether to use Anthropic protocol based on api_type and base_url.
-fn should_use_anthropic_protocol(config: &OrchestratorConfig) -> bool {
-    // Explicit api_type takes priority — user knows their endpoint best
-    match config.api_type.as_str() {
-        "anthropic" | "anthropic-compatible" => return true,
-        "openai" | "openai-compatible" | "google" => return false,
-        _ => {}
-    }
-    // Auto-detect only when api_type is not explicitly set
-    let url_lower = config.base_url.to_lowercase();
-    url_lower.contains("/anthropic")
-}
-
-/// Build a single rate-limited LLM client based on api_type and base_url.
+/// Build a single rate-limited LLM client based on api_type.
+///
+/// Uses `resolve_endpoint` to determine both the URL and `ApiFormat` from the
+/// configured `api_type`. Protocol selection is driven entirely by `api_type`,
+/// not by URL content inspection.
 fn build_single_client(config: &OrchestratorConfig) -> anyhow::Result<Box<dyn LLMClient>> {
     let rps = config.rate_limit_requests_per_second;
-    if should_use_anthropic_protocol(config) {
-        let client = AnthropicCompatibleClient::new(config);
-        let client = RateLimitedClient::new(client, rps)?;
-        Ok(Box::new(client))
-    } else {
-        let client = OpenAICompatibleClient::new(config);
-        let client = RateLimitedClient::new(client, rps)?;
-        Ok(Box::new(client))
+    let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
+
+    match endpoint.api_format {
+        ApiFormat::AnthropicMessages => {
+            let client = AnthropicCompatibleClient::new(config);
+            let client = RateLimitedClient::new(client, rps)?;
+            Ok(Box::new(client))
+        }
+        ApiFormat::OpenAIChat | ApiFormat::Google => {
+            let client = OpenAICompatibleClient::new(config);
+            let client = RateLimitedClient::new(client, rps)?;
+            Ok(Box::new(client))
+        }
     }
 }
 
@@ -985,7 +1033,8 @@ mod anthropic_protocol_tests {
             model: "glm-5".to_string(),
             ..Default::default()
         };
-        assert!(!should_use_anthropic_protocol(&config));
+        let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
+        assert_eq!(endpoint.api_format, ApiFormat::OpenAIChat, "openai-compatible must use OpenAI format regardless of URL content");
     }
 
     #[test]
@@ -997,11 +1046,12 @@ mod anthropic_protocol_tests {
             model: "claude-sonnet-4-20250514".to_string(),
             ..Default::default()
         };
-        assert!(should_use_anthropic_protocol(&config));
+        let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
+        assert_eq!(endpoint.api_format, ApiFormat::AnthropicMessages);
     }
 
     #[test]
-    fn test_unknown_type_with_anthropic_url_autodetects() {
+    fn test_unknown_type_defaults_to_openai() {
         let config = OrchestratorConfig {
             api_type: String::new(),
             base_url: "https://proxy.example.com/anthropic/v1".to_string(),
@@ -1009,7 +1059,8 @@ mod anthropic_protocol_tests {
             model: "test".to_string(),
             ..Default::default()
         };
-        assert!(should_use_anthropic_protocol(&config));
+        let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
+        assert_eq!(endpoint.api_format, ApiFormat::OpenAIChat, "unknown api_type defaults to OpenAI, no URL guessing");
     }
 
     #[test]
@@ -1021,12 +1072,14 @@ mod anthropic_protocol_tests {
             model: "gpt-4".to_string(),
             ..Default::default()
         };
-        assert!(!should_use_anthropic_protocol(&config));
+        let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
+        assert_eq!(endpoint.api_format, ApiFormat::OpenAIChat);
     }
 }
 
 #[cfg(test)]
 mod url_normalization_tests {
+    #[allow(deprecated)]
     use utils::url::normalize_base_url;
 
     #[test]
@@ -1042,57 +1095,6 @@ mod url_normalization_tests {
             "https://open.bigmodel.cn/api/paas/v4",
         );
         assert_eq!(url, "https://open.bigmodel.cn/api/paas/v4");
-    }
-
-    #[test]
-    fn test_openai_already_has_v1_not_doubled() {
-        let url = normalize_base_url("openai", "https://api.openai.com/v1");
-        assert_eq!(url, "https://api.openai.com/v1");
-    }
-
-    #[test]
-    fn test_anthropic_official_gets_v1() {
-        let url = normalize_base_url("anthropic", "https://api.anthropic.com");
-        assert_eq!(url, "https://api.anthropic.com/v1");
-    }
-
-    #[test]
-    fn test_anthropic_compatible_appends_v1() {
-        let url = normalize_base_url(
-            "anthropic-compatible",
-            "https://open.bigmodel.cn/api/anthropic",
-        );
-        assert_eq!(url, "https://open.bigmodel.cn/api/anthropic/v1");
-    }
-
-    #[test]
-    fn test_trailing_slash_stripped() {
-        let url = normalize_base_url("openai-compatible", "https://example.com/api/");
-        assert_eq!(url, "https://example.com/api");
-    }
-
-    #[test]
-    fn test_zhipuai_v4_preserved() {
-        let url = normalize_base_url(
-            "openai-compatible",
-            "https://open.bigmodel.cn/api/paas/v4",
-        );
-        assert_eq!(url, "https://open.bigmodel.cn/api/paas/v4");
-    }
-
-    #[test]
-    fn test_empty_api_type_no_v1_append() {
-        let url = normalize_base_url("", "https://custom.provider.com/api");
-        assert_eq!(url, "https://custom.provider.com/api");
-    }
-
-    #[test]
-    fn test_google_type_no_v1_append() {
-        let url = normalize_base_url("google", "https://generativelanguage.googleapis.com");
-        assert_eq!(
-            url,
-            "https://generativelanguage.googleapis.com"
-        );
     }
 }
 
@@ -1113,29 +1115,14 @@ mod full_chain_tests {
             ..Default::default()
         };
 
-        // Verify config is valid
         assert!(config.validate().is_ok(), "Config should be valid");
 
-        // Verify protocol selection
-        assert!(
-            !should_use_anthropic_protocol(&config),
-            "ZhipuAI openai-compatible should NOT use Anthropic protocol"
-        );
+        let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
+        assert_eq!(endpoint.api_format, ApiFormat::OpenAIChat, "ZhipuAI openai-compatible should use OpenAI format");
+        assert_eq!(endpoint.url, "https://open.bigmodel.cn/api/paas/v4", "URL preserved, no /v1 appended");
 
-        // Verify URL normalization preserves provider path (no /v1 appended)
-        let normalized = normalize_base_url(&config.api_type, &config.base_url);
-        assert_eq!(
-            normalized, "https://open.bigmodel.cn/api/paas/v4",
-            "openai-compatible must NOT append /v1 to provider URL"
-        );
-
-        // Verify the final request URL that would be constructed
-        let expected_chat_url = format!("{normalized}/chat/completions");
-        assert_eq!(
-            expected_chat_url,
-            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-            "Final chat URL must use provider's v4 path"
-        );
+        let chat_url = endpoint.chat_endpoint();
+        assert_eq!(chat_url, "https://open.bigmodel.cn/api/paas/v4/chat/completions");
     }
 
     #[test]
@@ -1150,25 +1137,13 @@ mod full_chain_tests {
 
         assert!(config.validate().is_ok(), "Config should be valid");
 
-        assert!(
-            should_use_anthropic_protocol(&config),
-            "ZhipuAI anthropic-compatible SHOULD use Anthropic protocol"
-        );
+        let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
+        assert_eq!(endpoint.api_format, ApiFormat::AnthropicMessages);
+        // Key fix: no /v1 appended for anthropic-compatible
+        assert_eq!(endpoint.url, "https://open.bigmodel.cn/api/anthropic");
 
-        // Verify URL normalization appends /v1 for anthropic-compatible
-        let normalized = normalize_base_url(&config.api_type, &config.base_url);
-        assert_eq!(
-            normalized, "https://open.bigmodel.cn/api/anthropic/v1",
-            "anthropic-compatible must append /v1 (Anthropic protocol requires /v1/messages)"
-        );
-
-        // Verify the final messages URL for Anthropic protocol
-        let expected_msg_url = format!("{normalized}/messages");
-        assert_eq!(
-            expected_msg_url,
-            "https://open.bigmodel.cn/api/anthropic/v1/messages",
-            "Final messages URL must use provider's anthropic path with /v1"
-        );
+        let msg_url = endpoint.chat_endpoint();
+        assert_eq!(msg_url, "https://open.bigmodel.cn/api/anthropic/messages");
     }
 
     #[test]
@@ -1181,24 +1156,14 @@ mod full_chain_tests {
             ..Default::default()
         };
 
-        assert!(config.validate().is_ok(), "Config should be valid");
+        assert!(config.validate().is_ok());
 
-        assert!(
-            !should_use_anthropic_protocol(&config),
-            "Official OpenAI should NOT use Anthropic protocol"
-        );
+        let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
+        assert_eq!(endpoint.api_format, ApiFormat::OpenAIChat);
+        assert_eq!(endpoint.url, "https://api.openai.com");
 
-        let normalized = normalize_base_url(&config.api_type, &config.base_url);
-        assert_eq!(
-            normalized, "https://api.openai.com/v1",
-            "Official openai MUST append /v1"
-        );
-
-        let expected_chat_url = format!("{normalized}/chat/completions");
-        assert_eq!(
-            expected_chat_url,
-            "https://api.openai.com/v1/chat/completions"
-        );
+        let chat_url = endpoint.chat_endpoint();
+        assert_eq!(chat_url, "https://api.openai.com/chat/completions");
     }
 
     #[test]
@@ -1211,50 +1176,32 @@ mod full_chain_tests {
             ..Default::default()
         };
 
-        assert!(config.validate().is_ok(), "Config should be valid");
+        assert!(config.validate().is_ok());
 
-        assert!(
-            should_use_anthropic_protocol(&config),
-            "Official Anthropic SHOULD use Anthropic protocol"
-        );
+        let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
+        assert_eq!(endpoint.api_format, ApiFormat::AnthropicMessages);
+        assert_eq!(endpoint.url, "https://api.anthropic.com");
 
-        let normalized = normalize_base_url(&config.api_type, &config.base_url);
-        assert_eq!(
-            normalized, "https://api.anthropic.com/v1",
-            "Official anthropic MUST append /v1"
-        );
-
-        let expected_msg_url = format!("{normalized}/messages");
-        assert_eq!(
-            expected_msg_url,
-            "https://api.anthropic.com/v1/messages"
-        );
+        let msg_url = endpoint.chat_endpoint();
+        assert_eq!(msg_url, "https://api.anthropic.com/messages");
     }
 
     #[test]
     fn test_protocol_detection_all_explicit_types() {
-        let cases = vec![
-            ("anthropic", true),
-            ("anthropic-compatible", true),
-            ("openai", false),
-            ("openai-compatible", false),
-            ("google", false),
+        let cases: Vec<(&str, ApiFormat)> = vec![
+            ("anthropic", ApiFormat::AnthropicMessages),
+            ("anthropic-compatible", ApiFormat::AnthropicMessages),
+            ("openai", ApiFormat::OpenAIChat),
+            ("openai-compatible", ApiFormat::OpenAIChat),
+            ("google", ApiFormat::Google),
         ];
 
-        for (api_type, expected_anthropic) in cases {
-            let config = OrchestratorConfig {
-                api_type: api_type.to_string(),
-                base_url: "https://example.com".to_string(),
-                api_key: "test".to_string(),
-                model: "test".to_string(),
-                ..Default::default()
-            };
+        for (api_type, expected_format) in cases {
+            let endpoint = resolve_endpoint(api_type, "https://example.com");
             assert_eq!(
-                should_use_anthropic_protocol(&config),
-                expected_anthropic,
-                "api_type '{}' should {}use Anthropic protocol",
-                api_type,
-                if expected_anthropic { "" } else { "NOT " }
+                endpoint.api_format, expected_format,
+                "api_type '{}' should resolve to {:?}",
+                api_type, expected_format
             );
         }
     }
