@@ -4000,7 +4000,10 @@ mod recovery_response_tests {
             .await
             .expect("should query workflow after recovery")
             .expect("workflow should exist");
-        assert_eq!(workflow.status, "failed");
+        // R7-PB1: restart recovery now marks `paused` (resumable), never
+        // `failed`. The recovery helper's user-facing "interrupted" count
+        // is unchanged — only the underlying status differs.
+        assert_eq!(workflow.status, "paused");
     }
 }
 
