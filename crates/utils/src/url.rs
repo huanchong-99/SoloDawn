@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Identifies which wire protocol / response format to expect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -6,6 +7,16 @@ pub enum ApiFormat {
     OpenAIChat,
     AnthropicMessages,
     Google,
+}
+
+impl fmt::Display for ApiFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ApiFormat::OpenAIChat => write!(f, "OpenAIChat"),
+            ApiFormat::AnthropicMessages => write!(f, "AnthropicMessages"),
+            ApiFormat::Google => write!(f, "Google"),
+        }
+    }
 }
 
 /// The result of resolving a user-provided URL + api_type into a concrete
@@ -16,6 +27,22 @@ pub struct ResolvedEndpoint {
     pub url: String,
     /// Which wire protocol to speak against this URL.
     pub api_format: ApiFormat,
+}
+
+impl ResolvedEndpoint {
+    /// Returns the full chat endpoint URL by appending the protocol-specific
+    /// path to the base URL.
+    ///
+    /// - `OpenAIChat` → `{url}/chat/completions`
+    /// - `AnthropicMessages` → `{url}/messages`
+    /// - `Google` → `{url}` (Google uses query parameters, not path suffixes)
+    pub fn chat_endpoint(&self) -> String {
+        match self.api_format {
+            ApiFormat::OpenAIChat => format!("{}/chat/completions", self.url),
+            ApiFormat::AnthropicMessages => format!("{}/messages", self.url),
+            ApiFormat::Google => self.url.clone(),
+        }
+    }
 }
 
 /// Resolve a raw user-provided base URL and an api_type string into a
