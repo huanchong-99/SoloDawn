@@ -5,6 +5,24 @@
 --              but projects.id is BLOB (UUID). This causes FOREIGN KEY
 --              constraint failures. This migration fixes the type mismatch.
 -- ============================================================================
+--
+-- TODO(W2-38-04): Partial rollback risk. This migration performs a
+-- table-rebuild pattern (CREATE workflow_new / INSERT SELECT / DROP / RENAME)
+-- and then re-creates indexes. The rebuild itself is wrapped in an implicit
+-- sqlx transaction, but:
+--   1. PRAGMA foreign_keys = OFF is issued at the top; if migration runs
+--      inside a transaction the PRAGMA is a no-op in some SQLite versions.
+--      A partial failure after DROP TABLE workflow but before RENAME would
+--      leave the DB without a `workflow` table at all.
+--   2. There is no sibling `.down.sql` for this migration; a rollback
+--      requires manual DDL. File is already applied in production — do NOT
+--      edit. Capture the recovery procedure in runbooks and add a
+--      `.down.sql` counterpart for the next equivalent migration.
+--   3. The INSERT SELECT assumes every existing `workflow.project_id` TEXT
+--      value is parseable as a 16-byte BLOB UUID; malformed rows would
+--      silently coerce or be dropped by SQLite's weak typing. If you ever
+--      repeat this pattern, pre-validate with a SELECT WHERE length(...) <> 32
+--      before the rebuild.
 
 PRAGMA foreign_keys = OFF;
 

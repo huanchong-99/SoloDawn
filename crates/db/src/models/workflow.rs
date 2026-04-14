@@ -1065,6 +1065,15 @@ impl WorkflowTask {
 
 impl SlashCommandPreset {
     /// Get all slash command presets
+    // TODO(W2-15-10): Unbounded + unindexed sort. The ORDER BY uses
+    // `is_system DESC, command ASC`, but `slash_command_preset` has no
+    // composite index on those columns, so SQLite will filesort on every
+    // call. Today the table has ~dozens of rows so it's cheap, but when
+    // user-defined presets land this becomes an O(N log N) sort per request
+    // on a hot path (command palette). Add
+    // `CREATE INDEX idx_slash_command_preset_system_cmd
+    //    ON slash_command_preset(is_system DESC, command ASC)`
+    // and cache the list in-memory with a short TTL.
     pub async fn find_all(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, SlashCommandPreset>(
             r"

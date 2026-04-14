@@ -1,1 +1,14 @@
+-- TODO(W2-38-09): Forward-only schema change. `ALTER TABLE ... DROP COLUMN`
+-- permanently removes `task_attempts.worktree_deleted` with no snapshot of
+-- the boolean flag values for already-existing rows. If a subsequent bug
+-- needs to distinguish "never had a worktree" from "worktree was reaped",
+-- that information is gone. There is no `.down.sql` sibling. This
+-- migration is already applied — do NOT modify. For future DROP COLUMN
+-- migrations:
+--   1. Pair with a `.down.sql` that re-adds the column (even if values
+--      cannot be reconstructed, having the column restored keeps the
+--      schema round-trippable for tests).
+--   2. If the column carries semantic state, emit a log line with the
+--      distribution of values (COUNT(*) GROUP BY col) from the migration
+--      runner before the DROP so post-mortems have a record.
 ALTER TABLE task_attempts DROP COLUMN worktree_deleted;

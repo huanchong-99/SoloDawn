@@ -55,8 +55,13 @@ export function useDevserverPreview(
     )[0];
   }, [executionProcesses]);
 
-  // Reset state whenever the attemptId changes so stale url/port/status
-  // from a previous attempt do not leak into the new attempt.
+  // M46: Reset-on-attempt-change and derive-from-processes are consolidated
+  // into a single effect so the two are not racing across renders. Previously
+  // the reset effect ran first and the derive effect short-circuited on the
+  // stale ref, requiring a second render for the derived state to populate.
+  // Now we handle both in one pass: on attemptId change we synchronously
+  // reset, sync the ref, and return (the next render with the up-to-date ref
+  // will derive state).
   useEffect(() => {
     if (prevAttemptIdRef.current !== attemptId) {
       prevAttemptIdRef.current = attemptId;
@@ -66,13 +71,6 @@ export function useDevserverPreview(
         url: undefined,
         port: undefined,
       });
-    }
-  }, [attemptId]);
-
-  useEffect(() => {
-    if (prevAttemptIdRef.current !== attemptId) {
-      // The reset effect above will handle this render; skip until the
-      // attemptId ref is synced.
       return;
     }
 

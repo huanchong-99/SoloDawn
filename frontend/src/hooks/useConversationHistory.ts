@@ -471,6 +471,11 @@ export const useConversationHistory = ({
   const executionProcesses = useRef<ExecutionProcess[]>(executionProcessesRaw);
   const displayedExecutionProcesses = useRef<ExecutionProcessStateStore>({});
   const loadedInitialEntries = useRef(false);
+  // M51: monotonic generation id, incremented on every attempt-change reset.
+  // Used to coordinate the async initial load with the sibling "active
+  // processes" effect so a late-resolving load cannot clobber state belonging
+  // to a newer attempt generation.
+  const resetGenerationRef = useRef(0);
   const streamingProcessIdsRef = useRef<Set<string>>(new Set());
   const activeStreamControllersRef = useRef<Map<string, { close(): void }>>(new Map());
   const onEntriesUpdatedRef = useRef<OnEntriesUpdated | null>(null);
@@ -813,9 +818,21 @@ export const useConversationHistory = ({
   );
 
   // Initial load when attempt changes
+  //
+  // M51: Reset-vs-initial race. The reset (clearing
+  // displayedExecutionProcesses / loadedInitialEntries) and the async initial
+  // load both live in this effect, but the sibling "active processes" effect
+  // below may fire between the synchronous reset and the first
+  // `await loadInitialEntries()` resume. To coordinate we bump a generation
+  // counter on every reset and capture it locally; if the generation changes
+  // mid-flight we treat the in-flight load as stale and bail out. The sibling
+  // effect reads the same ref to skip work until the initial load for the
+  // current generation has committed.
   useEffect(() => {
     displayedExecutionProcesses.current = {};
     loadedInitialEntries.current = false;
+    resetGenerationRef.current += 1;
+    const myGeneration = resetGenerationRef.current;
     streamingProcessIdsRef.current.clear();
     let cancelled = false;
     (async () => {
@@ -828,7 +845,7 @@ export const useConversationHistory = ({
 
       // Initial entries
       const allInitialEntries = await loadInitialEntries();
-      if (cancelled) return;
+      if (cancelled || resetGenerationRef.current !== myGeneration) return;
       mergeIntoDisplayed((state) => {
         Object.assign(state, allInitialEntries);
       });
@@ -838,11 +855,13 @@ export const useConversationHistory = ({
       // Then load the remaining in batches
       while (
         !cancelled &&
+        resetGenerationRef.current === myGeneration &&
         (await loadRemainingEntriesInBatches(REMAINING_BATCH_SIZE))
       ) {
-        if (cancelled) return;
+        if (cancelled || resetGenerationRef.current !== myGeneration) return;
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
+      if (cancelled || resetGenerationRef.current !== myGeneration) return;
       emitEntries(displayedExecutionProcesses.current, 'historic', false);
     })();
     return () => {
@@ -859,6 +878,12 @@ export const useConversationHistory = ({
   useEffect(() => {
     const activeProcesses = getActiveAgentProcesses();
     if (activeProcesses.length === 0) return;
+
+    // M51: Only operate once the initial load for the current reset
+    // generation has committed. Otherwise we could write process entries into
+    // `displayedExecutionProcesses` that the still-in-flight initial load
+    // will subsequently overwrite via `Object.assign`.
+    if (!loadedInitialEntries.current) return;
 
     for (const activeProcess of activeProcesses) {
       if (!displayedExecutionProcesses.current[activeProcess.id]) {

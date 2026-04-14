@@ -1,2 +1,14 @@
 -- Drop the drafts table (follow-up and retry drafts are no longer used)
+--
+-- TODO(W2-38-08): Forward-only schema change. `DROP TABLE drafts` is
+-- irreversible — there is no `.down.sql` sibling and no backup of the
+-- table contents before the drop. Any draft content that a user had not
+-- yet materialised into a workflow/session is silently discarded when this
+-- migration runs. This migration is already applied — do NOT modify. For
+-- future destructive schema changes:
+--   1. Add a `.up.sql` / `.down.sql` pair so CI can exercise rollback.
+--   2. Before DROP, copy the table to `drafts_archive_YYYYMMDD` (or
+--      export to a JSONL file in application space) so operators have a
+--      recovery path for 90 days.
+--   3. Emit a log line with affected row count from the migration runner.
 DROP TABLE IF EXISTS drafts;

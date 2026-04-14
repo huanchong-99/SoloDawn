@@ -27,5 +27,19 @@ rustflags = ["-C", "link-arg=/DEBUG"]
 [env]
 AWS_LC_SYS_STATIC = "0"
 AWS_LC_SYS_NO_PREGENERATED_SRC = "0"
+# TODO(W2-35-02): Forcing SQLX_OFFLINE=true globally in `.cargo/config.toml`
+# means every local `cargo build` uses the committed `crates/db/.sqlx/`
+# query cache. If a developer edits a sqlx macro query but forgets to run
+# `cargo sqlx prepare --workspace`, the build will silently succeed against
+# a stale cache and CI will fail later (or worse, at runtime with a type
+# mismatch). Consider:
+#   - dropping this override and letting developers opt-in via env,
+#   - or adding a pre-commit hook that runs `cargo sqlx prepare --check`.
+# TODO(W2-35-03): The cache lives at `crates/db/.sqlx/` but is used by
+# every workspace crate that imports `db`. There is no check that the cache
+# is up to date with migrations under `crates/db/migrations/` — a new
+# migration without a matching `cargo sqlx prepare` silently uses the old
+# schema. Add a CI job that runs `cargo sqlx prepare --check --workspace`
+# against a fresh DB built from all migrations.
 SQLX_OFFLINE = "true"
 

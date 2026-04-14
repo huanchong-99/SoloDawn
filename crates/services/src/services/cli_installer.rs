@@ -274,10 +274,35 @@ impl CliInstaller {
             }
         });
 
+        // W2-37-08: PowerShell is invoked with `-ExecutionPolicy Bypass`, but
+        // Group Policy (LocalMachine / MachinePolicy scope) can still override
+        // that flag and deny execution. When that happens, PowerShell writes a
+        // distinctive error to stderr (e.g. "cannot be loaded because running
+        // scripts is disabled on this system" or "UnauthorizedAccess") and
+        // exits non-zero. We scan stderr lines for those markers and surface a
+        // dedicated error so the operator knows to adjust their execution
+        // policy rather than chasing the generic non-zero exit code.
         let tx_err = tx.clone();
         let stderr_task = tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = reader.next_line().await {
+                #[cfg(target_os = "windows")]
+                {
+                    let lower = line.to_lowercase();
+                    if lower.contains("running scripts is disabled")
+                        || lower.contains("unauthorizedaccess")
+                        || (lower.contains("executionpolicy")
+                            && lower.contains("cannot be loaded"))
+                    {
+                        let _ = tx_err
+                            .send(InstallOutputLine::Error(format!(
+                                "PowerShell execution policy denied script execution: {line}. \
+                                 Adjust policy (e.g. `Set-ExecutionPolicy -Scope CurrentUser \
+                                 RemoteSigned`) or run the installer with sufficient privileges."
+                            )))
+                            .await;
+                    }
+                }
                 if tx_err.send(InstallOutputLine::Stderr(line)).await.is_err() {
                     break;
                 }

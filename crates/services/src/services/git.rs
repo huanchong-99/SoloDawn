@@ -659,11 +659,23 @@ impl GitService {
         };
 
         // Determine old/new paths based on change
+        let old_path_fallback = |old: Option<String>, path: &str| -> String {
+            old.unwrap_or_else(|| {
+                tracing::debug!(
+                    path = %path,
+                    "status entry missing old_path; falling back to new path"
+                );
+                path.to_string()
+            })
+        };
         let (old_path_opt, new_path_opt): (Option<String>, Option<String>) = match e.change {
             ChangeType::Added => (None, Some(e.path.clone())),
-            ChangeType::Deleted => (Some(e.old_path.unwrap_or(e.path.clone())), None),
+            ChangeType::Deleted => (
+                Some(old_path_fallback(e.old_path.clone(), &e.path)),
+                None,
+            ),
             ChangeType::Modified | ChangeType::TypeChanged | ChangeType::Unmerged => (
-                Some(e.old_path.unwrap_or(e.path.clone())),
+                Some(old_path_fallback(e.old_path.clone(), &e.path)),
                 Some(e.path.clone()),
             ),
             ChangeType::Renamed | ChangeType::Copied | ChangeType::Unknown(_) => {
@@ -1503,7 +1515,13 @@ impl GitService {
         // If a rebase is already in progress, refuse to proceed instead of
         // aborting (which might destroy user changes mid-rebase).
         let git = GitCli::new();
-        if git.is_rebase_in_progress(worktree_path).unwrap_or(false) {
+        if git
+            .is_rebase_in_progress(worktree_path)
+            .inspect_err(|e| {
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_rebase_in_progress CLI check failed; assuming false")
+            })
+            .unwrap_or(false)
+        {
             return Err(GitServiceError::RebaseInProgress);
         }
 
@@ -1702,7 +1720,13 @@ impl GitService {
 
     pub fn abort_conflicts(&self, worktree_path: &Path) -> Result<(), GitServiceError> {
         let git = GitCli::new();
-        if git.is_rebase_in_progress(worktree_path).unwrap_or(false) {
+        if git
+            .is_rebase_in_progress(worktree_path)
+            .inspect_err(|e| {
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_rebase_in_progress CLI check failed; assuming false")
+            })
+            .unwrap_or(false)
+        {
             // If there are no conflicted files, prefer `git rebase --quit` to clean up metadata
             let has_conflicts = !self
                 .get_conflicted_files(worktree_path)
@@ -1715,20 +1739,35 @@ impl GitService {
                 GitServiceError::InvalidRepository(format!("git rebase --quit failed: {e}"))
             });
         }
-        if git.is_merge_in_progress(worktree_path).unwrap_or(false) {
+        if git
+            .is_merge_in_progress(worktree_path)
+            .inspect_err(|e| {
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_merge_in_progress CLI check failed; assuming false")
+            })
+            .unwrap_or(false)
+        {
             return git.abort_merge(worktree_path).map_err(|e| {
                 GitServiceError::InvalidRepository(format!("git merge --abort failed: {e}"))
             });
         }
         if git
             .is_cherry_pick_in_progress(worktree_path)
+            .inspect_err(|e| {
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_cherry_pick_in_progress CLI check failed; assuming false")
+            })
             .unwrap_or(false)
         {
             return git.abort_cherry_pick(worktree_path).map_err(|e| {
                 GitServiceError::InvalidRepository(format!("git cherry-pick --abort failed: {e}"))
             });
         }
-        if git.is_revert_in_progress(worktree_path).unwrap_or(false) {
+        if git
+            .is_revert_in_progress(worktree_path)
+            .inspect_err(|e| {
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_revert_in_progress CLI check failed; assuming false")
+            })
+            .unwrap_or(false)
+        {
             return git.abort_revert(worktree_path).map_err(|e| {
                 GitServiceError::InvalidRepository(format!("git revert --abort failed: {e}"))
             });
