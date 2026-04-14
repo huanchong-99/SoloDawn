@@ -341,6 +341,11 @@ async fn run_command(cwd: &Path, program: &str, args: &[&str]) -> anyhow::Result
     let output = tokio::process::Command::new(program)
         .args(args)
         .current_dir(cwd)
+        // R6 port-leak fix: strip SoloDawn dev ports so cargo/clippy
+        // subprocesses don't inherit `PORT=23456` from server.exe.
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
         .output()
         .await?;
 

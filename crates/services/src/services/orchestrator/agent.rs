@@ -6232,6 +6232,14 @@ async fn ensure_js_deps_installed_for_gate(wd: &Path) {
         tokio::process::Command::new(&resolved_cmd)
             .args(&args)
             .current_dir(wd)
+            // R6 port-leak fix: SoloDawn's root `.env` historically set
+            // `PORT=23456`, which dotenv-loaded into server.exe and every
+            // child. Strip the dev ports at every gate-adjacent spawn so
+            // `npm install` / `pnpm install` does not inherit the backend
+            // port and trigger collisions in install-time scripts.
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
             .output(),
     )
     .await;

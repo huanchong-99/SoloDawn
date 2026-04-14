@@ -40,6 +40,10 @@ impl QualityProvider for SecurityProvider {
             let output = tokio::process::Command::new("bash")
                 .args([script_path.to_str().unwrap_or("scripts/audit-security.sh")])
                 .current_dir(project_root)
+                // R6 port-leak fix: strip SoloDawn dev ports.
+                .env_remove("PORT")
+                .env_remove("BACKEND_PORT")
+                .env_remove("FRONTEND_PORT")
                 .output()
                 .await;
 

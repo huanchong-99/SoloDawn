@@ -245,6 +245,11 @@ impl QualityProvider for SonarProvider {
         let output = tokio::process::Command::new(scanner_cmd)
             .args(&string_args)
             .current_dir(project_root)
+            // R6 port-leak fix: strip SoloDawn dev ports so the scanner
+            // doesn't inherit `PORT=23456` from server.exe's polluted env.
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
             .output()
             .await;
 
