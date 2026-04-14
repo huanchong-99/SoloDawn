@@ -126,9 +126,15 @@ impl CliInstaller {
 
     /// Resolve the bash install script path on Unix.
     fn resolve_unix_script_path() -> Option<PathBuf> {
-        let mut candidates = vec![PathBuf::from(
+        let mut candidates = Vec::new();
+
+        // FHS-style system install path (Linux). macOS uses a different layout,
+        // so only probe this on Linux.
+        #[cfg(target_os = "linux")]
+        candidates.push(PathBuf::from(
             "/opt/solodawn/install/install-single-cli.sh",
-        )];
+        ));
+
         if let Ok(cwd) = std::env::current_dir() {
             candidates.push(cwd.join("scripts/docker/install/install-single-cli.sh"));
         }

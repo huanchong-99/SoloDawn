@@ -152,7 +152,6 @@ pub fn build_router(
         .merge(scratch::router(&deployment))
         .merge(sessions::router(&deployment))
         .merge(system_settings::router())
-        .merge(setup::router())
         .nest("/images", images::routes())
         .nest("/models", models::router())
         .nest("/cli_types", cli_types::cli_types_routes())
@@ -163,7 +162,6 @@ pub fn build_router(
         .nest("/workflows", provider_health::provider_health_routes())
         .nest("/workflows", quality::quality_workflow_routes())
         .nest("/quality", quality::quality_routes())
-        .nest("/ci", ci_webhook::ci_webhook_routes())
         .nest("/concierge", concierge::concierge_routes())
         .nest("/terminal", terminal_ws::terminal_ws_routes())
         .nest("/terminals", terminals::terminal_routes())
@@ -181,6 +179,16 @@ pub fn build_router(
         // to restrict allowed origins (comma-separated). When unset, allows all
         // origins for local development convenience.
         .layer(build_cors_layer())
+        .with_state(deployment.clone());
+
+    // W2-34-01 / W2-34-02 / W2-18-01: Unauthed routes mounted before the
+    // require_api_token layer. Setup endpoints are needed for first-time
+    // onboarding (no token exists yet), and the CI webhook authenticates
+    // via HMAC signature (SOLODAWN_CI_WEBHOOK_SECRET) rather than API token.
+    let unauthed_routes = Router::new()
+        .merge(setup::router())
+        .nest("/ci", ci_webhook::ci_webhook_routes())
+        .layer(build_cors_layer())
         .with_state(deployment);
 
     Router::new()
@@ -188,6 +196,7 @@ pub fn build_router(
         .route("/readyz", get(health::readyz))
         .route("/", get(frontend::serve_frontend_root))
         .route("/{*path}", get(frontend::serve_frontend))
+        .nest("/api", unauthed_routes)
         .nest("/api", base_routes)
         // G32-015: Expose FeishuHandle to outer routes (readyz) so the health
         // endpoint can query actual WebSocket connection status.

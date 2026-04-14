@@ -1,4 +1,10 @@
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use sha2::{Digest, Sha256};
 
@@ -37,6 +43,7 @@ impl AnalyticsConfig {
 pub struct AnalyticsService {
     config: AnalyticsConfig,
     client: reqwest::Client,
+    opted_out: Arc<AtomicBool>,
 }
 
 impl AnalyticsService {
@@ -46,7 +53,17 @@ impl AnalyticsService {
             .build()
             .unwrap();
 
-        Self { config, client }
+        Self {
+            config,
+            client,
+            opted_out: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Update the opt-out state. Events enqueued but not yet sent will be
+    /// aborted if the user opts out before the HTTP request is issued.
+    pub fn set_opted_out(&self, opted_out: bool) {
+        self.opted_out.store(opted_out, Ordering::SeqCst);
     }
 
     pub fn track_event(&self, user_id: &str, event_name: &str, properties: Option<Value>) {
@@ -83,7 +100,19 @@ impl AnalyticsService {
         let client = self.client.clone();
         let event_name = event_name.to_string();
 
+        // Capture opt-out state at enqueue time; re-check inside the spawned
+        // task to abort if the user opts out during the spawn window.
+        let opted_out_at_enqueue = self.opted_out.load(Ordering::SeqCst);
+        let opted_out = self.opted_out.clone();
+
         tokio::spawn(async move {
+            if opted_out_at_enqueue || opted_out.load(Ordering::SeqCst) {
+                tracing::debug!(
+                    "Skipping event '{}' because analytics were disabled before send",
+                    event_name
+                );
+                return;
+            }
             match client
                 .post(&endpoint)
                 .header("Content-Type", "application/json")

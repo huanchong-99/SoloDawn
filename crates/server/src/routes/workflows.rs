@@ -282,6 +282,10 @@ fn has_configured_workflow_models(config: &AppConfig) -> bool {
 }
 
 fn is_orchestrator_chat_feature_enabled() -> bool {
+    // Intentionally default-enabled (opt-out) per docs/developed/misc/orchestrator-chat-rollback-runbook.md:
+    // the orchestrator chat endpoint is on unless SOLODAWN_ORCHESTRATOR_CHAT_ENABLED is explicitly set to a
+    // non-"true" value. This is asymmetric with SOLODAWN_CHAT_CONNECTOR_ENABLED (opt-in) by design, so that
+    // operators can disable only the external connector while keeping the internal orchestrator available.
     utils::env_compat::var_opt_with_compat("SOLODAWN_ORCHESTRATOR_CHAT_ENABLED", "GITCORTEX_ORCHESTRATOR_CHAT_ENABLED")
         .map_or(true, |value| value.trim().eq_ignore_ascii_case("true"))
 }

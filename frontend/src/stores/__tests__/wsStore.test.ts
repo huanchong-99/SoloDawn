@@ -53,6 +53,10 @@ const originalWebSocket = globalThis.WebSocket;
 describe('wsStore', () => {
   let useWsStore: typeof import('../wsStore').useWsStore;
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(async () => {
     vi.useFakeTimers();
     // Mock WebSocket globally

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './auth/useAuth';
 import { secureRandomIdFragment } from '@/utils/id';
@@ -58,9 +58,24 @@ export function usePreviousPath() {
   const location = useLocation();
   const { userId } = useAuth();
   const scopeKey = useMemo(() => getScopeKey(userId), [userId]);
+  const lastRecordedRef = useRef<{ scopeKey: string; pathname: string } | null>(
+    null
+  );
 
   // Track pathnames as user navigates
   useEffect(() => {
+    // Guard: only record when pathname (or scope) actually changed since last
+    // effect run. Prevents redundant array mutation on unrelated re-renders
+    // or StrictMode double-invocations.
+    const last = lastRecordedRef.current;
+    if (
+      last &&
+      last.scopeKey === scopeKey &&
+      last.pathname === location.pathname
+    ) {
+      return;
+    }
+
     const scopedVisited = getVisitedPaths(scopeKey);
     if (scopedVisited.at(-1) !== location.pathname) {
       scopedVisited.push(location.pathname);
@@ -69,6 +84,7 @@ export function usePreviousPath() {
         scopedVisited.splice(0, scopedVisited.length - MAX_VISITED_PATHS);
       }
     }
+    lastRecordedRef.current = { scopeKey, pathname: location.pathname };
   }, [location.pathname, scopeKey]);
 
   return useCallback(() => {

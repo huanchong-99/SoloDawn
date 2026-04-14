@@ -36,6 +36,7 @@ pub enum HookTables {
 
 #[derive(Serialize, Deserialize, TS)]
 #[serde(tag = "type", content = "data", rename_all = "SCREAMING_SNAKE_CASE")]
+#[ts(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RecordTypes {
     Task(Task),
     Workspace(Workspace),

@@ -184,7 +184,8 @@
     },
     "messages": {
       "verifySuccess": "Connection verified",
-      "confirmDelete": "Delete model configuration for {{name}}?"
+      "confirmDelete": "Delete model configuration for {{name}}?",
+      "confirmDeleteTitle": "Delete Model"
     },
     "errors": {
       "apiKeyRequired": "API key is required",

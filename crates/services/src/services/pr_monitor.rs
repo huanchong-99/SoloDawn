@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use db::{
     DBService,
@@ -11,11 +11,12 @@ use db::{
 use serde_json::json;
 use sqlx::error::Error as SqlxError;
 use thiserror::Error;
-use tokio::time::interval;
+use tokio::{sync::RwLock, time::interval};
 use tracing::{debug, error, info};
 
 use crate::services::{
     analytics::AnalyticsContext,
+    config::Config,
     git_host::{self, GitHostError, GitHostProvider},
 };
 
@@ -34,17 +35,20 @@ pub struct PrMonitorService {
     db: DBService,
     poll_interval: Duration,
     analytics: Option<AnalyticsContext>,
+    config: Arc<RwLock<Config>>,
 }
 
 impl PrMonitorService {
     pub fn spawn(
         db: DBService,
         analytics: Option<AnalyticsContext>,
+        config: Arc<RwLock<Config>>,
     ) -> tokio::task::JoinHandle<()> {
         let service = Self {
             db,
             poll_interval: Duration::from_secs(60), // Check every minute
             analytics,
+            config,
         };
         tokio::spawn(async move {
             service.start().await;
@@ -126,8 +130,9 @@ impl PrMonitorService {
                     Workspace::set_archived(&self.db.pool, workspace.id, true).await?;
                 }
 
-                // Track analytics event
-                if let Some(analytics) = &self.analytics
+                // Track analytics event (respect user opt-out preference)
+                if self.config.read().await.analytics_enabled
+                    && let Some(analytics) = &self.analytics
                     && let Ok(Some(task)) = Task::find_by_id(&self.db.pool, workspace.task_id).await
                 {
                     analytics.analytics_service.track_event(

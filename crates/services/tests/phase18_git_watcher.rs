@@ -130,6 +130,7 @@ async fn test_git_watcher_detects_commit_with_metadata() {
     }
 
     watcher_handle.abort();
+    let _ = watcher_handle.await;
 }
 
 #[tokio::test]
@@ -168,6 +169,7 @@ async fn test_git_watcher_ignores_commits_without_metadata() {
     );
 
     watcher_handle.abort();
+    let _ = watcher_handle.await;
 }
 
 #[tokio::test]
@@ -215,6 +217,7 @@ async fn test_git_watcher_handles_failed_status() {
     }
 
     watcher_handle.abort();
+    let _ = watcher_handle.await;
 }
 
 // ============================================================================

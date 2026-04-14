@@ -405,7 +405,7 @@ impl ConciergeAgent {
                 } else {
                     let status = resp.status();
                     let body = resp.text().await.unwrap_or_default();
-                    Ok(format!("Orchestrator error ({status}): {body}"))
+                    Ok(format!("Orchestrator error ({status}): {}", body.chars().take(200).collect::<String>()))
                 }
             }
             "prepare_workflow" => {
@@ -427,7 +427,7 @@ impl ConciergeAgent {
                 } else {
                     let status = resp.status();
                     let body = resp.text().await.unwrap_or_default();
-                    Ok(format!("Prepare failed ({status}): {body}"))
+                    Ok(format!("Prepare failed ({status}): {}", body.chars().take(200).collect::<String>()))
                 }
             }
             "start_workflow" => {
@@ -474,7 +474,7 @@ impl ConciergeAgent {
                 } else {
                     let status = resp.status();
                     let body = resp.text().await.unwrap_or_default();
-                    Ok(format!("Start failed ({status}): {body}"))
+                    Ok(format!("Start failed ({status}): {}", body.chars().take(200).collect::<String>()))
                 }
             }
             _ => Err(anyhow::anyhow!("Unknown runtime tool: {tool_name}")),

@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { approvalsApi } from '@/lib/api';
 
 interface ApproveParams {
@@ -11,12 +11,24 @@ interface DenyParams extends ApproveParams {
 }
 
 export function useApprovalMutation() {
+  const queryClient = useQueryClient();
+
+  const invalidateApprovalQueries = () => {
+    // Approval responses can advance execution processes and session state.
+    queryClient.invalidateQueries({ queryKey: ['executionProcesses'] });
+    queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    queryClient.invalidateQueries({ queryKey: ['workspaceSessions'] });
+  };
+
   const approveMutation = useMutation({
     mutationFn: ({ approvalId, executionProcessId }: ApproveParams) =>
       approvalsApi.respond(approvalId, {
         execution_process_id: executionProcessId,
         status: { status: 'approved' },
       }),
+    onSuccess: () => {
+      invalidateApprovalQueries();
+    },
     onError: (err) => {
       console.error('Failed to approve:', err);
     },
@@ -31,6 +43,9 @@ export function useApprovalMutation() {
           reason: reason || 'User denied this request.',
         },
       }),
+    onSuccess: () => {
+      invalidateApprovalQueries();
+    },
     onError: (err) => {
       console.error('Failed to deny:', err);
     },

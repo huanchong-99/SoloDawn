@@ -83,9 +83,12 @@ export function useCreateConciergeSession() {
     ): Promise<ConciergeSession> => {
       return conciergeApi.createSession(data);
     },
-    onSuccess: () => {
+    onSuccess: (session) => {
       queryClient.invalidateQueries({
         queryKey: conciergeKeys.sessions(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: conciergeKeys.messages(session.id),
       });
     },
   });

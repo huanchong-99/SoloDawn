@@ -169,6 +169,8 @@ fn prompt_decision_detail(decision: &PromptDecision) -> Value {
                 "response": response,
                 "reasoning": reasoning,
                 "targetIndex": target_index,
+                // TODO(W2-20-01/W2-31-03): snake_case `target_index` retained — TS
+                // fallback (wsStore.ts) and regression tests still reference it.
                 "target_index": target_index
             })
         }
@@ -464,28 +466,21 @@ impl WsEvent {
                         json!({
                             "workflowId": workflow_id,
                             "fromProvider": from_provider,
-                            "toProvider": to_provider,
-                            "workflow_id": workflow_id,
-                            "from_provider": from_provider,
-                            "to_provider": to_provider
+                            "toProvider": to_provider
                         }),
                     ),
                     ProviderEvent::Exhausted { provider_count } => (
                         WsEventType::ProviderExhausted,
                         json!({
                             "workflowId": workflow_id,
-                            "providerCount": provider_count,
-                            "workflow_id": workflow_id,
-                            "provider_count": provider_count
+                            "providerCount": provider_count
                         }),
                     ),
                     ProviderEvent::Recovered { provider_name } => (
                         WsEventType::ProviderRecovered,
                         json!({
                             "workflowId": workflow_id,
-                            "providerName": provider_name,
-                            "workflow_id": workflow_id,
-                            "provider_name": provider_name
+                            "providerName": provider_name
                         }),
                     ),
                 };

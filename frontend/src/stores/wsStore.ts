@@ -90,6 +90,7 @@ interface WsState {
   connectToWorkflow: (workflowId: string) => void;
   disconnectWorkflow: (workflowId: string) => void;
   disconnect: () => void;
+  reset: () => void;
   send: (message: WsMessage) => boolean;
   sendPromptResponse: (payload: TerminalPromptResponsePayload) => boolean;
   subscribe: (eventType: string, handler: MessageHandler) => () => void;
@@ -1391,6 +1392,17 @@ export const useWsStore = create<WsState>((set, get) => ({
       _manualDisconnect: true,
       reconnectAttempts: 0,
     });
+  },
+
+  // W2-22-12: Explicit reset() that clears the mutated handler Maps and returns
+  // the store to its initial state. `disconnect()` already performs this
+  // cleanup for connection lifecycle; `reset()` exposes the same teardown for
+  // sign-out and test paths without implying a user-initiated disconnect
+  // (note: _manualDisconnect is left false so a subsequent connect() is
+  // treated as a fresh session rather than a reconnection-after-manual-close).
+  reset: () => {
+    get().disconnect();
+    set({ _manualDisconnect: false });
   },
 
   send: (message: WsMessage) => {

@@ -914,6 +914,14 @@ mod tests {
     impl ApiTokenEnvGuard {
         fn set(token: Option<&str>) -> Self {
             let previous = std::env::var("SOLODAWN_API_TOKEN").ok();
+            // SAFETY: Rust 2024 marks `set_var`/`remove_var` as unsafe because
+            // concurrent mutation of the process environment races with other
+            // threads reading it (e.g. libc `getenv`). Tests that use this
+            // guard are annotated with `#[serial]` (via `serial_test`), so
+            // only one such test runs at a time and no production code
+            // observes `SOLODAWN_API_TOKEN` from another thread during the
+            // guard's lifetime. This type is confined to `#[cfg(test)]` and
+            // must not be reused in request-handling code paths.
             unsafe {
                 match token {
                     Some(value) => std::env::set_var("SOLODAWN_API_TOKEN", value),
@@ -927,6 +935,9 @@ mod tests {
 
     impl Drop for ApiTokenEnvGuard {
         fn drop(&mut self) {
+            // SAFETY: See `ApiTokenEnvGuard::set`. The guard restores the
+            // previous value while the `#[serial]` test still holds the
+            // global test lock, so no other thread observes the env var.
             unsafe {
                 match &self.previous {
                     Some(previous) => std::env::set_var("SOLODAWN_API_TOKEN", previous),

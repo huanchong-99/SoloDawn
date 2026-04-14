@@ -53,7 +53,7 @@ runs:
         sudo apt-get install -y $EXTRA_PACKAGES
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+      uses: dtolnay/rust-toolchain@a54c7afa936fefeb4456b2dd8068152669aa8203 # stable
       with:
         toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
@@ -71,4 +71,4 @@ runs:
       if: inputs.install-nextest == 'true'
       shell: bash
       run: |
-        curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+        cargo install --locked cargo-nextest --version 0.9.88

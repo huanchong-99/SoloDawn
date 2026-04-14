@@ -147,7 +147,7 @@ pub trait Deployment: Clone + Send + Sync + 'static {
                 user_id: self.user_id().to_string(),
                 analytics_service: analytics_service.clone(),
             });
-        PrMonitorService::spawn(db, analytics)
+        PrMonitorService::spawn(db, analytics, self.config().clone())
     }
 
     async fn track_if_analytics_allowed(&self, event_name: &str, properties: Value) {
@@ -177,7 +177,13 @@ pub trait Deployment: Clone + Send + Sync + 'static {
         let soft_timeout_ms = 2_000;
         // hard timeout to ensure the background task doesn't run indefinitely
         let hard_timeout_ms = 2_300;
-        let project_count = Project::count(&self.db().pool).await.unwrap_or(0);
+        let project_count = match Project::count(&self.db().pool).await {
+            Ok(count) => count,
+            Err(e) => {
+                tracing::error!("Failed to count projects during auto-setup: {e}");
+                return;
+            }
+        };
 
         // Only proceed if no projects exist
         if project_count == 0 {

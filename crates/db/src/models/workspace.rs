@@ -642,6 +642,14 @@ impl Workspace {
             }
         }
 
+        // TODO(W2-15-01): This is N+1 — for each unnamed workspace we issue a
+        // separate SELECT (get_first_user_message) and UPDATE. Bounded by
+        // `limit` above, but for large unbounded calls this compounds quickly.
+        // Batch improvement: collect all unnamed workspace IDs, issue a single
+        // query joining sessions/task_attempts/executor_sessions to fetch the
+        // first user message per workspace in one round trip, then apply all
+        // renames via a single UPDATE ... FROM (VALUES ...) (or CASE WHEN) so
+        // this becomes 2 queries instead of 2N.
         for ws in &mut workspaces {
             if ws.workspace.name.is_none()
                 && let Some(prompt) = Self::get_first_user_message(pool, ws.workspace.id).await?

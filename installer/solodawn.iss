@@ -96,10 +96,8 @@ Filename: "{app}\solodawn-server.exe"; Parameters: "self-test"; Description: "Ru
 ; Open web UI after install
 Filename: "http://127.0.0.1:{#DefaultPort}"; Description: "Open {#MyAppName} in browser"; Flags: shellexec nowait postinstall skipifsilent unchecked
 
-[UninstallRun]
-; Stop server before uninstall
-Filename: "taskkill"; Parameters: "/F /IM solodawn-server.exe"; Flags: runhidden
-Filename: "taskkill"; Parameters: "/F /IM solodawn-tray.exe"; Flags: runhidden
+; NOTE: taskkill is invoked from CurUninstallStepChanged (see [Code]) so we can
+; capture ResultCode and warn on failure. Exit code 128 = process not found (OK).
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\scripts"
@@ -122,21 +120,30 @@ function IsSystemNodeAvailable(): Boolean;
 var
   ResultCode: Integer;
   Output: AnsiString;
+  TmpFile: String;
 begin
   Result := False;
-  if Exec('cmd.exe', '/C node --version > "%TEMP%\gc_node_ver.txt" 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-  begin
-    if ResultCode = 0 then
+  // Use Inno Setup {tmp} dir (auto-cleaned at session end) instead of %TEMP%
+  TmpFile := ExpandConstant('{tmp}\gc_node_ver.txt');
+  try
+    if Exec('cmd.exe', '/C node --version > "' + TmpFile + '" 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     begin
-      if LoadStringFromFile(ExpandConstant('{tmp}\gc_node_ver.txt'), Output) then
+      if ResultCode = 0 then
       begin
-        if (Pos('v18.', String(Output)) > 0) or (Pos('v19.', String(Output)) > 0) or
-           (Pos('v20.', String(Output)) > 0) or (Pos('v21.', String(Output)) > 0) or
-           (Pos('v22.', String(Output)) > 0) or (Pos('v23.', String(Output)) > 0) or
-           (Pos('v24.', String(Output)) > 0) or (Pos('v25.', String(Output)) > 0) then
-          Result := True;
+        if LoadStringFromFile(TmpFile, Output) then
+        begin
+          if (Pos('v18.', String(Output)) > 0) or (Pos('v19.', String(Output)) > 0) or
+             (Pos('v20.', String(Output)) > 0) or (Pos('v21.', String(Output)) > 0) or
+             (Pos('v22.', String(Output)) > 0) or (Pos('v23.', String(Output)) > 0) or
+             (Pos('v24.', String(Output)) > 0) or (Pos('v25.', String(Output)) > 0) then
+            Result := True;
+        end;
       end;
     end;
+  finally
+    // Always delete the temp file (finally-like pattern)
+    if FileExists(TmpFile) then
+      DeleteFile(TmpFile);
   end;
 end;
 
@@ -225,7 +232,11 @@ begin
   end;
 end;
 
-// Remove from user PATH on uninstall
+// Remove from user PATH on uninstall. Handles all semicolon variations:
+//   "Dir;..."  (head, trailing semicolon)
+//   "...;Dir"  (tail, leading semicolon)
+//   "...;Dir;..." (middle)
+//   "Dir"      (only entry, no semicolons)
 procedure RemoveFromPath();
 var
   OldPath, AppDir: String;
@@ -233,7 +244,12 @@ begin
   if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OldPath) then
   begin
     AppDir := ExpandConstant('{app}');
-    StringChangeEx(OldPath, AppDir + ';', '', True);
+    // Order matters: try the semicolon-bearing variants first so we don't leave
+    // stray separators, then fall through to the bare-directory (only-entry) case.
+    StringChangeEx(OldPath, ';' + AppDir + ';', ';', True);  // middle
+    StringChangeEx(OldPath, AppDir + ';',       '',  True);  // head
+    StringChangeEx(OldPath, ';' + AppDir,       '',  True);  // tail
+    StringChangeEx(OldPath, AppDir,             '',  True);  // only entry
     RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OldPath);
   end;
 end;
@@ -266,8 +282,30 @@ begin
   end;
 end;
 
+// Kill a running process via taskkill, checking ResultCode and warning on failure.
+// ResultCode 0 = killed; 128 = process not found (benign); other = real failure.
+procedure KillProcess(const ImageName: String);
+var
+  ResultCode: Integer;
+begin
+  if not Exec('taskkill.exe', '/F /IM ' + ImageName, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Log('WARNING: taskkill.exe could not be launched for ' + ImageName);
+  end
+  else if (ResultCode <> 0) and (ResultCode <> 128) then
+  begin
+    Log(Format('WARNING: taskkill /F /IM %s returned exit code %d', [ImageName, ResultCode]));
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // Stop running processes before file removal; check ResultCode and warn on failure.
+    KillProcess('solodawn-server.exe');
+    KillProcess('solodawn-tray.exe');
+  end;
   if CurUninstallStep = usPostUninstall then
   begin
     RemoveFromPath();

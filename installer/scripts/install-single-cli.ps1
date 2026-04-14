@@ -196,15 +196,18 @@ if ($Action -eq "install") {
             exit 1
         }
 
-        # Strip version specifier for uninstall
+        # Strip version specifier for uninstall.
+        # Handles scoped names with hyphens (e.g. @anthropic-ai/claude-code@1.0)
+        # by anchoring a capture group on the full @scope/name before the version @.
         $UninstallPkg = $Package
-        if ($UninstallPkg -match "^@[^/]+/[^@]+@") {
+        if ($UninstallPkg -match '^(@[^/]+/[^@]+)@(.+)$') {
             # Scoped: @scope/name@version -> @scope/name
-            $UninstallPkg = $UninstallPkg -replace "(@[^/]+/[^@]+)@.*", '$1'
-        } elseif ($UninstallPkg -match "@") {
-            # Unscoped: name@version -> name
-            $UninstallPkg = $UninstallPkg.Split("@")[0]
+            $UninstallPkg = $Matches[1]
+        } elseif ($UninstallPkg -match '^([^@]+)@(.+)$') {
+            # Unscoped: name@version -> name (first @ is the version separator)
+            $UninstallPkg = $Matches[1]
         }
+        # else: no version specifier, leave $UninstallPkg as-is.
 
         Log-Info "Running: npm uninstall -g $UninstallPkg"
         & npm uninstall -g $UninstallPkg 2>&1 | ForEach-Object { Write-Host $_ }

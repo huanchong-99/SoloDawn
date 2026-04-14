@@ -61,6 +61,10 @@ export function useAttemptExecution(attemptId?: string, taskId?: string) {
       processes: executionProcesses,
       runningProcessDetails,
     };
+    // W2-40-14: processDetailSignature is a computed string that captures
+    // id+updatedAt for each detail; it is intentionally used in place of the
+    // raw processDetailData array so memoization is driven by meaningful
+    // changes rather than array identity churn from react-query refetches.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executionProcesses, setupProcesses, processDetailSignature]);
 

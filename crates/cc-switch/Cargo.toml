@@ -1,6 +1,10 @@
 [package]
 name = "cc-switch"
 version = "0.1.0"
+# Intentionally pinned to 2021: upstream cc-switch core is published/maintained
+# on edition 2021; bumping to 2024 would require auditing async closure/capture
+# changes and re-verifying upstream compatibility. Left on 2021 to avoid
+# cascading edition-bump risk.
 edition = "2021"
 description = "CLI configuration switching core for SoloDawn"
 authors = ["SoloDawn Contributors"]
@@ -26,4 +30,4 @@ tempfile = "3"
 toml = "0.8"
 
 # 日志
-tracing = "0.1"
+tracing = { workspace = true }

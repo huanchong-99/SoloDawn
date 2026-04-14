@@ -51,7 +51,9 @@ impl MsgStore {
     }
 
     pub fn push(&self, msg: LogMsg) {
-        let _ = self.sender.send(msg.clone()); // live listeners
+        if let Err(_) = self.sender.send(msg.clone()) {
+            tracing::debug!("msg_store broadcast has no listeners");
+        }
         let bytes = msg.approx_bytes();
 
         let mut inner = self.inner.write().unwrap();

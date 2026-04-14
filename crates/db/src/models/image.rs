@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, QueryBuilder, Sqlite, SqlitePool};
 use ts_rs::TS;
 use uuid::Uuid;
 
@@ -182,26 +182,28 @@ impl Image {
 
 impl TaskImage {
     /// Associate multiple images with a task, skipping duplicates.
+    ///
+    /// Uses a single multi-row INSERT with `ON CONFLICT DO NOTHING`, relying on
+    /// the `UNIQUE(task_id, image_id)` constraint on `task_images` to dedup.
     pub async fn associate_many_dedup(
         pool: &SqlitePool,
         task_id: Uuid,
         image_ids: &[Uuid],
     ) -> Result<(), sqlx::Error> {
-        for &image_id in image_ids {
-            let id = Uuid::new_v4();
-            sqlx::query!(
-                r#"INSERT INTO task_images (id, task_id, image_id)
-                   SELECT $1, $2, $3
-                   WHERE NOT EXISTS (
-                       SELECT 1 FROM task_images WHERE task_id = $2 AND image_id = $3
-                   )"#,
-                id,
-                task_id,
-                image_id
-            )
-            .execute(pool)
-            .await?;
+        if image_ids.is_empty() {
+            return Ok(());
         }
+
+        let mut qb: QueryBuilder<Sqlite> =
+            QueryBuilder::new("INSERT INTO task_images (id, task_id, image_id) ");
+        qb.push_values(image_ids.iter(), |mut b, image_id| {
+            b.push_bind(Uuid::new_v4())
+                .push_bind(task_id)
+                .push_bind(*image_id);
+        });
+        qb.push(" ON CONFLICT(task_id, image_id) DO NOTHING");
+
+        qb.build().execute(pool).await?;
         Ok(())
     }
 
