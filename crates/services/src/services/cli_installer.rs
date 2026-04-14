@@ -230,6 +230,14 @@ impl CliInstaller {
                 .arg(cli_name)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
+                // R6 port-leak fix: the install script shells out to
+                // npm/pnpm install for CLI tools. Without these strips the
+                // install subprocess inherits SoloDawn's dev ports and any
+                // post-install test hook bound to PORT would hijack the
+                // backend socket.
+                .env_remove("PORT")
+                .env_remove("BACKEND_PORT")
+                .env_remove("FRONTEND_PORT")
                 .spawn()
                 .context("Failed to spawn install-single-cli.ps1")?
         } else {
@@ -239,6 +247,10 @@ impl CliInstaller {
                 .arg(cli_name)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
+                // Same rationale as the Windows branch above.
+                .env_remove("PORT")
+                .env_remove("BACKEND_PORT")
+                .env_remove("FRONTEND_PORT")
                 .spawn()
                 .context("Failed to spawn install-single-cli.sh")?
         };
