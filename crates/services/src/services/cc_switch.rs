@@ -93,7 +93,7 @@ fn create_codex_config(
     codex_home: &Path,
     base_url: Option<&str>,
     model: &str,
-    api_key: &str,
+    _api_key: &str,
 ) -> anyhow::Result<()> {
     let config_path = codex_home.join("config.toml");
 
