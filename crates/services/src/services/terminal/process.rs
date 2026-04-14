@@ -765,11 +765,15 @@ impl ProcessManager {
 
         // Initialize output fanout and background reader
         let output_fanout = Self::default_output_fanout();
+        // E26-05: shared EOF flag published by the reader task and consulted by
+        // `is_running` / `list_running` so PTY closure is observable immediately.
+        let pty_eof = Arc::new(AtomicBool::new(false));
         let reader_task = match pair.master.try_clone_reader() {
             Ok(reader) => Some(Self::spawn_output_reader_task(
                 terminal_id,
                 PtyReader(reader),
                 Arc::clone(&output_fanout),
+                Arc::clone(&pty_eof),
             )),
             Err(e) => {
                 tracing::warn!(
@@ -780,6 +784,16 @@ impl ProcessManager {
                 None
             }
         };
+
+        // E26-12: before returning the PID, try_wait once more to ensure the
+        // child has not exited between our earlier poll and now. On Unix, a
+        // reaped PID can be recycled by the OS, so surfacing a stale PID to
+        // callers (who may later send signals) is unsafe.
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(anyhow::anyhow!(
+                "Terminal process exited before handle return with status: {status:?}"
+            ));
+        }
 
         // Store tracked process
         let mut processes = self.processes.write().await;
@@ -795,6 +809,7 @@ impl ProcessManager {
                 reader_task,
                 logger_task: None,
                 logger_shutdown_tx: None,
+                pty_eof,
             },
         );
 
@@ -1018,6 +1033,13 @@ impl ProcessManager {
         let Some(tracked) = processes.get_mut(terminal_id) else {
             return false;
         };
+        // [E26-05] If the background reader has observed PTY EOF, treat the
+        // terminal as no longer running even if `try_wait()` still returns
+        // `Ok(None)` (which can lag EOF on some platforms).
+        if tracked.pty_eof.load(Ordering::Acquire) {
+            processes.remove(terminal_id);
+            return false;
+        }
         // Try to reap the child non-blockingly; if it has exited, treat as not running.
         match tracked.child.try_wait() {
             Ok(Some(_)) => {
@@ -1037,6 +1059,12 @@ impl ProcessManager {
         let mut running = Vec::new();
         let mut dead: Vec<String> = Vec::new();
         for (id, tracked) in processes.iter_mut() {
+            // [E26-05] PTY EOF observed by the reader task means the terminal is
+            // effectively closed even if `try_wait()` has not yet reported exit.
+            if tracked.pty_eof.load(Ordering::Acquire) {
+                dead.push(id.clone());
+                continue;
+            }
             match tracked.child.try_wait() {
                 // [M18] Only include truly-running processes (try_wait == Ok(None)).
                 // Ok(Some(_)) means the child already exited; Err(_) means we cannot
