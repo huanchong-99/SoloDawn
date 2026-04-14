@@ -929,36 +929,57 @@ impl OrchestratorRuntime {
                     );
                 }
                 Ok(false) => {
-                    // G05-004: Check task progress before giving up. If the workflow
-                    // has completed tasks, it made meaningful progress before the
-                    // restart. In that case, mark it as `paused` so the user can
-                    // inspect results and optionally resume, rather than destroying
-                    // all recorded progress by marking it `failed`.
-                    let has_completed_tasks = match db::models::WorkflowTask::find_by_workflow(pool, &workflow_id).await {
-                        Ok(tasks) => tasks.iter().any(|t| t.status == "completed"),
+                    // R7-PB1: A `running` workflow whose persisted state is gone after
+                    // a restart must NEVER be auto-failed if it has any task that ever
+                    // started doing work — that would silently destroy user progress
+                    // and (combined with cargo-watch rebuilds during dev) produces a
+                    // restart-to-fail trap that bit R6 and R7 in the same week.
+                    //
+                    // The conservative recovery semantics are now:
+                    //   - Any task in `running`/`completed`/`review_pending` → paused
+                    //     (live work that the user should be able to resume or cancel
+                    //     manually after inspecting results).
+                    //   - Tasks exist but are all `pending`/`cancelled`/`failed`, OR no
+                    //     tasks materialized at all → paused as well. The orchestrator
+                    //     is the only thing that should ever auto-fail a workflow, and
+                    //     only on a real business signal (e.g. R4 Fix C N-failure
+                    //     fingerprint escalation) — not on a restart artifact.
+                    //
+                    // Truly abandoned workflows can still be cancelled/failed by:
+                    //   - the user via UI/API,
+                    //   - the orchestrator's own escalation logic,
+                    //   - a separate stale-workflow sweeper (out of scope for recovery).
+                    //
+                    // The original branch that marked `failed` here is preserved as
+                    // dead-code constants only via the `Err(e)` arm below, which still
+                    // honors that "recovery itself errored" is a different signal from
+                    // "recovery completed but state was missing."
+                    let active_tasks: Result<Vec<_>, _> =
+                        db::models::WorkflowTask::find_by_workflow(pool, &workflow_id).await;
+                    match active_tasks {
+                        Ok(tasks) => {
+                            let has_active_work = tasks.iter().any(|t| {
+                                matches!(
+                                    t.status.as_str(),
+                                    "running" | "completed" | "review_pending"
+                                )
+                            });
+                            warn!(
+                                workflow_id = %workflow_id,
+                                task_count = tasks.len(),
+                                has_active_work,
+                                "R7-PB1: no persisted state on restart; marking workflow as paused for manual resume (never auto-failing on restart artifact)"
+                            );
+                        }
                         Err(e) => {
                             warn!(
                                 workflow_id = %workflow_id,
                                 error = %e,
-                                "Failed to check task progress during recovery; defaulting to failed"
+                                "R7-PB1: failed to inspect task progress during recovery; still marking paused (not failed) to preserve user-visible state"
                             );
-                            false
                         }
-                    };
-
-                    let recovery_status = if has_completed_tasks {
-                        warn!(
-                            workflow_id = %workflow_id,
-                            "No persisted state found but workflow has completed tasks; marking as paused for manual resume"
-                        );
-                        WORKFLOW_STATUS_PAUSED
-                    } else {
-                        warn!(
-                            workflow_id = %workflow_id,
-                            "No persisted state found and no completed tasks, marking as failed"
-                        );
-                        WORKFLOW_STATUS_FAILED
-                    };
+                    }
+                    let recovery_status = WORKFLOW_STATUS_PAUSED;
 
                     if let Err(e) =
                         db::models::Workflow::update_status(pool, &workflow_id, recovery_status)
@@ -1790,6 +1811,144 @@ mod tests {
         assert!(
             watcher.is_none(),
             "Non-empty default_agent_working_dir should remain primary and not fallback to project_repos"
+        );
+    }
+
+    /// R7-PB1: A `running` workflow whose persisted state is gone after a
+    /// restart MUST be marked `paused` (resumable), never `failed`.
+    /// R6 hit this twice: cargo-watch picks up a source change → server.exe
+    /// rebuilds → recovery fires → workflow with running tasks is auto-failed
+    /// → user progress destroyed. Paused is the resumable state; only the
+    /// orchestrator's own escalation logic (e.g. R4 Fix C) or the user
+    /// should ever auto-fail a workflow.
+    #[tokio::test]
+    async fn test_recovery_marks_paused_when_no_persisted_state() {
+        let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
+        sqlx::query(
+            r"
+            CREATE TABLE workflow (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL,
+                execution_mode TEXT NOT NULL DEFAULT 'diy',
+                initial_goal TEXT,
+                use_slash_commands INTEGER NOT NULL DEFAULT 0,
+                orchestrator_enabled INTEGER NOT NULL DEFAULT 0,
+                orchestrator_api_type TEXT,
+                orchestrator_base_url TEXT,
+                orchestrator_api_key TEXT,
+                orchestrator_model TEXT,
+                error_terminal_enabled INTEGER NOT NULL DEFAULT 0,
+                error_terminal_cli_id TEXT,
+                error_terminal_model_id TEXT,
+                merge_terminal_cli_id TEXT NOT NULL,
+                merge_terminal_model_id TEXT NOT NULL,
+                target_branch TEXT NOT NULL,
+                git_watcher_enabled INTEGER NOT NULL DEFAULT 1,
+                orchestrator_state TEXT,
+                ready_at TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                pause_reason TEXT
+            )
+            ",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r"
+            CREATE TABLE workflow_task (
+                id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                vk_task_id TEXT,
+                name TEXT NOT NULL,
+                description TEXT,
+                branch TEXT NOT NULL,
+                status TEXT NOT NULL,
+                order_index INTEGER NOT NULL DEFAULT 0,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            ",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let db = Arc::new(DBService { pool: pool.clone() });
+        let message_bus = Arc::new(MessageBus::new(1000));
+        let runtime = OrchestratorRuntime::new(db.clone(), message_bus);
+
+        // Workflow row: status=running but no persisted orchestrator state.
+        let workflow_id = Uuid::new_v4().to_string();
+        let workflow = Workflow {
+            id: workflow_id.clone(),
+            project_id: Uuid::new_v4(),
+            name: "R7-PB1 in-flight workflow".to_string(),
+            description: None,
+            status: "running".to_string(),
+            execution_mode: "agent_planned".to_string(),
+            initial_goal: None,
+            use_slash_commands: false,
+            orchestrator_enabled: false,
+            orchestrator_api_type: None,
+            orchestrator_base_url: None,
+            orchestrator_api_key: None,
+            orchestrator_model: None,
+            error_terminal_enabled: false,
+            error_terminal_cli_id: None,
+            error_terminal_model_id: None,
+            merge_terminal_cli_id: "merge-cli".to_string(),
+            merge_terminal_model_id: "merge-model".to_string(),
+            target_branch: "main".to_string(),
+            git_watcher_enabled: true,
+            ready_at: Some(Utc::now()),
+            started_at: Some(Utc::now()),
+            completed_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            pause_reason: None,
+        };
+        Workflow::create(&pool, &workflow).await.unwrap();
+
+        // A single task in `running` — exactly the R7 failure shape.
+        let task_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            r"
+            INSERT INTO workflow_task (id, workflow_id, name, branch, status, order_index, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?6)
+            ",
+        )
+        .bind(&task_id)
+        .bind(&workflow_id)
+        .bind("R7-PB1 task")
+        .bind("feat/r7-pb1")
+        .bind("running")
+        .bind(Utc::now().to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        runtime
+            .recover_running_workflows()
+            .await
+            .expect("recovery should not error");
+
+        let recovered = Workflow::find_by_id(&pool, &workflow_id)
+            .await
+            .unwrap()
+            .expect("workflow row should still exist");
+        assert_eq!(
+            recovered.status,
+            WORKFLOW_STATUS_PAUSED,
+            "R7-PB1: a workflow with an in-flight running task at restart MUST be paused (resumable), NEVER auto-failed"
         );
     }
 }

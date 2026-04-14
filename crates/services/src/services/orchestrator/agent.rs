@@ -1896,7 +1896,7 @@ impl OrchestratorAgent {
                                                     &format!("{}", q.source),
                                                     &q.message,
                                                 );
-                                            rec.file_path = q.file_path.clone();
+                                            rec.file_path.clone_from(&q.file_path);
                                             rec.line = q.line.map(|v| v as i32);
                                             rec.end_line = q.end_line.map(|v| v as i32);
                                             rec.column_start = q.column.map(|v| v as i32);
@@ -1904,7 +1904,7 @@ impl OrchestratorAgent {
                                             rec.is_new = q.is_new;
                                             rec.is_blocking = q.is_blocking();
                                             rec.effort_minutes = q.effort_minutes;
-                                            rec.context = q.context.clone();
+                                            rec.context.clone_from(&q.context);
                                             rec
                                         })
                                         .collect::<Vec<_>>();
