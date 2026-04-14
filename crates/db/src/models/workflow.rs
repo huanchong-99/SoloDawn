@@ -622,18 +622,43 @@ impl Workflow {
     /// When transitioning to a terminal state, `completed_at` is set automatically
     /// to prevent dangling incomplete records.
     pub async fn update_status(pool: &SqlitePool, id: &str, status: &str) -> sqlx::Result<()> {
+        Self::update_status_with_reason(pool, id, status, None).await
+    }
+
+    /// Update workflow status, optionally recording a `pause_reason`.
+    ///
+    /// R8: `pause_reason` had a column reserved (`crates/db/src/models/workflow.rs`)
+    /// but no write path. The new gate-loop classifier auto-pauses workflows
+    /// instead of auto-failing them, and needs to record WHY:
+    ///   - "quality_gate_plateau"
+    ///   - "quality_gate_regression"
+    ///   - "quality_gate_wallclock"
+    ///   - "user_requested" (manual pause via UI)
+    ///   - "recovery_artifact" (R7-PB1 restart-recovery)
+    ///
+    /// Passing `reason = None` preserves existing behavior; passing
+    /// `Some("...")` writes the reason atomically with the status change.
+    /// Whether the row's CAS guard fires (status NOT IN terminal states)
+    /// is identical between the two helpers.
+    pub async fn update_status_with_reason(
+        pool: &SqlitePool,
+        id: &str,
+        status: &str,
+        reason: Option<&str>,
+    ) -> sqlx::Result<()> {
         let now = Utc::now();
         let is_terminal_state = matches!(status, "completed" | "failed" | "cancelled");
         if is_terminal_state {
             sqlx::query(
                 r"
                 UPDATE workflow
-                SET status = ?, completed_at = COALESCE(completed_at, ?), updated_at = ?
+                SET status = ?, pause_reason = ?, completed_at = COALESCE(completed_at, ?), updated_at = ?
                 WHERE id = ?
                   AND status NOT IN ('completed', 'failed', 'cancelled')
                 ",
             )
             .bind(status)
+            .bind(reason)
             .bind(now)
             .bind(now)
             .bind(id)
@@ -643,12 +668,13 @@ impl Workflow {
             sqlx::query(
                 r"
                 UPDATE workflow
-                SET status = ?, updated_at = ?
+                SET status = ?, pause_reason = ?, updated_at = ?
                 WHERE id = ?
                   AND status NOT IN ('completed', 'failed', 'cancelled')
                 ",
             )
             .bind(status)
+            .bind(reason)
             .bind(now)
             .bind(id)
             .execute(pool)

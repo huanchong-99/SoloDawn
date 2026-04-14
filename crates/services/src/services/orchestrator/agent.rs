@@ -34,7 +34,7 @@ use super::{
         TERMINAL_STATUS_NOT_STARTED, TERMINAL_STATUS_QUALITY_PENDING, TERMINAL_STATUS_REVIEW_PASSED,
         TERMINAL_STATUS_REVIEW_REJECTED, TERMINAL_STATUS_STARTING, TERMINAL_STATUS_WAITING,
         TERMINAL_STATUS_WORKING,
-        WORKFLOW_STATUS_COMPLETED, WORKFLOW_STATUS_FAILED,
+        WORKFLOW_STATUS_COMPLETED, WORKFLOW_STATUS_FAILED, WORKFLOW_STATUS_PAUSED,
         WORKFLOW_STATUS_MERGE_PARTIAL_FAILED,
         WORKFLOW_STATUS_RUNNING, WORKFLOW_TOPIC_PREFIX,
     },
@@ -2131,72 +2131,101 @@ impl OrchestratorAgent {
             && event.blocking_issues > 0
             && is_quality_run_only_infra_blockers(&self.db, &event.quality_run_id).await;
 
-        // R4 Fix C (v2, primary-brain feedback): detect N-consecutive-identical-
-        // blocker-fingerprint stall BEFORE dispatching ANY fix/infra messages
-        // or promoting the terminal. Must guard on enforce + !passed so
-        // shadow/warn error-status runs do NOT over-escalate. Applies to BOTH
-        // code-blocker and env-blocker categories — handle_quality_gate_result
-        // v1 placed this check AFTER the code-blocker return, so code-blocker
-        // loops were unreachable; v2 moves it above both return arms.
-        if event.mode == QUALITY_GATE_MODE_ENFORCE && !event.passed {
-            if let Some(stuck_fp) =
-                detect_n_failure_stuck_fingerprint(&self.db, &event.task_id).await
-            {
-                let category_label = if is_environment_blocker {
-                    "environment"
-                } else {
-                    "code"
-                };
-                tracing::error!(
+        // R8: Replace R4 Fix C N-failure auto-fail with progress-aware
+        // classifier. The user mandate is the quality gate must work as a
+        // real gate: pass → proceed; fail → forced back with feedback; loop
+        // until pass. The previous "3 same-fingerprint failures = workflow
+        // failed" path killed real progress (R7: blocking 52→15→11→7 same
+        // rule_ids → false escalation).
+        //
+        // New behavior:
+        //   - Always send the fix prompt back to the terminal (existing path).
+        //   - Decorate the prompt with a progress hint (MakingProgress /
+        //     Plateau / Regression).
+        //   - Auto-PAUSE the workflow (NEVER auto-fail) at extreme plateau
+        //     (LOOP_PAUSE_PLATEAU_ROUNDS) or extreme regression
+        //     (LOOP_PAUSE_REGRESSION_ROUNDS), so the user can decide whether
+        //     to resume / cancel / change model.
+        //
+        // Skip classification entirely for infra-blocker runs — those are
+        // environmental, not loop-progress signals. The existing infra path
+        // (is_environment_blocker, lines 2266+) handles them.
+        let (loop_progress_hint_text, should_auto_pause) = if event.mode
+            == QUALITY_GATE_MODE_ENFORCE
+            && !event.passed
+            && !is_metric_collection_failure
+            && !is_environment_blocker
+        {
+            let multiset_opt = compute_blocker_multiset(&self.db, &event.quality_run_id).await;
+            if let Some(curr_multiset) = multiset_opt {
+                let class =
+                    classify_loop_progress(&self.db, &event.terminal_id, &curr_multiset).await;
+                tracing::info!(
                     terminal_id = %event.terminal_id,
                     task_id = %event.task_id,
                     workflow_id = %event.workflow_id,
-                    consecutive_failures = N_FAILURE_ESCALATION_THRESHOLD,
-                    fingerprint = %stuck_fp,
-                    category = category_label,
-                    mode = %event.mode,
-                    "R4 Fix C: escalating task + workflow to failed — same blocker fingerprint \
-                     persisted for {} consecutive enforce-mode quality runs without progress",
-                    N_FAILURE_ESCALATION_THRESHOLD,
+                    blocking = curr_multiset.total(),
+                    unique_blockers = curr_multiset.unique_count(),
+                    fingerprint = %curr_multiset.fingerprint_string(),
+                    class = ?class,
+                    "R8: gate-loop progress classified"
                 );
-                if let Err(e) = db::models::WorkflowTask::update_status(
-                    &self.db.pool,
-                    &event.task_id,
-                    TASK_STATUS_FAILED,
-                )
-                .await
-                {
-                    tracing::error!(task_id = %event.task_id, error = %e, "Fix C: failed to mark task as failed");
-                }
-                if let Err(e) = db::models::Workflow::update_status(
-                    &self.db.pool,
-                    &event.workflow_id,
-                    WORKFLOW_STATUS_FAILED,
-                )
-                .await
-                {
-                    tracing::error!(workflow_id = %event.workflow_id, error = %e, "Fix C: failed to mark workflow as failed");
-                }
-                let err_msg = BusMessage::Error {
-                    workflow_id: event.workflow_id.clone(),
-                    error: format!(
-                        "R4 Fix C escalation: task {} stuck for {} consecutive enforce quality runs \
-                         ({}-blocker fingerprint `{}`) — task + workflow marked failed.",
-                        event.task_id,
-                        N_FAILURE_ESCALATION_THRESHOLD,
-                        category_label,
-                        stuck_fp,
-                    ),
+                let pause_reason: Option<&'static str> = match &class {
+                    LoopProgressClass::Plateau { rounds }
+                        if *rounds >= LOOP_PAUSE_PLATEAU_ROUNDS =>
+                    {
+                        Some("quality_gate_plateau")
+                    }
+                    LoopProgressClass::Regression { rounds, .. }
+                        if *rounds >= LOOP_PAUSE_REGRESSION_ROUNDS =>
+                    {
+                        Some("quality_gate_regression")
+                    }
+                    _ => None,
                 };
-                if let Err(e) = self
-                    .message_bus
-                    .publish_workflow_event(&event.workflow_id, err_msg)
-                    .await
-                {
-                    tracing::warn!(workflow_id = %event.workflow_id, error = %e, "Fix C: failed to publish escalation event");
-                }
-                return Ok(());
+                (loop_progress_hint(&class), pause_reason)
+            } else {
+                (None, None)
             }
+        } else {
+            (None, None)
+        };
+
+        if let Some(reason) = should_auto_pause {
+            tracing::warn!(
+                terminal_id = %event.terminal_id,
+                task_id = %event.task_id,
+                workflow_id = %event.workflow_id,
+                pause_reason = reason,
+                "R8: auto-pausing workflow after extreme stuck signal — user can resume/cancel/change-model via UI"
+            );
+            if let Err(e) = db::models::Workflow::update_status_with_reason(
+                &self.db.pool,
+                &event.workflow_id,
+                WORKFLOW_STATUS_PAUSED,
+                Some(reason),
+            )
+            .await
+            {
+                tracing::error!(workflow_id = %event.workflow_id, error = %e, "R8: failed to mark workflow as paused");
+            }
+            let pause_msg = BusMessage::Error {
+                workflow_id: event.workflow_id.clone(),
+                error: format!(
+                    "R8 auto-pause: terminal {} hit `{}` threshold on quality-gate loop. \
+                     Workflow paused for human review (status=paused, reason={}). \
+                     Task is NOT failed — resume via UI/API after intervening.",
+                    event.terminal_id, reason, reason,
+                ),
+            };
+            if let Err(e) = self
+                .message_bus
+                .publish_workflow_event(&event.workflow_id, pause_msg)
+                .await
+            {
+                tracing::warn!(workflow_id = %event.workflow_id, error = %e, "R8: failed to publish pause event");
+            }
+            return Ok(());
         }
 
         // G32-001: enforce + real issues — send fix instructions and leave the
@@ -2226,12 +2255,20 @@ impl OrchestratorAgent {
                 .filter(|s| !s.trim().is_empty());
 
                 if let Some(session_id) = session_id_opt {
+                    // R8: prepend progress-aware hint (MakingProgress /
+                    // Plateau / Regression). Empty when there's not enough
+                    // history yet, so the prompt looks identical to the
+                    // pre-R8 one for the first 1-2 attempts.
+                    let progress_prefix = loop_progress_hint_text
+                        .as_deref()
+                        .map(|h| format!("{h}\n\n"))
+                        .unwrap_or_default();
                     let fix_message = format!(
-                        "Your commit was BLOCKED by the quality gate.\n\n{}\n\n{}\n\n\
+                        "{}Your commit was BLOCKED by the quality gate.\n\n{}\n\n{}\n\n\
                          Fix ALL issues listed above, then commit again. \
                          The quality gate will re-run automatically on your next commit.\n\n\
                          Tip: Run the project's build/type-check command to verify your fixes before committing.",
-                        event.summary, fix_instructions
+                        progress_prefix, event.summary, fix_instructions
                     );
                     // G31-001: targeted delivery to specific terminal PTY.
                     self.message_bus
@@ -6346,26 +6383,100 @@ async fn is_quality_run_only_infra_blockers(
         .all(|i| i.rule_id.ends_with(UNAVAILABLE_RULE_SUFFIX))
 }
 
-/// R4 Fix C: N-failure-with-same-fingerprint escalation.
+/// R8: Quality-gate progress classification (replaces R4 Fix C N-failure escalation).
 ///
-/// Fingerprint = sorted, de-duplicated list of `rule_id` values across the
-/// blocking issues of a given quality_run. Two runs that produce the same
-/// fingerprint are "stuck in the same wall" — the terminal didn't make
-/// progress between attempts. After N=3 consecutive stuck runs on the same
-/// task we stop pretending the loop will converge and mark the task /
-/// workflow as `failed` so the deadlock surfaces as a real error rather
-/// than silent infinite retry.
+/// User mandate (R7 retrospective): the quality gate is supposed to be a real
+/// gate. Pass = proceed; fail = forced back with feedback; fix and re-attempt
+/// until pass. The previous R4 Fix C path treated 3 consecutive same-rule_id
+/// failures as "stuck" and marked workflow `failed`, but R7 proved this is
+/// wrong — blocking_issues went 52→15→11→7 (87% real reduction) yet the
+/// rule_id set stayed the same (same blocker categories, different instances)
+/// → false-positive escalation killed productive work.
 ///
-/// Returns `Some(fingerprint)` if the last N quality_runs of `task_id` all
-/// have identical non-empty blocker fingerprints AND all have gate_status =
-/// "error". Returns `None` in every other case (progress, too few runs,
-/// DB error, etc.).
-const N_FAILURE_ESCALATION_THRESHOLD: usize = 3;
+/// New design: per-terminal multiset fingerprint with counts; classifier
+/// distinguishes `MakingProgress` from `Plateau` from `Regression`; only
+/// pause (never auto-fail) at extreme thresholds.
+///
+/// Per-blocker identity tuple. `line` is intentionally NOT included
+/// (too noisy — moves on every fix). `file_path` IS included so two
+/// identical rule_ids in different files count separately.
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) struct BlockerKey {
+    pub(crate) source: String,
+    pub(crate) rule_id: String,
+    pub(crate) file_path: Option<String>,
+}
 
-async fn compute_blocker_fingerprint(
+/// Sorted Vec of (blocker, count). The vec ordering is canonical so two
+/// multisets with the same contents always compare equal.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub(crate) struct BlockerMultiset {
+    pub(crate) entries: Vec<(BlockerKey, u32)>,
+}
+
+impl BlockerMultiset {
+    /// Total blocking-issue count across all keys.
+    pub(crate) fn total(&self) -> u32 {
+        self.entries.iter().map(|(_, c)| c).sum()
+    }
+
+    /// Distinct blocker identities (ignores per-key counts).
+    pub(crate) fn unique_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns true if `other` and `self` have exactly the same set of
+    /// `BlockerKey`s (regardless of counts). Used to detect "same wall, fewer
+    /// instances" — the real R7 progress signal.
+    pub(crate) fn same_keys(&self, other: &BlockerMultiset) -> bool {
+        if self.entries.len() != other.entries.len() {
+            return false;
+        }
+        self.entries
+            .iter()
+            .map(|(k, _)| k)
+            .eq(other.entries.iter().map(|(k, _)| k))
+    }
+
+    /// Returns true if every key in `self` is also in `other` with the
+    /// SAME count, AND `other` has at least one extra key OR a higher count
+    /// somewhere — i.e. `self` is a proper subset of `other`.
+    /// Used to detect: "the new blocker set is a strict shrink of the old."
+    pub(crate) fn is_strict_shrink_of(&self, prev: &BlockerMultiset) -> bool {
+        if self.total() >= prev.total() {
+            return false;
+        }
+        for (k, c) in &self.entries {
+            match prev.entries.iter().find(|(pk, _)| pk == k) {
+                Some((_, pc)) if pc >= c => {}
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    /// Stable string for logs (not used for equality — equality is via PartialEq).
+    pub(crate) fn fingerprint_string(&self) -> String {
+        self.entries
+            .iter()
+            .map(|(k, c)| {
+                format!(
+                    "{}::{}::{}::{c}",
+                    k.source,
+                    k.rule_id,
+                    k.file_path.as_deref().unwrap_or("?")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+}
+
+/// Build a multiset from the blocking issues of a quality_run.
+async fn compute_blocker_multiset(
     db: &Arc<DBService>,
     quality_run_id: &str,
-) -> Option<String> {
+) -> Option<BlockerMultiset> {
     let issues =
         db::models::QualityIssueRecord::find_blocking_by_run(&db.pool, quality_run_id)
             .await
@@ -6373,39 +6484,216 @@ async fn compute_blocker_fingerprint(
     if issues.is_empty() {
         return None;
     }
-    let mut rule_ids: Vec<String> = issues.into_iter().map(|i| i.rule_id).collect();
-    rule_ids.sort();
-    rule_ids.dedup();
-    Some(rule_ids.join("|"))
+    let mut counts: std::collections::BTreeMap<BlockerKey, u32> =
+        std::collections::BTreeMap::new();
+    for issue in issues {
+        let key = BlockerKey {
+            source: issue.source,
+            rule_id: issue.rule_id,
+            file_path: issue.file_path,
+        };
+        *counts.entry(key).or_insert(0) += 1;
+    }
+    let entries: Vec<(BlockerKey, u32)> = counts.into_iter().collect();
+    Some(BlockerMultiset { entries })
 }
 
-async fn detect_n_failure_stuck_fingerprint(
+/// Loop-progress classification used by `handle_quality_gate_result` to
+/// decide what to do with a failed enforce-mode quality_run.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum LoopProgressClass {
+    /// Fewer than `min_history_for_classification` enforce-failed runs on
+    /// this terminal — no signal yet, just send the fix prompt verbatim.
+    FirstFew { history_len: usize },
+    /// Real progress: blocking count strictly down OR multiset strict shrink.
+    /// Send fix prompt with positive-feedback prefix.
+    MakingProgress {
+        prev_blocking: u32,
+        curr_blocking: u32,
+        same_keys: bool,
+    },
+    /// Same multiset across consecutive runs (no count change). Send fix
+    /// prompt with "try a different approach" hint. Wraps `rounds` so the
+    /// caller can decide if mid-tier or pause threshold is reached.
+    Plateau { rounds: usize },
+    /// Blocking count grew OR new blocker keys appeared. Send fix prompt
+    /// with "your last attempts ADDED issues" hint.
+    Regression {
+        rounds: usize,
+        added_keys: usize,
+        delta_blocking: i32,
+    },
+}
+
+/// Hardcoded defaults — primary brain mandated these become workflow-
+/// configurable in a follow-up; for now they live as constants so the
+/// architectural change can land without a DB migration.
+/// Minimum prior enforce-failed runs needed before the classifier can make
+/// a non-FirstFew judgment. With value=1 we always have at least one prior
+/// to compare against — enough to detect MakingProgress / Regression.
+pub(crate) const LOOP_MIN_HISTORY: usize = 1;
+pub(crate) const LOOP_PAUSE_PLATEAU_ROUNDS: usize = 8;
+pub(crate) const LOOP_PAUSE_REGRESSION_ROUNDS: usize = 5;
+
+/// Classify the current quality-gate failure against this terminal's recent
+/// enforce-mode failure history. Returns `FirstFew` when there's not enough
+/// history to reason about.
+///
+/// Per-terminal scope (NOT per-task): a task may host multiple terminals
+/// and mixing their histories produces nonsense fingerprints.
+async fn classify_loop_progress(
     db: &Arc<DBService>,
-    task_id: &str,
-) -> Option<String> {
-    let runs = db::models::QualityRun::find_by_task(&db.pool, task_id)
-        .await
-        .ok()?;
-    // DESC-ordered; take the most recent N.
-    let recent: Vec<_> = runs.into_iter().take(N_FAILURE_ESCALATION_THRESHOLD).collect();
-    if recent.len() < N_FAILURE_ESCALATION_THRESHOLD {
-        return None;
-    }
-    // Require every one to be an enforce-mode failure.
-    if !recent.iter().all(|r| r.gate_status == "error") {
-        return None;
-    }
-    let mut fps: Vec<String> = Vec::with_capacity(recent.len());
-    for r in &recent {
-        match compute_blocker_fingerprint(db, &r.id).await {
-            Some(fp) if !fp.is_empty() => fps.push(fp),
-            _ => return None,
+    terminal_id: &str,
+    current_multiset: &BlockerMultiset,
+) -> LoopProgressClass {
+    let runs_result = db::models::QualityRun::find_by_terminal(&db.pool, terminal_id).await;
+    let runs = match runs_result {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!(
+                terminal_id = %terminal_id,
+                error = %e,
+                "R8: failed to load terminal quality_run history; treating as FirstFew"
+            );
+            return LoopProgressClass::FirstFew { history_len: 0 };
         }
+    };
+    // DESC-ordered; the most recent run is the one we're currently classifying,
+    // so look at runs[1..] for the comparison history.
+    let prior_failures: Vec<_> = runs
+        .into_iter()
+        .skip(1)
+        .filter(|r| r.gate_status == "error")
+        .collect();
+
+    if prior_failures.len() < LOOP_MIN_HISTORY {
+        return LoopProgressClass::FirstFew {
+            history_len: prior_failures.len(),
+        };
     }
-    if fps.iter().all(|fp| fp == &fps[0]) {
-        Some(fps.remove(0))
-    } else {
-        None
+
+    let prev_run = &prior_failures[0];
+    let prev_multiset = match compute_blocker_multiset(db, &prev_run.id).await {
+        Some(ms) => ms,
+        None => return LoopProgressClass::FirstFew { history_len: prior_failures.len() },
+    };
+
+    let curr_total = current_multiset.total();
+    let prev_total = prev_multiset.total();
+
+    // Real progress: count strictly down, OR strict shrink of the multiset.
+    if current_multiset.is_strict_shrink_of(&prev_multiset) || curr_total < prev_total {
+        return LoopProgressClass::MakingProgress {
+            prev_blocking: prev_total,
+            curr_blocking: curr_total,
+            same_keys: current_multiset.same_keys(&prev_multiset),
+        };
+    }
+
+    // Regression: count grew OR new keys appeared that weren't in prev.
+    if curr_total > prev_total {
+        // Count consecutive regression rounds.
+        let mut rounds = 1usize;
+        let mut last = prev_multiset.clone();
+        for older in prior_failures.iter().skip(1) {
+            let older_ms = match compute_blocker_multiset(db, &older.id).await {
+                Some(ms) => ms,
+                None => break,
+            };
+            if last.total() > older_ms.total() {
+                rounds += 1;
+                last = older_ms;
+            } else {
+                break;
+            }
+        }
+        let added_keys = current_multiset
+            .entries
+            .iter()
+            .filter(|(k, _)| !prev_multiset.entries.iter().any(|(pk, _)| pk == k))
+            .count();
+        return LoopProgressClass::Regression {
+            rounds,
+            added_keys,
+            delta_blocking: curr_total as i32 - prev_total as i32,
+        };
+    }
+
+    // Same total + same multiset → Plateau. Count consecutive identical rounds.
+    if current_multiset == &prev_multiset {
+        let mut rounds = 2usize; // current + prev are identical
+        for older in prior_failures.iter().skip(1) {
+            let older_ms = match compute_blocker_multiset(db, &older.id).await {
+                Some(ms) => ms,
+                None => break,
+            };
+            if &older_ms == current_multiset {
+                rounds += 1;
+            } else {
+                break;
+            }
+        }
+        return LoopProgressClass::Plateau { rounds };
+    }
+
+    // Same total but different multiset (e.g., one blocker became another) —
+    // count it as MakingProgress because the AI changed something.
+    LoopProgressClass::MakingProgress {
+        prev_blocking: prev_total,
+        curr_blocking: curr_total,
+        same_keys: false,
+    }
+}
+
+/// Build a human-readable progress hint to prepend to the fix prompt.
+fn loop_progress_hint(class: &LoopProgressClass) -> Option<String> {
+    match class {
+        LoopProgressClass::FirstFew { .. } => None,
+        LoopProgressClass::MakingProgress {
+            prev_blocking,
+            curr_blocking,
+            same_keys,
+        } => {
+            let same_note = if *same_keys {
+                " (same blocker categories, fewer instances — keep applying the same fix strategy)"
+            } else {
+                " (blocker categories shifted)"
+            };
+            Some(format!(
+                "Round update: blocking issues went {prev_blocking} → {curr_blocking}{same_note}. \
+                 You ARE making progress — continue."
+            ))
+        }
+        LoopProgressClass::Plateau { rounds } => {
+            if *rounds >= LOOP_PAUSE_PLATEAU_ROUNDS {
+                Some(format!(
+                    "Round {rounds}: same exact blocker set has persisted for {rounds} consecutive \
+                     attempts with NO count change. Workflow will be paused for human review on the \
+                     next failure. Consider stopping this commit and writing a short blockers.md \
+                     describing what you tried."
+                ))
+            } else if *rounds >= 5 {
+                Some(format!(
+                    "Round {rounds}: same blocker set persisting unchanged. Try a FUNDAMENTALLY \
+                     different approach — different file, different tool, different framing. \
+                     Re-read the failure messages carefully."
+                ))
+            } else {
+                Some(format!(
+                    "Round {rounds}: same blocker set as last attempt with no count change. \
+                     Try a different approach for this category."
+                ))
+            }
+        }
+        LoopProgressClass::Regression {
+            rounds,
+            added_keys,
+            delta_blocking,
+        } => Some(format!(
+            "REGRESSION (round {rounds}): your last commits ADDED {added_keys} new blocker \
+             categories and grew blocking issues by {delta_blocking}. Consider `git revert HEAD` \
+             then try a smaller, more focused fix."
+        )),
     }
 }
 
@@ -6593,10 +6881,11 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        compute_blocker_fingerprint, detect_n_failure_stuck_fingerprint,
-        ensure_js_deps_installed_for_gate, is_quality_run_only_infra_blockers,
-        reset_js_bootstrap_cache_for_test, Duration, JsPackageManager, OrchestratorAgent,
-        StallRecoveryTracker,
+        BlockerKey, BlockerMultiset, LoopProgressClass, classify_loop_progress,
+        compute_blocker_multiset, ensure_js_deps_installed_for_gate,
+        is_quality_run_only_infra_blockers, reset_js_bootstrap_cache_for_test, Duration,
+        JsPackageManager, OrchestratorAgent, StallRecoveryTracker, LOOP_PAUSE_PLATEAU_ROUNDS,
+        LOOP_PAUSE_REGRESSION_ROUNDS,
     };
     use crate::services::orchestrator::{
         BusMessage, MessageBus, MockLLMClient, OrchestratorConfig,
@@ -7153,10 +7442,38 @@ mod tests {
         commit_hash: &str,
         blocker_rule_ids: &[&str],
     ) -> String {
+        insert_failed_quality_run_for_terminal_with_files(
+            db,
+            workflow_id,
+            task_id,
+            None,
+            commit_hash,
+            blocker_rule_ids
+                .iter()
+                .map(|rid| (*rid, None::<&str>))
+                .collect::<Vec<_>>()
+                .as_slice(),
+        )
+        .await
+    }
+
+    /// R8: helper that pins a run to a specific `terminal_id` and pairs each
+    /// blocker rule_id with an optional `file_path`. The new
+    /// `classify_loop_progress` builds its multiset over `(source, rule_id,
+    /// file_path)` tuples, so the file-path dimension is what lets the
+    /// classifier distinguish "same wall, fewer instances" from "stuck."
+    async fn insert_failed_quality_run_for_terminal_with_files(
+        db: &Arc<DBService>,
+        workflow_id: &str,
+        task_id: &str,
+        terminal_id: Option<&str>,
+        commit_hash: &str,
+        blocker_rule_id_and_files: &[(&str, Option<&str>)],
+    ) -> String {
         let run = db::models::QualityRun::new_pending(
             workflow_id,
             Some(task_id),
-            None,
+            terminal_id,
             Some(commit_hash),
             "terminal",
             "enforce",
@@ -7166,8 +7483,8 @@ mod tests {
             &db.pool,
             &run.id,
             "error",
-            blocker_rule_ids.len() as i32,
-            blocker_rule_ids.len() as i32,
+            blocker_rule_id_and_files.len() as i32,
+            blocker_rule_id_and_files.len() as i32,
             0,
             10,
             None,
@@ -7176,7 +7493,7 @@ mod tests {
         )
         .await
         .unwrap();
-        for rid in blocker_rule_ids {
+        for (rid, fp) in blocker_rule_id_and_files {
             let mut issue = db::models::QualityIssueRecord::new(
                 &run.id,
                 rid,
@@ -7186,6 +7503,7 @@ mod tests {
                 "synthetic blocker",
             );
             issue.is_blocking = true;
+            issue.file_path = fp.map(std::string::ToString::to_string);
             db::models::QualityIssueRecord::insert(&db.pool, &issue)
                 .await
                 .unwrap();
@@ -7252,162 +7570,263 @@ mod tests {
         );
     }
 
-    // ───────────────────────── R4 Fix C tests ─────────────────────────
+    // ───────────────────────── R8 classifier tests (replaces R4 Fix C) ─────────────────────────
 
     #[tokio::test]
-    async fn fix_c_compute_fingerprint_sorted_dedup() {
+    async fn r8_multiset_canonical_ordering_and_count() {
         let db = in_memory_db().await;
-        // Insert duplicates intentionally — ordering and dedup MUST be stable.
-        let run_id = insert_failed_quality_run_with_blockers(
+        // Insert blockers with duplicated (rule_id, file_path) so the
+        // multiset must collapse to count=2 for that key.
+        let run_id = insert_failed_quality_run_for_terminal_with_files(
             &db,
-            "wf-c1",
-            "task-c1",
-            "commit-c1",
-            &["vitest::unavailable", "tsc::unavailable", "tsc::unavailable"],
+            "wf-r8a",
+            "task-r8a",
+            Some("term-r8a"),
+            "commit-r8a",
+            &[
+                ("tsc::error", Some("src/a.ts")),
+                ("tsc::error", Some("src/a.ts")),
+                ("tsc::error", Some("src/b.ts")),
+                ("vitest::fail", Some("tests/x.test.ts")),
+            ],
         )
         .await;
-        let fp = compute_blocker_fingerprint(&db, &run_id).await.unwrap();
-        assert_eq!(fp, "tsc::unavailable|vitest::unavailable");
+        let ms = compute_blocker_multiset(&db, &run_id).await.unwrap();
+        assert_eq!(ms.total(), 4);
+        assert_eq!(ms.unique_count(), 3);
     }
 
+    /// R7 reproduction: blocking 52→15→11→7 on the SAME rule_id set across
+    /// 4 runs. Old R4 Fix C would have escalated to FAILED on round 4.
+    /// New classifier MUST return MakingProgress every time and never pause.
     #[tokio::test]
-    async fn fix_c_escalates_after_three_identical_failed_runs() {
+    async fn r8_r7_scenario_blocking_drops_same_categories_classified_as_progress() {
         let db = in_memory_db().await;
-        let fp_rules = ["tsc::unavailable", "vitest::unavailable"];
-        for i in 0..3 {
-            insert_failed_quality_run_with_blockers(
+        let term_id = "term-r7-repro";
+        let task_id = "task-r7-repro";
+        let wf_id = "wf-r7-repro";
+
+        // Helper to build a (rule_id, Some(file_path)) Vec of N blockers from
+        // a single rule_id — simulating "same wall, fewer instances".
+        fn n_files(rule: &'static str, n: usize) -> Vec<(&'static str, Option<String>)> {
+            (0..n).map(|i| (rule, Some(format!("src/file_{i}.ts")))).collect()
+        }
+        fn to_refs<'a>(v: &'a [(&'static str, Option<String>)]) -> Vec<(&'static str, Option<&'a str>)> {
+            v.iter().map(|(r, f)| (*r, f.as_deref())).collect()
+        }
+
+        let counts = [52usize, 15, 11, 7];
+        for (i, n) in counts.iter().enumerate() {
+            let owned = n_files("tsc::error", *n);
+            let pairs = to_refs(&owned);
+            insert_failed_quality_run_for_terminal_with_files(
+                &db, wf_id, task_id, Some(term_id), &format!("commit-{i}"), &pairs,
+            )
+            .await;
+
+            // For runs after the first, the classifier looks at this run's
+            // multiset against the prior history. Simulate the call site by
+            // computing the latest run's multiset and asking the classifier.
+            let runs = db::models::QualityRun::find_by_terminal(&db.pool, term_id)
+                .await
+                .unwrap();
+            let latest_id = &runs[0].id;
+            let curr_ms = compute_blocker_multiset(&db, latest_id).await.unwrap();
+            let class = classify_loop_progress(&db, term_id, &curr_ms).await;
+            match (i, class.clone()) {
+                (0, LoopProgressClass::FirstFew { .. }) => { /* round 0 has no prior */ }
+                (j, LoopProgressClass::MakingProgress { .. }) if j >= 1 => { /* expected */ }
+                (j, c) => panic!(
+                    "R7 scenario round {j}: expected FirstFew (j=0) or MakingProgress (j>=1), got {c:?}"
+                ),
+            }
+            assert!(
+                !matches!(
+                    class,
+                    LoopProgressClass::Plateau { rounds }
+                        if rounds >= LOOP_PAUSE_PLATEAU_ROUNDS
+                ),
+                "R7 scenario must NEVER reach pause-threshold plateau (round {i})"
+            );
+        }
+    }
+
+    /// Genuine plateau: same multiset every run → after enough rounds the
+    /// classifier returns Plateau{rounds >= LOOP_PAUSE_PLATEAU_ROUNDS}.
+    #[tokio::test]
+    async fn r8_genuine_plateau_eventually_hits_pause_threshold() {
+        let db = in_memory_db().await;
+        let term_id = "term-plateau";
+        // Insert LOOP_PAUSE_PLATEAU_ROUNDS+1 runs with IDENTICAL multisets.
+        for i in 0..=LOOP_PAUSE_PLATEAU_ROUNDS {
+            insert_failed_quality_run_for_terminal_with_files(
                 &db,
-                "wf-c2",
-                "task-c2",
-                &format!("commit-c2-{i}"),
-                &fp_rules,
+                "wf-plateau",
+                "task-plateau",
+                Some(term_id),
+                &format!("commit-p-{i}"),
+                &[
+                    ("eslint::no-explicit-any", Some("src/a.ts")),
+                    ("eslint::no-explicit-any", Some("src/b.ts")),
+                ],
             )
             .await;
         }
-        let out = detect_n_failure_stuck_fingerprint(&db, "task-c2").await;
-        assert!(
-            out.is_some(),
-            "three consecutive identical-fingerprint failed runs must escalate"
-        );
-    }
-
-    #[tokio::test]
-    async fn fix_c_does_not_escalate_when_fingerprint_changes() {
-        let db = in_memory_db().await;
-        // Run 1: two blockers. Run 2: same two. Run 3: one blocker removed (progress!)
-        insert_failed_quality_run_with_blockers(
-            &db,
-            "wf-c3",
-            "task-c3",
-            "commit-c3-0",
-            &["tsc::unavailable", "vitest::unavailable"],
-        )
-        .await;
-        insert_failed_quality_run_with_blockers(
-            &db,
-            "wf-c3",
-            "task-c3",
-            "commit-c3-1",
-            &["tsc::unavailable", "vitest::unavailable"],
-        )
-        .await;
-        insert_failed_quality_run_with_blockers(
-            &db,
-            "wf-c3",
-            "task-c3",
-            "commit-c3-2",
-            &["tsc::unavailable"],
-        )
-        .await;
-        assert!(
-            detect_n_failure_stuck_fingerprint(&db, "task-c3")
-                .await
-                .is_none(),
-            "fingerprint progress (fewer blockers) must NOT escalate"
-        );
-    }
-
-    #[tokio::test]
-    async fn fix_c_does_not_escalate_when_mode_is_shadow() {
-        // primary-brain v2 concern: shadow/warn runs that happen to have
-        // gate_status=error must NOT be counted for escalation. Simulate
-        // by inserting 3 shadow-mode rows with identical blockers and
-        // verify detect_n_failure_stuck_fingerprint returns None because
-        // the helper now only matches mode=enforce runs' error-status.
-        let db = in_memory_db().await;
-        for i in 0..3 {
-            let run = db::models::QualityRun::new_pending(
-                "wf-c5",
-                Some("task-c5"),
-                None,
-                Some(&format!("commit-c5-{i}")),
-                "terminal",
-                "shadow", // <-- explicit: not enforce
-            );
-            db::models::QualityRun::insert(&db.pool, &run).await.unwrap();
-            db::models::QualityRun::complete(
-                &db.pool, &run.id, "error", 2, 2, 0, 10, None, None, None,
-            )
+        let runs = db::models::QualityRun::find_by_terminal(&db.pool, term_id)
             .await
             .unwrap();
-            for rid in &["tsc::unavailable", "eslint::unavailable"] {
-                let mut issue = db::models::QualityIssueRecord::new(
-                    &run.id,
-                    rid,
-                    "BUG",
-                    "CRITICAL",
-                    "quality-test",
-                    "synthetic shadow blocker",
+        let latest_id = &runs[0].id;
+        let curr_ms = compute_blocker_multiset(&db, latest_id).await.unwrap();
+        let class = classify_loop_progress(&db, term_id, &curr_ms).await;
+        match class {
+            LoopProgressClass::Plateau { rounds } => {
+                assert!(
+                    rounds >= LOOP_PAUSE_PLATEAU_ROUNDS,
+                    "plateau rounds ({rounds}) must reach pause threshold ({LOOP_PAUSE_PLATEAU_ROUNDS})"
                 );
-                issue.is_blocking = true;
-                db::models::QualityIssueRecord::insert(&db.pool, &issue)
-                    .await
-                    .unwrap();
             }
+            other => panic!("expected Plateau at the pause threshold, got {other:?}"),
         }
-        // NOTE: detect_n_failure_stuck_fingerprint itself only checks for
-        // gate_status=error. The enforce-mode guard lives at the CALL site
-        // (handle_quality_gate_result checks event.mode). Verify the mode
-        // guard by reading event.mode — here we just confirm the helper
-        // does detect stuck runs on pure fingerprint/status, while the
-        // call-site gate-mode guard (which we verified manually via the
-        // patched `if event.mode == QUALITY_GATE_MODE_ENFORCE && !event.passed`
-        // outer block) prevents escalation for shadow events.
-        //
-        // The helper returns Some because all 3 runs are still error —
-        // that's correct; protection is at the caller.
-        let maybe_fp = detect_n_failure_stuck_fingerprint(&db, "task-c5").await;
-        assert!(
-            maybe_fp.is_some(),
-            "helper should still detect the pattern; caller's mode guard prevents action"
+    }
+
+    /// Regression: blocking grew across runs. Classifier returns Regression
+    /// with non-zero `delta_blocking` and added_keys count.
+    #[tokio::test]
+    async fn r8_regression_when_count_grows() {
+        let db = in_memory_db().await;
+        let term_id = "term-regress";
+        // Run 1: 2 blockers
+        insert_failed_quality_run_for_terminal_with_files(
+            &db,
+            "wf-regress",
+            "task-regress",
+            Some(term_id),
+            "commit-r-0",
+            &[("tsc::error", Some("src/a.ts")), ("tsc::error", Some("src/b.ts"))],
+        )
+        .await;
+        // Run 2: 5 blockers including 3 NEW keys (different files)
+        insert_failed_quality_run_for_terminal_with_files(
+            &db,
+            "wf-regress",
+            "task-regress",
+            Some(term_id),
+            "commit-r-1",
+            &[
+                ("tsc::error", Some("src/a.ts")),
+                ("tsc::error", Some("src/b.ts")),
+                ("tsc::error", Some("src/c.ts")),
+                ("eslint::any", Some("src/d.ts")),
+                ("vitest::fail", Some("tests/x.test.ts")),
+            ],
+        )
+        .await;
+        let runs = db::models::QualityRun::find_by_terminal(&db.pool, term_id)
+            .await
+            .unwrap();
+        let latest_id = &runs[0].id;
+        let curr_ms = compute_blocker_multiset(&db, latest_id).await.unwrap();
+        let class = classify_loop_progress(&db, term_id, &curr_ms).await;
+        match class {
+            LoopProgressClass::Regression {
+                rounds,
+                added_keys,
+                delta_blocking,
+            } => {
+                assert_eq!(delta_blocking, 3);
+                assert_eq!(added_keys, 3);
+                assert!(rounds >= 1);
+            }
+            other => panic!("expected Regression on count growth, got {other:?}"),
+        }
+        // LOOP_PAUSE_REGRESSION_ROUNDS used as pause threshold, but with
+        // `rounds = 1` we should NOT trigger pause yet.
+        const _ASSERT_REG_THRESHOLD: () = assert!(
+            LOOP_PAUSE_REGRESSION_ROUNDS > 1,
+            "regression pause threshold must be > 1 to allow recoverable bumps"
         );
     }
 
+    /// Infra-only blockers should be filtered at the call site by
+    /// `is_quality_run_only_infra_blockers` — the classifier itself never
+    /// runs on infra-only quality_runs (call site short-circuits). This test
+    /// asserts the existing infra-detection contract still holds with the
+    /// new helper signatures.
     #[tokio::test]
-    async fn fix_c_does_not_escalate_on_fewer_than_n_runs() {
+    async fn r8_infra_only_blockers_still_classified_as_environment() {
         let db = in_memory_db().await;
-        insert_failed_quality_run_with_blockers(
+        let run_id = insert_failed_quality_run_for_terminal_with_files(
             &db,
-            "wf-c4",
-            "task-c4",
-            "commit-c4-0",
-            &["tsc::unavailable"],
+            "wf-infra",
+            "task-infra",
+            Some("term-infra"),
+            "commit-infra",
+            &[
+                ("tsc::unavailable", None),
+                ("vitest::unavailable", None),
+            ],
         )
         .await;
-        insert_failed_quality_run_with_blockers(
-            &db,
-            "wf-c4",
-            "task-c4",
-            "commit-c4-1",
-            &["tsc::unavailable"],
-        )
-        .await;
-        // Only 2 runs < N=3 threshold.
         assert!(
-            detect_n_failure_stuck_fingerprint(&db, "task-c4")
-                .await
-                .is_none(),
-            "two runs must NOT escalate (below N threshold)"
+            is_quality_run_only_infra_blockers(&db, &run_id).await,
+            "all-unavailable blockers must still be flagged as environment"
         );
+    }
+
+    /// Insufficient history: classifier returns FirstFew when there's < 2
+    /// prior enforce-failed runs.
+    #[tokio::test]
+    async fn r8_first_few_when_history_too_short() {
+        let db = in_memory_db().await;
+        let term_id = "term-first";
+        insert_failed_quality_run_for_terminal_with_files(
+            &db,
+            "wf-first",
+            "task-first",
+            Some(term_id),
+            "commit-f-0",
+            &[("tsc::error", Some("src/a.ts"))],
+        )
+        .await;
+        let runs = db::models::QualityRun::find_by_terminal(&db.pool, term_id)
+            .await
+            .unwrap();
+        let latest_id = &runs[0].id;
+        let curr_ms = compute_blocker_multiset(&db, latest_id).await.unwrap();
+        let class = classify_loop_progress(&db, term_id, &curr_ms).await;
+        assert!(
+            matches!(class, LoopProgressClass::FirstFew { .. }),
+            "single-run history must classify as FirstFew, got {class:?}"
+        );
+    }
+
+    /// BlockerMultiset same_keys + is_strict_shrink_of contracts.
+    #[test]
+    fn r8_multiset_set_relations() {
+        let key_a = BlockerKey {
+            source: "tsc".into(),
+            rule_id: "error".into(),
+            file_path: Some("a.ts".into()),
+        };
+        let key_b = BlockerKey {
+            source: "tsc".into(),
+            rule_id: "error".into(),
+            file_path: Some("b.ts".into()),
+        };
+        let big = BlockerMultiset {
+            entries: vec![(key_a.clone(), 5), (key_b.clone(), 3)],
+        };
+        let same_keys_smaller = BlockerMultiset {
+            entries: vec![(key_a.clone(), 2), (key_b.clone(), 1)],
+        };
+        assert!(same_keys_smaller.same_keys(&big));
+        assert!(same_keys_smaller.is_strict_shrink_of(&big));
+        assert!(!big.is_strict_shrink_of(&same_keys_smaller));
+
+        let different_keys = BlockerMultiset {
+            entries: vec![(key_a, 5)],
+        };
+        assert!(!different_keys.same_keys(&big));
+        assert!(different_keys.is_strict_shrink_of(&big));
     }
 }
