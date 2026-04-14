@@ -83,6 +83,11 @@ installer/build/
 installer/output/
 docs/undeveloped/current/screenshots/
 target2/
+.codex-target/
+target_*/
+
+# R6 port-pollution incident (2026-04-14) — local diagnostic scripts
+scripts/r6-*.py
 
 # Temporary debug/test artifacts
 rustc-ice-*.txt
