@@ -286,6 +286,8 @@ impl OpenAICompatibleClient {
                     content: choice.message.content.clone(),
                     usage,
                 });
+            } else {
+                return Err(anyhow::anyhow!("LLM returned empty choices"));
             }
         }
 
