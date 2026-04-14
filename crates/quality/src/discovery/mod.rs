@@ -1313,6 +1313,19 @@ mod tests {
             "extremely-unlikely-shim-name-for-test.cmd".to_string(),
             "bare name with no PATH hit must fall back to `.cmd` suffix"
         );
+
+        // Direct regression guard for the exact v2 bug: a bare name that
+        // ALREADY carries a `.exe` suffix must still flow through the PATH
+        // scan rather than short-circuiting. With no PATH hit, the resolver
+        // falls back to `{name}.cmd` — note this produces `*.exe.cmd`, which
+        // is distinct from the input verbatim and proves the branch no
+        // longer treats extension-bearing bare names as explicit paths.
+        let resolved_exe = resolve_node_exe("extremely-unlikely-shim-name-for-test.exe");
+        assert_eq!(
+            resolved_exe,
+            "extremely-unlikely-shim-name-for-test.exe.cmd".to_string(),
+            "bare `.exe` name must not short-circuit — must scan PATH then fall back"
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::discovery::{
-    NodeQualityCommand, PackageManager, RepositoryDiscovery, resolve_node_command, resolve_node_exe,
+    NodeQualityCommand, PackageManager, RepositoryDiscovery, resolve_node_command,
 };
 use crate::gate::result::MeasureValue;
 use crate::issue::QualityIssue;
@@ -94,8 +94,12 @@ pub async fn run_node_quality_command(
     package_manager: Option<PackageManager>,
     command: &NodeQualityCommand,
 ) -> anyhow::Result<std::process::Output> {
+    // `resolve_node_command` already routes the PM shim through
+    // `resolve_node_exe` internally (both Script and PackageExec branches),
+    // so no additional resolution is needed here. Calling it again was a
+    // no-op for absolute results but caused primary-brain review concern
+    // about idempotency assumptions — keep a single resolution point.
     let (cmd, args) = resolve_node_command(package_manager, command);
-    let cmd = resolve_node_exe(&cmd);
     tokio::process::Command::new(cmd)
         .args(args)
         .current_dir(cwd)
