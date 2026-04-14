@@ -1123,7 +1123,17 @@ impl GitService {
             log_skip_when_dirty,
         } = options;
 
-        let head_oid = self.get_head_info(worktree_path).ok().map(|h| h.oid);
+        let head_oid = self
+            .get_head_info(worktree_path)
+            .inspect_err(|e| {
+                tracing::warn!(
+                    error = %e,
+                    worktree = %worktree_path.display(),
+                    "Failed to read HEAD info for worktree reset decision"
+                )
+            })
+            .ok()
+            .map(|h| h.oid);
         let mut outcome = WorktreeResetOutcome::default();
 
         if head_oid.as_deref() != Some(target_commit_oid) || is_dirty {
@@ -1255,7 +1265,17 @@ impl GitService {
                 && let Ok(commit) = repo.find_commit(target)
             {
                 let timestamp = commit.time().seconds();
-                return Ok(DateTime::from_timestamp(timestamp, 0).unwrap_or_else(Utc::now));
+                // E28-14: libgit2 commit timestamps should always fit in an
+                // i64 second count, but guard against out-of-range values
+                // (e.g. corrupt history) and surface the fallback so the
+                // "now" default isn't silently masking a bad commit.
+                return Ok(DateTime::from_timestamp(timestamp, 0).unwrap_or_else(|| {
+                    tracing::warn!(
+                        timestamp,
+                        "commit timestamp out of range for DateTime; falling back to Utc::now()"
+                    );
+                    Utc::now()
+                }));
             }
             Ok(Utc::now()) // Default to now if we can't get the commit date
         };
@@ -1333,7 +1353,18 @@ impl GitService {
         )?;
 
         let parse_date = |raw: Option<&str>| -> DateTime<Utc> {
-            raw.and_then(|value| DateTime::parse_from_rfc3339(value).ok()).map_or_else(Utc::now, |dt| dt.with_timezone(&Utc))
+            raw.and_then(|value| {
+                DateTime::parse_from_rfc3339(value)
+                    .inspect_err(|e| {
+                        tracing::warn!(
+                            error = %e,
+                            raw = %value,
+                            "Failed to parse branch committerdate as RFC3339; falling back to Utc::now()"
+                        )
+                    })
+                    .ok()
+            })
+            .map_or_else(Utc::now, |dt| dt.with_timezone(&Utc))
         };
 
         let mut branches = Vec::new();
@@ -1611,19 +1642,40 @@ impl GitService {
         worktree_path: &Path,
     ) -> Result<Option<ConflictOp>, GitServiceError> {
         let git = GitCli::new();
-        if git.is_rebase_in_progress(worktree_path).unwrap_or(false) {
+        if git
+            .is_rebase_in_progress(worktree_path)
+            .inspect_err(|e| {
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_rebase_in_progress CLI check failed; assuming false")
+            })
+            .unwrap_or(false)
+        {
             return Ok(Some(ConflictOp::Rebase));
         }
-        if git.is_merge_in_progress(worktree_path).unwrap_or(false) {
+        if git
+            .is_merge_in_progress(worktree_path)
+            .inspect_err(|e| {
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_merge_in_progress CLI check failed; assuming false")
+            })
+            .unwrap_or(false)
+        {
             return Ok(Some(ConflictOp::Merge));
         }
         if git
             .is_cherry_pick_in_progress(worktree_path)
+            .inspect_err(|e| {
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_cherry_pick_in_progress CLI check failed; assuming false")
+            })
             .unwrap_or(false)
         {
             return Ok(Some(ConflictOp::CherryPick));
         }
-        if git.is_revert_in_progress(worktree_path).unwrap_or(false) {
+        if git
+            .is_revert_in_progress(worktree_path)
+            .inspect_err(|e| {
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_revert_in_progress CLI check failed; assuming false")
+            })
+            .unwrap_or(false)
+        {
             return Ok(Some(ConflictOp::Revert));
         }
         Ok(None)

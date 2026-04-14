@@ -237,9 +237,8 @@ export const handleApiResponse = async <T, E = T>(
     }
 
     logApiError('[API Error]', {
-      message: errorMessage,
+      message: errorMessage.slice(0, 200),
       status: response.status,
-      response,
       endpoint: response.url,
       timestamp: new Date().toISOString(),
     });
@@ -263,9 +262,8 @@ export const handleApiResponse = async <T, E = T>(
     if (result.error_data) {
       logApiError('[API Error with data]', {
         error_data: result.error_data,
-        message: result.message,
+        message: (result.message || '').slice(0, 200),
         status: response.status,
-        response,
         endpoint: response.url,
         timestamp: new Date().toISOString(),
       });
@@ -279,9 +277,8 @@ export const handleApiResponse = async <T, E = T>(
     }
 
     logApiError('[API Error]', {
-      message: result.message || 'API request failed',
+      message: (result.message || 'API request failed').slice(0, 200),
       status: response.status,
-      response,
       endpoint: response.url,
       timestamp: new Date().toISOString(),
     });

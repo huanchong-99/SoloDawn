@@ -600,11 +600,23 @@ impl LocalContainerService {
         format!("{}-{}", short_uuid(workspace_id), task_title_id)
     }
 
-    async fn track_child_msgs_in_store(&self, id: Uuid, child: &mut AsyncGroupChild) {
+    async fn track_child_msgs_in_store(
+        &self,
+        id: Uuid,
+        child: &mut AsyncGroupChild,
+    ) -> Result<(), ContainerError> {
         let store = Arc::new(MsgStore::new());
 
-        let out = child.inner().stdout.take().expect("no stdout");
-        let err = child.inner().stderr.take().expect("no stderr");
+        let out = child
+            .inner()
+            .stdout
+            .take()
+            .ok_or_else(|| ContainerError::Other(anyhow!("child has no stdout")))?;
+        let err = child
+            .inner()
+            .stderr
+            .take()
+            .ok_or_else(|| ContainerError::Other(anyhow!("child has no stderr")))?;
 
         // Map stdout bytes -> LogMsg::Stdout
         let out = ReaderStream::new(out)
@@ -622,6 +634,7 @@ impl LocalContainerService {
 
         let mut map = self.msg_stores().write().await;
         map.insert(id, store);
+        Ok(())
     }
 
     /// Create a live diff log stream for ongoing attempts for WebSocket
@@ -635,7 +648,17 @@ impl LocalContainerService {
     /// Extract the last assistant message from the MsgStore history
     fn extract_last_assistant_message(&self, exec_id: &Uuid) -> Option<String> {
         // Get the MsgStore for this execution
-        let msg_stores = self.msg_stores.try_read().ok()?;
+        let msg_stores = match self.msg_stores.try_read() {
+            Ok(guard) => guard,
+            Err(e) => {
+                tracing::debug!(
+                    exec_id = %exec_id,
+                    error = %e,
+                    "msg_stores try_read failed; skipping last assistant message extraction"
+                );
+                return None;
+            }
+        };
         let msg_store = msg_stores.get(exec_id)?;
 
         // Get the history and scan in reverse for the last assistant message
@@ -946,13 +969,32 @@ impl LocalContainerService {
                                 serde_json::json!({})
                             };
                             if let Some(obj) = config_json.as_object_mut() {
-                                obj.insert("primaryApiKey".to_string(), serde_json::json!(vars.get("ANTHROPIC_API_KEY").unwrap()));
+                                match vars.get("ANTHROPIC_API_KEY") {
+                                    Some(key) => {
+                                        obj.insert(
+                                            "primaryApiKey".to_string(),
+                                            serde_json::json!(key),
+                                        );
+                                    }
+                                    None => {
+                                        tracing::warn!(
+                                            "ANTHROPIC_API_KEY missing from vars when writing Claude config.json"
+                                        );
+                                    }
+                                }
                                 if let Some(base_url) = model_config.base_url.as_ref() {
                                     obj.insert("apiBaseUrl".to_string(), serde_json::json!(base_url));
                                 }
                             }
-                            if let Err(e) = std::fs::write(&config_path, serde_json::to_string_pretty(&config_json).unwrap_or_default()) {
-                                tracing::warn!(error = %e, "Failed to write Claude config.json with API key");
+                            match serde_json::to_string_pretty(&config_json) {
+                                Ok(serialized) => {
+                                    if let Err(e) = std::fs::write(&config_path, serialized) {
+                                        tracing::warn!(error = %e, "Failed to write Claude config.json with API key");
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Failed to serialize Claude config.json with API key");
+                                }
                             }
                         }
                     }
@@ -1090,7 +1132,16 @@ impl ContainerService for LocalContainerService {
     }
 
     fn workspace_to_current_dir(&self, workspace: &Workspace) -> PathBuf {
-        PathBuf::from(workspace.container_ref.clone().unwrap_or_default())
+        match workspace.container_ref.clone() {
+            Some(path) => PathBuf::from(path),
+            None => {
+                tracing::warn!(
+                    workspace_id = %workspace.id,
+                    "workspace has no container_ref; falling back to empty path"
+                );
+                PathBuf::new()
+            }
+        }
     }
 
     async fn create(&self, workspace: &Workspace) -> Result<ContainerRef, ContainerError> {
@@ -1122,7 +1173,17 @@ impl ContainerService for LocalContainerService {
         let workspace_inputs: Vec<RepoWorkspaceInput> = repositories
             .iter()
             .map(|repo| {
-                let target_branch = target_branches.get(&repo.id).cloned().unwrap_or_default();
+                let target_branch = match target_branches.get(&repo.id).cloned() {
+                    Some(branch) => branch,
+                    None => {
+                        tracing::warn!(
+                            repo_id = %repo.id,
+                            workspace_id = %workspace.id,
+                            "no target_branch found for repo; using empty string"
+                        );
+                        String::new()
+                    }
+                };
                 RepoWorkspaceInput::new(repo.clone(), target_branch)
             })
             .collect();
@@ -1317,7 +1378,7 @@ impl ContainerService for LocalContainerService {
         })??;
 
         self.track_child_msgs_in_store(execution_process.id, &mut spawned.child)
-            .await;
+            .await?;
 
         self.add_child_to_store(execution_process.id, spawned.child)
             .await;

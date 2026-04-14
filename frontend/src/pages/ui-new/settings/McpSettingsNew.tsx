@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { useTranslation } from 'react-i18next';
 import {
   SpinnerGapIcon,
@@ -142,14 +143,20 @@ export function McpSettingsNew() {
     }
   }, [selectedProfileKey, t]);
 
-  const handleMcpServersChange = (value: string) => {
-    setMcpServers(value);
-    setMcpError(null);
-
-    if (value.trim() && mcpConfig) {
+  const { debounced: debouncedValidate } = useDebouncedCallback(
+    (value: string, currentMcpConfig: McpConfig | null) => {
+      if (!value.trim() || !currentMcpConfig) {
+        setMcpError(null);
+        return;
+      }
       try {
         const parsedConfig = JSON.parse(value);
-        McpConfigStrategyGeneral.validateFullConfig(mcpConfig, parsedConfig);
+        McpConfigStrategyGeneral.validateFullConfig(
+          currentMcpConfig,
+          parsedConfig
+        );
+        // Clear errors on successful parse + validate
+        setMcpError(null);
       } catch (err) {
         if (err instanceof SyntaxError) {
           setMcpError({
@@ -166,7 +173,16 @@ export function McpSettingsNew() {
           });
         }
       }
-    }
+    },
+    300
+  );
+
+  const handleMcpServersChange = (value: string) => {
+    setMcpServers(value);
+    // Clear error immediately so stale errors don't linger during typing;
+    // debounced validation will re-raise errors if needed.
+    setMcpError(null);
+    debouncedValidate(value, mcpConfig);
   };
 
   const handleApplyMcpServers = async () => {

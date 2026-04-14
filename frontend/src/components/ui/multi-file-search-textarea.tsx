@@ -336,6 +336,27 @@ export function MultiFileSearchTextarea({
     }
   }, [selectedIndex]);
 
+  // Clean up stale itemRefs when results change or dropdown hides
+  useEffect(() => {
+    const validIndices = new Set(searchResults.map((_, i) => i));
+    for (const key of itemRefs.current.keys()) {
+      if (!validIndices.has(key)) {
+        itemRefs.current.delete(key);
+      }
+    }
+    if (!showDropdown) {
+      itemRefs.current.clear();
+    }
+  }, [searchResults, showDropdown]);
+
+  // Clear itemRefs on unmount
+  useEffect(() => {
+    const refs = itemRefs.current;
+    return () => {
+      refs.clear();
+    };
+  }, []);
+
   const dropdownPosition = getDropdownPosition();
 
   return (
@@ -371,10 +392,12 @@ export function MultiFileSearchTextarea({
                 Searching...
               </div>
             ) : (
-              <div className="py-1">
+              <div className="py-1" role="listbox">
                 {searchResults.map((file, index) => (
                   <button
                     type="button"
+                    role="option"
+                    aria-selected={index === selectedIndex}
                     key={file.path}
                     ref={(el) => {
                       if (el) itemRefs.current.set(index, el);

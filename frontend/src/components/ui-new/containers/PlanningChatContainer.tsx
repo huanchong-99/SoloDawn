@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/toast';
 import { useCreateMode } from '@/contexts/CreateModeContext';
@@ -40,8 +40,13 @@ export function PlanningChatContainer() {
   const confirmMutation = useConfirmDraft();
   const materializeMutation = useMaterializeDraft();
 
-  // Use server messages when available, local messages as optimistic fallback
-  const messages = serverMessages ?? localMessages;
+  // Use server messages when available, local messages as optimistic fallback.
+  // E07-04: memoize so downstream props get a stable reference when neither
+  // input changed (prevents unnecessary re-renders of <PlanningChat />).
+  const messages = useMemo(
+    () => serverMessages ?? localMessages,
+    [serverMessages, localMessages]
+  );
 
   // Get planner model config from workflow_model_library
   const getFirstModelConfig = useCallback((): WorkflowModelConfig | null => {
@@ -66,7 +71,11 @@ export function PlanningChatContainer() {
           draftId,
           message: trimmed,
         });
-        setLocalMessages((prev) => [...prev, ...newMessages]);
+        setLocalMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m.id));
+          const deduped = newMessages.filter((m) => !existingIds.has(m.id));
+          return [...prev, ...deduped];
+        });
       } catch (e) {
         console.error('Failed to send planning message:', e);
         const err = e as { message?: string };

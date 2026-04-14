@@ -117,8 +117,14 @@ pub async fn require_api_token(req: Request, next: Next) -> Result<Response, Res
 /// Returns `true` if both slices are equal, `false` otherwise.
 /// Always compares all bytes regardless of where a mismatch occurs.
 ///
-/// Note: The early return on length mismatch leaks the token length via timing,
-/// which is acceptable for fixed-format API tokens (similar to HMAC comparison).
+/// Note: The early return on length mismatch leaks the token length via timing.
+/// This is acceptable here because SOLODAWN_API_TOKEN has a fixed format (its
+/// length is configured/known by operators and does not vary per-request, much
+/// like HMAC/digest comparisons of fixed-size outputs). Learning the token
+/// length therefore provides no meaningful advantage to an attacker: it is
+/// neither a secret nor variable between comparisons. If the token format ever
+/// becomes variable-length per request, switch to the `subtle` crate's
+/// `ConstantTimeEq` and pad/compare over a fixed maximum length.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;

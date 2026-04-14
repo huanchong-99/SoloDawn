@@ -171,6 +171,12 @@ impl ExecutionProcess {
 
     /// Context for backfilling before_head_commit for legacy rows
     /// List processes that have after_head_commit set but missing before_head_commit, with join context
+    // TODO(W2-15-05): Correlated subquery on `execution_processes` inside the
+    // LEFT JOIN re-scans the table per outer row. Refactor with a window
+    // function (`LAG(after_head_commit) OVER (PARTITION BY session_id, repo_id
+    // ORDER BY created_at)`) or a single materialised CTE so we don't do
+    // O(rows) lookups inside a query that already returns O(rows). Also
+    // unbounded — consider paginating since this is a backfill path.
     pub async fn list_missing_before_context(
         pool: &SqlitePool,
     ) -> Result<Vec<MissingBeforeContext>, sqlx::Error> {
@@ -244,6 +250,10 @@ impl ExecutionProcess {
     }
 
     /// Find all execution processes for a session (optionally include soft-deleted)
+    // TODO(W2-15-03): Unbounded query — `find_by_session_id` returns every
+    // process for a session with no LIMIT. For long-running sessions this can
+    // return thousands of rows. Callers that only need recent rows should
+    // prefer `find_by_session_id_paginated`; deprecate or bound this one.
     pub async fn find_by_session_id(
         pool: &SqlitePool,
         session_id: Uuid,
@@ -311,6 +321,10 @@ impl ExecutionProcess {
     }
 
     /// Find running execution processes
+    // TODO(W2-15-04): Unbounded cross-session scan with no LIMIT. A partial
+    // index on `execution_processes(status) WHERE status = 'running'` would
+    // keep this fast as the table grows, and callers should tolerate a bound
+    // (e.g. cap at 1k rows and log if truncated).
     pub async fn find_running(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
         sqlx::query_as!(
             ExecutionProcess,

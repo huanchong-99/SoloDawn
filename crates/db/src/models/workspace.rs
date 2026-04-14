@@ -41,14 +41,18 @@ pub struct ContainerInfo {
 pub struct Workspace {
     pub id: Uuid,
     pub task_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub container_ref: Option<String>,
     pub branch: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_working_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub setup_completed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub archived: bool,
     pub pinned: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
 
@@ -343,6 +347,11 @@ impl Workspace {
             LEFT JOIN sessions s ON w.id = s.workspace_id
             LEFT JOIN execution_processes ep ON s.id = ep.session_id AND ep.completed_at IS NOT NULL
             WHERE w.container_ref IS NOT NULL
+                -- TODO(E38-12): `SELECT DISTINCT s2.workspace_id` is not
+                -- backed by a dedicated covering index. If this query shows up
+                -- in slow-query traces, add an index on
+                -- sessions(workspace_id) combined with
+                -- execution_processes(session_id, completed_at).
                 AND w.id NOT IN (
                     SELECT DISTINCT s2.workspace_id
                     FROM sessions s2

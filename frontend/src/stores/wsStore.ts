@@ -243,7 +243,7 @@ function normalizeTerminalCompletedStatus(
       return 'failed';
     case 'cancelled':
     case 'canceled':
-      return 'failed';
+      return 'cancelled';
     case 'checkpoint':
       return 'checkpoint';
     case 'review_pass':
@@ -1527,6 +1527,7 @@ export interface GitCommitPayload {
 export type TerminalCompletedStatus =
   | 'completed'
   | 'failed'
+  | 'cancelled'
   | 'checkpoint'
   | 'review_pass'
   | 'review_reject'
@@ -1633,7 +1634,16 @@ export interface TerminalPromptDecisionPayload extends PromptEventContext {
 }
 
 // G08-002: Provider event payload types
-// G08-002: These payload types will be refined once the backend provider event schema stabilizes
+// G08-002: These payload types will be refined once the backend provider event schema stabilizes.
+// W2-20-07: Backend (crates/server/src/routes/workflow_events.rs,
+// BusMessage::ProviderStateChanged) guarantees the following fields:
+//   switched  -> workflowId, fromProvider, toProvider
+//   exhausted -> workflowId, providerCount
+//   recovered -> workflowId, providerName
+// Fields are kept optional here to stay lenient against payload drift and to
+// accommodate alternative field names (e.g. `provider`, `terminalId`, `reason`)
+// that older/other code paths have surfaced. Add required-ness once the
+// backend schema is frozen and all producers have been audited.
 export interface ProviderSwitchedPayload {
   workflowId: string;
   terminalId?: string;
@@ -1646,6 +1656,7 @@ export interface ProviderExhaustedPayload {
   workflowId: string;
   terminalId?: string;
   provider?: string;
+  providerCount?: number;
   error?: string;
 }
 
@@ -1653,6 +1664,7 @@ export interface ProviderRecoveredPayload {
   workflowId: string;
   terminalId?: string;
   provider?: string;
+  providerName?: string;
 }
 
 export type WorkflowEventHandlers = {

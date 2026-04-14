@@ -10,6 +10,16 @@ use uuid::Uuid;
 /// Git Event
 ///
 /// Corresponds to database table: git_event
+///
+// E38-13: `git_event.terminal_id` was defined as
+// `REFERENCES terminal(id)` (nullable, no cascade) in
+// `20260208020000_fix_terminal_old_foreign_keys.sql`. The migration is
+// already applied in production, so we cannot modify it in place. When a
+// terminal row is deleted, the default `NO ACTION` behavior will block
+// the delete if any git_event still references it. Callers that remove
+// terminals must null-out the related git_event.terminal_id first.
+// TODO(E38-13): Add a follow-up migration that rebuilds the table with
+// `ON DELETE SET NULL` on `terminal_id`.
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitEvent {

@@ -48,6 +48,20 @@ export function useRepoBranchSelection({
 
   const isLoadingBranches = queries.some((q) => q.isLoading);
 
+  // [W2-40] Derive a primitive key from `userOverrides` so that the
+  // useMemo below does not re-run on every render — `userOverrides` is a
+  // freshly-allocated object reference whenever any setState in this hook
+  // fires, even if its contents are unchanged. A stable serialization
+  // acts as a content hash that only changes on real updates.
+  const userOverridesKey = useMemo(
+    () =>
+      Object.keys(userOverrides)
+        .sort()
+        .map((k) => `${k}=${userOverrides[k] ?? ''}`)
+        .join('|'),
+    [userOverrides]
+  );
+
   const configs = useMemo((): RepoBranchConfig[] => {
     return repos.map((repo, i) => {
       const branches = queries[i]?.data ?? [];
@@ -70,7 +84,10 @@ export function useRepoBranchSelection({
         branches,
       };
     });
-  }, [repos, queries, userOverrides, initialBranch]);
+    // userOverrides is intentionally referenced via `userOverridesKey` to
+    // provide identity-stable memoization.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repos, queries, userOverridesKey, initialBranch]);
 
   const setRepoBranch = useCallback((repoId: string, branch: string) => {
     setUserOverrides((prev) => ({

@@ -129,7 +129,8 @@ export const FileTreeNode = forwardRef<HTMLButtonElement, FileTreeNodeProps>(
           )}
 
           {/* Stats for files */}
-          {node.type === 'file' && (node.additions || node.deletions) && (
+          {node.type === 'file' &&
+            (node.additions != null || node.deletions != null) && (
             <span className="text-sm shrink-0 ml-base">
               {node.additions != null && node.additions > 0 && (
                 <span className="text-success">+{node.additions}</span>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { TerminalDto } from 'shared/types';
 import { TerminalDetailPanel } from './TerminalDetailPanel';
 import { cn } from '@/lib/utils';
@@ -7,6 +7,13 @@ interface TerminalNodeProps {
   terminal: TerminalDto;
   taskName?: string;
 }
+
+// TODO(E10-06): Extract status -> classes map to a shared module (shared with
+// StatusBar/TaskCard) so terminal/task status styling stays in sync. The
+// duplication across components risks drift when statuses are added.
+// TODO(E10-07): Replace hardcoded Tailwind status colors (green/red/yellow)
+// with design-system tokens (success/error/warning) once the tokens exist
+// for the new-design palette.
 
 /**
  * Get status color classes for terminal node
@@ -46,16 +53,47 @@ function getStatusBadgeClasses(status: string): string {
 }
 
 export function TerminalNode({ terminal, taskName }: Readonly<TerminalNodeProps>) {
+  // E10-02: Ensure expanded state doesn't leak across unmount. We reset the
+  // value via a cleanup effect so a remount starts collapsed.
   const [expanded, setExpanded] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // E10-01: Close the expanded detail panel when the user clicks outside of it.
+  useEffect(() => {
+    if (!expanded) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (containerRef.current && target && !containerRef.current.contains(target)) {
+        setExpanded(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [expanded]);
+
+  // E10-02: State persistence cleanup on unmount.
+  useEffect(() => {
+    return () => {
+      setExpanded(false);
+    };
+  }, []);
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <button
         className={cn(
           'w-36 h-24 rounded border-2 flex flex-col items-center justify-center gap-1 transition-colors hover:bg-secondary/80',
           getStatusClasses(terminal.status)
         )}
-        onClick={() => setExpanded((prev) => !prev)}
+        onClick={(event) => {
+          // E10-03: Prevent the click from bubbling to outer handlers (e.g.,
+          // pipeline canvas selection) and from triggering our own outside
+          // click detector before state updates.
+          event.stopPropagation();
+          setExpanded((prev) => !prev);
+        }}
       >
         <div className="text-xs font-medium">{terminal.cliTypeId}</div>
         {terminal.role && (

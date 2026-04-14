@@ -152,9 +152,16 @@ static CLAUDE_BYPASS_YES_ACCEPT_RE: Lazy<Regex> = Lazy::new(|| {
 
 /// Notepad launch/open prompt seen in headless Codex flows on Windows.
 /// Example: "Open in Notepad? (y/N)"
+///
+/// E26-08 / E26-13: the gap between "notepad" and the y/n confirmation token is
+/// constrained to a single line ([^\n] instead of .) and the max length is
+/// reduced from 200 to 80 characters. This prevents pathological cross-line
+/// backtracking when the input buffer contains very long lines or many lines
+/// beginning with "notepad". Each alternation in the trailing group is also
+/// restricted to non-newline characters so the overall match cannot span lines.
 static NOTEPAD_PROMPT_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"(?i)\bnotepad\b.{0,200}(\[[^\]]*y\s*/\s*n[^\]]*\]|\([^\)]*y\s*/\s*n[^\)]*\)|\by\s*/\s*n\b|\byes\s*/\s*no\b)",
+        r"(?i)\bnotepad\b[^\n]{0,80}(\[[^\]\n]*y\s*/\s*n[^\]\n]*\]|\([^\)\n]*y\s*/\s*n[^\)\n]*\)|\by\s*/\s*n\b|\byes\s*/\s*no\b)",
     )
     .expect("NOTEPAD_PROMPT_RE must compile")
 });

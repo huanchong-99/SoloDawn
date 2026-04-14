@@ -568,6 +568,11 @@ impl Workflow {
         project_id: Uuid,
     ) -> sqlx::Result<Vec<WorkflowWithCounts>> {
         let start = std::time::Instant::now();
+        // TODO(E38-14): `COUNT(DISTINCT t.id)` / `COUNT(DISTINCT term.id)`
+        // are not backed by a dedicated covering index. If this list grows and
+        // the query shows up in slow-query traces, consider indexes on
+        // workflow_task(workflow_id) and terminal(workflow_task_id) (both
+        // should already exist as FK indexes) and verify EXPLAIN output.
         let result = sqlx::query_as::<_, WorkflowWithCounts>(
             r"
             SELECT

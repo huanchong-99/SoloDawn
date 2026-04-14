@@ -48,10 +48,16 @@ pub struct AnalyticsService {
 
 impl AnalyticsService {
     pub fn new(config: AnalyticsConfig) -> Self {
+        // E28-15: `reqwest::Client::builder().build()` can fail if the
+        // platform TLS backend cannot be initialised. We deliberately keep
+        // this as a hard failure (analytics is optional, but a broken HTTP
+        // client is a programming/environment bug worth surfacing), and
+        // upgrade the bare `.unwrap()` to `.expect()` with context so the
+        // panic message points at the real cause.
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
-            .unwrap();
+            .expect("failed to build analytics reqwest::Client (TLS backend unavailable?)");
 
         Self {
             config,
@@ -77,6 +83,21 @@ impl AnalyticsService {
             "event": event_name,
             "distinct_id": user_id,
         });
+        // W2-29-05: PostHog treats event names prefixed with `$` as reserved
+        // (e.g. `$identify`, `$set`, `$groupidentify`). We only support
+        // `$identify`; any other `$`-prefixed name is almost certainly a bug
+        // (typo or caller confusion) and would be silently dropped /
+        // misinterpreted by PostHog. Reject it at the source instead of
+        // shipping it to the wire.
+        if let Some(stripped) = event_name.strip_prefix('$')
+            && stripped != "identify"
+        {
+            tracing::warn!(
+                event = event_name,
+                "Refusing to send reserved PostHog event name (only `$identify` is supported)"
+            );
+            return;
+        }
         if event_name == "$identify" {
             // For $identify, set person properties in $set
             if let Some(props) = properties {
@@ -186,15 +207,12 @@ pub fn generate_user_id() -> String {
         }
     }
 
-    // Add username for per-user differentiation
-    if let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("USERNAME")) {
-        hasher.update(user.as_bytes());
-    }
-
-    // Add home directory for additional entropy
-    if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
-        hasher.update(home.as_bytes());
-    }
+    // W2-29-03: Do NOT mix USER / USERNAME / HOME / USERPROFILE into the
+    // hash. Those values are PII (often a real name or corporate login) and
+    // combining them with a machine identifier does not meaningfully
+    // anonymize the result. The per-machine UUID collected above is the
+    // persistent installation identity we want; anything above that is
+    // identity leakage.
 
     let result = hasher.finalize();
     // Take first 8 bytes (16 hex chars) for a compact ID

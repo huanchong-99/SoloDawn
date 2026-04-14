@@ -27,9 +27,22 @@ interface StreamController<E = unknown> {
 }
 
 /**
- * Connect to a WebSocket endpoint that emits JSON messages containing:
+ * Connect to a WebSocket endpoint that emits JSON messages produced by
+ * `LogMsg::to_ws_message_unchecked` in `crates/utils/src/log_msg.rs`.
+ *
+ * The backend emits the following JSON shapes on the socket:
  *   {"JsonPatch": [{"op": "add", "path": "/entries/0", "value": {...}}, ...]}
- *   {"Finished": ""}
+ *   {"Stdout": "..."}
+ *   {"Stderr": "..."}
+ *   {"SessionId": "..."}
+ *   {"Ready": true}       // signals the server has begun streaming
+ *   {"finished": true}    // signals end-of-stream (lowercased on purpose in
+ *                         // the Rust side for frontend compatibility; do NOT
+ *                         // "fix" to {"Finished": ...} without updating Rust)
+ *
+ * W2-20-09: Only `JsonPatch`, `Ready`, and `finished` are acted on here.
+ * Non-patch log variants are ignored since this helper only maintains the
+ * `{ entries }` snapshot.
  *
  * Maintains an in-memory { entries: [] } snapshot and returns a controller.
  */
@@ -76,7 +89,20 @@ export function streamJsonPatchEntries<E = unknown>(
         notify();
       }
 
-      // Handle Finished messages
+      // Handle Ready signal (server has started streaming). No snapshot
+      // mutation — this is a pure liveness marker.
+      // W2-20-09: Backend contract — `crates/utils/src/log_msg.rs`
+      // `LogMsg::to_ws_message_unchecked` emits the literal string
+      // `{"Ready":true}` after the initial snapshot is flushed (see
+      // `crates/services/src/services/events/streams.rs` and
+      // `diff_stream.rs`). Checking `msg.Ready !== undefined` therefore
+      // matches the exact wire shape produced by the backend.
+      if (msg.Ready !== undefined) {
+        // Intentional no-op; connection liveness is tracked via the `open` event.
+      }
+
+      // Handle Finished messages. Rust emits lowercase `finished` explicitly
+      // (see `LogMsg::to_ws_message_unchecked`); keep this key lowercase.
       if (msg.finished !== undefined) {
         opts.onFinished?.(snapshot.entries);
         ws.close();

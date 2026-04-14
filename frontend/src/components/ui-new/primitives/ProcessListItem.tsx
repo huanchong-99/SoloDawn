@@ -59,12 +59,20 @@ export function ProcessListItem({
 
   const isRunning = status === 'running';
 
+  // TODO (P3): Native <button> already handles Enter/Space activation, so no explicit
+  // onKeyDown is required (E06-03).
+  // TODO (P2): `selected` prop only drives text color on the inner <span>. Consider
+  // adding a container-level selected style (e.g., data-[state=selected]:ring-2 or
+  // bg-secondary) for clearer affordance (E06-10).
   return (
     <button
       type="button"
       onClick={onClick}
+      data-state={selected ? 'selected' : undefined}
+      aria-pressed={selected}
       className={cn(
         'w-full h-[26px] flex items-center gap-half px-half rounded-sm text-left transition-colors',
+        selected && 'bg-surface-2',
         className
       )}
     >

@@ -1,9 +1,12 @@
 //! WebSocket event model for workflow event broadcasting.
 //!
 //! Defines the event structure and types for real-time workflow updates.
-// TODO(G17-001): WsEvent and WsEventType derive TS but are not yet included in
-// the generate_types binary output. Add them to `shared/types.ts` so the frontend
-// can import typed event definitions instead of duplicating string literals.
+// W2-31-05: WsEvent and WsEventType derive TS and are emitted to
+// `shared/types.ts` via `crates/server/src/bin/generate_types.rs`
+// (`WsEvent::decl()` / `WsEventType::decl()`). The frontend imports these
+// typed definitions rather than duplicating string literals. This project
+// uses explicit `decl()` aggregation in `generate_types.rs` instead of
+// per-type `#[ts(export)]` attributes — do not add `#[ts(export)]` here.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -390,16 +393,15 @@ impl WsEvent {
             } => {
                 let decision_action = prompt_decision_action(&decision);
                 let decision_detail = prompt_decision_detail(&decision);
-                let mut decision_raw = serde_json::to_value(&decision).unwrap_or_else(|_| {
+                // W2-20-10: PromptDecision serializes with snake_case action tags
+                // including an explicit `#[serde(rename = "llm_decision")]` on the
+                // LLMDecision variant, so no post-serialize fixup is required.
+                let decision_raw = serde_json::to_value(&decision).unwrap_or_else(|_| {
                     json!({
                         "action": decision_action,
                         "error": "serialization_failed"
                     })
                 });
-
-                if decision_raw["action"] == "l_l_m_decision" {
-                    decision_raw["action"] = json!("llm_decision");
-                }
 
                 let payload = json!({
                     "workflowId": workflow_id,

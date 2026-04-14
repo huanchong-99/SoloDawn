@@ -157,11 +157,16 @@ ENV NPM_CONFIG_PREFIX=/var/lib/solodawn/.npm-global \
     GH_EXTENSIONS_DIR=/var/lib/solodawn/gh-extensions \
     PATH=/var/lib/solodawn/.npm-global/bin:$PATH
 
-# Install AI CLIs (Claude, etc.)
+# Install AI CLIs (Claude, etc.) — opt-out via --build-arg INSTALL_AI_CLIS=false.
+ARG INSTALL_AI_CLIS=true
 COPY scripts/docker/install/ /opt/solodawn/install/
 RUN mkdir -p /var/lib/solodawn/.npm-global \
         /var/lib/solodawn/gh-extensions \
-    && bash /opt/solodawn/install/install-ai-clis.sh
+    && if [ "${INSTALL_AI_CLIS:-true}" = "true" ]; then \
+           bash /opt/solodawn/install/install-ai-clis.sh; \
+       else \
+           echo "[Dockerfile.runner] Skipping AI CLI install (INSTALL_AI_CLIS=${INSTALL_AI_CLIS})"; \
+       fi
 
 COPY --from=rust-builder /tmp/solodawn-runner /usr/local/bin/solodawn-runner
 

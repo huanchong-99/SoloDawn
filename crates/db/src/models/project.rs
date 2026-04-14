@@ -69,6 +69,13 @@ impl Project {
             .await
     }
 
+    // TODO(W2-15-07): Unbounded — `Project::find_all` returns every project
+    // row with no pagination or LIMIT. Fine today because tenants have dozens
+    // of projects, but the list API route fans this straight to the client.
+    // Refactor: introduce `find_page(pool, limit, offset)` (or keyset by
+    // `created_at, id`) and deprecate this signature. Confirm the index
+    // `idx_projects_created_at` exists so the ORDER BY is covered — currently
+    // this relies on a full scan + filesort on SQLite.
     pub async fn find_all(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
         sqlx::query_as!(
             Project,

@@ -194,12 +194,17 @@ impl ExecutorConfigs {
 
     /// Get cached executor profiles
     pub fn get_cached() -> ExecutorConfigs {
-        EXECUTOR_PROFILES_CACHE.read().unwrap().clone()
+        EXECUTOR_PROFILES_CACHE
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 
     /// Reload executor profiles cache
     pub fn reload() {
-        let mut cache = EXECUTOR_PROFILES_CACHE.write().unwrap();
+        let mut cache = EXECUTOR_PROFILES_CACHE
+            .write()
+            .unwrap_or_else(|p| p.into_inner());
         *cache = Self::load();
     }
 

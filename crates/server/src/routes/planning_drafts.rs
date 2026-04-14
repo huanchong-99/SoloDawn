@@ -378,15 +378,36 @@ async fn send_message(
                         .split("```json\n").nth(1)
                         .or_else(|| response.content.split("```\n").nth(1))
                         .and_then(|s| s.split("```").next())
-                        .unwrap_or("");
+                        .unwrap_or_else(|| {
+                            tracing::warn!(
+                                draft_id = %draft_id,
+                                "PLANNING_SPEC detected but no fenced JSON block could be extracted; falling back to empty spec"
+                            );
+                            ""
+                        });
 
-                    let (req_summary, tech_spec) = if let Ok(spec) =
-                        serde_json::from_str::<serde_json::Value>(json_block)
-                    {
-                        let goal = spec["productGoal"].as_str().unwrap_or("").to_string();
-                        (goal, json_block.to_string())
-                    } else {
-                        (String::new(), json_block.to_string())
+                    let (req_summary, tech_spec) = match serde_json::from_str::<serde_json::Value>(json_block) {
+                        Ok(spec) => {
+                            let goal = spec
+                                .get("productGoal")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_else(|| {
+                                    tracing::warn!(
+                                        draft_id = %draft_id,
+                                        "PLANNING_SPEC JSON missing or non-string 'productGoal' field"
+                                    );
+                                    ""
+                                })
+                                .to_string();
+                            (goal, json_block.to_string())
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                draft_id = %draft_id,
+                                "Failed to parse PLANNING_SPEC JSON block: {e}"
+                            );
+                            (String::new(), json_block.to_string())
+                        }
                     };
 
                     // Store extracted spec content
@@ -463,6 +484,10 @@ async fn send_message(
                             let prefix = if role == "user" { "[User]" } else { "[Assistant]" };
                             let text = format!("{prefix} {content}");
                             let truncated = if text.len() > 4000 {
+                                // SAFETY: `text` is constructed from Rust `String`s via
+                                // `format!`, so it is guaranteed valid UTF-8. Therefore
+                                // `floor_char_boundary` always returns a valid boundary
+                                // in-bounds (floor_char_boundary clamps to len internally).
                                 let boundary = text.floor_char_boundary(4000);
                                 format!("{}...(truncated)", &text[..boundary])
                             } else {
@@ -606,14 +631,25 @@ async fn toggle_feishu_sync(
         let messenger = h.messenger.clone();
 
         // Resolve chat_id: explicit param → last received → DB binding
-        let last_id = h.last_chat_id.try_read().ok().and_then(|g| g.clone());
+        // Use blocking read (not try_read) so transient lock contention doesn't
+        // silently fall through to the slower DB path. The lock is only ever
+        // held briefly by Feishu event handlers updating the last chat id.
+        let last_id = h.last_chat_id.read().await.clone();
         drop(handle_guard);
 
         // Also check any concierge session that already has a feishu_chat_id
         let session_chat_id = {
             use db::models::concierge::ConciergeSession;
-            let sessions = ConciergeSession::list_all(&deployment.db().pool).await.unwrap_or_default();
-            sessions.into_iter().find_map(|s| s.feishu_chat_id)
+            match ConciergeSession::list_all(&deployment.db().pool).await {
+                Ok(sessions) => sessions.into_iter().find_map(|s| s.feishu_chat_id),
+                Err(e) => {
+                    tracing::warn!(
+                        draft_id = %draft_id,
+                        "Failed to list concierge sessions while resolving Feishu chat_id: {e}"
+                    );
+                    None
+                }
+            }
         };
 
         let chat_id = if let Some(id) = req.chat_id.clone() {
@@ -632,7 +668,22 @@ async fn toggle_feishu_sync(
 
             if let Some(b) = binding {
                 b.conversation_id
-            } else if let Some(bot_chat) = messenger.first_bot_chat_id().await.unwrap_or(None) {
+            } else if let Some(bot_chat) = messenger
+                .first_bot_chat_id()
+                .await
+                .unwrap_or_else(|e| {
+                    // E30-06: log fetch failures instead of silently treating them
+                    // as "no chat" so missing Feishu credentials / transport errors
+                    // are diagnosable in logs.
+                    tracing::warn!(
+                        draft_id = %draft_id,
+                        error = %e,
+                        "Failed to fetch first bot chat id from Feishu messenger; \
+                         falling back as if no chat was found"
+                    );
+                    None
+                })
+            {
                 bot_chat
             } else {
                 return Err(ApiError::BadRequest(
@@ -677,6 +728,9 @@ async fn toggle_feishu_sync(
                     let text = format!("{prefix} {}", msg.content);
                     // Truncate very long messages for Feishu
                     let truncated = if text.len() > 4000 {
+                        // SAFETY: `text` is built via `format!` from Rust `String`s,
+                        // so it is guaranteed valid UTF-8 and `floor_char_boundary`
+                        // is safe to slice with.
                         let boundary = text.floor_char_boundary(4000);
                         format!("{}...(truncated)", &text[..boundary])
                     } else {

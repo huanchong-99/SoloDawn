@@ -111,17 +111,21 @@ impl TestServer {
         // Wait for server to be ready
         let client = reqwest::Client::new();
         let healthz_url = format!("{base_url}/healthz");
-        let mut attempts = 0;
+        const MAX_ATTEMPTS: u32 = 60;
+        const POLL_INTERVAL_MS: u64 = 500;
+        let mut attempts: u32 = 0;
         loop {
-            if attempts > 60 {
+            if attempts > MAX_ATTEMPTS {
+                let total_ms = u64::from(MAX_ATTEMPTS) * POLL_INTERVAL_MS;
                 return Err(anyhow::anyhow!(
-                    "Timeout waiting for server to start (30s)"
+                    "Timeout waiting for server to start ({}s)",
+                    total_ms / 1000
                 ));
             }
             match client.get(&healthz_url).send().await {
                 Ok(resp) if resp.status().is_success() => break,
                 _ => {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
                     attempts += 1;
                 }
             }

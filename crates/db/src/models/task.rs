@@ -262,6 +262,13 @@ ORDER BY t.created_at DESC"#,
         .await
     }
 
+    // TODO(W2-15-08): Missing index and unbounded — filters on
+    // `shared_task_id IS NOT NULL` without a partial index on
+    // `tasks(shared_task_id) WHERE shared_task_id IS NOT NULL`. As the
+    // `tasks` table grows this becomes a full scan that returns every shared
+    // task at once. Add the partial index and paginate (or stream) the
+    // result. Consumers currently collect into `Vec` and hold all rows in
+    // memory.
     pub async fn find_all_shared(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
         sqlx::query_as!(
             Task,
@@ -328,13 +335,33 @@ ORDER BY t.created_at DESC"#,
         status: TaskStatus,
     ) -> Result<(), sqlx::Error> {
         sqlx::query!(
-            "UPDATE tasks SET status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+            "UPDATE tasks SET status = $2, updated_at = datetime('now', 'subsec') WHERE id = $1",
             id,
             status
         )
         .execute(pool)
         .await?;
         Ok(())
+    }
+
+    /// E25-06: Compare-and-swap status update. Returns true if the row was
+    /// updated (i.e., the previous status matched `expected`). This closes the
+    /// check-then-act race between reading `task.status` and updating it.
+    pub async fn update_status_cas(
+        pool: &SqlitePool,
+        id: Uuid,
+        expected: TaskStatus,
+        new_status: TaskStatus,
+    ) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query!(
+            "UPDATE tasks SET status = $3, updated_at = datetime('now', 'subsec') WHERE id = $1 AND status = $2",
+            id,
+            expected,
+            new_status
+        )
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     /// Update the parent_workspace_id field for a task
@@ -344,7 +371,7 @@ ORDER BY t.created_at DESC"#,
         parent_workspace_id: Option<Uuid>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query!(
-            "UPDATE tasks SET parent_workspace_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+            "UPDATE tasks SET parent_workspace_id = $2, updated_at = datetime('now', 'subsec') WHERE id = $1",
             task_id,
             parent_workspace_id
         )
@@ -362,6 +389,10 @@ ORDER BY t.created_at DESC"#,
     where
         E: Executor<'e, Database = Sqlite>,
     {
+        // TODO(E38-09): If this ever grows into a subquery form
+        // (WHERE parent_workspace_id IN (SELECT ...)), rely on the SQLite
+        // query optimizer; an index on tasks.parent_workspace_id already
+        // supports the current equality predicate.
         let result = sqlx::query!(
             "UPDATE tasks SET parent_workspace_id = NULL WHERE parent_workspace_id = $1",
             workspace_id

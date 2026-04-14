@@ -118,7 +118,7 @@
   },
   "step2": {
     "header": "Configure {{count}} parallel tasks",
-    "progress": "{{completed}} / {{total}} completed",
+    "progress": "{{percent}}% complete",
     "previousTask": "Previous task",
     "nextTask": "Next task",
     "taskIndicator": "Task {{current}} of {{total}}",

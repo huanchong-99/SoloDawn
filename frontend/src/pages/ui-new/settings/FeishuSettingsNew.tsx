@@ -66,6 +66,10 @@ export function FeishuSettingsNew() {
       setFeishuEnabled(data.featureEnabled);
       if (data.configSummary) {
         setAppId(data.configSummary.appId);
+        // NOTE: appSecret is write-only. The backend never returns the secret
+        // after save (only a redacted summary), so we intentionally do not
+        // repopulate the appSecret field on roundtrip. The input stays blank
+        // to indicate "leave unchanged" unless the user types a new value.
       }
     } catch {
       setError(t('settings.feishu.loadError'));
@@ -97,6 +101,12 @@ export function FeishuSettingsNew() {
 
   const handleSave = async () => {
     if (!appId.trim() || !appSecret.trim()) {
+      setError(t('settings.feishu.form.requiredFields'));
+      return;
+    }
+    // Validate appId format (Feishu app IDs start with "cli_")
+    const APP_ID_PATTERN = /^cli_[a-z0-9]+$/;
+    if (!APP_ID_PATTERN.test(appId.trim())) {
       setError(t('settings.feishu.form.requiredFields'));
       return;
     }

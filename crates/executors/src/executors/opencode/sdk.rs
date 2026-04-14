@@ -189,6 +189,11 @@ async fn run_session_inner(
 
     let model = config.model.as_deref().map(parse_model);
 
+    // TODO(W2-30-08): This control event channel is unbounded and many
+    // producers use `let _ = control_tx.send(..)`, silently dropping on a
+    // closed receiver. Log a warning when `send` fails (receiver gone) and
+    // consider switching to a bounded channel (e.g. 256) with `try_send` +
+    // warn-on-full to apply backpressure.
     let (control_tx, mut control_rx) = mpsc::unbounded_channel::<ControlEvent>();
 
     let event_resp = tokio::select! {

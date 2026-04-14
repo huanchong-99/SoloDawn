@@ -36,6 +36,10 @@ pub fn generate_task_branch_name(
     let mut candidate = base.clone();
     let mut counter = 2;
 
+    // E28-07: Linear scan of `existing_branches` per iteration is O(n*k).
+    // Acceptable while N stays small (one workflow's branches); if N ever
+    // grows past ~100 this should switch to a `HashSet<&str>` lookup.
+    // TODO(perf): promote to HashSet when existing_branches.len() > 100.
     while existing_branches.contains(&candidate) {
         candidate = format!("{base}-{counter}");
         counter += 1;

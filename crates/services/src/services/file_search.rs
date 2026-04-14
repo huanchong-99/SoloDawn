@@ -1,3 +1,11 @@
+// W2-37-05 / W2-37-06: This module performs case-insensitive file search via
+// `str::to_lowercase()`. That function uses Unicode's simple (1:1) case-fold
+// mapping and is only correct for ASCII; it does NOT implement full Unicode
+// case folding (e.g. Turkish dotless-I, German ß, or title-case characters).
+// The behaviour here is intentionally best-effort: we treat it as an
+// ASCII-case-insensitive substring match over file paths/names. Callers should
+// not rely on this function for Unicode-correct matching.
+
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -92,6 +100,12 @@ pub struct FileSearchCache {
 }
 
 impl Drop for FileSearchCache {
+    // [W2-36-02] Abort watcher/worker tasks synchronously without a graceful
+    // shutdown handshake. Acceptable here: these tasks are purely reactive
+    // (file-system watchers and FST index builders) with no non-idempotent
+    // external state; the next startup will rebuild in-memory indexes and
+    // reattach watchers. Performing an awaited shutdown would require a Tokio
+    // runtime inside `Drop`, which is not guaranteed.
     fn drop(&mut self) {
         if let Ok(mut tasks) = self.watcher_tasks.lock() {
             for handle in tasks.drain(..) {
@@ -108,6 +122,10 @@ impl Drop for FileSearchCache {
 
 impl FileSearchCache {
     pub fn new() -> Self {
+        // TODO(W2-30-03): Replace this unbounded build queue with a bounded
+        // channel (capacity ~1024) using `try_send` + warn-on-full. The
+        // `UnboundedSender<PathBuf>` type leaks into `build_queue` struct
+        // fields and several call sites, so this is a dedicated refactor.
         let (build_sender, build_receiver) = mpsc::unbounded_channel();
 
         // Create cache with 100MB limit and 1 hour TTL
@@ -610,6 +628,16 @@ impl FileSearchCache {
 
             match cache_builder.build_repo_cache(&repo_path).await {
                 Ok(cached_repo) => {
+                    // E28-12: `build_repo_cache` reads the working tree's
+                    // current HEAD; by the time we insert the result the HEAD
+                    // may already have advanced (concurrent commit/rebase)
+                    // and a subsequent build request for the same repo will
+                    // have been enqueued by the watcher. Last-writer-wins on
+                    // the moka cache is acceptable here because the watcher
+                    // always re-queues the repo after external changes, so
+                    // any stale entry is self-healing within one debounce
+                    // interval. Keep this insert non-conditional; do not add
+                    // CAS here.
                     cache.insert(repo_path.clone(), cached_repo).await;
                     info!("Successfully cached repo: {:?}", repo_path);
                 }
@@ -622,20 +650,31 @@ impl FileSearchCache {
 
     /// Setup file watcher for repository
     pub fn setup_watcher(&self, repo_path: &Path) -> Result<(), String> {
-        let repo_path_buf = repo_path.to_path_buf();
+        use dashmap::mapref::entry::Entry;
 
-        if self.watchers.contains_key(&repo_path_buf) {
-            return Ok(()); // Already watching
-        }
+        let repo_path_buf = repo_path.to_path_buf();
 
         let git_dir = repo_path.join(".git");
         if !git_dir.exists() {
             return Err("Not a git repository".to_string());
         }
 
+        // E27-10: use DashMap entry API to atomically check-and-insert, avoiding a
+        // TOCTOU where two concurrent calls could each observe an empty slot and
+        // both create a watcher.
+        let entry = self.watchers.entry(repo_path_buf.clone());
+        let vacant = match entry {
+            Entry::Occupied(_) => return Ok(()), // Already watching
+            Entry::Vacant(v) => v,
+        };
+
         let build_queue = self.build_queue.clone();
         let watched_path = repo_path_buf.clone();
 
+        // TODO(W2-30-03): Bound this HEAD-watcher channel (e.g. capacity 64)
+        // and drop oldest / coalesce events on overflow. Currently unbounded
+        // because the debouncer callback is sync and cannot await a bounded
+        // `send`; switching requires `try_send` with warn-on-full.
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let mut debouncer = new_debouncer(
@@ -645,6 +684,11 @@ impl FileSearchCache {
                 if let Ok(events) = res {
                     for event in events {
                         // Check if any path contains HEAD file
+                        // L08: Matching on file_name == "HEAD" captures the common
+                        // case where .git/HEAD is replaced atomically via rename.
+                        // On all supported platforms (Unix and Windows) branch
+                        // switches result in a HEAD-named file event, so this
+                        // check is cross-platform.
                         for path in &event.event.paths {
                             if path.file_name().is_some_and(|name| name == "HEAD") {
                                 if let Err(e) = tx.send(()) {
@@ -677,7 +721,7 @@ impl FileSearchCache {
         }
 
         // Keep debouncer alive for the lifetime of the watcher registration.
-        self.watchers.insert(repo_path_buf, debouncer);
+        vacant.insert(debouncer);
 
         info!("Setup file watcher for repo: {:?}", repo_path);
         Ok(())

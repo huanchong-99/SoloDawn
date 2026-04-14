@@ -75,6 +75,13 @@ async fn handle_concierge_ws(
             event = event_rx.recv() => {
                 match event {
                     Ok(concierge_event) => {
+                        // W2-20-08: Concierge events are intentionally NOT modeled by the
+                        // workflow `WsEventType` enum (see workflow_events.rs). They are
+                        // delivered on a dedicated `/concierge/{session_id}/events`
+                        // socket and consumed by `frontend/src/stores/conciergeWsStore.ts`,
+                        // which defines its own `ConciergeEventType` union. Keeping the
+                        // contracts separate avoids mixing the concierge chat channel
+                        // with workflow-scoped broadcasts that are keyed by workflow id.
                         let event_json = serde_json::json!({
                             "type": match &concierge_event {
                                 services::services::concierge::ConciergeEvent::NewMessage { .. } => "concierge.message",
@@ -108,7 +115,11 @@ async fn handle_concierge_ws(
                                         let concierge = concierge.clone();
                                         let sid = session_id.clone();
                                         let content = content.to_string();
-                                        // Process in background to not block WS loop
+                                        // Process in background to not block WS loop.
+                                        // TODO(E25-12): This spawned task is not cancelled when
+                                        // the WS connection closes. Wrap in tokio::select! with
+                                        // an abort channel (or JoinSet tracked across the loop)
+                                        // so in-flight processing stops when the client disconnects.
                                         tokio::spawn(async move {
                                             if let Err(e) = concierge.process_message(&sid, &content, Some("web"), None).await {
                                                 warn!("Concierge WS message processing failed: {e}");

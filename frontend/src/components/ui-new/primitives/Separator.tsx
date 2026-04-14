@@ -13,6 +13,9 @@ const Separator = React.forwardRef<
     { className, orientation = 'horizontal', decorative = true, ...props },
     ref
   ) => (
+    // TODO (P3): Uses arbitrary h-[1px]/w-[1px]. Works fine as a bg-colored line;
+    // could swap to border-t/border-l w/ border-width utility, but current form
+    // is idiomatic for a bg-filled separator.
     <SeparatorPrimitive.Root
       ref={ref}
       decorative={decorative}

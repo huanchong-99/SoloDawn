@@ -195,7 +195,11 @@ async fn list_openai_models(
     let body = response.text().await.unwrap_or_default();
 
     if !status.is_success() {
-        tracing::warn!("Model list request failed: {} - {}", status, body);
+        tracing::warn!(
+            "Model list request failed: {} - {}",
+            status,
+            &body[..body.len().min(200)]
+        );
         return Err(ApiError::BadRequest(format!(
             "Model list request failed: {status}"
         )));
@@ -238,7 +242,11 @@ async fn verify_openai_model(
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        tracing::warn!("Model verification failed: {} - {}", status, body);
+        tracing::warn!(
+            "Model verification failed: {} - {}",
+            status,
+            &body[..body.len().min(200)]
+        );
         return Ok(false);
     }
 
@@ -274,7 +282,11 @@ async fn list_anthropic_models(
     let body = response.text().await.unwrap_or_default();
 
     if !status.is_success() {
-        tracing::warn!("Anthropic model list request failed: {} - {}", status, body);
+        tracing::warn!(
+            "Anthropic model list request failed: {} - {}",
+            status,
+            &body[..body.len().min(200)]
+        );
         return Err(ApiError::BadRequest(format!(
             "Model list request failed: {status}"
         )));
@@ -314,7 +326,11 @@ async fn verify_anthropic_model(
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        tracing::warn!("Anthropic model verification failed: {} - {}", status, body);
+        tracing::warn!(
+            "Anthropic model verification failed: {} - {}",
+            status,
+            &body[..body.len().min(200)]
+        );
         return Ok(false);
     }
 
@@ -354,7 +370,11 @@ async fn list_google_models(
     let body = response.text().await.unwrap_or_default();
 
     if !status.is_success() {
-        tracing::warn!("Google model list request failed: {} - {}", status, body);
+        tracing::warn!(
+            "Google model list request failed: {} - {}",
+            status,
+            &body[..body.len().min(200)]
+        );
         return Err(ApiError::BadRequest(format!(
             "Model list request failed: {status}"
         )));
@@ -388,11 +408,17 @@ fn verify_response_body_ok(body: &str, expected_keys: &[&str], label: &str) -> b
     match serde_json::from_str::<Value>(body) {
         Ok(json) => {
             if json.get("error").is_some() {
-                tracing::warn!("{label} verification returned 200 but body contains error: {body}");
+                tracing::warn!(
+                    "{label} verification returned 200 but body contains error: {}",
+                    &body[..body.len().min(200)]
+                );
                 return false;
             }
             if !expected_keys.is_empty() && expected_keys.iter().all(|k| json.get(*k).is_none()) {
-                tracing::warn!("{label} verification returned 200 but body has no {expected_keys:?}: {body}");
+                tracing::warn!(
+                    "{label} verification returned 200 but body has no {expected_keys:?}: {}",
+                    &body[..body.len().min(200)]
+                );
                 return false;
             }
             true

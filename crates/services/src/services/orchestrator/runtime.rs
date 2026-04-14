@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 use super::{
     OrchestratorAgent, OrchestratorConfig, SharedMessageBus,
-    constants::{WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_READY},
+    constants::{WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_READY, WORKFLOW_TOPIC_PREFIX},
     persistence::StatePersistence,
     runtime_actions::RuntimeActionService,
     types::LLMMessage,
@@ -407,6 +407,10 @@ impl OrchestratorRuntime {
 
             // Best-effort cleanup for naturally completed workflow runs.
             // Guard against removing a newly restarted workflow with the same ID.
+            // TODO(E21-07): Replace the fixed 5x100ms polling loop with an
+            // event-driven handshake (e.g. notify/condvar on task completion
+            // or a one-shot channel) so cleanup latency is bounded by the
+            // actual finish signal rather than by a hard-coded poll budget.
             let mut removed_running = false;
             for _ in 0..5 {
                 let mut running = running_workflows.lock().await;
@@ -690,10 +694,14 @@ impl OrchestratorRuntime {
         // the agent task is guaranteed to receive the signal before we
         // discard the task handle.  The workflow topic is derived from the
         // workflow_id, so the agent's bus subscription will pick it up.
+        // E21-13: Use WORKFLOW_TOPIC_PREFIX to keep the published topic
+        // byte-identical with the subscriber side (see agent.rs:697), so the
+        // Shutdown signal cannot miss the agent's subscription because of a
+        // stray literal drift.
         if self.running_workflows.lock().await.contains_key(workflow_id) {
             self.message_bus
                 .publish(
-                    &format!("workflow:{workflow_id}"),
+                    &format!("{WORKFLOW_TOPIC_PREFIX}{workflow_id}"),
                     super::BusMessage::Shutdown,
                 )
                 .await?;
@@ -1222,6 +1230,10 @@ mod tests {
                 merge_terminal_cli_id TEXT NOT NULL,
                 merge_terminal_model_id TEXT NOT NULL,
                 target_branch TEXT NOT NULL,
+                -- git_watcher_enabled: mirrors the production migration
+                -- (20260224000000_add_git_watcher_enabled.sql). Default `1`
+                -- preserves backward compatibility so pre-existing workflows
+                -- keep the watcher active after upgrade.
                 git_watcher_enabled INTEGER NOT NULL DEFAULT 1,
                 orchestrator_state TEXT,
                 ready_at TEXT,
@@ -1864,6 +1876,10 @@ mod tests {
                 merge_terminal_cli_id TEXT NOT NULL,
                 merge_terminal_model_id TEXT NOT NULL,
                 target_branch TEXT NOT NULL,
+                -- git_watcher_enabled: mirrors the production migration
+                -- (20260224000000_add_git_watcher_enabled.sql). Default `1`
+                -- preserves backward compatibility so pre-existing workflows
+                -- keep the watcher active after upgrade.
                 git_watcher_enabled INTEGER NOT NULL DEFAULT 1,
                 orchestrator_state TEXT,
                 ready_at TEXT,

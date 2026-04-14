@@ -21,6 +21,9 @@ function formatTokens(tokens: number | null | undefined): string {
 }
 
 export function OrchestratorHeader({ name, status, model, tokensUsed }: Readonly<OrchestratorHeaderProps>) {
+  // TODO(E10-10): Localize hardcoded "Status:", "Model:", "Tokens Used",
+  // "N/A", and "n/a" strings via i18n (workflow namespace) to match the rest
+  // of the orchestrator UI.
   return (
     <div className="h-16 bg-panel border-b border-border px-6 flex items-center">
       <div className="flex-1">

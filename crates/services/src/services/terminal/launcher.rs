@@ -404,7 +404,14 @@ impl TerminalLauncher {
                             )
                             .await;
                     }
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    // E26-07: the ideal fix is a channel-based ready signal from
+                    // `bridge.register` so verification is deterministic rather than
+                    // timing-dependent. Until `register` exposes such a signal we
+                    // widen the sleep from 50ms to 200ms to reduce false negatives
+                    // on slower hosts / CI under load. TODO: plumb a oneshot "ready"
+                    // sender through TerminalBridge::register and await it here
+                    // instead of sleeping.
+                    tokio::time::sleep(Duration::from_millis(200)).await;
                     if !bridge.is_registered(&handle.session_id).await {
                         return self
                             .rollback_launch_after_spawn(

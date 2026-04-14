@@ -185,6 +185,17 @@ impl TaskImage {
     ///
     /// Uses a single multi-row INSERT with `ON CONFLICT DO NOTHING`, relying on
     /// the `UNIQUE(task_id, image_id)` constraint on `task_images` to dedup.
+    // TODO(W2-15-02): Historical N+1 — this function previously issued one
+    // INSERT per image id and one SELECT-for-dedup per image. The current
+    // implementation batches to a single multi-row INSERT with
+    // `ON CONFLICT DO NOTHING`, which fixes the N+1, but two caveats remain:
+    //   1. SQLite has a hard bind parameter limit (999 pre-3.32, 32766 after).
+    //      Each image contributes 3 binds, so callers passing >~330 images
+    //      will hit SQLITE_TOOBIG. Chunk `image_ids` before calling, or add a
+    //      chunk loop here.
+    //   2. There is no matching `associate_many_dedup` for workflow/session
+    //      image junctions; those still iterate in callers. Audit other
+    //      `*_images` junction tables to ensure they don't regress.
     pub async fn associate_many_dedup(
         pool: &SqlitePool,
         task_id: Uuid,

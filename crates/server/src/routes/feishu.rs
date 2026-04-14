@@ -217,6 +217,19 @@ async fn update_config(
         new_config.id
     };
 
+    // W2-18-07: Audit log on credential mutation. Once request-scoped
+    // principal/user context is wired through (G24), replace the placeholder
+    // actor with the authenticated user id.
+    tracing::info!(
+        target: "audit.feishu_config",
+        actor = "api_token",
+        config_id = %config_id,
+        app_id = %payload.app_id,
+        enabled = enabled,
+        base_url = %base_url,
+        "feishu config updated"
+    );
+
     Ok(Json(ApiResponse::success(UpdateFeishuConfigResponse {
         id: config_id,
         message: "Feishu configuration updated successfully".to_string(),

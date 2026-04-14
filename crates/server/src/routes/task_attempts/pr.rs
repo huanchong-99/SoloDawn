@@ -108,12 +108,26 @@ async fn trigger_pr_description_follow_up(
     pr_number: i64,
     pr_url: &str,
 ) -> Result<(), ApiError> {
-    // Get the custom prompt from config, or use default
+    // E29-11: Get the custom prompt from config, or use default. Validate
+    // custom prompt length to avoid feeding unbounded user input into the
+    // coding agent follow-up.
+    const MAX_PR_DESCRIPTION_PROMPT_LEN: usize = 8 * 1024;
     let config = deployment.config().read().await;
-    let prompt_template = config
-        .pr_auto_description_prompt
-        .as_deref()
-        .unwrap_or(DEFAULT_PR_DESCRIPTION_PROMPT);
+    let custom_prompt = config.pr_auto_description_prompt.as_deref();
+    let prompt_template = match custom_prompt {
+        Some(p) if p.trim().is_empty() => DEFAULT_PR_DESCRIPTION_PROMPT,
+        Some(p) if p.len() > MAX_PR_DESCRIPTION_PROMPT_LEN => {
+            tracing::warn!(
+                "Custom pr_auto_description_prompt exceeds {} chars ({}); \
+                 falling back to default",
+                MAX_PR_DESCRIPTION_PROMPT_LEN,
+                p.len()
+            );
+            DEFAULT_PR_DESCRIPTION_PROMPT
+        }
+        Some(p) => p,
+        None => DEFAULT_PR_DESCRIPTION_PROMPT,
+    };
 
     // Replace placeholders in prompt
     let prompt = prompt_template
@@ -484,7 +498,13 @@ pub async fn attach_existing_pr(
     let mut sorted_prs = prs;
     sorted_prs.sort_by_key(|pr| status_priority(&pr.status));
     if let Some(pr_info) = sorted_prs.into_iter().next() {
-        // Save PR info to database
+        // TODO(E29-06): Merge::create_pr and Merge::update_status below are not
+        // wrapped in a single transaction. Their signatures take `&SqlitePool`,
+        // so making them atomic requires making those db model methods generic
+        // over a sqlx executor (ripples across db crate and all call sites).
+        // Track as a follow-up: if create_pr succeeds but update_status fails,
+        // the merge row is left in 'open' status even though the real PR is
+        // merged/closed. Mitigation: the PR monitor reconciles status later.
         let merge = Merge::create_pr(
             pool,
             workspace.id,

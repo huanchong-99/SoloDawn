@@ -56,7 +56,10 @@ impl MsgStore {
         }
         let bytes = msg.approx_bytes();
 
-        let mut inner = self.inner.write().unwrap();
+        let mut inner = self
+            .inner
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         while inner.total_bytes.saturating_add(bytes) > HISTORY_BYTES {
             if let Some(front) = inner.history.pop_front() {
                 inner.total_bytes = inner.total_bytes.saturating_sub(front.bytes);
@@ -97,6 +100,15 @@ impl MsgStore {
         self.push(LogMsg::Finished);
     }
 
+    /// Subscribe to the live broadcast channel.
+    ///
+    /// E25-09: We intentionally do not add an explicit buffer-overrun guard
+    /// here. The underlying `tokio::sync::broadcast` channel already signals
+    /// overrun to slow subscribers via `RecvError::Lagged(n)`, which callers
+    /// are expected to handle (typically by resyncing from `get_history()` or
+    /// logging and continuing). Dropped messages on lag are an accepted
+    /// trade-off for back-pressure-free producers; the history buffer acts as
+    /// the recovery path for subscribers who miss live messages.
     pub fn get_receiver(&self) -> broadcast::Receiver<LogMsg> {
         self.sender.subscribe()
     }
@@ -104,7 +116,7 @@ impl MsgStore {
     pub fn get_history(&self) -> Vec<LogMsg> {
         self.inner
             .read()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .history
             .iter()
             .map(|s| s.msg.clone())
@@ -130,7 +142,7 @@ impl MsgStore {
         let history: Vec<LogMsg> = self
             .inner
             .read()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .history
             .iter()
             .map(|s| s.msg.clone())

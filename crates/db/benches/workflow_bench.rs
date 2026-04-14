@@ -1,6 +1,36 @@
 //! Workflow Performance Benchmarks
 //!
 //! Run with: cargo bench --bench workflow_bench
+//
+// NOTE: Known bench limitations (W2-05-01..08) — these are caveats of the
+// harness itself, not production defects. Benchmarks are not production code;
+// the following issues are intentionally left in place but should be
+// considered when interpreting results:
+//
+// - W2-05-01: Runtime leaks. Each `bench_*` function builds a fresh
+//   `tokio::runtime::Runtime` and never shuts it down. Cosmetic for benches,
+//   but don't copy this pattern into production code.
+// - W2-05-02: In-memory SQLite (`sqlite::memory:`) skips disk I/O, WAL, and
+//   page-cache effects, so latency numbers over-state real-world performance
+//   and mask lock contention that only appears on a file-backed DB.
+// - W2-05-03: Fixed-parameter queries (`project-0`, `test-project`, a single
+//   workflow id) hit the same hot cache path every iteration. This masks
+//   index selectivity and plan-cache variance; real traffic will span many
+//   project ids with differing row counts per project.
+// - W2-05-04: Schemas inlined here are a subset of the real migrations
+//   (missing columns, constraints, and some indexes) — drift between this
+//   file and `crates/db/migrations/` is silent and will not fail CI.
+// - W2-05-05: Data distribution is uniform (`i % 5`, `i % statuses.len()`)
+//   and small (<=500 rows); production distributions are skewed and much
+//   larger, so these results should not be used to set SLOs.
+// - W2-05-06: `find_by_project_with_status` hardcodes the `IN (...)` list
+//   that matches the partial index predicate; any other status filter would
+//   force a full scan and is not measured.
+// - W2-05-07: No warm-up/steady-state separation between setup and
+//   measurement beyond Criterion defaults; first-iteration plan prep is
+//   folded into the sample.
+// - W2-05-08: The `performance.rs` sibling file simulates DB work with a
+//   `Vec<u8>` and does not actually exercise sqlx — see its preamble.
 
 use chrono::Utc;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};

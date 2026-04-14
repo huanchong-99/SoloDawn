@@ -31,7 +31,10 @@ export function FollowUpConflictSection({
   const repoId = repoWithConflicts?.repo_id;
   const { abortConflicts } = useAttemptConflicts(workspaceId, repoId);
 
-  // write using setAborting and read through abortingRef in async handlers
+  // write using setAborting and read through abortingRef in async handlers.
+  // This "sync ref to state" pattern is intentional: the state drives UI
+  // re-renders, while the ref provides a stable synchronous read inside
+  // async callbacks that must not close over a stale `aborting` value.
   const [aborting, setAborting] = useState(false);
   const abortingRef = useRef(false);
   useEffect(() => {

@@ -49,6 +49,9 @@ pub fn duplicate_stdout(
     let mut fd_writer = wrap_fd_as_tokio_writer(pipe_writer);
 
     // Create the duplicate stdout stream
+    // TODO(W2-30-06): Bound this duplicate-stdout channel (e.g. 1024) and
+    // apply backpressure via `try_send` with warn-on-full; the current
+    // unbounded channel can grow unbounded if the consumer stream stalls.
     let (dup_writer, dup_reader) =
         tokio::sync::mpsc::unbounded_channel::<std::io::Result<String>>();
 
@@ -118,6 +121,9 @@ pub fn tee_stdout_with_appender(
     let shared_writer = std::sync::Arc::new(tokio::sync::Mutex::new(writer));
 
     // Create duplicate stream publisher
+    // TODO(W2-30-06): Bound the duplicate-stdout and injector channels (e.g.
+    // 1024) and add backpressure via `try_send` with warn-on-full so a slow
+    // consumer cannot cause unbounded memory growth here.
     let (dup_tx, dup_rx) = tokio::sync::mpsc::unbounded_channel::<std::io::Result<String>>();
     // Create injector channel
     let (inj_tx, mut inj_rx) = tokio::sync::mpsc::unbounded_channel::<String>();

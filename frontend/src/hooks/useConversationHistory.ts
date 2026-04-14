@@ -628,7 +628,7 @@ export const useConversationHistory = ({
 
       return aggregation.allEntries;
     },
-    []
+    [getLiveExecutionProcess, patchWithKey]
   );
 
   const emitEntries = useCallback(

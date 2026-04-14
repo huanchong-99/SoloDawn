@@ -6,6 +6,15 @@ use sqlx::{FromRow, SqlitePool, Type};
 use ts_rs::TS;
 use uuid::Uuid;
 
+// E38-04: `merges.repo_id` was added by migration
+// `20251209000000_add_project_repositories.sql` as
+// `REFERENCES repos(id)` WITHOUT `ON DELETE CASCADE`. The migration is
+// already applied in production, so we cannot modify it in place. If
+// `repos` rows are ever deleted while `merges` still references them, the
+// FK will block the delete (or leave dangling rows if FKs are off).
+// TODO(E38-04): Introduce a follow-up migration that recreates the FK
+// with `ON DELETE CASCADE` (SQLite requires a table rebuild via a temp
+// table + INSERT SELECT + swap).
 #[derive(Debug, Clone, Serialize, Deserialize, TS, Type)]
 #[sqlx(type_name = "merge_status", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]

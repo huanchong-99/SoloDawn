@@ -239,6 +239,22 @@ struct TrackedProcess {
     logger_shutdown_tx: Option<oneshot::Sender<()>>,
 }
 
+impl Drop for TrackedProcess {
+    /// W2-36-01: ensure any still-running background tasks owned by this process
+    /// are aborted when the tracked entry is dropped. Normal shutdown paths call
+    /// `finalize_terminated_process` which awaits these handles cleanly; this
+    /// Drop impl is a safety net for panics or removals that bypass that path.
+    /// `JoinHandle::abort` is non-blocking and safe in a synchronous destructor.
+    fn drop(&mut self) {
+        if let Some(handle) = self.reader_task.take() {
+            handle.abort();
+        }
+        if let Some(handle) = self.logger_task.take() {
+            handle.abort();
+        }
+    }
+}
+
 // ============================================================================
 // CODEX_HOME Cleanup Guard (RAII)
 // ============================================================================
@@ -349,6 +365,12 @@ impl ProcessManager {
         terminal_id: &str,
         tracked: &mut TrackedProcess,
     ) -> anyhow::Result<()> {
+        // E26-12: child.process_id() may be stale. On Unix, once the child has been
+        // reaped (via try_wait/wait) the PID can be reused by the OS for another
+        // unrelated process. Sending a signal to that PID could terminate the wrong
+        // process. Callers that need long-term process identity should track a
+        // ProcessHandle rather than the raw PID. Here we accept the risk because this
+        // path runs during active termination and the child has not yet been reaped.
         let kill_result = match tracked.child.process_id() {
             Some(pid) if pid > 0 => self.kill(pid).await,
             _ => tracked
@@ -494,6 +516,16 @@ impl ProcessManager {
                 match reader.0.read(&mut buf) {
                     Ok(0) => {
                         // EOF reached - flush any pending incomplete UTF-8 tail
+                        //
+                        // E26-05: read() returning Ok(0) is treated as EOF and terminates
+                        // this reader task. This ASSUMES the PTY master was fully closed
+                        // by the OS, which is typically true after the child exits and
+                        // all slave fds are released. However on some platforms (notably
+                        // certain Linux/macOS edge cases with fd inheritance or held-open
+                        // slave handles) an Ok(0) can be transient and does NOT guarantee
+                        // the PTY is closed. Downstream cleanup code must therefore not
+                        // rely on this break as proof the PTY is gone; it should verify
+                        // via try_wait() / process_id() on the child.
                         if let Some(tail_text) = decoder.flush_lossy_tail() {
                             let _ = output_fanout.publish(tail_text, 0);
                         }
@@ -668,23 +700,44 @@ impl ProcessManager {
         let pid = child.process_id().unwrap_or(0);
         let session_id = Uuid::new_v4().to_string();
 
-        // Wait a short time and check if the process is still alive
-        // This catches cases where the command fails immediately (e.g., not found, permission denied)
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                return Err(anyhow::anyhow!(
-                    "Terminal process exited immediately with status: {status:?}. The CLI may not be installed correctly."
-                ));
+        // Wait and check if the process is still alive.
+        // This catches cases where the command fails immediately (e.g., not found, permission denied).
+        // E26-14: replace the arbitrary 100ms sleep with a try_wait poll loop so we
+        // detect immediate-exit failures sooner while still giving slow-spawning
+        // processes up to 500ms to report an error.
+        let mut elapsed = std::time::Duration::from_millis(0);
+        let poll_step = std::time::Duration::from_millis(10);
+        let poll_budget = std::time::Duration::from_millis(500);
+        let mut immediate_status: Option<std::process::ExitStatus> = None;
+        let mut immediate_error: Option<String> = None;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    immediate_status = Some(status);
+                    break;
+                }
+                Ok(None) => {
+                    if elapsed >= poll_budget {
+                        break;
+                    }
+                    tokio::time::sleep(poll_step).await;
+                    elapsed += poll_step;
+                }
+                Err(e) => {
+                    immediate_error = Some(format!("{e}"));
+                    break;
+                }
             }
-            Ok(None) => {
-                // Process is still running, good
-            }
-            Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "Failed to check terminal process status: {e}"
-                ));
-            }
+        }
+        if let Some(status) = immediate_status {
+            return Err(anyhow::anyhow!(
+                "Terminal process exited immediately with status: {status:?}. The CLI may not be installed correctly."
+            ));
+        }
+        if let Some(e) = immediate_error {
+            return Err(anyhow::anyhow!(
+                "Failed to check terminal process status: {e}"
+            ));
         }
 
         // Initialize output fanout and background reader
@@ -1013,12 +1066,23 @@ impl ProcessManager {
     /// - Reader is cloned on each call (portable-pty supports multiple readers)
     /// - Writer is shared via Arc<Mutex> (initialized on first call, then reused)
     pub async fn get_handle(&self, terminal_id: &str) -> Option<ProcessHandle> {
+        // E26-10: shared_writer initialization uses the surrounding processes write
+        // lock as the single synchronization point. Prior callers at one point
+        // checked `is_none()` outside the lock and then initialized, which is a
+        // TOCTOU race. We now take `processes.write().await` up front and perform
+        // the check-and-init under that exclusive guard (double-check pattern):
+        // once the lock is held, `shared_writer.is_none()` cannot change beneath
+        // us, so initialization is race-free. If this call path ever becomes
+        // contended enough to warrant releasing the processes lock during init,
+        // switch to `Arc<OnceCell<Arc<Mutex<PtyWriter>>>>` on TrackedProcess so
+        // the first initializer wins atomically without holding the map lock.
         let mut processes = self.processes.write().await;
 
         if let Some(tracked) = processes.get_mut(terminal_id) {
             let session_id = tracked.session_id.clone();
 
             // Initialize shared writer on first call, then reuse for reconnections
+            // (double-checked under the processes write lock; see E26-10 above).
             if tracked.shared_writer.is_none() {
                 let master = match tracked.master.lock() {
                     Ok(m) => m,
@@ -1259,14 +1323,25 @@ impl Drop for ProcessManager {
             }
         };
 
+        // [W2-36-08] Collect pids first, send SIGTERM to all, then wait up to
+        // a short bounded timeout for them to exit, and force-kill any
+        // stragglers. This gives children a chance to run shutdown hooks
+        // without risking an indefinite hang in Drop.
+        #[cfg(unix)]
+        let pids: Vec<(String, u32)> = processes
+            .iter()
+            .filter_map(|(tid, t)| {
+                t.child
+                    .process_id()
+                    .filter(|p| *p > 0)
+                    .map(|p| (tid.clone(), p))
+            })
+            .collect();
+
+        #[cfg(not(unix))]
         for (terminal_id, tracked) in processes.iter() {
             if let Some(pid) = tracked.child.process_id() {
                 if pid > 0 {
-                    #[cfg(unix)]
-                    {
-                        use nix::{sys::signal::{self, Signal}, unistd::Pid};
-                        let _ = signal::kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
-                    }
                     #[cfg(windows)]
                     {
                         let _ = std::process::Command::new("taskkill")
@@ -1279,6 +1354,55 @@ impl Drop for ProcessManager {
                         "ProcessManager::drop: sent termination signal to child"
                     );
                 }
+            }
+        }
+
+        #[cfg(unix)]
+        {
+            use nix::{
+                sys::signal::{self, Signal},
+                unistd::Pid,
+            };
+
+            // Phase 1: SIGTERM all tracked children.
+            for (terminal_id, pid) in &pids {
+                let _ = signal::kill(Pid::from_raw(*pid as i32), Signal::SIGTERM);
+                tracing::debug!(
+                    terminal_id = %terminal_id,
+                    pid = *pid,
+                    "ProcessManager::drop: sent SIGTERM to child"
+                );
+            }
+
+            // Phase 2: Poll for exit up to DROP_TERMINATION_TIMEOUT, then SIGKILL.
+            // We cannot `waitpid` here without races against the owning async
+            // task, so we use `kill(pid, 0)` as a liveness probe. We bound the
+            // total wait so Drop never hangs a shutdown.
+            const DROP_TERMINATION_TIMEOUT: std::time::Duration =
+                std::time::Duration::from_millis(500);
+            const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(25);
+
+            let deadline = std::time::Instant::now() + DROP_TERMINATION_TIMEOUT;
+            let mut remaining: Vec<(String, u32)> = pids.clone();
+            while !remaining.is_empty() && std::time::Instant::now() < deadline {
+                remaining.retain(|(_, pid)| {
+                    // kill(pid, 0) returns Err(ESRCH) once the process is reaped.
+                    signal::kill(Pid::from_raw(*pid as i32), None).is_ok()
+                });
+                if remaining.is_empty() {
+                    break;
+                }
+                std::thread::sleep(POLL_INTERVAL);
+            }
+
+            // Phase 3: Force-kill anything still alive.
+            for (terminal_id, pid) in &remaining {
+                let _ = signal::kill(Pid::from_raw(*pid as i32), Signal::SIGKILL);
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    pid = *pid,
+                    "ProcessManager::drop: child did not exit within timeout; sent SIGKILL"
+                );
             }
         }
     }
@@ -1331,6 +1455,13 @@ impl Clone for TerminalLogger {
 }
 
 impl Drop for TerminalLogger {
+    // [W2-36-09] Fire-and-forget: we signal the flush task to stop but cannot
+    // await it from a sync `Drop`. The flush task batches terminal output and
+    // flushes every `flush_interval_secs`, so on a rapid shutdown (e.g.
+    // process exiting immediately after the last write) up to one batch worth
+    // of log lines may be lost before reaching the DB. Structured shutdowns
+    // should explicitly call `stop_flush_task().await` + `flush().await`
+    // (see `stop_logger_task_gracefully`) to guarantee no loss.
     fn drop(&mut self) {
         if Arc::strong_count(&self.flush_shutdown_tx) != 1 {
             return;

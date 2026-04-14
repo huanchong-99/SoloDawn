@@ -86,6 +86,14 @@ async fn refresh_path() -> bool {
         return false;
     }
     tracing::debug!(?existing, ?refreshed, ?merged, "Refreshed PATH");
+    // SAFETY: In Rust 2024, `std::env::set_var` is `unsafe` because mutating the
+    // process environment is not thread-safe (other threads may be reading env
+    // vars via `getenv`). `refresh_path` is invoked from our shell bootstrap
+    // code early in command execution paths where we do not spawn concurrent
+    // readers of PATH; any downstream consumers observe the updated value via
+    // the normal (already-synchronized) env-var API. Risk of tearing here is
+    // bounded to PATH lookups in other threads, which is acceptable given we
+    // only ever widen PATH (append unseen entries), never shrink it.
     unsafe {
         std::env::set_var("PATH", &merged);
     }
@@ -143,7 +151,22 @@ impl UnixShell {
         {
             return shell;
         }
-        UnixShell::Sh(PathBuf::from("/bin/sh"))
+        // W2-37-07: `/bin/sh` fallback is Unix-only. On Windows this path does
+        // not exist; callers on Windows should go through `get_shell_command`
+        // (which returns `cmd.exe /C`) rather than constructing a
+        // `UnixShell`. Gate the fallback construction with `#[cfg(unix)]` to
+        // make the platform assumption explicit. For Windows we fall back to
+        // `cmd.exe` via `UnixShell::Other` so the type can still be returned
+        // from cross-compiled code paths, though `get_shell_command` above is
+        // the correct entry point on Windows.
+        #[cfg(unix)]
+        {
+            UnixShell::Sh(PathBuf::from("/bin/sh"))
+        }
+        #[cfg(not(unix))]
+        {
+            UnixShell::Other(PathBuf::from("cmd.exe"))
+        }
     }
     pub fn from_path(path: &Path) -> Option<UnixShell> {
         if path.is_absolute() && path.is_file() {

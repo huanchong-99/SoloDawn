@@ -16,6 +16,13 @@ pub struct ExecutionProcessLogs {
 
 impl ExecutionProcessLogs {
     /// Find logs by execution process ID
+    // TODO(W2-15-06): Unbounded — returns every log chunk for an execution.
+    // Long-running processes accumulate MBs of log rows; this query has no
+    // LIMIT / OFFSET and the whole result is held in memory by callers
+    // (`parse_logs` further materialises them all). Add pagination
+    // (inserted_at cursor) and verify that `execution_process_logs`
+    // has an index on `(execution_id, inserted_at)` — without it this is a
+    // full scan + sort.
     pub async fn find_by_execution_id(
         pool: &SqlitePool,
         execution_id: Uuid,

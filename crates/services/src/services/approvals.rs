@@ -108,18 +108,23 @@ impl Approvals {
                         timeout_at: request.timeout_at,
                     })
                     .ok_or(ApprovalError::NoToolUseEntry)?;
-                store.push_patch(ConversationPatch::replace(idx, approval_entry));
 
+                // E25-08: Insert into `pending` *before* publishing the
+                // PendingApproval patch to `msg_store`. Subscribers observing
+                // the patch may immediately call `respond()`; if we pushed the
+                // patch first, those callers could see `NotFound` because the
+                // entry hadn't been inserted yet.
                 self.pending.insert(
                     req_id.clone(),
                     PendingApproval {
                         entry_index: idx,
-                        entry: matching_tool,
+                        entry: matching_tool.clone(),
                         execution_process_id: request.execution_process_id,
                         tool_name: request.tool_name.clone(),
                         response_tx: tx,
                     },
                 );
+                store.push_patch(ConversationPatch::replace(idx, approval_entry));
                 tracing::debug!(
                     "Created approval {} for tool '{}' at entry index {}",
                     req_id,
@@ -189,19 +194,37 @@ impl Approvals {
                 execution_process_id: p.execution_process_id,
             };
 
-            // If approved or denied, and task is still InReview, move back to InProgress
+            // E25-06: If approved or denied, transition InReview -> InProgress
+            // atomically via CAS. Avoids the check-then-act race between
+            // reading `task.status` and performing the update: another writer
+            // could move the task out of `InReview` between the read and the
+            // write, causing us to clobber it. With CAS, the UPDATE only
+            // applies when the row is still `InReview`.
             if matches!(
                 req.status,
                 ApprovalStatus::Approved | ApprovalStatus::Denied { .. }
             ) && let Ok(ctx) =
                 ExecutionProcess::load_context(pool, tool_ctx.execution_process_id).await
-                && ctx.task.status == TaskStatus::InReview
-                && let Err(e) = Task::update_status(pool, ctx.task.id, TaskStatus::InProgress).await
             {
-                tracing::warn!(
-                    "Failed to update task status to InProgress after approval response: {}",
-                    e
-                );
+                match Task::update_status_cas(
+                    pool,
+                    ctx.task.id,
+                    TaskStatus::InReview,
+                    TaskStatus::InProgress,
+                )
+                .await
+                {
+                    Ok(false) => {
+                        // Task wasn't InReview at UPDATE time; nothing to do.
+                    }
+                    Ok(true) => {}
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to update task status to InProgress after approval response: {}",
+                            e
+                        );
+                    }
+                }
             }
 
             Ok((req.status, tool_ctx))
@@ -225,9 +248,20 @@ impl Approvals {
         let pool = self.pool.clone();
 
         let now = chrono::Utc::now();
-        let to_wait = (timeout_at - now)
-            .to_std()
-            .unwrap_or_else(|_| StdDuration::from_secs(0));
+        // E28-03: Log when the approval is already expired at watcher spawn
+        // time so operators can see the degenerate case where `to_wait`
+        // collapses to zero instead of a real sleep.
+        let to_wait = match (timeout_at - now).to_std() {
+            Ok(d) => d,
+            Err(_) => {
+                tracing::debug!(
+                    "approval '{}' already expired at spawn time ({}); firing timeout immediately",
+                    id,
+                    timeout_at
+                );
+                StdDuration::from_secs(0)
+            }
+        };
         let deadline = tokio::time::Instant::now() + to_wait;
 
         tokio::spawn(async move {

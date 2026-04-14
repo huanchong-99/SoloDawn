@@ -176,6 +176,7 @@
   "fileTree": {
     "searchPlaceholder": "Search files...",
     "noResults": "No matching files",
+    "noChangedFiles": "No changed files",
     "title": "Files",
     "showGitHubComments": "Show GitHub comments",
     "hideGitHubComments": "Hide GitHub comments"

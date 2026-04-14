@@ -84,6 +84,7 @@ function DragHandle({
         isDragging ? 'cursor-grabbing' : 'cursor-grab'
       )}
       onMouseDown={onMouseDown}
+      aria-label="Drag handle"
     >
       <div className="flex gap-[2px] py-half">
         <span className="size-dot rounded-full bg-panel group-hover:bg-low transition" />

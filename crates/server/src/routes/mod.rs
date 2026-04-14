@@ -178,6 +178,14 @@ pub fn build_router(
         // G18-005: CORS configuration. In production, set SOLODAWN_CORS_ORIGINS
         // to restrict allowed origins (comma-separated). When unset, allows all
         // origins for local development convenience.
+        //
+        // W2-34-04: Layer ordering verified. Tower applies `.layer(...)` calls
+        // bottom-up (outside-in), so the CORS layer added here is the OUTERMOST
+        // middleware, wrapping `require_api_token`. This is the correct order:
+        // preflight `OPTIONS` requests are answered by CorsLayer before the
+        // auth middleware runs, so browsers can complete CORS negotiation
+        // without a valid API token. Do not move CORS below the auth layer or
+        // preflight will 401 and block all cross-origin requests.
         .layer(build_cors_layer())
         .with_state(deployment.clone());
 

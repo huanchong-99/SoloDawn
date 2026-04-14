@@ -111,12 +111,15 @@ mod tests {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct EditorConfig {
     editor_type: EditorType,
+    #[serde(skip_serializing_if = "Option::is_none")]
     custom_command: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     remote_ssh_host: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     remote_ssh_user: Option<String>,
 }
 

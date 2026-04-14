@@ -4,7 +4,12 @@
 set -euo pipefail
 
 SONAR_URL="${1:-http://localhost:9000}"
-ADMIN_PASS="${2:-admin}"
+# Require admin password from CLI arg or SONAR_ADMIN_PASSWORD env; no insecure default.
+ADMIN_PASS="${2:-${SONAR_ADMIN_PASSWORD:-}}"
+if [[ -z "$ADMIN_PASS" ]]; then
+    echo "[init-sonar] ERROR: SonarQube admin password is not set. Provide it as the second argument or via SONAR_ADMIN_PASSWORD." >&2
+    exit 2
+fi
 PROJECT_KEY="solodawn"
 PROJECT_NAME="SoloDawn"
 MAX_WAIT=300

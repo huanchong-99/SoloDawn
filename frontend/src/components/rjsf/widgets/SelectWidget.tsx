@@ -62,11 +62,17 @@ export const SelectWidget = (props: WidgetProps) => {
         <SelectValue placeholder={placeholder || 'Select an option...'} />
       </SelectTrigger>
       <SelectContent>
-        {allOptions.map((option) => (
-          <SelectItem key={option.value} value={String(option.value)}>
-            {option.label}
-          </SelectItem>
-        ))}
+        {allOptions.map((option) => {
+          const optValue =
+            option.value === null || option.value === undefined
+              ? ''
+              : String(option.value);
+          return (
+            <SelectItem key={optValue} value={optValue}>
+              {option.label}
+            </SelectItem>
+          );
+        })}
       </SelectContent>
     </Select>
   );

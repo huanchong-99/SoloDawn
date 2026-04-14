@@ -71,6 +71,7 @@ pub struct Terminal {
     pub model_config_id: String,
 
     /// Custom API Base URL
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_base_url: Option<String>,
 
     /// Custom API Key (encrypted storage)
@@ -79,9 +80,11 @@ pub struct Terminal {
     pub custom_api_key: Option<String>,
 
     /// Role, e.g., 'coder', 'reviewer', 'fixer'
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
 
     /// Role description
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub role_description: Option<String>,
 
     /// Execution order within task
@@ -98,15 +101,18 @@ pub struct Terminal {
     pub status: String,
 
     /// OS process ID
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub process_id: Option<i32>,
 
     /// PTY session ID
     pub pty_session_id: Option<String>,
 
     /// Associated session ID (NEW FIELD)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
 
     /// Associated execution process ID (NEW FIELD)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub execution_process_id: Option<String>,
 
     /// Associated solodawn session ID
@@ -120,15 +126,19 @@ pub struct Terminal {
     pub auto_confirm: bool,
 
     /// Last Git commit hash
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_commit_hash: Option<String>,
 
     /// Last Git commit message
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_commit_message: Option<String>,
 
     /// Started timestamp
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<DateTime<Utc>>,
 
     /// Completed timestamp
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<DateTime<Utc>>,
 
     /// Created timestamp

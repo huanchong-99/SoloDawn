@@ -27,7 +27,15 @@ pub struct ToolCall {
 pub fn parse_tool_call(response: &str) -> Option<ToolCall> {
     // Try fenced JSON first, then inline JSON
     let json_str = extract_fenced_json(response).or_else(|| extract_inline_json(response))?;
-    let parsed: ToolCall = serde_json::from_str(json_str).ok()?;
+    let parsed: ToolCall = serde_json::from_str(json_str)
+        .inspect_err(|e| {
+            tracing::warn!(
+                error = %e,
+                preview = &json_str[..json_str.len().min(200)],
+                "Failed to parse tool call JSON"
+            )
+        })
+        .ok()?;
     if parsed.tool.is_empty() {
         return None;
     }

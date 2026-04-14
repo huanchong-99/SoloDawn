@@ -45,6 +45,16 @@ pub async fn get_tasks(
     State(deployment): State<DeploymentImpl>,
     Query(query): Query<TaskQuery>,
 ) -> Result<ResponseJson<ApiResponse<Vec<TaskWithAttemptStatus>>>, ApiError> {
+    // E29-01: Validate project_id is not nil (empty/null guard at entry).
+    if query.project_id.is_nil() {
+        return Err(ApiError::BadRequest(
+            "project_id must not be empty".to_string(),
+        ));
+    }
+
+    // TODO(W2-18-02): No auth enforcement here; ownership check must be added
+    // at a higher layer (middleware) once multi-user auth lands.
+
     let tasks =
         Task::find_by_project_id_with_attempt_status(&deployment.db().pool, query.project_id)
             .await?;
@@ -279,7 +289,7 @@ pub async fn create_task_and_start(
 
     let task = Task::find_by_id(pool, task.id)
         .await?
-        .ok_or(ApiError::Database(SqlxError::RowNotFound))?;
+        .ok_or_else(|| ApiError::NotFound(format!("Task {} not found", task.id)))?;
 
     tracing::info!("Started attempt for task {}", task.id);
     Ok(ResponseJson(ApiResponse::success(TaskWithAttemptStatus {
@@ -297,6 +307,29 @@ pub async fn update_task(
     Json(payload): Json<UpdateTask>,
 ) -> Result<ResponseJson<ApiResponse<Task>>, ApiError> {
     ensure_shared_task_auth(&existing_task, &deployment).await?;
+
+    // E29-09: Validate optional fields when they are supplied.
+    const MAX_TITLE_LEN: usize = 256;
+    const MAX_DESCRIPTION_LEN: usize = 64 * 1024;
+    if let Some(ref t) = payload.title {
+        if t.trim().is_empty() {
+            return Err(ApiError::BadRequest(
+                "title must not be empty".to_string(),
+            ));
+        }
+        if t.len() > MAX_TITLE_LEN {
+            return Err(ApiError::BadRequest(format!(
+                "title must not exceed {MAX_TITLE_LEN} characters"
+            )));
+        }
+    }
+    if let Some(ref d) = payload.description {
+        if d.len() > MAX_DESCRIPTION_LEN {
+            return Err(ApiError::BadRequest(format!(
+                "description must not exceed {MAX_DESCRIPTION_LEN} characters"
+            )));
+        }
+    }
 
     // Use existing values if not provided in update
     let title = payload.title.unwrap_or(existing_task.title);
@@ -357,6 +390,22 @@ pub async fn delete_task(
     Extension(task): Extension<Task>,
     State(deployment): State<DeploymentImpl>,
 ) -> Result<(StatusCode, ResponseJson<ApiResponse<()>>), ApiError> {
+    // TODO(W2-18-08): TOCTOU between ownership check and delete.
+    //
+    // The `Task` extension is populated by the task-loader middleware, which
+    // also performs ownership/authorization against the project scope. Between
+    // that check and the `Task::delete` call below, the task row could be
+    // reparented, transferred, or mutated concurrently — meaning the delete
+    // executes against a row whose ownership is no longer what the middleware
+    // validated.
+    //
+    // Fix forward: either (a) re-read-and-validate the row inside the same
+    // transaction (`SELECT ... FOR UPDATE` / sqlite equivalent via `BEGIN
+    // IMMEDIATE`) before `Task::delete`, or (b) push ownership into the
+    // `DELETE ... WHERE id = ?1 AND project_id = ?2 AND <owner guard>` SQL
+    // itself and treat `rows_affected == 0` as a 404/403. Option (b) is
+    // preferred since it is atomic at the DB layer and needs no extra round
+    // trip. Revisit when `Task::delete` signature is updated.
     ensure_shared_task_auth(&task, &deployment).await?;
 
     let pool = &deployment.db().pool;
@@ -391,6 +440,15 @@ pub async fn delete_task(
     }
 
     // Use a transaction to ensure atomicity: either all operations succeed or all are rolled back
+    //
+    // TODO(E29-15): Rollback is not guaranteed on panic. sqlx::Transaction's
+    // Drop impl schedules an async rollback but cannot await it, so a panic
+    // mid-transaction may leave the connection in an ambiguous state. If this
+    // hot path grows more complex, switch to an RAII guard that performs an
+    // explicit rollback-on-drop via block_in_place / spawn_blocking, or move
+    // the whole body behind an explicit commit helper that aborts the task on
+    // any error path. Current code only has two awaited statements between
+    // begin() and commit(), so panic risk is low but non-zero.
     let mut tx = pool.begin().await?;
 
     // Nullify parent_workspace_id for all child tasks before deletion

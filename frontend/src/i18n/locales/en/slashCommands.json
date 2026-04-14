@@ -3,6 +3,14 @@
   "title": "Slash Commands",
   "description": "Create and manage custom slash command presets for your workflows.",
   "createButton": "New Command",
+  "dialogs": {
+    "deleteConfirm": {
+      "title": "Delete Command",
+      "message": "Are you sure you want to delete the command \"{{command}}\"?",
+      "confirm": "Delete",
+      "cancel": "Cancel"
+    }
+  },
   "errors": {
     "loadFailed": "Failed to load slash commands",
     "deleteConfirm": "Are you sure you want to delete the command \"{{command}}\"?",

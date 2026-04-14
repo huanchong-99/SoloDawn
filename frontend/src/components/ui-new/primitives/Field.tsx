@@ -109,6 +109,9 @@ function FieldLabel({
   ...props
 }: React.ComponentProps<typeof Label>) {
   return (
+    // TODO (P2): `has-data-[state=checked]:*` relies on Tailwind v3.4+ has() variant support.
+    // Verify it resolves in the compiled CSS; if not, switch to peer-data-[state=checked]
+    // or a parent [&:has([data-state=checked])] selector.
     <Label
       data-slot="field-label"
       className={cn(

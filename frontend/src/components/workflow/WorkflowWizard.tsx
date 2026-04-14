@@ -241,6 +241,8 @@ export function WorkflowWizard({
   };
 
   const handleSubmit = async () => {
+    // E11-02: Prevent double-submit when handler is invoked concurrently
+    if (isSubmitting) return;
     const latestConfig = configRef.current;
     // Validate ALL visible steps before submission, not just the current step.
     // This catches cross-step inconsistencies when the user goes back and edits.

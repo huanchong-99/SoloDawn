@@ -157,14 +157,22 @@ export function GeneralSettingsNew() {
     setDirty(false);
   };
 
-  const resetDisclaimer = async () => {
+  const handleResetDisclaimer = async () => {
     if (!config) return;
-    updateAndSaveConfig({ disclaimer_acknowledged: false });
+    try {
+      await updateAndSaveConfig({ disclaimer_acknowledged: false });
+    } catch (err) {
+      console.error('Failed to reset disclaimer:', err);
+    }
   };
 
-  const resetOnboarding = async () => {
+  const handleResetOnboarding = async () => {
     if (!config) return;
-    updateAndSaveConfig({ onboarding_acknowledged: false });
+    try {
+      await updateAndSaveConfig({ onboarding_acknowledged: false });
+    } catch (err) {
+      console.error('Failed to reset onboarding:', err);
+    }
   };
 
   // Theme options for SettingsSelect
@@ -446,8 +454,9 @@ export function GeneralSettingsNew() {
                   'opacity-50 cursor-not-allowed'
               )}
               value={
-                draft?.pr_auto_description_prompt ??
-                DEFAULT_PR_DESCRIPTION_PROMPT
+                draft?.pr_auto_description_prompt == null
+                  ? ''
+                  : draft.pr_auto_description_prompt
               }
               disabled={draft?.pr_auto_description_prompt == null}
               onChange={(e) =>
@@ -586,7 +595,7 @@ export function GeneralSettingsNew() {
             </div>
             <button
               type="button"
-              onClick={resetDisclaimer}
+              onClick={handleResetDisclaimer}
               className="inline-flex items-center gap-1.5 shrink-0 rounded border border-border bg-secondary px-base py-1 text-sm text-normal hover:bg-surface-2 transition-colors duration-200"
             >
               <ArrowCounterClockwiseIcon className="size-icon-xs" weight="bold" />
@@ -605,7 +614,7 @@ export function GeneralSettingsNew() {
             </div>
             <button
               type="button"
-              onClick={resetOnboarding}
+              onClick={handleResetOnboarding}
               className="inline-flex items-center gap-1.5 shrink-0 rounded border border-border bg-secondary px-base py-1 text-sm text-normal hover:bg-surface-2 transition-colors duration-200"
             >
               <ArrowCounterClockwiseIcon className="size-icon-xs" weight="bold" />

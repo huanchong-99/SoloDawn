@@ -38,6 +38,13 @@ export function useEditorAvailability(
     };
 
     checkAvailability();
+
+    // Reset availability state on unmount / editorType change so we don't
+    // leave stale 'available'/'unavailable' values visible after the hook
+    // consumer has torn down.
+    return () => {
+      setAvailability(null);
+    };
   }, [editorType]);
 
   return availability;

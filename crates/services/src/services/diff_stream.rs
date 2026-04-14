@@ -70,6 +70,11 @@ impl futures::Stream for DiffStreamHandle {
 }
 
 impl Drop for DiffStreamHandle {
+    // [W2-36-03] Abort the watcher task synchronously without joining.
+    // Acceptable: the watcher only pushes diff events into the owned stream
+    // that we are dropping, so any in-flight work has no visible side effects
+    // once this handle is gone. A graceful shutdown/await would require a
+    // Tokio runtime inside `Drop`, which we cannot assume.
     fn drop(&mut self) {
         if let Some(handle) = self.watcher_task.take() {
             handle.abort();
@@ -156,7 +161,12 @@ impl DiffStreamManager {
         self.reset_stream().await?;
 
         // Send Ready message to indicate initial data has been sent
-        let _ready_error = self.tx.send(Ok(LogMsg::Ready)).await;
+        if let Err(e) = self.tx.send(Ok(LogMsg::Ready)).await {
+            tracing::warn!(
+                error = %e,
+                "Failed to send Ready LogMsg on diff stream; receiver likely dropped"
+            );
+        }
 
         let (fs_debouncer, mut fs_rx, canonical_worktree) =
             filesystem_watcher::async_watcher(&self.args.worktree_path)
@@ -392,10 +402,17 @@ impl DiffStreamManager {
         let branch = self.args.branch.clone();
         let target = target_branch.to_string();
 
-        tokio::task::spawn_blocking(move || git.get_base_commit(&repo_path, &branch, &target).ok())
-            .await
-            .ok()
-            .flatten()
+        tokio::task::spawn_blocking(move || {
+            git.get_base_commit(&repo_path, &branch, &target)
+                .inspect_err(|e| {
+                    tracing::warn!(error = %e, branch = %branch, target = %target, "Failed to compute base commit")
+                })
+                .ok()
+        })
+        .await
+        .inspect_err(|e| tracing::warn!(error = %e, "spawn_blocking join failed in recompute_base_commit"))
+        .ok()
+        .flatten()
     }
 }
 
@@ -568,7 +585,7 @@ fn setup_git_watcher(
     let (tx, rx) = tokio::sync::watch::channel(());
 
     // Create debouncer with short timeout since git operations might touch multiple files
-    let mut debouncer = new_debouncer(
+    let mut debouncer = match new_debouncer(
         Duration::from_millis(200),
         None,
         move |res: DebounceEventResult| {
@@ -576,8 +593,16 @@ fn setup_git_watcher(
                 let _ = tx.send(());
             }
         },
-    )
-    .ok()?;
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(
+                "Failed to create git watcher debouncer: {}; git events will be ignored",
+                e
+            );
+            return None;
+        }
+    };
 
     let mut watched_any = false;
     for path in paths_to_watch {

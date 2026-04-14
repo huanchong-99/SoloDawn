@@ -37,6 +37,7 @@ export function useCommandBarShortcut(
   );
 
   useEffect(() => {
+    if (typeof globalThis === 'undefined') return;
     if (!enabled) return;
 
     // Use capture phase to intercept before other handlers (like Lexical editor)

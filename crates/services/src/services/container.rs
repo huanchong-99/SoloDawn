@@ -189,6 +189,13 @@ pub trait ContainerService {
             let pool = self.db().pool.clone();
             let workspace_id = ctx.workspace.id;
             let task_id = ctx.task.id;
+            // TODO [W2-36-10]: This detached `tokio::spawn` is fire-and-forget —
+            // the JoinHandle is discarded so the task is not tracked for
+            // graceful shutdown or cancellation. It only runs a single
+            // post-completion status refresh and is tolerant to being
+            // aborted on runtime drop, but we should eventually track the
+            // handle (e.g. via a supervised TaskTracker on Container) so
+            // in-flight refreshes can be awaited/cancelled at shutdown.
             tokio::spawn(async move {
                 let repo_path = match WorkspaceRepo::find_by_workspace_id(&pool, workspace_id).await {
                     Ok(ws_repos) if !ws_repos.is_empty() => {
@@ -429,6 +436,11 @@ pub trait ContainerService {
         tracing::info!("Backfilling {} repo names", repos.len());
 
         for repo in repos {
+            // TODO(E27-12): Falling back to `repo.id` (a UUID) here means the
+            // persisted name no longer matches any path component, which breaks
+            // downstream assumptions tying `working_dir` (see E27-08) to the repo
+            // name. Existing behavior may be intentional for uniqueness; revisit
+            // when auditing the `working_dir = repo.name` pattern.
             let name = repo
                 .path
                 .file_name()
@@ -442,6 +454,10 @@ pub trait ContainerService {
         Ok(())
     }
 
+    // TODO(E27-08): `working_dir` below is set to `repo.name` (a relative component),
+    // not the full `repo.path`. For multi-repo projects this relies on the executor
+    // resolving the name relative to the project root. Audit all callers and switch to
+    // the full path; fix is invasive so tracked as TODO.
     fn cleanup_actions_for_repos(&self, repos: &[Repo]) -> Option<ExecutorAction> {
         let repos_with_cleanup: Vec<_> = repos
             .iter()
@@ -479,6 +495,8 @@ pub trait ContainerService {
         Some(root_action)
     }
 
+    // TODO(E27-08): Same concern as `cleanup_actions_for_repos` — `working_dir` is set
+    // to `repo.name`, not the full repo path. Revisit once callers are audited.
     fn setup_actions_for_repos(&self, repos: &[Repo]) -> Option<ExecutorAction> {
         let repos_with_setup: Vec<_> = repos.iter().filter(|r| r.setup_script.is_some()).collect();
 
@@ -513,6 +531,8 @@ pub trait ContainerService {
         Some(root_action)
     }
 
+    // TODO(E27-08): See `setup_actions_for_repos` — `working_dir` is `repo.name`,
+    // not the full repo path.
     fn setup_action_for_repo(repo: &Repo) -> Option<ExecutorAction> {
         repo.setup_script.as_ref().map(|script| {
             ExecutorAction::new(

@@ -80,21 +80,25 @@ export const ChangesPanel = forwardRef<HTMLDivElement, ChangesPanelProps>(
           className
         )}
       >
-        <div className="space-y-base">
-          {diffItems.map(({ diff, initialExpanded }) => (
-            <DiffItem
-              key={diff.newPath || diff.oldPath || ''}
-              diff={diff}
-              initialExpanded={initialExpanded}
-              onRef={onDiffRef}
-              projectId={projectId}
-              attemptId={attemptId}
-            />
-          ))}
-        </div>
-        {diffItems.length === 0 && (
+        {/* E08-01: render either the list OR the empty state, never both,
+            so the empty state isn't forced into a `space-y-base` slot that
+            collapses its centering. */}
+        {diffItems.length === 0 ? (
           <div className="flex-1 flex items-center justify-center text-low">
             <p className="text-sm">{t('common:empty.noChanges')}</p>
+          </div>
+        ) : (
+          <div className="space-y-base">
+            {diffItems.map(({ diff, initialExpanded }) => (
+              <DiffItem
+                key={diff.newPath || diff.oldPath || ''}
+                diff={diff}
+                initialExpanded={initialExpanded}
+                onRef={onDiffRef}
+                projectId={projectId}
+                attemptId={attemptId}
+              />
+            ))}
           </div>
         )}
       </div>

@@ -14,7 +14,10 @@ export function areProfilesEqual(
   a: ExecutorProfileId | null | undefined,
   b: ExecutorProfileId | null | undefined
 ): boolean {
-  if (!a || !b) return !a && !b;
+  // L18: use `== null` to treat both `null` and `undefined` as equivalent
+  // (double-equals-null matches both), rather than `!a` which also treats
+  // falsy-but-defined values as missing.
+  if (a == null || b == null) return a == null && b == null;
   if (a.executor !== b.executor) return false;
   // Normalize variants: null/undefined -> 'DEFAULT'
   const variantA = a.variant ?? 'DEFAULT';

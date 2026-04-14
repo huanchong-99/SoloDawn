@@ -17,6 +17,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   e2e:
     strategy:
@@ -112,7 +116,8 @@ jobs:
     - name: Run E2E self-test
       shell: bash
       env:
-        SOLODAWN_ENCRYPTION_KEY: "12345678901234567890123456789012"
+        # Test-only placeholder key (32 bytes); not a real secret
+        SOLODAWN_ENCRYPTION_KEY: ${{ secrets.E2E_TEST_ENCRYPTION_KEY || 'test-key-placeholder-not-secret-ci-only-0000' }}
         SOLODAWN_LOCAL_MODE: "1"
         SOLODAWN_NO_BROWSER: "1"
         RUST_LOG: "warn,server=info"
@@ -268,9 +273,11 @@ jobs:
       run: cargo build --release -p server
 
     - name: Run orchestration E2E test
+      if: github.event_name != 'pull_request'
       shell: bash
       env:
-        SOLODAWN_ENCRYPTION_KEY: "12345678901234567890123456789012"
+        # Test-only placeholder key (32 bytes); not a real secret
+        SOLODAWN_ENCRYPTION_KEY: ${{ secrets.E2E_TEST_ENCRYPTION_KEY || 'test-key-placeholder-not-secret-ci-only-0000' }}
         SOLODAWN_LOCAL_MODE: "1"
         SOLODAWN_NO_BROWSER: "1"
         RUST_LOG: "warn,server=info,services=info"

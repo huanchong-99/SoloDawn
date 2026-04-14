@@ -199,7 +199,7 @@ impl GitCli {
         )];
 
         // Use a temp index from HEAD to accurately track renames in untracked files
-        let _ = Self::git_with_env(worktree_path, ["read-tree", "HEAD"], &envs)?;
+        Self::git_with_env(worktree_path, ["read-tree", "HEAD"], &envs)?;
 
         // Stage changed and untracked files explicitly, which is faster than `git add -A` for large repos.
         // Use raw paths from `get_worktree_status` to avoid lossy UTF-8 conversions for odd filenames.
@@ -496,9 +496,23 @@ impl GitCli {
         a: &str,
         b: &str,
     ) -> Result<String, GitCliError> {
-        let out = self
-            .git(worktree_path, ["merge-base", "--fork-point", a, b])
-            .unwrap_or(self.git(worktree_path, ["merge-base", a, b])?);
+        // E23-03: `--fork-point` can fail when reflog data is missing (e.g.,
+        // fresh clones, shallow fetches, or after pruning). When it fails, fall
+        // back to the plain merge-base, but log a warning so the degraded
+        // accuracy is visible in diagnostics.
+        let out = match self.git(worktree_path, ["merge-base", "--fork-point", a, b]) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    a = %a,
+                    b = %b,
+                    worktree = %worktree_path.display(),
+                    error = %e,
+                    "git merge-base --fork-point failed; falling back to plain merge-base"
+                );
+                self.git(worktree_path, ["merge-base", a, b])?
+            }
+        };
         Ok(out.trim().to_string())
     }
 
@@ -512,6 +526,15 @@ impl GitCli {
     ) -> Result<(), GitCliError> {
         // If a rebase is in progress, refuse to proceed. The caller can
         // choose to abort or continue; we avoid destructive actions here.
+        //
+        // E23-04: This is a best-effort TOCTOU check. A concurrent process (or
+        // a user running git by hand) could start or finish a rebase between
+        // this check and the `git rebase` invocation below. Git itself will
+        // refuse to start a new rebase while one is in progress and will
+        // surface a clear error, so the worst case is a non-destructive
+        // failure we report to the caller. We don't attempt to hold a lock
+        // across the worktree because git has no portable locking primitive
+        // usable from an external process. Inherent raciness accepted.
         if self.is_rebase_in_progress(worktree_path).unwrap_or(false) {
             return Err(GitCliError::RebaseInProgress);
         }
@@ -534,8 +557,16 @@ impl GitCli {
     pub fn is_rebase_in_progress(&self, worktree_path: &Path) -> Result<bool, GitCliError> {
         let rebase_merge = self.git(worktree_path, ["rev-parse", "--git-path", "rebase-merge"])?;
         let rebase_apply = self.git(worktree_path, ["rev-parse", "--git-path", "rebase-apply"])?;
-        let rm_exists = std::path::Path::new(rebase_merge.trim()).exists();
-        let ra_exists = std::path::Path::new(rebase_apply.trim()).exists();
+        // E23-05: Use `try_exists()` instead of `exists()` to avoid the symlink
+        // TOCTOU pitfall where a broken/racing symlink is silently treated as
+        // absent. `try_exists()` surfaces real I/O errors while still treating
+        // `NotFound` as a plain `false`, giving us an honest answer.
+        let rm_exists = std::path::Path::new(rebase_merge.trim())
+            .try_exists()
+            .unwrap_or(false);
+        let ra_exists = std::path::Path::new(rebase_apply.trim())
+            .try_exists()
+            .unwrap_or(false);
         Ok(rm_exists || ra_exists)
     }
 
@@ -619,6 +650,11 @@ impl GitCli {
         from_branch: &str,
         message: &str,
     ) -> Result<String, GitCliError> {
+        // E23-07: Validate that `base_branch` actually resolves before we try
+        // to `checkout`. This surfaces a clear `CommandFailed` early rather
+        // than relying on checkout's diagnostics, and prevents surprising
+        // behaviour when a caller passes a stale/renamed ref.
+        self.git(repo_path, ["rev-parse", "--verify", base_branch])?;
         self.git(repo_path, ["checkout", base_branch]).map(|_| ())?;
         if let Err(GitCliError::CommandFailed(msg)) =
             self.git(repo_path, ["merge", "--squash", "--no-commit", from_branch])

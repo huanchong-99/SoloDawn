@@ -1,4 +1,5 @@
-import { DndContext, type DragEndEvent, useDroppable } from '@dnd-kit/core';
+import { DndContext, DragOverlay, type DragEndEvent, type DragStartEvent, useDroppable } from '@dnd-kit/core';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWorkflow, useUpdateTaskStatus } from '@/hooks/useWorkflows';
 import type { WorkflowTaskDto } from 'shared/types';
@@ -83,7 +84,34 @@ export function WorkflowKanbanBoard({ workflowId }: Readonly<WorkflowKanbanBoard
 
   const tasks = workflow?.tasks ?? [];
 
+  // E09-01: Keep a ref to the freshest tasks list so drag-end doesn't read a
+  // stale closure when the mutation resolves between drag-start and drag-end.
+  const tasksRef = useRef<WorkflowTaskDto[]>(tasks);
+  tasksRef.current = tasks;
+
+  // E09-06: Track the task currently being dragged so we can render it inside
+  // a <DragOverlay> for smoother visual feedback.
+  const [activeTask, setActiveTask] = useState<WorkflowTaskDto | null>(null);
+
+  // TODO(E09-03..07): Address remaining optimization/race issues flagged in the
+  // Kanban review (debounced mutations, dnd sensors, keyboard a11y, etc.).
+  // TODO(E09-08): Add drag-end test coverage for WorkflowKanbanBoard (skipped
+  //   here; tracked separately so handleDragEnd's status-transition whitelist
+  //   and stale-closure protection are exercised in unit tests).
+  // TODO(E09-09): Configure dnd-kit sensors (PointerSensor with activation
+  //   constraint + KeyboardSensor) instead of relying on defaults, so click
+  //   vs. drag intent is disambiguated and keyboard dragging works.
+  // TODO(E09-10): Announce drag events via dnd-kit's `accessibility` prop
+  //   (screenReaderInstructions / announcements) for a11y parity.
+
+  const handleDragStart = ({ active }: DragStartEvent) => {
+    const taskId = String(active.id);
+    const task = tasksRef.current.find((item) => item.id === taskId) ?? null;
+    setActiveTask(task);
+  };
+
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    setActiveTask(null);
     if (!workflowId || !over) return;
 
     const taskId = String(active.id);
@@ -92,8 +120,10 @@ export function WorkflowKanbanBoard({ workflowId }: Readonly<WorkflowKanbanBoard
     // Validate the target is a valid column
     if (!columns.some((column) => column.id === nextStatus)) return;
 
-    // Find the task and check if status actually changed
-    const task = tasks.find((item) => item.id === taskId);
+    // E09-01: Read the freshest task list from the ref instead of the stale
+    // closure captured when this handler was created.
+    const currentTasks = tasksRef.current;
+    const task = currentTasks.find((item) => item.id === taskId);
     if (!task || task.status === nextStatus) return;
 
     // G29-005: Client-side transition validation to avoid unnecessary API calls
@@ -136,7 +166,7 @@ export function WorkflowKanbanBoard({ workflowId }: Readonly<WorkflowKanbanBoard
   }
 
   return (
-    <DndContext onDragEnd={handleDragEnd}>
+    <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="flex-1 p-6 grid grid-cols-6 gap-4">
         {columns.map((column) => (
           <KanbanColumn
@@ -147,6 +177,12 @@ export function WorkflowKanbanBoard({ workflowId }: Readonly<WorkflowKanbanBoard
           />
         ))}
       </div>
+      {/* E09-06: Render the dragged item in an overlay for smoother feedback. */}
+      <DragOverlay>
+        {activeTask ? (
+          <TaskCard task={activeTask} workflowId={workflowId} />
+        ) : null}
+      </DragOverlay>
     </DndContext>
   );
 }

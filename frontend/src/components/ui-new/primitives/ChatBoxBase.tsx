@@ -15,6 +15,7 @@ function SendModeToggle({
   readonly sendOnEnter: boolean;
   readonly onToggle: () => void;
 }) {
+  // TODO (P3): text-[10px] is an arbitrary value; design tokens define text-xs=8px and text-sm=10px. Keeping arbitrary value (intentional per design).
   return (
     <button
       type="button"

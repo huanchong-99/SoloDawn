@@ -79,6 +79,7 @@ const EditBranchNameDialogImpl = NiceModal.create<EditBranchNameDialogProps>(
     };
 
     const handleOpenChange = (open: boolean) => {
+      if (renameMutation.isPending) return;
       if (!open) {
         handleCancel();
       }

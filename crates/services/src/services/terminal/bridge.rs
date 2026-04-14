@@ -249,6 +249,11 @@ impl TerminalBridge {
             .contains_key(pty_session_id)
     }
 
+    /// Maximum input payload size accepted from the bus before forwarding to PTY stdin.
+    /// Inputs larger than this (1 MiB) are dropped with a warning to guard against
+    /// oversized/malicious payloads exhausting the PTY writer. See E26-11.
+    const MAX_INPUT_LEN: usize = 1024 * 1024;
+
     /// Helper method to forward a bus message to PTY stdin.
     async fn forward_bus_message(
         tx: &mpsc::Sender<Vec<u8>>,
@@ -256,6 +261,24 @@ impl TerminalBridge {
         pty_session_id: &str,
         msg: Option<BusMessage>,
     ) -> anyhow::Result<bool> {
+        // E26-11: validate input length at entry before any processing.
+        if let Some(ref bus_msg) = msg {
+            let incoming_len = match bus_msg {
+                BusMessage::TerminalMessage { message } => message.len(),
+                BusMessage::TerminalInput { input, .. } => input.len(),
+                _ => 0,
+            };
+            if incoming_len > Self::MAX_INPUT_LEN {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    pty_session_id = %pty_session_id,
+                    incoming_len,
+                    max_len = Self::MAX_INPUT_LEN,
+                    "Dropping oversized terminal input message"
+                );
+                return Ok(false);
+            }
+        }
         match msg {
             Some(BusMessage::TerminalMessage { message }) => {
                 let payload = Self::normalize_message(&message);
@@ -358,6 +381,11 @@ impl TerminalBridge {
         let terminal_id_writer = terminal_id.clone();
 
         // Spawn blocking writer task
+        // TODO(E26-04): This spawn_blocking task holds Arc<Mutex<PtyWriter>> for its
+        // entire lifetime (until writer_rx closes), which can outlive the bridge loop.
+        // If writer_rx is never dropped (e.g. on abnormal shutdown paths), the Arc ref
+        // count stays >0 and the PTY writer is not released. Consider bounding the task
+        // lifetime with an explicit shutdown signal and dropping the Arc promptly.
         let mut writer_task = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             while let Some(data) = writer_rx.blocking_recv() {
                 let mut writer_guard = match writer.lock() {

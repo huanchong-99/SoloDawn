@@ -2,6 +2,12 @@ use std::{future::Future, sync::OnceLock};
 
 use tokio::runtime::{Builder, Handle, Runtime, RuntimeFlavor};
 
+// [W2-36-07] The global Runtime stored in this OnceLock is intentionally
+// never dropped. It is a process-wide executor used by `block_on` when sync
+// code needs to drive async work, so its lifetime is the program lifetime.
+// The OS reclaims all associated threads and file descriptors on process
+// exit; running `Runtime::shutdown_*` at exit would offer no benefit and
+// could deadlock if called from within an outstanding `block_on`.
 fn rt() -> &'static Runtime {
     static RT: OnceLock<Runtime> = OnceLock::new();
     RT.get_or_init(|| {

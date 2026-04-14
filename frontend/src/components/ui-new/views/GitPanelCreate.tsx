@@ -105,7 +105,7 @@ export function GitPanelCreate({
                 </span>
               </div>
             )}
-            {canBind && (
+            {canBind && selectedProjectName && (
               <button
                 type="button"
                 onClick={onBindRepo}

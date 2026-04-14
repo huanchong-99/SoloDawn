@@ -175,11 +175,21 @@ impl OrchestratorState {
     }
 
     pub fn mark_terminal_dispatched(&mut self, task_id: &str, terminal_id: &str) {
-        if let Some(state) = self.task_states.get_mut(task_id)
-            && let Some(index) = state.terminal_ids.iter().position(|id| id == terminal_id)
-        {
-            state.current_terminal_index = index;
-            state.is_completed = false;
+        // E21-04: bounds check via `position()` ensures we only update the
+        // index when `terminal_id` is actually present in `terminal_ids`.
+        // A missing terminal is traced rather than silently ignored so
+        // out-of-sync dispatches surface in logs.
+        if let Some(state) = self.task_states.get_mut(task_id) {
+            if let Some(index) = state.terminal_ids.iter().position(|id| id == terminal_id) {
+                state.current_terminal_index = index;
+                state.is_completed = false;
+            } else {
+                tracing::warn!(
+                    task_id = %task_id,
+                    terminal_id = %terminal_id,
+                    "mark_terminal_dispatched: terminal not found in task's terminal_ids; ignoring"
+                );
+            }
         }
     }
 

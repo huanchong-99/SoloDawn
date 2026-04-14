@@ -357,9 +357,28 @@ fn ensure_orchestrator_permission(
     Ok(())
 }
 
-// TODO(G16-013): Rate-limit state grows unboundedly as workflows accumulate.
-// Add a periodic cleanup task (or LRU eviction) to prune stale entries from
-// ORCHESTRATOR_GOVERNANCE_STATE.rate_windows for workflows that are no longer active.
+// E31-07: TTL after which an entirely-idle rate-limit bucket is removed.
+// Must be >= ORCHESTRATOR_RATE_LIMIT_WINDOW so we don't evict buckets that
+// still carry an active window; we pick a generous multiple.
+const ORCHESTRATOR_RATE_LIMIT_IDLE_TTL: Duration = Duration::from_secs(30 * 60);
+
+/// E31-07: Prune rate_windows entries whose most recent request is older than
+/// `ORCHESTRATOR_RATE_LIMIT_IDLE_TTL`. Caller must hold the state lock.
+///
+/// This is called opportunistically from `enforce_orchestrator_rate_limit`
+/// rather than from a dedicated task, so cleanup happens naturally whenever
+/// governance state is touched without requiring a background timer.
+fn prune_inactive_rate_windows(state: &mut OrchestratorGovernanceState, now: Instant) {
+    state.rate_windows.retain(|_key, bucket| {
+        // Drop entirely empty buckets immediately.
+        if let Some(latest) = bucket.back().copied() {
+            now.duration_since(latest) < ORCHESTRATOR_RATE_LIMIT_IDLE_TTL
+        } else {
+            false
+        }
+    });
+}
+
 async fn enforce_orchestrator_rate_limit(
     workflow_id: &str,
     source: &str,
@@ -369,6 +388,11 @@ async fn enforce_orchestrator_rate_limit(
     let key = format!("{workflow_id}:{source}:{scope}");
     let now = Instant::now();
     let mut state = ORCHESTRATOR_GOVERNANCE_STATE.lock().await;
+
+    // E31-07: opportunistically prune inactive workflow rate-limit buckets so
+    // rate_windows doesn't grow unboundedly as workflows accumulate.
+    prune_inactive_rate_windows(&mut state, now);
+
     let bucket = state.rate_windows.entry(key).or_default();
 
     while let Some(timestamp) = bucket.front().copied() {
@@ -853,6 +877,12 @@ async fn create_workflow(
             .map(|c| c.model_config_id.clone()),
         merge_terminal_cli_id: req.merge_terminal_config.cli_type_id.clone(),
         merge_terminal_model_id: req.merge_terminal_config.model_config_id.clone(),
+        // E31-15: default target_branch is hardcoded "main". The majority of
+        // repositories use "main" (or a previously-configured default supplied
+        // by the caller via req.target_branch); querying the git repo's actual
+        // default branch here would require an async git call and a repo path,
+        // neither of which is available at this call site. If callers need a
+        // different default they should pass req.target_branch explicitly.
         target_branch: req.target_branch.unwrap_or_else(|| "main".to_string()),
         git_watcher_enabled: req.git_watcher_enabled.unwrap_or(true),
         ready_at: None,
@@ -891,7 +921,8 @@ async fn create_workflow(
         .bind(project_id)
         .fetch_optional(&deployment.db().pool)
         .await
-        .unwrap_or(None)
+        .ok()
+        .flatten()
         .flatten();
         repo_path_str.map(std::path::PathBuf::from)
     };
@@ -927,7 +958,7 @@ async fn create_workflow(
                         })
                         .await
                         .ok()
-                        .and_then(|r| r.ok())
+                        .and_then(Result::ok)
                         .unwrap_or(false)
                     } else {
                         false
@@ -1343,11 +1374,31 @@ async fn resolve_workflow_working_dir(
     // G23-006: Check if there is a task worktree for this workflow. If so, use
     // the first task's worktree path as the working directory so that each
     // terminal operates in its own isolated checkout instead of the repo root.
-    let first_task =
-        WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow.id)
-            .await
-            .ok()
-            .and_then(|tasks| tasks.into_iter().next());
+    //
+    // E29-13: `find_by_workflow` may return multiple tasks. Log a warning when
+    // that happens so the silent "pick first" behaviour is at least observable;
+    // None is accepted and falls through to the repo-root fallback below.
+    let first_task = match WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow.id).await
+    {
+        Ok(tasks) => {
+            if tasks.len() > 1 {
+                tracing::warn!(
+                    workflow_id = %workflow.id,
+                    task_count = tasks.len(),
+                    "Multiple workflow tasks found; using the first for working-dir resolution"
+                );
+            }
+            tasks.into_iter().next()
+        }
+        Err(e) => {
+            tracing::warn!(
+                workflow_id = %workflow.id,
+                error = %e,
+                "Failed to load workflow tasks for working-dir resolution"
+            );
+            None
+        }
+    };
 
     if let Some(task) = first_task {
         let worktree_path =
@@ -2955,7 +3006,18 @@ async fn submit_prompt_response(
 }
 
 /// POST /api/workflows/:workflow_id/orchestrator/chat
-/// Submit a direct chat message to the running orchestrator agent
+/// Submit a direct chat message to the running orchestrator agent.
+///
+/// W2-18-04: This state-changing endpoint does not perform a CSRF
+/// double-submit cookie check. This is accepted as intentional: all
+/// mutating routes in the authenticated zone are gated by
+/// `require_api_token`, which requires a bearer API token in the
+/// `Authorization` header — a header browsers will not attach to
+/// cross-origin requests without explicit opt-in. Combined with the
+/// restricted CORS allowlist (see `build_cors_layer` / `SOLODAWN_CORS_ORIGINS`)
+/// this provides equivalent protection to a CSRF token for the
+/// non-cookie authentication model used here. If cookie-based auth is
+/// ever added, a double-submit cookie check MUST be reintroduced.
 pub(crate) async fn submit_orchestrator_chat(
     State(deployment): State<DeploymentImpl>,
     headers: HeaderMap,

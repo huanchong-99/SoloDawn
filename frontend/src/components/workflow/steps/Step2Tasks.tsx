@@ -170,6 +170,8 @@ export const Step2Tasks: React.FC<Step2TasksProps> = ({
   const completedTasks = config.filter(
     (task) => task.name && task.description && task.branch
   ).length;
+  const progressPercent =
+    taskCount > 0 ? Math.round((completedTasks / taskCount) * 100) : 0;
 
   return (
     <div className="flex flex-col gap-base">
@@ -178,7 +180,7 @@ export const Step2Tasks: React.FC<Step2TasksProps> = ({
           {t('step2.header', { count: taskCount })}
         </h2>
         <div className="text-base text-low">
-          {t('step2.progress', { completed: completedTasks, total: taskCount })}
+          {t('step2.progress', { percent: progressPercent })}
         </div>
       </div>
 

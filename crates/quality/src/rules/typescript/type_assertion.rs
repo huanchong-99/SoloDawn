@@ -22,8 +22,13 @@ pub struct TypeAssertionRule {
 impl Default for TypeAssertionRule {
     fn default() -> Self {
         Self {
-            // Match `as SomeType` — we filter out `as const` in the analyze method
-            as_pattern: Regex::new(r"\bas\s+\w+")
+            // Match `as SomeType` where the target type is PascalCase-like
+            // (starts with an uppercase letter). This avoids false positives
+            // where `as` appears adjacent to lowercase identifiers like
+            // `async as` keyword sequences. `as const` is intentionally
+            // excluded by the starts-with-uppercase requirement, but we
+            // still filter it explicitly below for defence in depth.
+            as_pattern: Regex::new(r"\bas\s+[A-Z]\w*")
                 .expect("invalid as-assertion regex"),
             // Match `<SomeType>` followed by a word char or paren (value expression),
             // but not common JSX/HTML-like patterns

@@ -78,9 +78,9 @@ export const useProjectTasks = (projectId: string): UseProjectTasksResult => {
           )
           .where(({ sharedTasks }) => isNull(sharedTasks.deleted_at));
       },
-    [remoteProjectId, sharedTasksEnabled]
+    [remoteProjectId, sharedTasksEnabled, sharedTasksFeatureEnabled]
     ),
-    [remoteProjectId, isSignedIn, sharedTasksEnabled]
+    [remoteProjectId, isSignedIn, sharedTasksEnabled, sharedTasksFeatureEnabled]
   );
 
   const sharedTasksList = useMemo(

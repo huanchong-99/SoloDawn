@@ -160,6 +160,13 @@ pub trait Deployment: Clone + Send + Sync + 'static {
 
     /// Trigger background auto-setup of default projects for new users
     async fn trigger_auto_project_setup(&self) {
+        // SOLODAWN_AUTO_SETUP_PROJECTS is a positive-named opt-OUT switch:
+        // - unset (default)                -> auto-setup ENABLED
+        // - set to a falsy value           -> auto-setup DISABLED
+        //   (accepted falsy values: "0", "false", "no", "off", case-insensitive)
+        // - set to any other value         -> auto-setup ENABLED
+        // The `map_or(true, ...)` therefore matches the positive name: when
+        // the env var is absent, the feature is on.
         let auto_setup_enabled = utils::env_compat::var_opt_with_compat("SOLODAWN_AUTO_SETUP_PROJECTS", "GITCORTEX_AUTO_SETUP_PROJECTS")
             .map_or(true, |value| {
                 !matches!(

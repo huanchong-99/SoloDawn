@@ -132,10 +132,15 @@ impl Default for Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct GitHubConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pat: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub primary_email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_pr_base: Option<String>,
 }
 

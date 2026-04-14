@@ -130,6 +130,16 @@ pub fn validate_terminal_id(terminal_id: &str) -> anyhow::Result<()> {
 // ============================================================================
 
 /// WebSocket message types
+// W2-31-06: `rename_all = "snake_case"` is intentional and MUST NOT be
+// changed to camelCase. Verified frontend consumers rely on the current
+// wire shape:
+//   * Discriminants `input` / `output` / `resize` / `heartbeat` / `error`
+//     are single-word and unaffected by case style.
+//   * The `resume_from_seq` / `skipped` fields on the `Resynced` variant
+//     are consumed by `frontend/src/components/terminal/TerminalEmulator.tsx`
+//     and related resync logic under the existing snake_case names.
+// Switching to camelCase would silently break the W2-30-09 resync signal
+// without a coordinated frontend migration.
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WsMessage {
@@ -143,6 +153,14 @@ pub enum WsMessage {
     Heartbeat,
     /// Error message
     Error { message: String },
+    /// [W2-30-09] Signal sent to the client after the server recovers from a
+    /// lagged broadcast subscription. The client should clear its local
+    /// buffer and treat subsequent output as authoritative starting from
+    /// `resume_from_seq`.
+    Resynced {
+        resume_from_seq: u64,
+        skipped: u64,
+    },
 }
 
 fn is_benign_ws_disconnect(error: &axum::Error) -> bool {
@@ -195,6 +213,17 @@ struct ResumeParams {
 }
 
 /// WebSocket handler for terminal connection
+///
+/// TODO(W2-18-12): This handler does not verify that the authenticated
+/// principal owns (or otherwise has access to) the project/workspace that
+/// owns `terminal_id`. The outer `require_api_token` middleware guarantees
+/// *some* valid API token, and `validate_ws_origin` blocks cross-origin
+/// browsers, but any token holder can currently attach to any terminal by
+/// UUID — this lets a user observe another user's shell output and inject
+/// input. Fix-forward: resolve `terminal_id` to its owning
+/// Terminal → WorkflowTask → Workflow/Project chain, then enforce the same
+/// project-scope check used by the HTTP task routes before calling
+/// `ws.on_upgrade`. Requires project-scoped principal context (G24).
 async fn terminal_ws_handler(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
@@ -443,6 +472,24 @@ async fn handle_terminal_socket(
                                                     resume_from_seq = resume_from,
                                                     "WS output subscription recovered after lag"
                                                 );
+                                                // [W2-30-09] Notify the client so it can clear its
+                                                // local buffer and avoid showing stale/duplicated
+                                                // output after the lag recovery.
+                                                let resync = WsMessage::Resynced {
+                                                    resume_from_seq: resume_from,
+                                                    skipped,
+                                                };
+                                                if let Ok(json) = serde_json::to_string(&resync)
+                                                    && let Err(e) = ws_sender
+                                                        .send(Message::Text(json.into()))
+                                                        .await
+                                                {
+                                                    tracing::debug!(
+                                                        terminal_id = %terminal_id_output,
+                                                        error = %e,
+                                                        "Failed to send resync marker to client"
+                                                    );
+                                                }
                                             }
                                             Err(re_err) => {
                                                 tracing::warn!(

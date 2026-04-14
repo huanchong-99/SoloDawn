@@ -17,8 +17,10 @@ export function validateStep4Terminals(config: WizardConfig): Record<string, str
 
   const validTaskIds = new Set(config.tasks.map((t) => t.id));
 
-  config.terminals.forEach((terminal, index) => {
-    const terminalKey = terminal.id.trim() || String(index);
+  config.terminals.forEach((terminal) => {
+    // E11-07: Use stable terminal.id as the error key; do not fall back to index,
+    // which aliases errors when terminals are reordered or inserted.
+    const terminalKey = terminal.id;
     const cliTypeId = terminal.cliTypeId.trim();
     const modelConfigId = terminal.modelConfigId.trim();
 

@@ -121,6 +121,14 @@ pub struct FeishuChannelStatus {
 // Handlers
 // ============================================================================
 
+// TODO(W2-18-09): No rate limit on concierge session creation or on the
+// downstream LLM-backed endpoints in this module. A malicious or misbehaving
+// client holding a valid API token could burn concierge LLM quota. Mirror
+// the per-principal token-bucket pattern used in workflows.rs
+// (`ORCHESTRATOR_RATE_LIMIT_WINDOW` / `ORCHESTRATOR_RATE_LIMIT_MAX_REQUESTS`
+// + `ORCHESTRATOR_GOVERNANCE_STATE`) once a shared governance module is
+// extracted, then apply it to `create_session` and any message-submit
+// handlers in this file.
 async fn create_session(
     State(deployment): State<DeploymentImpl>,
     Json(payload): Json<CreateSessionRequest>,

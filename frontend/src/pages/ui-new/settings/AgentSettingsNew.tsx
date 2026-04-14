@@ -773,16 +773,23 @@ export function AgentSettingsNew() {
                 value={executorDraft?.executor ?? ''}
                 onChange={(value) => {
                   const variants = profiles?.[value];
-                  const keepCurrentVariant =
+                  // Validate before keeping: ensure variants exist, current variant
+                  // is set, and the target executor actually defines that variant
+                  // as a non-null entry.
+                  const currentVariant = executorDraft?.variant;
+                  const keepCurrentVariant = Boolean(
                     variants &&
-                    executorDraft?.variant &&
-                    variants[executorDraft.variant];
+                      currentVariant &&
+                      Object.prototype.hasOwnProperty.call(
+                        variants,
+                        currentVariant
+                      ) &&
+                      variants[currentVariant] != null
+                  );
 
                   const newProfile: ExecutorProfileId = {
                     executor: value as BaseCodingAgent,
-                    variant: keepCurrentVariant
-                      ? executorDraft!.variant
-                      : null,
+                    variant: keepCurrentVariant ? currentVariant! : null,
                   };
                   updateExecutorDraft(newProfile);
                 }}

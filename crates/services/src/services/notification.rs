@@ -47,11 +47,15 @@ impl NotificationService {
         };
 
         // Use platform-specific sound notification
-        // Note: spawn() calls are intentionally not awaited - sound notifications should be fire-and-forget
+        // Note: spawn() calls are intentionally not awaited - sound notifications should be fire-and-forget.
+        // Errors are logged at debug level so failures don't spam logs but are still observable.
         if cfg!(target_os = "macos") {
-            let _ = tokio::process::Command::new("afplay")
+            if let Err(e) = tokio::process::Command::new("afplay")
                 .arg(&file_path)
-                .spawn();
+                .spawn()
+            {
+                tracing::debug!("Failed to spawn afplay for sound notification: {}", e);
+            }
         } else if cfg!(target_os = "linux") && !utils::is_wsl2() {
             // Try different Linux audio players
             if tokio::process::Command::new("paplay")
@@ -68,10 +72,13 @@ impl NotificationService {
                 // Success with aplay
             } else {
                 // Try system bell as fallback
-                let _ = tokio::process::Command::new("echo")
+                if let Err(e) = tokio::process::Command::new("echo")
                     .arg("-e")
                     .arg("\\a")
-                    .spawn();
+                    .spawn()
+                {
+                    tracing::debug!("Failed to spawn fallback bell for sound notification: {}", e);
+                }
             }
         } else if cfg!(target_os = "windows") || (cfg!(target_os = "linux") && utils::is_wsl2()) {
             // Convert WSL path to Windows path if in WSL2
@@ -85,13 +92,16 @@ impl NotificationService {
                 file_path.to_string_lossy().to_string()
             };
 
-            let _ = tokio::process::Command::new("powershell.exe")
+            if let Err(e) = tokio::process::Command::new("powershell.exe")
                 .args(["-NoProfile", "-Command"])
                 .arg(format!(
                     "(New-Object Media.SoundPlayer '{}').PlaySync()",
                     file_path.replace('\'', "''")
                 ))
-                .spawn();
+                .spawn()
+            {
+                tracing::debug!("Failed to spawn powershell for sound notification: {}", e);
+            }
         }
     }
 
@@ -124,10 +134,13 @@ impl NotificationService {
             sanitize_applescript(title)
         );
 
-        let _ = tokio::process::Command::new("osascript")
+        if let Err(e) = tokio::process::Command::new("osascript")
             .arg("-e")
             .arg(script)
-            .spawn();
+            .spawn()
+        {
+            tracing::debug!("Failed to spawn osascript for macOS notification: {}", e);
+        }
     }
 
     /// Send Linux notification using notify-rust
@@ -147,7 +160,12 @@ impl NotificationService {
                 tracing::error!("Failed to send Linux notification: {}", e);
             }
         });
-        drop(handle); // Don't await, fire-and-forget
+        // Track the spawn_blocking handle so panics surface in logs instead of being silently dropped.
+        tokio::spawn(async move {
+            if let Err(e) = handle.await {
+                tracing::warn!("Linux notification task failed: {}", e);
+            }
+        });
     }
 
     /// Send Windows/WSL notification using PowerShell toast script

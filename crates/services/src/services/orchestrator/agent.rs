@@ -1594,6 +1594,12 @@ impl OrchestratorAgent {
 
         // --- Dedup: check DB for existing quality_run for this terminal+commit ---
         // (done before acquiring write lock to avoid holding the lock during DB I/O)
+        // TODO(E21-08): There is a TOCTOU window between this DB dedup query and
+        // the subsequent write-lock block below where a concurrent checkpoint
+        // for the same (terminal_id, commit_hash) could slip through. Structural
+        // fix: move this query inside the write-lock scope (accepting the DB I/O
+        // under the lock) or wrap the dedup + insert sequence in a single DB
+        // transaction with a unique constraint on (terminal_id, commit_hash).
         if self.is_checkpoint_duplicate(&event.terminal_id, event.commit_hash.as_deref()).await {
             tracing::info!(
                 terminal_id = %event.terminal_id,
@@ -1699,13 +1705,16 @@ impl OrchestratorAgent {
         let gate_mode = mode.clone();
 
         tokio::spawn(async move {
-            // G31-008: ensure pending_quality_checks is cleaned up even if this task panics.
-            // We use a flag rather than scopeguard crate to avoid the extra dependency;
-            // the cleanup runs in the same async block via an RAII-like wrapper.
+            // G31-008 / [W2-36-04]: best-effort panic notification for the
+            // pending_quality_checks entry. The Drop impl below cannot touch
+            // AppState (no &state across .await boundaries inside a spawned
+            // task), so on panic it only emits a tracing::error. The actual
+            // removal of the entry from `pending_quality_checks` is performed
+            // on the normal path below (see the `remove(&event.terminal_id)`
+            // call ~line 2178) and on every early return path; the stranded
+            // entry from a panic is additionally self-healing because the
+            // next successful gate result clears it.
             struct PendingGuard {
-                // We cannot hold &state from the outer scope across .await points, so
-                // cleaning up here is a best-effort tracing warning only; the actual
-                // cleanup happens at the end of the spawn body or on early return.
                 terminal_id: String,
             }
             impl Drop for PendingGuard {
@@ -2104,6 +2113,18 @@ impl OrchestratorAgent {
     ///
     /// Returns `false` when there is no commit_hash (nothing to dedup against)
     /// or when the DB query fails (fail-open to avoid blocking processing).
+    ///
+    /// E21-10: Dedup is intentionally split across two layers and is NOT
+    /// unified in this helper:
+    ///   1. This DB-backed check catches duplicates that survive restarts
+    ///      (state is lost, but quality_runs table persists).
+    ///   2. The in-memory `processed_checkpoints` set inside the state
+    ///      write-lock catches rapid in-process replays without hitting the
+    ///      DB on every event.
+    /// Callers are expected to perform BOTH checks (see `handle_checkpoint`);
+    /// merging them here would either force every replay check to hit the DB
+    /// or drop the cross-restart guarantee. See also E21-08 for the TOCTOU
+    /// window that exists because of this split.
     async fn is_checkpoint_duplicate(
         &self,
         terminal_id: &str,
@@ -2591,6 +2612,10 @@ impl OrchestratorAgent {
             current_terminal_index = total_terminals.saturating_sub(1);
         }
 
+        // E21-05: All mutation of state happens under this single write lock
+        // acquisition. `sync_task_terminals` and the subsequent task_state
+        // adjustments must stay atomic, so the lock is intentionally held
+        // through the end of this block and released on function return.
         let mut state = self.state.write().await;
         if state.task_states.contains_key(task_id) {
             return Ok(());
@@ -3708,7 +3733,15 @@ impl OrchestratorAgent {
     /// Parse a JSON array element-by-element, skipping items that fail to
     /// deserialize.  Returns `Some` when at least one instruction was recovered.
     fn parse_instructions_individually(json_str: &str) -> Option<Vec<OrchestratorInstruction>> {
-        let arr: Vec<serde_json::Value> = serde_json::from_str(json_str).ok()?;
+        let arr: Vec<serde_json::Value> = serde_json::from_str(json_str)
+            .inspect_err(|e| {
+                tracing::warn!(
+                    error = %e,
+                    preview = &json_str[..json_str.len().min(200)],
+                    "Failed to parse instruction array JSON"
+                )
+            })
+            .ok()?;
         if arr.is_empty() {
             return None;
         }
@@ -4666,6 +4699,12 @@ impl OrchestratorAgent {
         }
 
         // 2. Refresh terminal snapshot after CAS to avoid stale PTY/session metadata.
+        // TODO(E21-06): The CAS acquires the waiting->working transition atomically,
+        // but between this point and the PTY send below another task could still
+        // flip the status (e.g. via cancellation). Consider either (a) re-verifying
+        // `active_terminal.status == WORKING` after the PTY send and rolling back
+        // on race, or (b) wrapping the CAS + PTY dispatch bookkeeping in a single
+        // DB transaction so concurrent status transitions are serialized.
         let active_terminal = db::models::Terminal::find_by_id(&self.db.pool, &terminal.id)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to reload terminal after CAS: {e}"))?
@@ -7041,8 +7080,12 @@ async fn fetch_previous_terminal_context(
 /// Looks for "HANDOFF:" or "Handoff Notes:" markers. If not found, returns
 /// the commit message with the METADATA block stripped.
 fn extract_handoff_notes(commit_message: &str) -> String {
-    // Look for handoff markers (case-insensitive)
-    let lower = commit_message.to_lowercase();
+    // Look for handoff markers (case-insensitive).
+    // E21-12: Use `to_ascii_lowercase` since the markers ("handoff:",
+    // "handoff notes:") are pure ASCII, avoiding Unicode-aware case folding
+    // overhead and preserving byte-offset alignment with the original string
+    // (so `pos + marker.len()` stays valid when indexing `commit_message`).
+    let lower = commit_message.to_ascii_lowercase();
     for marker in &["handoff:", "handoff notes:"] {
         if let Some(pos) = lower.find(marker) {
             let start = pos + marker.len();

@@ -195,6 +195,10 @@ impl AcpAgentHarness {
         // Create a fresh stdout pipe for logs
         let writer = crate::stdout_dup::create_stdout_pipe_writer(child)?;
         let shared_writer = Arc::new(tokio::sync::Mutex::new(writer));
+        // TODO(W2-30-05): Bound this log channel to ~512 and use `try_send`
+        // with a warn-on-full fallback so a slow writer cannot grow the
+        // queue without limit. `log_tx` is cloned into several producers
+        // so changing the type is non-local.
         let (log_tx, mut log_rx) = mpsc::unbounded_channel::<String>();
 
         // Spawn log -> stdout writer task
@@ -278,6 +282,11 @@ impl AcpAgentHarness {
                     .run_until(async move {
                         // Create event and raw channels
                         // Typed events available for future use; raw lines forwarded and persisted
+                        // TODO(W2-30-05): Bound this event channel to ~512 and
+                        // use `try_send` with warn-on-full so a slow consumer
+                        // cannot grow the queue without limit. `event_tx` is
+                        // cloned into the ACP client and several producers,
+                        // so the type change is non-local.
                         let (event_tx, mut event_rx) =
                             mpsc::unbounded_channel::<crate::executors::acp::AcpEvent>();
 
