@@ -35,6 +35,15 @@ fn is_blocked_env_var(key: &str) -> bool {
         .any(|&b| b.eq_ignore_ascii_case(key))
 }
 
+/// Environment variables SoloDawn's dev stack leaks into every child:
+/// root `.env` historically set `PORT=23456`, which `dotenv::dotenv().ok()`
+/// loaded into `server.exe`'s env. Every subsequent child (AI terminal PTYs,
+/// `npm test` spawns, executor helpers) inherited the pollution and any
+/// test-time `app.listen()` bound the backend's dev port (R6 Task 1 jest
+/// orphan incident). Strip these at every executor spawn so no downstream
+/// code — regardless of CLI — sees a port value it didn't ask for.
+const STRIPPED_INHERITED_ENV_VARS: &[&str] = &["PORT", "BACKEND_PORT", "FRONTEND_PORT"];
+
 /// Environment variables to inject into executor processes
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionEnv {
@@ -80,7 +89,14 @@ impl ExecutionEnv {
     ///
     /// Blocked security-sensitive variables are silently dropped with a warning.
     /// `PATH` is appended to the existing value rather than replaced outright.
+    /// SoloDawn dev ports (`PORT`, `BACKEND_PORT`, `FRONTEND_PORT`) are
+    /// actively unset from the inherited parent env so root-`.env` pollution
+    /// cannot leak into any executor child (R6 root-cause fix).
     pub fn apply_to_command(&self, command: &mut Command) {
+        for var in STRIPPED_INHERITED_ENV_VARS {
+            command.env_remove(var);
+        }
+
         for (key, value) in &self.vars {
             if is_blocked_env_var(key) {
                 warn!(

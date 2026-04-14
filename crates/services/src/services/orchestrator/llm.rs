@@ -802,6 +802,12 @@ impl LLMClient for ClaudeCodeNativeClient {
 fn detect_cc_version() -> Option<String> {
     let output = std::process::Command::new("claude")
         .arg("--version")
+        // R6 port-leak hygiene: strip SoloDawn dev ports consistently across
+        // every subprocess spawn. `claude --version` doesn't consume these,
+        // but keeping the strip uniform prevents future drift.
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
         .output()
         .ok()?;
     let version_str = String::from_utf8_lossy(&output.stdout);

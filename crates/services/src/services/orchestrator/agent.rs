@@ -4829,6 +4829,12 @@ impl OrchestratorAgent {
         {
             let output = tokio::process::Command::new("taskkill")
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
+                // R6 port-leak hygiene: uniform strip across every child
+                // spawn. `taskkill` doesn't care about these, but the
+                // uniformity makes it hard for a new call site to forget.
+                .env_remove("PORT")
+                .env_remove("BACKEND_PORT")
+                .env_remove("FRONTEND_PORT")
                 .output()
                 .await
                 .map_err(|e| anyhow!("failed to execute taskkill: {e}"))?;
