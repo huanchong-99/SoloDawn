@@ -717,12 +717,30 @@ impl CCSwitchService {
             .await?
             .ok_or_else(|| anyhow::anyhow!("CLI type not found: {}", terminal.cli_type_id))?;
 
+        // SoloDawn's own dev ports must never leak into AI terminal children.
+        // Root `.env` dotenv-loads `PORT` / `BACKEND_PORT` into server.exe on
+        // startup; without stripping, an AI terminal's `npm test` or
+        // `npm run dev` inherits our backend port, launches an Express server
+        // on top of it, and hijacks the dev backend socket. Add these to
+        // every terminal's `env.unset` regardless of CLI type so the
+        // pollution can never reach a PTY child.
+        let port_unset = || {
+            vec![
+                "PORT".to_string(),
+                "BACKEND_PORT".to_string(),
+                "FRONTEND_PORT".to_string(),
+            ]
+        };
+
         // Helper to create empty config for unsupported CLIs
         let empty_config = || SpawnCommand {
             command: base_command.to_string(),
             args: Vec::new(),
             working_dir: working_dir.to_path_buf(),
-            env: SpawnEnv::default(),
+            env: SpawnEnv {
+                set: Default::default(),
+                unset: port_unset(),
+            },
         };
 
         // Parse CLI type
@@ -765,7 +783,10 @@ impl CCSwitchService {
             "Resolved model config for terminal launch"
         );
 
-        let mut env = SpawnEnv::default();
+        let mut env = SpawnEnv {
+            set: Default::default(),
+            unset: port_unset(),
+        };
         let mut args = Vec::new();
 
         match cli {
@@ -1570,6 +1591,102 @@ mod tests {
 
         assert_ne!(resolved, "glm-5");
         assert!(CCSwitchService::looks_like_claude_model(&resolved));
+    }
+
+    /// R6 regression guard: every terminal launch config — supported CLI or
+    /// fallback empty_config — must strip SoloDawn dev ports from the child
+    /// PTY env. Otherwise the root `.env`'s `PORT=23456` / `BACKEND_PORT=23456`
+    /// loaded by `dotenv::dotenv().ok()` leaks into an AI terminal, which may
+    /// run `npm test` / `npm run dev` and bind the backend port (as happened
+    /// with Task 1's Express test boot in R6).
+    #[tokio::test]
+    async fn test_build_launch_config_strips_solodawn_dev_ports_empty_path() {
+        let db = setup_test_db().await;
+        let service = CCSwitchService::new(db.clone());
+
+        // Seed an unrecognized CLI type so CcCliType::parse returns None and
+        // build_launch_config returns via the empty_config fallback path.
+        let now = Utc::now();
+        sqlx::query(
+            r"
+            INSERT INTO cli_type (id, name, display_name, detect_command, install_command, install_guide_url, config_file_path, is_system, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ",
+        )
+        .bind("cli-unknown-test")
+        .bind("not-a-real-cli")
+        .bind("Fake CLI")
+        .bind("which fake")
+        .bind::<Option<&str>>(None)
+        .bind::<Option<&str>>(None)
+        .bind::<Option<&str>>(None)
+        .bind(false)
+        .bind(now)
+        .execute(&db.pool)
+        .await
+        .expect("seed cli_type failed");
+
+        let mut terminal = make_test_terminal(None);
+        terminal.cli_type_id = "cli-unknown-test".to_string();
+
+        let spawn = service
+            .build_launch_config(&terminal, "fake", std::path::Path::new("."), false)
+            .await
+            .expect("build_launch_config empty_path should succeed");
+
+        for key in ["PORT", "BACKEND_PORT", "FRONTEND_PORT"] {
+            assert!(
+                spawn.env.unset.iter().any(|k| k == key),
+                "env.unset missing {key} in empty_config fallback — dev port would leak to PTY child"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_build_launch_config_strips_solodawn_dev_ports_claude_path() {
+        let db = setup_test_db().await;
+        let service = CCSwitchService::new(db.clone());
+
+        // `cli-claude-code` is pre-seeded by the migration — only seed the
+        // model_config that our make_test_terminal points at.
+        let now = Utc::now();
+        sqlx::query(
+            r"
+            INSERT INTO model_config (id, cli_type_id, name, display_name, api_model_id, is_default, is_official, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ",
+        )
+        .bind("model-test")
+        .bind("cli-claude-code")
+        .bind("claude-sonnet-4-6")
+        .bind("Claude Sonnet 4.6")
+        .bind::<Option<&str>>(Some("claude-sonnet-4-6"))
+        .bind(true)
+        .bind(true)
+        .bind(now)
+        .bind(now)
+        .execute(&db.pool)
+        .await
+        .expect("seed model_config failed");
+
+        let terminal = make_test_terminal(None);
+
+        let spawn = service
+            .build_launch_config(
+                &terminal,
+                "claude",
+                std::path::Path::new("."),
+                false,
+            )
+            .await
+            .expect("build_launch_config claude path should succeed");
+
+        for key in ["PORT", "BACKEND_PORT", "FRONTEND_PORT"] {
+            assert!(
+                spawn.env.unset.iter().any(|k| k == key),
+                "env.unset missing {key} in Claude Code path — dev port would leak to PTY child"
+            );
+        }
     }
 
     #[tokio::test]

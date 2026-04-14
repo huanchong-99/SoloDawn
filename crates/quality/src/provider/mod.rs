@@ -103,6 +103,17 @@ pub async fn run_node_quality_command(
     tokio::process::Command::new(cmd)
         .args(args)
         .current_dir(cwd)
+        // SoloDawn's root `.env` carries `PORT=23456` / `BACKEND_PORT=23456`
+        // which dotenv-loads into server.exe at startup. Before Fix 6 the
+        // Windows npm spawn failed silently and this pollution had no victim;
+        // now that the gate really runs `npm test`, the child inherits our
+        // dev ports and any target's test-time Express boot (e.g., Task 1)
+        // ends up listening on 23456 and hijacks the backend port.
+        // Strip the three ports at the gate's child boundary so quality-gate
+        // subprocesses always see a clean port namespace.
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
         .output()
         .await
         .map_err(Into::into)
@@ -149,5 +160,85 @@ pub trait QualityProvider: Send + Sync {
         _changed_files: Option<&[String]>,
     ) -> Vec<MetricKey> {
         self.supported_metrics()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discovery::{NodeQualityCommand, PackageManager};
+
+    /// Regression guard for the R6 port-23456 orphan incident: every child
+    /// spawned by `run_node_quality_command` must have `PORT` /
+    /// `BACKEND_PORT` / `FRONTEND_PORT` stripped from its env, so SoloDawn's
+    /// dev-server ports (loaded into server.exe via `dotenv::dotenv().ok()`)
+    /// cannot leak into a Node test runner and hijack them.
+    #[tokio::test]
+    async fn run_node_quality_command_strips_solodawn_dev_ports() {
+        if std::process::Command::new("node").arg("-v").output().is_err() {
+            eprintln!("node not found; skipping env-strip regression test");
+            return;
+        }
+
+        let tmp = std::env::temp_dir().join(format!(
+            "quality-env-strip-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        std::fs::write(
+            tmp.join("package.json"),
+            r#"{
+  "name": "env-strip-probe",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "print-env": "node -e \"console.log('P='+(process.env.PORT||'NIL')+';B='+(process.env.BACKEND_PORT||'NIL')+';F='+(process.env.FRONTEND_PORT||'NIL'))\""
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        // Poison the parent env the way SoloDawn's root `.env` does in prod.
+        // SAFETY: test-local, no concurrent env readers with meaning on these.
+        unsafe {
+            std::env::set_var("PORT", "23456");
+            std::env::set_var("BACKEND_PORT", "23456");
+            std::env::set_var("FRONTEND_PORT", "23457");
+        }
+
+        let output = run_node_quality_command(
+            &tmp,
+            Some(PackageManager::Npm),
+            &NodeQualityCommand::Script {
+                script: "print-env".to_string(),
+            },
+        )
+        .await
+        .expect("run_node_quality_command should succeed");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        assert!(
+            stdout.contains("P=NIL"),
+            "PORT leaked into child: stdout = {stdout}"
+        );
+        assert!(
+            stdout.contains("B=NIL"),
+            "BACKEND_PORT leaked into child: stdout = {stdout}"
+        );
+        assert!(
+            stdout.contains("F=NIL"),
+            "FRONTEND_PORT leaked into child: stdout = {stdout}"
+        );
+
+        // Cleanup — remove temp dir and the env pollution we injected.
+        unsafe {
+            std::env::remove_var("PORT");
+            std::env::remove_var("BACKEND_PORT");
+            std::env::remove_var("FRONTEND_PORT");
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
