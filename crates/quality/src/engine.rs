@@ -81,7 +81,7 @@ impl QualityEngine {
         }
         if config.providers.builtin_frontend {
             providers.push(Arc::new(
-                crate::provider::builtin_frontend::BuiltinFrontendProvider::default(),
+                crate::provider::builtin_frontend::BuiltinFrontendProvider,
             ));
         }
         if config.providers.builtin_common {
