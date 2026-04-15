@@ -2189,11 +2189,20 @@ impl OrchestratorAgent {
         // Skip classification entirely for infra-blocker runs — those are
         // environmental, not loop-progress signals. The existing infra path
         // (is_environment_blocker, lines 2266+) handles them.
+        //
+        // R8-C1: also skip when `blocking_issues == 0`. A gate that returns
+        // status=error / status=fail with total_issues>0 but blocking_issues=0
+        // means only non-blocking warnings remain (e.g. 344 ESLint warnings,
+        // audit findings, style issues). The AI has cleared every real blocker
+        // — classifying an empty multiset is noise, and sending the fix-prompt
+        // below preempts the completion cascade and traps the task in an
+        // endless loop (observed in R8-B retry workflow `bf6550f7`).
         let (loop_progress_hint_text, should_auto_pause) = if event.mode
             == QUALITY_GATE_MODE_ENFORCE
             && !event.passed
             && !is_metric_collection_failure
             && !is_environment_blocker
+            && event.blocking_issues > 0
         {
             let multiset_opt = compute_blocker_multiset(&self.db, &event.quality_run_id).await;
             if let Some(curr_multiset) = multiset_opt {
@@ -2271,10 +2280,19 @@ impl OrchestratorAgent {
         // terminal working for a retry. The previous behavior ("send fix AND mark
         // Failed") created a race where subsequent fix-up commits were rejected by
         // out-of-order protection.
+        //
+        // R8-C1: require `blocking_issues > 0` as well. A blocking=0 result means
+        // the AI has cleared every real blocker; remaining total_issues are only
+        // non-blocking warnings. Sending a fix-prompt here short-circuits the
+        // completion cascade (line 2489 is never reached) and traps the task in
+        // an endless handoff loop — this was the root cause that kept Task 1 R8-B
+        // retry workflow running with blocking=0 for 5+ gate rounds without ever
+        // completing.
         if event.mode == QUALITY_GATE_MODE_ENFORCE
             && !event.passed
             && !is_metric_collection_failure
             && !is_environment_blocker
+            && event.blocking_issues > 0
         {
             if let Some(fix_instructions) = &event.fix_instructions {
                 tracing::warn!(
@@ -8032,6 +8050,61 @@ mod tests {
         assert!(
             !workflow_has_unresolved_enforce_blockers(&db, wf_id).await,
             "workflow rollup with no terminal records must default to safe (false)"
+        );
+    }
+
+    /// R8-C1: A quality_run that had gate_status=error with NO blocking issues
+    /// (only non-blocking warnings like 344 ESLint style issues) must expose
+    /// `compute_blocker_multiset() == None`. Callers of the multiset (the
+    /// R8 classifier + fix-prompt guard in `handle_quality_gate_result`) rely
+    /// on this to short-circuit — they MUST NOT enter the fix-prompt path when
+    /// blocking=0, otherwise every handoff commit bounces back to the terminal
+    /// and the task never completes (observed live in R8-B retry workflow
+    /// `bf6550f7`: 9 consecutive `next_action: handoff` commits, task stayed
+    /// `running` because fix-prompts preempted the completion cascade).
+    #[tokio::test]
+    async fn r8_c1_blocking_zero_error_gate_produces_no_multiset() {
+        use super::terminal_has_unresolved_enforce_blockers;
+        let db = in_memory_db().await;
+        let wf_id = "wf-c1";
+        let task_id = "task-c1";
+        let term_id = "term-c1";
+        let commit_hash = "commit-c1";
+
+        // Directly construct an enforce run with status=error, blocking=0,
+        // total_issues=10 (non-blocking warnings only). This mirrors the
+        // bf6550f7 gate #21 observed state: status=error issues=344 blocking=0.
+        let run = db::models::QualityRun::new_pending(
+            wf_id,
+            Some(task_id),
+            Some(term_id),
+            Some(commit_hash),
+            "terminal",
+            "enforce",
+        );
+        db::models::QualityRun::insert(&db.pool, &run).await.unwrap();
+        db::models::QualityRun::complete(
+            &db.pool, &run.id, "error", 10, 0, 0, 42, None, None, None,
+        )
+        .await
+        .unwrap();
+
+        // No `is_blocking = true` issues were inserted — the multiset helper
+        // must return None so the R8-C1 guard skips classifier + fix-prompt.
+        assert!(
+            compute_blocker_multiset(&db, &run.id).await.is_none(),
+            "blocking=0 gate run must yield None multiset so the R8-C1 guard \
+             can short-circuit the fix-prompt path"
+        );
+
+        // R8-B3 guard must also treat this as "gate cleared" (blocking=0 +
+        // status=error falls into the `latest.blocking_issues > 0` = false
+        // branch of terminal_has_unresolved_enforce_blockers), allowing the
+        // completion cascade to proceed once R8-C1 lets control fall through.
+        assert!(
+            !terminal_has_unresolved_enforce_blockers(&db, term_id).await,
+            "R8-B3: blocking=0 error must NOT block cascade — the AI has \
+             cleared every real blocker; non-blocking warnings are noise"
         );
     }
 

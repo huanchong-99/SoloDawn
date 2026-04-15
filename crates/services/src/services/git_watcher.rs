@@ -239,6 +239,32 @@ impl GitWatcher {
         self.is_running.load(Ordering::SeqCst)
     }
 
+    /// R8-C2: Pre-seed the last-seen-commit cursor before `watch()` is called.
+    ///
+    /// On `recover_running_workflows`, the caller queries the DB for the most
+    /// recent commit it has already processed for this workflow (the union of
+    /// `git_event.commit_hash` for checkpoint commits and
+    /// `quality_run.commit_hash` for handoff commits, since handoffs go through
+    /// the TerminalCompleted path and are NOT in `git_event`). Passing that hash
+    /// here causes `watch()` to start `git log --not <hash>` from the right
+    /// point, so commits made between server shutdown and restart are NOT
+    /// silently skipped.
+    ///
+    /// Without this, `watch()` defaults to seeding from HEAD — meaning every
+    /// pending handoff commit committed before restart becomes permanently
+    /// invisible and the task appears to hang forever (the orchestrator never
+    /// sees the AI's completion signal).
+    pub async fn seed_last_seen_commit(&self, hash: impl Into<String>) {
+        let hash = hash.into();
+        let mut guard = self.last_commit_hash.lock().await;
+        tracing::info!(
+            resume_cursor = %hash,
+            repo = %self.config.repo_path.display(),
+            "R8-C2: seeding GitWatcher cursor from DB-recovered commit (skip-HEAD path)"
+        );
+        *guard = Some(hash);
+    }
+
     /// Start watching the repository for new commits
     ///
     /// This method polls the git repository for new commits and processes
@@ -254,8 +280,19 @@ impl GitWatcher {
             poll_interval
         );
 
-        // Get initial HEAD commit
-        if let Ok(initial_commit) = self.get_latest_commit(&repo_path).await {
+        // R8-C2: only seed from HEAD when no cursor was pre-provided via
+        // `seed_last_seen_commit`. On fresh starts the cursor is None → we
+        // fall back to HEAD (unchanged legacy behaviour). On recovery after
+        // a restart, the caller has already seeded the cursor with the DB's
+        // most-recent-processed commit; we must NOT overwrite that with the
+        // current HEAD, otherwise any commits made between shutdown and
+        // restart get permanently skipped.
+        let cursor_preseeded = { self.last_commit_hash.lock().await.is_some() };
+        if cursor_preseeded {
+            tracing::info!(
+                "GitWatcher using pre-seeded cursor (skipping HEAD initialization)"
+            );
+        } else if let Ok(initial_commit) = self.get_latest_commit(&repo_path).await {
             {
                 let mut hash = self.last_commit_hash.lock().await;
                 *hash = Some(initial_commit.hash.clone());
@@ -987,6 +1024,49 @@ next_action: continue";
 
         let recv = tokio::time::timeout(Duration::from_millis(150), workflow_rx.recv()).await;
         assert!(recv.is_err(), "mismatch commit should not publish events");
+
+        let _ = std::fs::remove_dir_all(repo_path);
+    }
+
+    /// R8-C2: `seed_last_seen_commit` must pre-populate `last_commit_hash`
+    /// so `watch()` skips the HEAD-seeding branch on recovery. Without this,
+    /// handoff commits made between server shutdown and restart are silently
+    /// lost — the task never sees the AI's completion signal.
+    #[tokio::test]
+    async fn test_seed_last_seen_commit_overrides_default_head_seed() {
+        let mut repo_path = std::env::temp_dir();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+        repo_path.push(format!(
+            "gitwatcher-seed-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(repo_path.join(".git"))
+            .expect("create mock git repo should succeed");
+
+        let message_bus = MessageBus::new(16);
+        let watcher = GitWatcher::new(
+            GitWatcherConfig::new(repo_path.clone(), 100),
+            message_bus,
+        )
+        .expect("watcher should be created");
+
+        assert!(
+            watcher.last_commit_hash.lock().await.is_none(),
+            "fresh watcher must have no cursor until seed or watch() starts"
+        );
+
+        watcher.seed_last_seen_commit("deadbeefcafe1234").await;
+
+        assert_eq!(
+            watcher.last_commit_hash.lock().await.as_deref(),
+            Some("deadbeefcafe1234"),
+            "seed_last_seen_commit must set the cursor exactly, so watch() takes the \
+             preseeded branch and does not overwrite it with the current HEAD"
+        );
 
         let _ = std::fs::remove_dir_all(repo_path);
     }
