@@ -1401,4 +1401,51 @@ mod claude_code_native_tests {
         // Actual version detection depends on CLI installation
         let _version = detect_cc_version();
     }
+
+    /// Ad-hoc upstream-acceptance probe for a candidate model ID under the
+    /// local Claude Code subscription. Marked `#[ignore]` — run manually with:
+    ///
+    ///   cargo test -p services --lib -- --ignored test_probe_subscription_model_acceptance
+    ///
+    /// Reads `~/.claude/.credentials.json`, sends a minimal "hi" prompt, and
+    /// asserts a 2xx response. Used to validate that
+    /// `claude-sonnet-4-6`/`claude-opus-4-6`/etc. are accepted by the
+    /// subscription endpoint BEFORE swapping the hardcoded default in
+    /// agent.rs:172 / :500 and planning_drafts.rs:339.
+    #[tokio::test]
+    #[ignore = "network + real OAuth token — manual run only (see doc comment)"]
+    async fn test_probe_subscription_model_acceptance() {
+        // reqwest is configured with `rustls-tls-webpki-roots-no-provider` at
+        // the workspace level — the app (server.exe) installs the ring
+        // crypto provider at startup, but unit tests must do it themselves.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        // Change this to test a different candidate model.
+        let candidate = std::env::var("PROBE_MODEL")
+            .unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+
+        let client = ClaudeCodeNativeClient::try_new(&candidate)
+            .expect("Claude Code OAuth credentials must be present at ~/.claude/.credentials.json");
+
+        let messages = vec![LLMMessage {
+            role: "user".to_string(),
+            content: "Respond with the single word 'ok' and nothing else."
+                .to_string(),
+        }];
+
+        match client.chat(messages).await {
+            Ok(resp) => {
+                println!(
+                    "UPSTREAM ACCEPTED model={} content={:?} usage={:?}",
+                    candidate, resp.content, resp.usage
+                );
+            }
+            Err(e) => {
+                panic!(
+                    "UPSTREAM REJECTED model={candidate}: {e}. \
+                     Do NOT swap the hardcoded default to this ID."
+                );
+            }
+        }
+    }
 }

@@ -479,7 +479,12 @@ pub struct CCSwitchService {
 }
 
 impl CCSwitchService {
-    const DEFAULT_CLAUDE_FALLBACK_MODEL: &'static str = "claude-sonnet-4-20250514";
+    // Last-resort fallback when both the terminal's requested Claude model and
+    // the CLI's DB default are absent/invalid. Bumped alongside the matching
+    // strings in agent.rs and planning_drafts.rs after the
+    // `test_probe_subscription_model_acceptance` probe confirmed the
+    // subscription endpoint accepts the new ID.
+    const DEFAULT_CLAUDE_FALLBACK_MODEL: &'static str = "claude-sonnet-4-6";
 
     pub fn new(db: Arc<DBService>) -> Self {
         Self {

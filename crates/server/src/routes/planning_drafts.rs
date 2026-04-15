@@ -334,9 +334,12 @@ async fn send_message(
 
     // 3. Try to call LLM and store assistant reply
     // Fallback chain: configured model → Claude Code native credentials
+    // Native fallback model bumped to `claude-sonnet-4-6` (Sonnet 4.6) —
+    // see the matching comment in agent.rs and the probe test
+    // `test_probe_subscription_model_acceptance` for upstream confirmation.
     let llm_client = build_llm_client_from_draft(&draft).or_else(|| {
         tracing::info!(draft_id = %draft_id, "No model configured, trying Claude Code native credentials");
-        create_claude_code_native_client("claude-sonnet-4-20250514")
+        create_claude_code_native_client("claude-sonnet-4-6")
     });
     if let Some(llm_client) = llm_client {
         let all_messages = PlanningDraftMessage::list_by_draft(&deployment.db().pool, &draft_id)
