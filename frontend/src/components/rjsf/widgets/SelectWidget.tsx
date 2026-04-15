@@ -1,4 +1,5 @@
 import { WidgetProps } from '@rjsf/utils';
+import { useTranslation } from 'react-i18next';
 import {
   Select,
   SelectContent,
@@ -8,6 +9,7 @@ import {
 } from '@/components/ui/select';
 
 export const SelectWidget = (props: WidgetProps) => {
+  const { t } = useTranslation('common');
   const {
     id,
     value,
@@ -59,7 +61,7 @@ export const SelectWidget = (props: WidgetProps) => {
       disabled={disabled || readonly}
     >
       <SelectTrigger id={id}>
-        <SelectValue placeholder={placeholder || 'Select an option...'} />
+        <SelectValue placeholder={placeholder || t('select.selectOption')} />
       </SelectTrigger>
       <SelectContent>
         {allOptions.map((option) => {

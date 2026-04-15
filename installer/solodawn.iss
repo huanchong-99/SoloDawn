@@ -268,8 +268,16 @@ procedure RemoveFirewallRule();
 var
   ResultCode: Integer;
 begin
-  Exec('netsh', 'advfirewall firewall delete rule name="SoloDawn Server"',
-       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if not Exec('netsh', 'advfirewall firewall delete rule name="SoloDawn Server"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Log('WARNING: netsh advfirewall firewall delete could not be launched');
+  end
+  else if (ResultCode <> 0) and (ResultCode <> 1) then
+  begin
+    // ResultCode 1 = rule not found (idempotent; expected if user declined firewall task)
+    Log(Format('WARNING: netsh advfirewall firewall delete returned exit code %d', [ResultCode]));
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import NiceModal, { useModal } from '@ebay/nice-modal-react';
 import { defineModal } from '@/lib/modals';
 import {
@@ -46,6 +47,7 @@ const buildMemberLabel = (member: OrganizationMemberWithProfile): string => {
 
 const ReassignDialogImpl = NiceModal.create<ReassignDialogProps>(
   ({ sharedTask }) => {
+    const { t } = useTranslation('common');
     const modal = useModal();
     const { userId } = useAuth();
 
@@ -189,8 +191,8 @@ const ReassignDialogImpl = NiceModal.create<ReassignDialogProps>(
                 <SelectValue
                   placeholder={
                     membersQuery.isPending
-                      ? 'Loading members...'
-                      : 'Select an assignee'
+                      ? t('states.loadingMembers')
+                      : t('actions.selectAssignee')
                   }
                 />
               </SelectTrigger>

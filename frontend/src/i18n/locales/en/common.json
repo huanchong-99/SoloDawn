@@ -19,11 +19,22 @@
   },
   "states": {
     "loading": "Loading...",
+    "loadingMembers": "Loading members...",
     "loadingHistory": "Loading History",
     "saving": "Saving...",
     "error": "Error",
     "success": "Success",
     "reconnecting": "Reconnecting"
+  },
+  "select": {
+    "selectOption": "Select an option..."
+  },
+  "projectSelector": {
+    "searchProjects": "Search projects..."
+  },
+  "createConfiguration": {
+    "cloneFromPlaceholder": "Start blank or clone existing",
+    "startBlank": "Start blank"
   },
   "language": {
     "browserDefault": "Browser Default"
@@ -201,6 +212,7 @@
     "noReposAddedHint": "Add one or more repositories to this workspace from the options below"
   },
   "actions": {
+    "selectAssignee": "Select an assignee",
     "browseRepos": "Browse repos on disk",
     "createNewRepo": "Create new repo on disk",
     "viewInChangesPanel": "View in changes panel",

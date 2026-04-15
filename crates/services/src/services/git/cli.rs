@@ -25,6 +25,15 @@ use std::{
 use thiserror::Error;
 use utils::shell::resolve_executable_path_blocking; // TODO: make GitCli async
 
+// Note on path semantics in this module:
+// Many helpers accept `&Path` arguments for repository/worktree locations.
+// These are passed to the `git` CLI via `-C <path>` or as explicit working
+// directories, so `git` itself resolves them. However, callers in this crate
+// are expected to provide ABSOLUTE paths. Supplying a relative path here will
+// resolve against the current process `cwd`, which is generally not the
+// workspace root in SoloDawn and can lead to the wrong repository being
+// operated on. Prefer canonicalized absolute paths at call sites.
+
 use crate::services::{filesystem_watcher::ALWAYS_SKIP_DIRS, git::Commit};
 
 #[derive(Debug, Error)]
