@@ -2117,16 +2117,13 @@ impl OrchestratorAgent {
     ///
     /// E21-10: Dedup is intentionally split across two layers and is NOT
     /// unified in this helper:
+    ///
     ///   1. This DB-backed check catches duplicates that survive restarts
     ///      (state is lost, but quality_runs table persists).
     ///   2. The in-memory `processed_checkpoints` set inside the state
     ///      write-lock catches rapid in-process replays without hitting the
     ///      DB on every event.
-    ///   1. This DB-backed check catches duplicates that survive restarts
-    ///      (state is lost, but quality_runs table persists).
-    ///   2. The in-memory `processed_checkpoints` set inside the state
-    ///      write-lock catches rapid in-process replays without hitting the
-    ///      DB on every event.
+    ///
     /// Callers are expected to perform BOTH checks (see `handle_checkpoint`);
     /// merging them here would either force every replay check to hit the DB
     /// or drop the cross-restart guarantee. See also E21-08 for the TOCTOU
