@@ -928,7 +928,7 @@ mod tests {
         let json = serde_json::to_string(&resynced).unwrap();
         assert!(json.contains("resynced"));
         assert!(json.contains("42"));
-        assert!(json.contains("7"));
+        assert!(json.contains('7'));
     }
 
     #[test]

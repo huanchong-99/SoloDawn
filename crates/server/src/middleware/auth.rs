@@ -43,6 +43,7 @@ pub struct RequestContext {
 /// default today), this is a no-op and returns `Ok(())` to preserve
 /// backward-compatible "development mode" behavior. When set to a truthy
 /// value, missing authentication is rejected with 401.
+#[allow(clippy::result_large_err)]
 pub fn assert_authorized(ctx: &RequestContext) -> Result<(), Response> {
     let require = std::env::var("SOLODAWN_REQUIRE_AUTH")
         .ok()
@@ -73,6 +74,7 @@ pub fn assert_authorized(ctx: &RequestContext) -> Result<(), Response> {
 /// include an `X-Admin-Token` header whose value matches exactly; otherwise a
 /// `403 Forbidden` response is returned. This is additive to — not a
 /// replacement for — the bearer-token layer in `require_api_token`.
+#[allow(clippy::result_large_err)]
 pub fn check_admin(_ctx: &RequestContext, headers: &HeaderMap) -> Result<(), Response> {
     let admin_token = match std::env::var("SOLODAWN_ADMIN_TOKEN") {
         Ok(value) if !value.trim().is_empty() => value,
