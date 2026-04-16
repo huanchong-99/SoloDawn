@@ -938,9 +938,8 @@ impl ProcessManager {
                         break false;
                     }
                     // signal::kill with None acts as a liveness probe (signal 0).
-                    match signal::kill(target, None) {
-                        Err(_) => break true, // process gone
-                        Ok(()) => {}
+                    if let Err(_) = signal::kill(target, None) {
+                        break true; // process gone
                     }
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 };

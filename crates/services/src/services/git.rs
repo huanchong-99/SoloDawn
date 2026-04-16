@@ -1663,7 +1663,7 @@ impl GitService {
         if git
             .is_rebase_in_progress(worktree_path)
             .inspect_err(|e| {
-                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_rebase_in_progress CLI check failed; assuming false")
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_rebase_in_progress CLI check failed; assuming false");
             })
             .unwrap_or(false)
         {
@@ -1723,7 +1723,7 @@ impl GitService {
         if git
             .is_rebase_in_progress(worktree_path)
             .inspect_err(|e| {
-                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_rebase_in_progress CLI check failed; assuming false")
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_rebase_in_progress CLI check failed; assuming false");
             })
             .unwrap_or(false)
         {
@@ -1742,7 +1742,7 @@ impl GitService {
         if git
             .is_merge_in_progress(worktree_path)
             .inspect_err(|e| {
-                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_merge_in_progress CLI check failed; assuming false")
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_merge_in_progress CLI check failed; assuming false");
             })
             .unwrap_or(false)
         {
@@ -1753,7 +1753,7 @@ impl GitService {
         if git
             .is_cherry_pick_in_progress(worktree_path)
             .inspect_err(|e| {
-                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_cherry_pick_in_progress CLI check failed; assuming false")
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_cherry_pick_in_progress CLI check failed; assuming false");
             })
             .unwrap_or(false)
         {
@@ -1764,7 +1764,7 @@ impl GitService {
         if git
             .is_revert_in_progress(worktree_path)
             .inspect_err(|e| {
-                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_revert_in_progress CLI check failed; assuming false")
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_revert_in_progress CLI check failed; assuming false");
             })
             .unwrap_or(false)
         {

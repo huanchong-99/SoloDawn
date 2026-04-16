@@ -45,7 +45,7 @@ pub fn detect_provider_from_url(url: &str) -> ProviderKind {
 fn extract_host(url_lower: &str) -> Option<String> {
     // scp-style: user@host:path
     if let Some(rest) = url_lower.strip_prefix("git@") {
-        return rest.split(':').next().map(|h| h.to_string());
+        return rest.split(':').next().map(std::string::ToString::to_string);
     }
 
     // scheme://[user@]host[:port]/path
