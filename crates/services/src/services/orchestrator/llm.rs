@@ -358,7 +358,7 @@ impl LLMClient for OpenAICompatibleClient {
 /// with `x-api-key` header and structured content blocks.
 pub struct AnthropicCompatibleClient {
     client: Client,
-    base_url: String,
+    chat_url: String,
     api_key: String,
     model: String,
 }
@@ -398,16 +398,18 @@ impl AnthropicCompatibleClient {
             "Anthropic-compatible LLM client endpoint resolved"
         );
 
+        let chat_url = endpoint.chat_endpoint();
+
         Self {
             client,
-            base_url: endpoint.url,
+            chat_url,
             api_key: config.api_key.clone(),
             model: config.model.clone(),
         }
     }
 
     async fn chat_once(&self, messages: Vec<LLMMessage>) -> anyhow::Result<LLMResponse> {
-        let url = format!("{}/messages", self.base_url);
+        let url = self.chat_url.clone();
 
         // Extract system message and convert the rest
         let mut system_prompt = None;
@@ -1147,7 +1149,7 @@ mod full_chain_tests {
         assert_eq!(endpoint.url, "https://open.bigmodel.cn/api/anthropic");
 
         let msg_url = endpoint.chat_endpoint();
-        assert_eq!(msg_url, "https://open.bigmodel.cn/api/anthropic/messages");
+        assert_eq!(msg_url, "https://open.bigmodel.cn/api/anthropic/v1/messages");
     }
 
     #[test]
@@ -1187,7 +1189,32 @@ mod full_chain_tests {
         assert_eq!(endpoint.url, "https://api.anthropic.com");
 
         let msg_url = endpoint.chat_endpoint();
-        assert_eq!(msg_url, "https://api.anthropic.com/messages");
+        assert_eq!(msg_url, "https://api.anthropic.com/v1/messages");
+    }
+
+    #[test]
+    fn test_anthropic_chat_endpoint_preserves_existing_v1() {
+        // If the user already put /v1 on the base URL, chat_endpoint must
+        // not double it. This covers migrations from the legacy
+        // normalize_base_url path that appended /v1.
+        let cases = [
+            (
+                "https://api.anthropic.com/v1",
+                "https://api.anthropic.com/v1/messages",
+            ),
+            (
+                "https://open.bigmodel.cn/api/anthropic/v1",
+                "https://open.bigmodel.cn/api/anthropic/v1/messages",
+            ),
+            (
+                "https://open.bigmodel.cn/api/anthropic/v1/",
+                "https://open.bigmodel.cn/api/anthropic/v1/messages",
+            ),
+        ];
+        for (input, expected) in cases {
+            let endpoint = resolve_endpoint("anthropic-compatible", input);
+            assert_eq!(endpoint.chat_endpoint(), expected, "input={input}");
+        }
     }
 
     #[test]

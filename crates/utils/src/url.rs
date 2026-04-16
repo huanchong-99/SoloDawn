@@ -34,12 +34,28 @@ impl ResolvedEndpoint {
     /// path to the base URL.
     ///
     /// - `OpenAIChat` → `{url}/chat/completions`
-    /// - `AnthropicMessages` → `{url}/messages`
+    /// - `AnthropicMessages` → `{url}/v1/messages` (adds `/v1` if missing)
     /// - `Google` → `{url}` (Google uses query parameters, not path suffixes)
+    ///
+    /// For `AnthropicMessages`, both shapes are accepted:
+    /// - `https://api.anthropic.com` → `https://api.anthropic.com/v1/messages`
+    /// - `https://api.anthropic.com/v1` → `https://api.anthropic.com/v1/messages`
+    ///
+    /// Anthropic's wire protocol (including third-party compatible providers
+    /// like Zhipu GLM) requires `/v1/messages`; appending only `/messages`
+    /// yields 404 against both `api.anthropic.com` and
+    /// `open.bigmodel.cn/api/anthropic`.
     pub fn chat_endpoint(&self) -> String {
         match self.api_format {
             ApiFormat::OpenAIChat => format!("{}/chat/completions", self.url),
-            ApiFormat::AnthropicMessages => format!("{}/messages", self.url),
+            ApiFormat::AnthropicMessages => {
+                let base = self.url.trim_end_matches('/');
+                if base.ends_with("/v1") {
+                    format!("{base}/messages")
+                } else {
+                    format!("{base}/v1/messages")
+                }
+            }
             ApiFormat::Google => self.url.clone(),
         }
     }
