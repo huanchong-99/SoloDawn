@@ -119,15 +119,8 @@ vi.mock('@/hooks/useProjects', () => ({
   }),
 }));
 
-vi.mock('@/stores/wsStore', () => ({
-  useWorkflowEvents: vi.fn(
-    (workflowId: string | null | undefined, handlers?: WorkflowEventHandlers) => {
-      wsStoreMock.workflowId = workflowId;
-      wsStoreMock.handlers = handlers;
-      return { connectionStatus: 'connected' };
-    }
-  ),
-  useWsStore: vi.fn(
+vi.mock('@/stores/wsStore', () => {
+  const useWsStoreMock = vi.fn(
     (
       selector: (state: {
         sendPromptResponse: typeof wsStoreMock.sendPromptResponse;
@@ -138,7 +131,21 @@ vi.mock('@/stores/wsStore', () => ({
         sendPromptResponse: wsStoreMock.sendPromptResponse,
         subscribeToWorkflow: wsStoreMock.subscribeToWorkflow,
       })
-  ),
+  );
+  useWsStoreMock.getState = () => ({
+    subscribeToWorkflow: wsStoreMock.subscribeToWorkflow,
+    sendPromptResponse: wsStoreMock.sendPromptResponse,
+  });
+  return {
+    useWorkflowEvents: vi.fn(
+      (workflowId: string | null | undefined, handlers?: WorkflowEventHandlers) => {
+        wsStoreMock.workflowId = workflowId;
+        wsStoreMock.handlers = handlers;
+        return { connectionStatus: 'connected' };
+      }
+    ),
+    useWsStore: useWsStoreMock,
+  };
 }));
 
 vi.mock('@/components/ConfigProvider', () => ({

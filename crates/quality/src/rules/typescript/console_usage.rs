@@ -64,7 +64,7 @@ fn is_test_file(path: &str) -> bool {
     // `my__tests__helper`). The `.test.`/`.spec.` infix checks remain
     // filename-based and are safe as substring matches.
     let is_tests_segment = path
-        .split(|c| c == '/' || c == '\\')
+        .split(['/', '\\'])
         .any(|seg| seg == "__tests__");
     is_tests_segment || path.contains(".test.") || path.contains(".spec.")
 }

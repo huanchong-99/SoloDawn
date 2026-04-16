@@ -750,7 +750,7 @@ export function OrganizationSettingsNew() {
             loadingInvitations={loadingInvitations}
             invitations={invitations}
             onRevoke={handleRevokeInvitation}
-            isRevoking={revokeInvitation.isPending}
+            isPendingId={isPendingId}
             t={t}
           />
         </SettingsCard>
@@ -783,8 +783,7 @@ export function OrganizationSettingsNew() {
             isAdmin={isAdmin}
             onRemove={handleRemoveMember}
             onRoleChange={handleRoleChange}
-            isRemoving={removeMember.isPending}
-            isRoleChanging={updateMemberRole.isPending}
+            isPendingId={isPendingId}
             t={t}
           />
         </SettingsCard>
@@ -808,8 +807,7 @@ export function OrganizationSettingsNew() {
             availableLocalProjects={availableLocalProjects}
             onLink={handleLinkProject}
             onUnlink={handleUnlinkProject}
-            isLinking={linkToExisting.isPending}
-            isUnlinking={unlinkProject.isPending}
+            isPendingId={isPendingId}
             remoteProjectUnsupportedMessage={remoteProjectUnsupportedMessage}
             loadRemoteProjectsErrorMessage={loadRemoteProjectsErrorMessage}
             t={t}

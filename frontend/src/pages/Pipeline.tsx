@@ -6,9 +6,7 @@ import { TaskPipeline } from '@/components/pipeline/TaskPipeline';
 
 export function Pipeline() {
   const { workflowId } = useParams<{ workflowId: string }>();
-  const { data: workflow, isLoading } = useWorkflow(workflowId ?? '', {
-    enabled: !!workflowId,
-  });
+  const { data: workflow, isLoading } = useWorkflow(workflowId ?? '');
 
   // Guard: hook internally no-ops when workflowId is undefined
   useWorkflowInvalidation(workflowId);

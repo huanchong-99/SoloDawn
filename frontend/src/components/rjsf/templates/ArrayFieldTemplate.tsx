@@ -18,7 +18,11 @@ export const ArrayFieldTemplate = (props: ArrayFieldTemplateProps) => {
         {items?.map((item, idx) => {
           const itemKey =
             (item as unknown as { key?: string | number }).key ?? idx;
-          return <div key={itemKey}>{item.children}</div>;
+          return (
+            <div key={itemKey}>
+              <ArrayFieldItemTemplate {...item} />
+            </div>
+          );
         })}
       </div>
 

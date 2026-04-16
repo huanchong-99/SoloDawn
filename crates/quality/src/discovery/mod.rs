@@ -728,12 +728,13 @@ fn compile_workspace_patterns(patterns: &[String]) -> anyhow::Result<Vec<Pattern
             // E37-10: log a warning so silently-skipped invalid patterns are
             // surfaced; error is still returned to the caller.
             Pattern::new(pattern)
-                .inspect_err(|err| {
+                .map_err(|err| {
                     tracing::warn!(
                         pattern = %pattern,
                         error = %err,
                         "invalid workspace pattern; will fail compilation"
                     );
+                    err
                 })
                 .with_context(|| format!("invalid workspace pattern: {pattern}"))
         })
