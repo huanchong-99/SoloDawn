@@ -119,23 +119,9 @@ vi.mock('@/hooks/useProjects', () => ({
   }),
 }));
 
-vi.mock('@/stores/wsStore', () => {
-  const useWsStoreMock = vi.fn(
-    (
-      selector: (state: {
-        sendPromptResponse: typeof wsStoreMock.sendPromptResponse;
-        subscribeToWorkflow: typeof wsStoreMock.subscribeToWorkflow;
-      }) => unknown
-    ) =>
-      selector({
-        sendPromptResponse: wsStoreMock.sendPromptResponse,
-        subscribeToWorkflow: wsStoreMock.subscribeToWorkflow,
-      })
-  );
-  useWsStoreMock.getState = () => ({
-    subscribeToWorkflow: wsStoreMock.subscribeToWorkflow,
-    sendPromptResponse: wsStoreMock.sendPromptResponse,
-  });
+vi.mock('@/stores/wsStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/stores/wsStore')>();
+  const origUseWsStore = actual.useWsStore;
   return {
     useWorkflowEvents: vi.fn(
       (workflowId: string | null | undefined, handlers?: WorkflowEventHandlers) => {
@@ -144,9 +130,26 @@ vi.mock('@/stores/wsStore', () => {
         return { connectionStatus: 'connected' };
       }
     ),
-    useWsStore: useWsStoreMock,
+    useWsStore: new Proxy(origUseWsStore, {
+      apply(target, thisArg, args) {
+        // When called as a hook (selector), use mock data
+        return args[0]({
+          sendPromptResponse: wsStoreMock.sendPromptResponse,
+          subscribeToWorkflow: wsStoreMock.subscribeToWorkflow,
+        });
+      },
+      get(target, prop) {
+        if (prop === 'getState') {
+          return () => ({
+            subscribeToWorkflow: wsStoreMock.subscribeToWorkflow,
+            sendPromptResponse: wsStoreMock.sendPromptResponse,
+          });
+        }
+        return Reflect.get(target, prop);
+      },
+    }),
   };
-}));
+});
 
 vi.mock('@/components/ConfigProvider', () => ({
   useUserSystem: () => ({

@@ -51,7 +51,7 @@ impl MsgStore {
     }
 
     pub fn push(&self, msg: LogMsg) {
-        if let Err(_) = self.sender.send(msg.clone()) {
+        if self.sender.send(msg.clone()).is_err() {
             tracing::debug!("msg_store broadcast has no listeners");
         }
         let bytes = msg.approx_bytes();
@@ -59,7 +59,7 @@ impl MsgStore {
         let mut inner = self
             .inner
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         while inner.total_bytes.saturating_add(bytes) > HISTORY_BYTES {
             if let Some(front) = inner.history.pop_front() {
                 inner.total_bytes = inner.total_bytes.saturating_sub(front.bytes);
@@ -116,7 +116,7 @@ impl MsgStore {
     pub fn get_history(&self) -> Vec<LogMsg> {
         self.inner
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .history
             .iter()
             .map(|s| s.msg.clone())
@@ -142,7 +142,7 @@ impl MsgStore {
         let history: Vec<LogMsg> = self
             .inner
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .history
             .iter()
             .map(|s| s.msg.clone())
