@@ -9,7 +9,7 @@ const KEEPALIVE_INPUT_MESSAGE = JSON.stringify({ type: 'heartbeat' });
 // Mock xterm
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
-    onData = vi.fn<(handler: (data: string) => void) => ({ dispose: vi.fn<() => void>() })>();
+    onData = vi.fn().mockReturnValue({ dispose: vi.fn() });
     open = vi.fn<(container: HTMLElement) => void>();
     write = vi.fn<(data: string) => void>();
     clear = vi.fn<() => void>();
