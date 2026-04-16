@@ -279,6 +279,10 @@ pub struct RepositoryDiscovery {
     js_targets: Vec<JsTarget>,
     rust_manifests: Vec<PathBuf>,
     js_dependents: Vec<Vec<usize>>,
+    /// True if subdirectory package.json files were found (even when no root
+    /// package.json exists). Used by the engine to detect that JS/TS source
+    /// code is present but discovery may have missed targets.
+    has_subdirectory_js_manifests: bool,
 }
 
 impl RepositoryDiscovery {
@@ -347,6 +351,31 @@ impl RepositoryDiscovery {
                     ));
                 }
             }
+        } else if root_manifest.is_none() {
+            // No root package.json AND no workspace patterns — the repo root
+            // itself is not a JS project. But sub-directories may contain
+            // independent JS/TS projects (e.g. `knowledge-base-app/`).
+            // Scan all discovered package.json files and treat each as a
+            // potential JS target so the frontend provider can run tsc/eslint.
+            for manifest_path in &scanned_manifests.package_json {
+                let Some(manifest_dir) = manifest_path.parent() else {
+                    continue;
+                };
+                if let Some(manifest) = read_manifest(manifest_path)? {
+                    let package_manager = PackageManager::detect(
+                        project_root,
+                        manifest_dir,
+                        manifest.package_manager.as_deref(),
+                    );
+                    js_targets.push(build_js_target(
+                        project_root,
+                        manifest_dir,
+                        manifest_path,
+                        &manifest,
+                        package_manager,
+                    ));
+                }
+            }
         }
 
         let repo_checks = root_manifest
@@ -355,11 +384,13 @@ impl RepositoryDiscovery {
             .unwrap_or_default();
         let rust_manifests = scanned_manifests.cargo_toml;
         let js_dependents = build_js_dependents(&js_targets);
+        let has_subdirectory_js_manifests = root_manifest.is_none() && !scanned_manifests.package_json.is_empty();
 
         debug!(
             js_targets = js_targets.len(),
             rust_manifests = rust_manifests.len(),
             repo_checks = ?repo_checks,
+            has_subdirectory_js_manifests,
             "quality discovery completed"
         );
 
@@ -370,6 +401,7 @@ impl RepositoryDiscovery {
             js_targets,
             rust_manifests,
             js_dependents,
+            has_subdirectory_js_manifests,
         })
     }
 
@@ -391,6 +423,14 @@ impl RepositoryDiscovery {
 
     pub fn has_js_targets(&self) -> bool {
         !self.js_targets.is_empty()
+    }
+
+    /// Returns true if package.json files were found in subdirectories but the
+    /// repo root itself has no package.json. This signals that JS/TS code is
+    /// present but the project layout is non-standard (e.g. code lives inside
+    /// a subdirectory like `knowledge-base-app/`).
+    pub fn has_subdirectory_js_manifests(&self) -> bool {
+        self.has_subdirectory_js_manifests
     }
 
     pub fn has_rust_targets(&self) -> bool {
@@ -1350,6 +1390,54 @@ mod tests {
             }
             other => panic!("expected PackageExec tsc, got {other:?}"),
         }
+        cleanup(&root);
+    }
+
+    /// When the git repo root has NO package.json but a subdirectory (e.g.
+    /// `knowledge-base-app/`) contains one with workspaces, discovery must
+    /// still find and build JS targets from those sub-manifests.
+    #[test]
+    fn discovers_targets_from_subdirectory_without_root_manifest() {
+        let root = temp_project_root();
+        // No package.json at root — only CLAUDE.md or README.md might exist.
+        write_file(&root.join("README.md"), "# test project");
+
+        // Subdirectory has a real JS project with workspaces.
+        write_file(
+            &root.join("my-app/package.json"),
+            r#"{
+  "name": "my-app",
+  "private": true,
+  "workspaces": ["client", "server"]
+}"#,
+        );
+        write_file(
+            &root.join("my-app/client/package.json"),
+            r#"{
+  "name": "client",
+  "scripts": { "lint": "eslint .", "type-check": "tsc --noEmit" }
+}"#,
+        );
+        write_file(&root.join("my-app/client/tsconfig.json"), "{}");
+        write_file(
+            &root.join("my-app/server/package.json"),
+            r#"{ "name": "server", "scripts": { "lint": "eslint ." } }"#,
+        );
+
+        let discovery = RepositoryDiscovery::discover(&root).unwrap();
+
+        // Must find at least the sub-package targets
+        assert!(
+            !discovery.js_targets().is_empty(),
+            "discovery must find JS targets in subdirectories even without root package.json, found {} targets",
+            discovery.js_targets().len(),
+        );
+        assert!(discovery.has_subdirectory_js_manifests());
+
+        // At least one target must have a typecheck capability (client has tsc)
+        let has_typecheck = discovery.js_targets().iter().any(|t| t.capabilities().typecheck.is_some());
+        assert!(has_typecheck, "at least one target must have typecheck capability");
+
         cleanup(&root);
     }
 }
