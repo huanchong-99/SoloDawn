@@ -33,7 +33,7 @@ pub fn parse_tool_call(response: &str) -> Option<ToolCall> {
                 error = %e,
                 preview = &json_str[..json_str.len().min(200)],
                 "Failed to parse tool call JSON"
-            )
+            );
         })
         .ok()?;
     if parsed.tool.is_empty() {

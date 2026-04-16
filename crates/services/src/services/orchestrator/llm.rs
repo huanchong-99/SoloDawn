@@ -568,12 +568,12 @@ impl ClaudeCodeNativeClient {
         let creds_path = home.join(".claude").join(".credentials.json");
         let creds_str = std::fs::read_to_string(&creds_path)
             .inspect_err(|e| {
-                tracing::warn!(error = %e, path = %creds_path.display(), "Failed to read Claude credentials file")
+                tracing::warn!(error = %e, path = %creds_path.display(), "Failed to read Claude credentials file");
             })
             .ok()?;
         let creds: ClaudeCredentials = serde_json::from_str(&creds_str)
             .inspect_err(|e| {
-                tracing::warn!(error = %e, "Failed to parse Claude credentials JSON")
+                tracing::warn!(error = %e, "Failed to parse Claude credentials JSON");
             })
             .ok()?;
         let oauth = creds.claude_ai_oauth?;

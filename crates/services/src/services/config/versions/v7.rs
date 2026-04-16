@@ -1,4 +1,3 @@
-use anyhow::Error;
 use executors::{executors::BaseCodingAgent, profile::ExecutorProfileId};
 use serde::{Deserialize, Serialize};
 use strum_macros::EnumString;
@@ -55,7 +54,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_previous_version(raw_config: &str) -> Result<Self, Error> {
+    pub fn from_previous_version(raw_config: &str) -> Self {
         let old_config = match serde_json::from_str::<v6::Config>(raw_config) {
             Ok(cfg) => cfg,
             Err(e) => {
@@ -86,7 +85,7 @@ impl Config {
             }
         };
 
-        Ok(Self {
+        Self {
             config_version: "v7".to_string(),
             theme,
             executor_profile: old_config.executor_profile,
@@ -105,7 +104,7 @@ impl Config {
             language: old_config.language,
             git_branch_prefix: default_git_branch_prefix(),
             showcases: ShowcaseState::default(),
-        })
+        }
     }
 }
 
@@ -117,16 +116,9 @@ impl From<String> for Config {
             return config;
         }
 
-        match Self::from_previous_version(&raw_config) {
-            Ok(config) => {
-                tracing::info!("Config upgraded to v7");
-                config
-            }
-            Err(e) => {
-                tracing::warn!("Config migration failed: {}, using default", e);
-                Self::default()
-            }
-        }
+        let config = Self::from_previous_version(&raw_config);
+        tracing::info!("Config upgraded to v7");
+        config
     }
 }
 

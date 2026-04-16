@@ -716,12 +716,12 @@ impl FileSearchCache {
                                 // worker will re-read HEAD once drained).
                                 if let Err(e) = tx.try_send(()) {
                                     match e {
-                                        mpsc::error::TrySendError::Full(_) => {
+                                        mpsc::error::TrySendError::Full(()) => {
                                             warn!(
                                                 "HEAD watcher channel full, dropping event"
                                             );
                                         }
-                                        mpsc::error::TrySendError::Closed(_) => {
+                                        mpsc::error::TrySendError::Closed(()) => {
                                             warn!(
                                                 "HEAD watcher channel closed, dropping event"
                                             );

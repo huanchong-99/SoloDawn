@@ -1142,7 +1142,7 @@ impl GitService {
                     error = %e,
                     worktree = %worktree_path.display(),
                     "Failed to read HEAD info for worktree reset decision"
-                )
+                );
             })
             .ok()
             .map(|h| h.oid);
@@ -1372,7 +1372,7 @@ impl GitService {
                             error = %e,
                             raw = %value,
                             "Failed to parse branch committerdate as RFC3339; falling back to Utc::now()"
-                        )
+                        );
                     })
                     .ok()
             })
@@ -1518,7 +1518,7 @@ impl GitService {
         if git
             .is_rebase_in_progress(worktree_path)
             .inspect_err(|e| {
-                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_rebase_in_progress CLI check failed; assuming false")
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_rebase_in_progress CLI check failed; assuming false");
             })
             .unwrap_or(false)
         {
@@ -1672,7 +1672,7 @@ impl GitService {
         if git
             .is_merge_in_progress(worktree_path)
             .inspect_err(|e| {
-                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_merge_in_progress CLI check failed; assuming false")
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_merge_in_progress CLI check failed; assuming false");
             })
             .unwrap_or(false)
         {
@@ -1681,7 +1681,7 @@ impl GitService {
         if git
             .is_cherry_pick_in_progress(worktree_path)
             .inspect_err(|e| {
-                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_cherry_pick_in_progress CLI check failed; assuming false")
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_cherry_pick_in_progress CLI check failed; assuming false");
             })
             .unwrap_or(false)
         {
@@ -1690,7 +1690,7 @@ impl GitService {
         if git
             .is_revert_in_progress(worktree_path)
             .inspect_err(|e| {
-                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_revert_in_progress CLI check failed; assuming false")
+                tracing::warn!(error = %e, worktree = %worktree_path.display(), "is_revert_in_progress CLI check failed; assuming false");
             })
             .unwrap_or(false)
         {

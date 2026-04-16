@@ -222,7 +222,7 @@ impl DiffStreamManager {
             let mut guard = self
                 .known_paths
                 .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             guard.drain().collect()
         };
 
@@ -239,7 +239,7 @@ impl DiffStreamManager {
         self.cumulative.store(0, Ordering::Relaxed);
         self.full_sent
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
 
         let diffs = self.fetch_diffs().await?;
@@ -282,7 +282,7 @@ impl DiffStreamManager {
                 let mut guard = self
                     .known_paths
                     .write()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 guard.insert(raw_path.clone());
             }
 
@@ -290,7 +290,7 @@ impl DiffStreamManager {
                 let mut guard = self
                     .full_sent
                     .write()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 guard.insert(raw_path.clone());
             }
 
@@ -405,7 +405,7 @@ impl DiffStreamManager {
         tokio::task::spawn_blocking(move || {
             git.get_base_commit(&repo_path, &branch, &target)
                 .inspect_err(|e| {
-                    tracing::warn!(error = %e, branch = %branch, target = %target, "Failed to compute base commit")
+                    tracing::warn!(error = %e, branch = %branch, target = %target, "Failed to compute base commit");
                 })
                 .ok()
         })
@@ -516,7 +516,7 @@ fn process_file_changes(
         {
             let mut guard = known_paths
                 .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             guard.insert(raw_file_path.clone());
         }
 
@@ -525,7 +525,7 @@ fn process_file_changes(
         if !diff.content_omitted {
             let mut guard = full_sent_paths
                 .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             guard.insert(raw_file_path.clone());
         }
 
@@ -552,7 +552,7 @@ fn process_file_changes(
             {
                 let mut guard = known_paths
                     .write()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 guard.remove(changed_path);
             }
         }

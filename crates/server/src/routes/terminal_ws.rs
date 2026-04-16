@@ -651,6 +651,9 @@ async fn handle_terminal_socket(
                                     WsMessage::Error { .. } => {
                                         tracing::warn!("Client sent unexpected Error message");
                                     }
+                                    WsMessage::Resynced { .. } => {
+                                        tracing::warn!("Client sent unexpected Resynced message");
+                                    }
                                 }
                             } else {
                                 tracing::warn!("Failed to parse WebSocket message: {}", text);
@@ -916,6 +919,16 @@ mod tests {
         let heartbeat = WsMessage::Heartbeat;
         let json = serde_json::to_string(&heartbeat).unwrap();
         assert!(json.contains("heartbeat"));
+
+        // Test Resynced message
+        let resynced = WsMessage::Resynced {
+            resume_from_seq: 42,
+            skipped: 7,
+        };
+        let json = serde_json::to_string(&resynced).unwrap();
+        assert!(json.contains("resynced"));
+        assert!(json.contains("42"));
+        assert!(json.contains("7"));
     }
 
     #[test]
@@ -945,6 +958,20 @@ mod tests {
         let json = r#"{"type":"heartbeat"}"#;
         let msg: WsMessage = serde_json::from_str(json).unwrap();
         assert!(matches!(msg, WsMessage::Heartbeat));
+
+        // Test Resynced message
+        let json = r#"{"type":"resynced","resume_from_seq":100,"skipped":5}"#;
+        let msg: WsMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            WsMessage::Resynced {
+                resume_from_seq,
+                skipped,
+            } => {
+                assert_eq!(resume_from_seq, 100);
+                assert_eq!(skipped, 5);
+            }
+            _ => panic!("Expected Resynced message"),
+        }
     }
 
     #[test]

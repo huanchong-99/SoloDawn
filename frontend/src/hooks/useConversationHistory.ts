@@ -480,12 +480,13 @@ export const useConversationHistory = ({
   const activeStreamControllersRef = useRef<Map<string, { close(): void }>>(new Map());
   const onEntriesUpdatedRef = useRef<OnEntriesUpdated | null>(null);
 
-  const mergeIntoDisplayed = (
-    mutator: (state: ExecutionProcessStateStore) => void
-  ) => {
-    const state = displayedExecutionProcesses.current;
-    mutator(state);
-  };
+  const mergeIntoDisplayed = useCallback(
+    (mutator: (state: ExecutionProcessStateStore) => void) => {
+      const state = displayedExecutionProcesses.current;
+      mutator(state);
+    },
+    []
+  );
   useEffect(() => {
     onEntriesUpdatedRef.current = onEntriesUpdated;
   }, [onEntriesUpdated]);
@@ -523,25 +524,29 @@ export const useConversationHistory = ({
     });
   };
 
-  const getLiveExecutionProcess = (
-    executionProcessId: string
-  ): ExecutionProcess | undefined => {
-    return executionProcesses?.current.find(
-      (executionProcess) => executionProcess.id === executionProcessId
-    );
-  };
+  const getLiveExecutionProcess = useCallback(
+    (executionProcessId: string): ExecutionProcess | undefined => {
+      return executionProcesses?.current.find(
+        (executionProcess) => executionProcess.id === executionProcessId
+      );
+    },
+    []
+  );
 
-  const patchWithKey = (
-    patch: PatchType,
-    executionProcessId: string,
-    index: number | 'user'
-  ) => {
-    return {
-      ...patch,
-      patchKey: `${executionProcessId}:${index}`,
-      executionProcessId,
-    };
-  };
+  const patchWithKey = useCallback(
+    (
+      patch: PatchType,
+      executionProcessId: string,
+      index: number | 'user'
+    ) => {
+      return {
+        ...patch,
+        patchKey: `${executionProcessId}:${index}`,
+        executionProcessId,
+      };
+    },
+    []
+  );
 
   const flattenEntries = (
     executionProcessState: ExecutionProcessStateStore
@@ -697,7 +702,7 @@ export const useConversationHistory = ({
         activeStreamControllersRef.current.set(executionProcess.id, controller);
       });
     },
-    [emitEntries]
+    [emitEntries, mergeIntoDisplayed, patchWithKey]
   );
 
   // Sometimes it can take a few seconds for the stream to start, wrap the loadRunningAndEmit method
@@ -788,7 +793,7 @@ export const useConversationHistory = ({
       }
       return anyUpdated;
     },
-    [executionProcesses, patchWithKey]
+    [executionProcesses, patchWithKey, mergeIntoDisplayed]
   );
 
   const ensureProcessVisible = useCallback((p: ExecutionProcess) => {
@@ -805,7 +810,7 @@ export const useConversationHistory = ({
         };
       }
     });
-  }, []);
+  }, [mergeIntoDisplayed]);
 
   const idListKey = useMemo(
     () => executionProcessesRaw?.map((p) => p.id).join(','),
@@ -873,6 +878,7 @@ export const useConversationHistory = ({
     loadInitialEntries,
     loadRemainingEntriesInBatches,
     emitEntries,
+    mergeIntoDisplayed,
   ]); // include idListKey so new processes trigger reload
 
   useEffect(() => {
@@ -923,6 +929,7 @@ export const useConversationHistory = ({
     emitEntries,
     ensureProcessVisible,
     loadRunningAndEmitWithBackoff,
+    mergeIntoDisplayed,
   ]);
 
   // If an execution process is removed, remove it from the state
@@ -940,7 +947,7 @@ export const useConversationHistory = ({
         });
       });
     }
-  }, [attempt.id, idListKey, executionProcessesRaw]);
+  }, [attempt.id, idListKey, executionProcessesRaw, mergeIntoDisplayed]);
 
 
   return {};
