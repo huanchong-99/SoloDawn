@@ -1132,15 +1132,14 @@ impl ContainerService for LocalContainerService {
     }
 
     fn workspace_to_current_dir(&self, workspace: &Workspace) -> PathBuf {
-        match workspace.container_ref.clone() {
-            Some(path) => PathBuf::from(path),
-            None => {
-                tracing::warn!(
-                    workspace_id = %workspace.id,
-                    "workspace has no container_ref; falling back to empty path"
-                );
-                PathBuf::new()
-            }
+        if let Some(path) = workspace.container_ref.clone() {
+            PathBuf::from(path)
+        } else {
+            tracing::warn!(
+                workspace_id = %workspace.id,
+                "workspace has no container_ref; falling back to empty path"
+            );
+            PathBuf::new()
         }
     }
 
@@ -1173,16 +1172,15 @@ impl ContainerService for LocalContainerService {
         let workspace_inputs: Vec<RepoWorkspaceInput> = repositories
             .iter()
             .map(|repo| {
-                let target_branch = match target_branches.get(&repo.id).cloned() {
-                    Some(branch) => branch,
-                    None => {
-                        tracing::warn!(
-                            repo_id = %repo.id,
-                            workspace_id = %workspace.id,
-                            "no target_branch found for repo; using empty string"
-                        );
-                        String::new()
-                    }
+                let target_branch = if let Some(branch) = target_branches.get(&repo.id).cloned() {
+                    branch
+                } else {
+                    tracing::warn!(
+                        repo_id = %repo.id,
+                        workspace_id = %workspace.id,
+                        "no target_branch found for repo; using empty string"
+                    );
+                    String::new()
                 };
                 RepoWorkspaceInput::new(repo.clone(), target_branch)
             })
