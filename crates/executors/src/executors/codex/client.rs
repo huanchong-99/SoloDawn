@@ -441,8 +441,7 @@ impl JsonRpcCallbacks for AppServerClient {
                     let truncated_count = session_configured
                         .initial_messages
                         .as_ref()
-                        .map(|m| m.len())
-                        .unwrap_or(0);
+                        .map_or(0, Vec::len);
                     if truncated_count > 0 {
                         tracing::warn!(
                             truncated_messages = truncated_count,

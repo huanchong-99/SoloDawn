@@ -745,7 +745,7 @@ impl FileSearchCache {
         let handle = tokio::spawn(async move {
             while rx.recv().await.is_some() {
                 info!("HEAD changed for repo: {:?}", watched_path);
-                if let Err(e) = build_queue.send(watched_path.clone()) {
+                if let Err(e) = build_queue.send(watched_path.clone()).await {
                     error!("Failed to enqueue cache refresh: {}", e);
                 }
             }

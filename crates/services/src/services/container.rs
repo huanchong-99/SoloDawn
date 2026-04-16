@@ -237,7 +237,7 @@ pub trait ContainerService {
                 if !path.exists() {
                     tracing::error!(
                         task_id = %task_id,
-                        repo_path = %repo_path,
+                        repo_path = %repo_path.display(),
                         "Quality gate skipped: resolved repo path does not exist on disk"
                     );
                     return;

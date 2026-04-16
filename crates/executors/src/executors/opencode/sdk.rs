@@ -522,6 +522,7 @@ async fn prompt(
 
     // E34-11: cap the snippet we include in error messages so a multi-megabyte
     // error body does not blow up logs / UI. 500 chars matches the guideline.
+    #[allow(clippy::items_after_statements)]
     const MAX_ERROR_SNIPPET: usize = 500;
     let trimmed_snippet: String = if trimmed.len() > MAX_ERROR_SNIPPET {
         let mut s = trimmed.chars().take(MAX_ERROR_SNIPPET).collect::<String>();
@@ -544,8 +545,7 @@ async fn prompt(
         let message = parsed
             .pointer("/data/message")
             .and_then(Value::as_str)
-            .map(ToString::to_string)
-            .unwrap_or_else(|| trimmed_snippet.clone());
+            .map_or_else(|| trimmed_snippet.clone(), ToString::to_string);
         return Err(ExecutorError::Io(io::Error::other(format!(
             "OpenCode session.prompt failed: {name}: {message}"
         ))));

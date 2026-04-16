@@ -388,12 +388,10 @@ impl Codex {
         // clearly opted in via DangerFullAccess-without-approval-policy or
         // AskForApproval::Never.
         let auto_approve = match (&self.sandbox, &self.ask_for_approval) {
-            (Some(SandboxMode::DangerFullAccess), None) => true,
-            (_, Some(AskForApproval::Never)) => true,
+            (Some(SandboxMode::DangerFullAccess), None) | (_, Some(AskForApproval::Never)) => true,
             // Most restrictive default: if the caller did not specify either
             // knob, require explicit approval rather than silently running
             // with auto-approve enabled.
-            (None, None) => false,
             _ => false,
         };
         let approvals = self.approvals.clone();

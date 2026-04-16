@@ -454,11 +454,12 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     } else if tc.title.trim_start().starts_with('{') {
                         // Title contains JSON arguments for the tool
                         serde_json::from_str::<serde_json::Value>(&tc.title)
-                            .inspect_err(|e| {
+                            .map_err(|e| {
                                 tracing::debug!(
                                     "failed to parse tool title as JSON arguments: {}",
                                     e
-                                )
+                                );
+                                e
                             })
                             .ok()
                     } else {

@@ -196,7 +196,7 @@ impl ExecutorConfigs {
     pub fn get_cached() -> ExecutorConfigs {
         EXECUTOR_PROFILES_CACHE
             .read()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -204,7 +204,7 @@ impl ExecutorConfigs {
     pub fn reload() {
         let mut cache = EXECUTOR_PROFILES_CACHE
             .write()
-            .unwrap_or_else(|p| p.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *cache = Self::load();
     }
 

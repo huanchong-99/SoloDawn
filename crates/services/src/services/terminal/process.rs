@@ -731,7 +731,7 @@ impl ProcessManager {
         let mut elapsed = std::time::Duration::from_millis(0);
         let poll_step = std::time::Duration::from_millis(10);
         let poll_budget = std::time::Duration::from_millis(500);
-        let mut immediate_status: Option<std::process::ExitStatus> = None;
+        let mut immediate_status: Option<_> = None;
         let mut immediate_error: Option<String> = None;
         loop {
             match child.try_wait() {

@@ -105,13 +105,10 @@ impl StdoutAppender {
         // W2-30-06: sync context -> use try_send and warn on full/closed
         // instead of an unbounded channel that could grow without limit.
         match self.tx.try_send(line) {
-            Ok(()) => {}
             Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
                 tracing::warn!("stdout_dup: injector channel full; dropping line");
             }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                // Writer task has ended; silently drop.
-            }
+            Ok(()) | Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
         }
     }
 }

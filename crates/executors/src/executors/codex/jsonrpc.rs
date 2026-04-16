@@ -215,6 +215,7 @@ impl JsonRpcPeer {
         // are expected to occupy. This effectively wraps but only to a
         // positive sentinel value rather than a negative one.
         let raw = self.id_counter.fetch_add(1, Ordering::Relaxed);
+        #[allow(clippy::cast_possible_wrap)]
         let bounded = (raw % (i64::MAX as u64)) as i64;
         RequestId::Integer(bounded)
     }

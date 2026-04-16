@@ -21,6 +21,10 @@ vi.mock('@/hooks', async () => {
   };
 });
 
+vi.mock('@/hooks/auth/useAuth', () => ({
+  useAuth: () => ({ isSignedIn: true }),
+}));
+
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api');
   return {

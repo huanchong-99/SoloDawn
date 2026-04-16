@@ -35,30 +35,28 @@ pub fn fork_session(session_id: &str) -> io::Result<String> {
     // file with no parent component would be unusual and indicates a
     // misconfigured sessions root; fall back to `root` but log so the
     // fallback is visible.
-    let destination_parent = match source.parent() {
-        Some(parent) => parent.to_path_buf(),
-        None => {
-            tracing::warn!(
-                source = %source.display(),
-                "droid fork_session: source has no parent directory; falling back to sessions root"
-            );
-            root.clone()
-        }
+    let destination_parent = if let Some(parent) = source.parent() {
+        parent.to_path_buf()
+    } else {
+        tracing::warn!(
+            source = %source.display(),
+            "droid fork_session: source has no parent directory; falling back to sessions root"
+        );
+        root.clone()
     };
     let destination = destination_parent.join(format!("{new_session_id}.jsonl"));
     fs::write(&destination, output)?;
 
     if let Ok(settings_source) = find_session_file(&root, &format!("{session_id}.settings.json")) {
         // E34-02: explicit validation for the settings file parent as well.
-        let settings_parent = match settings_source.parent() {
-            Some(parent) => parent.to_path_buf(),
-            None => {
-                tracing::warn!(
-                    source = %settings_source.display(),
-                    "droid fork_session: settings file has no parent directory; falling back to sessions root"
-                );
-                root.clone()
-            }
+        let settings_parent = if let Some(parent) = settings_source.parent() {
+            parent.to_path_buf()
+        } else {
+            tracing::warn!(
+                source = %settings_source.display(),
+                "droid fork_session: settings file has no parent directory; falling back to sessions root"
+            );
+            root.clone()
         };
         let settings_destination =
             settings_parent.join(format!("{new_session_id}.settings.json"));
