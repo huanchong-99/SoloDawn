@@ -12,21 +12,11 @@ use uuid::Uuid;
 
 use crate::{DeploymentImpl, error::ApiError, middleware::auth::{RequestContext, assert_authorized}};
 
-// TODO(W2-18-02): Missing ownership/access check on project load.
-// This middleware loads a Project by ID for any authenticated caller. Today,
-// SoloDawn uses a single shared API token (see `middleware/auth.rs`), so there
-// is no per-user identity on the request and no `user_id`/`tenant_id` available
-// to verify ownership against. In a multi-user / team deployment this is an
-// IDOR (Insecure Direct Object Reference) risk: any valid token holder can
-// reference any project UUID.
-//
-// To fix properly, the auth layer must be extended to:
-//   1. Identify the caller (user_id / tenant_id / api_key_id) and insert it as
-//      a request extension (e.g. `AuthContext`).
-//   2. This middleware would then pull that extension and confirm the loaded
-//      `project.owner_id` (or team membership) matches, returning 403/404
-//      otherwise.
-// Until such identity context exists, no ownership check is possible here.
+// W2-18-02: Project load is gated below by `assert_authorized`, which closes
+// the dev-mode passthrough hole when `SOLODAWN_REQUIRE_AUTH=1`. Per-user
+// project ownership still requires G24 (principal with project scope on
+// `RequestContext`); until that lands, any holder of a valid shared API
+// token can load any project by UUID.
 pub async fn load_project_middleware(
     State(deployment): State<DeploymentImpl>,
     Path(project_id): Path<Uuid>,
@@ -66,19 +56,11 @@ pub async fn load_project_middleware(
     Ok(next.run(request).await)
 }
 
-// TODO(W2-18-03): Missing ownership/access check on task load.
-// Same class of issue as W2-18-02: a Task is loaded by ID with no verification
-// that the authenticated caller owns (or has access to) its parent Project.
-// SoloDawn currently authenticates via a single shared API token
-// (`middleware/auth.rs`), so there is no per-user identity on the request to
-// check against. In multi-user/team scenarios this is an IDOR risk.
-//
-// To fix properly:
-//   1. Extend auth to attach an `AuthContext { user_id, .. }` request extension.
-//   2. Here, load the task, then load its parent project, and verify the
-//      project's owner (or team) matches the caller. Return 403/404 otherwise.
-// The contract comment below ("validate it belongs to the project") is also
-// currently aspirational — no such validation is performed today.
+// W2-18-03: Same posture as `load_project_middleware` — the opt-in gate
+// below closes the dev-mode passthrough hole, but per-user task ownership
+// still requires G24. The phrase "validate it belongs to the project" in
+// the inline comment further below remains aspirational until principal
+// scoping exists.
 pub async fn load_task_middleware(
     State(deployment): State<DeploymentImpl>,
     Path(task_id): Path<Uuid>,
@@ -124,6 +106,17 @@ pub async fn load_workspace_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Same opt-in gate as `load_project_middleware`.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     // Load the Workspace from the database
     let workspace = match Workspace::find_by_id(&deployment.db().pool, workspace_id).await {
         Ok(Some(w)) => w,
@@ -150,6 +143,17 @@ pub async fn load_execution_process_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Same opt-in gate as `load_project_middleware`.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     // Load the execution process from the database
     let execution_process =
         match ExecutionProcess::find_by_id(&deployment.db().pool, process_id).await {
@@ -178,6 +182,17 @@ pub async fn load_tag_middleware(
     request: axum::extract::Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Same opt-in gate as `load_project_middleware`.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     // Load the tag from the database
     let tag = match Tag::find_by_id(&deployment.db().pool, tag_id).await {
         Ok(Some(tag)) => tag,
@@ -205,6 +220,17 @@ pub async fn load_session_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Same opt-in gate as `load_project_middleware`.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     let session = match Session::find_by_id(&deployment.db().pool, session_id).await {
         Ok(Some(session)) => session,
         Ok(None) => {

@@ -30,7 +30,12 @@ use utils::response::ApiResponse;
 use uuid::Uuid;
 
 use crate::{
-    DeploymentImpl, error::ApiError, middleware::load_task_middleware,
+    DeploymentImpl,
+    error::ApiError,
+    middleware::{
+        auth::{RequestContext, assert_authorized},
+        load_task_middleware,
+    },
     routes::task_attempts::WorkspaceRepoInput,
 };
 
@@ -44,6 +49,7 @@ pub struct TaskQuery {
 pub async fn get_tasks(
     State(deployment): State<DeploymentImpl>,
     Query(query): Query<TaskQuery>,
+    ctx: Option<Extension<RequestContext>>,
 ) -> Result<ResponseJson<ApiResponse<Vec<TaskWithAttemptStatus>>>, ApiError> {
     // E29-01: Validate project_id is not nil (empty/null guard at entry).
     if query.project_id.is_nil() {
@@ -52,8 +58,18 @@ pub async fn get_tasks(
         ));
     }
 
-    // TODO(W2-18-02): No auth enforcement here; ownership check must be added
-    // at a higher layer (middleware) once multi-user auth lands.
+    // W2-18-02: opt-in strict auth. When `SOLODAWN_REQUIRE_AUTH` is set,
+    // reject dev-mode passthrough requests. Per-user project ownership
+    // (principal scoped to project_id) still requires G24 — until then,
+    // deployments with more than one operator MUST enable
+    // `SOLODAWN_REQUIRE_AUTH=1` AND treat the bearer token as shared per
+    // tenant, not across tenants.
+    let ctx = ctx
+        .map(|Extension(c)| c)
+        .unwrap_or(RequestContext { authenticated: false });
+    if assert_authorized(&ctx).is_err() {
+        return Err(ApiError::Unauthorized);
+    }
 
     let tasks =
         Task::find_by_project_id_with_attempt_status(&deployment.db().pool, query.project_id)

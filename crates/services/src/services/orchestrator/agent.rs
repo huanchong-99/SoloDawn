@@ -814,7 +814,13 @@ impl OrchestratorAgent {
             BusMessage::Shutdown => {
                 return Ok(true);
             }
-            other @ (BusMessage::Instruction(..)
+            // Outbound-only or UI-notification events — no action needed in agent loop.
+            // M16: Out-of-order completion-like events (TerminalStatusUpdate /
+            // TaskStatusUpdate) arriving before their corresponding TerminalCompleted are
+            // dropped here. A future change could buffer them by terminal_id/task_id and
+            // re-emit them in order. Listed explicitly so adding a new BusMessage variant
+            // causes a compile error rather than silent fall-through.
+            msg @ (BusMessage::Instruction(..)
             | BusMessage::StatusUpdate { .. }
             | BusMessage::TerminalStatusUpdate { .. }
             | BusMessage::TaskStatusUpdate { .. }
@@ -823,14 +829,21 @@ impl OrchestratorAgent {
             | BusMessage::TerminalInput { .. }
             | BusMessage::TerminalPromptDecision { .. }
             | BusMessage::ProviderStateChanged { .. }) => {
-                // Outbound-only or UI-notification events — no action needed in agent loop.
-                // TODO(M16): Out-of-order completion-like events (e.g. TerminalStatusUpdate /
-                // TaskStatusUpdate) arriving before their corresponding TerminalCompleted are
-                // currently dropped here. Buffer them by terminal_id/task_id and re-check against
-                // state when the expected completion arrives so they can be re-emitted in order.
-                tracing::warn!(
-                    message_variant = std::any::type_name_of_val(&other),
-                    "Agent loop received outbound/UI-only event; ignoring (see M16 TODO for out-of-order completion buffering)"
+                let variant = match &msg {
+                    BusMessage::Instruction(..) => "Instruction",
+                    BusMessage::StatusUpdate { .. } => "StatusUpdate",
+                    BusMessage::TerminalStatusUpdate { .. } => "TerminalStatusUpdate",
+                    BusMessage::TaskStatusUpdate { .. } => "TaskStatusUpdate",
+                    BusMessage::Error { .. } => "Error",
+                    BusMessage::TerminalMessage { .. } => "TerminalMessage",
+                    BusMessage::TerminalInput { .. } => "TerminalInput",
+                    BusMessage::TerminalPromptDecision { .. } => "TerminalPromptDecision",
+                    BusMessage::ProviderStateChanged { .. } => "ProviderStateChanged",
+                    _ => "unknown",
+                };
+                tracing::trace!(
+                    message_variant = variant,
+                    "Agent loop: ignoring outbound/UI-only event"
                 );
             }
         }

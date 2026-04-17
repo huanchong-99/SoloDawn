@@ -99,12 +99,24 @@ impl TerminalBridge {
         let ready_rx = self
             .register_with_ready(terminal_id, pty_session_id)
             .await?;
-        // Await readiness with a bounded timeout; readiness fires once the bridge
-        // task has begun executing. If the task was aborted immediately (e.g. on
-        // a registration race), the sender is dropped and `ready_rx` returns Err,
-        // which we treat as benign for backward-compat callers.
-        let _ = tokio::time::timeout(Duration::from_secs(2), ready_rx).await;
-        Ok(())
+        // Await readiness with a bounded timeout. A dropped sender (`Err(_)`) is
+        // benign — it means the bridge task was aborted (typically because another
+        // registration for the same terminal won) and the caller should just
+        // proceed. An elapsed timeout, however, indicates the task never started
+        // executing within 2s, which is a real bug worth surfacing instead of
+        // silently returning Ok(()).
+        match tokio::time::timeout(Duration::from_secs(2), ready_rx).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(_)) => Ok(()), // task aborted before signalling — benign
+            Err(_elapsed) => {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    pty_session_id = %pty_session_id,
+                    "Terminal bridge did not become ready within 2s; proceeding anyway"
+                );
+                Ok(())
+            }
+        }
     }
 
     /// Registers a bridge task and returns a [`oneshot::Receiver`] that completes

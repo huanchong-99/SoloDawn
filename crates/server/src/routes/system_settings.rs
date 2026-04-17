@@ -35,12 +35,17 @@ async fn get_settings(
     Ok(Json(ApiResponse::success(Value::Object(map))))
 }
 
-// TODO(W2-18-05 / G24): Restrict PUT /system-settings to admin principals.
-// Today any bearer of a valid API token can toggle system-level flags
-// (e.g. feishu_enabled). Enforcing this requires the auth-layer extension
-// planned for G24 (role/claims propagated from the token into request
-// extensions); once that is in place, reject non-admin callers here with
-// ApiError::Forbidden before mutating.
+// Admin-only mutation.
+//
+// The immediate exposure (any bearer of a valid API token could toggle
+// system-level flags) is gated below via `check_admin`. When
+// `SOLODAWN_ADMIN_TOKEN` is set, callers must additionally present a matching
+// `X-Admin-Token` header. When unset, the gate is a no-op for backward
+// compatibility with single-user/dev setups.
+//
+// Long-term (G24): replace the separate admin token with role/claims carried
+// on `RequestContext` so per-principal RBAC can be enforced instead of a
+// shared secret.
 async fn update_settings(
     State(deployment): State<DeploymentImpl>,
     headers: HeaderMap,

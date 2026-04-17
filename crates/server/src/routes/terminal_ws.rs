@@ -10,12 +10,12 @@ use std::{
 };
 
 use axum::{
-    Router,
+    Extension, Router,
     extract::{
         Path, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::get,
 };
@@ -44,7 +44,11 @@ fn elapsed_since_millis(start_millis: u64) -> Duration {
     Duration::from_millis(now.saturating_sub(start_millis))
 }
 
-use crate::{DeploymentImpl, error::ApiError};
+use crate::{
+    DeploymentImpl,
+    error::ApiError,
+    middleware::auth::{RequestContext, assert_authorized},
+};
 use super::ws_origin::validate_ws_origin;
 
 // BACKLOG-002: Runner container separation
@@ -212,28 +216,47 @@ struct ResumeParams {
     last_seq: Option<u64>,
 }
 
-/// WebSocket handler for terminal connection
+/// WebSocket handler for terminal connection.
 ///
-/// TODO(W2-18-12): This handler does not verify that the authenticated
-/// principal owns (or otherwise has access to) the project/workspace that
-/// owns `terminal_id`. The outer `require_api_token` middleware guarantees
-/// *some* valid API token, and `validate_ws_origin` blocks cross-origin
-/// browsers, but any token holder can currently attach to any terminal by
-/// UUID — this lets a user observe another user's shell output and inject
-/// input. Fix-forward: resolve `terminal_id` to its owning
-/// Terminal → WorkflowTask → Workflow/Project chain, then enforce the same
-/// project-scope check used by the HTTP task routes before calling
-/// `ws.on_upgrade`. Requires project-scoped principal context (G24).
+/// # Auth posture (W2-18-12 / G24)
+///
+/// Current layers, in order:
+///   1. `require_api_token` middleware rejects requests without a bearer
+///      token when `SOLODAWN_API_TOKEN` is set, or inserts an
+///      `authenticated: false` `RequestContext` in dev-mode passthrough.
+///   2. `validate_ws_origin` blocks cross-origin browsers.
+///   3. When `SOLODAWN_REQUIRE_AUTH` is truthy, `assert_authorized` below
+///      rejects any request whose `RequestContext` was not authenticated —
+///      closing the dev-mode passthrough hole for this endpoint specifically.
+///
+/// What is NOT enforced yet: per-user ownership of `terminal_id`. Two or
+/// more users sharing one SOLODAWN_API_TOKEN can still read/write each
+/// other's terminals by guessing UUIDs. Fixing that requires G24
+/// (project-scoped principal context on `RequestContext`); until then,
+/// deployments with more than one operator MUST enable
+/// `SOLODAWN_REQUIRE_AUTH=1` AND treat the bearer token as shared-per-tenant,
+/// not shared-across-tenants.
 async fn terminal_ws_handler(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
     Path(terminal_id): Path<String>,
     Query(params): Query<ResumeParams>,
     State(deployment): State<DeploymentImpl>,
-) -> impl IntoResponse {
+    ctx: Option<Extension<RequestContext>>,
+) -> axum::response::Response {
     // SEC-003: Validate Origin header before WebSocket upgrade
     if let Err((status, msg)) = validate_ws_origin(&headers) {
         return (status, msg).into_response();
+    }
+
+    // Opt-in strict auth: when `SOLODAWN_REQUIRE_AUTH` is set, a dev-mode
+    // passthrough (no API token configured) is not enough to attach to
+    // terminals. Defense in depth against W2-18-12.
+    let ctx = ctx
+        .map(|Extension(c)| c)
+        .unwrap_or(RequestContext { authenticated: false });
+    if let Err(resp) = assert_authorized(&ctx) {
+        return resp;
     }
 
     // Validate terminal_id format before proceeding
@@ -242,12 +265,37 @@ async fn terminal_ws_handler(
         return ApiError::BadRequest(format!("Invalid terminal_id format: {e}")).into_response();
     }
 
+    // Verify the terminal actually exists in the DB before upgrading. This
+    // narrows the window for UUID enumeration (an attacker who guesses a
+    // valid UUID still passes, but random probes 404 cheaply without going
+    // through the WS state machine) and surfaces a proper 404 instead of a
+    // silently-closed socket.
+    match Terminal::find_by_id(&deployment.db().pool, &terminal_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                "terminal not found",
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!(
+                terminal_id = %terminal_id,
+                error = %e,
+                "Failed to look up terminal for WS upgrade"
+            );
+            return ApiError::Internal("terminal lookup failed".to_string()).into_response();
+        }
+    }
+
     // SEC-017: Enforce WebSocket message size limits (256 KB)
     ws.max_message_size(256 * 1024)
         .max_frame_size(256 * 1024)
         .on_upgrade(move |socket| {
             handle_terminal_socket(socket, terminal_id, deployment, params.last_seq)
         })
+        .into_response()
 }
 
 /// Handle terminal WebSocket connection with PTY.

@@ -141,13 +141,17 @@ async fn get_user_system_info(
     ResponseJson(ApiResponse::success(user_system_info))
 }
 
-// TODO(W2-18-11 / G24): Restrict PUT /config to admin principals. Today any
-// holder of a valid API token can fully replace the server config (including
-// git branch prefix, enabled integrations, and other side-effect-bearing
-// fields). Role enforcement here depends on the auth-layer extension planned
-// for G24: once principals carry roles/claims in request extensions, reject
-// non-admin callers with ApiError::Forbidden before touching the config file
-// or the in-memory config handle.
+// Admin-only mutation.
+//
+// The immediate exposure (any bearer of a valid API token could fully
+// replace the server config) is gated below via `check_admin`. When
+// `SOLODAWN_ADMIN_TOKEN` is set, callers must additionally present a matching
+// `X-Admin-Token` header. When unset, the gate is a no-op for backward
+// compatibility with single-user/dev setups.
+//
+// Long-term (G24): replace the separate admin token with role/claims carried
+// on `RequestContext` so per-principal RBAC can be enforced instead of a
+// shared secret.
 async fn update_config(
     State(deployment): State<DeploymentImpl>,
     headers: HeaderMap,

@@ -2044,6 +2044,75 @@ mod tests {
         .await;
     }
 
+    /// E26-10: Race-condition regression test for `get_handle`.
+    ///
+    /// Spawns many concurrent `get_handle` callers and asserts:
+    ///   1. all callers succeed,
+    ///   2. every returned writer is the *same* `Arc<Mutex<PtyWriter>>`
+    ///      (i.e. `OnceCell::get_or_try_init` produced exactly one writer),
+    ///   3. the session id is stable across all callers.
+    ///
+    /// Before the OnceCell refactor, two callers racing on the pre-existing
+    /// `Option<Arc<…>>`-based check-then-init could each end up taking a
+    /// distinct `PtyWriter` from the master, which silently broke input
+    /// multiplexing across reconnections.
+    #[tokio::test]
+    async fn test_get_handle_is_race_free_under_concurrency() {
+        let manager = Arc::new(ProcessManager::new());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let spawn_config = build_test_spawn_command(temp_dir.path());
+
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            manager.spawn_pty_with_config("race-terminal", &spawn_config, 80, 24),
+        )
+        .await
+        .expect("spawn_pty_with_config should not hang")
+        .unwrap();
+
+        const CONCURRENT_CALLERS: usize = 32;
+        let mut join_set = tokio::task::JoinSet::new();
+        for _ in 0..CONCURRENT_CALLERS {
+            let mgr = Arc::clone(&manager);
+            join_set.spawn(async move { mgr.get_handle("race-terminal").await });
+        }
+
+        let mut handles = Vec::with_capacity(CONCURRENT_CALLERS);
+        while let Some(res) = join_set.join_next().await {
+            let handle = res.expect("get_handle task panicked")
+                .expect("get_handle returned None");
+            handles.push(handle);
+        }
+        assert_eq!(handles.len(), CONCURRENT_CALLERS);
+
+        let first = handles.first().expect("at least one handle");
+        let first_writer = first
+            .writer
+            .as_ref()
+            .expect("writer should be initialized");
+        let first_session = first.session_id.clone();
+
+        for (i, h) in handles.iter().enumerate().skip(1) {
+            assert_eq!(
+                h.session_id, first_session,
+                "session_id must be stable across concurrent get_handle callers (index {i})"
+            );
+            let writer = h.writer.as_ref().expect("writer must be present");
+            assert!(
+                Arc::ptr_eq(first_writer, writer),
+                "all concurrent get_handle callers must observe the same writer Arc \
+                 (index {i} diverged — OnceCell init raced)"
+            );
+        }
+
+        // Cleanup
+        let _ = tokio::time::timeout(
+            Duration::from_secs(10),
+            manager.kill_terminal("race-terminal"),
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn test_terminal_logger_flush_manual_flush_persists() {
         let terminal_id = Uuid::new_v4().to_string();
