@@ -50,6 +50,12 @@ terminal_gate:
 # ── 分支级质量门 ──
 # 触发时机: 任务最后一个终端通过后
 # 目标: 覆盖整个 task branch 的完整检查
+#
+# 注意: `eslint_errors` **不在**条件集中。ESLint 是 advisory 工具（见
+# `crates/quality/src/rule.rs::Severity::cap_for_advisory`），其 rule
+# 严重级别由 LLM 生成的 `.eslintrc` 决定，按模型而异 —— 让标签决定
+# 阻断意味着让"模型口味"决定质量门，这与质量门的契约相悖。前端
+# 真正的阻断信号来自 `tsc_errors` 和 `test_failures`。
 branch_gate:
   name: "Branch Gate"
   conditions:
@@ -63,9 +69,6 @@ branch_gate:
       operator: "GT"
       threshold: "0"
     - metric: fmt_violations
-      operator: "GT"
-      threshold: "0"
-    - metric: eslint_errors
       operator: "GT"
       threshold: "0"
     - metric: tsc_errors
@@ -112,9 +115,10 @@ repo_gate:
     - metric: fmt_violations
       operator: "GT"
       threshold: "0"
-    - metric: eslint_errors
-      operator: "GT"
-      threshold: "0"
+    # Note: `eslint_errors` is intentionally absent here as well — see the
+    # branch_gate comment above. ESLint severity is decided by a model-drafted
+    # `.eslintrc`, so it cannot gate even at repo level. `tsc_errors` and
+    # `test_failures` are the authoritative frontend signals.
     - metric: tsc_errors
       operator: "GT"
       threshold: "0"

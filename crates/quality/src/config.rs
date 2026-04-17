@@ -234,6 +234,11 @@ impl QualityGateConfig {
                     },
                 ],
             },
+            // NOTE: `EslintErrors` is intentionally absent from branch / repo
+            // gates. ESLint is advisory (see `Severity::cap_for_advisory`);
+            // its severity is a project-local `.eslintrc` decision that varies
+            // per model run, so the gate cannot honor it. Compile (`tsc`) and
+            // test failures are the authoritative frontend blockers.
             branch_gate: GateDefinition {
                 name: "Branch Gate (Default)".to_string(),
                 conditions: vec![
@@ -248,7 +253,7 @@ impl QualityGateConfig {
                         threshold: "0".to_string(),
                     },
                     ConditionConfig {
-                        metric: MetricKey::EslintErrors,
+                        metric: MetricKey::TscErrors,
                         operator: "GT".to_string(),
                         threshold: "0".to_string(),
                     },
@@ -273,7 +278,7 @@ impl QualityGateConfig {
                         threshold: "0".to_string(),
                     },
                     ConditionConfig {
-                        metric: MetricKey::EslintErrors,
+                        metric: MetricKey::TscErrors,
                         operator: "GT".to_string(),
                         threshold: "0".to_string(),
                     },

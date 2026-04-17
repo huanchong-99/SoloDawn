@@ -183,13 +183,27 @@ impl QualityProvider for FrontendProvider {
             }
 
             if lint_attempted {
+                // Principle (see `Severity::cap_for_advisory`): ESLint is an
+                // advisory linter — its per-rule severity comes from
+                // model-generated `.eslintrc` files and varies across runs.
+                // The gate decides severity itself. To defuse the metric
+                // pathway (`eslint_errors > 0` thresholds in any YAML, past
+                // or future, in-tree or downstream), we **fold the reported
+                // error count into the advisory warnings total** and pin
+                // `EslintErrors` to zero. Blocking ESLint findings is now
+                // impossible by construction.
+                //
+                // The `-1` sentinel for failed-closed state is preserved on
+                // both metrics so the evaluator still fails closed when the
+                // tool itself didn't run.
+                let advisory_total = lint_errors + lint_warnings;
                 report.metrics.insert(
                     MetricKey::EslintErrors,
-                    MeasureValue::Int(if lint_failed_closed { -1 } else { lint_errors }),
+                    MeasureValue::Int(if lint_failed_closed { -1 } else { 0 }),
                 );
                 report.metrics.insert(
                     MetricKey::EslintWarnings,
-                    MeasureValue::Int(if lint_failed_closed { -1 } else { lint_warnings }),
+                    MeasureValue::Int(if lint_failed_closed { -1 } else { advisory_total }),
                 );
             }
         }
@@ -510,7 +524,7 @@ fn scan_test_dependency_coherence(
     let mut issues = Vec::new();
     for (target_label, pkg) in &missing_pairs {
         let sample = sample_locations.get(pkg).cloned().unwrap_or_default();
-        let mut issue = QualityIssue::new(
+        let mut issue = QualityIssue::new_capped(
             "frontend::test_dep_missing",
             RuleType::Bug,
             Severity::Critical,
@@ -631,23 +645,31 @@ fn parse_eslint_output(output: &str) -> (i64, i64, Vec<QualityIssue>) {
         if trimmed.contains("problems") {
             continue;
         }
-        if trimmed.contains("error") {
-            issues.push(QualityIssue::new(
-                "eslint::error",
-                RuleType::Bug,
-                Severity::Critical,
-                AnalyzerSource::EsLint,
-                trimmed,
-            ));
-        } else if trimmed.contains("warning") {
-            issues.push(QualityIssue::new(
-                "eslint::warning",
-                RuleType::CodeSmell,
-                Severity::Major,
-                AnalyzerSource::EsLint,
-                trimmed,
-            ));
+        // Principle (see `Severity::cap_for_advisory`): ESLint severity is
+        // decided by project-local `.eslintrc`, which in this repo is drafted
+        // by whichever LLM produced the task. The `error` vs `warning` label
+        // is therefore model taste, not signal. We keep the distinction in
+        // the rule-id (for operator visibility) and hand the *raw* severity
+        // to `new_capped`, which routes it through the single-source-of-truth
+        // advisory cap. No inline capping here — the principle lives on
+        // `AnalyzerSource::severity_origin`, not at each parser site.
+        let is_error = trimmed.contains("error");
+        let is_warn = trimmed.contains("warning");
+        if !is_error && !is_warn {
+            continue;
         }
+        let (rule_id, raw_sev) = if is_error {
+            ("eslint::error", Severity::Critical)
+        } else {
+            ("eslint::warning", Severity::Major)
+        };
+        issues.push(QualityIssue::new_capped(
+            rule_id,
+            RuleType::CodeSmell,
+            raw_sev,
+            AnalyzerSource::EsLint,
+            trimmed,
+        ));
     }
 
     if errors == 0 && warnings == 0 {
@@ -673,7 +695,7 @@ fn parse_tsc_output(output: &str) -> (i64, Vec<QualityIssue>) {
     for line in output.lines() {
         if line.contains("error TS") {
             errors += 1;
-            issues.push(QualityIssue::new(
+            issues.push(QualityIssue::new_capped(
                 "tsc::error",
                 RuleType::Bug,
                 Severity::Critical,
@@ -693,7 +715,7 @@ fn parse_vitest_output(output: &str) -> (i64, Vec<QualityIssue>) {
     for line in output.lines() {
         if line.contains("FAIL") && !line.contains("Tests:") {
             failures += 1;
-            issues.push(QualityIssue::new(
+            issues.push(QualityIssue::new_capped(
                 "vitest::failure",
                 RuleType::Bug,
                 Severity::Critical,
@@ -905,6 +927,53 @@ mod tests {
         );
         assert_eq!(issue.severity, Severity::Critical);
         assert!(issue.is_blocking());
+    }
+
+    #[test]
+    fn parse_eslint_output_error_line_is_nonblocking() {
+        // Principle: an ESLint finding labeled `error` by a model-drafted
+        // .eslintrc must still end up non-blocking, because ESLint severity
+        // is model taste, not signal. This is the test that would have
+        // caught the "GLM-5.1 wrote `no-explicit-any: error`" regression.
+        let output = concat!(
+            "  12:5  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n",
+            "\n",
+            "1 problem (1 error, 0 warnings)\n"
+        );
+        let (errors, warnings, issues) = parse_eslint_output(output);
+        assert_eq!(errors, 1);
+        assert_eq!(warnings, 0);
+        assert!(!issues.is_empty(), "parser must still surface the finding");
+        let eslint_err = issues
+            .iter()
+            .find(|i| i.rule_id == "eslint::error")
+            .expect("an error-labeled line must produce eslint::error rule id");
+        assert_eq!(
+            eslint_err.severity,
+            Severity::Major,
+            "ESLint 'error' must be capped to Major"
+        );
+        assert!(
+            !eslint_err.is_blocking(),
+            "ESLint findings must never block the gate"
+        );
+    }
+
+    #[test]
+    fn parse_eslint_output_warning_line_is_nonblocking() {
+        let output = concat!(
+            "  3:1  warning  'foo' is defined but never used  no-unused-vars\n",
+            "\n",
+            "1 problem (0 errors, 1 warning)\n"
+        );
+        let (_, warnings, issues) = parse_eslint_output(output);
+        assert_eq!(warnings, 1);
+        let eslint_warn = issues
+            .iter()
+            .find(|i| i.rule_id == "eslint::warning")
+            .expect("warning-labeled line must produce eslint::warning rule id");
+        assert_eq!(eslint_warn.severity, Severity::Major);
+        assert!(!eslint_warn.is_blocking());
     }
 
     #[test]

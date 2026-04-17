@@ -46,7 +46,16 @@ pub struct QualityIssue {
 }
 
 impl QualityIssue {
-    /// 创建新的质量问题
+    /// 创建新的质量问题（**不应用咨询性封顶**）
+    ///
+    /// 此构造器写入原始 `severity`，不经过
+    /// [`Severity::cap_for_advisory`]。仅用于**有意绕过封顶**的场景：
+    /// - `*::unavailable` 哨兵 —— 工具未能启动 = 环境故障，必须阻断
+    /// - `quality_engine::empty_scan` 等基础设施信号 —— meta-level，
+    ///   非分析器发现
+    ///
+    /// 分析器解析出的发现一律应使用 [`Self::new_capped`]，让原则
+    /// ([`AnalyzerSource::severity_origin`]) 在单一真源处决定阻断。
     pub fn new(
         rule_id: impl Into<String>,
         rule_type: RuleType,
@@ -71,6 +80,37 @@ impl QualityIssue {
             created_at: Utc::now(),
             context: None,
         }
+    }
+
+    /// 创建质量问题，**自动应用咨询性封顶**。
+    ///
+    /// 这是所有**分析器解析器**（clippy、tsc、vitest、eslint 等）
+    /// 的**首选构造器**。原始 `raw_severity` 会经过
+    /// [`Severity::cap_for_advisory`] —— 若 `source` 的
+    /// [`AnalyzerSource::severity_origin`] 为 `ProjectConfig`（如 ESLint），
+    /// 严重级别将被封顶到 `Major`（非阻断）；若为 `Tool`（如 TypeScript、
+    /// CargoTest），原样透传。
+    ///
+    /// ### 为何不让 `new` 默认封顶？
+    ///
+    /// 一些场景 *必须* 绕过封顶 —— `*::unavailable` 哨兵代表工具未能
+    /// 启动（环境故障），无论该工具是否咨询性都得阻断。若 `new`
+    /// 默认封顶，这些场景就得专门开后门；反之把原则移到 `new_capped`，
+    /// `new` 保留为低阶 primitive，更清晰。
+    ///
+    /// ### 未来扩展
+    ///
+    /// 新增分析器解析器时用此构造器，严重级别写源生硬编码值即可 ——
+    /// 质量门的咨询性封顶机制会自动生效，无需改动解析器。
+    pub fn new_capped(
+        rule_id: impl Into<String>,
+        rule_type: RuleType,
+        raw_severity: Severity,
+        source: AnalyzerSource,
+        message: impl Into<String>,
+    ) -> Self {
+        let severity = raw_severity.cap_for_advisory(&source);
+        Self::new(rule_id, rule_type, severity, source, message)
     }
 
     /// 设置文件位置信息
