@@ -167,6 +167,18 @@ fn join_url(base: &str, path: &str) -> String {
     )
 }
 
+/// Build an Anthropic-compatible endpoint URL, auto-inserting `/v1` when the
+/// caller-supplied base URL does not already end in `/v1`.
+fn anthropic_endpoint(base: &str, path: &str) -> String {
+    let trimmed = base.trim_end_matches('/');
+    let leaf = path.trim_start_matches('/');
+    if trimmed.ends_with("/v1") {
+        format!("{trimmed}/{leaf}")
+    } else {
+        format!("{trimmed}/v1/{leaf}")
+    }
+}
+
 // ============================================================================
 // OpenAI / OpenAI-Compatible
 // ============================================================================
@@ -254,7 +266,7 @@ async fn list_anthropic_models(
     base_url: &str,
     api_key: &str,
 ) -> Result<Vec<String>, ApiError> {
-    let url = join_url(base_url, "models");
+    let url = anthropic_endpoint(base_url, "models");
     tracing::debug!("Fetching Anthropic models from: {}", url);
 
     let response = client
@@ -287,7 +299,7 @@ async fn verify_anthropic_model(
     api_key: &str,
     model_id: &str,
 ) -> Result<bool, ApiError> {
-    let url = join_url(base_url, "messages");
+    let url = anthropic_endpoint(base_url, "messages");
     tracing::debug!("Verifying Anthropic model {} at: {}", model_id, url);
 
     let payload = serde_json::json!({
