@@ -359,7 +359,7 @@ export function NextActionCard({
     ? t('attempt.setupHelpText', { agent: attempt?.session?.executor })
     : null;
 
-  const editorName = getIdeName(config?.editor?.editor_type);
+  const editorName = getIdeName(config?.editor?.editorType);
 
   const shouldHide =
     (!failed || (execution_processes > 2 && !needsSetup)) && fileCount === 0;
@@ -424,7 +424,7 @@ export function NextActionCard({
               handleGitActions={handleGitActions}
               attemptId={attemptId}
               editorName={editorName}
-              editorType={config?.editor?.editor_type}
+              editorType={config?.editor?.editorType}
               hasRunningDevServer={hasRunningDevServer}
               projectHasDevScript={projectHasDevScript}
               isStarting={isStarting}

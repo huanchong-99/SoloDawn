@@ -166,11 +166,11 @@ export function ActionsDropdown({
     remoteFeaturesEnabled &&
     Boolean(task) &&
     Boolean(sharedTask) &&
-    sharedTask?.assignee_user_id === userId;
+    sharedTask?.assigneeUserId === userId;
   const canStopShare =
     remoteFeaturesEnabled &&
     Boolean(sharedTask) &&
-    sharedTask?.assignee_user_id === userId;
+    sharedTask?.assigneeUserId === userId;
 
   return (
     <DropdownMenu>

@@ -54,7 +54,7 @@ export function GeneralSettingsNew() {
   const { setTheme } = useTheme();
 
   // Check editor availability when draft editor changes
-  const editorAvailability = useEditorAvailability(draft?.editor.editor_type);
+  const editorAvailability = useEditorAvailability(draft?.editor.editorType);
 
   const validateBranchPrefix = useCallback(
     (prefix: string): string | null => {
@@ -217,11 +217,11 @@ export function GeneralSettingsNew() {
 
   // Editors that support remote SSH
   const supportsRemoteSsh =
-    draft?.editor.editor_type === EditorType.VS_CODE ||
-    draft?.editor.editor_type === EditorType.CURSOR ||
-    draft?.editor.editor_type === EditorType.WINDSURF ||
-    draft?.editor.editor_type === EditorType.GOOGLE_ANTIGRAVITY ||
-    draft?.editor.editor_type === EditorType.ZED;
+    draft?.editor.editorType === EditorType.VS_CODE ||
+    draft?.editor.editorType === EditorType.CURSOR ||
+    draft?.editor.editorType === EditorType.WINDSURF ||
+    draft?.editor.editorType === EditorType.GOOGLE_ANTIGRAVITY ||
+    draft?.editor.editorType === EditorType.ZED;
 
   if (loading) {
     return (
@@ -294,10 +294,10 @@ export function GeneralSettingsNew() {
             <SettingsSelect
               label={t('settings.general.editor.type.label')}
               description={t('settings.general.editor.type.helper')}
-              value={draft?.editor.editor_type ?? EditorType.VS_CODE}
+              value={draft?.editor.editorType ?? EditorType.VS_CODE}
               onChange={(value) =>
                 updateDraft({
-                  editor: { ...draft!.editor, editor_type: value as EditorType },
+                  editor: { ...draft!.editor, editorType: value as EditorType },
                 })
               }
               options={editorOptions}
@@ -305,26 +305,26 @@ export function GeneralSettingsNew() {
             />
 
             {/* Editor availability status indicator */}
-            {draft?.editor.editor_type !== EditorType.CUSTOM && (
+            {draft?.editor.editorType !== EditorType.CUSTOM && (
               <div className="pl-0">
                 <EditorAvailabilityIndicator availability={editorAvailability} />
               </div>
             )}
           </div>
 
-          {draft?.editor.editor_type === EditorType.CUSTOM && (
+          {draft?.editor.editorType === EditorType.CUSTOM && (
             <SettingsInput
               label={t('settings.general.editor.customCommand.label')}
               description={t('settings.general.editor.customCommand.helper')}
               placeholder={t(
                 'settings.general.editor.customCommand.placeholder'
               )}
-              value={draft?.editor.custom_command || ''}
+              value={draft?.editor.customCommand || ''}
               onChange={(value) =>
                 updateDraft({
                   editor: {
                     ...draft!.editor,
-                    custom_command: value || null,
+                    customCommand: value || null,
                   },
                 })
               }
@@ -339,30 +339,30 @@ export function GeneralSettingsNew() {
                 placeholder={t(
                   'settings.general.editor.remoteSsh.host.placeholder'
                 )}
-                value={draft?.editor.remote_ssh_host || ''}
+                value={draft?.editor.remoteSshHost || ''}
                 onChange={(value) =>
                   updateDraft({
                     editor: {
                       ...draft!.editor,
-                      remote_ssh_host: value || null,
+                      remoteSshHost: value || null,
                     },
                   })
                 }
               />
 
-              {draft?.editor.remote_ssh_host && (
+              {draft?.editor.remoteSshHost && (
                 <SettingsInput
                   label={t('settings.general.editor.remoteSsh.user.label')}
                   description={t('settings.general.editor.remoteSsh.user.helper')}
                   placeholder={t(
                     'settings.general.editor.remoteSsh.user.placeholder'
                   )}
-                  value={draft?.editor.remote_ssh_user || ''}
+                  value={draft?.editor.remoteSshUser || ''}
                   onChange={(value) =>
                     updateDraft({
                       editor: {
                         ...draft!.editor,
-                        remote_ssh_user: value || null,
+                        remoteSshUser: value || null,
                       },
                     })
                   }

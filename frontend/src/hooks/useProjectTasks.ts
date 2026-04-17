@@ -74,9 +74,9 @@ export const useProjectTasks = (projectId: string): UseProjectTasksResult => {
         return q
           .from({ sharedTasks: sharedTasksCollection })
           .where(({ sharedTasks }) =>
-            eq(sharedTasks.project_id, remoteProjectId)
+            eq(sharedTasks.projectId, remoteProjectId)
           )
-          .where(({ sharedTasks }) => isNull(sharedTasks.deleted_at));
+          .where(({ sharedTasks }) => isNull(sharedTasks.deletedAt));
       },
       [remoteProjectId, sharedTasksEnabled]
     ),
@@ -114,15 +114,15 @@ export const useProjectTasks = (projectId: string): UseProjectTasksResult => {
     const list = Array.isArray(sharedTasksList) ? sharedTasksList : [];
     for (const task of list) {
       let assignee = null;
-      if (task.assignee_user_id && assignees) {
-        assignee = assignees.find((a) => a.user_id === task.assignee_user_id) ?? null;
+      if (task.assigneeUserId && assignees) {
+        assignee = assignees.find((a) => a.userId === task.assigneeUserId) ?? null;
       }
       map[task.id] = {
         ...task,
         status: task.status,
-        remote_project_id: task.project_id,
-        assignee_first_name: assignee?.first_name ?? null,
-        assignee_last_name: assignee?.last_name ?? null,
+        remote_project_id: task.projectId,
+        assignee_first_name: assignee?.firstName ?? null,
+        assignee_last_name: assignee?.lastName ?? null,
         assignee_username: assignee?.username ?? null,
       };
     }
@@ -183,8 +183,8 @@ export const useProjectTasks = (projectId: string): UseProjectTasksResult => {
     Object.values(grouped).forEach((list) => {
       list.sort(
         (a, b) =>
-          new Date(b.created_at).getTime() -
-          new Date(a.created_at).getTime()
+          new Date(b.createdAt).getTime() -
+          new Date(a.createdAt).getTime()
       );
     });
 

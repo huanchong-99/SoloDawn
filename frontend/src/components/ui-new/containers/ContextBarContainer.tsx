@@ -18,7 +18,7 @@ export function ContextBarContainer({
 }: Readonly<ContextBarContainerProps>) {
   const { executorContext } = useActions();
   const { config } = useUserSystem();
-  const editorType = config?.editor?.editor_type ?? null;
+  const editorType = config?.editor?.editorType ?? null;
 
   // Get visibility context (now includes dev server state)
   const actionCtx = useActionVisibilityContext();

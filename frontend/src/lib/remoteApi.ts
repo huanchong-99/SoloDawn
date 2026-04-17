@@ -27,7 +27,7 @@ export const getSharedTaskAssignees = async (
 ): Promise<UserData[]> => {
   const response = await makeRequest(
     `/v1/tasks/assignees?${new URLSearchParams({
-      project_id: projectId,
+      projectId,
     } as AssigneesQuery)}`
   );
 

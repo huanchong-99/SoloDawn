@@ -22,7 +22,7 @@ export function useAssigneeUserNames(options: UseAssigneeUserNamesOptions) {
   const assignedUserIds = useMemo(() => {
     if (!sharedTasks) return null;
     return Array.from(
-      new Set(sharedTasks.map((task) => task.assignee_user_id))
+      new Set(sharedTasks.map((task) => task.assigneeUserId))
     );
   }, [sharedTasks]);
 

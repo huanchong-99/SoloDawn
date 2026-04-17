@@ -15,7 +15,7 @@ export function OpenInIdeButton({
   className,
 }: Readonly<OpenInIdeButtonProps>) {
   const { config } = useUserSystem();
-  const editorType = config?.editor?.editor_type ?? null;
+  const editorType = config?.editor?.editorType ?? null;
 
   const label = useMemo(() => {
     const ideName = getIdeName(editorType);
