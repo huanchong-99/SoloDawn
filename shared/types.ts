@@ -17,7 +17,7 @@ mergeTerminalModelId: string | null, targetBranch: string, gitWatcherEnabled: bo
 
 export type WorkflowTaskDto = { id: string, workflowId: string, vkTaskId: string | null, name: string, description: string | null, branch: string, status: string, orderIndex: number, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, terminals: Array<TerminalDto>, };
 
-export type TerminalDto = { id: string, workflowTaskId: string, cliTypeId: string, modelConfigId: string, customBaseUrl: string | null, customApiKey?: string, role: string | null, roleDescription: string | null, orderIndex: number, status: string, autoConfirm: boolean, lastCommitHash: string | null, lastCommitMessage: string | null, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, };
+export type TerminalDto = { id: string, workflowTaskId: string, cliTypeId: string, modelConfigId: string, customBaseUrl: string | null, customApiKey?: string, role: string | null, roleDescription: string | null, orderIndex: number, status: TerminalStatus, autoConfirm: boolean, lastCommitHash: string | null, lastCommitMessage: string | null, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, };
 
 export type WorkflowCommandDto = { id: string, workflowId: string, presetId: string, orderIndex: number, customParams: string | null, createdAt: string, preset: SlashCommandPresetDto, };
 
@@ -27,11 +27,11 @@ export type WorkflowListItemDto = { id: string, projectId: string, name: string,
 
 export type SharedTaskResponse = { task: SharedTask, user: UserData | null, };
 
-export type AssigneesQuery = { project_id: string, };
+export type AssigneesQuery = { projectId: string, };
 
-export type SharedTask = { id: string, organization_id: string, project_id: string, creator_user_id: string | null, assignee_user_id: string | null, deleted_by_user_id: string | null, title: string, description: string | null, status: TaskStatus, deleted_at: string | null, shared_at: string | null, created_at: string, updated_at: string, };
+export type SharedTask = { id: string, organizationId: string, projectId: string, creatorUserId: string | null, assigneeUserId: string | null, deletedByUserId: string | null, title: string, description: string | null, status: TaskStatus, deletedAt: string | null, sharedAt: string | null, createdAt: string, updatedAt: string, };
 
-export type UserData = { user_id: string, first_name: string | null, last_name: string | null, username: string | null, };
+export type UserData = { userId: string, firstName: string | null, lastName: string | null, username: string | null, };
 
 export type Project = { id: string, name: string, defaultAgentWorkingDir: string | null, remoteProjectId: string | null, createdAt: Date, updatedAt: Date, };
 
@@ -77,7 +77,7 @@ export type TaskRelationships = { parentTask: Task | null, currentWorkspace: Wor
 
 export type CreateTask = { projectId: string, title: string, description: string | null, status: TaskStatus | null, parentWorkspaceId: string | null, imageIds: Array<string> | null, sharedTaskId: string | null, };
 
-export type UpdateTask = { title: string | null, description: string | null, status: TaskStatus | null, parentWorkspaceId: string | null, imageIds: Array<string> | null, };
+export type UpdateTask = { title: string | null, description: string | null, status: TaskStatus | null, parentWorkspaceId?: string | null, imageIds: Array<string> | null, };
 
 export type DraftFollowUpData = { message: string, variant: string | null, };
 
@@ -241,7 +241,7 @@ export type CheckEditorAvailabilityResponse = { available: boolean, };
 
 export type CheckAgentAvailabilityQuery = { executor: BaseCodingAgent, };
 
-export type WsMessage = { "type": "input", data: string, } | { "type": "output", data: string, } | { "type": "resize", cols: number, rows: number, } | { "type": "heartbeat" } | { "type": "error", message: string, };
+export type WsMessage = { "type": "input", data: string, } | { "type": "output", data: string, } | { "type": "resize", cols: number, rows: number, } | { "type": "heartbeat" } | { "type": "error", message: string, } | { "type": "resynced", resume_from_seq: bigint, skipped: bigint, };
 
 export type CurrentUserResponse = { user_id: string, };
 
@@ -407,7 +407,7 @@ export type NotificationConfig = { sound_enabled: boolean, push_enabled: boolean
 
 export enum ThemeMode { LIGHT = "LIGHT", DARK = "DARK", SYSTEM = "SYSTEM" }
 
-export type EditorConfig = { editor_type: EditorType, custom_command: string | null, remote_ssh_host: string | null, remote_ssh_user: string | null, };
+export type EditorConfig = { editorType: EditorType, customCommand: string | null, remoteSshHost?: string | null, remoteSshUser?: string | null, };
 
 export enum EditorType { VS_CODE = "VS_CODE", CURSOR = "CURSOR", WINDSURF = "WINDSURF", INTELLI_J = "INTELLI_J", ZED = "ZED", XCODE = "XCODE", GOOGLE_ANTIGRAVITY = "GOOGLE_ANTIGRAVITY", CUSTOM = "CUSTOM" }
 
