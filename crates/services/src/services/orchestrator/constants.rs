@@ -58,6 +58,7 @@ pub const COMPLETION_CONTEXT_LOG_LINES: usize = 50;
 pub const COMPLETION_CONTEXT_LOG_MAX_CHARS: usize = 2000;
 pub const COMPLETION_CONTEXT_DIFF_MAX_CHARS: usize = 1000;
 pub const COMPLETION_CONTEXT_BODY_MAX_CHARS: usize = 500;
+pub const ACCEPTANCE_REVIEW_MAX_BYTES: usize = 32_768;
 
 // Phase 28C: Agent event loop fault tolerance
 pub const MAX_CONSECUTIVE_LLM_FAILURES: u32 = 10;

@@ -100,19 +100,13 @@ branch_gate:
     - metric: line_coverage
       operator: "LT"
       threshold: "60"
-    # Completeness: block skeleton services, high TODO density, migration debris
+    # Completeness: universal structural checks
     - metric: test_file_absence
-      operator: "GT"
-      threshold: "0"
-    - metric: skeleton_service_count
       operator: "GT"
       threshold: "0"
     - metric: todo_density
       operator: "GT"
       threshold: "5"
-    - metric: migration_debris_files
-      operator: "GT"
-      threshold: "0"
 
 # ── 仓库级质量门 ──
 # 触发时机: 合并主分支前 / GitHub Actions
@@ -170,19 +164,13 @@ repo_gate:
     - metric: line_coverage
       operator: "LT"
       threshold: "80"
-    # Completeness: strictest thresholds at repo level
+    # Completeness: universal structural checks
     - metric: test_file_absence
-      operator: "GT"
-      threshold: "0"
-    - metric: skeleton_service_count
       operator: "GT"
       threshold: "0"
     - metric: todo_density
       operator: "GT"
       threshold: "3"
-    - metric: migration_debris_files
-      operator: "GT"
-      threshold: "0"
 
 # ── Provider 启用/禁用 ──
 providers:

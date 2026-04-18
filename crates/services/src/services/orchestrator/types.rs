@@ -453,6 +453,76 @@ pub struct TerminalCompletionContext {
     pub diff_stat: String,
     /// Full commit message body, truncated to max chars
     pub commit_body: String,
+    /// Actual content of changed files (collected via `git show`), truncated
+    pub changed_files_content: String,
+}
+
+/// Result of an LLM-powered acceptance review that compares code against requirements
+#[derive(Debug, Clone)]
+pub struct AcceptanceReviewResult {
+    pub verdict: AcceptanceVerdict,
+    pub fix_instructions: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcceptanceVerdict {
+    Approved,
+    Rejected,
+}
+
+impl AcceptanceReviewResult {
+    pub fn approved() -> Self {
+        Self {
+            verdict: AcceptanceVerdict::Approved,
+            fix_instructions: String::new(),
+        }
+    }
+
+    pub fn parse(response: &str) -> Self {
+        let trimmed = response.trim();
+        // Try to extract JSON from the response
+        let json_str = if let Some(start) = trimmed.find('{') {
+            if let Some(end) = trimmed.rfind('}') {
+                &trimmed[start..=end]
+            } else {
+                trimmed
+            }
+        } else {
+            trimmed
+        };
+
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_str) {
+            let verdict_str = value
+                .get("verdict")
+                .and_then(|v| v.as_str())
+                .unwrap_or("APPROVED");
+            let verdict = if verdict_str.eq_ignore_ascii_case("REJECTED") {
+                AcceptanceVerdict::Rejected
+            } else {
+                AcceptanceVerdict::Approved
+            };
+            let fix_instructions = value
+                .get("fix_instructions")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            Self {
+                verdict,
+                fix_instructions,
+            }
+        } else {
+            // Fallback: check for REJECTED keyword in raw text
+            if trimmed.to_uppercase().contains("REJECTED") {
+                Self {
+                    verdict: AcceptanceVerdict::Rejected,
+                    fix_instructions: trimmed.to_string(),
+                }
+            } else {
+                Self::approved()
+            }
+        }
+    }
 }
 
 /// Result of a quality gate evaluation for a terminal checkpoint

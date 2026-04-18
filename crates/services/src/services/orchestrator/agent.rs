@@ -22,8 +22,9 @@ use tokio::{
 use super::{
     config::OrchestratorConfig,
     constants::{
-        COMPLETION_CONTEXT_BODY_MAX_CHARS, COMPLETION_CONTEXT_DIFF_MAX_CHARS,
-        COMPLETION_CONTEXT_LOG_LINES, COMPLETION_CONTEXT_LOG_MAX_CHARS,
+        ACCEPTANCE_REVIEW_MAX_BYTES, COMPLETION_CONTEXT_BODY_MAX_CHARS,
+        COMPLETION_CONTEXT_DIFF_MAX_CHARS, COMPLETION_CONTEXT_LOG_LINES,
+        COMPLETION_CONTEXT_LOG_MAX_CHARS,
         GIT_COMMIT_METADATA_SEPARATOR, HANDOFF_COMMIT_MAX_CHARS, HANDOFF_NOTES_MAX_CHARS,
         MAX_CONSECUTIVE_LLM_FAILURES, QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
         QUALITY_GATE_MODE_SHADOW, QUALITY_GATE_STATUS_SKIPPED,
@@ -45,9 +46,10 @@ use super::{
     runtime_actions::{RuntimeActionService, RuntimeTaskSpec, RuntimeTerminalSpec},
     state::{OrchestratorRunState, OrchestratorState, SharedOrchestratorState},
     types::{
-        CodeIssue, LLMMessage, OrchestratorInstruction, PreviousTerminalContext,
-        QualityGateResultEvent, TerminalCompletionContext, TerminalCompletionEvent,
-        TerminalCompletionStatus, TerminalPromptEvent,
+        AcceptanceReviewResult, AcceptanceVerdict, CodeIssue, LLMMessage,
+        OrchestratorInstruction, PreviousTerminalContext, QualityGateResultEvent,
+        TerminalCompletionContext, TerminalCompletionEvent, TerminalCompletionStatus,
+        TerminalPromptEvent,
     },
 };
 use crate::services::{
@@ -1480,6 +1482,68 @@ impl OrchestratorAgent {
         }
 
         // 闁哄瀚紓鎾诲箵閹邦喓浠涙鐐村劶閻ㄧ喖鏁?LLM
+        // Acceptance review: LLM reads actual code and verifies against requirements.
+        if success && !task_failed {
+            if let Ok(working_dir) = self.resolve_project_working_dir().await {
+                let commit_hash = event.commit_hash.as_deref().unwrap_or("N/A");
+                if let Ok(ctx) = fetch_terminal_completion_context(
+                    &self.db,
+                    &event.terminal_id,
+                    commit_hash,
+                    &working_dir,
+                )
+                .await
+                {
+                    let review = self.run_acceptance_review(&event, &ctx).await?;
+                    if review.verdict == AcceptanceVerdict::Rejected {
+                        tracing::warn!(
+                            task_id = %event.task_id,
+                            terminal_id = %event.terminal_id,
+                            "Acceptance review REJECTED — sending fix instructions"
+                        );
+                        let fix_message = format!(
+                            "ACCEPTANCE REVIEW: Your code does not meet the task requirements.\n\n\
+                             {}\n\n\
+                             Fix these issues and commit again. \
+                             The acceptance review will re-run automatically.",
+                            review.fix_instructions
+                        );
+                        let session_id_opt =
+                            db::models::Terminal::find_by_id(&self.db.pool, &event.terminal_id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .and_then(|t| t.pty_session_id.or(t.session_id))
+                                .filter(|s| !s.trim().is_empty());
+                        if let Some(session_id) = session_id_opt {
+                            self.message_bus
+                                .publish_terminal_input(
+                                    &event.terminal_id,
+                                    &session_id,
+                                    &fix_message,
+                                    None,
+                                )
+                                .await;
+                        } else if let Ok(ra) = self.runtime_actions() {
+                            if let Ok(restarted) =
+                                ra.relaunch_terminal_clean_context(&event.terminal_id).await
+                            {
+                                let _ = self
+                                    .dispatch_terminal(&event.task_id, &restarted, &fix_message)
+                                    .await;
+                            }
+                        }
+                        self.maybe_save_state().await;
+                        {
+                            let mut state = self.state.write().await;
+                            state.run_state = OrchestratorRunState::Idle;
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
         let should_run_completion_llm = !(success && has_next && !task_failed);
         let mut completion_response: Option<String> = None;
         if should_run_completion_llm {
@@ -3640,6 +3704,100 @@ impl OrchestratorAgent {
             }
         }
         Ok(prompt)
+    }
+
+    /// Build a prompt that asks the LLM to review actual code against task requirements.
+    fn build_acceptance_review_prompt(
+        task_name: &str,
+        task_description: &str,
+        workflow_goal: &str,
+        completion_ctx: &TerminalCompletionContext,
+    ) -> String {
+        format!(
+            "You are a code reviewer verifying whether a task's requirements have been met \
+             by reading the actual source code.\n\n\
+             ## Task\n\
+             Name: {task_name}\n\
+             Description: {task_description}\n\n\
+             ## Project Goal\n\
+             {workflow_goal}\n\n\
+             ## Code Produced (changed files)\n\
+             {code}\n\n\
+             ## Terminal Output Summary\n\
+             {logs}\n\n\
+             ## Changes Summary\n\
+             {diff}\n\n\
+             ## Instructions\n\
+             Review the code above against the task requirements. For EACH requirement:\n\
+             1. State the requirement\n\
+             2. State whether it is MET or UNMET\n\
+             3. Cite specific evidence (file name + function/class/route)\n\n\
+             Then give an overall verdict: APPROVED or REJECTED.\n\
+             If REJECTED, list exactly what must be fixed.\n\n\
+             Respond in this JSON format only:\n\
+             {{\"verdict\": \"APPROVED\", \"fix_instructions\": \"\"}}\n\
+             or\n\
+             {{\"verdict\": \"REJECTED\", \"fix_instructions\": \"1. ... 2. ...\"}}\n\n\
+             IMPORTANT: Base your verdict ONLY on the actual code shown above. \
+             Do NOT trust claims in commit messages or terminal output — verify against the source code.",
+            code = completion_ctx.changed_files_content,
+            logs = completion_ctx.log_summary,
+            diff = completion_ctx.diff_stat,
+        )
+    }
+
+    /// Run acceptance review: LLM reads actual code and compares against task requirements.
+    /// Returns Approved if requirements are met, Rejected with fix instructions if not.
+    async fn run_acceptance_review(
+        &self,
+        event: &TerminalCompletionEvent,
+        completion_ctx: &TerminalCompletionContext,
+    ) -> anyhow::Result<AcceptanceReviewResult> {
+        // Only run for agent-planned workflows (DIY workflows have no structured requirements)
+        if !self.is_agent_planned_workflow().await? {
+            return Ok(AcceptanceReviewResult::approved());
+        }
+
+        // Skip if no code was produced
+        if completion_ctx.changed_files_content.is_empty() {
+            return Ok(AcceptanceReviewResult::approved());
+        }
+
+        let task = db::models::WorkflowTask::find_by_id(&self.db.pool, &event.task_id)
+            .await?
+            .ok_or_else(|| anyhow!("Task not found for acceptance review"))?;
+        let workflow = self.load_workflow().await?;
+        let goal = workflow.initial_goal.as_deref().unwrap_or("");
+        let task_desc = task.description.as_deref().unwrap_or(&task.name);
+
+        let prompt =
+            Self::build_acceptance_review_prompt(&task.name, task_desc, goal, completion_ctx);
+
+        tracing::info!(
+            task_id = %event.task_id,
+            terminal_id = %event.terminal_id,
+            "Running acceptance review ({} bytes of code context)",
+            completion_ctx.changed_files_content.len()
+        );
+
+        match self.call_llm_safe(&prompt).await {
+            Some(response) => {
+                let result = AcceptanceReviewResult::parse(&response);
+                tracing::info!(
+                    task_id = %event.task_id,
+                    verdict = ?result.verdict,
+                    "Acceptance review complete"
+                );
+                Ok(result)
+            }
+            None => {
+                tracing::warn!(
+                    task_id = %event.task_id,
+                    "Acceptance review LLM unavailable, proceeding without review"
+                );
+                Ok(AcceptanceReviewResult::approved())
+            }
+        }
     }
 
     fn normalize_instruction_payload(response: &str) -> &str {
@@ -7072,11 +7230,113 @@ async fn fetch_terminal_completion_context(
         }
     };
 
+    // 4. Get actual content of changed files for acceptance review
+    let changed_files_content = if commit_hash == "N/A" {
+        String::new()
+    } else {
+        collect_changed_files_content(working_dir, commit_hash, ACCEPTANCE_REVIEW_MAX_BYTES).await
+    };
+
     Ok(TerminalCompletionContext {
         log_summary,
         diff_stat,
         commit_body,
+        changed_files_content,
     })
+}
+
+/// Collect the actual content of files changed in a commit for acceptance review.
+/// Uses `git diff --name-only` to list files, then `git show` to read each one.
+async fn collect_changed_files_content(
+    working_dir: &Path,
+    commit_hash: &str,
+    max_bytes: usize,
+) -> String {
+    // Get list of changed files
+    let file_list = match tokio::process::Command::new("git")
+        .args(["diff", "--name-only", &format!("{commit_hash}~1"), commit_hash])
+        .current_dir(working_dir)
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).to_string()
+        }
+        _ => {
+            // Fallback: try diff against empty tree for initial commits
+            match tokio::process::Command::new("git")
+                .args(["diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash])
+                .current_dir(working_dir)
+                .env_remove("PORT")
+                .env_remove("BACKEND_PORT")
+                .env_remove("FRONTEND_PORT")
+                .output()
+                .await
+            {
+                Ok(output) if output.status.success() => {
+                    String::from_utf8_lossy(&output.stdout).to_string()
+                }
+                _ => return String::new(),
+            }
+        }
+    };
+
+    let source_extensions = [
+        "rs", "ts", "tsx", "js", "jsx", "go", "py", "vue", "svelte",
+        "java", "kt", "rb", "php", "cs", "swift",
+    ];
+    let config_extensions = ["json", "yaml", "yml", "toml", "dockerfile"];
+
+    let files: Vec<&str> = file_list.lines().filter(|l| !l.is_empty()).collect();
+
+    // Prioritize source files over config files
+    let mut source_files: Vec<&str> = Vec::new();
+    let mut config_files: Vec<&str> = Vec::new();
+    for file in &files {
+        let ext = file.rsplit('.').next().unwrap_or("").to_lowercase();
+        if source_extensions.iter().any(|e| *e == ext) {
+            source_files.push(file);
+        } else if config_extensions.iter().any(|e| *e == ext) {
+            config_files.push(file);
+        }
+    }
+
+    let mut result = String::new();
+    let mut bytes_used = 0usize;
+    let ordered = source_files.iter().chain(config_files.iter());
+
+    for file_path in ordered {
+        if bytes_used >= max_bytes {
+            break;
+        }
+
+        let content = match tokio::process::Command::new("git")
+            .args(["show", &format!("{commit_hash}:{file_path}")])
+            .current_dir(working_dir)
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
+            .output()
+            .await
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).to_string()
+            }
+            _ => continue,
+        };
+
+        let header = format!("\n--- file: {file_path} ---\n");
+        let remaining = max_bytes.saturating_sub(bytes_used + header.len());
+        let truncated: String = content.chars().take(remaining).collect();
+        bytes_used += header.len() + truncated.len();
+        result.push_str(&header);
+        result.push_str(&truncated);
+    }
+
+    result
 }
 
 /// Fetch context from the previous completed terminal in the same task.
