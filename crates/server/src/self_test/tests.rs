@@ -498,8 +498,13 @@ async fn test_list_cli_types(ctx: &mut TestContext) -> Result<(), String> {
 }
 
 async fn test_detect_cli_types(ctx: &mut TestContext) -> Result<(), String> {
-    let resp = ctx.client.get(ctx.api("/cli_types/detect")).send().await.map_err(|e| e.to_string())?;
-    // On clean env, may return empty results — that's fine
+    // CLI detection spawns ~9 subprocesses; on Windows CI this can exceed
+    // the default 30s client timeout. Use a dedicated long-timeout client.
+    let long_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = long_client.get(ctx.api("/cli_types/detect")).send().await.map_err(|e| e.to_string())?;
     assert_status(resp, 200, "detect_cli_types").await?;
     Ok(())
 }
