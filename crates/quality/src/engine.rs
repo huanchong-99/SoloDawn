@@ -94,6 +94,11 @@ impl QualityEngine {
                 crate::provider::coverage::CoverageProvider,
             ));
         }
+        if config.providers.completeness {
+            providers.push(Arc::new(
+                crate::provider::completeness::CompletenessProvider,
+            ));
+        }
 
         Ok(Self::new(config, providers))
     }

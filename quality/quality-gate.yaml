@@ -46,6 +46,10 @@ terminal_gate:
     - metric: secrets_detected
       operator: "GT"
       threshold: "0"
+    # Completeness: block if project has source but zero test files
+    - metric: test_file_absence
+      operator: "GT"
+      threshold: "0"
 
 # ── 分支级质量门 ──
 # 触发时机: 任务最后一个终端通过后
@@ -96,6 +100,19 @@ branch_gate:
     - metric: line_coverage
       operator: "LT"
       threshold: "60"
+    # Completeness: block skeleton services, high TODO density, migration debris
+    - metric: test_file_absence
+      operator: "GT"
+      threshold: "0"
+    - metric: skeleton_service_count
+      operator: "GT"
+      threshold: "0"
+    - metric: todo_density
+      operator: "GT"
+      threshold: "5"
+    - metric: migration_debris_files
+      operator: "GT"
+      threshold: "0"
 
 # ── 仓库级质量门 ──
 # 触发时机: 合并主分支前 / GitHub Actions
@@ -153,6 +170,19 @@ repo_gate:
     - metric: line_coverage
       operator: "LT"
       threshold: "80"
+    # Completeness: strictest thresholds at repo level
+    - metric: test_file_absence
+      operator: "GT"
+      threshold: "0"
+    - metric: skeleton_service_count
+      operator: "GT"
+      threshold: "0"
+    - metric: todo_density
+      operator: "GT"
+      threshold: "3"
+    - metric: migration_debris_files
+      operator: "GT"
+      threshold: "0"
 
 # ── Provider 启用/禁用 ──
 providers:
@@ -166,6 +196,7 @@ providers:
   builtin_frontend: true
   builtin_common: true
   coverage: true
+  completeness: true
 
 # ── SonarQube 本地配置 ──
 sonar:

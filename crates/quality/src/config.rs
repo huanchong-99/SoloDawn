@@ -100,6 +100,9 @@ pub struct ProvidersConfig {
     /// Coverage report parsing (lcov, cobertura, tarpaulin)
     #[serde(default = "default_true")]
     pub coverage: bool,
+    /// Completeness checks (skeleton services, test absence, migration debris, TODO density)
+    #[serde(default = "default_true")]
+    pub completeness: bool,
 }
 
 fn default_true() -> bool {

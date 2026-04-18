@@ -1491,22 +1491,31 @@ impl OrchestratorAgent {
                     let state = self.state.read().await;
                     state.workflow_id.clone()
                 };
-                tracing::warn!(
-                    workflow_id = %wf_id,
-                    task_id = %event.task_id,
-                    terminal_id = %event.terminal_id,
-                    "LLM unavailable, falling back to auto-complete stalled tasks"
-                );
-
-                // Fallback: when LLM is unavailable and there's no next terminal to
-                // auto-dispatch, tasks/workflow can get stuck in running state forever.
-                // Auto-complete any tasks whose terminals have all finished.
-                if let Err(e) = self.auto_complete_stalled_tasks().await {
-                    tracing::error!(
+                // Agent-planned workflows must NOT auto-complete without LLM
+                // because the LLM is responsible for creating feature tasks and
+                // validating requirement coverage before completion.
+                if self.is_agent_planned_workflow().await.unwrap_or(false) {
+                    tracing::warn!(
                         workflow_id = %wf_id,
-                        "LLM-unavailable fallback: failed to auto-complete stalled tasks: {}",
-                        e
+                        task_id = %event.task_id,
+                        terminal_id = %event.terminal_id,
+                        "LLM unavailable for agent-planned workflow — \
+                         refusing auto-complete; tasks remain in current state until LLM recovers"
                     );
+                } else {
+                    tracing::warn!(
+                        workflow_id = %wf_id,
+                        task_id = %event.task_id,
+                        terminal_id = %event.terminal_id,
+                        "LLM unavailable, falling back to auto-complete stalled tasks"
+                    );
+                    if let Err(e) = self.auto_complete_stalled_tasks().await {
+                        tracing::error!(
+                            workflow_id = %wf_id,
+                            "LLM-unavailable fallback: failed to auto-complete stalled tasks: {}",
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -3595,16 +3604,40 @@ impl OrchestratorAgent {
             prompt.push_str("\n\nAgent-planned runtime context:\n");
             prompt.push_str(&context);
 
-            // Remind the LLM of the original goal so it checks completion against requirements
-            if let Some(ref goal) = workflow.initial_goal {
-                let goal_preview: String = goal.chars().take(2000).collect();
-                prompt.push_str("\n\nOriginal project goal (check ALL requirements before completing):\n");
-                prompt.push_str(&goal_preview);
-            }
+            let is_foundation_phase = {
+                let state = self.state.read().await;
+                state.foundation_phase_only
+            };
 
-            prompt.push_str(
-                "\n\nDecide next action. IMPORTANT: Do NOT complete_workflow unless ALL original requirements have been addressed. If requirements remain, create new tasks to cover them. If this task is done, mark it complete_task and wait for others.\n\nRESPOND WITH A RAW JSON ARRAY ONLY. No markdown, no code fences, no explanatory text.",
-            );
+            if is_foundation_phase {
+                // Foundation task just completed — force the LLM to create feature tasks
+                prompt.push_str(
+                    "\n\nFOUNDATION PHASE COMPLETED. \
+                     The foundation/scaffolding task has finished. \
+                     Now you MUST create feature tasks for ALL remaining requirements.\n",
+                );
+                if let Some(ref goal) = workflow.initial_goal {
+                    prompt.push_str("Original project goal (FULL — check every requirement):\n");
+                    prompt.push_str(goal);
+                }
+                prompt.push_str(
+                    "\n\nCreate tasks to cover EVERY unaddressed requirement. \
+                     Do NOT emit complete_workflow. Do NOT emit set_workflow_planning_complete \
+                     until you have created ALL feature tasks.\
+                     \n\nRESPOND WITH A RAW JSON ARRAY ONLY. No markdown, no code fences, no explanatory text.",
+                );
+            } else {
+                // Normal completion path — remind LLM of requirements
+                if let Some(ref goal) = workflow.initial_goal {
+                    let goal_preview: String = goal.chars().take(16000).collect();
+                    prompt.push_str("\n\nOriginal project goal (check ALL requirements before completing):\n");
+                    prompt.push_str(&goal_preview);
+                }
+
+                prompt.push_str(
+                    "\n\nDecide next action. IMPORTANT: Do NOT complete_workflow unless ALL original requirements have been addressed. If requirements remain, create new tasks to cover them. If this task is done, mark it complete_task and wait for others.\n\nRESPOND WITH A RAW JSON ARRAY ONLY. No markdown, no code fences, no explanatory text.",
+                );
+            }
         }
         Ok(prompt)
     }
@@ -4177,14 +4210,37 @@ impl OrchestratorAgent {
                         .map(|text| format!(": {text}"))
                         .unwrap_or_default()
                 );
-                {
-                    let mut state = self.state.write().await;
-                    state.set_workflow_planning_complete(true);
-                }
                 let workflow_id = {
                     let state = self.state.read().await;
                     state.workflow_id.clone()
                 };
+                {
+                    let mut state = self.state.write().await;
+                    state.set_workflow_planning_complete(true);
+                }
+
+                // Guard: if only a Foundation task exists, defer workflow_planning_complete
+                // and enter foundation_phase_only mode so the agent creates feature tasks
+                // after Foundation completes instead of auto-syncing to completed.
+                let task_count = db::models::WorkflowTask::find_by_workflow(
+                    &self.db.pool,
+                    &workflow_id,
+                )
+                .await
+                .map(|t| t.len())
+                .unwrap_or(0);
+                if task_count <= 1 {
+                    tracing::info!(
+                        workflow_id = %workflow_id,
+                        task_count,
+                        "Foundation-only planning detected. \
+                         Deferring workflow_planning_complete until feature tasks are created."
+                    );
+                    let mut state = self.state.write().await;
+                    state.set_workflow_planning_complete(false);
+                    state.foundation_phase_only = true;
+                }
+
                 self.auto_sync_workflow_completion(&workflow_id).await?;
             }
             OrchestratorInstruction::SendToTerminal {
@@ -4276,6 +4332,50 @@ impl OrchestratorAgent {
                     );
                     // Do not complete — let the event loop continue until tasks finish
                     return Ok(());
+                }
+
+                // Guard: agent-planned workflows with only 1 completed task
+                // likely means feature tasks were never created (Foundation-only).
+                if self.is_agent_planned_workflow().await.unwrap_or(false) {
+                    let completed_tasks = tasks.iter()
+                        .filter(|t| t.status == TASK_STATUS_COMPLETED)
+                        .count();
+                    if completed_tasks <= 1 {
+                        tracing::warn!(
+                            workflow_id = %workflow_id,
+                            completed_tasks,
+                            "CompleteWorkflow rejected: agent-planned workflow has only \
+                             {completed_tasks} completed task(s) — feature tasks likely never created"
+                        );
+                        return Ok(());
+                    }
+
+                    // Sanity check: at least some goal terms should appear in task names
+                    let workflow = self.load_workflow().await?;
+                    if let Some(ref goal) = workflow.initial_goal {
+                        let goal_terms: Vec<&str> = goal
+                            .split_whitespace()
+                            .filter(|w| w.len() > 4)
+                            .take(10)
+                            .collect();
+                        if goal_terms.len() > 3 {
+                            let task_names: String =
+                                tasks.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(" ");
+                            let task_names_lower = task_names.to_lowercase();
+                            let coverage = goal_terms
+                                .iter()
+                                .filter(|term| task_names_lower.contains(&term.to_lowercase()))
+                                .count();
+                            if coverage == 0 {
+                                tracing::warn!(
+                                    workflow_id = %workflow_id,
+                                    "CompleteWorkflow rejected: zero overlap between \
+                                     goal terms and task names"
+                                );
+                                return Ok(());
+                            }
+                        }
+                    }
                 }
 
                 // R8-B3 guard #4: even with all tasks "completed", the

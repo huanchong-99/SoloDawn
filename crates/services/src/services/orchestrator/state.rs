@@ -78,6 +78,11 @@ pub struct OrchestratorState {
 
     /// Set of processed checkpoint keys (`terminal_id:commit_hash`) for replay protection.
     pub processed_checkpoints: HashSet<String>,
+
+    /// True when the orchestrator created only a Foundation task and marked
+    /// `workflow_planning_complete` before any feature tasks exist.
+    /// Used to trigger a second planning round after Foundation completes.
+    pub foundation_phase_only: bool,
 }
 
 impl OrchestratorState {
@@ -96,6 +101,7 @@ impl OrchestratorState {
             pending_quiet_completion_checks: HashSet::new(),
             pending_quality_checks: HashSet::new(),
             processed_checkpoints: HashSet::new(),
+            foundation_phase_only: false,
         }
     }
 

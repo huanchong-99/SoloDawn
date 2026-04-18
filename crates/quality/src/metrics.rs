@@ -133,6 +133,20 @@ pub enum MetricKey {
     #[serde(rename = "branch_coverage")]
     BranchCoverage,
 
+    // ── Completeness 指标 ──
+    /// 骨架服务数（仅 health 端点 + TODO 标记的服务）
+    #[serde(rename = "skeleton_service_count")]
+    SkeletonServiceCount,
+    /// 测试文件缺失（项目有源文件但零测试文件时 = 1）
+    #[serde(rename = "test_file_absence")]
+    TestFileAbsence,
+    /// 迁移残留文件数（旧技术栈未清理的文件）
+    #[serde(rename = "migration_debris_files")]
+    MigrationDebrisFiles,
+    /// TODO/FIXME 密度百分比（TODO 行数 / 总行数 * 100）
+    #[serde(rename = "todo_density")]
+    TodoDensity,
+
     // ── Quality engine internal sentinels ──
     /// 强制模式下，仓库已发现 target 但没有任何 provider 能评估任一 gate condition
     /// 的兜底信号。等同于"安检员手里没拿到清单"，必须 fail-closed。
@@ -179,6 +193,10 @@ impl MetricKey {
             Self::SecretsDetected => "secrets_detected",
             Self::LineCoverage => "line_coverage",
             Self::BranchCoverage => "branch_coverage",
+            Self::SkeletonServiceCount => "skeleton_service_count",
+            Self::TestFileAbsence => "test_file_absence",
+            Self::MigrationDebrisFiles => "migration_debris_files",
+            Self::TodoDensity => "todo_density",
             Self::QualityGateEmptyScan => "quality_gate_empty_scan",
         }
     }
@@ -221,6 +239,10 @@ impl MetricKey {
             Self::SecretsDetected => "Secrets Detected",
             Self::LineCoverage => "Line Coverage (%)",
             Self::BranchCoverage => "Branch Coverage (%)",
+            Self::SkeletonServiceCount => "Skeleton Services",
+            Self::TestFileAbsence => "Test File Absence",
+            Self::MigrationDebrisFiles => "Migration Debris Files",
+            Self::TodoDensity => "TODO Density (%)",
             Self::QualityGateEmptyScan => "Empty Quality Scan",
         }
     }
