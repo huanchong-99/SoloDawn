@@ -21,15 +21,107 @@ use utils::assets::asset_dir;
 pub mod encryption;
 pub mod models;
 
+struct ExpectedColumn {
+    table: &'static str,
+    column: &'static str,
+    col_type: &'static str,
+    default: Option<&'static str>,
+}
+
+const SCHEMA_EXPECTATIONS: &[ExpectedColumn] = &[
+    ExpectedColumn { table: "workflow", column: "orchestrator_state", col_type: "TEXT", default: None },
+    ExpectedColumn { table: "workflow", column: "orchestrator_api_key_encrypted", col_type: "TEXT", default: None },
+    ExpectedColumn { table: "workflow", column: "git_watcher_enabled", col_type: "INTEGER", default: Some("1") },
+    ExpectedColumn { table: "workflow", column: "execution_mode", col_type: "TEXT", default: Some("'diy'") },
+    ExpectedColumn { table: "workflow", column: "initial_goal", col_type: "TEXT", default: None },
+    ExpectedColumn { table: "workflow", column: "pause_reason", col_type: "TEXT", default: None },
+    ExpectedColumn { table: "model_config", column: "encrypted_api_key", col_type: "TEXT", default: None },
+    ExpectedColumn { table: "model_config", column: "base_url", col_type: "TEXT", default: None },
+    ExpectedColumn { table: "model_config", column: "api_type", col_type: "TEXT", default: None },
+];
+
+async fn verify_schema(pool: &Pool<Sqlite>) -> Result<(), Error> {
+    let mut healed = 0u32;
+
+    for exp in SCHEMA_EXPECTATIONS {
+        let exists: bool = sqlx::query_scalar::<_, i32>(&format!(
+            "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name = '{}'",
+            exp.table, exp.column
+        ))
+        .fetch_one(pool)
+        .await
+        .map(|n| n > 0)
+        .unwrap_or(false);
+
+        if !exists {
+            let default_clause = exp.default.map_or_else(String::new, |d| format!(" DEFAULT {d}"));
+            let sql = format!(
+                "ALTER TABLE {} ADD COLUMN {} {}{}",
+                exp.table, exp.column, exp.col_type, default_clause
+            );
+
+            match sqlx::query(&sql).execute(pool).await {
+                Ok(_) => {
+                    tracing::warn!(
+                        table = exp.table,
+                        column = exp.column,
+                        "Startup self-check: missing column detected and auto-healed"
+                    );
+                    healed += 1;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        table = exp.table,
+                        column = exp.column,
+                        error = %e,
+                        "Startup self-check: failed to auto-heal missing column"
+                    );
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    if healed > 0 {
+        tracing::warn!(
+            healed_count = healed,
+            "Startup self-check: {healed} missing column(s) were auto-healed. \
+             This indicates stale compiled migrations. Run: cargo clean -p db && cargo build"
+        );
+    } else {
+        tracing::info!("Startup self-check: schema verification passed ({} columns verified)", SCHEMA_EXPECTATIONS.len());
+    }
+
+    Ok(())
+}
+
 async fn run_migrations(pool: &Pool<Sqlite>) -> Result<(), Error> {
     use std::collections::HashSet;
 
     let migrator = sqlx::migrate!("./migrations");
     let mut processed_versions: HashSet<i64> = HashSet::new();
 
+    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+
     loop {
         match migrator.run(pool).await {
-            Ok(()) => return Ok(()),
+            Ok(()) => {
+                let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+                    .fetch_one(pool)
+                    .await
+                    .unwrap_or(0);
+                let new_migrations = after - before;
+
+                if new_migrations > 0 || before == 0 {
+                    tracing::info!(applied = new_migrations, "New migrations applied, running schema self-check");
+                    verify_schema(pool).await?;
+                }
+
+                return Ok(());
+            }
             Err(MigrateError::VersionMismatch(version)) => {
                 if !cfg!(windows) {
                     // On non-Windows platforms, we do not attempt to auto-fix checksum mismatches.
