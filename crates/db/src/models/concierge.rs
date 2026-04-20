@@ -9,15 +9,12 @@ use uuid::Uuid;
 // ConciergeSession
 // ---------------------------------------------------------------------------
 
-// E38-05: `active_project_id` is defined with
-// `REFERENCES projects(id)` (no `ON DELETE` clause) in
-// `20260322200000_create_concierge_tables.sql`. The migration is already
-// applied, so we cannot modify it. When a project is deleted, the default
-// SQLite behavior is `NO ACTION`, which will fail the delete if any
-// concierge_session still points at it. Callers that delete projects must
-// first null-out or reassign `active_project_id` on affected sessions.
-// TODO(E38-05): In a follow-up migration, rebuild the table with
-// `ON DELETE SET NULL` so project deletion does not fail.
+// E38-05: `active_project_id` originally had a FK to `projects(id)`, but
+// `20260322210000_fix_concierge_session_fk.sql` rebuilt the table and
+// dropped that constraint because the column types did not line up in
+// SQLite. Deleting a project no longer blocks on concierge_session rows.
+// NOTE(E38-05): Keep this as an application-level reference until the
+// project ID types are aligned well enough to safely reintroduce a FK.
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(clippy::struct_excessive_bools)]
@@ -128,13 +125,11 @@ impl ConciergeSession {
             .await
     }
 
-    // TODO(W2-15-09): Unbounded `SELECT *` with missing index. This returns
-    // every concierge_session, ordered by `updated_at DESC`, without a
-    // matching index on `(updated_at DESC)` — so it is a full scan + sort on
-    // every call. This is also used by list endpoints, so it fans the entire
-    // table to the UI. Add an index on `concierge_session(updated_at DESC)`
-    // and introduce a paginated variant (keyset on `updated_at, id`) before
-    // the table grows past a few thousand rows.
+    // NOTE(W2-15-09): Migration `20260417010000_add_perf_indexes.sql` adds
+    // `idx_concierge_session_updated_at`, so this descending list no longer
+    // pays a full scan + sort cost. The query still returns the full session
+    // set by design; add pagination if concierge session counts grow enough
+    // for list endpoints to need a bounded window.
     pub async fn list_all(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, Self>(
             "SELECT * FROM concierge_session ORDER BY updated_at DESC",

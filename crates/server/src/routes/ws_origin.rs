@@ -81,6 +81,7 @@ fn is_localhost_request(headers: &HeaderMap) -> bool {
 #[cfg(test)]
 mod tests {
     use axum::http::{HeaderMap, HeaderValue};
+    use serial_test::serial;
 
     use super::*;
 
@@ -103,6 +104,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn dev_mode_allows_any_origin() {
         with_env(None, || {
             let mut headers = HeaderMap::new();
@@ -115,6 +117,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn allowed_origin_passes() {
         with_env(
             Some("http://localhost:3000,https://app.example.com"),
@@ -130,6 +133,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn disallowed_origin_rejected() {
         with_env(Some("https://app.example.com"), || {
             let mut headers = HeaderMap::new();
@@ -143,6 +147,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn missing_origin_from_localhost_allowed() {
         with_env(Some("https://app.example.com"), || {
             let mut headers = HeaderMap::new();
@@ -152,6 +157,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn missing_origin_from_remote_rejected() {
         with_env(Some("https://app.example.com"), || {
             let headers = HeaderMap::new();

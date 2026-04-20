@@ -436,7 +436,7 @@ pub trait ContainerService {
         tracing::info!("Backfilling {} repo names", repos.len());
 
         for repo in repos {
-            // TODO(E27-12): Falling back to `repo.id` (a UUID) here means the
+            // NOTE(E27-12): Falling back to `repo.id` (a UUID) here means the
             // persisted name no longer matches any path component, which breaks
             // downstream assumptions tying `working_dir` (see E27-08) to the repo
             // name. Existing behavior may be intentional for uniqueness; revisit
@@ -454,7 +454,7 @@ pub trait ContainerService {
         Ok(())
     }
 
-    // TODO(E27-08): `working_dir` below is set to `repo.name` (a relative component),
+    // NOTE(E27-08): `working_dir` below is set to `repo.name` (a relative component),
     // not the full `repo.path`. For multi-repo projects this relies on the executor
     // resolving the name relative to the project root. Audit all callers and switch to
     // the full path; fix is invasive so tracked as TODO.
@@ -495,7 +495,7 @@ pub trait ContainerService {
         Some(root_action)
     }
 
-    // TODO(E27-08): Same concern as `cleanup_actions_for_repos` — `working_dir` is set
+    // NOTE(E27-08): Same concern as `cleanup_actions_for_repos` — `working_dir` is set
     // to `repo.name`, not the full repo path. Revisit once callers are audited.
     fn setup_actions_for_repos(&self, repos: &[Repo]) -> Option<ExecutorAction> {
         let repos_with_setup: Vec<_> = repos.iter().filter(|r| r.setup_script.is_some()).collect();
@@ -531,7 +531,7 @@ pub trait ContainerService {
         Some(root_action)
     }
 
-    // TODO(E27-08): See `setup_actions_for_repos` — `working_dir` is `repo.name`,
+    // NOTE(E27-08): See `setup_actions_for_repos` — `working_dir` is `repo.name`,
     // not the full repo path.
     fn setup_action_for_repo(repo: &Repo) -> Option<ExecutorAction> {
         repo.setup_script.as_ref().map(|script| {

@@ -171,10 +171,7 @@ fn prompt_decision_detail(decision: &PromptDecision) -> Value {
                 "action": "llm_decision",
                 "response": response,
                 "reasoning": reasoning,
-                "targetIndex": target_index,
-                // TODO(W2-20-01/W2-31-03): snake_case `target_index` retained — TS
-                // fallback (wsStore.ts) and regression tests still reference it.
-                "target_index": target_index
+                "targetIndex": target_index
             })
         }
         PromptDecision::AskUser {
@@ -731,7 +728,6 @@ mod tests {
             "safe to proceed"
         );
         assert_eq!(event.payload["decisionDetail"]["targetIndex"], 2);
-        assert_eq!(event.payload["decisionDetail"]["target_index"], 2);
         assert_eq!(event.payload["decisionRaw"]["action"], "llm_decision");
         assert_eq!(event.payload["decisionRaw"]["target_index"], 2);
         assert_eq!(event.payload["workflow_id"], "wf-123");
@@ -883,10 +879,7 @@ mod tests {
             prompt_decision.payload["terminal_id"]
         );
         assert_eq!(prompt_decision.payload["decision"], "llm_decision");
-        assert_eq!(
-            prompt_decision.payload["decisionDetail"]["targetIndex"],
-            prompt_decision.payload["decisionDetail"]["target_index"]
-        );
+        assert_eq!(prompt_decision.payload["decisionDetail"]["targetIndex"], 1);
         assert_eq!(
             prompt_decision.payload["decisionRaw"]["action"],
             "llm_decision"

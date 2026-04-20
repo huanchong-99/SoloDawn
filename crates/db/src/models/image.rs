@@ -185,36 +185,34 @@ impl TaskImage {
     ///
     /// Uses a single multi-row INSERT with `ON CONFLICT DO NOTHING`, relying on
     /// the `UNIQUE(task_id, image_id)` constraint on `task_images` to dedup.
-    // TODO(W2-15-02): Historical N+1 — this function previously issued one
-    // INSERT per image id and one SELECT-for-dedup per image. The current
-    // implementation batches to a single multi-row INSERT with
-    // `ON CONFLICT DO NOTHING`, which fixes the N+1, but two caveats remain:
-    //   1. SQLite has a hard bind parameter limit (999 pre-3.32, 32766 after).
-    //      Each image contributes 3 binds, so callers passing >~330 images
-    //      will hit SQLITE_TOOBIG. Chunk `image_ids` before calling, or add a
-    //      chunk loop here.
-    //   2. There is no matching `associate_many_dedup` for workflow/session
-    //      image junctions; those still iterate in callers. Audit other
-    //      `*_images` junction tables to ensure they don't regress.
+    // NOTE(W2-15-02): Previous N+1 (one INSERT + one SELECT-for-dedup per
+    // image) is replaced by a single multi-row INSERT with
+    // `ON CONFLICT DO NOTHING`. `SQLITE_MAX_VARIABLE_NUMBER` is 32766 in
+    // sqlite 3.32+ (3 binds per image, so effective cap ≈ 10_000). We chunk
+    // to `MAX_IMAGES_PER_BATCH = 500` to stay well below that and keep
+    // statement compile time reasonable. Callers no longer need to chunk.
     pub async fn associate_many_dedup(
         pool: &SqlitePool,
         task_id: Uuid,
         image_ids: &[Uuid],
     ) -> Result<(), sqlx::Error> {
+        const MAX_IMAGES_PER_BATCH: usize = 500;
+
         if image_ids.is_empty() {
             return Ok(());
         }
 
-        let mut qb: QueryBuilder<Sqlite> =
-            QueryBuilder::new("INSERT INTO task_images (id, task_id, image_id) ");
-        qb.push_values(image_ids.iter(), |mut b, image_id| {
-            b.push_bind(Uuid::new_v4())
-                .push_bind(task_id)
-                .push_bind(*image_id);
-        });
-        qb.push(" ON CONFLICT(task_id, image_id) DO NOTHING");
-
-        qb.build().execute(pool).await?;
+        for chunk in image_ids.chunks(MAX_IMAGES_PER_BATCH) {
+            let mut qb: QueryBuilder<Sqlite> =
+                QueryBuilder::new("INSERT INTO task_images (id, task_id, image_id) ");
+            qb.push_values(chunk.iter(), |mut b, image_id| {
+                b.push_bind(Uuid::new_v4())
+                    .push_bind(task_id)
+                    .push_bind(*image_id);
+            });
+            qb.push(" ON CONFLICT(task_id, image_id) DO NOTHING");
+            qb.build().execute(pool).await?;
+        }
         Ok(())
     }
 

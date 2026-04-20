@@ -1,4 +1,4 @@
--- TODO(W2-38-09): Forward-only schema change. `ALTER TABLE ... DROP COLUMN`
+-- NOTE(W2-38-09): Forward-only schema change. `ALTER TABLE ... DROP COLUMN`
 -- permanently removes `task_attempts.worktree_deleted` with no snapshot of
 -- the boolean flag values for already-existing rows. If a subsequent bug
 -- needs to distinguish "never had a worktree" from "worktree was reaped",

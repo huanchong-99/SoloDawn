@@ -32,15 +32,18 @@ pub fn generate_task_branch_name(
     task_name: &str,
     existing_branches: &[String],
 ) -> String {
+    use std::collections::HashSet;
+
     let base = format!("workflow/{}/{}", workflow_id, slugify(task_name));
+
+    // E28-07: O(1) lookup per iteration. Previously a linear scan that was
+    // fine for small N but could degrade once a workflow accumulated many
+    // branches. Building the set is O(n) once; each `contains` is then O(1).
+    let existing: HashSet<&str> = existing_branches.iter().map(String::as_str).collect();
+
     let mut candidate = base.clone();
     let mut counter = 2;
-
-    // E28-07: Linear scan of `existing_branches` per iteration is O(n*k).
-    // Acceptable while N stays small (one workflow's branches); if N ever
-    // grows past ~100 this should switch to a `HashSet<&str>` lookup.
-    // TODO(perf): promote to HashSet when existing_branches.len() > 100.
-    while existing_branches.contains(&candidate) {
+    while existing.contains(candidate.as_str()) {
         candidate = format!("{base}-{counter}");
         counter += 1;
     }

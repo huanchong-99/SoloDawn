@@ -31,6 +31,17 @@ interface Props {
   onError?: (error: Error) => void;
 }
 
+// NOTE(E15-09): display options (cursorBlink/fontSize/fontFamily/scrollback)
+// are intentionally compile-time constants below. Threading them through
+// props would require either re-creating the xterm instance on every change
+// (dropping scrollback) or routing updates through an imperative ref that
+// writes to `terminal.options`. Neither need has surfaced yet; when it does,
+// extend `TerminalEmulatorRef` with a `setDisplayOptions(...)` method.
+const DEFAULT_CURSOR_BLINK = true;
+const DEFAULT_FONT_SIZE = 14;
+const DEFAULT_FONT_FAMILY = 'Menlo, Monaco, "Courier New", monospace';
+const DEFAULT_SCROLLBACK = 10000;
+
 export interface TerminalEmulatorRef {
   write: (data: string) => void;
   clear: () => void;
@@ -180,18 +191,16 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
       if (!containerRef.current) return;
 
       const terminal = new Terminal({
-        // TODO(E15-09): Accept cursorBlink and other display options via a config
-        // prop instead of hardcoding.
-        cursorBlink: true,
-        fontSize: 14,
-        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        cursorBlink: DEFAULT_CURSOR_BLINK,
+        fontSize: DEFAULT_FONT_SIZE,
+        fontFamily: DEFAULT_FONT_FAMILY,
         theme: {
           background: '#1e1e1e',
           foreground: '#d4d4d4',
           cursor: '#d4d4d4',
           selectionBackground: '#264f78',
         },
-        scrollback: 10000,
+        scrollback: DEFAULT_SCROLLBACK,
         convertEol: true,
       });
 

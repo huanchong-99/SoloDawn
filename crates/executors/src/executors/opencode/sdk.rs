@@ -189,12 +189,11 @@ async fn run_session_inner(
 
     let model = config.model.as_deref().map(parse_model);
 
-    // TODO(W2-30-08): This control event channel is unbounded and many
-    // producers use `let _ = control_tx.send(..)`, silently dropping on a
-    // closed receiver. Log a warning when `send` fails (receiver gone) and
-    // consider switching to a bounded channel (e.g. 256) with `try_send` +
-    // warn-on-full to apply backpressure.
-    let (control_tx, mut control_rx) = mpsc::unbounded_channel::<ControlEvent>();
+    // W2-30-08: bounded control-event channel. Producers use `try_send_control`
+    // which logs on `Full` (backpressure signal) and on `Closed` (receiver
+    // gone). Capacity chosen to absorb a typical reconnect burst without
+    // blocking the event loop.
+    let (control_tx, mut control_rx) = mpsc::channel::<ControlEvent>(256);
 
     let event_resp = tokio::select! {
         () = cancel.cancelled() => return Ok(()),
@@ -285,7 +284,7 @@ async fn run_prompt_with_control(
     prompt_text: &str,
     model: Option<ModelSpec>,
     agent: Option<String>,
-    control_rx: &mut mpsc::UnboundedReceiver<ControlEvent>,
+    control_rx: &mut mpsc::Receiver<ControlEvent>,
     cancel: CancellationToken,
 ) -> Result<(), ExecutorError> {
     let mut idle_seen = false;
@@ -630,7 +629,7 @@ struct EventListenerConfig {
     log_writer: LogWriter,
     approvals: Option<Arc<dyn ExecutorApprovalService>>,
     auto_approve: bool,
-    control_tx: mpsc::UnboundedSender<ControlEvent>,
+    control_tx: mpsc::Sender<ControlEvent>,
 }
 
 async fn spawn_event_listener(config: EventListenerConfig, initial_resp: reqwest::Response) {
@@ -672,7 +671,7 @@ async fn spawn_event_listener(config: EventListenerConfig, initial_resp: reqwest
                             .await;
                         attempt += 1;
                         if attempt >= max_attempts {
-                            let _ = control_tx.send(ControlEvent::Disconnected);
+                            try_send_control(&control_tx, ControlEvent::Disconnected);
                             return;
                         }
 
@@ -706,7 +705,7 @@ async fn spawn_event_listener(config: EventListenerConfig, initial_resp: reqwest
             Ok(EventStreamOutcome::Disconnected) | Err(_) => {
                 attempt += 1;
                 if attempt >= max_attempts {
-                    let _ = control_tx.send(ControlEvent::Disconnected);
+                    try_send_control(&control_tx, ControlEvent::Disconnected);
                     return;
                 }
             }
@@ -714,6 +713,26 @@ async fn spawn_event_listener(config: EventListenerConfig, initial_resp: reqwest
 
         tokio::time::sleep(exponential_backoff(base_retry_delay, attempt)).await;
         resp = None;
+    }
+}
+
+/// W2-30-08: Non-blocking send on the bounded control channel. Preserves the
+/// "fire-and-forget" character of the old unbounded sends while surfacing
+/// backpressure (`Full`) or teardown (`Closed`) via logging instead of
+/// silently dropping.
+fn try_send_control(tx: &mpsc::Sender<ControlEvent>, event: ControlEvent) {
+    if let Err(e) = tx.try_send(event) {
+        match e {
+            mpsc::error::TrySendError::Full(dropped) => {
+                tracing::warn!(
+                    dropped_event = ?std::mem::discriminant(&dropped),
+                    "OpenCode control channel full; dropping event"
+                );
+            }
+            mpsc::error::TrySendError::Closed(_) => {
+                tracing::debug!("OpenCode control channel closed; receiver gone");
+            }
+        }
     }
 }
 
@@ -741,7 +760,7 @@ struct EventStreamContext<'a> {
     log_writer: &'a LogWriter,
     approvals: Option<Arc<dyn ExecutorApprovalService>>,
     auto_approve: bool,
-    control_tx: &'a mpsc::UnboundedSender<ControlEvent>,
+    control_tx: &'a mpsc::Sender<ControlEvent>,
     base_retry_delay: &'a mut Duration,
     last_event_id: &'a mut Option<String>,
 }
@@ -794,7 +813,7 @@ async fn process_event_stream(
 
         match event_type {
             "session.idle" => {
-                let _ = ctx.control_tx.send(ControlEvent::Idle);
+                try_send_control(ctx.control_tx, ControlEvent::Idle);
                 return Ok(EventStreamOutcome::Idle);
             }
             "session.error" => {
@@ -811,11 +830,11 @@ async fn process_event_stream(
                     .to_string();
 
                 if error_type == "ProviderAuthError" {
-                    let _ = ctx.control_tx.send(ControlEvent::AuthRequired { message });
+                    try_send_control(ctx.control_tx, ControlEvent::AuthRequired { message });
                     return Ok(EventStreamOutcome::Terminal);
                 }
 
-                let _ = ctx.control_tx.send(ControlEvent::SessionError { message });
+                try_send_control(ctx.control_tx, ControlEvent::SessionError { message });
             }
             "permission.asked" => {
                 // E34-12: distinguish "missing request_id" from "duplicate

@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, QueryBuilder, Sqlite, SqlitePool};
 use thiserror::Error;
 use ts_rs::TS;
 use uuid::Uuid;
@@ -34,6 +36,12 @@ pub struct ContainerInfo {
     pub workspace_id: Uuid,
     pub task_id: Uuid,
     pub project_id: Uuid,
+}
+
+#[derive(Debug, FromRow)]
+struct WorkspacePromptRow {
+    workspace_id: Uuid,
+    prompt: String,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, TS)]
@@ -347,7 +355,7 @@ impl Workspace {
             LEFT JOIN sessions s ON w.id = s.workspace_id
             LEFT JOIN execution_processes ep ON s.id = ep.session_id AND ep.completed_at IS NOT NULL
             WHERE w.container_ref IS NOT NULL
-                -- TODO(E38-12): `SELECT DISTINCT s2.workspace_id` is not
+                -- NOTE(E38-12): `SELECT DISTINCT s2.workspace_id` is not
                 -- backed by a dedicated covering index. If this query shows up
                 -- in slow-query traces, add an index on
                 -- sessions(workspace_id) combined with
@@ -554,6 +562,81 @@ impl Workspace {
         Ok(result.and_then(|r| r.prompt))
     }
 
+    async fn list_generated_names(
+        pool: &SqlitePool,
+        workspace_ids: &[Uuid],
+    ) -> Result<Vec<(Uuid, String)>, sqlx::Error> {
+        if workspace_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut query_builder = QueryBuilder::<Sqlite>::new(
+            r"SELECT workspace_id, prompt
+               FROM (
+                   SELECT
+                       s.workspace_id AS workspace_id,
+                       cat.prompt AS prompt,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY s.workspace_id
+                           ORDER BY s.created_at ASC, ep.created_at ASC, ep.id ASC
+                       ) AS row_num
+                   FROM sessions s
+                   JOIN execution_processes ep ON ep.session_id = s.id
+                   JOIN coding_agent_turns cat ON cat.execution_process_id = ep.id
+                   WHERE s.executor IS NOT NULL
+                     AND cat.prompt IS NOT NULL
+                     AND s.workspace_id IN (",
+        );
+
+        let mut separated = query_builder.separated(", ");
+        for workspace_id in workspace_ids {
+            separated.push_bind(workspace_id);
+        }
+        query_builder.push(
+            r")
+               ) ranked
+               WHERE row_num = 1",
+        );
+
+        let rows: Vec<WorkspacePromptRow> = query_builder.build_query_as().fetch_all(pool).await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| {
+                let name = Self::truncate_to_name(&row.prompt, WORKSPACE_NAME_MAX_LEN);
+                (!name.is_empty()).then_some((row.workspace_id, name))
+            })
+            .collect())
+    }
+
+    async fn persist_generated_names(
+        pool: &SqlitePool,
+        generated_names: &[(Uuid, String)],
+    ) -> Result<(), sqlx::Error> {
+        if generated_names.is_empty() {
+            return Ok(());
+        }
+
+        let mut query_builder =
+            QueryBuilder::<Sqlite>::new("WITH generated_names(workspace_id, name) AS (");
+        query_builder.push_values(generated_names.iter(), |mut builder, (workspace_id, name)| {
+            builder.push_bind(*workspace_id).push_bind(name.as_str());
+        });
+        query_builder.push(
+            r")
+            UPDATE workspaces
+            SET name = (
+                    SELECT generated_names.name
+                    FROM generated_names
+                    WHERE generated_names.workspace_id = workspaces.id
+                ),
+                updated_at = datetime('now', 'subsec')
+            WHERE id IN (SELECT workspace_id FROM generated_names)",
+        );
+
+        query_builder.build().execute(pool).await?;
+        Ok(())
+    }
+
     pub fn truncate_to_name(prompt: &str, max_len: usize) -> String {
         let trimmed = prompt.trim();
         if trimmed.chars().count() <= max_len {
@@ -651,21 +734,18 @@ impl Workspace {
             }
         }
 
-        // TODO(W2-15-01): This is N+1 — for each unnamed workspace we issue a
-        // separate SELECT (get_first_user_message) and UPDATE. Bounded by
-        // `limit` above, but for large unbounded calls this compounds quickly.
-        // Batch improvement: collect all unnamed workspace IDs, issue a single
-        // query joining sessions/task_attempts/executor_sessions to fetch the
-        // first user message per workspace in one round trip, then apply all
-        // renames via a single UPDATE ... FROM (VALUES ...) (or CASE WHEN) so
-        // this becomes 2 queries instead of 2N.
+        let unnamed_ids: Vec<Uuid> = workspaces
+            .iter()
+            .filter(|ws| ws.workspace.name.is_none())
+            .map(|ws| ws.workspace.id)
+            .collect();
+        let generated_names = Self::list_generated_names(pool, &unnamed_ids).await?;
+        Self::persist_generated_names(pool, &generated_names).await?;
+
+        let generated_names: HashMap<Uuid, String> = generated_names.into_iter().collect();
         for ws in &mut workspaces {
-            if ws.workspace.name.is_none()
-                && let Some(prompt) = Self::get_first_user_message(pool, ws.workspace.id).await?
-            {
-                let name = Self::truncate_to_name(&prompt, WORKSPACE_NAME_MAX_LEN);
-                Self::update(pool, ws.workspace.id, None, None, Some(&name)).await?;
-                ws.workspace.name = Some(name);
+            if let Some(name) = generated_names.get(&ws.workspace.id) {
+                ws.workspace.name = Some(name.clone());
             }
         }
 

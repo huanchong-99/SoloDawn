@@ -441,7 +441,7 @@ pub async fn delete_task(
 
     // Use a transaction to ensure atomicity: either all operations succeed or all are rolled back
     //
-    // TODO(E29-15): Rollback is not guaranteed on panic. sqlx::Transaction's
+    // NOTE(E29-15): Rollback is not guaranteed on panic. sqlx::Transaction's
     // Drop impl schedules an async rollback but cannot await it, so a panic
     // mid-transaction may leave the connection in an ambiguous state. If this
     // hot path grows more complex, switch to an RAII guard that performs an

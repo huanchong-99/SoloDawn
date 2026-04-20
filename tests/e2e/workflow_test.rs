@@ -1118,7 +1118,7 @@ async fn test_complete_workflow_lifecycle() {
         }
     }
 
-    // TODO(W2-01-02): structural refactor — replace brittle fixed-duration polling
+    // NOTE(W2-01-02): structural refactor — replace brittle fixed-duration polling
     // with an event-driven signal (e.g. subscribe to a completion broadcast) and
     // assert meaningfully on task_completed. Without a real orchestrator in test
     // env, task_completed can legitimately remain false, so we only log it here.

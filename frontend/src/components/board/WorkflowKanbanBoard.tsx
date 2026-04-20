@@ -1,5 +1,16 @@
-import { DndContext, DragOverlay, type DragEndEvent, type DragStartEvent, useDroppable } from '@dnd-kit/core';
-import { useRef, useState } from 'react';
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type Announcements,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWorkflow, useUpdateTaskStatus } from '@/hooks/useWorkflows';
 import type { WorkflowTaskDto } from 'shared/types';
@@ -93,16 +104,43 @@ export function WorkflowKanbanBoard({ workflowId }: Readonly<WorkflowKanbanBoard
   // a <DragOverlay> for smoother visual feedback.
   const [activeTask, setActiveTask] = useState<WorkflowTaskDto | null>(null);
 
-  // TODO(E09-03..07): Address remaining optimization/race issues flagged in the
-  // Kanban review (debounced mutations, dnd sensors, keyboard a11y, etc.).
-  // TODO(E09-08): Add drag-end test coverage for WorkflowKanbanBoard (skipped
-  //   here; tracked separately so handleDragEnd's status-transition whitelist
-  //   and stale-closure protection are exercised in unit tests).
-  // TODO(E09-09): Configure dnd-kit sensors (PointerSensor with activation
-  //   constraint + KeyboardSensor) instead of relying on defaults, so click
-  //   vs. drag intent is disambiguated and keyboard dragging works.
-  // TODO(E09-10): Announce drag events via dnd-kit's `accessibility` prop
-  //   (screenReaderInstructions / announcements) for a11y parity.
+  // NOTE(E09-03..07, E09-08): The remaining Kanban items (debounced mutations,
+  // drag-end unit tests) are tracked separately from the sensor + a11y work
+  // done below.
+  //
+  // E09-09: Disambiguate click vs. drag intent via a `distance` activation
+  // constraint on `PointerSensor`, and enable keyboard dragging via
+  // `KeyboardSensor`.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  // E09-10: Screen-reader announcements so keyboard/AT users can track drag
+  // progress and the final drop result.
+  const announcements: Announcements = useMemo(
+    () => ({
+      onDragStart({ active }) {
+        return `Picked up task ${active.id}.`;
+      },
+      onDragOver({ active, over }) {
+        if (over) {
+          return `Task ${active.id} is over column ${over.id}.`;
+        }
+        return `Task ${active.id} is no longer over a column.`;
+      },
+      onDragEnd({ active, over }) {
+        if (over) {
+          return `Task ${active.id} dropped on column ${over.id}.`;
+        }
+        return `Task ${active.id} dropped outside any column; no change.`;
+      },
+      onDragCancel({ active }) {
+        return `Drag of task ${active.id} cancelled.`;
+      },
+    }),
+    [],
+  );
 
   const handleDragStart = ({ active }: DragStartEvent) => {
     const taskId = String(active.id);
@@ -166,7 +204,12 @@ export function WorkflowKanbanBoard({ workflowId }: Readonly<WorkflowKanbanBoard
   }
 
   return (
-    <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext
+      sensors={sensors}
+      accessibility={{ announcements }}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
       <div className="flex-1 p-6 grid grid-cols-6 gap-4">
         {columns.map((column) => (
           <KanbanColumn

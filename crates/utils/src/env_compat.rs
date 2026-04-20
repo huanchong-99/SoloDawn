@@ -1,12 +1,12 @@
 //! Environment variable helpers with backward compatibility for GITCORTEX_ → SOLODAWN_ migration.
 //
-// W2-31-07: Backward compatibility for the deprecated `GITCORTEX_*` env var
-// names is intentionally retained. A `tracing::warn!` is emitted whenever the
-// old name is used so operators can migrate incrementally.
-// TODO(W2-31-07): Remove `GITCORTEX_*` fallbacks once all deployment configs,
-// Docker images, CI pipelines, and user docs have been audited and updated
-// to the `SOLODAWN_*` names. Track a deprecation window (e.g. two minor
-// releases) before deletion.
+// NOTE(W2-31-07): Backward compatibility for the deprecated `GITCORTEX_*` env
+// var names is intentionally retained for at least two minor release cycles
+// from v0.0.153 (i.e. remove no earlier than v0.2.0). A `tracing::warn!` is
+// emitted on first fallback use so operators see a deprecation signal in
+// logs. When removing: grep for `var_with_compat` / `var_is_set` /
+// `var_opt_with_compat` callers, drop the old-name argument, and delete this
+// module's compat path.
 
 use std::env::VarError;
 

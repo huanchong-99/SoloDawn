@@ -11,15 +11,11 @@ use uuid::Uuid;
 ///
 /// Corresponds to database table: git_event
 ///
-// E38-13: `git_event.terminal_id` was defined as
-// `REFERENCES terminal(id)` (nullable, no cascade) in
-// `20260208020000_fix_terminal_old_foreign_keys.sql`. The migration is
-// already applied in production, so we cannot modify it in place. When a
-// terminal row is deleted, the default `NO ACTION` behavior will block
-// the delete if any git_event still references it. Callers that remove
-// terminals must null-out the related git_event.terminal_id first.
-// TODO(E38-13): Add a follow-up migration that rebuilds the table with
-// `ON DELETE SET NULL` on `terminal_id`.
+// E38-13: Migration `20260417020002_set_null_git_event_terminal_fk.sql`
+// rebuilds `git_event` so deleting a terminal clears `terminal_id` instead
+// of blocking the delete.
+// NOTE(E38-13): Future FK changes here still require a table rebuild
+// migration because SQLite cannot alter FK clauses in place.
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitEvent {
@@ -43,7 +39,7 @@ impl GitEvent {
     // build time, which complicates CI and contributor builds (the schema is
     // created from embedded migrations at runtime). `FromRow` on `GitEvent`
     // plus explicit `bind()` calls give adequate type safety for this model.
-    // TODO(W2-35-03): If we adopt `cargo sqlx prepare` in CI and commit the
+    // NOTE(W2-35-03): If we adopt `cargo sqlx prepare` in CI and commit the
     // offline cache, migrate these to `query!` / `query_as!` for full
     // compile-time checking against the migration schema.
     /// Insert a new git event record

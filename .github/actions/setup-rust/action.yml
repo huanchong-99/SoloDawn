@@ -62,14 +62,14 @@ runs:
       shell: bash
       run: |
         echo "CARGO_TERM_COLOR=always" >> "$GITHUB_ENV"
-        # TODO(W2-35-04): CI sets SQLX_OFFLINE=true but never verifies the
+        # NOTE(W2-35-04): CI sets SQLX_OFFLINE=true but never verifies the
         # `.sqlx/` cache is in sync with the committed migrations. If a PR
         # edits a migration but forgets to re-run `cargo sqlx prepare`, CI
         # will build against stale query metadata and may pass while
         # production breaks. Add a step that runs
         # `cargo sqlx prepare --check --workspace` (after applying
         # migrations to a scratch SQLite file) before `cargo build`.
-        # TODO(W2-35-05): The `.sqlx/` cache is not scoped per-target; a
+        # NOTE(W2-35-05): The `.sqlx/` cache is not scoped per-target; a
         # query that is valid under one feature flag combination (e.g.
         # `default-features = false`) can be incorrectly cached from a
         # build with different features. Document which feature set is

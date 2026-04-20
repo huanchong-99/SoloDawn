@@ -69,27 +69,74 @@ impl Project {
             .await
     }
 
-    // TODO(W2-15-07): Unbounded — `Project::find_all` returns every project
-    // row with no pagination or LIMIT. Fine today because tenants have dozens
-    // of projects, but the list API route fans this straight to the client.
-    // Refactor: introduce `find_page(pool, limit, offset)` (or keyset by
-    // `created_at, id`) and deprecate this signature. Confirm the index
-    // `idx_projects_created_at` exists so the ORDER BY is covered — currently
-    // this relies on a full scan + filesort on SQLite.
+    /// Hard cap used by `find_all` (W2-15-07).
+    pub const FIND_ALL_MAX_ROWS: i64 = 1000;
+
+    /// Return projects in `created_at DESC` order, capped at
+    /// [`Self::FIND_ALL_MAX_ROWS`]. Typical tenants have well under this;
+    /// use `find_page` if you genuinely need to paginate.
     pub async fn find_all(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
-        sqlx::query_as!(
-            Project,
-            r#"SELECT id as "id!: Uuid",
+        let limit: i64 = Self::FIND_ALL_MAX_ROWS;
+        sqlx::query_as::<_, Project>(
+            r"SELECT id,
                       name,
                       default_agent_working_dir,
-                      remote_project_id as "remote_project_id: Uuid",
-                      created_at as "created_at!: DateTime<Utc>",
-                      updated_at as "updated_at!: DateTime<Utc>"
+                      remote_project_id,
+                      created_at,
+                      updated_at
                FROM projects
-               ORDER BY created_at DESC"#
+               ORDER BY created_at DESC
+               LIMIT ?",
         )
+        .bind(limit)
         .fetch_all(pool)
         .await
+    }
+
+    /// Keyset-friendly paginated variant of `find_all`. Pass `after`
+    /// as the last-seen `(created_at, id)` tuple to walk older pages.
+    pub async fn find_page(
+        pool: &SqlitePool,
+        after: Option<(DateTime<Utc>, Uuid)>,
+        limit: i64,
+    ) -> Result<Vec<Self>, sqlx::Error> {
+        match after {
+            Some((ts, id)) => {
+                sqlx::query_as::<_, Project>(
+                    r"SELECT id,
+                              name,
+                              default_agent_working_dir,
+                              remote_project_id,
+                              created_at,
+                              updated_at
+                       FROM projects
+                       WHERE (created_at, id) < (?, ?)
+                       ORDER BY created_at DESC, id DESC
+                       LIMIT ?",
+                )
+                .bind(ts)
+                .bind(id)
+                .bind(limit)
+                .fetch_all(pool)
+                .await
+            }
+            None => {
+                sqlx::query_as::<_, Project>(
+                    r"SELECT id,
+                              name,
+                              default_agent_working_dir,
+                              remote_project_id,
+                              created_at,
+                              updated_at
+                       FROM projects
+                       ORDER BY created_at DESC, id DESC
+                       LIMIT ?",
+                )
+                .bind(limit)
+                .fetch_all(pool)
+                .await
+            }
+        }
     }
 
     /// Find the most actively used projects based on recent task activity

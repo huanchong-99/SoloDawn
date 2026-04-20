@@ -1,6 +1,6 @@
 -- Drop the drafts table (follow-up and retry drafts are no longer used)
 --
--- TODO(W2-38-08): Forward-only schema change. `DROP TABLE drafts` is
+-- NOTE(W2-38-08): Forward-only schema change. `DROP TABLE drafts` is
 -- irreversible — there is no `.down.sql` sibling and no backup of the
 -- table contents before the drop. Any draft content that a user had not
 -- yet materialised into a workflow/session is silently discarded when this

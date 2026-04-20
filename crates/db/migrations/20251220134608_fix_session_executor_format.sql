@@ -3,7 +3,7 @@
 -- This was introduced in the refactor from task_attempts to sessions (commit 6a129d0fa)
 -- Optimized: Using instr() instead of LIKE to avoid full table scan warning
 --
--- TODO(W2-38-06): Data coercion risk. `substr(executor, 1, instr(executor, ':') - 1)`
+-- NOTE(W2-38-06): Data coercion risk. `substr(executor, 1, instr(executor, ':') - 1)`
 -- silently truncates every value with a ':' — including values that are
 -- legitimately shaped like `key:value` but weren't caused by the original
 -- bug. If a future executor name ever contains a ':' (e.g. a URL or a

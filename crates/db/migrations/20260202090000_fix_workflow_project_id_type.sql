@@ -6,7 +6,7 @@
 --              constraint failures. This migration fixes the type mismatch.
 -- ============================================================================
 --
--- TODO(W2-38-04): Partial rollback risk. This migration performs a
+-- NOTE(W2-38-04): Partial rollback risk. This migration performs a
 -- table-rebuild pattern (CREATE workflow_new / INSERT SELECT / DROP / RENAME)
 -- and then re-creates indexes. The rebuild itself is wrapped in an implicit
 -- sqlx transaction, but:

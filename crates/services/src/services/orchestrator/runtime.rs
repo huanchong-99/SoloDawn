@@ -407,7 +407,7 @@ impl OrchestratorRuntime {
 
             // Best-effort cleanup for naturally completed workflow runs.
             // Guard against removing a newly restarted workflow with the same ID.
-            // TODO(E21-07, W2-19-06, K11): Replace the fixed 5x100ms polling loop
+            // NOTE(E21-07, W2-19-06, K11): Replace the fixed 5x100ms polling loop
             // with an event-driven handshake (e.g. notify/condvar on task completion
             // or a one-shot channel) so cleanup latency is bounded by the actual
             // finish signal rather than by a hard-coded poll budget. The

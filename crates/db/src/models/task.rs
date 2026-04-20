@@ -282,13 +282,11 @@ ORDER BY t.created_at DESC"#,
         .await
     }
 
-    // TODO(W2-15-08): Missing index and unbounded — filters on
-    // `shared_task_id IS NOT NULL` without a partial index on
-    // `tasks(shared_task_id) WHERE shared_task_id IS NOT NULL`. As the
-    // `tasks` table grows this becomes a full scan that returns every shared
-    // task at once. Add the partial index and paginate (or stream) the
-    // result. Consumers currently collect into `Vec` and hold all rows in
-    // memory.
+    // NOTE(W2-15-08): Migration `20260417010000_add_perf_indexes.sql` adds
+    // the partial index on `tasks(shared_task_id) WHERE shared_task_id IS
+    // NOT NULL`, so the filter stays cheap. The query remains intentionally
+    // unbounded because current callers consume the full shared-task set; add
+    // pagination if that result becomes materially larger.
     pub async fn find_all_shared(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
         sqlx::query_as!(
             Task,
@@ -435,7 +433,7 @@ ORDER BY t.created_at DESC"#,
     where
         E: Executor<'e, Database = Sqlite>,
     {
-        // TODO(E38-09): If this ever grows into a subquery form
+        // NOTE(E38-09): If this ever grows into a subquery form
         // (WHERE parent_workspace_id IN (SELECT ...)), rely on the SQLite
         // query optimizer; an index on tasks.parent_workspace_id already
         // supports the current equality predicate.

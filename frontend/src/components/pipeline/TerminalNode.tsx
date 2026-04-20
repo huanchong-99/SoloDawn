@@ -1,55 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { TerminalDto } from 'shared/types';
 import { TerminalDetailPanel } from './TerminalDetailPanel';
+import { getTerminalBadgeClasses, getTerminalNodeClasses } from './statusColor';
 import { cn } from '@/lib/utils';
 
 interface TerminalNodeProps {
   terminal: TerminalDto;
   taskName?: string;
-}
-
-// TODO(E10-06): Extract status -> classes map to a shared module (shared with
-// StatusBar/TaskCard) so terminal/task status styling stays in sync. The
-// duplication across components risks drift when statuses are added.
-// TODO(E10-07): Replace hardcoded Tailwind status colors (green/red/yellow)
-// with design-system tokens (success/error/warning) once the tokens exist
-// for the new-design palette.
-
-/**
- * Get status color classes for terminal node
- */
-function getStatusClasses(status: string): string {
-  switch (status) {
-    case 'running':
-    case 'working':
-      return 'border-green-500 bg-green-500/10';
-    case 'waiting':
-      return 'border-blue-500 bg-blue-500/10';
-    case 'completed':
-      return 'border-gray-400 bg-gray-400/10';
-    case 'failed':
-      return 'border-red-500 bg-red-500/10';
-    case 'starting':
-      return 'border-yellow-500 bg-yellow-500/10';
-    default:
-      return 'border-border bg-secondary';
-  }
-}
-
-/**
- * Get status badge classes for terminal node
- */
-function getStatusBadgeClasses(status: string): string {
-  if (status === 'running' || status === 'working') {
-    return 'bg-green-500/20 text-green-600';
-  }
-  if (status === 'failed') {
-    return 'bg-red-500/20 text-red-600';
-  }
-  if (status === 'completed') {
-    return 'bg-gray-500/20 text-gray-600';
-  }
-  return 'bg-blue-500/20 text-blue-600';
 }
 
 export function TerminalNode({ terminal, taskName }: Readonly<TerminalNodeProps>) {
@@ -85,7 +42,7 @@ export function TerminalNode({ terminal, taskName }: Readonly<TerminalNodeProps>
       <button
         className={cn(
           'w-36 h-24 rounded border-2 flex flex-col items-center justify-center gap-1 transition-colors hover:bg-secondary/80',
-          getStatusClasses(terminal.status)
+          getTerminalNodeClasses(terminal.status)
         )}
         onClick={(event) => {
           // E10-03: Prevent the click from bubbling to outer handlers (e.g.,
@@ -104,7 +61,7 @@ export function TerminalNode({ terminal, taskName }: Readonly<TerminalNodeProps>
         <div
           className={cn(
             'text-xs px-2 py-0.5 rounded-full',
-            getStatusBadgeClasses(terminal.status)
+            getTerminalBadgeClasses(terminal.status)
           )}
         >
           {terminal.status}

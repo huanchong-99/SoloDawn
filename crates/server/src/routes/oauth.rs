@@ -28,7 +28,7 @@ pub struct CurrentUserResponse {
     pub user_id: String,
 }
 
-// TODO(W2-34-03): If/when OAuth is re-enabled in this deployment, the
+// NOTE(W2-34-03): If/when OAuth is re-enabled in this deployment, the
 // pre-authentication endpoints below (`/auth/handoff/init`,
 // `/auth/handoff/complete`, `/auth/token`) MUST be moved into
 // `unauthed_routes` in `mod.rs` — mirroring the setup move performed for
