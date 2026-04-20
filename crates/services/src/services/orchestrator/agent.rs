@@ -750,7 +750,7 @@ impl OrchestratorAgent {
                     let Some(message) = maybe_message else {
                         break;
                     };
-                    let should_stop = self.handle_message(message).await?;
+                    let should_stop = Box::pin(self.handle_message(message)).await?;
                     if should_stop {
                         break;
                     }

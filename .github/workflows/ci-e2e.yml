@@ -66,10 +66,7 @@ jobs:
 
     - name: Install protobuf (Windows)
       if: runner.os == 'Windows'
-      shell: bash
-      run: |
-        choco install protoc -y --no-progress
-        echo "PROTOC=C:/ProgramData/chocolatey/bin/protoc.exe" >> "$GITHUB_ENV"
+      uses: ./.github/actions/setup-protoc-windows
 
     # --- Rust toolchain ---
     - name: Install Rust toolchain
@@ -180,10 +177,7 @@ jobs:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
     - name: Install protobuf (Windows)
-      shell: bash
-      run: |
-        choco install protoc -y --no-progress
-        echo "PROTOC=C:/ProgramData/chocolatey/bin/protoc.exe" >> "$GITHUB_ENV"
+      uses: ./.github/actions/setup-protoc-windows
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@a54c7afa936fefeb4456b2dd8068152669aa8203 # stable

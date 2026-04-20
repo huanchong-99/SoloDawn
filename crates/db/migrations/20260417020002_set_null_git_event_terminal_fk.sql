@@ -14,32 +14,10 @@ CREATE TABLE git_event_new (
     processed_at    TEXT
 );
 
-INSERT INTO git_event_new (
-    id,
-    workflow_id,
-    terminal_id,
-    commit_hash,
-    branch,
-    commit_message,
-    metadata,
-    process_status,
-    agent_response,
-    created_at,
-    processed_at
-)
-SELECT
-    id,
-    workflow_id,
-    terminal_id,
-    commit_hash,
-    branch,
-    commit_message,
-    metadata,
-    process_status,
-    agent_response,
-    created_at,
-    processed_at
-FROM git_event;
+-- Column order intentionally matches `git_event`, so a straight copy keeps
+-- the rebuild concise while preserving every row.
+INSERT INTO git_event_new
+SELECT * FROM git_event;
 
 DROP TABLE git_event;
 ALTER TABLE git_event_new RENAME TO git_event;
