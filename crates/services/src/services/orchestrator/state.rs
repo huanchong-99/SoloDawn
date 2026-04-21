@@ -83,6 +83,11 @@ pub struct OrchestratorState {
     /// `workflow_planning_complete` before any feature tasks exist.
     /// Used to trigger a second planning round after Foundation completes.
     pub foundation_phase_only: bool,
+
+    /// Tracks consecutive R8-B3 guard blocks per task for deadlock detection.
+    /// When a task exceeds `MAX_ENFORCE_DEADLOCK_BLOCKS`, the quality gate is
+    /// degraded and the task is force-completed.
+    pub enforce_deadlock_counters: HashMap<String, u32>,
 }
 
 impl OrchestratorState {
@@ -102,6 +107,7 @@ impl OrchestratorState {
             pending_quality_checks: HashSet::new(),
             processed_checkpoints: HashSet::new(),
             foundation_phase_only: false,
+            enforce_deadlock_counters: HashMap::new(),
         }
     }
 

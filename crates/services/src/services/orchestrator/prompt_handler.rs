@@ -11,7 +11,7 @@
 //! 4. **Dangerous keywords detected**: Escalate to LLM or ask user
 //! 5. **YesNo/Choice/ArrowSelect/Input**: LLM decision
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use tokio::sync::RwLock;
 
@@ -22,6 +22,11 @@ use super::{
         TerminalPromptStateMachine,
     },
 };
+
+/// Callback type for LLM-powered prompt input generation.
+pub type LLMPromptCallback = Arc<
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync,
+>;
 
 // ============================================================================
 // Constants
@@ -215,6 +220,8 @@ pub struct PromptHandler {
     state_machines: Arc<RwLock<HashMap<String, TerminalPromptStateMachine>>>,
     /// Task context cache (terminal_id -> context)
     task_contexts: Arc<RwLock<HashMap<String, String>>>,
+    /// Optional LLM callback for generating free-form input responses
+    llm_callback: Option<LLMPromptCallback>,
 }
 
 impl PromptHandler {
@@ -236,6 +243,17 @@ impl PromptHandler {
             message_bus,
             state_machines: Arc::new(RwLock::new(HashMap::new())),
             task_contexts: Arc::new(RwLock::new(HashMap::new())),
+            llm_callback: None,
+        }
+    }
+
+    /// Create a new prompt handler with LLM callback for free-form input generation
+    pub fn new_with_llm(message_bus: SharedMessageBus, llm_callback: LLMPromptCallback) -> Self {
+        Self {
+            message_bus,
+            state_machines: Arc::new(RwLock::new(HashMap::new())),
+            task_contexts: Arc::new(RwLock::new(HashMap::new())),
+            llm_callback: Some(llm_callback),
         }
     }
 
@@ -486,7 +504,44 @@ impl PromptHandler {
                     return PromptDecision::auto_enter();
                 }
 
-                // Input prompts should ask user - we can't guess free-form input
+                if let Some(ref callback) = self.llm_callback {
+                    let task_ctx = {
+                        let contexts = self.task_contexts.read().await;
+                        contexts.values().next().cloned().unwrap_or_default()
+                    };
+                    let llm_prompt = format!(
+                        "A terminal is asking for free-form input. Provide ONLY the text to type, nothing else.\n\n\
+                         Task context: {task_ctx}\n\n\
+                         Prompt shown: {raw}\n\n\
+                         Respond with ONLY the input text.",
+                        raw = prompt.raw_text,
+                    );
+                    match tokio::time::timeout(
+                        Duration::from_secs(30),
+                        (callback)(llm_prompt),
+                    )
+                    .await
+                    {
+                        Ok(Some(response)) => {
+                            tracing::info!(
+                                raw_text = %prompt.raw_text,
+                                "LLM generated input response for free-form prompt"
+                            );
+                            return PromptDecision::LLMDecision {
+                                response,
+                                reasoning: "LLM-generated free-form input".to_string(),
+                                target_index: None,
+                            };
+                        }
+                        Ok(None) => {
+                            tracing::warn!("LLM input callback returned None, falling back to AskUser");
+                        }
+                        Err(_) => {
+                            tracing::warn!("LLM input callback timed out (30s), falling back to AskUser");
+                        }
+                    }
+                }
+
                 tracing::info!(
                     raw_text = %prompt.raw_text,
                     "Input prompt - requiring user input"

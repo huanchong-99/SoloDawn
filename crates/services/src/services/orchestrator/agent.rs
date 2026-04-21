@@ -26,7 +26,8 @@ use super::{
         COMPLETION_CONTEXT_DIFF_MAX_CHARS, COMPLETION_CONTEXT_LOG_LINES,
         COMPLETION_CONTEXT_LOG_MAX_CHARS,
         GIT_COMMIT_METADATA_SEPARATOR, HANDOFF_COMMIT_MAX_CHARS, HANDOFF_NOTES_MAX_CHARS,
-        MAX_CONSECUTIVE_LLM_FAILURES, QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
+        MAX_CONSECUTIVE_LLM_FAILURES, MAX_ENFORCE_DEADLOCK_BLOCKS,
+        QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
         QUALITY_GATE_MODE_SHADOW, QUALITY_GATE_STATUS_SKIPPED,
         QUALITY_REQUIREMENTS_SUFFIX,
         STATE_SAVE_DEBOUNCE_SECS, TASK_STATUS_CANCELLED,
@@ -42,7 +43,7 @@ use super::{
     persistence::StatePersistence,
     llm::{LLMClient, build_terminal_completion_prompt, create_claude_code_native_client, create_llm_client},
     message_bus::{BusMessage, SharedMessageBus},
-    prompt_handler::PromptHandler,
+    prompt_handler::{LLMPromptCallback, PromptHandler},
     runtime_actions::{RuntimeActionService, RuntimeTaskSpec, RuntimeTerminalSpec},
     state::{OrchestratorRunState, OrchestratorState, SharedOrchestratorState},
     types::{
@@ -185,7 +186,31 @@ impl OrchestratorAgent {
         })?;
         let state = Arc::new(RwLock::new(OrchestratorState::new(workflow_id)));
         let error_handler = ErrorHandler::new(db.clone(), message_bus.clone());
-        let prompt_handler = PromptHandler::new(message_bus.clone());
+
+        // Build LLM callback for prompt input generation (separate client instance)
+        let prompt_handler = match create_llm_client(&config) {
+            Ok(prompt_llm) => {
+                let prompt_llm: Arc<Box<dyn LLMClient>> = Arc::new(prompt_llm);
+                let callback: LLMPromptCallback = Arc::new(move |prompt_text: String| {
+                    let llm = prompt_llm.clone();
+                    Box::pin(async move {
+                        let messages = vec![LLMMessage {
+                            role: "user".to_string(),
+                            content: prompt_text,
+                        }];
+                        match llm.chat(messages).await {
+                            Ok(resp) => Some(resp.content),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Prompt LLM callback failed");
+                                None
+                            }
+                        }
+                    })
+                });
+                PromptHandler::new_with_llm(message_bus.clone(), callback)
+            }
+            Err(_) => PromptHandler::new(message_bus.clone()),
+        };
 
         Ok(Self {
             config,
@@ -885,11 +910,55 @@ impl OrchestratorAgent {
                             }
                         }
                         if blocked_by_gate {
+                            let deadlock_count = {
+                                let mut state = self.state.write().await;
+                                let counter = state.enforce_deadlock_counters
+                                    .entry(task.id.clone())
+                                    .or_insert(0);
+                                *counter += 1;
+                                *counter
+                            };
+
+                            if deadlock_count >= MAX_ENFORCE_DEADLOCK_BLOCKS {
+                                let all_processes_dead = task_terminals.iter().all(|t| {
+                                    t.status == "completed"
+                                        || t.status == "failed"
+                                        || t.execution_process_id.is_none()
+                                });
+
+                                if all_processes_dead {
+                                    tracing::warn!(
+                                        task_id = %task.id, task_name = %task.name,
+                                        deadlock_count,
+                                        "R8-B3 deadlock detected: enforce blockers unresolved \
+                                         but all terminals are dead. Force-completing task."
+                                    );
+                                    db::models::WorkflowTask::update_status(
+                                        &self.db.pool, &task.id, "completed",
+                                    ).await?;
+                                    self.persist_event(
+                                        "task_status",
+                                        &format!("Task \"{}\" force-completed (quality gate deadlock resolved)", task.name),
+                                    ).await;
+                                    {
+                                        let mut state = self.state.write().await;
+                                        state.enforce_deadlock_counters.remove(&task.id);
+                                    }
+                                    continue;
+                                }
+                            }
+
                             tracing::warn!(
                                 task_id = %task.id, task_name = %task.name,
-                                "R8-B3: refusing to auto-complete task — at least one terminal has unresolved enforce quality blockers"
+                                deadlock_count,
+                                "R8-B3: refusing to auto-complete task — enforce quality blockers ({}/{})",
+                                deadlock_count, MAX_ENFORCE_DEADLOCK_BLOCKS,
                             );
                             continue;
+                        }
+                        {
+                            let mut state = self.state.write().await;
+                            state.enforce_deadlock_counters.remove(&task.id);
                         }
                         tracing::info!(
                             task_id = %task.id, task_name = %task.name,
@@ -1072,7 +1141,7 @@ impl OrchestratorAgent {
 
         let instruction = format!(
             "{} | {}",
-            Self::build_task_instruction(workflow_id, task, terminal, total_terminals, None, &[]),
+            Self::build_task_instruction(workflow_id, task, terminal, total_terminals, None, &[], None, None),
             Self::STALL_RECOVERY_SUFFIX
         );
 
@@ -1486,11 +1555,16 @@ impl OrchestratorAgent {
         if success && !task_failed {
             if let Ok(working_dir) = self.resolve_project_working_dir().await {
                 let commit_hash = event.commit_hash.as_deref().unwrap_or("N/A");
+                let (task_branch, target_branch) = Self::load_branch_info_for_review(
+                    &self.db, &event.task_id, &workflow_id,
+                ).await;
                 if let Ok(ctx) = fetch_terminal_completion_context(
                     &self.db,
                     &event.terminal_id,
                     commit_hash,
                     &working_dir,
+                    task_branch.as_deref(),
+                    target_branch.as_deref(),
                 )
                 .await
                 {
@@ -2936,12 +3010,25 @@ impl OrchestratorAgent {
             state.workflow_id.clone()
         };
 
-        // Build and dispatch instruction
+        // Build and dispatch instruction (with foundation context + initial_goal for functional tasks)
         let prev_context = fetch_previous_terminal_context(
             &self.db, &task.id, &workflow_id, active_terminal.order_index,
         ).await.unwrap_or(None);
+        let (foundation_ctx, initial_goal) = if task.order_index > 0 {
+            let working_dir = self.resolve_project_working_dir().await.ok();
+            let fctx = if let Some(ref wd) = working_dir {
+                Self::build_foundation_context(&self.db, &workflow_id, wd).await
+            } else {
+                None
+            };
+            let goal = db::models::Workflow::find_by_id(&self.db.pool, &workflow_id)
+                .await.ok().flatten().and_then(|w| w.initial_goal);
+            (fctx, goal)
+        } else {
+            (None, None)
+        };
         let instruction =
-            Self::build_task_instruction(&workflow_id, &task, &active_terminal, terminals.len(), prev_context.as_ref(), &[]);
+            Self::build_task_instruction(&workflow_id, &task, &active_terminal, terminals.len(), prev_context.as_ref(), &[], foundation_ctx.as_deref(), initial_goal.as_deref());
         self.dispatch_terminal(task_id, &active_terminal, &instruction)
             .await
     }
@@ -3639,11 +3726,20 @@ impl OrchestratorAgent {
 
         // Inject terminal completion context (silent degradation on failure)
         if let Ok(working_dir) = self.resolve_project_working_dir().await {
+            let workflow_id = {
+                let state = self.state.read().await;
+                state.workflow_id.clone()
+            };
+            let (task_branch, target_branch) = Self::load_branch_info_for_review(
+                &self.db, &event.task_id, &workflow_id,
+            ).await;
             if let Ok(ctx) = fetch_terminal_completion_context(
                 &self.db,
                 &event.terminal_id,
                 commit_hash,
                 &working_dir,
+                task_branch.as_deref(),
+                target_branch.as_deref(),
             )
             .await
             {
@@ -5331,6 +5427,86 @@ impl OrchestratorAgent {
         }
     }
 
+    /// Load task branch and workflow target_branch for acceptance review.
+    async fn load_branch_info_for_review(
+        db: &DBService,
+        task_id: &str,
+        workflow_id: &str,
+    ) -> (Option<String>, Option<String>) {
+        let task_branch = db::models::WorkflowTask::find_by_id(&db.pool, task_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| t.branch);
+        let target_branch = db::models::Workflow::find_by_id(&db.pool, workflow_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|w| w.target_branch);
+        (task_branch, target_branch)
+    }
+
+    /// Build Foundation task context for functional terminals.
+    /// Returns a summary of Foundation's output (file tree) so functional tasks
+    /// know what already exists in the repository.
+    async fn build_foundation_context(
+        db: &DBService,
+        workflow_id: &str,
+        working_dir: &Path,
+    ) -> Option<String> {
+        let tasks = db::models::WorkflowTask::find_by_workflow(&db.pool, workflow_id)
+            .await
+            .ok()?;
+
+        let foundation = tasks.iter().find(|t| t.order_index == 0)?;
+        if foundation.status != TASK_STATUS_COMPLETED {
+            return None;
+        }
+
+        let tree_output = tokio::process::Command::new("git")
+            .args(["ls-tree", "-r", "--name-only", "HEAD"])
+            .current_dir(working_dir)
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
+            .output()
+            .await
+            .ok()?;
+
+        if !tree_output.status.success() {
+            return None;
+        }
+
+        let tree = String::from_utf8_lossy(&tree_output.stdout);
+        let filtered_tree: String = tree
+            .lines()
+            .filter(|l| {
+                !l.contains("node_modules/")
+                    && !l.contains(".lock")
+                    && !l.ends_with(".lock")
+                    && !l.contains("vendor/")
+                    && !l.contains("target/")
+                    && !l.contains("dist/")
+            })
+            .take(200)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if filtered_tree.is_empty() {
+            return None;
+        }
+
+        Some(format!(
+            "--- Foundation Task Output (existing project structure) ---\n\
+             The Foundation task (branch: {branch}) has completed and created:\n\
+             {tree}\n\
+             Build upon this existing structure. Do NOT recreate files that already exist.\n\
+             ---",
+            branch = foundation.branch,
+            tree = filtered_tree,
+        ))
+    }
+
     /// Builds a task instruction from task and terminal information.
     fn build_task_instruction(
         workflow_id: &str,
@@ -5339,8 +5515,19 @@ impl OrchestratorAgent {
         total_terminals: usize,
         prev_context: Option<&PreviousTerminalContext>,
         sibling_tasks: &[db::models::WorkflowTask],
+        foundation_context: Option<&str>,
+        initial_goal: Option<&str>,
     ) -> String {
         let mut parts = vec![format!("Start task: {} ({})", task.name, task.id)];
+
+        if let Some(goal) = initial_goal {
+            let preview: String = goal.chars().take(8000).collect();
+            parts.push(format!("## Original Project Requirements\n{preview}"));
+        }
+
+        if let Some(ctx) = foundation_context {
+            parts.push(ctx.to_string());
+        }
 
         // Include sibling task overview so each terminal knows the full project plan
         if sibling_tasks.len() > 1 {
@@ -5365,7 +5552,7 @@ impl OrchestratorAgent {
             let normalized = description.split_whitespace().collect::<Vec<_>>().join(" ");
             if !normalized.is_empty() {
                 if total_terminals > 1 {
-                    let summary = Self::truncate_instruction_text(&normalized, 200);
+                    let summary = Self::truncate_instruction_text(&normalized, 4000);
                     parts.push(format!("Task objective: {summary}"));
                 } else {
                     parts.push(format!("Task description: {normalized}"));
@@ -5489,6 +5676,15 @@ impl OrchestratorAgent {
             workflow_id
         );
 
+        // Pre-compute foundation context and initial_goal for functional tasks
+        let foundation_ctx = if let Ok(wd) = self.resolve_project_working_dir().await {
+            Self::build_foundation_context(&self.db, &workflow_id, &wd).await
+        } else {
+            None
+        };
+        let initial_goal = db::models::Workflow::find_by_id(&self.db.pool, &workflow_id)
+            .await.ok().flatten().and_then(|w| w.initial_goal);
+
         // Phase 1 (sequential): build the list of (task_id, terminal, instruction) to dispatch.
         // State initialization requires the write lock, so this must remain sequential.
         let mut dispatch_queue: Vec<(String, db::models::Terminal, String)> = Vec::new();
@@ -5560,8 +5756,11 @@ impl OrchestratorAgent {
             }
 
             // Build instruction and enqueue for parallel dispatch
+            // Non-foundation tasks get foundation context + initial_goal
+            let fctx = if task.order_index > 0 { foundation_ctx.as_deref() } else { None };
+            let goal = if task.order_index > 0 { initial_goal.as_deref() } else { None };
             let instruction =
-                Self::build_task_instruction(&workflow_id, task, &terminal, terminals.len(), None, &tasks);
+                Self::build_task_instruction(&workflow_id, task, &terminal, terminals.len(), None, &tasks, fctx, goal);
             dispatch_queue.push((task.id.clone(), terminal, instruction));
         }
 
@@ -7153,11 +7352,15 @@ fn loop_progress_hint(class: &LoopProgressClass) -> Option<String> {
 
 /// Collect terminal completion context (log summary, diff stat, commit body)
 /// for injection into LLM completion prompts.
+/// When `task_branch` and `target_branch` are provided, the acceptance review
+/// sees all files changed since the branch diverged (not just the last commit).
 async fn fetch_terminal_completion_context(
     db: &DBService,
     terminal_id: &str,
     commit_hash: &str,
     working_dir: &Path,
+    task_branch: Option<&str>,
+    target_branch: Option<&str>,
 ) -> anyhow::Result<TerminalCompletionContext> {
     // 1. Query terminal logs (returned in DESC order, reverse for chronological)
     let log_summary = match db::models::terminal::TerminalLog::find_by_terminal(
@@ -7182,11 +7385,21 @@ async fn fetch_terminal_completion_context(
         }
     };
 
-    // 2. Get diff stat via git
+    // 2. Compute merge-base for full branch diff (if branch info available)
+    let base_ref = match (task_branch, target_branch) {
+        (Some(tb), Some(tgt)) => compute_merge_base(working_dir, tgt, tb).await,
+        _ => None,
+    };
+
+    // 3. Get diff stat via git (use full branch range when available)
+    let diff_stat_args = if let Some(ref base) = base_ref {
+        vec!["diff".to_string(), "--stat".to_string(), format!("{base}..{commit_hash}")]
+    } else {
+        vec!["diff".to_string(), "--stat".to_string(), "HEAD~1..HEAD".to_string()]
+    };
     let diff_stat = match tokio::process::Command::new("git")
-        .args(["diff", "--stat", "HEAD~1..HEAD"])
+        .args(&diff_stat_args)
         .current_dir(working_dir)
-        // R6 port-leak hygiene — uniform strip across every child spawn.
         .env_remove("PORT")
         .env_remove("BACKEND_PORT")
         .env_remove("FRONTEND_PORT")
@@ -7204,14 +7417,13 @@ async fn fetch_terminal_completion_context(
         }
     };
 
-    // 3. Get commit body
+    // 4. Get commit body
     let commit_body = if commit_hash == "N/A" {
         String::new()
     } else {
         match tokio::process::Command::new("git")
             .args(["show", "-s", "--format=%B", commit_hash])
             .current_dir(working_dir)
-            // R6 port-leak hygiene — uniform strip across every child spawn.
             .env_remove("PORT")
             .env_remove("BACKEND_PORT")
             .env_remove("FRONTEND_PORT")
@@ -7230,11 +7442,11 @@ async fn fetch_terminal_completion_context(
         }
     };
 
-    // 4. Get actual content of changed files for acceptance review
+    // 5. Get actual content of changed files for acceptance review (full branch diff)
     let changed_files_content = if commit_hash == "N/A" {
         String::new()
     } else {
-        collect_changed_files_content(working_dir, commit_hash, ACCEPTANCE_REVIEW_MAX_BYTES).await
+        collect_changed_files_content(working_dir, commit_hash, base_ref.as_deref(), ACCEPTANCE_REVIEW_MAX_BYTES).await
     };
 
     Ok(TerminalCompletionContext {
@@ -7245,41 +7457,83 @@ async fn fetch_terminal_completion_context(
     })
 }
 
-/// Collect the actual content of files changed in a commit for acceptance review.
-/// Uses `git diff --name-only` to list files, then `git show` to read each one.
-async fn collect_changed_files_content(
+/// Compute the merge-base between two branches for full-branch diff.
+async fn compute_merge_base(
     working_dir: &Path,
-    commit_hash: &str,
-    max_bytes: usize,
-) -> String {
-    // Get list of changed files
-    let file_list = match tokio::process::Command::new("git")
-        .args(["diff", "--name-only", &format!("{commit_hash}~1"), commit_hash])
+    target_branch: &str,
+    task_branch: &str,
+) -> Option<String> {
+    let output = tokio::process::Command::new("git")
+        .args(["merge-base", target_branch, task_branch])
         .current_dir(working_dir)
         .env_remove("PORT")
         .env_remove("BACKEND_PORT")
         .env_remove("FRONTEND_PORT")
         .output()
         .await
-    {
-        Ok(output) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout).to_string()
+        .ok()?;
+    if output.status.success() {
+        let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if hash.is_empty() { None } else { Some(hash) }
+    } else {
+        None
+    }
+}
+
+/// Collect the actual content of files changed in a commit for acceptance review.
+/// When `base_ref` is provided, collects all files changed since the branch divergence
+/// point (full branch diff). Otherwise falls back to single-commit diff.
+async fn collect_changed_files_content(
+    working_dir: &Path,
+    commit_hash: &str,
+    base_ref: Option<&str>,
+    max_bytes: usize,
+) -> String {
+    // Get list of changed files — full branch diff when base_ref available
+    let file_list = if let Some(base) = base_ref {
+        match tokio::process::Command::new("git")
+            .args(["diff", "--name-only", base, commit_hash])
+            .current_dir(working_dir)
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
+            .output()
+            .await
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).to_string()
+            }
+            _ => return String::new(),
         }
-        _ => {
-            // Fallback: try diff against empty tree for initial commits
-            match tokio::process::Command::new("git")
-                .args(["diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash])
-                .current_dir(working_dir)
-                .env_remove("PORT")
-                .env_remove("BACKEND_PORT")
-                .env_remove("FRONTEND_PORT")
-                .output()
-                .await
-            {
-                Ok(output) if output.status.success() => {
-                    String::from_utf8_lossy(&output.stdout).to_string()
+    } else {
+        match tokio::process::Command::new("git")
+            .args(["diff", "--name-only", &format!("{commit_hash}~1"), commit_hash])
+            .current_dir(working_dir)
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
+            .output()
+            .await
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).to_string()
+            }
+            _ => {
+                // Fallback: try diff against empty tree for initial commits
+                match tokio::process::Command::new("git")
+                    .args(["diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash])
+                    .current_dir(working_dir)
+                    .env_remove("PORT")
+                    .env_remove("BACKEND_PORT")
+                    .env_remove("FRONTEND_PORT")
+                    .output()
+                    .await
+                {
+                    Ok(output) if output.status.success() => {
+                        String::from_utf8_lossy(&output.stdout).to_string()
+                    }
+                    _ => return String::new(),
                 }
-                _ => return String::new(),
             }
         }
     };
@@ -7597,7 +7851,7 @@ mod tests {
         let terminal = make_terminal(0);
 
         let instruction =
-            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 3, None, &[]);
+            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 3, None, &[], None, None);
 
         assert!(instruction.contains("Task objective:"));
         assert!(!instruction.contains("Task description:"));
@@ -7619,7 +7873,7 @@ mod tests {
         let terminal = make_terminal(0);
 
         let instruction =
-            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 1, None, &[]);
+            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 1, None, &[], None, None);
 
         assert!(instruction.contains("Task description: Complete full implementation end-to-end"));
         assert!(!instruction.contains("Task objective:"));
