@@ -2511,7 +2511,33 @@ impl OrchestratorAgent {
             && !is_environment_blocker
             && event.blocking_issues > 0
         {
-            if let Some(fix_instructions) = &event.fix_instructions {
+            // Stagnation detection: if blocking count hasn't decreased for
+            // MAX_ENFORCE_DEADLOCK_BLOCKS consecutive gate runs, the terminal
+            // is stuck on unfixable issues (e.g., dist/ false positives).
+            // Force-skip the quality gate to break the cycle.
+            let stagnation_key = format!("qg_stagnation:{}", event.terminal_id);
+            let should_force_skip = {
+                let mut state = self.state.write().await;
+                let counter = state.enforce_deadlock_counters
+                    .entry(stagnation_key.clone())
+                    .or_insert(0);
+                *counter += 1;
+                *counter >= MAX_ENFORCE_DEADLOCK_BLOCKS
+            };
+            if should_force_skip {
+                tracing::warn!(
+                    terminal_id = %event.terminal_id,
+                    blocking_issues = event.blocking_issues,
+                    "Quality gate stagnation detected: {} consecutive enforce failures. \
+                     Force-skipping to break the cycle.",
+                    MAX_ENFORCE_DEADLOCK_BLOCKS,
+                );
+                {
+                    let mut state = self.state.write().await;
+                    state.enforce_deadlock_counters.remove(&stagnation_key);
+                }
+                // Fall through to the normal completion flow (skip the fix-instructions path)
+            } else if let Some(fix_instructions) = &event.fix_instructions {
                 tracing::warn!(
                     terminal_id = %event.terminal_id,
                     blocking_issues = event.blocking_issues,
@@ -2622,10 +2648,13 @@ impl OrchestratorAgent {
                     }
                 }
             }
-            // Leave terminal in its current working/waiting state; the next commit
-            // will re-trigger the gate. PTY exit is handled by the normal
-            // terminal-lifecycle path.
-            return Ok(());
+            if !should_force_skip {
+                // Leave terminal in its current working/waiting state; the next commit
+                // will re-trigger the gate. PTY exit is handled by the normal
+                // terminal-lifecycle path.
+                return Ok(());
+            }
+            // should_force_skip == true: fall through to normal completion flow
         }
 
         // R4 Fix B: environment blocker (all blocking issues are infra / tool
