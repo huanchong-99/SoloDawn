@@ -990,6 +990,55 @@ impl OrchestratorAgent {
                 _ => {}
             }
         }
+
+        // Stuck foundation detection: if foundation_phase_only is set, the
+        // Foundation task is completed, but no feature tasks exist, trigger
+        // a synthetic completion event so the LLM creates feature tasks.
+        let is_foundation_stuck = {
+            let state = self.state.read().await;
+            state.foundation_phase_only
+                && !state.workflow_planning_complete
+                && tasks.len() == 1
+                && tasks[0].status == TASK_STATUS_COMPLETED
+        };
+        if is_foundation_stuck {
+            let foundation = &tasks[0];
+            let foundation_terminals: Vec<_> = terminals
+                .iter()
+                .filter(|t| t.workflow_task_id == foundation.id)
+                .collect();
+            let any_working = foundation_terminals.iter().any(|t| t.status == TERMINAL_STATUS_WORKING);
+            if !any_working {
+                tracing::warn!(
+                    task_id = %foundation.id,
+                    "Stuck foundation detected: task completed, no feature tasks, \
+                     no working terminals. Triggering synthetic completion for replanning."
+                );
+                let last_terminal = foundation_terminals.last();
+                let commit_hash = last_terminal
+                    .and_then(|t| t.last_commit_message.as_deref())
+                    .unwrap_or("N/A");
+                let synthetic_event = TerminalCompletionEvent {
+                    terminal_id: last_terminal.map_or_else(
+                        || foundation.id.clone(),
+                        |t| t.id.clone(),
+                    ),
+                    task_id: foundation.id.clone(),
+                    workflow_id: workflow_id.clone(),
+                    status: TerminalCompletionStatus::Completed,
+                    commit_hash: Some(commit_hash.to_string()),
+                    commit_message: Some("Foundation phase completed".to_string()),
+                    metadata: None,
+                };
+                let prompt = self.build_completion_prompt(&synthetic_event).await?;
+                if let Some(response) = self.call_llm_safe(&prompt).await {
+                    if let Err(e) = self.execute_instruction(&response).await {
+                        tracing::error!(error = %e, "Failed to execute replanning instructions");
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1424,20 +1473,36 @@ impl OrchestratorAgent {
 
         // R8-B3 guard #1: do NOT cascade a clean PTY exit into terminal
         // completion if the most recent enforce quality gate still reports
-        // unresolved blockers. R8 retry workflow `94ab3e66` got marked
-        // `completed` despite blocking_issues=4 because Claude Code's
-        // stop-hook sequence looked like a normal exit. The fix here keeps
-        // the terminal in its current state (working/waiting); the next
-        // quality gate event or stall recovery will re-drive progress.
+        // unresolved blockers — UNLESS the parent task is already completed.
+        // When the task was auto-completed (e.g., by stall recovery), keeping
+        // the terminal in "working" state creates a dead loop: quality gate
+        // cycles endlessly but no progress is possible. Allowing the terminal
+        // to finalize lets the completion LLM run and trigger the
+        // foundation→feature task transition.
         if success
             && terminal_has_unresolved_enforce_blockers(&self.db, &event.terminal_id).await
         {
+            let task_already_done = db::models::WorkflowTask::find_by_id(
+                &self.db.pool, &event.task_id,
+            )
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|t| t.status == TASK_STATUS_COMPLETED || t.status == TASK_STATUS_FAILED);
+
+            if !task_already_done {
+                tracing::warn!(
+                    terminal_id = %event.terminal_id,
+                    task_id = %event.task_id,
+                    "R8-B3: refusing to mark terminal completed — last enforce quality_run still has unresolved blockers. Terminal stays in current state; gate-loop or stall recovery will re-drive."
+                );
+                return Ok(());
+            }
             tracing::warn!(
                 terminal_id = %event.terminal_id,
                 task_id = %event.task_id,
-                "R8-B3: refusing to mark terminal completed — last enforce quality_run still has unresolved blockers. Terminal stays in current state; gate-loop or stall recovery will re-drive."
+                "R8-B3: allowing terminal completion despite enforce blockers — task is already completed, blocking further would create a dead loop"
             );
-            return Ok(());
         }
 
         let completion_updated = self
