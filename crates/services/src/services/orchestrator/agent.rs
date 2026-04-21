@@ -3912,20 +3912,51 @@ impl OrchestratorAgent {
 
     /// Extract JSON from a response that may contain explanatory text around it.
     fn extract_json_from_mixed_response(response: &str) -> Option<String> {
-        // Strategy 1: bracket matching — find first [ to last ] (or { to }).
-        // This is the most robust approach because LLMs often include ``` markers
-        // INSIDE the JSON content (e.g., instruction text with code blocks),
-        // which breaks ```json extraction by prematurely closing the fence.
+        // Strategy 1: depth-aware bracket matching — find the first balanced
+        // JSON block (array or object). Previous `rfind` approach broke when
+        // the LLM returned multiple JSON blocks separated by prose.
         let first_bracket = response.find('[').unwrap_or(usize::MAX);
         let first_brace = response.find('{').unwrap_or(usize::MAX);
         let start = first_bracket.min(first_brace);
         if start < response.len() {
             let remaining = &response[start..];
-            let end_char = if remaining.starts_with('[') { ']' } else { '}' };
-            if let Some(end) = remaining.rfind(end_char) {
+            let (open, close) = if remaining.starts_with('[') {
+                ('[', ']')
+            } else {
+                ('{', '}')
+            };
+            let mut depth = 0i32;
+            let mut in_string = false;
+            let mut escape_next = false;
+            let mut end_pos = None;
+            for (i, ch) in remaining.char_indices() {
+                if escape_next {
+                    escape_next = false;
+                    continue;
+                }
+                if ch == '\\' && in_string {
+                    escape_next = true;
+                    continue;
+                }
+                if ch == '"' {
+                    in_string = !in_string;
+                    continue;
+                }
+                if in_string {
+                    continue;
+                }
+                if ch == open {
+                    depth += 1;
+                } else if ch == close {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_pos = Some(i);
+                        break;
+                    }
+                }
+            }
+            if let Some(end) = end_pos {
                 let candidate = remaining[..=end].to_string();
-                // Only use if the extracted JSON is large enough (avoids grabbing
-                // small inline brackets from explanatory text).
                 if candidate.len() > 50 {
                     return Some(candidate);
                 }
