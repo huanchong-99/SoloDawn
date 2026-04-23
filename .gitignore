@@ -106,3 +106,6 @@ quality-report-*.md
 .tmp_*.log
 test_task.json
 test-screenshots/
+
+# Locally-provisioned build tooling (protoc, etc.)
+.tooling/

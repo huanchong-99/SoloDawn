@@ -22,10 +22,12 @@ use tokio::{
 use super::{
     config::OrchestratorConfig,
     constants::{
-        COMPLETION_CONTEXT_BODY_MAX_CHARS, COMPLETION_CONTEXT_DIFF_MAX_CHARS,
-        COMPLETION_CONTEXT_LOG_LINES, COMPLETION_CONTEXT_LOG_MAX_CHARS,
+        ACCEPTANCE_REVIEW_MAX_BYTES, COMPLETION_CONTEXT_BODY_MAX_CHARS,
+        COMPLETION_CONTEXT_DIFF_MAX_CHARS, COMPLETION_CONTEXT_LOG_LINES,
+        COMPLETION_CONTEXT_LOG_MAX_CHARS,
         GIT_COMMIT_METADATA_SEPARATOR, HANDOFF_COMMIT_MAX_CHARS, HANDOFF_NOTES_MAX_CHARS,
-        MAX_CONSECUTIVE_LLM_FAILURES, QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
+        MAX_CONSECUTIVE_LLM_FAILURES, MAX_ENFORCE_DEADLOCK_BLOCKS,
+        QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
         QUALITY_GATE_MODE_SHADOW, QUALITY_GATE_STATUS_SKIPPED,
         QUALITY_REQUIREMENTS_SUFFIX,
         STATE_SAVE_DEBOUNCE_SECS, TASK_STATUS_CANCELLED,
@@ -41,13 +43,14 @@ use super::{
     persistence::StatePersistence,
     llm::{LLMClient, build_terminal_completion_prompt, create_claude_code_native_client, create_llm_client},
     message_bus::{BusMessage, SharedMessageBus},
-    prompt_handler::PromptHandler,
+    prompt_handler::{LLMPromptCallback, PromptHandler},
     runtime_actions::{RuntimeActionService, RuntimeTaskSpec, RuntimeTerminalSpec},
     state::{OrchestratorRunState, OrchestratorState, SharedOrchestratorState},
     types::{
-        CodeIssue, LLMMessage, OrchestratorInstruction, PreviousTerminalContext,
-        QualityGateResultEvent, TerminalCompletionContext, TerminalCompletionEvent,
-        TerminalCompletionStatus, TerminalPromptEvent,
+        AcceptanceReviewResult, AcceptanceVerdict, CodeIssue, LLMMessage,
+        OrchestratorInstruction, PreviousTerminalContext, QualityGateResultEvent,
+        TerminalCompletionContext, TerminalCompletionEvent, TerminalCompletionStatus,
+        TerminalPromptEvent,
     },
 };
 use crate::services::{
@@ -166,10 +169,15 @@ impl OrchestratorAgent {
             );
             // Use a Claude model for native credentials — ignore non-Claude
             // model names (e.g. "gpt-4o" from default config).
+            // Hardcoded fallback was bumped from `claude-sonnet-4-20250514`
+            // (Sonnet 4) to `claude-sonnet-4-6` (Sonnet 4.6) after the R8-C
+            // Task 1 retry delivered 92/100 on the older model — verified
+            // via the `test_probe_subscription_model_acceptance` probe that
+            // the subscription endpoint accepts the new ID.
             let model = if config.model.starts_with("claude-") {
                 &config.model
             } else {
-                "claude-sonnet-4-20250514"
+                "claude-sonnet-4-6"
             };
             create_claude_code_native_client(model)
                 .ok_or_else(|| anyhow::anyhow!(
@@ -178,7 +186,31 @@ impl OrchestratorAgent {
         })?;
         let state = Arc::new(RwLock::new(OrchestratorState::new(workflow_id)));
         let error_handler = ErrorHandler::new(db.clone(), message_bus.clone());
-        let prompt_handler = PromptHandler::new(message_bus.clone());
+
+        // Build LLM callback for prompt input generation (separate client instance)
+        let prompt_handler = match create_llm_client(&config) {
+            Ok(prompt_llm) => {
+                let prompt_llm: Arc<Box<dyn LLMClient>> = Arc::new(prompt_llm);
+                let callback: LLMPromptCallback = Arc::new(move |prompt_text: String| {
+                    let llm = prompt_llm.clone();
+                    Box::pin(async move {
+                        let messages = vec![LLMMessage {
+                            role: "user".to_string(),
+                            content: prompt_text,
+                        }];
+                        match llm.chat(messages).await {
+                            Ok(resp) => Some(resp.content),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Prompt LLM callback failed");
+                                None
+                            }
+                        }
+                    })
+                });
+                PromptHandler::new_with_llm(message_bus.clone(), callback)
+            }
+            Err(_) => PromptHandler::new(message_bus.clone()),
+        };
 
         Ok(Self {
             config,
@@ -490,14 +522,14 @@ impl OrchestratorAgent {
         // a synthetic Claude Code model so the agent can create terminals.
         let mut model_configs = db::models::ModelConfig::find_user_configured(&self.db.pool).await?;
         if model_configs.is_empty()
-            && create_claude_code_native_client("claude-sonnet-4-20250514").is_some()
+            && create_claude_code_native_client("claude-sonnet-4-6").is_some()
         {
             model_configs.push(db::models::ModelConfig {
                 id: "model-claude-sonnet".to_string(),
                 cli_type_id: "cli-claude-code".to_string(),
                 name: "sonnet".to_string(),
                 display_name: "Claude Sonnet (Native)".to_string(),
-                api_model_id: Some("claude-sonnet-4-20250514".to_string()),
+                api_model_id: Some("claude-sonnet-4-6".to_string()),
                 is_default: true,
                 is_official: false,
                 created_at: chrono::Utc::now(),
@@ -899,11 +931,55 @@ impl OrchestratorAgent {
                             }
                         }
                         if blocked_by_gate {
+                            let deadlock_count = {
+                                let mut state = self.state.write().await;
+                                let counter = state.enforce_deadlock_counters
+                                    .entry(task.id.clone())
+                                    .or_insert(0);
+                                *counter += 1;
+                                *counter
+                            };
+
+                            if deadlock_count >= MAX_ENFORCE_DEADLOCK_BLOCKS {
+                                let all_processes_dead = task_terminals.iter().all(|t| {
+                                    t.status == "completed"
+                                        || t.status == "failed"
+                                        || t.execution_process_id.is_none()
+                                });
+
+                                if all_processes_dead {
+                                    tracing::warn!(
+                                        task_id = %task.id, task_name = %task.name,
+                                        deadlock_count,
+                                        "R8-B3 deadlock detected: enforce blockers unresolved \
+                                         but all terminals are dead. Force-completing task."
+                                    );
+                                    db::models::WorkflowTask::update_status(
+                                        &self.db.pool, &task.id, "completed",
+                                    ).await?;
+                                    self.persist_event(
+                                        "task_status",
+                                        &format!("Task \"{}\" force-completed (quality gate deadlock resolved)", task.name),
+                                    ).await;
+                                    {
+                                        let mut state = self.state.write().await;
+                                        state.enforce_deadlock_counters.remove(&task.id);
+                                    }
+                                    continue;
+                                }
+                            }
+
                             tracing::warn!(
                                 task_id = %task.id, task_name = %task.name,
-                                "R8-B3: refusing to auto-complete task — at least one terminal has unresolved enforce quality blockers"
+                                deadlock_count,
+                                "R8-B3: refusing to auto-complete task — enforce quality blockers ({}/{})",
+                                deadlock_count, MAX_ENFORCE_DEADLOCK_BLOCKS,
                             );
                             continue;
+                        }
+                        {
+                            let mut state = self.state.write().await;
+                            state.enforce_deadlock_counters.remove(&task.id);
                         }
                         tracing::info!(
                             task_id = %task.id, task_name = %task.name,
@@ -935,6 +1011,55 @@ impl OrchestratorAgent {
                 _ => {}
             }
         }
+
+        // Stuck foundation detection: if foundation_phase_only is set, the
+        // Foundation task is completed, but no feature tasks exist, trigger
+        // a synthetic completion event so the LLM creates feature tasks.
+        let is_foundation_stuck = {
+            let state = self.state.read().await;
+            state.foundation_phase_only
+                && !state.workflow_planning_complete
+                && tasks.len() == 1
+                && tasks[0].status == TASK_STATUS_COMPLETED
+        };
+        if is_foundation_stuck {
+            let foundation = &tasks[0];
+            let foundation_terminals: Vec<_> = terminals
+                .iter()
+                .filter(|t| t.workflow_task_id == foundation.id)
+                .collect();
+            let any_working = foundation_terminals.iter().any(|t| t.status == TERMINAL_STATUS_WORKING);
+            if !any_working {
+                tracing::warn!(
+                    task_id = %foundation.id,
+                    "Stuck foundation detected: task completed, no feature tasks, \
+                     no working terminals. Triggering synthetic completion for replanning."
+                );
+                let last_terminal = foundation_terminals.last();
+                let commit_hash = last_terminal
+                    .and_then(|t| t.last_commit_message.as_deref())
+                    .unwrap_or("N/A");
+                let synthetic_event = TerminalCompletionEvent {
+                    terminal_id: last_terminal.map_or_else(
+                        || foundation.id.clone(),
+                        |t| t.id.clone(),
+                    ),
+                    task_id: foundation.id.clone(),
+                    workflow_id: workflow_id.clone(),
+                    status: TerminalCompletionStatus::Completed,
+                    commit_hash: Some(commit_hash.to_string()),
+                    commit_message: Some("Foundation phase completed".to_string()),
+                    metadata: None,
+                };
+                let prompt = self.build_completion_prompt(&synthetic_event).await?;
+                if let Some(response) = self.call_llm_safe(&prompt).await {
+                    if let Err(e) = self.execute_instruction(&response).await {
+                        tracing::error!(error = %e, "Failed to execute replanning instructions");
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1086,7 +1211,7 @@ impl OrchestratorAgent {
 
         let instruction = format!(
             "{} | {}",
-            Self::build_task_instruction(workflow_id, task, terminal, total_terminals, None, &[]),
+            Self::build_task_instruction(workflow_id, task, terminal, total_terminals, None, &[], None, None),
             Self::STALL_RECOVERY_SUFFIX
         );
 
@@ -1369,20 +1494,36 @@ impl OrchestratorAgent {
 
         // R8-B3 guard #1: do NOT cascade a clean PTY exit into terminal
         // completion if the most recent enforce quality gate still reports
-        // unresolved blockers. R8 retry workflow `94ab3e66` got marked
-        // `completed` despite blocking_issues=4 because Claude Code's
-        // stop-hook sequence looked like a normal exit. The fix here keeps
-        // the terminal in its current state (working/waiting); the next
-        // quality gate event or stall recovery will re-drive progress.
+        // unresolved blockers — UNLESS the parent task is already completed.
+        // When the task was auto-completed (e.g., by stall recovery), keeping
+        // the terminal in "working" state creates a dead loop: quality gate
+        // cycles endlessly but no progress is possible. Allowing the terminal
+        // to finalize lets the completion LLM run and trigger the
+        // foundation→feature task transition.
         if success
             && terminal_has_unresolved_enforce_blockers(&self.db, &event.terminal_id).await
         {
+            let task_already_done = db::models::WorkflowTask::find_by_id(
+                &self.db.pool, &event.task_id,
+            )
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|t| t.status == TASK_STATUS_COMPLETED || t.status == TASK_STATUS_FAILED);
+
+            if !task_already_done {
+                tracing::warn!(
+                    terminal_id = %event.terminal_id,
+                    task_id = %event.task_id,
+                    "R8-B3: refusing to mark terminal completed — last enforce quality_run still has unresolved blockers. Terminal stays in current state; gate-loop or stall recovery will re-drive."
+                );
+                return Ok(());
+            }
             tracing::warn!(
                 terminal_id = %event.terminal_id,
                 task_id = %event.task_id,
-                "R8-B3: refusing to mark terminal completed — last enforce quality_run still has unresolved blockers. Terminal stays in current state; gate-loop or stall recovery will re-drive."
+                "R8-B3: allowing terminal completion despite enforce blockers — task is already completed, blocking further would create a dead loop"
             );
-            return Ok(());
         }
 
         let completion_updated = self
@@ -1501,6 +1642,73 @@ impl OrchestratorAgent {
         }
 
         // 闁哄瀚紓鎾诲箵閹邦喓浠涙鐐村劶閻ㄧ喖鏁?LLM
+        // Acceptance review: LLM reads actual code and verifies against requirements.
+        if success && !task_failed {
+            if let Ok(working_dir) = self.resolve_project_working_dir().await {
+                let commit_hash = event.commit_hash.as_deref().unwrap_or("N/A");
+                let (task_branch, target_branch) = Self::load_branch_info_for_review(
+                    &self.db, &event.task_id, &workflow_id,
+                ).await;
+                if let Ok(ctx) = fetch_terminal_completion_context(
+                    &self.db,
+                    &event.terminal_id,
+                    commit_hash,
+                    &working_dir,
+                    task_branch.as_deref(),
+                    target_branch.as_deref(),
+                )
+                .await
+                {
+                    let review = self.run_acceptance_review(&event, &ctx).await?;
+                    if review.verdict == AcceptanceVerdict::Rejected {
+                        tracing::warn!(
+                            task_id = %event.task_id,
+                            terminal_id = %event.terminal_id,
+                            "Acceptance review REJECTED — sending fix instructions"
+                        );
+                        let fix_message = format!(
+                            "ACCEPTANCE REVIEW: Your code does not meet the task requirements.\n\n\
+                             {}\n\n\
+                             Fix these issues and commit again. \
+                             The acceptance review will re-run automatically.",
+                            review.fix_instructions
+                        );
+                        let session_id_opt =
+                            db::models::Terminal::find_by_id(&self.db.pool, &event.terminal_id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .and_then(|t| t.pty_session_id.or(t.session_id))
+                                .filter(|s| !s.trim().is_empty());
+                        if let Some(session_id) = session_id_opt {
+                            self.message_bus
+                                .publish_terminal_input(
+                                    &event.terminal_id,
+                                    &session_id,
+                                    &fix_message,
+                                    None,
+                                )
+                                .await;
+                        } else if let Ok(ra) = self.runtime_actions() {
+                            if let Ok(restarted) =
+                                ra.relaunch_terminal_clean_context(&event.terminal_id).await
+                            {
+                                let _ = self
+                                    .dispatch_terminal(&event.task_id, &restarted, &fix_message)
+                                    .await;
+                            }
+                        }
+                        self.maybe_save_state().await;
+                        {
+                            let mut state = self.state.write().await;
+                            state.run_state = OrchestratorRunState::Idle;
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
         let should_run_completion_llm = !(success && has_next && !task_failed);
         let mut completion_response: Option<String> = None;
         if should_run_completion_llm {
@@ -1512,22 +1720,31 @@ impl OrchestratorAgent {
                     let state = self.state.read().await;
                     state.workflow_id.clone()
                 };
-                tracing::warn!(
-                    workflow_id = %wf_id,
-                    task_id = %event.task_id,
-                    terminal_id = %event.terminal_id,
-                    "LLM unavailable, falling back to auto-complete stalled tasks"
-                );
-
-                // Fallback: when LLM is unavailable and there's no next terminal to
-                // auto-dispatch, tasks/workflow can get stuck in running state forever.
-                // Auto-complete any tasks whose terminals have all finished.
-                if let Err(e) = self.auto_complete_stalled_tasks().await {
-                    tracing::error!(
+                // Agent-planned workflows must NOT auto-complete without LLM
+                // because the LLM is responsible for creating feature tasks and
+                // validating requirement coverage before completion.
+                if self.is_agent_planned_workflow().await.unwrap_or(false) {
+                    tracing::warn!(
                         workflow_id = %wf_id,
-                        "LLM-unavailable fallback: failed to auto-complete stalled tasks: {}",
-                        e
+                        task_id = %event.task_id,
+                        terminal_id = %event.terminal_id,
+                        "LLM unavailable for agent-planned workflow — \
+                         refusing auto-complete; tasks remain in current state until LLM recovers"
                     );
+                } else {
+                    tracing::warn!(
+                        workflow_id = %wf_id,
+                        task_id = %event.task_id,
+                        terminal_id = %event.terminal_id,
+                        "LLM unavailable, falling back to auto-complete stalled tasks"
+                    );
+                    if let Err(e) = self.auto_complete_stalled_tasks().await {
+                        tracing::error!(
+                            workflow_id = %wf_id,
+                            "LLM-unavailable fallback: failed to auto-complete stalled tasks: {}",
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -2239,11 +2456,20 @@ impl OrchestratorAgent {
         // Skip classification entirely for infra-blocker runs — those are
         // environmental, not loop-progress signals. The existing infra path
         // (is_environment_blocker, lines 2266+) handles them.
+        //
+        // R8-C1: also skip when `blocking_issues == 0`. A gate that returns
+        // status=error / status=fail with total_issues>0 but blocking_issues=0
+        // means only non-blocking warnings remain (e.g. 344 ESLint warnings,
+        // audit findings, style issues). The AI has cleared every real blocker
+        // — classifying an empty multiset is noise, and sending the fix-prompt
+        // below preempts the completion cascade and traps the task in an
+        // endless loop (observed in R8-B retry workflow `bf6550f7`).
         let (loop_progress_hint_text, should_auto_pause) = if event.mode
             == QUALITY_GATE_MODE_ENFORCE
             && !event.passed
             && !is_metric_collection_failure
             && !is_environment_blocker
+            && event.blocking_issues > 0
         {
             let multiset_opt = compute_blocker_multiset(&self.db, &event.quality_run_id).await;
             if let Some(curr_multiset) = multiset_opt {
@@ -2321,12 +2547,47 @@ impl OrchestratorAgent {
         // terminal working for a retry. The previous behavior ("send fix AND mark
         // Failed") created a race where subsequent fix-up commits were rejected by
         // out-of-order protection.
+        //
+        // R8-C1: require `blocking_issues > 0` as well. A blocking=0 result means
+        // the AI has cleared every real blocker; remaining total_issues are only
+        // non-blocking warnings. Sending a fix-prompt here short-circuits the
+        // completion cascade (line 2489 is never reached) and traps the task in
+        // an endless handoff loop — this was the root cause that kept Task 1 R8-B
+        // retry workflow running with blocking=0 for 5+ gate rounds without ever
+        // completing.
         if event.mode == QUALITY_GATE_MODE_ENFORCE
             && !event.passed
             && !is_metric_collection_failure
             && !is_environment_blocker
+            && event.blocking_issues > 0
         {
-            if let Some(fix_instructions) = &event.fix_instructions {
+            // Stagnation detection: if blocking count hasn't decreased for
+            // MAX_ENFORCE_DEADLOCK_BLOCKS consecutive gate runs, the terminal
+            // is stuck on unfixable issues (e.g., dist/ false positives).
+            // Force-skip the quality gate to break the cycle.
+            let stagnation_key = format!("qg_stagnation:{}", event.terminal_id);
+            let should_force_skip = {
+                let mut state = self.state.write().await;
+                let counter = state.enforce_deadlock_counters
+                    .entry(stagnation_key.clone())
+                    .or_insert(0);
+                *counter += 1;
+                *counter >= MAX_ENFORCE_DEADLOCK_BLOCKS
+            };
+            if should_force_skip {
+                tracing::warn!(
+                    terminal_id = %event.terminal_id,
+                    blocking_issues = event.blocking_issues,
+                    "Quality gate stagnation detected: {} consecutive enforce failures. \
+                     Force-skipping to break the cycle.",
+                    MAX_ENFORCE_DEADLOCK_BLOCKS,
+                );
+                {
+                    let mut state = self.state.write().await;
+                    state.enforce_deadlock_counters.remove(&stagnation_key);
+                }
+                // Fall through to the normal completion flow (skip the fix-instructions path)
+            } else if let Some(fix_instructions) = &event.fix_instructions {
                 tracing::warn!(
                     terminal_id = %event.terminal_id,
                     blocking_issues = event.blocking_issues,
@@ -2437,10 +2698,13 @@ impl OrchestratorAgent {
                     }
                 }
             }
-            // Leave terminal in its current working/waiting state; the next commit
-            // will re-trigger the gate. PTY exit is handled by the normal
-            // terminal-lifecycle path.
-            return Ok(());
+            if !should_force_skip {
+                // Leave terminal in its current working/waiting state; the next commit
+                // will re-trigger the gate. PTY exit is handled by the normal
+                // terminal-lifecycle path.
+                return Ok(());
+            }
+            // should_force_skip == true: fall through to normal completion flow
         }
 
         // R4 Fix B: environment blocker (all blocking issues are infra / tool
@@ -2894,12 +3158,25 @@ impl OrchestratorAgent {
             state.workflow_id.clone()
         };
 
-        // Build and dispatch instruction
+        // Build and dispatch instruction (with foundation context + initial_goal for functional tasks)
         let prev_context = fetch_previous_terminal_context(
             &self.db, &task.id, &workflow_id, active_terminal.order_index,
         ).await.unwrap_or(None);
+        let (foundation_ctx, initial_goal) = if task.order_index > 0 {
+            let working_dir = self.resolve_project_working_dir().await.ok();
+            let fctx = if let Some(ref wd) = working_dir {
+                Self::build_foundation_context(&self.db, &workflow_id, wd).await
+            } else {
+                None
+            };
+            let goal = db::models::Workflow::find_by_id(&self.db.pool, &workflow_id)
+                .await.ok().flatten().and_then(|w| w.initial_goal);
+            (fctx, goal)
+        } else {
+            (None, None)
+        };
         let instruction =
-            Self::build_task_instruction(&workflow_id, &task, &active_terminal, terminals.len(), prev_context.as_ref(), &[]);
+            Self::build_task_instruction(&workflow_id, &task, &active_terminal, terminals.len(), prev_context.as_ref(), &[], foundation_ctx.as_deref(), initial_goal.as_deref());
         self.dispatch_terminal(task_id, &active_terminal, &instruction)
             .await
     }
@@ -3597,11 +3874,20 @@ impl OrchestratorAgent {
 
         // Inject terminal completion context (silent degradation on failure)
         if let Ok(working_dir) = self.resolve_project_working_dir().await {
+            let workflow_id = {
+                let state = self.state.read().await;
+                state.workflow_id.clone()
+            };
+            let (task_branch, target_branch) = Self::load_branch_info_for_review(
+                &self.db, &event.task_id, &workflow_id,
+            ).await;
             if let Ok(ctx) = fetch_terminal_completion_context(
                 &self.db,
                 &event.terminal_id,
                 commit_hash,
                 &working_dir,
+                task_branch.as_deref(),
+                target_branch.as_deref(),
             )
             .await
             {
@@ -3626,18 +3912,136 @@ impl OrchestratorAgent {
             prompt.push_str("\n\nAgent-planned runtime context:\n");
             prompt.push_str(&context);
 
-            // Remind the LLM of the original goal so it checks completion against requirements
-            if let Some(ref goal) = workflow.initial_goal {
-                let goal_preview: String = goal.chars().take(2000).collect();
-                prompt.push_str("\n\nOriginal project goal (check ALL requirements before completing):\n");
-                prompt.push_str(&goal_preview);
-            }
+            let is_foundation_phase = {
+                let state = self.state.read().await;
+                state.foundation_phase_only
+            };
 
-            prompt.push_str(
-                "\n\nDecide next action. IMPORTANT: Do NOT complete_workflow unless ALL original requirements have been addressed. If requirements remain, create new tasks to cover them. If this task is done, mark it complete_task and wait for others.\n\nRESPOND WITH A RAW JSON ARRAY ONLY. No markdown, no code fences, no explanatory text.",
-            );
+            if is_foundation_phase {
+                // Foundation task just completed — force the LLM to create feature tasks
+                prompt.push_str(
+                    "\n\nFOUNDATION PHASE COMPLETED. \
+                     The foundation/scaffolding task has finished. \
+                     Now you MUST create feature tasks for ALL remaining requirements.\n",
+                );
+                if let Some(ref goal) = workflow.initial_goal {
+                    prompt.push_str("Original project goal (FULL — check every requirement):\n");
+                    prompt.push_str(goal);
+                }
+                prompt.push_str(
+                    "\n\nCreate tasks to cover EVERY unaddressed requirement. \
+                     Do NOT emit complete_workflow. Do NOT emit set_workflow_planning_complete \
+                     until you have created ALL feature tasks.\
+                     \n\nRESPOND WITH A RAW JSON ARRAY ONLY. No markdown, no code fences, no explanatory text.",
+                );
+            } else {
+                // Normal completion path — remind LLM of requirements
+                if let Some(ref goal) = workflow.initial_goal {
+                    let goal_preview: String = goal.chars().take(16000).collect();
+                    prompt.push_str("\n\nOriginal project goal (check ALL requirements before completing):\n");
+                    prompt.push_str(&goal_preview);
+                }
+
+                prompt.push_str(
+                    "\n\nDecide next action. IMPORTANT: Do NOT complete_workflow unless ALL original requirements have been addressed. If requirements remain, create new tasks to cover them. If this task is done, mark it complete_task and wait for others.\n\nRESPOND WITH A RAW JSON ARRAY ONLY. No markdown, no code fences, no explanatory text.",
+                );
+            }
         }
         Ok(prompt)
+    }
+
+    /// Build a prompt that asks the LLM to review actual code against task requirements.
+    fn build_acceptance_review_prompt(
+        task_name: &str,
+        task_description: &str,
+        workflow_goal: &str,
+        completion_ctx: &TerminalCompletionContext,
+    ) -> String {
+        format!(
+            "You are a code reviewer verifying whether a task's requirements have been met \
+             by reading the actual source code.\n\n\
+             ## Task\n\
+             Name: {task_name}\n\
+             Description: {task_description}\n\n\
+             ## Project Goal\n\
+             {workflow_goal}\n\n\
+             ## Code Produced (changed files)\n\
+             {code}\n\n\
+             ## Terminal Output Summary\n\
+             {logs}\n\n\
+             ## Changes Summary\n\
+             {diff}\n\n\
+             ## Instructions\n\
+             Review the code above against the task requirements. For EACH requirement:\n\
+             1. State the requirement\n\
+             2. State whether it is MET or UNMET\n\
+             3. Cite specific evidence (file name + function/class/route)\n\n\
+             Then give an overall verdict: APPROVED or REJECTED.\n\
+             If REJECTED, list exactly what must be fixed.\n\n\
+             Respond in this JSON format only:\n\
+             {{\"verdict\": \"APPROVED\", \"fix_instructions\": \"\"}}\n\
+             or\n\
+             {{\"verdict\": \"REJECTED\", \"fix_instructions\": \"1. ... 2. ...\"}}\n\n\
+             IMPORTANT: Base your verdict ONLY on the actual code shown above. \
+             Do NOT trust claims in commit messages or terminal output — verify against the source code.",
+            code = completion_ctx.changed_files_content,
+            logs = completion_ctx.log_summary,
+            diff = completion_ctx.diff_stat,
+        )
+    }
+
+    /// Run acceptance review: LLM reads actual code and compares against task requirements.
+    /// Returns Approved if requirements are met, Rejected with fix instructions if not.
+    async fn run_acceptance_review(
+        &self,
+        event: &TerminalCompletionEvent,
+        completion_ctx: &TerminalCompletionContext,
+    ) -> anyhow::Result<AcceptanceReviewResult> {
+        // Only run for agent-planned workflows (DIY workflows have no structured requirements)
+        if !self.is_agent_planned_workflow().await? {
+            return Ok(AcceptanceReviewResult::approved());
+        }
+
+        // Skip if no code was produced
+        if completion_ctx.changed_files_content.is_empty() {
+            return Ok(AcceptanceReviewResult::approved());
+        }
+
+        let task = db::models::WorkflowTask::find_by_id(&self.db.pool, &event.task_id)
+            .await?
+            .ok_or_else(|| anyhow!("Task not found for acceptance review"))?;
+        let workflow = self.load_workflow().await?;
+        let goal = workflow.initial_goal.as_deref().unwrap_or("");
+        let task_desc = task.description.as_deref().unwrap_or(&task.name);
+
+        let prompt =
+            Self::build_acceptance_review_prompt(&task.name, task_desc, goal, completion_ctx);
+
+        tracing::info!(
+            task_id = %event.task_id,
+            terminal_id = %event.terminal_id,
+            "Running acceptance review ({} bytes of code context)",
+            completion_ctx.changed_files_content.len()
+        );
+
+        match self.call_llm_safe(&prompt).await {
+            Some(response) => {
+                let result = AcceptanceReviewResult::parse(&response);
+                tracing::info!(
+                    task_id = %event.task_id,
+                    verdict = ?result.verdict,
+                    "Acceptance review complete"
+                );
+                Ok(result)
+            }
+            None => {
+                tracing::warn!(
+                    task_id = %event.task_id,
+                    "Acceptance review LLM unavailable, proceeding without review"
+                );
+                Ok(AcceptanceReviewResult::approved())
+            }
+        }
     }
 
     fn normalize_instruction_payload(response: &str) -> &str {
@@ -3656,20 +4060,51 @@ impl OrchestratorAgent {
 
     /// Extract JSON from a response that may contain explanatory text around it.
     fn extract_json_from_mixed_response(response: &str) -> Option<String> {
-        // Strategy 1: bracket matching — find first [ to last ] (or { to }).
-        // This is the most robust approach because LLMs often include ``` markers
-        // INSIDE the JSON content (e.g., instruction text with code blocks),
-        // which breaks ```json extraction by prematurely closing the fence.
+        // Strategy 1: depth-aware bracket matching — find the first balanced
+        // JSON block (array or object). Previous `rfind` approach broke when
+        // the LLM returned multiple JSON blocks separated by prose.
         let first_bracket = response.find('[').unwrap_or(usize::MAX);
         let first_brace = response.find('{').unwrap_or(usize::MAX);
         let start = first_bracket.min(first_brace);
         if start < response.len() {
             let remaining = &response[start..];
-            let end_char = if remaining.starts_with('[') { ']' } else { '}' };
-            if let Some(end) = remaining.rfind(end_char) {
+            let (open, close) = if remaining.starts_with('[') {
+                ('[', ']')
+            } else {
+                ('{', '}')
+            };
+            let mut depth = 0i32;
+            let mut in_string = false;
+            let mut escape_next = false;
+            let mut end_pos = None;
+            for (i, ch) in remaining.char_indices() {
+                if escape_next {
+                    escape_next = false;
+                    continue;
+                }
+                if ch == '\\' && in_string {
+                    escape_next = true;
+                    continue;
+                }
+                if ch == '"' {
+                    in_string = !in_string;
+                    continue;
+                }
+                if in_string {
+                    continue;
+                }
+                if ch == open {
+                    depth += 1;
+                } else if ch == close {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_pos = Some(i);
+                        break;
+                    }
+                }
+            }
+            if let Some(end) = end_pos {
                 let candidate = remaining[..=end].to_string();
-                // Only use if the extracted JSON is large enough (avoids grabbing
-                // small inline brackets from explanatory text).
                 if candidate.len() > 50 {
                     return Some(candidate);
                 }
@@ -4216,14 +4651,37 @@ impl OrchestratorAgent {
                         .map(|text| format!(": {text}"))
                         .unwrap_or_default()
                 );
-                {
-                    let mut state = self.state.write().await;
-                    state.set_workflow_planning_complete(true);
-                }
                 let workflow_id = {
                     let state = self.state.read().await;
                     state.workflow_id.clone()
                 };
+                {
+                    let mut state = self.state.write().await;
+                    state.set_workflow_planning_complete(true);
+                }
+
+                // Guard: if only a Foundation task exists, defer workflow_planning_complete
+                // and enter foundation_phase_only mode so the agent creates feature tasks
+                // after Foundation completes instead of auto-syncing to completed.
+                let task_count = db::models::WorkflowTask::find_by_workflow(
+                    &self.db.pool,
+                    &workflow_id,
+                )
+                .await
+                .map(|t| t.len())
+                .unwrap_or(0);
+                if task_count <= 1 {
+                    tracing::info!(
+                        workflow_id = %workflow_id,
+                        task_count,
+                        "Foundation-only planning detected. \
+                         Deferring workflow_planning_complete until feature tasks are created."
+                    );
+                    let mut state = self.state.write().await;
+                    state.set_workflow_planning_complete(false);
+                    state.foundation_phase_only = true;
+                }
+
                 self.auto_sync_workflow_completion(&workflow_id).await?;
             }
             OrchestratorInstruction::SendToTerminal {
@@ -4315,6 +4773,50 @@ impl OrchestratorAgent {
                     );
                     // Do not complete — let the event loop continue until tasks finish
                     return Ok(());
+                }
+
+                // Guard: agent-planned workflows with only 1 completed task
+                // likely means feature tasks were never created (Foundation-only).
+                if self.is_agent_planned_workflow().await.unwrap_or(false) {
+                    let completed_tasks = tasks.iter()
+                        .filter(|t| t.status == TASK_STATUS_COMPLETED)
+                        .count();
+                    if completed_tasks <= 1 {
+                        tracing::warn!(
+                            workflow_id = %workflow_id,
+                            completed_tasks,
+                            "CompleteWorkflow rejected: agent-planned workflow has only \
+                             {completed_tasks} completed task(s) — feature tasks likely never created"
+                        );
+                        return Ok(());
+                    }
+
+                    // Sanity check: at least some goal terms should appear in task names
+                    let workflow = self.load_workflow().await?;
+                    if let Some(ref goal) = workflow.initial_goal {
+                        let goal_terms: Vec<&str> = goal
+                            .split_whitespace()
+                            .filter(|w| w.len() > 4)
+                            .take(10)
+                            .collect();
+                        if goal_terms.len() > 3 {
+                            let task_names: String =
+                                tasks.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(" ");
+                            let task_names_lower = task_names.to_lowercase();
+                            let coverage = goal_terms
+                                .iter()
+                                .filter(|term| task_names_lower.contains(&term.to_lowercase()))
+                                .count();
+                            if coverage == 0 {
+                                tracing::warn!(
+                                    workflow_id = %workflow_id,
+                                    "CompleteWorkflow rejected: zero overlap between \
+                                     goal terms and task names"
+                                );
+                                return Ok(());
+                            }
+                        }
+                    }
                 }
 
                 // R8-B3 guard #4: even with all tasks "completed", the
@@ -5204,6 +5706,86 @@ impl OrchestratorAgent {
         }
     }
 
+    /// Load task branch and workflow target_branch for acceptance review.
+    async fn load_branch_info_for_review(
+        db: &DBService,
+        task_id: &str,
+        workflow_id: &str,
+    ) -> (Option<String>, Option<String>) {
+        let task_branch = db::models::WorkflowTask::find_by_id(&db.pool, task_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| t.branch);
+        let target_branch = db::models::Workflow::find_by_id(&db.pool, workflow_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|w| w.target_branch);
+        (task_branch, target_branch)
+    }
+
+    /// Build Foundation task context for functional terminals.
+    /// Returns a summary of Foundation's output (file tree) so functional tasks
+    /// know what already exists in the repository.
+    async fn build_foundation_context(
+        db: &DBService,
+        workflow_id: &str,
+        working_dir: &Path,
+    ) -> Option<String> {
+        let tasks = db::models::WorkflowTask::find_by_workflow(&db.pool, workflow_id)
+            .await
+            .ok()?;
+
+        let foundation = tasks.iter().find(|t| t.order_index == 0)?;
+        if foundation.status != TASK_STATUS_COMPLETED {
+            return None;
+        }
+
+        let tree_output = tokio::process::Command::new("git")
+            .args(["ls-tree", "-r", "--name-only", "HEAD"])
+            .current_dir(working_dir)
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
+            .output()
+            .await
+            .ok()?;
+
+        if !tree_output.status.success() {
+            return None;
+        }
+
+        let tree = String::from_utf8_lossy(&tree_output.stdout);
+        let filtered_tree: String = tree
+            .lines()
+            .filter(|l| {
+                !l.contains("node_modules/")
+                    && !l.contains(".lock")
+                    && !l.ends_with(".lock")
+                    && !l.contains("vendor/")
+                    && !l.contains("target/")
+                    && !l.contains("dist/")
+            })
+            .take(200)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if filtered_tree.is_empty() {
+            return None;
+        }
+
+        Some(format!(
+            "--- Foundation Task Output (existing project structure) ---\n\
+             The Foundation task (branch: {branch}) has completed and created:\n\
+             {tree}\n\
+             Build upon this existing structure. Do NOT recreate files that already exist.\n\
+             ---",
+            branch = foundation.branch,
+            tree = filtered_tree,
+        ))
+    }
+
     /// Builds a task instruction from task and terminal information.
     fn build_task_instruction(
         workflow_id: &str,
@@ -5212,8 +5794,19 @@ impl OrchestratorAgent {
         total_terminals: usize,
         prev_context: Option<&PreviousTerminalContext>,
         sibling_tasks: &[db::models::WorkflowTask],
+        foundation_context: Option<&str>,
+        initial_goal: Option<&str>,
     ) -> String {
         let mut parts = vec![format!("Start task: {} ({})", task.name, task.id)];
+
+        if let Some(goal) = initial_goal {
+            let preview: String = goal.chars().take(8000).collect();
+            parts.push(format!("## Original Project Requirements\n{preview}"));
+        }
+
+        if let Some(ctx) = foundation_context {
+            parts.push(ctx.to_string());
+        }
 
         // Include sibling task overview so each terminal knows the full project plan
         if sibling_tasks.len() > 1 {
@@ -5238,7 +5831,7 @@ impl OrchestratorAgent {
             let normalized = description.split_whitespace().collect::<Vec<_>>().join(" ");
             if !normalized.is_empty() {
                 if total_terminals > 1 {
-                    let summary = Self::truncate_instruction_text(&normalized, 200);
+                    let summary = Self::truncate_instruction_text(&normalized, 4000);
                     parts.push(format!("Task objective: {summary}"));
                 } else {
                     parts.push(format!("Task description: {normalized}"));
@@ -5362,6 +5955,15 @@ impl OrchestratorAgent {
             workflow_id
         );
 
+        // Pre-compute foundation context and initial_goal for functional tasks
+        let foundation_ctx = if let Ok(wd) = self.resolve_project_working_dir().await {
+            Self::build_foundation_context(&self.db, &workflow_id, &wd).await
+        } else {
+            None
+        };
+        let initial_goal = db::models::Workflow::find_by_id(&self.db.pool, &workflow_id)
+            .await.ok().flatten().and_then(|w| w.initial_goal);
+
         // Phase 1 (sequential): build the list of (task_id, terminal, instruction) to dispatch.
         // State initialization requires the write lock, so this must remain sequential.
         let mut dispatch_queue: Vec<(String, db::models::Terminal, String)> = Vec::new();
@@ -5433,8 +6035,11 @@ impl OrchestratorAgent {
             }
 
             // Build instruction and enqueue for parallel dispatch
+            // Non-foundation tasks get foundation context + initial_goal
+            let fctx = if task.order_index > 0 { foundation_ctx.as_deref() } else { None };
+            let goal = if task.order_index > 0 { initial_goal.as_deref() } else { None };
             let instruction =
-                Self::build_task_instruction(&workflow_id, task, &terminal, terminals.len(), None, &tasks);
+                Self::build_task_instruction(&workflow_id, task, &terminal, terminals.len(), None, &tasks, fctx, goal);
             dispatch_queue.push((task.id.clone(), terminal, instruction));
         }
 
@@ -7026,11 +7631,15 @@ fn loop_progress_hint(class: &LoopProgressClass) -> Option<String> {
 
 /// Collect terminal completion context (log summary, diff stat, commit body)
 /// for injection into LLM completion prompts.
+/// When `task_branch` and `target_branch` are provided, the acceptance review
+/// sees all files changed since the branch diverged (not just the last commit).
 async fn fetch_terminal_completion_context(
     db: &DBService,
     terminal_id: &str,
     commit_hash: &str,
     working_dir: &Path,
+    task_branch: Option<&str>,
+    target_branch: Option<&str>,
 ) -> anyhow::Result<TerminalCompletionContext> {
     // 1. Query terminal logs (returned in DESC order, reverse for chronological)
     let log_summary = match db::models::terminal::TerminalLog::find_by_terminal(
@@ -7055,11 +7664,21 @@ async fn fetch_terminal_completion_context(
         }
     };
 
-    // 2. Get diff stat via git
+    // 2. Compute merge-base for full branch diff (if branch info available)
+    let base_ref = match (task_branch, target_branch) {
+        (Some(tb), Some(tgt)) => compute_merge_base(working_dir, tgt, tb).await,
+        _ => None,
+    };
+
+    // 3. Get diff stat via git (use full branch range when available)
+    let diff_stat_args = if let Some(ref base) = base_ref {
+        vec!["diff".to_string(), "--stat".to_string(), format!("{base}..{commit_hash}")]
+    } else {
+        vec!["diff".to_string(), "--stat".to_string(), "HEAD~1..HEAD".to_string()]
+    };
     let diff_stat = match tokio::process::Command::new("git")
-        .args(["diff", "--stat", "HEAD~1..HEAD"])
+        .args(&diff_stat_args)
         .current_dir(working_dir)
-        // R6 port-leak hygiene — uniform strip across every child spawn.
         .env_remove("PORT")
         .env_remove("BACKEND_PORT")
         .env_remove("FRONTEND_PORT")
@@ -7077,14 +7696,13 @@ async fn fetch_terminal_completion_context(
         }
     };
 
-    // 3. Get commit body
+    // 4. Get commit body
     let commit_body = if commit_hash == "N/A" {
         String::new()
     } else {
         match tokio::process::Command::new("git")
             .args(["show", "-s", "--format=%B", commit_hash])
             .current_dir(working_dir)
-            // R6 port-leak hygiene — uniform strip across every child spawn.
             .env_remove("PORT")
             .env_remove("BACKEND_PORT")
             .env_remove("FRONTEND_PORT")
@@ -7103,11 +7721,155 @@ async fn fetch_terminal_completion_context(
         }
     };
 
+    // 5. Get actual content of changed files for acceptance review (full branch diff)
+    let changed_files_content = if commit_hash == "N/A" {
+        String::new()
+    } else {
+        collect_changed_files_content(working_dir, commit_hash, base_ref.as_deref(), ACCEPTANCE_REVIEW_MAX_BYTES).await
+    };
+
     Ok(TerminalCompletionContext {
         log_summary,
         diff_stat,
         commit_body,
+        changed_files_content,
     })
+}
+
+/// Compute the merge-base between two branches for full-branch diff.
+async fn compute_merge_base(
+    working_dir: &Path,
+    target_branch: &str,
+    task_branch: &str,
+) -> Option<String> {
+    let output = tokio::process::Command::new("git")
+        .args(["merge-base", target_branch, task_branch])
+        .current_dir(working_dir)
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
+        .output()
+        .await
+        .ok()?;
+    if output.status.success() {
+        let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if hash.is_empty() { None } else { Some(hash) }
+    } else {
+        None
+    }
+}
+
+/// Collect the actual content of files changed in a commit for acceptance review.
+/// When `base_ref` is provided, collects all files changed since the branch divergence
+/// point (full branch diff). Otherwise falls back to single-commit diff.
+async fn collect_changed_files_content(
+    working_dir: &Path,
+    commit_hash: &str,
+    base_ref: Option<&str>,
+    max_bytes: usize,
+) -> String {
+    // Get list of changed files — full branch diff when base_ref available
+    let file_list = if let Some(base) = base_ref {
+        match tokio::process::Command::new("git")
+            .args(["diff", "--name-only", base, commit_hash])
+            .current_dir(working_dir)
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
+            .output()
+            .await
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).to_string()
+            }
+            _ => return String::new(),
+        }
+    } else {
+        match tokio::process::Command::new("git")
+            .args(["diff", "--name-only", &format!("{commit_hash}~1"), commit_hash])
+            .current_dir(working_dir)
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
+            .output()
+            .await
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).to_string()
+            }
+            _ => {
+                // Fallback: try diff against empty tree for initial commits
+                match tokio::process::Command::new("git")
+                    .args(["diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash])
+                    .current_dir(working_dir)
+                    .env_remove("PORT")
+                    .env_remove("BACKEND_PORT")
+                    .env_remove("FRONTEND_PORT")
+                    .output()
+                    .await
+                {
+                    Ok(output) if output.status.success() => {
+                        String::from_utf8_lossy(&output.stdout).to_string()
+                    }
+                    _ => return String::new(),
+                }
+            }
+        }
+    };
+
+    let source_extensions = [
+        "rs", "ts", "tsx", "js", "jsx", "go", "py", "vue", "svelte",
+        "java", "kt", "rb", "php", "cs", "swift",
+    ];
+    let config_extensions = ["json", "yaml", "yml", "toml", "dockerfile"];
+
+    let files: Vec<&str> = file_list.lines().filter(|l| !l.is_empty()).collect();
+
+    // Prioritize source files over config files
+    let mut source_files: Vec<&str> = Vec::new();
+    let mut config_files: Vec<&str> = Vec::new();
+    for file in &files {
+        let ext = file.rsplit('.').next().unwrap_or("").to_lowercase();
+        if source_extensions.iter().any(|e| *e == ext) {
+            source_files.push(file);
+        } else if config_extensions.iter().any(|e| *e == ext) {
+            config_files.push(file);
+        }
+    }
+
+    let mut result = String::new();
+    let mut bytes_used = 0usize;
+    let ordered = source_files.iter().chain(config_files.iter());
+
+    for file_path in ordered {
+        if bytes_used >= max_bytes {
+            break;
+        }
+
+        let content = match tokio::process::Command::new("git")
+            .args(["show", &format!("{commit_hash}:{file_path}")])
+            .current_dir(working_dir)
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
+            .output()
+            .await
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).to_string()
+            }
+            _ => continue,
+        };
+
+        let header = format!("\n--- file: {file_path} ---\n");
+        let remaining = max_bytes.saturating_sub(bytes_used + header.len());
+        let truncated: String = content.chars().take(remaining).collect();
+        bytes_used += header.len() + truncated.len();
+        result.push_str(&header);
+        result.push_str(&truncated);
+    }
+
+    result
 }
 
 /// Fetch context from the previous completed terminal in the same task.
@@ -7379,7 +8141,7 @@ mod tests {
         let terminal = make_terminal(0);
 
         let instruction =
-            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 3, None, &[]);
+            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 3, None, &[], None, None);
 
         assert!(instruction.contains("Task objective:"));
         assert!(!instruction.contains("Task description:"));
@@ -7401,7 +8163,7 @@ mod tests {
         let terminal = make_terminal(0);
 
         let instruction =
-            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 1, None, &[]);
+            OrchestratorAgent::build_task_instruction(workflow_id, &task, &terminal, 1, None, &[], None, None);
 
         assert!(instruction.contains("Task description: Complete full implementation end-to-end"));
         assert!(!instruction.contains("Task objective:"));
@@ -8197,6 +8959,61 @@ mod tests {
         assert!(
             !workflow_has_unresolved_enforce_blockers(&db, wf_id).await,
             "workflow rollup with no terminal records must default to safe (false)"
+        );
+    }
+
+    /// R8-C1: A quality_run that had gate_status=error with NO blocking issues
+    /// (only non-blocking warnings like 344 ESLint style issues) must expose
+    /// `compute_blocker_multiset() == None`. Callers of the multiset (the
+    /// R8 classifier + fix-prompt guard in `handle_quality_gate_result`) rely
+    /// on this to short-circuit — they MUST NOT enter the fix-prompt path when
+    /// blocking=0, otherwise every handoff commit bounces back to the terminal
+    /// and the task never completes (observed live in R8-B retry workflow
+    /// `bf6550f7`: 9 consecutive `next_action: handoff` commits, task stayed
+    /// `running` because fix-prompts preempted the completion cascade).
+    #[tokio::test]
+    async fn r8_c1_blocking_zero_error_gate_produces_no_multiset() {
+        use super::terminal_has_unresolved_enforce_blockers;
+        let db = in_memory_db().await;
+        let wf_id = "wf-c1";
+        let task_id = "task-c1";
+        let term_id = "term-c1";
+        let commit_hash = "commit-c1";
+
+        // Directly construct an enforce run with status=error, blocking=0,
+        // total_issues=10 (non-blocking warnings only). This mirrors the
+        // bf6550f7 gate #21 observed state: status=error issues=344 blocking=0.
+        let run = db::models::QualityRun::new_pending(
+            wf_id,
+            Some(task_id),
+            Some(term_id),
+            Some(commit_hash),
+            "terminal",
+            "enforce",
+        );
+        db::models::QualityRun::insert(&db.pool, &run).await.unwrap();
+        db::models::QualityRun::complete(
+            &db.pool, &run.id, "error", 10, 0, 0, 42, None, None, None,
+        )
+        .await
+        .unwrap();
+
+        // No `is_blocking = true` issues were inserted — the multiset helper
+        // must return None so the R8-C1 guard skips classifier + fix-prompt.
+        assert!(
+            compute_blocker_multiset(&db, &run.id).await.is_none(),
+            "blocking=0 gate run must yield None multiset so the R8-C1 guard \
+             can short-circuit the fix-prompt path"
+        );
+
+        // R8-B3 guard must also treat this as "gate cleared" (blocking=0 +
+        // status=error falls into the `latest.blocking_issues > 0` = false
+        // branch of terminal_has_unresolved_enforce_blockers), allowing the
+        // completion cascade to proceed once R8-C1 lets control fall through.
+        assert!(
+            !terminal_has_unresolved_enforce_blockers(&db, term_id).await,
+            "R8-B3: blocking=0 error must NOT block cascade — the AI has \
+             cleared every real blocker; non-blocking warnings are noise"
         );
     }
 

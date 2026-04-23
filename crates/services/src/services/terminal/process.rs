@@ -1639,6 +1639,23 @@ impl TerminalLogger {
             return Err(error);
         }
 
+        // Auto-cleanup: keep only the most recent MAX_LOGS_PER_TERMINAL entries
+        // to prevent unbounded database growth that causes OOM crashes.
+        const MAX_LOGS_PER_TERMINAL: i64 = 5000;
+        if let Err(e) = db::models::terminal::TerminalLog::cleanup_old_logs(
+            &db.pool,
+            terminal_id,
+            MAX_LOGS_PER_TERMINAL,
+        )
+        .await
+        {
+            tracing::debug!(
+                terminal_id = %terminal_id,
+                error = %e,
+                "Terminal log cleanup failed (non-fatal)"
+            );
+        }
+
         Ok(())
     }
 

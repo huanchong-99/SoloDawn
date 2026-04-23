@@ -94,6 +94,11 @@ impl QualityEngine {
                 crate::provider::coverage::CoverageProvider,
             ));
         }
+        if config.providers.completeness {
+            providers.push(Arc::new(
+                crate::provider::completeness::CompletenessProvider,
+            ));
+        }
 
         Ok(Self::new(config, providers))
     }
@@ -234,10 +239,11 @@ impl QualityEngine {
         // sentinel metric `QualityGateEmptyScan` and inject a matching blocking
         // QualityIssue so the orchestrator's audit trail reflects the cause.
         let has_targets = discovery.has_js_targets() || discovery.has_rust_targets();
+        let has_js_evidence = has_targets || discovery.has_subdirectory_js_manifests();
         let gate_has_rules = !gate.conditions.is_empty();
         let no_provider_metric_matched = applicable_conditions.is_empty();
         let trigger_empty_scan_block =
-            self.config.is_enforcing() && has_targets && gate_has_rules && no_provider_metric_matched;
+            self.config.is_enforcing() && has_js_evidence && gate_has_rules && no_provider_metric_matched;
 
         let final_eval_results: Vec<EvaluationResult> = if trigger_empty_scan_block {
             let js_count = discovery.js_targets().len();

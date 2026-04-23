@@ -197,9 +197,10 @@
       "modelIdRequired": "Model ID is required"
     },
     "warnings": {
-      "urlV1Compatible": "URL 以 /v1 結尾，但 API 類型設定為相容模式。相容模式的提供商通常不需要在 URL 中包含 /v1。",
+      "urlV1Compatible": "URL 以 /v1 結尾。系統將原樣使用您輸入的 URL，不會自動追加路徑。如果 API 需要 /v1 則保留，否則可以移除。",
       "zhipuaiOpenai": "偵測到智譜AI位址。建議將 API 類型更改為 \"openai-compatible\"。",
-      "zhipuaiAnthropic": "偵測到智譜AI位址。建議將 API 類型更改為 \"anthropic-compatible\"。"
+      "zhipuaiAnthropic": "偵測到智譜AI位址。建議將 API 類型更改為 \"anthropic-compatible\"。",
+      "urlHint": "請輸入完整的基礎 URL，系統將原樣使用（例如 https://api.example.com/v1）。"
     }
   },
   "step4": {

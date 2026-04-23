@@ -93,21 +93,16 @@ fn create_codex_config(
     codex_home: &Path,
     base_url: Option<&str>,
     model: &str,
-    api_key: &str,
+    _api_key: &str,
 ) -> anyhow::Result<()> {
     let config_path = codex_home.join("config.toml");
 
-    // Use a custom provider when a custom base URL is configured.
-    // Normalize base_url: Codex CLI appends endpoint paths (e.g. /responses) directly
-    // to base_url, so it must end with /v1 for OpenAI-compatible gateways.
-    let normalized_base_url;
     let (provider_key, base_url_str) = match base_url {
         Some(url) => {
-            // Codex CLI always uses OpenAI protocol, so "openai" ensures /v1 is appended.
-            normalized_base_url = utils::url::normalize_base_url("openai", url);
-            ("custom", normalized_base_url.as_str())
+            let trimmed = url.trim_end_matches('/');
+            ("custom", trimmed.to_string())
         }
-        None => ("openai", "https://api.openai.com/v1"),
+        None => ("openai", "https://api.openai.com/v1".to_string()),
     };
     let wire_api = resolve_codex_wire_api();
 
@@ -118,17 +113,10 @@ model = "{model}"
 [model_providers.{provider_key}]
 name = "{provider_key}"
 base_url = "{base_url_str}"
-api_key = "{api_key}"
 "#
     );
 
-    // Default to OpenAI Responses API for compatibility with most custom gateways.
-    // Set SOLODAWN_CODEX_WIRE_API=codex when provider explicitly requires /codex.
     config_content.push_str(&format!("wire_api = \"{wire_api}\"\n"));
-
-    // Skip interactive sandbox setup prompt by pre-configuring sandbox and approval.
-    // Without this, Codex CLI presents an interactive menu asking the user to select
-    // a sandbox type, which blocks automated PTY-based execution.
     config_content.push_str("approval_policy = \"on-request\"\n");
     config_content.push_str("sandbox_permissions = [\"disk-full-read-access\", \"disk-write-folder\"]\n");
 
@@ -141,7 +129,7 @@ api_key = "{api_key}"
         model_provider = %provider_key,
         base_url = %base_url_str,
         wire_api = %wire_api,
-        "Created Codex config.toml for authentication skip"
+        "Created Codex config.toml for authentication skip (api_key via env var only)"
     );
 
     Ok(())
@@ -479,7 +467,12 @@ pub struct CCSwitchService {
 }
 
 impl CCSwitchService {
-    const DEFAULT_CLAUDE_FALLBACK_MODEL: &'static str = "claude-sonnet-4-20250514";
+    // Last-resort fallback when both the terminal's requested Claude model and
+    // the CLI's DB default are absent/invalid. Bumped alongside the matching
+    // strings in agent.rs and planning_drafts.rs after the
+    // `test_probe_subscription_model_acceptance` probe confirmed the
+    // subscription endpoint accepts the new ID.
+    const DEFAULT_CLAUDE_FALLBACK_MODEL: &'static str = "claude-sonnet-4-6";
 
     pub fn new(db: Arc<DBService>) -> Self {
         Self {

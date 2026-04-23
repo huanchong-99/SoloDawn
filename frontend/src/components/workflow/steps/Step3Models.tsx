@@ -115,9 +115,7 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
     const apiType = formData.apiType;
     if (!url || !apiType) return null;
 
-    const isCompatible = apiType.endsWith('-compatible');
-
-    if (isCompatible && url.endsWith('/v1')) {
+    if (url.endsWith('/v1')) {
       return t('step3.warnings.urlV1Compatible');
     }
 
@@ -609,6 +607,11 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
                 <p className="flex items-center gap-half text-xs text-warning mt-half">
                   <WarningIcon className="size-icon-xs shrink-0" weight="fill" />
                   {urlWarning}
+                </p>
+              )}
+              {!urlWarning && (formData.apiType === 'openai-compatible' || formData.apiType === 'anthropic-compatible') && (
+                <p className="text-xs text-low mt-half">
+                  {t('step3.warnings.urlHint')}
                 </p>
               )}
             </Field>

@@ -174,6 +174,7 @@ impl OrchestratorRuntime {
         &self,
         workflow_id: &str,
         workflow: &db::models::Workflow,
+        resume_cursor: Option<String>,
     ) -> Result<Option<GitWatcherHandle>> {
         // Check workflow-level git watcher toggle
         if !workflow.git_watcher_enabled {
@@ -238,6 +239,15 @@ impl OrchestratorRuntime {
         watcher.set_workflow_id(workflow_id.to_string());
 
         let watcher = Arc::new(watcher);
+
+        // R8-C2: on recovery, seed the cursor from the DB-recovered commit so
+        // `watch()` doesn't fall back to HEAD and silently skip commits made
+        // between server shutdown and restart. On fresh starts `resume_cursor`
+        // is None → `watch()` seeds from HEAD as before.
+        if let Some(cursor) = resume_cursor {
+            watcher.seed_last_seen_commit(cursor).await;
+        }
+
         let watcher_clone = watcher.clone();
         let workflow_id_owned = workflow_id.to_string();
 
@@ -469,8 +479,9 @@ impl OrchestratorRuntime {
         );
         drop(running); // Release lock before logging
 
-        // Start GitWatcher for this workflow (non-blocking, failure is not fatal)
-        match self.try_start_git_watcher(workflow_id, &workflow).await {
+        // Start GitWatcher for this workflow (non-blocking, failure is not fatal).
+        // Fresh start → no resume_cursor; watcher seeds from HEAD as usual.
+        match self.try_start_git_watcher(workflow_id, &workflow, None).await {
             Ok(Some(handle)) => {
                 let mut watchers = self.git_watchers.lock().await;
                 watchers.insert(workflow_id.to_string(), handle);
@@ -1098,7 +1109,26 @@ impl OrchestratorRuntime {
         // watcher is already polling when the agent begins its event loop.
         // This eliminates the timing window where commits landing between
         // agent start and watcher start would be silently missed.
-        match self.try_start_git_watcher(workflow_id, &workflow).await {
+        //
+        // R8-C2: seed the watcher cursor from the DB-recorded most-recent
+        // commit for this workflow (UNION of git_event + quality_run) so that
+        // handoff commits made between server shutdown and restart are not
+        // silently skipped. Without this, watcher defaults to HEAD and any
+        // pending `status: completed, next_action: handoff` commits become
+        // invisible — the task appears stuck forever.
+        let resume_cursor = resume_cursor_for_workflow(&self.db.pool, workflow_id)
+            .await
+            .unwrap_or_else(|e| {
+                warn!(
+                    "Failed to resolve resume_cursor for workflow {}: {} (will seed from HEAD)",
+                    workflow_id, e
+                );
+                None
+            });
+        match self
+            .try_start_git_watcher(workflow_id, &workflow, resume_cursor)
+            .await
+        {
             Ok(Some(handle)) => {
                 let mut watchers = self.git_watchers.lock().await;
                 watchers.insert(workflow_id.to_string(), handle);
@@ -1204,6 +1234,44 @@ impl OrchestratorRuntime {
             };
         Ok(recovered as usize)
     }
+}
+
+/// R8-C2: Resolve the most-recent commit this workflow has already processed
+/// so that on recovery the `GitWatcher` skips re-scanning the repo from HEAD
+/// (which would miss anything committed between server shutdown and restart).
+///
+/// The cursor is the newer of:
+/// - `git_event.commit_hash` — checkpoint commits (status=completed,
+///   next_action=continue) that take the GitEvent path
+/// - `quality_run.commit_hash` — handoff/review commits that go through the
+///   TerminalCompleted path (and thus never land in `git_event`)
+///
+/// Returns `Ok(None)` when neither table has a matching row (fresh workflow),
+/// `Err` only on an actual SQL failure. Callers should log and fall back to
+/// HEAD seeding on `Err`, not abort.
+async fn resume_cursor_for_workflow(
+    pool: &sqlx::SqlitePool,
+    workflow_id: &str,
+) -> Result<Option<String>> {
+    let row = sqlx::query(
+        r"
+        SELECT commit_hash FROM (
+            SELECT commit_hash, created_at FROM git_event
+            WHERE workflow_id = ?1
+              AND commit_hash IS NOT NULL AND commit_hash != ''
+            UNION ALL
+            SELECT commit_hash, created_at FROM quality_run
+            WHERE workflow_id = ?1
+              AND commit_hash IS NOT NULL AND commit_hash != ''
+        )
+        ORDER BY created_at DESC
+        LIMIT 1
+        ",
+    )
+    .bind(workflow_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(|r| r.try_get::<Option<String>, _>("commit_hash").ok().flatten()))
 }
 
 #[cfg(test)]
@@ -1804,7 +1872,7 @@ mod tests {
 
             let workflow = build_workflow_for_project(project_id);
             let watcher = runtime
-                .try_start_git_watcher(&workflow.id, &workflow)
+                .try_start_git_watcher(&workflow.id, &workflow, None)
                 .await
                 .unwrap();
 
@@ -1844,7 +1912,7 @@ mod tests {
 
         let workflow = build_workflow_for_project(project_id);
         let watcher = runtime
-            .try_start_git_watcher(&workflow.id, &workflow)
+            .try_start_git_watcher(&workflow.id, &workflow, None)
             .await
             .unwrap();
 
@@ -1993,6 +2061,114 @@ mod tests {
             recovered.status,
             WORKFLOW_STATUS_PAUSED,
             "R7-PB1: a workflow with an in-flight running task at restart MUST be paused (resumable), NEVER auto-failed"
+        );
+    }
+
+    /// R8-C2: `resume_cursor_for_workflow` picks the most recent commit from
+    /// the union of `git_event` and `quality_run`, so handoff commits (which
+    /// only appear in `quality_run`) are not missed on restart.
+    #[tokio::test]
+    async fn r8_c2_resume_cursor_picks_newest_across_git_event_and_quality_run() {
+        let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
+        sqlx::query(
+            r"
+            CREATE TABLE git_event (
+                id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                commit_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            ",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r"
+            CREATE TABLE quality_run (
+                id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                commit_hash TEXT,
+                created_at DATETIME NOT NULL
+            );
+            ",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let wf = "wf-r8c2";
+
+        // No history → None (fresh workflow, caller seeds HEAD).
+        assert!(
+            resume_cursor_for_workflow(&pool, wf).await.unwrap().is_none(),
+            "fresh workflow with no history must return None"
+        );
+
+        // Older git_event checkpoint.
+        sqlx::query(
+            "INSERT INTO git_event (id, workflow_id, commit_hash, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind("ge1")
+        .bind(wf)
+        .bind("aaaa1111")
+        .bind("2026-04-14T16:16:51.000Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Newer handoff only in quality_run (the bf6550f7 scenario).
+        sqlx::query(
+            "INSERT INTO quality_run (id, workflow_id, commit_hash, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind("qr1")
+        .bind(wf)
+        .bind("bbbb2222")
+        .bind("2026-04-14T16:37:05.000Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resume_cursor_for_workflow(&pool, wf).await.unwrap().as_deref(),
+            Some("bbbb2222"),
+            "resume cursor must pick the newest commit across BOTH tables — \
+             handoff commits live only in quality_run and would be skipped \
+             if we queried git_event alone"
+        );
+
+        // Rows for another workflow must not leak.
+        sqlx::query(
+            "INSERT INTO git_event (id, workflow_id, commit_hash, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind("ge-other")
+        .bind("wf-other")
+        .bind("cccc3333")
+        .bind("2099-01-01T00:00:00.000Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            resume_cursor_for_workflow(&pool, wf).await.unwrap().as_deref(),
+            Some("bbbb2222"),
+            "cross-workflow commits must not leak into the cursor"
+        );
+
+        // Empty-string commit_hash rows are ignored.
+        sqlx::query(
+            "INSERT INTO quality_run (id, workflow_id, commit_hash, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind("qr-empty")
+        .bind(wf)
+        .bind("")
+        .bind("2099-01-01T00:00:00.000Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            resume_cursor_for_workflow(&pool, wf).await.unwrap().as_deref(),
+            Some("bbbb2222"),
+            "empty commit_hash must be excluded so we never seed with a garbage cursor"
         );
     }
 }

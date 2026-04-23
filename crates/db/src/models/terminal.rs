@@ -629,6 +629,49 @@ impl TerminalLog {
         .fetch_all(pool)
         .await
     }
+
+    /// Delete old logs for a terminal, keeping only the most recent `keep` entries.
+    pub async fn cleanup_old_logs(
+        pool: &SqlitePool,
+        terminal_id: &str,
+        keep: i64,
+    ) -> sqlx::Result<u64> {
+        let result = sqlx::query(
+            r"
+            DELETE FROM terminal_log
+            WHERE terminal_id = ?1
+              AND id NOT IN (
+                SELECT id FROM terminal_log
+                WHERE terminal_id = ?1
+                ORDER BY created_at DESC
+                LIMIT ?2
+              )
+            ",
+        )
+        .bind(terminal_id)
+        .bind(keep)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Delete all logs for terminals belonging to completed/failed/cancelled workflows.
+    pub async fn cleanup_finished_workflow_logs(pool: &SqlitePool) -> sqlx::Result<u64> {
+        let result = sqlx::query(
+            r"
+            DELETE FROM terminal_log
+            WHERE terminal_id IN (
+                SELECT t.id FROM terminal t
+                JOIN workflow_task wt ON t.workflow_task_id = wt.id
+                JOIN workflow w ON wt.workflow_id = w.id
+                WHERE w.status IN ('completed', 'failed', 'cancelled')
+            )
+            ",
+        )
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
 }
 
 #[cfg(test)]

@@ -197,9 +197,10 @@
       "modelIdRequired": "Model ID is required"
     },
     "warnings": {
-      "urlV1Compatible": "La URL termina en /v1 pero el tipo de API está configurado en modo compatible. Los proveedores compatibles normalmente no necesitan /v1 en la URL.",
+      "urlV1Compatible": "La URL termina en /v1. La URL se usará tal como se ingresó; no se agregarán rutas automáticamente. Si la API requiere /v1, déjela; de lo contrario, puede eliminarla.",
       "zhipuaiOpenai": "Se detectó ZhipuAI. Considere usar \"openai-compatible\" como tipo de API.",
-      "zhipuaiAnthropic": "Se detectó ZhipuAI. Considere usar \"anthropic-compatible\" como tipo de API."
+      "zhipuaiAnthropic": "Se detectó ZhipuAI. Considere usar \"anthropic-compatible\" como tipo de API.",
+      "urlHint": "Ingrese la URL base completa. Se usará tal cual (ej. https://api.example.com/v1)."
     }
   },
   "step4": {

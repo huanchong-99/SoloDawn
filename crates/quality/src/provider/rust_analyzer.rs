@@ -56,7 +56,7 @@ impl RustProvider {
                     "warning" => {
                         warnings += 1;
                         issues.push(
-                            QualityIssue::new(
+                            QualityIssue::new_capped(
                                 &msg.rule_id,
                                 RuleType::CodeSmell,
                                 Severity::Major,
@@ -69,7 +69,7 @@ impl RustProvider {
                     "error" => {
                         errors += 1;
                         issues.push(
-                            QualityIssue::new(
+                            QualityIssue::new_capped(
                                 &msg.rule_id,
                                 RuleType::Bug,
                                 Severity::Critical,
@@ -97,7 +97,7 @@ impl RustProvider {
             let trimmed = line.trim();
             if trimmed.starts_with("Diff in") || trimmed.ends_with(".rs") {
                 violations += 1;
-                issues.push(QualityIssue::new(
+                issues.push(QualityIssue::new_capped(
                     "fmt::unformatted",
                     RuleType::CodeSmell,
                     Severity::Minor,
@@ -124,7 +124,7 @@ impl RustProvider {
                     .and_then(|s| s.split(" ...").next())
                     .unwrap_or("unknown");
 
-                issues.push(QualityIssue::new(
+                issues.push(QualityIssue::new_capped(
                     format!("test::{}", test_name),
                     RuleType::Bug,
                     Severity::Critical,

@@ -5,6 +5,7 @@
 pub mod builtin_common;
 pub mod builtin_frontend;
 pub mod builtin_rust;
+pub mod completeness;
 pub mod coverage;
 pub mod frontend;
 pub mod repo;

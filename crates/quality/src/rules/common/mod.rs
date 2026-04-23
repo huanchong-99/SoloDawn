@@ -8,6 +8,7 @@ pub mod large_file;
 pub mod line_length;
 pub mod secret_detection;
 pub mod trailing_whitespace;
+pub mod weak_default_detection;
 
 use super::CommonRule;
 
@@ -16,6 +17,7 @@ pub fn all_common_rules() -> Vec<Box<dyn CommonRule>> {
     vec![
         Box::new(duplication::DuplicationRule),
         Box::new(secret_detection::SecretDetectionRule::default()),
+        Box::new(weak_default_detection::WeakDefaultDetectionRule::default()),
         Box::new(large_file::LargeFileRule),
         Box::new(line_length::LineLengthRule),
         Box::new(trailing_whitespace::TrailingWhitespaceRule),

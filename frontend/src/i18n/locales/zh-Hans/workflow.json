@@ -198,9 +198,10 @@
       "modelIdRequired": "请选择或输入模型 ID"
     },
     "warnings": {
-      "urlV1Compatible": "URL 以 /v1 结尾，但 API 类型设置为兼容模式。兼容模式的提供商通常不需要在 URL 中包含 /v1。",
+      "urlV1Compatible": "URL 以 /v1 结尾。系统将原样使用您输入的 URL，不会自动追加路径。如果 API 需要 /v1 则保留，否则可以移除。",
       "zhipuaiOpenai": "检测到智谱AI地址。建议将 API 类型更改为 \"openai-compatible\"。",
-      "zhipuaiAnthropic": "检测到智谱AI地址。建议将 API 类型更改为 \"anthropic-compatible\"。"
+      "zhipuaiAnthropic": "检测到智谱AI地址。建议将 API 类型更改为 \"anthropic-compatible\"。",
+      "urlHint": "请输入完整的基础 URL，系统将原样使用（例如 https://api.example.com/v1）。"
     }
   },
   "step4": {

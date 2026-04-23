@@ -124,7 +124,15 @@ pub fn sarif_to_issues(report: &SarifReport, source: AnalyzerSource) -> Vec<Qual
 
     for run in &report.runs {
         for result in &run.results {
-            let severity = sarif_level_to_severity(result.level.as_deref().unwrap_or("warning"));
+            // Same advisory principle as the text-parsing path in
+            // `provider::frontend::parse_eslint_output`: a SARIF `level` of
+            // `error` on an ESLint run still reflects a project-local
+            // `.eslintrc` choice made by the model, not genuine breakage.
+            // Route the raw severity through `cap_for_advisory` so the
+            // SARIF side-door cannot re-introduce model-dependent blocking.
+            let raw_severity =
+                sarif_level_to_severity(result.level.as_deref().unwrap_or("warning"));
+            let severity = raw_severity.cap_for_advisory(&source);
             let rule_type = severity_to_rule_type(severity);
 
             let mut issue = QualityIssue::new(
@@ -225,5 +233,64 @@ mod tests {
         assert_eq!(issues[0].rule_id, "clippy::unwrap_used");
         assert_eq!(issues[0].line, Some(42));
         assert_eq!(issues[0].severity, Severity::Major);
+    }
+
+    #[test]
+    fn eslint_sarif_error_level_is_capped_to_major() {
+        // Closes the SARIF side-door: even if ESLint emits its findings
+        // via SARIF with level="error", the advisory-cap must still apply.
+        // Without the cap, `sarif_to_issues` would hand back Critical and
+        // every model-set `error` severity would re-enter blocking.
+        let json = r#"{
+            "version": "2.1.0",
+            "runs": [{
+                "tool": { "driver": { "name": "eslint", "rules": [] } },
+                "results": [{
+                    "ruleId": "@typescript-eslint/no-explicit-any",
+                    "level": "error",
+                    "message": { "text": "Unexpected any." },
+                    "locations": [{
+                        "physicalLocation": {
+                            "artifactLocation": { "uri": "src/util.ts" },
+                            "region": { "startLine": 7 }
+                        }
+                    }]
+                }]
+            }]
+        }"#;
+        let report = parse_sarif(json).unwrap();
+        let issues = sarif_to_issues(&report, AnalyzerSource::EsLint);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(
+            issues[0].severity,
+            Severity::Major,
+            "ESLint SARIF error must be capped to Major"
+        );
+        assert!(
+            !issues[0].is_blocking(),
+            "ESLint SARIF findings must never block, regardless of label"
+        );
+    }
+
+    #[test]
+    fn clippy_sarif_error_level_stays_blocking() {
+        // The cap is *source-keyed*. Clippy is not advisory, so a real
+        // error from clippy SARIF must still be blocking.
+        let json = r#"{
+            "version": "2.1.0",
+            "runs": [{
+                "tool": { "driver": { "name": "clippy", "rules": [] } },
+                "results": [{
+                    "ruleId": "clippy::correctness",
+                    "level": "error",
+                    "message": { "text": "real bug" },
+                    "locations": []
+                }]
+            }]
+        }"#;
+        let report = parse_sarif(json).unwrap();
+        let issues = sarif_to_issues(&report, AnalyzerSource::Clippy);
+        assert_eq!(issues[0].severity, Severity::Critical);
+        assert!(issues[0].is_blocking());
     }
 }

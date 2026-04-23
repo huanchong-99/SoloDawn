@@ -197,9 +197,10 @@
       "modelIdRequired": "Model ID is required"
     },
     "warnings": {
-      "urlV1Compatible": "URLが /v1 で終わっていますが、APIタイプが互換モードに設定されています。互換プロバイダーは通常、URLに /v1 を含める必要はありません。",
+      "urlV1Compatible": "URLが /v1 で終わっています。URLは入力された通りに使用され、パスは自動追加されません。API に /v1 が必要な場合はそのままにし、不要な場合は削除してください。",
       "zhipuaiOpenai": "ZhipuAIが検出されました。APIタイプを \"openai-compatible\" に変更することを検討してください。",
-      "zhipuaiAnthropic": "ZhipuAIが検出されました。APIタイプを \"anthropic-compatible\" に変更することを検討してください。"
+      "zhipuaiAnthropic": "ZhipuAIが検出されました。APIタイプを \"anthropic-compatible\" に変更することを検討してください。",
+      "urlHint": "完全なベースURLを入力してください。入力された通りに使用されます（例：https://api.example.com/v1）。"
     }
   },
   "step4": {

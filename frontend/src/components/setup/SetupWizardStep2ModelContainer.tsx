@@ -66,9 +66,7 @@ export function SetupWizardStep2ModelContainer({
     const url = baseUrl.trim();
     if (!url || !apiType) return null;
 
-    const isCompatible = apiType.endsWith('-compatible');
-
-    if (isCompatible && url.endsWith('/v1')) {
+    if (url.endsWith('/v1')) {
       return t('step3.warnings.urlV1Compatible');
     }
 

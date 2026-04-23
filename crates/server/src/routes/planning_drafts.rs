@@ -308,11 +308,46 @@ async fn send_message(
     if missing_planner {
         {
             let cfg = deployment.config().read().await;
-            if let Some(model) = cfg.workflow_model_library.iter().find(|m| !m.api_key.is_empty()) {
+            // Priority 1: Anthropic-protocol models (most common for orchestrator chat)
+            if let Some(model) = cfg.workflow_model_library.iter().find(|m| {
+                !m.api_key.is_empty()
+                && matches!(m.api_type.as_str(), "anthropic" | "anthropic-compatible")
+            }) {
                 tracing::info!(
                     draft_id = %draft_id,
                     model_id = %model.model_id,
-                    "Auto-filling planner config from workflow_model_library"
+                    "Auto-filling planner config from workflow_model_library (anthropic)"
+                );
+                draft.planner_model_id = Some(model.model_id.clone());
+                draft.planner_api_type = Some(model.api_type.clone());
+                draft.planner_base_url = Some(model.base_url.clone());
+                if let Err(e) = draft.set_api_key(&model.api_key) {
+                    tracing::warn!(draft_id = %draft_id, "Failed to encrypt auto-filled API key: {e}");
+                }
+            }
+            // Priority 2: OpenAI-protocol models (fallback)
+            else if let Some(model) = cfg.workflow_model_library.iter().find(|m| {
+                !m.api_key.is_empty()
+                && matches!(m.api_type.as_str(), "openai" | "openai-compatible")
+            }) {
+                tracing::info!(
+                    draft_id = %draft_id,
+                    model_id = %model.model_id,
+                    "Auto-filling planner config from workflow_model_library (openai-compatible)"
+                );
+                draft.planner_model_id = Some(model.model_id.clone());
+                draft.planner_api_type = Some(model.api_type.clone());
+                draft.planner_base_url = Some(model.base_url.clone());
+                if let Err(e) = draft.set_api_key(&model.api_key) {
+                    tracing::warn!(draft_id = %draft_id, "Failed to encrypt auto-filled API key: {e}");
+                }
+            }
+            // Priority 3: Any model with API key (last resort)
+            else if let Some(model) = cfg.workflow_model_library.iter().find(|m| !m.api_key.is_empty()) {
+                tracing::info!(
+                    draft_id = %draft_id,
+                    model_id = %model.model_id,
+                    "Auto-filling planner config from workflow_model_library (any)"
                 );
                 draft.planner_model_id = Some(model.model_id.clone());
                 draft.planner_api_type = Some(model.api_type.clone());
@@ -334,9 +369,12 @@ async fn send_message(
 
     // 3. Try to call LLM and store assistant reply
     // Fallback chain: configured model → Claude Code native credentials
+    // Native fallback model bumped to `claude-sonnet-4-6` (Sonnet 4.6) —
+    // see the matching comment in agent.rs and the probe test
+    // `test_probe_subscription_model_acceptance` for upstream confirmation.
     let llm_client = build_llm_client_from_draft(&draft).or_else(|| {
         tracing::info!(draft_id = %draft_id, "No model configured, trying Claude Code native credentials");
-        create_claude_code_native_client("claude-sonnet-4-20250514")
+        create_claude_code_native_client("claude-sonnet-4-6")
     });
     if let Some(llm_client) = llm_client {
         let all_messages = PlanningDraftMessage::list_by_draft(&deployment.db().pool, &draft_id)
