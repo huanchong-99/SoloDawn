@@ -18,6 +18,7 @@ import { AutoExpandingTextarea } from '@/components/ui/auto-expanding-textarea';
 import { MultiFileSearchTextarea } from '@/components/ui/multi-file-search-textarea';
 import { useScriptPlaceholders } from '@/hooks/useScriptPlaceholders';
 import { repoApi } from '@/lib/api';
+import { repoBranchKeys } from '@/hooks/useRepoBranches';
 import { ConfirmDialog } from '@/components/ui-new/dialogs/ConfirmDialog';
 import type { Repo, UpdateRepo } from 'shared/types';
 
@@ -176,13 +177,18 @@ export function ReposSettingsNew() {
     setSuccess(false);
 
     try {
+      // Normalize empty strings to null at save time
+      const normalize = (v: string): string | null => {
+        const trimmed = v.trim();
+        return trimmed === '' ? null : trimmed;
+      };
       const updateData: UpdateRepo = {
-        displayName: draft.displayName.trim() || null,
-        setupScript: draft.setupScript.trim() || null,
-        cleanupScript: draft.cleanupScript.trim() || null,
-        copyFiles: draft.copyFiles.trim() || null,
+        displayName: normalize(draft.displayName),
+        setupScript: normalize(draft.setupScript),
+        cleanupScript: normalize(draft.cleanupScript),
+        copyFiles: normalize(draft.copyFiles),
         parallelSetupScript: draft.parallelSetupScript,
-        devServerScript: draft.devServerScript.trim() || null,
+        devServerScript: normalize(draft.devServerScript),
       };
 
       const updatedRepo = await repoApi.update(selectedRepo.id, updateData);
@@ -191,6 +197,10 @@ export function ReposSettingsNew() {
       queryClient.setQueryData(['repos'], (old: Repo[] | undefined) =>
         old?.map((r) => (r.id === updatedRepo.id ? updatedRepo : r))
       );
+      // Invalidate branch data since repo config may have changed
+      queryClient.invalidateQueries({
+        queryKey: repoBranchKeys.byRepo(updatedRepo.id),
+      });
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {

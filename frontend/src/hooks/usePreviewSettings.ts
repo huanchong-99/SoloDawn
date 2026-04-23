@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef, useEffect } from 'react';
 import { useScratch } from './useScratch';
 import { useDebouncedCallback } from './useDebouncedCallback';
 import {
@@ -72,22 +72,46 @@ export function usePreviewSettings(
     [scratchData?.responsiveWidth, scratchData?.responsiveHeight]
   );
 
+  // Keep latest values in refs so saveSettings has a stable identity.
+  // This breaks the circular dep where saveSettings → responsiveDimensions →
+  // setResponsiveDimensions → saveSettings.
+  const latestRef = useRef({
+    overrideUrl,
+    screenSize,
+    responsiveWidth: responsiveDimensions.width,
+    responsiveHeight: responsiveDimensions.height,
+  });
+  useEffect(() => {
+    latestRef.current = {
+      overrideUrl,
+      screenSize,
+      responsiveWidth: responsiveDimensions.width,
+      responsiveHeight: responsiveDimensions.height,
+    };
+  }, [
+    overrideUrl,
+    screenSize,
+    responsiveDimensions.width,
+    responsiveDimensions.height,
+  ]);
+
   // Helper to save settings
   const saveSettings = useCallback(
     async (updates: Partial<PreviewSettingsData>) => {
       if (!workspaceId) return;
 
+      const latest = latestRef.current;
       try {
         await updateScratch({
           payload: {
             type: 'PREVIEW_SETTINGS',
             data: {
-              url: updates.url ?? overrideUrl ?? '',
-              screenSize: updates.screenSize ?? screenSize,
+              url: updates.url ?? latest.overrideUrl ?? '',
+              screenSize: updates.screenSize ?? latest.screenSize,
               responsiveWidth:
-                updates.responsiveWidth ?? responsiveDimensions.width,
+                updates.responsiveWidth ?? latest.responsiveWidth,
               responsiveHeight:
-                updates.responsiveHeight ?? responsiveDimensions.height,
+                updates.responsiveHeight ?? latest.responsiveHeight,
             },
           },
         });
@@ -95,14 +119,7 @@ export function usePreviewSettings(
         console.error('[usePreviewSettings] Failed to save:', e);
       }
     },
-    [
-      workspaceId,
-      updateScratch,
-      overrideUrl,
-      screenSize,
-      responsiveDimensions.width,
-      responsiveDimensions.height,
-    ]
+    [workspaceId, updateScratch]
   );
 
   // Debounced save for URL changes (frequent typing)

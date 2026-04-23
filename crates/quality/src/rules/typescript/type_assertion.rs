@@ -22,8 +22,9 @@ pub struct TypeAssertionRule {
 impl Default for TypeAssertionRule {
     fn default() -> Self {
         Self {
-            // Match `as SomeType` — we filter out `as const` in the analyze method
-            as_pattern: Regex::new(r"\bas\s+\w+")
+            // Match `as SomeType` where the target type is a word boundary
+            // identifier. `as const` is intentionally excluded below.
+            as_pattern: Regex::new(r"\bas\s+(\w+)")
                 .expect("invalid as-assertion regex"),
             // Match `<SomeType>` followed by a word char or paren (value expression),
             // but not common JSX/HTML-like patterns

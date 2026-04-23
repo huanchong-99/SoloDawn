@@ -45,7 +45,7 @@ export function useAutoLinkSharedTasks({
 
     const tasksToLink = Object.values(sharedTasksById).filter((task) => {
       const isAssignedToCurrentUser =
-        task.assignee_user_id === currentUser.user_id;
+        task.assigneeUserId === currentUser.user_id;
       const hasLocalTask = Boolean(localTasksById[task.id]);
       const isAlreadyLinked = referencedSharedIds.has(task.id);
       const isBeingLinked = linkingInProgress.current.has(task.id);

@@ -17,10 +17,10 @@ FROM terminal_log;
 DROP TABLE terminal_log;
 ALTER TABLE terminal_log_new RENAME TO terminal_log;
 
-CREATE INDEX idx_terminal_log_terminal_id ON terminal_log(terminal_id);
-CREATE INDEX idx_terminal_log_created_at ON terminal_log(created_at);
-CREATE INDEX idx_terminal_log_streaming ON terminal_log(terminal_id, created_at DESC);
-CREATE INDEX idx_terminal_log_cleanup ON terminal_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_terminal_log_terminal_id ON terminal_log(terminal_id);
+CREATE INDEX IF NOT EXISTS idx_terminal_log_created_at ON terminal_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_terminal_log_streaming ON terminal_log(terminal_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_terminal_log_cleanup ON terminal_log(created_at);
 
 CREATE TABLE git_event_new (
     id TEXT PRIMARY KEY,
@@ -66,16 +66,16 @@ FROM git_event;
 DROP TABLE git_event;
 ALTER TABLE git_event_new RENAME TO git_event;
 
-CREATE INDEX idx_git_event_workflow_id ON git_event(workflow_id);
-CREATE INDEX idx_git_event_terminal_id ON git_event(terminal_id);
-CREATE INDEX idx_git_event_process_status ON git_event(process_status);
-CREATE INDEX idx_git_event_workflow_status
+CREATE INDEX IF NOT EXISTS idx_git_event_workflow_id ON git_event(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_git_event_terminal_id ON git_event(terminal_id);
+CREATE INDEX IF NOT EXISTS idx_git_event_process_status ON git_event(process_status);
+CREATE INDEX IF NOT EXISTS idx_git_event_workflow_status
 ON git_event(workflow_id, process_status, created_at)
 WHERE process_status IN ('pending', 'processing');
-CREATE INDEX idx_git_event_terminal_status
+CREATE INDEX IF NOT EXISTS idx_git_event_terminal_status
 ON git_event(terminal_id, process_status, created_at)
 WHERE process_status = 'pending';
-CREATE INDEX idx_git_event_cleanup
+CREATE INDEX IF NOT EXISTS idx_git_event_cleanup
 ON git_event(workflow_id, processed_at)
 WHERE process_status = 'processed' AND processed_at IS NOT NULL;
 

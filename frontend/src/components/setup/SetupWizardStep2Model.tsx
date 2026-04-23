@@ -230,6 +230,12 @@ export function SetupWizardStep2Model({
                   key={opt.value}
                   type="button"
                   onClick={() => onCliTypeIdChange(opt.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onCliTypeIdChange(opt.value);
+                    }
+                  }}
                   className={cn(
                     'px-base py-half rounded border text-base transition-colors cursor-pointer',
                     'hover:border-brand hover:text-high',
@@ -377,7 +383,7 @@ export function SetupWizardStep2Model({
                     'focus:outline-none focus:ring-1 focus:ring-brand'
                   )}
                 >
-                  <option value="">
+                  <option key="empty" value="">
                     {t('setup:wizard.model.modelIdPlaceholder')}
                   </option>
                   {models.map((m) => (

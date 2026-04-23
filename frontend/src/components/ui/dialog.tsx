@@ -111,11 +111,15 @@ const Dialog = React.forwardRef<
     <div className="fixed inset-0 z-[9999] flex items-start justify-center p-4 overflow-y-auto">
       <button
         type="button"
+        aria-hidden="true"
+        tabIndex={-1}
         className="fixed inset-0 bg-black/50"
         onClick={() => (uncloseable ? {} : onOpenChange?.(false))}
       />
       <div
         ref={ref}
+        role="dialog"
+        aria-modal="true"
         className={cn(
           'relative z-[9999] flex flex-col w-full max-w-xl gap-4 bg-primary p-6 shadow-lg duration-200 sm:rounded-lg my-8',
           className

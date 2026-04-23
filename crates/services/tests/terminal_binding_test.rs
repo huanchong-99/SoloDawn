@@ -1,23 +1,59 @@
-use std::{str::FromStr, sync::Arc};
+use std::{
+    str::FromStr,
+    sync::{Arc, Mutex, MutexGuard},
+};
 
 use chrono::Utc;
 use db::{
     DBService,
     models::{Terminal, execution_process::ExecutionProcess, session::Session},
 };
+use once_cell::sync::Lazy;
 use services::services::terminal::TerminalLauncher;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use uuid::Uuid;
 
+/// Mutex to serialize environment variable access across tests in this file.
+/// Ensures tests that mutate env vars run sequentially and restore on drop.
+static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+/// RAII guard for environment variables. Restores the previous value on drop
+/// and holds a global lock so concurrent tests cannot race on env mutation.
+struct EnvVarGuard {
+    key: &'static str,
+    prev: Option<String>,
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var(key).ok();
+        unsafe { std::env::set_var(key, value) };
+        Self {
+            key,
+            prev,
+            _lock: lock,
+        }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match &self.prev {
+            Some(value) => unsafe { std::env::set_var(self.key, value) },
+            None => unsafe { std::env::remove_var(self.key) },
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_terminal_launch_creates_session() {
-    // Setup encryption key for API key encryption
-    unsafe {
-        std::env::set_var(
-            "SOLODAWN_ENCRYPTION_KEY",
-            "12345678901234567890123456789012",
-        );
-    }
+    // Setup encryption key for API key encryption (restored on drop).
+    let _env = EnvVarGuard::set(
+        "SOLODAWN_ENCRYPTION_KEY",
+        "12345678901234567890123456789012",
+    );
 
     // Setup: Create in-memory DB with migrations
     let options = SqliteConnectOptions::from_str(":memory:")

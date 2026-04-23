@@ -107,19 +107,36 @@ export function useModelConfigForExecutor(
   // otherwise user's manual selection would be overwritten on every
   // allModels reference change.
   const prevExecutorRef = useRef(executor);
+  // Primitive dep derived from model ids to avoid referential-identity churn.
+  const allModelsKey = useMemo(
+    () => allModels.map((m) => m.id).join('|'),
+    [allModels]
+  );
+  const firstCustomId = customModels[0]?.id ?? null;
+  const firstOfficialId = officialModels[0]?.id ?? null;
+  const firstAnyId = allModels[0]?.id ?? null;
+  const hasModels = allModels.length > 0;
   useEffect(() => {
     const executorChanged = prevExecutorRef.current !== executor;
     prevExecutorRef.current = executor;
 
-    if (allModels.length === 0) {
+    if (!hasModels) {
       setSelectedModelConfigId(null);
       return;
     }
     if (executorChanged || selectedModelConfigId === null) {
-      const preferred = customModels[0] ?? officialModels[0] ?? allModels[0];
-      setSelectedModelConfigId(preferred?.id ?? null);
+      const preferredId = firstCustomId ?? firstOfficialId ?? firstAnyId;
+      setSelectedModelConfigId(preferredId);
     }
-  }, [allModels, customModels, officialModels, executor, selectedModelConfigId]);
+  }, [
+    allModelsKey,
+    hasModels,
+    firstCustomId,
+    firstOfficialId,
+    firstAnyId,
+    executor,
+    selectedModelConfigId,
+  ]);
 
   return {
     customModels,

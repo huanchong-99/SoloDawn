@@ -24,7 +24,7 @@ message SpawnTerminalRequest {
 
 message SpawnTerminalResponse {
   bool success = 1;
-  string error = 2;
+  optional string error = 2;
   uint32 pid = 3;
 }
 

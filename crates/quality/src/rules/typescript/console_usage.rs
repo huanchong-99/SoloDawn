@@ -59,7 +59,14 @@ impl Rule for ConsoleUsageRule {
 
 /// Check whether a file path looks like it belongs to a test directory or file.
 fn is_test_file(path: &str) -> bool {
-    path.contains("__tests__") || path.contains(".test.") || path.contains(".spec.")
+    // Split on both '/' and '\\' so we can match `__tests__` as a proper
+    // path segment (avoid false positives from substrings like
+    // `my__tests__helper`). The `.test.`/`.spec.` infix checks remain
+    // filename-based and are safe as substring matches.
+    let is_tests_segment = path
+        .split(['/', '\\'])
+        .any(|seg| seg == "__tests__");
+    is_tests_segment || path.contains(".test.") || path.contains(".spec.")
 }
 
 /// Check whether a line is a single-line comment (// or leading /*)

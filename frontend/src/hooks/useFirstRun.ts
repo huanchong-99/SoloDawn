@@ -10,8 +10,19 @@ import { useUserSystem } from '@/components/ConfigProvider';
 export function useFirstRun() {
   const { config, updateAndSaveConfig } = useUserSystem();
 
-  const isFirstRun = !(config as Record<string, unknown>)?.first_run_completed;
+  const firstRunCompleted = (config as { first_run_completed?: unknown })
+    ?.first_run_completed;
+  const isFirstRun = !(
+    typeof firstRunCompleted === 'boolean' && firstRunCompleted
+  );
 
+  // [W2-40] `updateAndSaveConfig` dependency: this function is provided by
+  // `useUserSystem()` and may change identity across renders, which would
+  // invalidate the `completeFirstRun` memoization. Accepted as-is because
+  // (a) `completeFirstRun` is only invoked imperatively at most once per
+  // session (the first-run wizard completion), so identity churn has no
+  // measurable cost, and (b) always closing over the latest config setter
+  // is safer than caching a stale reference.
   const completeFirstRun = useCallback(async () => {
     await updateAndSaveConfig({
       first_run_completed: true,

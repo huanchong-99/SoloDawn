@@ -6,7 +6,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use tokio::{
-    sync::{RwLock, mpsc},
+    sync::{RwLock, mpsc, oneshot},
     task::JoinHandle,
     time::MissedTickBehavior,
 };
@@ -94,6 +94,44 @@ impl TerminalBridge {
     /// Returns `Ok(())` if registration succeeds, or an error if the session ID
     /// is empty or registration fails.
     pub async fn register(&self, terminal_id: &str, pty_session_id: &str) -> anyhow::Result<()> {
+        // Backward-compatible shim: await the ready signal internally so existing
+        // callers still observe the old blocking semantics.
+        let ready_rx = self
+            .register_with_ready(terminal_id, pty_session_id)
+            .await?;
+        // Await readiness with a bounded timeout. A dropped sender (`Err(_)`) is
+        // benign — it means the bridge task was aborted (typically because another
+        // registration for the same terminal won) and the caller should just
+        // proceed. An elapsed timeout, however, indicates the task never started
+        // executing within 2s, which is a real bug worth surfacing instead of
+        // silently returning Ok(()).
+        match tokio::time::timeout(Duration::from_secs(2), ready_rx).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(_)) => Ok(()), // task aborted before signalling — benign
+            Err(_elapsed) => {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    pty_session_id = %pty_session_id,
+                    "Terminal bridge did not become ready within 2s; proceeding anyway"
+                );
+                Ok(())
+            }
+        }
+    }
+
+    /// Registers a bridge task and returns a [`oneshot::Receiver`] that completes
+    /// once the bridge task has started executing.
+    ///
+    /// Callers can await the receiver (ideally with a timeout) to obtain a
+    /// deterministic "bridge ready" signal instead of polling or sleeping.
+    ///
+    /// Note: the receiver yields `Err(_)` if the bridge task is aborted before it
+    /// can signal readiness (e.g. registration race with another caller).
+    pub async fn register_with_ready(
+        &self,
+        terminal_id: &str,
+        pty_session_id: &str,
+    ) -> anyhow::Result<oneshot::Receiver<()>> {
         let session_id = pty_session_id.trim();
         if session_id.is_empty() {
             return Err(anyhow::anyhow!("pty_session_id is empty"));
@@ -101,6 +139,14 @@ impl TerminalBridge {
         if terminal_id.trim().is_empty() {
             return Err(anyhow::anyhow!("terminal_id is empty"));
         }
+
+        // Helper: a pre-completed ready receiver for early-return paths where no
+        // new bridge task is spawned (the bridge is effectively "already ready").
+        let already_ready = || {
+            let (tx, rx) = oneshot::channel::<()>();
+            let _ = tx.send(());
+            rx
+        };
 
         // Keep exactly one active bridge per terminal.
         // A terminal restart may produce a new PTY session while an old bridge task
@@ -113,7 +159,7 @@ impl TerminalBridge {
                     pty_session_id = %session_id,
                     "Terminal bridge already registered"
                 );
-                return Ok(());
+                return Ok(already_ready());
             }
 
             let stale_session_ids: Vec<String> = active
@@ -149,8 +195,17 @@ impl TerminalBridge {
         let terminal_id_for_task = terminal_id.to_string();
         let active_sessions = Arc::clone(&self.active_sessions);
 
+        // E26-07: channel-based ready signal. The bridge task sends `()` once it
+        // begins executing, letting callers await a deterministic readiness
+        // notification instead of polling `is_registered` after a fixed sleep.
+        let (ready_tx, ready_rx) = oneshot::channel::<()>();
+
         // Spawn bridge task
         let task_handle = tokio::spawn(async move {
+            // Signal readiness as soon as the task is scheduled. Ignore send errors
+            // (receiver may have been dropped if the caller gave up waiting).
+            let _ = ready_tx.send(());
+
             let result = Self::run_bridge(
                 process_manager,
                 terminal_id_for_task.clone(),
@@ -197,7 +252,7 @@ impl TerminalBridge {
                     pty_session_id = %session_id,
                     "Terminal bridge registration race: existing session kept"
                 );
-                return Ok(());
+                return Ok(already_ready());
             }
 
             active.insert(
@@ -216,7 +271,7 @@ impl TerminalBridge {
             "Terminal bridge registered"
         );
 
-        Ok(())
+        Ok(ready_rx)
     }
 
     /// Unregisters a bridge task for a PTY session.
@@ -249,6 +304,11 @@ impl TerminalBridge {
             .contains_key(pty_session_id)
     }
 
+    /// Maximum input payload size accepted from the bus before forwarding to PTY stdin.
+    /// Inputs larger than this (1 MiB) are dropped with a warning to guard against
+    /// oversized/malicious payloads exhausting the PTY writer. See E26-11.
+    const MAX_INPUT_LEN: usize = 1024 * 1024;
+
     /// Helper method to forward a bus message to PTY stdin.
     async fn forward_bus_message(
         tx: &mpsc::Sender<Vec<u8>>,
@@ -256,6 +316,24 @@ impl TerminalBridge {
         pty_session_id: &str,
         msg: Option<BusMessage>,
     ) -> anyhow::Result<bool> {
+        // E26-11: validate input length at entry before any processing.
+        if let Some(ref bus_msg) = msg {
+            let incoming_len = match bus_msg {
+                BusMessage::TerminalMessage { message } => message.len(),
+                BusMessage::TerminalInput { input, .. } => input.len(),
+                _ => 0,
+            };
+            if incoming_len > Self::MAX_INPUT_LEN {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    pty_session_id = %pty_session_id,
+                    incoming_len,
+                    max_len = Self::MAX_INPUT_LEN,
+                    "Dropping oversized terminal input message"
+                );
+                return Ok(false);
+            }
+        }
         match msg {
             Some(BusMessage::TerminalMessage { message }) => {
                 let payload = Self::normalize_message(&message);
@@ -358,27 +436,43 @@ impl TerminalBridge {
         let terminal_id_writer = terminal_id.clone();
 
         // Spawn blocking writer task
+        //
+        // E26-04: the mutex guard is acquired *inside* the loop and explicitly
+        // dropped after each write+flush, so the `PtyWriter` is never held across
+        // iterations or await points. In addition, the `Arc<Mutex<PtyWriter>>`
+        // itself is explicitly dropped once the channel closes so the writer's
+        // ref count is released promptly rather than at task-exit unwind.
         let mut writer_task = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            while let Some(data) = writer_rx.blocking_recv() {
-                let mut writer_guard = match writer.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => {
-                        tracing::warn!(
-                            terminal_id = %terminal_id_writer,
-                            "PTY writer lock poisoned; recovering"
-                        );
-                        poisoned.into_inner()
-                    }
-                };
+            let result: anyhow::Result<()> = 'writer_loop: {
+                while let Some(data) = writer_rx.blocking_recv() {
+                    let mut writer_guard = match writer.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => {
+                            tracing::warn!(
+                                terminal_id = %terminal_id_writer,
+                                "PTY writer lock poisoned; recovering"
+                            );
+                            poisoned.into_inner()
+                        }
+                    };
 
-                if let Err(e) = writer_guard.write_all(&data) {
-                    return Err(anyhow::anyhow!("PTY write error: {e}"));
+                    if let Err(e) = writer_guard.write_all(&data) {
+                        break 'writer_loop Err(anyhow::anyhow!("PTY write error: {e}"));
+                    }
+                    if let Err(e) = writer_guard.flush() {
+                        break 'writer_loop Err(anyhow::anyhow!("PTY flush error: {e}"));
+                    }
+
+                    // Explicitly drop the mutex guard before the next
+                    // `blocking_recv()` so we never hold the lock while idle.
+                    drop(writer_guard);
                 }
-                if let Err(e) = writer_guard.flush() {
-                    return Err(anyhow::anyhow!("PTY flush error: {e}"));
-                }
-            }
-            Ok(())
+                Ok(())
+            };
+            // Drop the `Arc<Mutex<PtyWriter>>` before returning so the ref count
+            // is released immediately rather than waiting for task-exit unwind.
+            drop(writer);
+            result
         });
 
         let mut writer_finished = false;
@@ -442,6 +536,18 @@ impl TerminalBridge {
                 }
                 result = &mut writer_task => {
                     writer_finished = true;
+                    // [E26-03] Writer task has exited; its `writer_rx` is now dropped,
+                    // so any messages still buffered in the mpsc channel will be
+                    // discarded. Surface the count so we know when writes were lost.
+                    let pending = tx.max_capacity().saturating_sub(tx.capacity());
+                    if pending > 0 {
+                        tracing::warn!(
+                            terminal_id = %terminal_id,
+                            pty_session_id = %pty_session_id,
+                            discarded_messages = pending,
+                            "Writer task exited with buffered messages still in channel; they will be dropped"
+                        );
+                    }
                     match result {
                         Ok(Ok(())) => {}
                         Ok(Err(e)) => return Err(e),

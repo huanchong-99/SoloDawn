@@ -40,6 +40,14 @@ export function useErrorNotification(
     [context, onError]
   );
 
+  // [W2-40] `wrapAsync` depends on `notifyError`, which in turn depends on
+  // the consumer-provided `onError` and `context`. Each of those can change
+  // between renders, which will cause `wrapAsync` to change identity too.
+  // Accepted: wrapAsync is intended to be invoked fresh per async call
+  // (not memoized by consumers as a dependency), and always pulling the
+  // latest `notifyError` is required so errors are dispatched through the
+  // caller's current handler rather than a stale one captured on first
+  // render.
   const wrapAsync = useCallback(
     <Args extends unknown[], Result>(
       fn: (...args: Args) => Promise<Result>,

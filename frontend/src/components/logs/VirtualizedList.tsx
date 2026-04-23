@@ -7,6 +7,7 @@ import {
   VirtuosoMessageListProps,
 } from '@virtuoso.dev/message-list';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import DisplayConversationEntry from '../NormalizedConversation/DisplayConversationEntry';
 import { useEntries } from '@/contexts/EntriesContext';
@@ -77,6 +78,7 @@ const computeItemKey: VirtuosoMessageListProps<
 >['computeItemKey'] = ({ data }) => `l-${data.patchKey}`;
 
 const VirtualizedList = ({ attempt, task }: Readonly<VirtualizedListProps>) => {
+  const { t } = useTranslation('common');
   const [channelData, setChannelData] =
     useState<DataWithScrollModifier<PatchTypeWithKey> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -133,9 +135,9 @@ const VirtualizedList = ({ attempt, task }: Readonly<VirtualizedListProps>) => {
         />
       </VirtuosoMessageListLicense>
       {loading && (
-        <div className="float-left top-0 left-0 w-full h-full bg-primary flex flex-col gap-2 justify-center items-center">
+        <div className="absolute inset-0 bg-primary flex flex-col gap-2 justify-center items-center">
           <Loader2 className="h-8 w-8 animate-spin" />
-          <p>Loading History</p>
+          <p>{t('states.loadingHistory')}</p>
         </div>
       )}
     </ApprovalFormProvider>

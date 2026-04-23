@@ -537,7 +537,11 @@ export function AgentSettingsNew() {
         setProfilesSuccess(true);
         setTimeout(() => setProfilesSuccess(false), 3000);
 
-        reloadSystem();
+        try {
+          reloadSystem();
+        } catch (reloadError: unknown) {
+          console.error('Failed to reload system after deletion:', reloadError);
+        }
       } catch (delSaveError: unknown) {
         console.error('Failed to save deletion to backend:', delSaveError);
         setSaveError(t('settings.agents.errors.deleteFailed'));
@@ -773,16 +777,23 @@ export function AgentSettingsNew() {
                 value={executorDraft?.executor ?? ''}
                 onChange={(value) => {
                   const variants = profiles?.[value];
-                  const keepCurrentVariant =
+                  // Validate before keeping: ensure variants exist, current variant
+                  // is set, and the target executor actually defines that variant
+                  // as a non-null entry.
+                  const currentVariant = executorDraft?.variant;
+                  const keepCurrentVariant = Boolean(
                     variants &&
-                    executorDraft?.variant &&
-                    variants[executorDraft.variant];
+                      currentVariant &&
+                      Object.prototype.hasOwnProperty.call(
+                        variants,
+                        currentVariant
+                      ) &&
+                      variants[currentVariant] != null
+                  );
 
                   const newProfile: ExecutorProfileId = {
                     executor: value as BaseCodingAgent,
-                    variant: keepCurrentVariant
-                      ? executorDraft!.variant
-                      : null,
+                    variant: keepCurrentVariant ? currentVariant! : null,
                   };
                   updateExecutorDraft(newProfile);
                 }}
@@ -928,8 +939,8 @@ export function AgentSettingsNew() {
           <SettingsToggle
             label={t('settings.agents.editor.formLabel')}
             description={undefined}
-            checked={!useFormEditor}
-            onChange={(checked) => setUseFormEditor(!checked)}
+            checked={useFormEditor}
+            onChange={(checked) => setUseFormEditor(checked)}
             disabled={profilesLoading || !localParsedProfiles}
           />
 

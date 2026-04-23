@@ -224,6 +224,10 @@ impl StandardCodingAgentExecutor for Opencode {
         normalize_logs::normalize_logs(msg_store, worktree_path);
     }
 
+    // L06: Returns the conventional opencode config location. May return None
+    // if the platform has no XDG/config dir available; callers are expected to
+    // treat a missing path the same as a missing file (feature unavailable).
+    // This function does NOT guarantee the file exists on disk.
     fn default_mcp_config_path(&self) -> Option<std::path::PathBuf> {
         #[cfg(unix)]
         {

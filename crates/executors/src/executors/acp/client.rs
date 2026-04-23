@@ -14,7 +14,7 @@ use crate::{
 /// ACP client that handles agent-client protocol communication
 #[derive(Clone)]
 pub struct AcpClient {
-    event_tx: mpsc::UnboundedSender<AcpEvent>,
+    event_tx: mpsc::Sender<AcpEvent>,
     approvals: Option<Arc<dyn ExecutorApprovalService>>,
     feedback_queue: Arc<Mutex<Vec<String>>>,
 }
@@ -22,7 +22,7 @@ pub struct AcpClient {
 impl AcpClient {
     /// Create a new ACP client
     pub fn new(
-        event_tx: mpsc::UnboundedSender<AcpEvent>,
+        event_tx: mpsc::Sender<AcpEvent>,
         approvals: Option<Arc<dyn ExecutorApprovalService>>,
     ) -> Self {
         Self {
@@ -38,8 +38,14 @@ impl AcpClient {
 
     /// Send an event to the event channel
     fn send_event(&self, event: AcpEvent) {
-        if let Err(e) = self.event_tx.send(event) {
-            warn!("Failed to send ACP event: {}", e);
+        match self.event_tx.try_send(event) {
+            Ok(()) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                warn!("ACP event channel full (cap=512); dropping event");
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                warn!("ACP event channel closed; dropping event");
+            }
         }
     }
 

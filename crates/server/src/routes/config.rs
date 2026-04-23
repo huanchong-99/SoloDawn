@@ -6,10 +6,10 @@ use std::{
 };
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     body::Body,
     extract::{Path, Query, State},
-    http::{self, StatusCode},
+    http::{self, HeaderMap, StatusCode},
     response::{Json as ResponseJson, Response},
     routing::{get, post, put},
 };
@@ -32,7 +32,11 @@ use tokio::{fs, process::Command};
 use ts_rs::TS;
 use utils::{api::oauth::LoginStatus, assets::config_path, response::ApiResponse};
 
-use crate::{DeploymentImpl, error::ApiError};
+use crate::{
+    DeploymentImpl,
+    error::ApiError,
+    middleware::auth::{RequestContext, check_admin},
+};
 
 pub fn router() -> Router<DeploymentImpl> {
     Router::new()
@@ -54,6 +58,10 @@ pub fn router() -> Router<DeploymentImpl> {
         )
 }
 
+// Remote features (beta workspaces, shared cloud flows) are not yet active in
+// this build. Kept disabled at compile time until the backing services ship.
+// TODO: flip to `true` (or make runtime-configurable) once the remote feature
+// stack is enabled for general availability.
 const REMOTE_FEATURES_ENABLED: bool = false;
 
 #[derive(Debug, Serialize, Deserialize, TS)]
@@ -133,10 +141,32 @@ async fn get_user_system_info(
     ResponseJson(ApiResponse::success(user_system_info))
 }
 
+// Admin-only mutation.
+//
+// The immediate exposure (any bearer of a valid API token could fully
+// replace the server config) is gated below via `check_admin`. When
+// `SOLODAWN_ADMIN_TOKEN` is set, callers must additionally present a matching
+// `X-Admin-Token` header. When unset, the gate is a no-op for backward
+// compatibility with single-user/dev setups.
+//
+// Long-term (G24): replace the separate admin token with role/claims carried
+// on `RequestContext` so per-principal RBAC can be enforced instead of a
+// shared secret.
 async fn update_config(
     State(deployment): State<DeploymentImpl>,
+    headers: HeaderMap,
+    ctx: Option<Extension<RequestContext>>,
     Json(new_config): Json<Config>,
 ) -> Result<ResponseJson<ApiResponse<Config>>, ApiError> {
+    // Defense-in-depth: opt-in admin gate. When SOLODAWN_ADMIN_TOKEN is unset,
+    // this is a no-op. When set, require a matching X-Admin-Token header.
+    let ctx = ctx
+        .map(|Extension(c)| c)
+        .unwrap_or(RequestContext { authenticated: false });
+    if check_admin(&ctx, &headers).is_err() {
+        return Err(ApiError::Forbidden("admin token required".to_string()));
+    }
+
     let config_path = match config_path() {
         Ok(path) => path,
         Err(e) => {

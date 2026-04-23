@@ -108,12 +108,26 @@ async fn trigger_pr_description_follow_up(
     pr_number: i64,
     pr_url: &str,
 ) -> Result<(), ApiError> {
-    // Get the custom prompt from config, or use default
+    // E29-11: Get the custom prompt from config, or use default. Validate
+    // custom prompt length to avoid feeding unbounded user input into the
+    // coding agent follow-up.
+    const MAX_PR_DESCRIPTION_PROMPT_LEN: usize = 8 * 1024;
     let config = deployment.config().read().await;
-    let prompt_template = config
-        .pr_auto_description_prompt
-        .as_deref()
-        .unwrap_or(DEFAULT_PR_DESCRIPTION_PROMPT);
+    let custom_prompt = config.pr_auto_description_prompt.as_deref();
+    let prompt_template = match custom_prompt {
+        Some(p) if p.trim().is_empty() => DEFAULT_PR_DESCRIPTION_PROMPT,
+        Some(p) if p.len() > MAX_PR_DESCRIPTION_PROMPT_LEN => {
+            tracing::warn!(
+                "Custom pr_auto_description_prompt exceeds {} chars ({}); \
+                 falling back to default",
+                MAX_PR_DESCRIPTION_PROMPT_LEN,
+                p.len()
+            );
+            DEFAULT_PR_DESCRIPTION_PROMPT
+        }
+        Some(p) => p,
+        None => DEFAULT_PR_DESCRIPTION_PROMPT,
+    };
 
     // Replace placeholders in prompt
     let prompt = prompt_template
@@ -484,9 +498,14 @@ pub async fn attach_existing_pr(
     let mut sorted_prs = prs;
     sorted_prs.sort_by_key(|pr| status_priority(&pr.status));
     if let Some(pr_info) = sorted_prs.into_iter().next() {
-        // Save PR info to database
-        let merge = Merge::create_pr(
-            pool,
+        // E29-06: wrap create_pr + update_status in a single sqlx transaction
+        // so the merge row's initial status reflects the real PR status
+        // atomically. Prior to this, if create_pr succeeded but update_status
+        // failed, the row stayed 'open' even when the PR was merged/closed
+        // (the monitor would later reconcile, but the window was observable).
+        let mut tx = pool.begin().await?;
+        let merge = Merge::create_pr_tx(
+            &mut *tx,
             workspace.id,
             workspace_repo.repo_id,
             &workspace_repo.target_branch,
@@ -497,14 +516,15 @@ pub async fn attach_existing_pr(
 
         // Update status if not open
         if !matches!(pr_info.status, MergeStatus::Open) {
-            Merge::update_status(
-                pool,
+            Merge::update_status_tx(
+                &mut *tx,
                 merge.id,
                 pr_info.status.clone(),
                 pr_info.merge_commit_sha.clone(),
             )
             .await?;
         }
+        tx.commit().await?;
 
         // If PR is merged, only mark task done/archive after all repos are merged
         if matches!(pr_info.status, MergeStatus::Merged) {

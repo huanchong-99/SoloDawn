@@ -133,7 +133,9 @@ impl OutputFanout {
         }
 
         drop(inner);
-        let _ = self.tx.send(chunk.clone());
+        if let Err(_) = self.tx.send(chunk.clone()) {
+            tracing::debug!("output_fanout broadcast has no listeners");
+        }
         Some(chunk)
     }
 

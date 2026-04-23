@@ -13,6 +13,10 @@ fn default_git_branch_prefix() -> String {
 }
 
 fn default_pr_auto_description_enabled() -> bool {
+    // PR auto-description is user-initiated (generated when the user opens
+    // the create-PR dialog, where the description is editable before
+    // submit). Defaulting to `true` preserves the pre-v9 behavior and does
+    // not send data without user interaction.
     true
 }
 
@@ -113,13 +117,21 @@ impl Default for Config {
             notifications: NotificationConfig::default(),
             editor: EditorConfig::default(),
             github: GitHubConfig::default(),
-            analytics_enabled: true,
+            // Opt-in by default: there is currently no first-run consent
+            // flow (see DisclaimerDialog / OnboardingDialog), so analytics
+            // must default to OFF until the user explicitly enables it in
+            // Settings -> General.
+            analytics_enabled: false,
             workspace_dir: None,
             last_app_version: None,
             show_release_notes: false,
             language: UiLanguage::default(),
             git_branch_prefix: default_git_branch_prefix(),
             showcases: ShowcaseState::default(),
+            // PR auto-description is user-triggered at PR creation time (the
+            // user sees and can edit the generated text before submitting),
+            // so defaulting to enabled does not bypass user consent. Kept
+            // `true` intentionally to match the pre-v9 behavior.
             pr_auto_description_enabled: true,
             pr_auto_description_prompt: None,
             beta_workspaces: false,
@@ -143,7 +155,7 @@ mod tests {
             "disclaimer_acknowledged":true,
             "onboarding_acknowledged":true,
             "notifications":{"sound_enabled":true,"push_enabled":true,"sound_file":"COW_MOOING"},
-            "editor":{"editor_type":"VS_CODE","custom_command":null,"remote_ssh_host":null,"remote_ssh_user":null},
+            "editor":{"editorType":"VS_CODE","customCommand":null,"remoteSshHost":null,"remoteSshUser":null},
             "github":{"pat":null,"oauth_token":null,"username":null,"primary_email":null,"default_pr_base":"main"},
             "analytics_enabled":true,
             "workspace_dir":null,
@@ -172,7 +184,7 @@ mod tests {
             "disclaimer_acknowledged":true,
             "onboarding_acknowledged":true,
             "notifications":{"sound_enabled":true,"push_enabled":true,"sound_file":"COW_MOOING"},
-            "editor":{"editor_type":"VS_CODE","custom_command":null,"remote_ssh_host":null,"remote_ssh_user":null},
+            "editor":{"editorType":"VS_CODE","customCommand":null,"remoteSshHost":null,"remoteSshUser":null},
             "github":{"pat":null,"oauth_token":null,"username":null,"primary_email":null,"default_pr_base":"main"},
             "analytics_enabled":true,
             "workspace_dir":null,

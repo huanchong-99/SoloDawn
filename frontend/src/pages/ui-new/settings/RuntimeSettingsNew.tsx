@@ -88,8 +88,14 @@ export function RuntimeSettingsNew() {
       return handleApiResponse(response);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['runtime'] });
-      queryClient.invalidateQueries({ queryKey: cliTypesKeys.detection });
+      queryClient.invalidateQueries({
+        queryKey: ['runtime', 'cli-status'],
+        exact: true,
+      });
+      queryClient.invalidateQueries({
+        queryKey: cliTypesKeys.detection,
+        exact: true,
+      });
     },
   });
 

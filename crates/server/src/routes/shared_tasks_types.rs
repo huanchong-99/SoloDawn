@@ -6,6 +6,8 @@ use uuid::Uuid;
 
 /// Type-only definitions for shared-task shapes (remote sharing is disabled).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct UserData {
     pub user_id: String,
     pub first_name: Option<String>,
@@ -14,6 +16,8 @@ pub struct UserData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SharedTask {
     pub id: Uuid,
     pub organization_id: Uuid,
@@ -31,6 +35,8 @@ pub struct SharedTask {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SharedTaskResponse {
     pub task: SharedTask,
     pub user: Option<UserData>,
@@ -46,6 +52,8 @@ pub struct SharedTaskDetails {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AssigneesQuery {
     pub project_id: Uuid,
 }

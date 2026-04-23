@@ -288,12 +288,14 @@ export function ConciergeChatView({
       {/* Header */}
       <div className="flex items-center gap-base border-b px-base py-half">
         <ChatCircleIcon className="size-icon-sm text-brand" weight="fill" />
-        <h2 className="text-lg font-medium text-high">{sessionName}</h2>{activeWorkflowId && (
+        <h2 className="text-lg font-medium text-high">{sessionName}</h2>
+        {activeWorkflowId && (
           <a
             href={`/pipeline/${activeWorkflowId}`}
             className="flex items-center gap-1 rounded-full bg-success/20 px-base py-px text-xs text-success hover:bg-success/30 transition-colors"
           >
-            <span className="inline-block size-1.5 rounded-full bg-success animate-pulse" /><span>{t('concierge.viewWorkflowProgress')}</span>
+            <span className="inline-block size-1.5 rounded-full bg-success animate-pulse" />
+            <span>{t('concierge.viewWorkflowProgress')}</span>
           </a>
         )}
         {onToggleFeishuSync && (

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { sessionsApi } from '@/lib/api';
 import type { Session } from 'shared/types';
 
@@ -45,10 +45,24 @@ export function useWorkspaceSessions(
     enabled: enabled && !!workspaceId,
   });
 
+  // Track the workspaceId for which selection was last applied so a stale
+  // sessions array (from a previous workspace, still in react-query cache)
+  // cannot clobber selection after the user switches workspaces.
+  const appliedWorkspaceIdRef = useRef<string | undefined>(undefined);
+
   // Combined effect: handle workspace changes and auto-select sessions
   // This replaces two separate effects that had a race condition where the reset
   // effect would fire after auto-select when sessions were cached, undoing the selection.
   useEffect(() => {
+    // "Did I change" token check: if workspaceId changed, reset selection and
+    // wait for the matching sessions fetch before auto-selecting. This avoids
+    // applying sessions from the previous workspace.
+    if (appliedWorkspaceIdRef.current !== workspaceId) {
+      appliedWorkspaceIdRef.current = workspaceId;
+      setSelection(undefined);
+      if (isLoading) return;
+    }
+
     setSelection((prev) => {
       if (prev?.mode === 'new') return prev;
 
@@ -68,7 +82,7 @@ export function useWorkspaceSessions(
       // Sessions are ordered by most recently used, so first is the most recently used
       return { mode: 'existing', sessionId: sessions[0].id };
     });
-  }, [workspaceId, sessions]);
+  }, [workspaceId, sessions, isLoading]);
 
   // Derived values from selection state
   const isNewSessionMode = selection?.mode === 'new';

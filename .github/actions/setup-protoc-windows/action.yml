@@ -1,0 +1,43 @@
+name: Setup Protoc (Windows)
+description: Download and expose a pinned protoc release on GitHub-hosted Windows runners
+
+runs:
+  using: composite
+  steps:
+    - name: Download protoc
+      shell: pwsh
+      run: |
+        $version = '31.1'
+        $zipPath = Join-Path $env:RUNNER_TEMP "protoc-$version-win64.zip"
+        $installRoot = Join-Path $env:RUNNER_TEMP "protoc-$version"
+
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+          try {
+            Invoke-WebRequest `
+              -Uri "https://github.com/protocolbuffers/protobuf/releases/download/v$version/protoc-$version-win64.zip" `
+              -OutFile $zipPath
+            break
+          } catch {
+            if ($attempt -eq 3) {
+              throw
+            }
+            Start-Sleep -Seconds (2 * $attempt)
+          }
+        }
+
+        if (Test-Path $installRoot) {
+          Remove-Item -LiteralPath $installRoot -Recurse -Force
+        }
+
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $installRoot -Force
+
+        $binPath = Join-Path $installRoot 'bin'
+        $protocPath = Join-Path $binPath 'protoc.exe'
+        if (-not (Test-Path $protocPath)) {
+          throw "protoc.exe not found at $protocPath"
+        }
+
+        $binPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        "PROTOC=$protocPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+        & $protocPath --version

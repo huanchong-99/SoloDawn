@@ -1,5 +1,19 @@
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string) => {
+      const translations: Record<string, string> = {
+        'pipeline.orchestrator.statusLabel': 'Status:',
+        'pipeline.orchestrator.modelLabel': 'Model:',
+        'pipeline.orchestrator.tokensUsedLabel': 'Tokens Used',
+      };
+      return translations[key] ?? key;
+    },
+  }),
+}));
+
 import { OrchestratorHeader } from './OrchestratorHeader';
 
 describe('OrchestratorHeader', () => {

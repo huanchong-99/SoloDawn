@@ -91,9 +91,15 @@ const qualityApi = {
 // Hooks
 // ============================================================================
 
+// Sentinel key segment used when the input id is missing. Prevents all
+// disabled consumers from sharing the same `['quality', …, '']` cache
+// entry (which would cause cross-caller collisions if react-query ever
+// materialized a record for a disabled query). [E19-09]
+const DISABLED_KEY = '__disabled__';
+
 export function useQualityRuns(workflowId: string | undefined) {
   return useQuery({
-    queryKey: qualityKeys.runsForWorkflow(workflowId ?? ''),
+    queryKey: qualityKeys.runsForWorkflow(workflowId ?? DISABLED_KEY),
     queryFn: () => qualityApi.getRunsForWorkflow(workflowId!),
     enabled: !!workflowId,
     staleTime: 5 * 60 * 1000,
@@ -102,7 +108,7 @@ export function useQualityRuns(workflowId: string | undefined) {
 
 export function useQualityRunDetail(runId: string | undefined) {
   return useQuery({
-    queryKey: qualityKeys.runDetail(runId ?? ''),
+    queryKey: qualityKeys.runDetail(runId ?? DISABLED_KEY),
     queryFn: () => qualityApi.getRunDetail(runId!),
     enabled: !!runId,
     staleTime: 5 * 60 * 1000,
@@ -111,7 +117,7 @@ export function useQualityRunDetail(runId: string | undefined) {
 
 export function useQualityIssues(runId: string | undefined) {
   return useQuery({
-    queryKey: qualityKeys.issuesForRun(runId ?? ''),
+    queryKey: qualityKeys.issuesForRun(runId ?? DISABLED_KEY),
     queryFn: () => qualityApi.getIssuesForRun(runId!),
     enabled: !!runId,
     staleTime: 5 * 60 * 1000,
@@ -120,7 +126,7 @@ export function useQualityIssues(runId: string | undefined) {
 
 export function useTerminalLatestQuality(terminalId: string | undefined) {
   return useQuery({
-    queryKey: qualityKeys.latestForTerminal(terminalId ?? ''),
+    queryKey: qualityKeys.latestForTerminal(terminalId ?? DISABLED_KEY),
     queryFn: () => qualityApi.getLatestForTerminal(terminalId!),
     enabled: !!terminalId,
     staleTime: 30 * 1000,

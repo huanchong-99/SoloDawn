@@ -20,8 +20,11 @@ pub enum SessionError {
 pub struct Session {
     pub id: Uuid,
     pub workspace_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub executor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model_config_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

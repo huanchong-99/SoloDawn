@@ -265,7 +265,10 @@ impl OpenAICompatibleClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("LLM API error: {status} - {body}"));
+            return Err(anyhow::anyhow!(
+                "LLM API error: {status} - {}",
+                &body[..body.len().min(200)]
+            ));
         }
 
         // Read body as text first for multi-format parsing (Rectifier pattern)
@@ -463,7 +466,10 @@ impl AnthropicCompatibleClient {
 
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("LLM API error: {status} - {body}"));
+            return Err(anyhow::anyhow!(
+                "LLM API error: {status} - {}",
+                &body[..body.len().min(200)]
+            ));
         }
 
         // Parse SSE stream and accumulate text content + usage
@@ -532,7 +538,7 @@ impl AnthropicCompatibleClient {
         if content.is_empty() {
             tracing::warn!(
                 body_len = body.len(),
-                body_preview = %body.chars().take(500).collect::<String>(),
+                body_preview = %body.chars().take(200).collect::<String>(),
                 "Anthropic API returned empty content after SSE + JSON fallback parsing"
             );
             return Err(anyhow::anyhow!("Anthropic API returned empty content"));
@@ -616,8 +622,16 @@ impl ClaudeCodeNativeClient {
     pub fn try_new(model: &str) -> Option<Self> {
         let home = dirs::home_dir()?;
         let creds_path = home.join(".claude").join(".credentials.json");
-        let creds_str = std::fs::read_to_string(&creds_path).ok()?;
-        let creds: ClaudeCredentials = serde_json::from_str(&creds_str).ok()?;
+        let creds_str = std::fs::read_to_string(&creds_path)
+            .inspect_err(|e| {
+                tracing::warn!(error = %e, path = %creds_path.display(), "Failed to read Claude credentials file");
+            })
+            .ok()?;
+        let creds: ClaudeCredentials = serde_json::from_str(&creds_str)
+            .inspect_err(|e| {
+                tracing::warn!(error = %e, "Failed to parse Claude credentials JSON");
+            })
+            .ok()?;
         let oauth = creds.claude_ai_oauth?;
         if oauth.access_token.is_empty() {
             return None;
@@ -843,7 +857,7 @@ impl LLMClient for ClaudeCodeNativeClient {
             // Never log the token — only log status and truncated error body
             tracing::warn!(
                 status = %status,
-                err_preview = %err_body.chars().take(300).collect::<String>(),
+                err_preview = %err_body.chars().take(200).collect::<String>(),
                 "Claude Code native API error"
             );
             return Err(anyhow::anyhow!("Claude Code native API error: {status}"));

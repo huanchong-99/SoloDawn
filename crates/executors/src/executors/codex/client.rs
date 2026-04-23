@@ -258,7 +258,12 @@ impl AppServerClient {
         tool_input: Value,
         tool_call_id: &str,
     ) -> Result<ApprovalStatus, ExecutorError> {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        // TODO: Revisit this arbitrary delay; see E33-08. It appears to give the
+        // approval UI/tooling a short grace window to register the incoming tool
+        // before the approval prompt races ahead. A constant makes the intent
+        // discoverable, but the underlying race should be fixed properly.
+        const APPROVAL_WINDOW_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+        tokio::time::sleep(APPROVAL_WINDOW_DELAY).await;
         if self.auto_approve {
             return Ok(ApprovalStatus::Approved);
         }
@@ -433,6 +438,18 @@ impl JsonRpcCallbacks for AppServerClient {
                     &mut server_notification
                 {
                     // history can be large, which might get truncated during transmission, corrupting the JSON line and losing valuable session and model information.
+                    let truncated_count = session_configured
+                        .initial_messages
+                        .as_ref()
+                        .map_or(0, Vec::len);
+                    if truncated_count > 0 {
+                        tracing::warn!(
+                            truncated_messages = truncated_count,
+                            reason =
+                                "session history can be large and may corrupt the JSON line on transmission",
+                            "truncating session history from SessionConfigured notification"
+                        );
+                    }
                     session_configured.initial_messages = None;
                     Cow::Owned(serde_json::to_string(&server_notification)?)
                 } else {
@@ -495,9 +512,13 @@ fn request_id(request: &ClientRequest) -> RequestId {
         | ClientRequest::ReviewStart { request_id, .. } => request_id.clone(),
         _ => {
                 tracing::warn!(
-                    "request_id called for unknown ClientRequest variant; returning default id"
+                    "request_id called for unknown ClientRequest variant; returning sentinel id"
                 );
-                RequestId::Integer(0)
+                // E33-03: reserved sentinel value; avoids colliding with real
+                // ids (which start at 1 and increment positively). `i64::MIN`
+                // is never produced by `next_request_id`, so an unknown-origin
+                // id is unambiguous without polluting the id type space.
+                RequestId::Integer(i64::MIN)
             }
     }
 }

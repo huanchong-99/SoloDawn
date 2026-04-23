@@ -4,6 +4,10 @@ import { cva, type VariantProps } from 'class-variance-authority';
 
 import { cn } from '@/lib/utils';
 
+// TODO (P3): `ring-offset-background` resolves via colors.background in
+// tailwind.new.config.js (maps to --bg-primary). Valid; but other primitives use
+// `ring-offset-surface-1`. Consider unifying across Button/Dialog/SettingsToggle
+// (E06-01, E06-02, E06-08).
 const buttonVariants = cva(
   'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer',
   {

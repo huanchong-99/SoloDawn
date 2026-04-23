@@ -1,5 +1,15 @@
 -- NOTE: SonarCloud flags duplicate string literals (e.g. datetime('now', 'subsec')) in this migration.
 -- This is acceptable for SQL DDL migrations where each table definition requires its own DEFAULT clause.
+--
+-- Wave-2 finding W2-38-05: The INSERT below uses `randomblob(16)` to generate
+-- new session ids (see `INSERT INTO sessions ... SELECT randomblob(16), ...`).
+-- `randomblob` produces 16 random bytes that are NOT a UUID (no version/variant
+-- bits set) and are not guaranteed unique across concurrent migrations or
+-- retries. This is a data-integrity gap because the application elsewhere
+-- assumes UUID-shaped session ids. Operator action for existing databases:
+-- none required if the migration ran successfully once; but do NOT re-run this
+-- INSERT manually. Migration body is not modified because this migration has
+-- already been applied in deployed environments.
 
 -- Refactor task_attempts into workspaces and sessions
 -- - Rename task_attempts -> workspaces (keeps workspace-related fields)

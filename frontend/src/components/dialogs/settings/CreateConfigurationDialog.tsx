@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,6 +36,7 @@ export type CreateConfigurationResult = {
 const CreateConfigurationDialogImpl =
   NiceModal.create<CreateConfigurationDialogProps>(
     ({ executorType, existingConfigs }) => {
+      const { t } = useTranslation('common');
       const modal = useModal();
       const [configName, setConfigName] = useState('');
       const [cloneFrom, setCloneFrom] = useState<string | null>(null);
@@ -124,10 +126,14 @@ const CreateConfigurationDialogImpl =
                   }
                 >
                   <SelectTrigger id="clone-from">
-                    <SelectValue placeholder="Start blank or clone existing" />
+                    <SelectValue
+                      placeholder={t('createConfiguration.cloneFromPlaceholder')}
+                    />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__blank__">Start blank</SelectItem>
+                    <SelectItem value="__blank__">
+                      {t('createConfiguration.startBlank')}
+                    </SelectItem>
                     {existingConfigs.map((configuration) => (
                       <SelectItem key={configuration} value={configuration}>
                         Clone from {configuration}

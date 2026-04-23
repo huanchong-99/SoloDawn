@@ -101,7 +101,7 @@ impl From<String> for Config {
 
         match Self::from_previous_version(&raw_config) {
             Ok(config) => {
-                tracing::info!("Config upgraded to v3");
+                tracing::info!("Config upgraded to v4");
                 config
             }
             Err(e) => {

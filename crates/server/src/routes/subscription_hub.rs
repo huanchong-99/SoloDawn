@@ -64,6 +64,10 @@ impl SubscriptionHub {
     ///
     /// Returns a receiver that will receive all events published to this workflow.
     pub async fn subscribe(&self, workflow_id: &str) -> broadcast::Receiver<WsEvent> {
+        // E27-09: hold the senders write lock across channel creation, receiver
+        // registration, and pending-event replay so no concurrent publish can
+        // observe an inconsistent state (e.g. cache a new event after we've
+        // drained pending_events but before the receiver is registered).
         let mut senders = self.senders.write().await;
         let sender = if let Some(sender) = senders.get(workflow_id).cloned() {
             sender
@@ -74,12 +78,16 @@ impl SubscriptionHub {
             sender
         };
 
-        let should_replay_pending = sender.receiver_count() == 0;
+        // Register the receiver *before* replaying so cached events are
+        // guaranteed to be delivered to this subscriber.
         let receiver = sender.subscribe();
 
-        if should_replay_pending {
-            self.replay_pending_events(workflow_id, &sender).await;
-        }
+        // Always drain any pending events for this workflow; a new subscriber
+        // should receive buffered events regardless of whether other
+        // receivers exist. Drain is atomic w.r.t. publish because publish
+        // caches only when there are no receivers, and we hold the senders
+        // write lock here (publish takes a senders read lock).
+        self.replay_pending_events(workflow_id, &sender).await;
 
         drop(senders);
 
@@ -95,17 +103,34 @@ impl SubscriptionHub {
         workflow_id: &str,
         event: WsEvent,
     ) -> Result<usize, broadcast::error::SendError<WsEvent>> {
-        let Some(sender) = self.get_sender(workflow_id).await else {
-            self.cache_pending_event(workflow_id, event.clone()).await;
-            return Err(broadcast::error::SendError(event));
-        };
-
-        if sender.receiver_count() == 0 {
-            self.cache_pending_event(workflow_id, event.clone()).await;
-            return Err(broadcast::error::SendError(event));
+        // E30-11: hold the `senders` read lock across the sender lookup,
+        // receiver_count check, and (if caching is required) the pending-event
+        // insert. This prevents a subscribe() from racing between the
+        // receiver_count() == 0 check and cache_pending_event: if we dropped
+        // the lock in between, subscribe() could register and drain
+        // pending_events, then the publisher would cache an event that no
+        // subsequent subscriber will replay. Subscribe() acquires the senders
+        // *write* lock, so taking a read lock here serializes them correctly.
+        let senders = self.senders.read().await;
+        let sender_opt = senders.get(workflow_id).cloned();
+        match sender_opt {
+            Some(sender) if sender.receiver_count() > 0 => {
+                // Drop the senders lock before delivering — broadcast::send is
+                // non-blocking but we still avoid holding the shared lock
+                // while invoking send().
+                drop(senders);
+                sender.send(event)
+            }
+            _ => {
+                // No sender or no receivers: cache the event while still
+                // holding the senders read lock so no subscribe() can slip
+                // in between our check and the insert.
+                self.cache_pending_event_locked(workflow_id, event.clone())
+                    .await;
+                drop(senders);
+                Err(broadcast::error::SendError(event))
+            }
         }
-
-        sender.send(event)
     }
 
     /// Publish lagged notification to all active workflow subscribers.
@@ -193,15 +218,22 @@ impl SubscriptionHub {
         self.senders.read().await.len()
     }
 
-    async fn get_sender(&self, workflow_id: &str) -> Option<broadcast::Sender<WsEvent>> {
-        self.senders.read().await.get(workflow_id).cloned()
-    }
-
-    async fn cache_pending_event(&self, workflow_id: &str, event: WsEvent) {
+    /// Insert an event into pending_events. The caller must already hold a
+    /// read or write guard on `self.senders` for the duration of this call to
+    /// prevent a subscribe() from racing (see E30-11 in `publish`).
+    async fn cache_pending_event_locked(&self, workflow_id: &str, event: WsEvent) {
         let mut pending_events = self.pending_events.write().await;
         let queue = pending_events.entry(workflow_id.to_string()).or_default();
-        queue.push_back((event, Instant::now()));
+        let now = Instant::now();
 
+        // E27-15: evict expired entries on every publish so pending_events
+        // cannot accumulate indefinitely for workflows whose cleanup_if_idle
+        // is rarely called (e.g. long-lived active workflows).
+        queue.retain(|(_, inserted_at)| now.duration_since(*inserted_at) < PENDING_EVENT_TTL);
+
+        queue.push_back((event, now));
+
+        // E27-15: also enforce the hard size bound as a safety net.
         while queue.len() > self.pending_limit {
             queue.pop_front();
         }

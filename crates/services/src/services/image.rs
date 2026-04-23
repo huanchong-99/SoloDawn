@@ -22,6 +22,9 @@ pub enum ImageError {
     #[error("Image too large: {0} bytes (max: {1} bytes)")]
     TooLarge(u64, u64),
 
+    #[error("Image size does not fit in i64: {0} bytes")]
+    SizeOverflow(u64),
+
     #[error("Image not found")]
     NotFound,
 
@@ -97,7 +100,8 @@ impl ImageService {
                 file_path: new_filename,
                 original_name: original_filename.to_string(),
                 mime_type,
-                size_bytes: i64::try_from(file_size).unwrap_or(i64::MAX),
+                size_bytes: i64::try_from(file_size)
+                    .map_err(|_| ImageError::SizeOverflow(file_size))?,
                 hash,
             },
         )

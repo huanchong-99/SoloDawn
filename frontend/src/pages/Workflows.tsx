@@ -626,8 +626,6 @@ function OrchestratorChatPanel({
   // Subscribe to orchestrator.decision and orchestrator.awakened events to
   // invalidate the messages query only when the orchestrator actually produces
   // new output, eliminating unnecessary network traffic.
-  const subscribeToWorkflow = useWsStore((s) => s.subscribeToWorkflow);
-
   useEffect(() => {
     if (!workflowId || !canSendMessage) return;
 
@@ -642,6 +640,11 @@ function OrchestratorChatPanel({
       queryClient.invalidateQueries({ queryKey: orchestratorQueryKey });
     };
 
+    // W2-22-08: Read subscribeToWorkflow via getState() (non-reactive) so this
+    // effect does not re-run when the store reference changes; the function is
+    // stable in practice but this avoids any reactivity-driven churn.
+    const subscribeToWorkflow = useWsStore.getState().subscribeToWorkflow;
+
     const unsubs = [
       subscribeToWorkflow(workflowId, 'orchestrator.decision', invalidate),
       subscribeToWorkflow(workflowId, 'orchestrator.awakened', invalidate),
@@ -654,7 +657,7 @@ function OrchestratorChatPanel({
     return () => {
       unsubs.forEach((unsub) => unsub());
     };
-  }, [workflowId, canSendMessage, queryClient, subscribeToWorkflow]);
+  }, [workflowId, canSendMessage, queryClient]);
 
   const {
     data: messages,
@@ -1115,16 +1118,30 @@ export function Workflows() {
   // Update URL when projectId is invalid or missing
   useEffect(() => {
     if (projects.length > 0 && projectIdFromUrl !== validProjectId) {
-      const newParams = new URLSearchParams(searchParams);
-      newParams.set('projectId', validProjectId);
-      setSearchParams(newParams, { replace: true });
+      setSearchParams(
+        (prev) => {
+          const newParams = new URLSearchParams(prev);
+          if (validProjectId) {
+            if (newParams.get('projectId') === validProjectId) {
+              return prev;
+            }
+            newParams.set('projectId', validProjectId);
+          } else {
+            if (!newParams.has('projectId')) {
+              return prev;
+            }
+            newParams.delete('projectId');
+          }
+          return newParams;
+        },
+        { replace: true }
+      );
       setSelectedWorkflowId(null);
     }
   }, [
     projectIdFromUrl,
     validProjectId,
     projects.length,
-    searchParams,
     setSearchParams,
   ]);
 
@@ -1222,7 +1239,7 @@ export function Workflows() {
 
       setPromptSubmitError(null);
     },
-    []
+    [pendingPromptDecisionsRef]
   );
 
   const handleTerminalPromptDecision = useCallback(
@@ -1253,7 +1270,7 @@ export function Workflows() {
         setPromptSubmitError(null);
       }
     },
-    []
+    [pendingPromptDecisionsRef]
   );
 
   const handleRealtimeWorkflowSignal = useCallback(() => {

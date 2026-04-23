@@ -579,7 +579,9 @@ export function TaskFollowUpSection({
     clickedMarkdown,
     localMessage,
   ]);
-  const isEditable = !isRetryActive && !hasPendingApproval;
+  // L13: block editing while a follow-up is in-flight so the user can't mutate
+  // the message payload (or paste files) between submit and server ack.
+  const isEditable = !isRetryActive && !hasPendingApproval && !isSendingFollowUp;
 
   const hasSetupScript = useMemo(
     () => repos.some((repo) => repo.setupScript != null),
@@ -720,7 +722,11 @@ export function TaskFollowUpSection({
     [isAttemptRunning, isQueued, handleQueueMessage, onSendFollowUp]
   );
 
-  // Ref to access setFollowUpMessage without adding it as a dependency
+  // Ref to access setFollowUpMessage without adding it as a dependency.
+  // This "sync ref to prop" pattern is intentional: callers pass a prop
+  // that may change identity, but we want stable callback references
+  // elsewhere. Keeping the ref updated via useEffect ensures we always
+  // call the latest setter without re-creating dependent callbacks.
   const setFollowUpMessageRef = useRef(setFollowUpMessage);
   useEffect(() => {
     setFollowUpMessageRef.current = setFollowUpMessage;
@@ -868,7 +874,7 @@ export function TaskFollowUpSection({
       setFollowUpMessageRef.current(value); // Debounced save to scratch
       if (followUpErrorRef.current) setFollowUpError(null);
     },
-    [setFollowUpError, getQueueState, cancelMutation]
+    [setFollowUpError, getQueueState, cancelMutation, setFollowUpMessageRef]
   );
 
   // Memoize placeholder to avoid re-renders

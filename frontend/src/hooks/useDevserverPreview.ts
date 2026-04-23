@@ -55,6 +55,13 @@ export function useDevserverPreview(
     )[0];
   }, [executionProcesses]);
 
+  // M46: Reset-on-attempt-change and derive-from-processes are consolidated
+  // into a single effect so the two are not racing across renders. Previously
+  // the reset effect ran first and the derive effect short-circuited on the
+  // stale ref, requiring a second render for the derived state to populate.
+  // Now we handle both in one pass: on attemptId change we synchronously
+  // reset, sync the ref, and return (the next render with the up-to-date ref
+  // will derive state).
   useEffect(() => {
     if (prevAttemptIdRef.current !== attemptId) {
       prevAttemptIdRef.current = attemptId;

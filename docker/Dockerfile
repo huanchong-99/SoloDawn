@@ -256,9 +256,15 @@ RUN mkdir -p /var/lib/solodawn/.npm-global \
 COPY --from=rust-builder /tmp/solodawn-server /usr/local/bin/solodawn-server
 COPY assets/scripts/ /opt/solodawn/assets/scripts/
 
+COPY scripts/docker/entrypoint.sh /opt/solodawn/entrypoint.sh
+
+# Create user, prepare ownership, and set USER BEFORE declaring VOLUME so
+# that the volume inherits the correct ownership (avoids root-owned mount).
 RUN groupadd -r solodawn && useradd -r -g solodawn -m solodawn \
     && mkdir -p /var/lib/solodawn/assets /var/lib/solodawn \
-    && chown -R solodawn:solodawn /var/lib/solodawn
+    && chown -R solodawn:solodawn /var/lib/solodawn \
+    && chmod +x /opt/solodawn/entrypoint.sh
+USER solodawn
 VOLUME ["/var/lib/solodawn"]
 
 ENV SOLODAWN_ASSET_DIR=/var/lib/solodawn/assets \
@@ -268,11 +274,6 @@ ENV SOLODAWN_ASSET_DIR=/var/lib/solodawn/assets \
     RUST_LOG=info
 
 EXPOSE 23456
-
-COPY scripts/docker/entrypoint.sh /opt/solodawn/entrypoint.sh
-RUN chmod +x /opt/solodawn/entrypoint.sh
-
-USER solodawn
 
 ENTRYPOINT ["/opt/solodawn/entrypoint.sh"]
 CMD ["solodawn-server"]

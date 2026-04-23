@@ -140,6 +140,9 @@ impl QualityEngine {
             }
             let provider = Arc::clone(provider);
             let root = project_root.to_path_buf();
+            // E37-06: defensive clone of changed_files per provider so each
+            // tokio task owns its own Vec. Non-critical: list is typically
+            // small (diff of changed paths) and clones are cheap.
             let files = changed_files.map(|f| f.to_vec());
             let discovery = Arc::clone(&discovery);
 

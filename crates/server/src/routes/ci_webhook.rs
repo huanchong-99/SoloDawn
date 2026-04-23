@@ -19,53 +19,66 @@ pub struct CiWebhookPayload {
 ///
 /// Accepts CI workflow completion notifications from GitHub Actions.
 ///
-/// G35-009: When `SOLODAWN_CI_WEBHOOK_SECRET` is set, validates the
-/// `X-Webhook-Signature` header (HMAC-SHA256) before accepting payloads.
-/// When unset, accepts all payloads (development mode).
+/// G35-009 / W2-18-10: Requires `SOLODAWN_CI_WEBHOOK_SECRET` to be set and
+/// validates the `X-Webhook-Signature` header (HMAC-SHA256) before accepting
+/// payloads. When the secret is unset or empty, the endpoint refuses the
+/// request with 401 — the webhook lives in the unauthenticated zone, so
+/// accepting unsigned payloads would let anonymous clients push arbitrary
+/// CI-status events into the system.
 pub async fn ci_webhook(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> (StatusCode, Json<Value>) {
-    // G35-009: Validate HMAC signature if webhook secret is configured
-    if let Ok(secret) = utils::env_compat::var_with_compat("SOLODAWN_CI_WEBHOOK_SECRET", "GITCORTEX_CI_WEBHOOK_SECRET") {
-        if !secret.trim().is_empty() {
-            let signature = headers
-                .get("x-webhook-signature")
-                .and_then(|v| v.to_str().ok());
+    // W2-18-10: Require a configured webhook secret. Previously the handler
+    // silently accepted unsigned payloads when the env var was unset
+    // ("development mode"); that behavior is unsafe because the route is
+    // unauthenticated and exposed on the same surface as production.
+    let secret = match utils::env_compat::var_with_compat(
+        "SOLODAWN_CI_WEBHOOK_SECRET",
+        "GITCORTEX_CI_WEBHOOK_SECRET",
+    ) {
+        Ok(s) if !s.trim().is_empty() => s.trim().to_string(),
+        _ => {
+            tracing::warn!(
+                "CI webhook rejected: SOLODAWN_CI_WEBHOOK_SECRET is not configured"
+            );
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "status": "rejected",
+                    "message": "CI webhook requires SOLODAWN_CI_WEBHOOK_SECRET to be configured"
+                })),
+            );
+        }
+    };
 
-            match signature {
-                Some(sig) => {
-                    if !verify_hmac_sha256(secret.trim().as_bytes(), &body, sig) {
-                        tracing::warn!("CI webhook rejected: invalid HMAC signature");
-                        return (
-                            StatusCode::UNAUTHORIZED,
-                            Json(json!({
-                                "status": "rejected",
-                                "message": "Invalid webhook signature"
-                            })),
-                        );
-                    }
-                }
-                None => {
-                    tracing::warn!("CI webhook rejected: missing X-Webhook-Signature header");
-                    return (
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({
-                            "status": "rejected",
-                            "message": "Missing X-Webhook-Signature header"
-                        })),
-                    );
-                }
+    let signature = headers
+        .get("x-webhook-signature")
+        .and_then(|v| v.to_str().ok());
+
+    match signature {
+        Some(sig) => {
+            if !verify_hmac_sha256(secret.as_bytes(), &body, sig) {
+                tracing::warn!("CI webhook rejected: invalid HMAC signature");
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "status": "rejected",
+                        "message": "Invalid webhook signature"
+                    })),
+                );
             }
         }
-    }
-
-    // G35-009: Warn when accepting unauthenticated webhooks (no secret configured)
-    if utils::env_compat::var_with_compat("SOLODAWN_CI_WEBHOOK_SECRET", "GITCORTEX_CI_WEBHOOK_SECRET")
-        .map(|s| s.trim().is_empty())
-        .unwrap_or(true)
-    {
-        tracing::warn!("CI webhook accepting unauthenticated request — SOLODAWN_CI_WEBHOOK_SECRET is not configured");
+        None => {
+            tracing::warn!("CI webhook rejected: missing X-Webhook-Signature header");
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "status": "rejected",
+                    "message": "Missing X-Webhook-Signature header"
+                })),
+            );
+        }
     }
 
     // Parse payload after signature validation

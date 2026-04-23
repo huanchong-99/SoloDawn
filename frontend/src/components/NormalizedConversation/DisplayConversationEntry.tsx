@@ -225,7 +225,7 @@ const MessageCard: React.FC<{
 }> = ({ children, variant, expanded, onToggle }) => {
   const frameBase =
     'border px-3 py-2 w-full bg-[hsl(var(--card))] border-[hsl(var(--border))]';
-  const systemTheme = 'border-400/40 text-zinc-500';
+  const systemTheme = 'border-zinc-400/40 text-zinc-500';
   const errorTheme =
     'border-red-400/40 bg-red-50 dark:bg-[hsl(var(--card))] text-[hsl(var(--foreground))]';
 
@@ -280,7 +280,7 @@ const ExpandChevron: React.FC<{
 }> = ({ expanded, onClick, variant }) => {
   const color =
     variant === 'system'
-      ? 'text-700 dark:text-300'
+      ? 'text-zinc-700 dark:text-zinc-300'
       : 'text-red-700 dark:text-red-300';
 
   return (
@@ -800,6 +800,9 @@ function renderToolUseBody(
   expansionKey: string,
   taskAttempt?: WorkspaceWithSession,
 ) {
+  if (!toolEntry.action_type) {
+    return null;
+  }
   if (isFileEdit(toolEntry.action_type)) {
     const fileEditAction = toolEntry.action_type;
     return (
@@ -833,6 +836,7 @@ function renderToolUseBody(
 
   if (
     toolEntry.action_type.action === 'command_run' &&
+    toolEntry.tool_name != null &&
     SCRIPT_TOOL_NAMES.has(toolEntry.tool_name)
   ) {
     const exitCode = getCommandExitCode(toolEntry.action_type);

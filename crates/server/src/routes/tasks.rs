@@ -30,7 +30,12 @@ use utils::response::ApiResponse;
 use uuid::Uuid;
 
 use crate::{
-    DeploymentImpl, error::ApiError, middleware::load_task_middleware,
+    DeploymentImpl,
+    error::ApiError,
+    middleware::{
+        auth::{RequestContext, assert_authorized},
+        load_task_middleware,
+    },
     routes::task_attempts::WorkspaceRepoInput,
 };
 
@@ -44,7 +49,28 @@ pub struct TaskQuery {
 pub async fn get_tasks(
     State(deployment): State<DeploymentImpl>,
     Query(query): Query<TaskQuery>,
+    ctx: Option<Extension<RequestContext>>,
 ) -> Result<ResponseJson<ApiResponse<Vec<TaskWithAttemptStatus>>>, ApiError> {
+    // E29-01: Validate project_id is not nil (empty/null guard at entry).
+    if query.project_id.is_nil() {
+        return Err(ApiError::BadRequest(
+            "project_id must not be empty".to_string(),
+        ));
+    }
+
+    // W2-18-02: opt-in strict auth. When `SOLODAWN_REQUIRE_AUTH` is set,
+    // reject dev-mode passthrough requests. Per-user project ownership
+    // (principal scoped to project_id) still requires G24 — until then,
+    // deployments with more than one operator MUST enable
+    // `SOLODAWN_REQUIRE_AUTH=1` AND treat the bearer token as shared per
+    // tenant, not across tenants.
+    let ctx = ctx
+        .map(|Extension(c)| c)
+        .unwrap_or(RequestContext { authenticated: false });
+    if assert_authorized(&ctx).is_err() {
+        return Err(ApiError::Unauthorized);
+    }
+
     let tasks =
         Task::find_by_project_id_with_attempt_status(&deployment.db().pool, query.project_id)
             .await?;
@@ -279,7 +305,7 @@ pub async fn create_task_and_start(
 
     let task = Task::find_by_id(pool, task.id)
         .await?
-        .ok_or(ApiError::Database(SqlxError::RowNotFound))?;
+        .ok_or_else(|| ApiError::NotFound(format!("Task {} not found", task.id)))?;
 
     tracing::info!("Started attempt for task {}", task.id);
     Ok(ResponseJson(ApiResponse::success(TaskWithAttemptStatus {
@@ -298,6 +324,29 @@ pub async fn update_task(
 ) -> Result<ResponseJson<ApiResponse<Task>>, ApiError> {
     ensure_shared_task_auth(&existing_task, &deployment).await?;
 
+    // E29-09: Validate optional fields when they are supplied.
+    const MAX_TITLE_LEN: usize = 256;
+    const MAX_DESCRIPTION_LEN: usize = 64 * 1024;
+    if let Some(ref t) = payload.title {
+        if t.trim().is_empty() {
+            return Err(ApiError::BadRequest(
+                "title must not be empty".to_string(),
+            ));
+        }
+        if t.len() > MAX_TITLE_LEN {
+            return Err(ApiError::BadRequest(format!(
+                "title must not exceed {MAX_TITLE_LEN} characters"
+            )));
+        }
+    }
+    if let Some(ref d) = payload.description {
+        if d.len() > MAX_DESCRIPTION_LEN {
+            return Err(ApiError::BadRequest(format!(
+                "description must not exceed {MAX_DESCRIPTION_LEN} characters"
+            )));
+        }
+    }
+
     // Use existing values if not provided in update
     let title = payload.title.unwrap_or(existing_task.title);
     let description = match payload.description {
@@ -306,6 +355,10 @@ pub async fn update_task(
         None => existing_task.description,      // Field omitted = keep existing
     };
     let status = payload.status.unwrap_or(existing_task.status);
+    // M38: `parent_workspace_id` is now a tri-state (`Option<Option<Uuid>>`). The outer
+    // `None` means "field omitted, leave unchanged"; `Some(None)` means "explicit null,
+    // clear to NULL"; `Some(Some(id))` means "update to the given id". `Task::update`
+    // handles all three cases in SQL (see its implementation in `crates/db/src/models/task.rs`).
     let parent_workspace_id = payload.parent_workspace_id;
 
     let task = Task::update(
@@ -347,6 +400,12 @@ pub async fn delete_task(
     Extension(task): Extension<Task>,
     State(deployment): State<DeploymentImpl>,
 ) -> Result<(StatusCode, ResponseJson<ApiResponse<()>>), ApiError> {
+    // W2-18-08: TOCTOU between ownership check and delete is closed by using
+    // `Task::delete_scoped`, which pushes the `project_id` guard into the
+    // DELETE WHERE clause. If the row is reparented or vanishes concurrently
+    // between the middleware ownership check and this SQL, `rows_affected`
+    // will be 0 and we return 404 below — the delete never executes against
+    // a row whose ownership differs from what the middleware validated.
     ensure_shared_task_auth(&task, &deployment).await?;
 
     let pool = &deployment.db().pool;
@@ -381,6 +440,15 @@ pub async fn delete_task(
     }
 
     // Use a transaction to ensure atomicity: either all operations succeed or all are rolled back
+    //
+    // NOTE(E29-15): Rollback is not guaranteed on panic. sqlx::Transaction's
+    // Drop impl schedules an async rollback but cannot await it, so a panic
+    // mid-transaction may leave the connection in an ambiguous state. If this
+    // hot path grows more complex, switch to an RAII guard that performs an
+    // explicit rollback-on-drop via block_in_place / spawn_blocking, or move
+    // the whole body behind an explicit commit helper that aborts the task on
+    // any error path. Current code only has two awaited statements between
+    // begin() and commit(), so panic risk is low but non-zero.
     let mut tx = pool.begin().await?;
 
     // Nullify parent_workspace_id for all child tasks before deletion
@@ -393,7 +461,9 @@ pub async fn delete_task(
     }
 
     // Delete task from database (FK CASCADE will handle task_attempts)
-    let rows_affected = Task::delete(&mut *tx, task.id).await?;
+    // W2-18-08: Scope delete by (id, project_id) so middleware's ownership
+    // check is re-enforced atomically inside the SQL itself.
+    let rows_affected = Task::delete_scoped(&mut *tx, task.id, task.project_id).await?;
 
     if rows_affected == 0 {
         return Err(ApiError::Database(SqlxError::RowNotFound));

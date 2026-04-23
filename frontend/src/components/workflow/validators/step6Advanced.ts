@@ -23,7 +23,7 @@ export function validateStep6Advanced(config: WizardConfig): Record<string, stri
     return boundCliTypeId === cliTypeId;
   };
 
-  if (config.advanced.orchestrator.modelConfigId.trim()) {
+  if (config.advanced.orchestrator.modelConfigId.trim().length > 0) {
     // G25-016: Verify orchestrator model actually exists in configured models
     const orchestratorModel = config.models.find(
       (m) => m.id === config.advanced.orchestrator.modelConfigId

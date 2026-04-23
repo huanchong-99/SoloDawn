@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getSharedTaskAssignees } from '@/lib/remoteApi';
 import type { SharedTask, UserData } from 'shared/types';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 interface UseAssigneeUserNamesOptions {
   projectId: string | undefined;
@@ -22,15 +22,21 @@ export function useAssigneeUserNames(options: UseAssigneeUserNamesOptions) {
   const assignedUserIds = useMemo(() => {
     if (!sharedTasks) return null;
     return Array.from(
-      new Set(sharedTasks.map((task) => task.assignee_user_id))
+      new Set(sharedTasks.map((task) => task.assigneeUserId))
     );
   }, [sharedTasks]);
 
-  // Refetch when assignee ids change
+  // Refetch when assignee ids change. Use a ref for refetch so it does not
+  // retrigger the effect when the query client produces a new function identity.
+  const refetchRef = useRef(refetch);
+  useEffect(() => {
+    refetchRef.current = refetch;
+  }, [refetch]);
+
   useEffect(() => {
     if (!assignedUserIds || !enabled) return;
-    refetch();
-  }, [assignedUserIds, refetch, enabled]);
+    refetchRef.current();
+  }, [assignedUserIds, enabled]);
 
   return {
     assignees,

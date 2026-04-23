@@ -60,7 +60,7 @@ export function FeishuChannelPanel({
       {sessions.length > 0 && (
         <select
           className="w-full rounded border bg-secondary px-half py-half text-xs text-normal"
-          value={selectedValue}
+          value={selectedValue ?? ''}
           disabled={isPending}
           onChange={(e) => onSelectChange(e.target.value)}
         >

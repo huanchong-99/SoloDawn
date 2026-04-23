@@ -160,6 +160,7 @@ const CreateAttemptDialogImpl = NiceModal.create<CreateAttemptDialogProps>(
     };
 
     const handleOpenChange = (open: boolean) => {
+      if (isCreating) return;
       if (!open) modal.hide();
     };
 

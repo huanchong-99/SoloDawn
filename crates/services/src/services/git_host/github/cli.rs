@@ -142,9 +142,17 @@ impl GhCli {
             .map_err(|err| GhCliError::CommandFailed(err.to_string()))?;
 
         if output.status.success() {
+            // from_utf8_lossy silently replaces invalid bytes; warn so operators
+            // notice if `gh` ever emits non-UTF-8 output.
+            if std::str::from_utf8(&output.stdout).is_err() {
+                tracing::warn!("gh stdout contained invalid UTF-8; lossily converting");
+            }
             return Ok(String::from_utf8_lossy(&output.stdout).to_string());
         }
 
+        if std::str::from_utf8(&output.stderr).is_err() {
+            tracing::warn!("gh stderr contained invalid UTF-8; lossily converting");
+        }
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
         // Check exit code first - gh CLI uses exit code 4 for auth failures
@@ -312,6 +320,7 @@ impl GhCli {
         let raw = Self::run(
             [
                 "api",
+                "--paginate",
                 &format!("repos/{owner}/{repo}/pulls/{pr_number}/comments"),
             ],
             None,
@@ -381,6 +390,10 @@ impl GhCli {
 
     fn pr_response_to_info(pr: GhPrResponse) -> PullRequestInfo {
         let state = if pr.state.is_empty() {
+            tracing::warn!(
+                "gh PR #{} response missing 'state' field; defaulting to OPEN",
+                pr.number
+            );
             "OPEN"
         } else {
             &pr.state

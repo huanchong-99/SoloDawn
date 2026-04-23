@@ -379,11 +379,21 @@ impl Codex {
 
         let params = self.build_new_conversation_params(current_dir);
         let resume_session = resume_session.map(ToString::to_string);
-        let auto_approve = matches!(
-            (&self.sandbox, &self.ask_for_approval),
-            (Some(SandboxMode::DangerFullAccess), None)
-                | (_, Some(AskForApproval::Never))
-        );
+        // E33-09: pick the safest default when neither sandbox nor
+        // ask_for_approval is specified. Previously the match below implicitly
+        // treated (None, None) as not-auto-approved, but only because of the
+        // `Some(SandboxMode::DangerFullAccess)` arm. Make the default
+        // explicit: when both are None we require human approval (most
+        // restrictive). Auto-approve is only granted when the caller has
+        // clearly opted in via DangerFullAccess-without-approval-policy or
+        // AskForApproval::Never.
+        let auto_approve = match (&self.sandbox, &self.ask_for_approval) {
+            (Some(SandboxMode::DangerFullAccess), None) | (_, Some(AskForApproval::Never)) => true,
+            // Most restrictive default: if the caller did not specify either
+            // knob, require explicit approval rather than silently running
+            // with auto-approve enabled.
+            _ => false,
+        };
         let approvals = self.approvals.clone();
         tokio::spawn(async move {
             let exit_signal_tx = ExitSignalSender::new(exit_signal_tx);

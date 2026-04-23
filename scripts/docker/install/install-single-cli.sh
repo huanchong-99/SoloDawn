@@ -142,8 +142,7 @@ if [[ "$ACTION" == "install" ]]; then
     DETECT_CMD="$(detect_command_for "$CLI_NAME")"
     if [[ -n "$DETECT_CMD" ]]; then
         log_info "Verifying installation..."
-        # shellcheck disable=SC2086
-        if output=$(eval $DETECT_CMD 2>&1); then
+        if output=$(sh -c "$DETECT_CMD" 2>&1); then
             version="${output%%$'\n'*}"
             log_info "Verified $CLI_NAME: ${version:-installed}"
         else

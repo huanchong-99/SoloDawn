@@ -97,6 +97,10 @@ export function SearchableDropdown<T>({
     );
   };
 
+  // TODO (P3): Keyboard handling relies on (1) Radix DropdownMenu's built-in Escape
+  // behavior (closes via onOpenChange) and (2) the caller-provided onKeyDown on the
+  // search input for ArrowUp/ArrowDown/Enter/Tab. If callers do not handle Tab or
+  // Escape, consider a default handler here (E06-09).
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>

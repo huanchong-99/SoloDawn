@@ -55,6 +55,7 @@ export function RemoteProjectItem({
 
   const handleLinkSelect = (localProjectId: string) => {
     if (disabled) return;
+    if (!availableLocalProjects.some((p) => p.id === localProjectId)) return;
     onLink(remoteProject.id, localProjectId);
   };
 

@@ -235,12 +235,16 @@ export function WorkflowWizard({
 
   const handleBack = () => {
     if (navigation.canGoPrevious()) {
-      navigation.previous();
+      // E11-09: Clear errors BEFORE navigating so the previous step never
+      // renders a one-frame flash of stale validation messages.
       validation.clearErrors();
+      navigation.previous();
     }
   };
 
   const handleSubmit = async () => {
+    // E11-02: Prevent double-submit when handler is invoked concurrently
+    if (isSubmitting) return;
     const latestConfig = configRef.current;
     // Validate ALL visible steps before submission, not just the current step.
     // This catches cross-step inconsistencies when the user goes back and edits.

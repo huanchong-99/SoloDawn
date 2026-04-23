@@ -1280,7 +1280,10 @@ mod tests {
 
     // Test helper to create in-memory database
     async fn setup_test_db() -> Arc<DBService> {
-        let pool = SqlitePoolOptions::new().connect(":memory:").await.unwrap();
+        let pool = SqlitePoolOptions::new()
+            .connect(":memory:")
+            .await
+            .expect("failed to open in-memory sqlite pool for cc_switch tests");
 
         // Run migrations
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));

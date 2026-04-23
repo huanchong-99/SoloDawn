@@ -110,13 +110,13 @@ function InvitationListContent({
   loadingInvitations,
   invitations,
   onRevoke,
-  isRevoking,
+  isPendingId,
   t,
 }: Readonly<{
   loadingInvitations: boolean;
   invitations: Invitation[];
   onRevoke: (id: string) => void;
-  isRevoking: boolean;
+  isPendingId: (id: string) => boolean;
   t: TFunction;
 }>) {
   if (loadingInvitations) {
@@ -134,7 +134,7 @@ function InvitationListContent({
           key={invitation.id}
           invitation={invitation}
           onRevoke={onRevoke}
-          isRevoking={isRevoking}
+          isRevoking={isPendingId(invitation.id)}
         />
       ))}
     </div>
@@ -150,8 +150,7 @@ function MemberListContent({
   isAdmin,
   onRemove,
   onRoleChange,
-  isRemoving,
-  isRoleChanging,
+  isPendingId,
   t,
 }: Readonly<{
   loadingMembers: boolean;
@@ -160,8 +159,7 @@ function MemberListContent({
   isAdmin: boolean;
   onRemove: (userId: string) => void;
   onRoleChange: (userId: string, role: MemberRole) => void;
-  isRemoving: boolean;
-  isRoleChanging: boolean;
+  isPendingId: (id: string) => boolean;
   t: TFunction;
 }>) {
   if (loadingMembers) {
@@ -174,18 +172,21 @@ function MemberListContent({
 
   return (
     <div className="space-y-base">
-      {members.map((member) => (
-        <MemberListItem
-          key={member.user_id}
-          member={member}
-          currentUserId={currentUserId}
-          isAdmin={isAdmin}
-          onRemove={onRemove}
-          onRoleChange={onRoleChange}
-          isRemoving={isRemoving}
-          isRoleChanging={isRoleChanging}
-        />
-      ))}
+      {members.map((member) => {
+        const pending = isPendingId(member.user_id);
+        return (
+          <MemberListItem
+            key={member.user_id}
+            member={member}
+            currentUserId={currentUserId}
+            isAdmin={isAdmin}
+            onRemove={onRemove}
+            onRoleChange={onRoleChange}
+            isRemoving={pending}
+            isRoleChanging={pending}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -202,8 +203,7 @@ function RemoteProjectsContent({
   availableLocalProjects,
   onLink,
   onUnlink,
-  isLinking,
-  isUnlinking,
+  isPendingId,
   remoteProjectUnsupportedMessage,
   loadRemoteProjectsErrorMessage,
   t,
@@ -217,8 +217,7 @@ function RemoteProjectsContent({
   availableLocalProjects: Project[];
   onLink: (remoteId: string, localId: string) => void;
   onUnlink: (projectId: string) => void;
-  isLinking: boolean;
-  isUnlinking: boolean;
+  isPendingId: (id: string) => boolean;
   remoteProjectUnsupportedMessage: string;
   loadRemoteProjectsErrorMessage: string;
   t: TFunction;
@@ -253,6 +252,9 @@ function RemoteProjectsContent({
         const linkedLocalProject = allProjects.find(
           (p) => p.remoteProjectId === remoteProject.id
         );
+        const pending =
+          isPendingId(remoteProject.id) ||
+          (linkedLocalProject ? isPendingId(linkedLocalProject.id) : false);
 
         return (
           <RemoteProjectItem
@@ -262,8 +264,8 @@ function RemoteProjectsContent({
             availableLocalProjects={availableLocalProjects}
             onLink={onLink}
             onUnlink={onUnlink}
-            isLinking={isLinking}
-            isUnlinking={isUnlinking}
+            isLinking={pending}
+            isUnlinking={pending}
             disabled={isRemoteProjectUnsupported}
             disabledReason={remoteProjectUnsupportedMessage}
           />
@@ -328,6 +330,25 @@ export function OrganizationSettingsNew() {
   const { isSignedIn, isLoaded } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // E02-07: Track per-row pending state so individual items (not all) disable
+  // while a mutation targeting that id is in flight.
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const addPendingId = (id: string) => {
+    setPendingIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  };
+  const removePendingId = (id: string) => {
+    setPendingIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+  const isPendingId = (id: string) => pendingIds.has(id);
 
   // Fetch all organizations
   const {
@@ -529,7 +550,11 @@ export function OrganizationSettingsNew() {
     if (!selectedOrgId) return;
 
     setError(null);
-    revokeInvitation.mutate({ orgId: selectedOrgId, invitationId });
+    addPendingId(invitationId);
+    revokeInvitation.mutate(
+      { orgId: selectedOrgId, invitationId },
+      { onSettled: () => removePendingId(invitationId) }
+    );
   };
 
   const handleRemoveMember = async (userId: string) => {
@@ -547,14 +572,22 @@ export function OrganizationSettingsNew() {
     }
 
     setError(null);
-    removeMember.mutate({ orgId: selectedOrgId, userId });
+    addPendingId(userId);
+    removeMember.mutate(
+      { orgId: selectedOrgId, userId },
+      { onSettled: () => removePendingId(userId) }
+    );
   };
 
   const handleRoleChange = async (userId: string, newRole: MemberRole) => {
     if (!selectedOrgId) return;
 
     setError(null);
-    updateMemberRole.mutate({ orgId: selectedOrgId, userId, role: newRole });
+    addPendingId(userId);
+    updateMemberRole.mutate(
+      { orgId: selectedOrgId, userId, role: newRole },
+      { onSettled: () => removePendingId(userId) }
+    );
   };
 
   const handleDeleteOrganization = async () => {
@@ -572,7 +605,10 @@ export function OrganizationSettingsNew() {
     }
 
     setError(null);
-    deleteOrganization.mutate(selectedOrgId);
+    addPendingId(selectedOrgId);
+    deleteOrganization.mutate(selectedOrgId, {
+      onSettled: () => removePendingId(selectedOrgId),
+    });
   };
 
   const handleLinkProject = (
@@ -585,10 +621,20 @@ export function OrganizationSettingsNew() {
     }
 
     setError(null);
-    linkToExisting.mutate({
-      localProjectId,
-      data: { remote_project_id: remoteProjectId },
-    });
+    addPendingId(remoteProjectId);
+    addPendingId(localProjectId);
+    linkToExisting.mutate(
+      {
+        localProjectId,
+        data: { remote_project_id: remoteProjectId },
+      },
+      {
+        onSettled: () => {
+          removePendingId(remoteProjectId);
+          removePendingId(localProjectId);
+        },
+      }
+    );
   };
 
   const handleUnlinkProject = (projectId: string) => {
@@ -598,7 +644,10 @@ export function OrganizationSettingsNew() {
     }
 
     setError(null);
-    unlinkProject.mutate(projectId);
+    addPendingId(projectId);
+    unlinkProject.mutate(projectId, {
+      onSettled: () => removePendingId(projectId),
+    });
   };
 
   /* ---------- Early returns ---------- */
@@ -701,7 +750,7 @@ export function OrganizationSettingsNew() {
             loadingInvitations={loadingInvitations}
             invitations={invitations}
             onRevoke={handleRevokeInvitation}
-            isRevoking={revokeInvitation.isPending}
+            isPendingId={isPendingId}
             t={t}
           />
         </SettingsCard>
@@ -734,8 +783,7 @@ export function OrganizationSettingsNew() {
             isAdmin={isAdmin}
             onRemove={handleRemoveMember}
             onRoleChange={handleRoleChange}
-            isRemoving={removeMember.isPending}
-            isRoleChanging={updateMemberRole.isPending}
+            isPendingId={isPendingId}
             t={t}
           />
         </SettingsCard>
@@ -759,8 +807,7 @@ export function OrganizationSettingsNew() {
             availableLocalProjects={availableLocalProjects}
             onLink={handleLinkProject}
             onUnlink={handleUnlinkProject}
-            isLinking={linkToExisting.isPending}
-            isUnlinking={unlinkProject.isPending}
+            isPendingId={isPendingId}
             remoteProjectUnsupportedMessage={remoteProjectUnsupportedMessage}
             loadRemoteProjectsErrorMessage={loadRemoteProjectsErrorMessage}
             t={t}

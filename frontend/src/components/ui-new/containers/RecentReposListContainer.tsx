@@ -22,20 +22,28 @@ export function RecentReposListContainer({
 
   // Load recent repos on mount
   useEffect(() => {
+    const controller = new AbortController();
     const loadRecentRepos = async () => {
       setLoading(true);
       setError(null);
       try {
         const repos = await fileSystemApi.listGitRepos();
+        if (controller.signal.aborted) return;
         setRecentRepos(repos);
       } catch (err) {
+        if (controller.signal.aborted) return;
         setError('Failed to load recent repositories');
         console.error('Failed to load repos:', err);
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     };
     loadRecentRepos();
+    return () => {
+      controller.abort();
+    };
   }, []);
 
   // Handle selecting a recent repo

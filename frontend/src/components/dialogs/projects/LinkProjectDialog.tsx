@@ -211,21 +211,18 @@ const LinkProjectDialogImpl = NiceModal.create<LinkProjectDialogProps>(
 
     const isSubmitting = linkToExisting.isPending || createAndLink.isPending;
 
+    // E12-05: Consolidated form reset for open/close into a single effect.
+    // Open sets defaults from props; close clears everything.
     useEffect(() => {
+      setLinkMode('existing');
+      setSelectedRemoteProjectId('');
+      setError(null);
       if (modal.visible) {
-        // Reset form when dialog opens
-        setLinkMode('existing');
         setSelectedOrgId(defaultOrgId);
-        setSelectedRemoteProjectId('');
         setNewProjectName(projectName);
-        setError(null);
       } else {
-        // Cleanup when dialog closes
-        setLinkMode('existing');
         setSelectedOrgId('');
-        setSelectedRemoteProjectId('');
         setNewProjectName('');
-        setError(null);
       }
     }, [modal.visible, projectName, defaultOrgId]);
 

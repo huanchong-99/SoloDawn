@@ -49,7 +49,10 @@ export function LogsContentContainer({ className }: Readonly<LogsContentContaine
     return matches.reverse();
   }, [currentLogs, searchQuery]);
 
-  // Report match indices to parent
+  // Report match indices to parent.
+  // E07-07: use `?.()` consistently (the setter is always provided by the
+  // LogsPanelContext today, but keeping the guard matches the rest of the
+  // surface and avoids a hard crash if the context contract changes).
   useEffect(() => {
     onMatchIndicesChange?.(matchIndices);
   }, [matchIndices, onMatchIndicesChange]);

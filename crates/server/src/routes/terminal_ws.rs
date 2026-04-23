@@ -10,12 +10,12 @@ use std::{
 };
 
 use axum::{
-    Router,
+    Extension, Router,
     extract::{
         Path, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::get,
 };
@@ -44,7 +44,11 @@ fn elapsed_since_millis(start_millis: u64) -> Duration {
     Duration::from_millis(now.saturating_sub(start_millis))
 }
 
-use crate::{DeploymentImpl, error::ApiError};
+use crate::{
+    DeploymentImpl,
+    error::ApiError,
+    middleware::auth::{RequestContext, assert_authorized},
+};
 use super::ws_origin::validate_ws_origin;
 
 // BACKLOG-002: Runner container separation
@@ -67,9 +71,6 @@ pub(crate) struct TerminalIO {
     pub writer: Option<
         std::sync::Arc<std::sync::Mutex<services::services::terminal::process::PtyWriter>>,
     >,
-    // RUNNER_CLIENT_MIGRATION: Future fields for gRPC-based I/O:
-    //   pub input_stream: Option<tonic::Streaming<TerminalInputChunk>>,
-    //   pub output_stream: Option<tonic::Streaming<TerminalOutputChunk>>,
 }
 
 #[allow(dead_code)]
@@ -130,6 +131,16 @@ pub fn validate_terminal_id(terminal_id: &str) -> anyhow::Result<()> {
 // ============================================================================
 
 /// WebSocket message types
+// W2-31-06: `rename_all = "snake_case"` is intentional and MUST NOT be
+// changed to camelCase. Verified frontend consumers rely on the current
+// wire shape:
+//   * Discriminants `input` / `output` / `resize` / `heartbeat` / `error`
+//     are single-word and unaffected by case style.
+//   * The `resume_from_seq` / `skipped` fields on the `Resynced` variant
+//     are consumed by `frontend/src/components/terminal/TerminalEmulator.tsx`
+//     and related resync logic under the existing snake_case names.
+// Switching to camelCase would silently break the W2-30-09 resync signal
+// without a coordinated frontend migration.
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WsMessage {
@@ -143,6 +154,14 @@ pub enum WsMessage {
     Heartbeat,
     /// Error message
     Error { message: String },
+    /// [W2-30-09] Signal sent to the client after the server recovers from a
+    /// lagged broadcast subscription. The client should clear its local
+    /// buffer and treat subsequent output as authoritative starting from
+    /// `resume_from_seq`.
+    Resynced {
+        resume_from_seq: u64,
+        skipped: u64,
+    },
 }
 
 fn is_benign_ws_disconnect(error: &axum::Error) -> bool {
@@ -194,17 +213,47 @@ struct ResumeParams {
     last_seq: Option<u64>,
 }
 
-/// WebSocket handler for terminal connection
+/// WebSocket handler for terminal connection.
+///
+/// # Auth posture (W2-18-12 / G24)
+///
+/// Current layers, in order:
+///   1. `require_api_token` middleware rejects requests without a bearer
+///      token when `SOLODAWN_API_TOKEN` is set, or inserts an
+///      `authenticated: false` `RequestContext` in dev-mode passthrough.
+///   2. `validate_ws_origin` blocks cross-origin browsers.
+///   3. When `SOLODAWN_REQUIRE_AUTH` is truthy, `assert_authorized` below
+///      rejects any request whose `RequestContext` was not authenticated —
+///      closing the dev-mode passthrough hole for this endpoint specifically.
+///
+/// What is NOT enforced yet: per-user ownership of `terminal_id`. Two or
+/// more users sharing one SOLODAWN_API_TOKEN can still read/write each
+/// other's terminals by guessing UUIDs. Fixing that requires G24
+/// (project-scoped principal context on `RequestContext`); until then,
+/// deployments with more than one operator MUST enable
+/// `SOLODAWN_REQUIRE_AUTH=1` AND treat the bearer token as shared-per-tenant,
+/// not shared-across-tenants.
 async fn terminal_ws_handler(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
     Path(terminal_id): Path<String>,
     Query(params): Query<ResumeParams>,
     State(deployment): State<DeploymentImpl>,
-) -> impl IntoResponse {
+    ctx: Option<Extension<RequestContext>>,
+) -> axum::response::Response {
     // SEC-003: Validate Origin header before WebSocket upgrade
     if let Err((status, msg)) = validate_ws_origin(&headers) {
         return (status, msg).into_response();
+    }
+
+    // Opt-in strict auth: when `SOLODAWN_REQUIRE_AUTH` is set, a dev-mode
+    // passthrough (no API token configured) is not enough to attach to
+    // terminals. Defense in depth against W2-18-12.
+    let ctx = ctx
+        .map(|Extension(c)| c)
+        .unwrap_or(RequestContext { authenticated: false });
+    if let Err(resp) = assert_authorized(&ctx) {
+        return resp;
     }
 
     // Validate terminal_id format before proceeding
@@ -213,12 +262,37 @@ async fn terminal_ws_handler(
         return ApiError::BadRequest(format!("Invalid terminal_id format: {e}")).into_response();
     }
 
+    // Verify the terminal actually exists in the DB before upgrading. This
+    // narrows the window for UUID enumeration (an attacker who guesses a
+    // valid UUID still passes, but random probes 404 cheaply without going
+    // through the WS state machine) and surfaces a proper 404 instead of a
+    // silently-closed socket.
+    match Terminal::find_by_id(&deployment.db().pool, &terminal_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                "terminal not found",
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!(
+                terminal_id = %terminal_id,
+                error = %e,
+                "Failed to look up terminal for WS upgrade"
+            );
+            return ApiError::Internal("terminal lookup failed".to_string()).into_response();
+        }
+    }
+
     // SEC-017: Enforce WebSocket message size limits (256 KB)
     ws.max_message_size(256 * 1024)
         .max_frame_size(256 * 1024)
         .on_upgrade(move |socket| {
             handle_terminal_socket(socket, terminal_id, deployment, params.last_seq)
         })
+        .into_response()
 }
 
 /// Handle terminal WebSocket connection with PTY.
@@ -443,6 +517,24 @@ async fn handle_terminal_socket(
                                                     resume_from_seq = resume_from,
                                                     "WS output subscription recovered after lag"
                                                 );
+                                                // [W2-30-09] Notify the client so it can clear its
+                                                // local buffer and avoid showing stale/duplicated
+                                                // output after the lag recovery.
+                                                let resync = WsMessage::Resynced {
+                                                    resume_from_seq: resume_from,
+                                                    skipped,
+                                                };
+                                                if let Ok(json) = serde_json::to_string(&resync)
+                                                    && let Err(e) = ws_sender
+                                                        .send(Message::Text(json.into()))
+                                                        .await
+                                                {
+                                                    tracing::debug!(
+                                                        terminal_id = %terminal_id_output,
+                                                        error = %e,
+                                                        "Failed to send resync marker to client"
+                                                    );
+                                                }
                                             }
                                             Err(re_err) => {
                                                 tracing::warn!(
@@ -603,6 +695,9 @@ async fn handle_terminal_socket(
                                     }
                                     WsMessage::Error { .. } => {
                                         tracing::warn!("Client sent unexpected Error message");
+                                    }
+                                    WsMessage::Resynced { .. } => {
+                                        tracing::warn!("Client sent unexpected Resynced message");
                                     }
                                 }
                             } else {
@@ -869,6 +964,16 @@ mod tests {
         let heartbeat = WsMessage::Heartbeat;
         let json = serde_json::to_string(&heartbeat).unwrap();
         assert!(json.contains("heartbeat"));
+
+        // Test Resynced message
+        let resynced = WsMessage::Resynced {
+            resume_from_seq: 42,
+            skipped: 7,
+        };
+        let json = serde_json::to_string(&resynced).unwrap();
+        assert!(json.contains("resynced"));
+        assert!(json.contains("42"));
+        assert!(json.contains('7'));
     }
 
     #[test]
@@ -898,6 +1003,20 @@ mod tests {
         let json = r#"{"type":"heartbeat"}"#;
         let msg: WsMessage = serde_json::from_str(json).unwrap();
         assert!(matches!(msg, WsMessage::Heartbeat));
+
+        // Test Resynced message
+        let json = r#"{"type":"resynced","resume_from_seq":100,"skipped":5}"#;
+        let msg: WsMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            WsMessage::Resynced {
+                resume_from_seq,
+                skipped,
+            } => {
+                assert_eq!(resume_from_seq, 100);
+                assert_eq!(skipped, 5);
+            }
+            _ => panic!("Expected Resynced message"),
+        }
     }
 
     #[test]

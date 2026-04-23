@@ -2,10 +2,14 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool, Type};
+use sqlx::{Executor, FromRow, Sqlite, SqlitePool, Type};
 use ts_rs::TS;
 use uuid::Uuid;
 
+// E38-04: Migration `20260417020000_cascade_merges_repo_fk.sql` rebuilds
+// `merges` so deleting a repo cascades to its merge metadata.
+// NOTE(E38-04): Future FK changes here still require a table rebuild
+// migration because SQLite cannot alter FK clauses in place.
 #[derive(Debug, Clone, Serialize, Deserialize, TS, Type)]
 #[sqlx(type_name = "merge_status", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -137,6 +141,22 @@ impl Merge {
         pr_number: i64,
         pr_url: &str,
     ) -> Result<PrMerge, sqlx::Error> {
+        Self::create_pr_tx(pool, workspace_id, repo_id, target_branch_name, pr_number, pr_url).await
+    }
+
+    /// Transaction-compatible variant of `create_pr`. E29-06: allows pairing
+    /// with `update_status_tx` in a single atomic transaction.
+    pub async fn create_pr_tx<'e, E>(
+        executor: E,
+        workspace_id: Uuid,
+        repo_id: Uuid,
+        target_branch_name: &str,
+        pr_number: i64,
+        pr_url: &str,
+    ) -> Result<PrMerge, sqlx::Error>
+    where
+        E: Executor<'e, Database = Sqlite>,
+    {
         let id = Uuid::new_v4();
         let now = Utc::now();
 
@@ -167,7 +187,7 @@ impl Merge {
             now,
             target_branch_name
         )
-        .fetch_one(pool)
+        .fetch_one(executor)
         .await
         .and_then(TryInto::try_into)
     }
@@ -206,6 +226,19 @@ impl Merge {
         pr_status: MergeStatus,
         merge_commit_sha: Option<String>,
     ) -> Result<(), sqlx::Error> {
+        Self::update_status_tx(pool, merge_id, pr_status, merge_commit_sha).await
+    }
+
+    /// Transaction-compatible variant of `update_status`. E29-06.
+    pub async fn update_status_tx<'e, E>(
+        executor: E,
+        merge_id: Uuid,
+        pr_status: MergeStatus,
+        merge_commit_sha: Option<String>,
+    ) -> Result<(), sqlx::Error>
+    where
+        E: Executor<'e, Database = Sqlite>,
+    {
         let merged_at = if matches!(pr_status, MergeStatus::Merged) {
             Some(Utc::now())
         } else {
@@ -223,7 +256,7 @@ impl Merge {
             merged_at,
             merge_id
         )
-        .execute(pool)
+        .execute(executor)
         .await?;
 
         Ok(())

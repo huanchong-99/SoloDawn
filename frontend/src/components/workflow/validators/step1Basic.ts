@@ -15,7 +15,7 @@ export function validateStep1Basic(config: WizardConfig): Record<string, string>
     errors.initialGoal = 'validation.basic.initialGoalRequired';
   }
 
-  if (!isAgentPlanned && config.basic.taskCount < 1) {
+  if (!isAgentPlanned && (config.basic.taskCount <= 0 || config.basic.taskCount > 10)) {
     errors.taskCount = 'validation.basic.taskCountMin';
   }
 

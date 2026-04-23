@@ -102,25 +102,25 @@ impl CommitMetadata {
         for line in metadata_section.lines() {
             let line = line.trim();
             if let Some(pos) = line.find(':') {
-                let key = &line[..pos].trim();
-                let value = &line[pos + 1..].trim();
+                let key = line[..pos].trim();
+                let value = line[pos + 1..].trim();
 
-                match *key {
-                    "workflow_id" => metadata.workflow_id = (*value).to_string(),
-                    "task_id" => metadata.task_id = (*value).to_string(),
-                    "terminal_id" => metadata.terminal_id = (*value).to_string(),
+                match key {
+                    "workflow_id" => metadata.workflow_id = value.to_string(),
+                    "task_id" => metadata.task_id = value.to_string(),
+                    "terminal_id" => metadata.terminal_id = value.to_string(),
                     "terminal_order" => {
                         metadata.terminal_order = value.parse().unwrap_or(0);
                     }
-                    "cli" => metadata.cli = (*value).to_string(),
-                    "model" => metadata.model = (*value).to_string(),
-                    "status" => metadata.status = (*value).to_string(),
-                    "severity" => metadata.severity = Some((*value).to_string()),
-                    "reviewed_terminal" => metadata.reviewed_terminal = Some((*value).to_string()),
+                    "cli" => metadata.cli = value.to_string(),
+                    "model" => metadata.model = value.to_string(),
+                    "status" => metadata.status = value.to_string(),
+                    "severity" => metadata.severity = Some(value.to_string()),
+                    "reviewed_terminal" => metadata.reviewed_terminal = Some(value.to_string()),
                     "issues" => {
                         metadata.issues = serde_json::from_str(value).ok();
                     }
-                    "next_action" => metadata.next_action = (*value).to_string(),
+                    "next_action" => metadata.next_action = value.to_string(),
                     _ => {}
                 }
             }

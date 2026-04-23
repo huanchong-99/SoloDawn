@@ -62,6 +62,11 @@ pub enum ExecutorActionType {
     ReviewRequest,
 }
 
+/// Maximum depth of chained `ExecutorAction` via `next_action`.
+/// Guards against unbounded recursion/stack growth when serializing,
+/// traversing, or appending actions.
+pub const MAX_ACTION_DEPTH: usize = 64;
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ExecutorAction {
     pub typ: ExecutorActionType,
@@ -72,8 +77,28 @@ impl ExecutorAction {
     pub fn new(typ: ExecutorActionType, next_action: Option<Box<ExecutorAction>>) -> Self {
         Self { typ, next_action }
     }
+
+    /// Compute the current depth of the action chain (including self).
+    fn depth(&self) -> usize {
+        let mut depth = 1;
+        let mut cur = self.next_action.as_deref();
+        while let Some(next) = cur {
+            depth += 1;
+            cur = next.next_action.as_deref();
+        }
+        depth
+    }
+
     #[must_use]
     pub fn append_action(mut self, action: ExecutorAction) -> Self {
+        // Refuse to append if the resulting chain would exceed MAX_ACTION_DEPTH.
+        if self.depth() + action.depth() > MAX_ACTION_DEPTH {
+            tracing::warn!(
+                "append_action refused: resulting chain would exceed MAX_ACTION_DEPTH ({})",
+                MAX_ACTION_DEPTH
+            );
+            return self;
+        }
         if let Some(next) = self.next_action {
             self.next_action = Some(Box::new(next.append_action(action)));
         } else {

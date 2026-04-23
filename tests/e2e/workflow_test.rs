@@ -13,11 +13,26 @@
 
 use reqwest::Client;
 use serde_json::json;
+use std::sync::LazyLock;
 use std::time::Duration;
 use uuid::Uuid;
 
-const SERVER_URL: &str = "http://localhost:3001";
-const API_BASE: &str = "http://localhost:3001/api";
+static SERVER_URL_INNER: LazyLock<String> = LazyLock::new(|| {
+    std::env::var("TEST_SERVER_URL")
+        .ok()
+        .unwrap_or_else(|| "http://localhost:23456".to_string())
+});
+static API_BASE_INNER: LazyLock<String> =
+    LazyLock::new(|| format!("{}/api", SERVER_URL_INNER.as_str()));
+
+#[allow(non_snake_case)]
+fn SERVER_URL() -> &'static str {
+    SERVER_URL_INNER.as_str()
+}
+#[allow(non_snake_case)]
+fn API_BASE() -> &'static str {
+    API_BASE_INNER.as_str()
+}
 
 /// HTTP client with timeout
 fn client() -> Client {
@@ -42,7 +57,7 @@ fn get_test_api_key() -> String {
 async fn ensure_server_running() {
     let client = client();
     let response = client
-        .get(&format!("{}/cli_types", API_BASE))
+        .get(&format!("{}/cli_types", API_BASE()))
         .timeout(Duration::from_secs(5))
         .send()
         .await;
@@ -50,7 +65,7 @@ async fn ensure_server_running() {
     if response.is_err() {
         panic!(
             "Server is not running on {}. Please start the server first.",
-            SERVER_URL
+            SERVER_URL()
         );
     }
 }
@@ -58,7 +73,7 @@ async fn ensure_server_running() {
 /// Helper: Get first CLI type ID from the API
 async fn get_first_cli_type(client: &Client) -> String {
     let cli_response = client
-        .get(&format!("{}/cli_types", API_BASE))
+        .get(&format!("{}/cli_types", API_BASE()))
         .send()
         .await
         .expect("Failed to GET /cli_types - server may not be running");
@@ -89,7 +104,7 @@ async fn get_first_cli_type(client: &Client) -> String {
 /// Helper: Get first model ID for a given CLI type
 async fn get_first_model(client: &Client, cli_type_id: &str) -> String {
     let models_response = client
-        .get(&format!("{}/cli_types/{}/models", API_BASE, cli_type_id))
+        .get(&format!("{}/cli_types/{}/models", API_BASE(), cli_type_id))
         .send()
         .await
         .expect(&format!(
@@ -166,7 +181,7 @@ async fn create_complete_workflow(
     });
 
     let response = client
-        .post(&format!("{}/workflows", API_BASE))
+        .post(&format!("{}/workflows", API_BASE()))
         .json(&workflow_payload)
         .send()
         .await
@@ -193,7 +208,7 @@ async fn create_complete_workflow(
 /// Helper: Get workflow by ID
 async fn get_workflow(client: &Client, workflow_id: &str) -> serde_json::Value {
     let response = client
-        .get(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .get(&format!("{}/workflows/{}", API_BASE(), workflow_id))
         .send()
         .await
         .expect("Failed to get workflow");
@@ -216,7 +231,7 @@ async fn get_workflow(client: &Client, workflow_id: &str) -> serde_json::Value {
 /// Helper: Get workflow tasks
 async fn get_workflow_tasks(client: &Client, workflow_id: &str) -> Vec<serde_json::Value> {
     let response = client
-        .get(&format!("{}/workflows/{}/tasks", API_BASE, workflow_id))
+        .get(&format!("{}/workflows/{}/tasks", API_BASE(), workflow_id))
         .send()
         .await
         .expect("Failed to get workflow tasks");
@@ -245,7 +260,7 @@ async fn execute_merge_terminal(
     workflow_id: &str,
 ) -> serde_json::Value {
     let response = client
-        .post(&format!("{}/workflows/{}/merge", API_BASE, workflow_id))
+        .post(&format!("{}/workflows/{}/merge", API_BASE(), workflow_id))
         .json(&json!({
             "mergeStrategy": "merge_commit"
         }))
@@ -273,7 +288,7 @@ async fn test_cli_detection() {
 
     // Test CLI detection endpoint
     let response = client
-        .get(&format!("{}/cli_types/detect", API_BASE))
+        .get(&format!("{}/cli_types/detect", API_BASE()))
         .send()
         .await
         .expect("Failed to GET /cli_types/detect - server may not be running");
@@ -330,7 +345,7 @@ async fn test_list_cli_types() {
 
     // Test list CLI types endpoint
     let response = client
-        .get(&format!("{}/cli_types", API_BASE))
+        .get(&format!("{}/cli_types", API_BASE()))
         .send()
         .await
         .expect("Failed to GET /cli_types - server may not be running");
@@ -386,7 +401,7 @@ async fn test_list_models_for_cli() {
 
     // Test models for CLI type
     let response = client
-        .get(&format!("{}/cli_types/{}/models", API_BASE, cli_type_id))
+        .get(&format!("{}/cli_types/{}/models", API_BASE(), cli_type_id))
         .send()
         .await
         .expect(&format!(
@@ -439,7 +454,7 @@ async fn test_list_command_presets() {
 
     // Test list command presets endpoint
     let response = client
-        .get(&format!("{}/workflows/presets/commands", API_BASE))
+        .get(&format!("{}/workflows/presets/commands", API_BASE()))
         .send()
         .await
         .expect("Failed to GET /workflows/presets/commands - server may not be running");
@@ -516,7 +531,7 @@ async fn test_workflow_lifecycle() {
     });
 
     let create_response = client
-        .post(&format!("{}/workflows", API_BASE))
+        .post(&format!("{}/workflows", API_BASE()))
         .json(&create_payload)
         .send()
         .await
@@ -542,7 +557,7 @@ async fn test_workflow_lifecycle() {
 
     // Step 2: Get workflow details
     let get_response = client
-        .get(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .get(&format!("{}/workflows/{}", API_BASE(), workflow_id))
         .send()
         .await
         .expect(&format!(
@@ -581,7 +596,7 @@ async fn test_workflow_lifecycle() {
     let list_response = client
         .get(&format!(
             "{}/workflows?projectId={}",
-            API_BASE, project_id
+            API_BASE(), project_id
         ))
         .send()
         .await
@@ -617,7 +632,7 @@ async fn test_workflow_lifecycle() {
     });
 
     let update_response = client
-        .put(&format!("{}/workflows/{}/status", API_BASE, workflow_id))
+        .put(&format!("{}/workflows/{}/status", API_BASE(), workflow_id))
         .json(&update_payload)
         .send()
         .await
@@ -638,7 +653,7 @@ async fn test_workflow_lifecycle() {
 
     // Step 5: Verify status update
     let verify_response = client
-        .get(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .get(&format!("{}/workflows/{}", API_BASE(), workflow_id))
         .send()
         .await
         .expect(&format!(
@@ -658,7 +673,7 @@ async fn test_workflow_lifecycle() {
 
     // Step 6: Delete workflow
     let delete_response = client
-        .delete(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .delete(&format!("{}/workflows/{}", API_BASE(), workflow_id))
         .send()
         .await
         .expect(&format!(
@@ -678,7 +693,7 @@ async fn test_workflow_lifecycle() {
 
     // Step 7: Verify deletion
     let verify_delete_response = client
-        .get(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .get(&format!("{}/workflows/{}", API_BASE(), workflow_id))
         .send()
         .await
         .expect(&format!(
@@ -720,7 +735,7 @@ async fn test_workflow_with_tasks() {
 
     // Get command presets
     let presets_response = client
-        .get(&format!("{}/workflows/presets/commands", API_BASE))
+        .get(&format!("{}/workflows/presets/commands", API_BASE()))
         .send()
         .await
         .expect("Failed to GET /workflows/presets/commands - server may not be running");
@@ -767,7 +782,7 @@ async fn test_workflow_with_tasks() {
     });
 
     let create_response = client
-        .post(&format!("{}/workflows", API_BASE))
+        .post(&format!("{}/workflows", API_BASE()))
         .json(&create_payload)
         .send()
         .await
@@ -836,9 +851,10 @@ async fn test_workflow_with_tasks() {
 
     // Cleanup: delete the workflow
     let _ = client
-        .delete(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .delete(&format!("{}/workflows/{}", API_BASE(), workflow_id))
         .send()
-        .await;
+        .await
+        .inspect_err(|e| eprintln!("Failed to cleanup workflow {}: {}", workflow_id, e));
 
     println!("✓ Workflow with tasks test completed successfully");
 }
@@ -863,7 +879,7 @@ async fn test_workflow_error_handling() {
     });
 
     let response = client
-        .post(&format!("{}/workflows", API_BASE))
+        .post(&format!("{}/workflows", API_BASE()))
         .json(&invalid_payload)
         .send()
         .await
@@ -881,7 +897,7 @@ async fn test_workflow_error_handling() {
     // Test 2: Try to get non-existent workflow
     let fake_id = Uuid::new_v4().to_string();
     let response = client
-        .get(&format!("{}/workflows/{}", API_BASE, fake_id))
+        .get(&format!("{}/workflows/{}", API_BASE(), fake_id))
         .send()
         .await
         .expect(&format!(
@@ -916,7 +932,7 @@ async fn test_workflow_error_handling() {
     });
 
     let response = client
-        .put(&format!("{}/workflows/{}/status", API_BASE, fake_id))
+        .put(&format!("{}/workflows/{}/status", API_BASE(), fake_id))
         .json(&update_payload)
         .send()
         .await
@@ -936,7 +952,7 @@ async fn test_workflow_error_handling() {
 
     // Test 4: Try to delete non-existent workflow
     let response = client
-        .delete(&format!("{}/workflows/{}", API_BASE, fake_id))
+        .delete(&format!("{}/workflows/{}", API_BASE(), fake_id))
         .send()
         .await
         .expect(&format!(
@@ -969,7 +985,7 @@ async fn test_workflow_error_handling() {
     });
 
     let create_response = client
-        .post(&format!("{}/workflows", API_BASE))
+        .post(&format!("{}/workflows", API_BASE()))
         .json(&create_payload)
         .send()
         .await
@@ -991,7 +1007,7 @@ async fn test_workflow_error_handling() {
         });
 
         let response = client
-            .put(&format!("{}/workflows/{}/status", API_BASE, workflow_id))
+            .put(&format!("{}/workflows/{}/status", API_BASE(), workflow_id))
             .json(&invalid_status)
             .send()
             .await
@@ -1011,9 +1027,10 @@ async fn test_workflow_error_handling() {
 
         // Cleanup
         let _ = client
-            .delete(&format!("{}/workflows/{}", API_BASE, workflow_id))
+            .delete(&format!("{}/workflows/{}", API_BASE(), workflow_id))
             .send()
-            .await;
+            .await
+            .inspect_err(|e| eprintln!("Failed to cleanup workflow {}: {}", workflow_id, e));
     }
 
     println!("✓ Workflow error handling test completed successfully");
@@ -1054,7 +1071,7 @@ async fn test_complete_workflow_lifecycle() {
     });
 
     let update_response = client
-        .put(&format!("{}/workflows/{}/status", API_BASE, &workflow_id))
+        .put(&format!("{}/workflows/{}/status", API_BASE(), &workflow_id))
         .json(&update_payload)
         .send()
         .await
@@ -1070,7 +1087,7 @@ async fn test_complete_workflow_lifecycle() {
 
     // Step 4: Start the workflow
     let start_response = client
-        .post(&format!("{}/workflows/{}/start", API_BASE, &workflow_id))
+        .post(&format!("{}/workflows/{}/start", API_BASE(), &workflow_id))
         .send()
         .await
         .expect("Failed to start workflow");
@@ -1101,9 +1118,14 @@ async fn test_complete_workflow_lifecycle() {
         }
     }
 
-    // Note: Task completion may not happen in test environment without actual orchestrator
-    // We'll check workflow status instead
-    println!("✓ Polled for task completion");
+    // NOTE(W2-01-02): structural refactor — replace brittle fixed-duration polling
+    // with an event-driven signal (e.g. subscribe to a completion broadcast) and
+    // assert meaningfully on task_completed. Without a real orchestrator in test
+    // env, task_completed can legitimately remain false, so we only log it here.
+    println!(
+        "✓ Polled for task completion (task_completed={})",
+        task_completed
+    );
 
     // Step 6: Verify workflow status (may be "running" or "starting" in test env)
     let workflow = get_workflow(&client, &workflow_id).await;
@@ -1117,7 +1139,7 @@ async fn test_complete_workflow_lifecycle() {
 
     // Step 7: Execute merge terminal (if endpoint exists)
     let merge_response = client
-        .post(&format!("{}/workflows/{}/merge", API_BASE, &workflow_id))
+        .post(&format!("{}/workflows/{}/merge", API_BASE(), &workflow_id))
         .json(&json!({
             "mergeStrategy": "merge_commit"
         }))
@@ -1136,9 +1158,10 @@ async fn test_complete_workflow_lifecycle() {
 
                 // Cleanup: delete the workflow
                 let _ = client
-                    .delete(&format!("{}/workflows/{}", API_BASE, &workflow_id))
+                    .delete(&format!("{}/workflows/{}", API_BASE(), &workflow_id))
                     .send()
-                    .await;
+                    .await
+                    .inspect_err(|e| eprintln!("Failed to cleanup workflow {}: {}", &workflow_id, e));
             } else {
                 println!("⚠ Merge endpoint returned status: {} (may not be implemented yet)", response.status());
             }

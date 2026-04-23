@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   PlayIcon,
@@ -249,6 +249,15 @@ export function NextActionCard({
   const { projectId } = useProject();
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current !== null) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const { data: attempt } = useQuery({
     queryKey: ['attemptWithSession', attemptId],
@@ -281,7 +290,13 @@ export function NextActionCard({
     try {
       await navigator.clipboard.writeText(containerRef);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copyTimeoutRef.current !== null) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      copyTimeoutRef.current = setTimeout(() => {
+        setCopied(false);
+        copyTimeoutRef.current = null;
+      }, 2000);
     } catch (err) {
       console.warn('Copy to clipboard failed:', err);
     }
@@ -344,7 +359,7 @@ export function NextActionCard({
     ? t('attempt.setupHelpText', { agent: attempt?.session?.executor })
     : null;
 
-  const editorName = getIdeName(config?.editor?.editor_type);
+  const editorName = getIdeName(config?.editor?.editorType);
 
   const shouldHide =
     (!failed || (execution_processes > 2 && !needsSetup)) && fileCount === 0;
@@ -409,7 +424,7 @@ export function NextActionCard({
               handleGitActions={handleGitActions}
               attemptId={attemptId}
               editorName={editorName}
-              editorType={config?.editor?.editor_type}
+              editorType={config?.editor?.editorType}
               hasRunningDevServer={hasRunningDevServer}
               projectHasDevScript={projectHasDevScript}
               isStarting={isStarting}

@@ -70,6 +70,11 @@ impl futures::Stream for DiffStreamHandle {
 }
 
 impl Drop for DiffStreamHandle {
+    // [W2-36-03] Abort the watcher task synchronously without joining.
+    // Acceptable: the watcher only pushes diff events into the owned stream
+    // that we are dropping, so any in-flight work has no visible side effects
+    // once this handle is gone. A graceful shutdown/await would require a
+    // Tokio runtime inside `Drop`, which we cannot assume.
     fn drop(&mut self) {
         if let Some(handle) = self.watcher_task.take() {
             handle.abort();
@@ -156,7 +161,12 @@ impl DiffStreamManager {
         self.reset_stream().await?;
 
         // Send Ready message to indicate initial data has been sent
-        let _ready_error = self.tx.send(Ok(LogMsg::Ready)).await;
+        if let Err(e) = self.tx.send(Ok(LogMsg::Ready)).await {
+            tracing::warn!(
+                error = %e,
+                "Failed to send Ready LogMsg on diff stream; receiver likely dropped"
+            );
+        }
 
         let (fs_debouncer, mut fs_rx, canonical_worktree) =
             filesystem_watcher::async_watcher(&self.args.worktree_path)
@@ -209,7 +219,10 @@ impl DiffStreamManager {
 
     async fn reset_stream(&mut self) -> Result<(), DiffStreamError> {
         let paths_to_clear: Vec<String> = {
-            let mut guard = self.known_paths.write().unwrap();
+            let mut guard = self
+                .known_paths
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             guard.drain().collect()
         };
 
@@ -217,13 +230,17 @@ impl DiffStreamManager {
             let prefixed = prefix_path(raw_path, self.args.path_prefix.as_deref());
             let entry_index = escape_json_pointer_segment(&prefixed);
             let patch = ConversationPatch::remove_diff(&entry_index);
-            if self.tx.send(Ok(LogMsg::JsonPatch(patch))).await.is_err() {
+            if let Err(e) = self.tx.send(Ok(LogMsg::JsonPatch(patch))).await {
+                tracing::debug!("diff_stream: reset_stream send failed (receiver dropped): {e}");
                 return Ok(());
             }
         }
 
         self.cumulative.store(0, Ordering::Relaxed);
-        self.full_sent.write().unwrap().clear();
+        self.full_sent
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
 
         let diffs = self.fetch_diffs().await?;
         self.send_diffs(diffs).await?;
@@ -262,12 +279,18 @@ impl DiffStreamManager {
             let raw_path = GitService::diff_path(&diff);
 
             {
-                let mut guard = self.known_paths.write().unwrap();
+                let mut guard = self
+                    .known_paths
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 guard.insert(raw_path.clone());
             }
 
             if !diff.content_omitted {
-                let mut guard = self.full_sent.write().unwrap();
+                let mut guard = self
+                    .full_sent
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 guard.insert(raw_path.clone());
             }
 
@@ -282,7 +305,8 @@ impl DiffStreamManager {
 
             let entry_index = escape_json_pointer_segment(&prefixed_entry);
             let patch = ConversationPatch::add_diff(&entry_index, diff);
-            if self.tx.send(Ok(LogMsg::JsonPatch(patch))).await.is_err() {
+            if let Err(e) = self.tx.send(Ok(LogMsg::JsonPatch(patch))).await {
+                tracing::debug!("diff_stream: send_diffs send failed (receiver dropped): {e}");
                 return Ok(());
             }
         }
@@ -328,7 +352,8 @@ impl DiffStreamManager {
         .await??;
 
         for msg in messages {
-            if self.tx.send(Ok(msg)).await.is_err() {
+            if let Err(e) = self.tx.send(Ok(msg)).await {
+                tracing::debug!("diff_stream: handle_fs_events send failed (receiver dropped): {e}");
                 return Ok(());
             }
         }
@@ -377,10 +402,17 @@ impl DiffStreamManager {
         let branch = self.args.branch.clone();
         let target = target_branch.to_string();
 
-        tokio::task::spawn_blocking(move || git.get_base_commit(&repo_path, &branch, &target).ok())
-            .await
-            .ok()
-            .flatten()
+        tokio::task::spawn_blocking(move || {
+            git.get_base_commit(&repo_path, &branch, &target)
+                .inspect_err(|e| {
+                    tracing::warn!(error = %e, branch = %branch, target = %target, "Failed to compute base commit");
+                })
+                .ok()
+        })
+        .await
+        .inspect_err(|e| tracing::warn!(error = %e, "spawn_blocking join failed in recompute_base_commit"))
+        .ok()
+        .flatten()
     }
 }
 
@@ -482,14 +514,18 @@ fn process_file_changes(
         let raw_file_path = GitService::diff_path(&diff);
         files_with_diffs.insert(raw_file_path.clone());
         {
-            let mut guard = known_paths.write().unwrap();
+            let mut guard = known_paths
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             guard.insert(raw_file_path.clone());
         }
 
         apply_stream_omit_policy(&mut diff, cumulative_bytes, stats_only);
 
         if !diff.content_omitted {
-            let mut guard = full_sent_paths.write().unwrap();
+            let mut guard = full_sent_paths
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             guard.insert(raw_file_path.clone());
         }
 
@@ -514,7 +550,9 @@ fn process_file_changes(
             let patch = ConversationPatch::remove_diff(&entry_index);
             msgs.push(LogMsg::JsonPatch(patch));
             {
-                let mut guard = known_paths.write().unwrap();
+                let mut guard = known_paths
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 guard.remove(changed_path);
             }
         }
@@ -547,7 +585,7 @@ fn setup_git_watcher(
     let (tx, rx) = tokio::sync::watch::channel(());
 
     // Create debouncer with short timeout since git operations might touch multiple files
-    let mut debouncer = new_debouncer(
+    let mut debouncer = match new_debouncer(
         Duration::from_millis(200),
         None,
         move |res: DebounceEventResult| {
@@ -555,8 +593,16 @@ fn setup_git_watcher(
                 let _ = tx.send(());
             }
         },
-    )
-    .ok()?;
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(
+                "Failed to create git watcher debouncer: {}; git events will be ignored",
+                e
+            );
+            return None;
+        }
+    };
 
     let mut watched_any = false;
     for path in paths_to_watch {

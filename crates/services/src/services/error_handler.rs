@@ -105,6 +105,15 @@ impl ErrorHandler {
             // Error terminal exists, activate it
             info!("Found existing error terminal: {}", terminal.id);
 
+            // E28-02: Ensure PTY session is initialized before activating to
+            // avoid racing the terminal service that populates `pty_session_id`.
+            if terminal.pty_session_id.is_none() {
+                return Err(anyhow!(
+                    "Error terminal {} has no PTY session yet; refusing to activate",
+                    terminal.id
+                ));
+            }
+
             // Update terminal status to "waiting"
             db::models::Terminal::update_status(&self.db.pool, &terminal.id, "waiting").await?;
 

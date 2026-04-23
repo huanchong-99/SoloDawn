@@ -17,6 +17,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   e2e:
     strategy:
@@ -62,10 +66,7 @@ jobs:
 
     - name: Install protobuf (Windows)
       if: runner.os == 'Windows'
-      shell: bash
-      run: |
-        choco install protoc -y --no-progress
-        echo "PROTOC=C:/ProgramData/chocolatey/bin/protoc.exe" >> "$GITHUB_ENV"
+      uses: ./.github/actions/setup-protoc-windows
 
     # --- Rust toolchain ---
     - name: Install Rust toolchain
@@ -112,7 +113,8 @@ jobs:
     - name: Run E2E self-test
       shell: bash
       env:
-        SOLODAWN_ENCRYPTION_KEY: "12345678901234567890123456789012"
+        # Test-only placeholder key (32 bytes); not a real secret
+        SOLODAWN_ENCRYPTION_KEY: ${{ secrets.E2E_TEST_ENCRYPTION_KEY || 'test-key-placeholder-not-secret-ci-only-0000' }}
         SOLODAWN_LOCAL_MODE: "1"
         SOLODAWN_NO_BROWSER: "1"
         RUST_LOG: "warn,server=info"
@@ -175,10 +177,7 @@ jobs:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
     - name: Install protobuf (Windows)
-      shell: bash
-      run: |
-        choco install protoc -y --no-progress
-        echo "PROTOC=C:/ProgramData/chocolatey/bin/protoc.exe" >> "$GITHUB_ENV"
+      uses: ./.github/actions/setup-protoc-windows
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@a54c7afa936fefeb4456b2dd8068152669aa8203 # stable
@@ -268,9 +267,11 @@ jobs:
       run: cargo build --release -p server
 
     - name: Run orchestration E2E test
+      if: github.event_name != 'pull_request'
       shell: bash
       env:
-        SOLODAWN_ENCRYPTION_KEY: "12345678901234567890123456789012"
+        # Test-only placeholder key (32 bytes); not a real secret
+        SOLODAWN_ENCRYPTION_KEY: ${{ secrets.E2E_TEST_ENCRYPTION_KEY || 'test-key-placeholder-not-secret-ci-only-0000' }}
         SOLODAWN_LOCAL_MODE: "1"
         SOLODAWN_NO_BROWSER: "1"
         RUST_LOG: "warn,server=info,services=info"

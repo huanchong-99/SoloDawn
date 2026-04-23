@@ -64,6 +64,9 @@ export const useLogStream = (processId: string): UseLogStreamResult => {
     // Update the ref to track the current processId
     currentProcessIdRef.current = processId;
 
+    // Reset retry count on process id change to prevent unbounded growth
+    retryCountRef.current = 0;
+
     // Clear logs when process changes
     setLogs([]);
     setError(null);

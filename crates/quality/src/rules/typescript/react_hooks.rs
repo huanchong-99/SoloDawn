@@ -81,7 +81,12 @@ impl TsRule for ReactHooksRule {
                 continue;
             }
 
-            // Detect function/component boundaries to scope early return tracking
+            // Detect function/component boundaries to scope early return tracking.
+            // We capture the brace_depth *before* entering the function body.
+            // When a closing brace returns brace_depth to this captured value,
+            // we have exited the function. The comparison used below is
+            // `brace_depth == fn_depth + 1` because the check runs before the
+            // decrement, i.e. we are about to close the function body itself.
             if (trimmed.contains("function ") || trimmed.contains("=> {") || trimmed.contains("=>{"))
                 && function_scope_depth.is_none() {
                     function_scope_depth = Some(brace_depth);
@@ -138,8 +143,12 @@ impl TsRule for ReactHooksRule {
                 brace_depth -= 1;
             }
 
-            // Detect early returns (return statements not at the end of a function)
-            if return_re.is_match(trimmed) && conditional_depth > 0 {
+            // Detect early returns (return statements anywhere inside a
+            // function scope). Any `return` encountered while we are still
+            // inside the function body implies subsequent hook calls would
+            // only execute on some renders — track it regardless of whether
+            // it is inside a conditional or at the non-conditional level.
+            if return_re.is_match(trimmed) && function_scope_depth.is_some() {
                 had_early_return = true;
             }
 
