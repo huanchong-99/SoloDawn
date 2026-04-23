@@ -829,7 +829,7 @@ impl OrchestratorAgent {
                 self.handle_terminal_completed(event).await?;
             }
             BusMessage::TerminalQualityGateResult(event) => {
-                self.handle_quality_gate_result(event).await?;
+                Box::pin(self.handle_quality_gate_result(event)).await?;
             }
             BusMessage::TerminalPromptDetected(event) => {
                 self.handle_terminal_prompt_detected(event).await?;
@@ -5762,7 +5762,9 @@ impl OrchestratorAgent {
             .filter(|l| {
                 !l.contains("node_modules/")
                     && !l.contains(".lock")
-                    && !l.ends_with(".lock")
+                    && !std::path::Path::new(l)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("lock"))
                     && !l.contains("vendor/")
                     && !l.contains("target/")
                     && !l.contains("dist/")
