@@ -71,9 +71,6 @@ pub(crate) struct TerminalIO {
     pub writer: Option<
         std::sync::Arc<std::sync::Mutex<services::services::terminal::process::PtyWriter>>,
     >,
-    // RUNNER_CLIENT_MIGRATION: Future fields for gRPC-based I/O:
-    //   pub input_stream: Option<tonic::Streaming<TerminalInputChunk>>,
-    //   pub output_stream: Option<tonic::Streaming<TerminalOutputChunk>>,
 }
 
 #[allow(dead_code)]
