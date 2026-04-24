@@ -1008,7 +1008,7 @@ impl OrchestratorAgent {
                     let Some(message) = maybe_message else {
                         break;
                     };
-                    let should_stop = self.handle_message(message).await?;
+                    let should_stop = Box::pin(self.handle_message(message)).await?;
                     if should_stop {
                         break;
                     }
@@ -1055,7 +1055,7 @@ impl OrchestratorAgent {
                 self.handle_terminal_completed(event).await?;
             }
             BusMessage::TerminalQualityGateResult(event) => {
-                self.handle_quality_gate_result(event).await?;
+                Box::pin(self.handle_quality_gate_result(event)).await?;
             }
             BusMessage::TerminalPromptDetected(event) => {
                 self.handle_terminal_prompt_detected(event).await?;
@@ -3087,7 +3087,7 @@ impl OrchestratorAgent {
             match terminal.status.as_str() {
                 TERMINAL_STATUS_COMPLETED => completed_terminals.push(terminal.id.clone()),
                 TERMINAL_STATUS_FAILED | TERMINAL_STATUS_CANCELLED => {
-                    failed_terminals.push(terminal.id.clone())
+                    failed_terminals.push(terminal.id.clone());
                 }
                 _ => {
                     if !found_active_terminal {
@@ -4194,7 +4194,7 @@ impl OrchestratorAgent {
                 let review = AcceptanceReviewResult::rejected(format!(
                     "Acceptance review could not resolve the project working directory: {e}"
                 ));
-                return Ok(self.handle_acceptance_review_result(event, review).await?);
+                return self.handle_acceptance_review_result(event, review).await;
             }
         };
         let locked_commit_hash = if let Some(commit_hash) = event.commit_hash.clone() {
@@ -6111,7 +6111,9 @@ impl OrchestratorAgent {
             .filter(|l| {
                 !l.contains("node_modules/")
                     && !l.contains(".lock")
-                    && !l.ends_with(".lock")
+                    && !std::path::Path::new(l)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("lock"))
                     && !l.contains("vendor/")
                     && !l.contains("target/")
                     && !l.contains("dist/")
