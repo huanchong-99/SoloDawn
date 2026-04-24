@@ -24,12 +24,15 @@ pub use llm::{
     LLMClient, OpenAICompatibleClient, build_terminal_completion_prompt,
     create_claude_code_native_client, create_llm_client,
 };
-pub use resilient_llm::{ProviderEvent, ProviderStatusReport, ResilientLLMClient};
 pub use message_bus::{BusMessage, MessageBus, SharedMessageBus};
 pub use prompt_handler::PromptHandler;
+pub use resilient_llm::{ProviderEvent, ProviderStatusReport, ResilientLLMClient};
 pub use runtime::{OrchestratorRuntime, RuntimeConfig};
 pub use runtime_actions::{RuntimeActionService, RuntimeTaskSpec, RuntimeTerminalSpec};
-pub use state::{OrchestratorRunState, OrchestratorState, SharedOrchestratorState};
+pub use state::{
+    DebtPolicy, OrchestratorRunState, OrchestratorState, QualityProfile, SharedOrchestratorState,
+    WorkflowArchetype, WorkflowStrategy,
+};
 pub use terminal_coordinator::TerminalCoordinator;
 pub use types::*;
 

@@ -149,6 +149,40 @@ Before committing, verify each item by actually running the command:\n\
 [ ] .gitignore is appropriate for the tech stack\n\
 [ ] All new code has corresponding tests";
 
+/// Scoped quality requirements for existing-codebase workflows.
+///
+/// This keeps incremental tasks focused on the requested change. Full project
+/// artifacts (Docker/CI/README) are only required when the task explicitly asks
+/// for them or when the workflow strategy is full-delivery.
+pub const QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX: &str = "\n\n---\n\
+## MANDATORY QUALITY STANDARDS (Existing Codebase)\n\
+\n\
+### 1. Preserve Existing Behavior\n\
+- Follow the repository's current architecture, scripts, naming, and test style\n\
+- Keep the change scoped to the requested task\n\
+- Do NOT add or rewrite Docker, CI, README, or deployment files unless the task explicitly requires it\n\
+\n\
+Think: \"Did I solve the requested problem without expanding the project's surface area?\"\n\
+\n\
+### 2. Build and Test the Delta\n\
+- Run the existing build/type-check/lint/test commands that apply to your changed code\n\
+- Fix all errors introduced by your changes\n\
+- If the repository already has unrelated failures, document them in the commit notes instead of broadening scope\n\
+- Add or update tests for new or modified logic\n\
+\n\
+Think: \"Can reviewers tell which checks cover my exact change?\"\n\
+\n\
+### 3. Security and Compatibility\n\
+- Do not introduce hardcoded secrets, weak defaults, or unsafe fallback credentials\n\
+- Validate new external inputs and preserve existing public APIs unless the task requires a breaking change\n\
+- New environment variables must be documented in the existing env/example mechanism\n\
+\n\
+### SELF-VERIFICATION CHECKLIST (run before your final commit)\n\
+[ ] Existing project checks relevant to my changed code pass, or pre-existing failures are clearly identified\n\
+[ ] New/modified behavior has tests\n\
+[ ] No unrelated infrastructure/documentation churn\n\
+[ ] No new secrets or weak defaults";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,6 +268,14 @@ mod tests {
             QUALITY_REQUIREMENTS_SUFFIX.contains("CI pipeline"),
             "Must require CI"
         );
+    }
+
+    #[test]
+    fn incremental_quality_suffix_avoids_greenfield_artifact_churn() {
+        assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("Existing Codebase"));
+        assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("Do NOT add or rewrite Docker"));
+        assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("pre-existing failures"));
+        assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("No unrelated infrastructure"));
     }
 
     #[test]

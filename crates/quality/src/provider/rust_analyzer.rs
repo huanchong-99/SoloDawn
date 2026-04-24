@@ -2,16 +2,18 @@
 //!
 //! 封装 cargo check / clippy / fmt / test 命令
 
+use std::{path::Path, time::Instant};
+
 use async_trait::async_trait;
-use std::path::Path;
-use std::time::Instant;
 use tracing::{debug, warn};
 
-use crate::gate::result::MeasureValue;
-use crate::issue::QualityIssue;
-use crate::metrics::MetricKey;
-use crate::provider::{ProviderReport, QualityProvider};
-use crate::rule::{AnalyzerSource, RuleType, Severity};
+use crate::{
+    gate::result::MeasureValue,
+    issue::QualityIssue,
+    metrics::MetricKey,
+    provider::{ProviderReport, QualityProvider},
+    rule::{AnalyzerSource, RuleType, Severity},
+};
 
 /// Rust 分析器 Provider
 ///
@@ -144,7 +146,10 @@ impl RustProvider {
             if let Some(reason) = json.get("reason").and_then(|r| r.as_str()) {
                 if reason == "compiler-message" {
                     if let Some(msg) = json.get("message") {
-                        let level = msg.get("level").and_then(|l| l.as_str()).unwrap_or("warning");
+                        let level = msg
+                            .get("level")
+                            .and_then(|l| l.as_str())
+                            .unwrap_or("warning");
                         let message = msg.get("message").and_then(|m| m.as_str()).unwrap_or("");
                         let code = msg
                             .get("code")
@@ -162,10 +167,9 @@ impl RustProvider {
                                     .get("file_name")
                                     .and_then(|f| f.as_str())
                                     .unwrap_or("unknown");
-                                let line = span
-                                    .get("line_start")
-                                    .and_then(|l| l.as_u64())
-                                    .unwrap_or(0) as u32;
+                                let line =
+                                    span.get("line_start").and_then(|l| l.as_u64()).unwrap_or(0)
+                                        as u32;
                                 (file.to_string(), line)
                             })
                             .unwrap_or(("unknown".to_string(), 0));
@@ -210,30 +214,73 @@ impl QualityProvider for RustProvider {
         ]
     }
 
+    fn applicable_metrics(
+        &self,
+        discovery: &crate::discovery::RepositoryDiscovery,
+        changed_files: Option<&[String]>,
+    ) -> Vec<MetricKey> {
+        if !discovery.has_rust_targets() {
+            return Vec::new();
+        }
+
+        if let Some(files) = changed_files
+            && !files.is_empty()
+            && !files.iter().any(|file| {
+                let lower = file.replace('\\', "/").to_ascii_lowercase();
+                lower.ends_with(".rs")
+                    || lower.ends_with("cargo.toml")
+                    || lower.ends_with("cargo.lock")
+            })
+        {
+            return Vec::new();
+        }
+
+        self.supported_metrics()
+    }
+
     async fn analyze(
         &self,
         project_root: &Path,
-        _discovery: &crate::discovery::RepositoryDiscovery,
+        discovery: &crate::discovery::RepositoryDiscovery,
         _changed_files: Option<&[String]>,
     ) -> anyhow::Result<ProviderReport> {
         let start = Instant::now();
         let mut report = ProviderReport::success("rust", 0);
         let mut all_issues = Vec::new();
 
+        if !discovery.has_rust_targets() {
+            debug!("RustProvider skipped: no Rust targets discovered");
+            report.duration_ms = start.elapsed().as_millis() as u64;
+            return Ok(report);
+        }
+
         // 1. cargo check
         if self.enable_check {
             debug!("Running cargo check...");
-            let output = run_command(project_root, "cargo", &["check", "--workspace", "--message-format=json"]).await;
+            let output = run_command(
+                project_root,
+                "cargo",
+                &["check", "--workspace", "--message-format=json"],
+            )
+            .await;
             match output {
                 Ok(out) => {
                     // G16-005: Detect non-Rust projects (no Cargo.toml) to avoid
                     // false positives from "error: could not find Cargo.toml".
-                    if !out._success && out.stderr.contains("could not find") && out.stderr.contains("Cargo.toml") {
+                    if !out._success
+                        && out.stderr.contains("could not find")
+                        && out.stderr.contains("Cargo.toml")
+                    {
                         debug!("cargo check: not a Rust project (no Cargo.toml), skipping");
-                        report.metrics.insert(MetricKey::CargoCheckErrors, MeasureValue::Int(-1));
+                        report
+                            .metrics
+                            .insert(MetricKey::CargoCheckErrors, MeasureValue::Int(-1));
                     } else {
-                        let errors = out.stderr.lines().filter(|l| l.contains("error[")).count() as i64;
-                        report.metrics.insert(MetricKey::CargoCheckErrors, MeasureValue::Int(errors));
+                        let errors =
+                            out.stderr.lines().filter(|l| l.contains("error[")).count() as i64;
+                        report
+                            .metrics
+                            .insert(MetricKey::CargoCheckErrors, MeasureValue::Int(errors));
                         if errors > 0 {
                             report.success = false;
                         }
@@ -241,7 +288,9 @@ impl QualityProvider for RustProvider {
                 }
                 Err(e) => {
                     warn!("cargo check failed to execute: {}", e);
-                    report.metrics.insert(MetricKey::CargoCheckErrors, MeasureValue::Int(-1));
+                    report
+                        .metrics
+                        .insert(MetricKey::CargoCheckErrors, MeasureValue::Int(-1));
                     report.success = false;
                     report.error = Some(format!("cargo check failed: {}", e));
                 }
@@ -254,26 +303,47 @@ impl QualityProvider for RustProvider {
             let output = run_command(
                 project_root,
                 "cargo",
-                &["clippy", "--workspace", "--all-targets", "--all-features", "--message-format=json"],
+                &[
+                    "clippy",
+                    "--workspace",
+                    "--all-targets",
+                    "--all-features",
+                    "--message-format=json",
+                ],
             )
             .await;
             match output {
                 Ok(out) => {
-                    if !out._success && out.stderr.contains("could not find") && out.stderr.contains("Cargo.toml") {
+                    if !out._success
+                        && out.stderr.contains("could not find")
+                        && out.stderr.contains("Cargo.toml")
+                    {
                         debug!("cargo clippy: not a Rust project, skipping");
-                        report.metrics.insert(MetricKey::ClippyWarnings, MeasureValue::Int(-1));
-                        report.metrics.insert(MetricKey::ClippyErrors, MeasureValue::Int(-1));
+                        report
+                            .metrics
+                            .insert(MetricKey::ClippyWarnings, MeasureValue::Int(-1));
+                        report
+                            .metrics
+                            .insert(MetricKey::ClippyErrors, MeasureValue::Int(-1));
                     } else {
                         let (issues, warnings, errors) = Self::parse_clippy_output(&out.stdout);
-                        report.metrics.insert(MetricKey::ClippyWarnings, MeasureValue::Int(warnings));
-                        report.metrics.insert(MetricKey::ClippyErrors, MeasureValue::Int(errors));
+                        report
+                            .metrics
+                            .insert(MetricKey::ClippyWarnings, MeasureValue::Int(warnings));
+                        report
+                            .metrics
+                            .insert(MetricKey::ClippyErrors, MeasureValue::Int(errors));
                         all_issues.extend(issues);
                     }
                 }
                 Err(e) => {
                     warn!("cargo clippy failed to execute: {}", e);
-                    report.metrics.insert(MetricKey::ClippyWarnings, MeasureValue::Int(-1));
-                    report.metrics.insert(MetricKey::ClippyErrors, MeasureValue::Int(-1));
+                    report
+                        .metrics
+                        .insert(MetricKey::ClippyWarnings, MeasureValue::Int(-1));
+                    report
+                        .metrics
+                        .insert(MetricKey::ClippyErrors, MeasureValue::Int(-1));
                 }
             }
         }
@@ -284,18 +354,27 @@ impl QualityProvider for RustProvider {
             let output = run_command(project_root, "cargo", &["fmt", "--check"]).await;
             match output {
                 Ok(out) => {
-                    if !out._success && out.stderr.contains("could not find") && out.stderr.contains("Cargo.toml") {
+                    if !out._success
+                        && out.stderr.contains("could not find")
+                        && out.stderr.contains("Cargo.toml")
+                    {
                         debug!("cargo fmt: not a Rust project, skipping");
-                        report.metrics.insert(MetricKey::FmtViolations, MeasureValue::Int(-1));
+                        report
+                            .metrics
+                            .insert(MetricKey::FmtViolations, MeasureValue::Int(-1));
                     } else {
                         let (issues, violations) = Self::parse_fmt_output(&out.stdout);
-                        report.metrics.insert(MetricKey::FmtViolations, MeasureValue::Int(violations));
+                        report
+                            .metrics
+                            .insert(MetricKey::FmtViolations, MeasureValue::Int(violations));
                         all_issues.extend(issues);
                     }
                 }
                 Err(e) => {
                     warn!("cargo fmt --check failed to execute: {}", e);
-                    report.metrics.insert(MetricKey::FmtViolations, MeasureValue::Int(-1));
+                    report
+                        .metrics
+                        .insert(MetricKey::FmtViolations, MeasureValue::Int(-1));
                 }
             }
         }
@@ -303,21 +382,35 @@ impl QualityProvider for RustProvider {
         // 4. cargo test
         if self.enable_test {
             debug!("Running cargo test...");
-            let output = run_command(project_root, "cargo", &["test", "--workspace", "--no-fail-fast"]).await;
+            let output = run_command(
+                project_root,
+                "cargo",
+                &["test", "--workspace", "--no-fail-fast"],
+            )
+            .await;
             match output {
                 Ok(out) => {
-                    if !out._success && out.stderr.contains("could not find") && out.stderr.contains("Cargo.toml") {
+                    if !out._success
+                        && out.stderr.contains("could not find")
+                        && out.stderr.contains("Cargo.toml")
+                    {
                         debug!("cargo test: not a Rust project, skipping");
-                        report.metrics.insert(MetricKey::RustTestFailures, MeasureValue::Int(-1));
+                        report
+                            .metrics
+                            .insert(MetricKey::RustTestFailures, MeasureValue::Int(-1));
                     } else {
                         let (issues, failures) = Self::parse_test_output(&out.stdout);
-                        report.metrics.insert(MetricKey::RustTestFailures, MeasureValue::Int(failures));
+                        report
+                            .metrics
+                            .insert(MetricKey::RustTestFailures, MeasureValue::Int(failures));
                         all_issues.extend(issues);
                     }
                 }
                 Err(e) => {
                     warn!("cargo test failed to execute: {}", e);
-                    report.metrics.insert(MetricKey::RustTestFailures, MeasureValue::Int(-1));
+                    report
+                        .metrics
+                        .insert(MetricKey::RustTestFailures, MeasureValue::Int(-1));
                 }
             }
         }
@@ -354,4 +447,37 @@ async fn run_command(cwd: &Path, program: &str, args: &[&str]) -> anyhow::Result
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         _success: output.status.success(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::discovery::RepositoryDiscovery;
+
+    fn temp_root() -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("rust-provider-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[tokio::test]
+    async fn non_rust_project_has_no_applicable_rust_metrics_or_errors() {
+        let root = temp_root();
+        std::fs::write(root.join("package.json"), r#"{ "name": "web" }"#).unwrap();
+
+        let discovery = RepositoryDiscovery::discover(&root).unwrap();
+        assert!(!discovery.has_rust_targets());
+
+        let provider = RustProvider::default();
+        assert!(provider.applicable_metrics(&discovery, None).is_empty());
+
+        let report = provider.analyze(&root, &discovery, None).await.unwrap();
+        assert!(report.success);
+        assert!(report.metrics.is_empty());
+        assert!(report.issues.is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

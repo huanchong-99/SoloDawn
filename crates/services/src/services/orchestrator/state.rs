@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use super::{
@@ -20,6 +21,95 @@ pub enum OrchestratorRunState {
     Paused,
     /// Stopped and no longer processing.
     Stopped,
+}
+
+/// Stable workflow classification used to select orchestration behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowArchetype {
+    /// New project or effectively empty repository.
+    Greenfield,
+    /// Existing source tree that should receive scoped, incremental changes.
+    ExistingCodebase,
+    /// Existing repository with a new standalone subsystem/foundation phase.
+    HybridFoundation,
+}
+
+/// Quality strictness profile derived from the workflow archetype.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityProfile {
+    /// Full delivery expectations: artifacts, tests, docs, local operability.
+    FullDelivery,
+    /// Incremental change expectations: no regressions, scoped tests, no churn.
+    IncrementalChange,
+}
+
+/// How existing quality debt should affect completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DebtPolicy {
+    /// All detected debt can block completion.
+    BlockAll,
+    /// Only issues introduced by this workflow/task should block completion.
+    BlockIntroducedOnly,
+}
+
+/// Persisted orchestration strategy for a workflow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowStrategy {
+    pub archetype: WorkflowArchetype,
+    pub quality_profile: QualityProfile,
+    pub debt_policy: DebtPolicy,
+}
+
+impl WorkflowStrategy {
+    pub fn new(archetype: WorkflowArchetype) -> Self {
+        match archetype {
+            WorkflowArchetype::Greenfield => Self {
+                archetype,
+                quality_profile: QualityProfile::FullDelivery,
+                debt_policy: DebtPolicy::BlockAll,
+            },
+            WorkflowArchetype::ExistingCodebase => Self {
+                archetype,
+                quality_profile: QualityProfile::IncrementalChange,
+                debt_policy: DebtPolicy::BlockIntroducedOnly,
+            },
+            WorkflowArchetype::HybridFoundation => Self {
+                archetype,
+                quality_profile: QualityProfile::FullDelivery,
+                debt_policy: DebtPolicy::BlockIntroducedOnly,
+            },
+        }
+    }
+
+    pub fn should_pass_initial_goal(self, task_order_index: i32) -> bool {
+        match self.archetype {
+            WorkflowArchetype::Greenfield => task_order_index > 0,
+            WorkflowArchetype::ExistingCodebase => true,
+            WorkflowArchetype::HybridFoundation => true,
+        }
+    }
+
+    pub fn should_pass_foundation_context(self, task_order_index: i32) -> bool {
+        match self.archetype {
+            WorkflowArchetype::Greenfield | WorkflowArchetype::HybridFoundation => {
+                task_order_index > 0
+            }
+            WorkflowArchetype::ExistingCodebase => false,
+        }
+    }
+
+    pub fn is_full_delivery(self) -> bool {
+        self.quality_profile == QualityProfile::FullDelivery
+    }
+}
+
+impl Default for WorkflowStrategy {
+    fn default() -> Self {
+        Self::new(WorkflowArchetype::ExistingCodebase)
+    }
 }
 
 /// Tracks per-task terminal execution progress.
@@ -48,6 +138,9 @@ pub struct OrchestratorState {
 
     /// Whether the workflow planner has declared the execution graph complete.
     pub workflow_planning_complete: bool,
+
+    /// Stable orchestration strategy for this workflow.
+    pub workflow_strategy: WorkflowStrategy,
 
     /// Conversation history for LLM context.
     pub conversation_history: Vec<LLMMessage>,
@@ -97,6 +190,7 @@ impl OrchestratorState {
             workflow_id,
             task_states: HashMap::new(),
             workflow_planning_complete: true,
+            workflow_strategy: WorkflowStrategy::default(),
             conversation_history: Vec::new(),
             pending_events: Vec::new(),
             total_tokens_used: 0,
@@ -165,13 +259,15 @@ impl OrchestratorState {
         state.terminal_ids = terminal_ids;
         state.total_terminals = state.terminal_ids.len();
         state.planning_complete = planning_complete;
-        state.completed_terminals
+        state
+            .completed_terminals
             .retain(|terminal_id| state.terminal_ids.iter().any(|id| id == terminal_id));
-        state.failed_terminals
+        state
+            .failed_terminals
             .retain(|terminal_id| state.terminal_ids.iter().any(|id| id == terminal_id));
 
-        state.current_terminal_index = Self::first_unfinished_terminal_index(state)
-            .unwrap_or(state.total_terminals);
+        state.current_terminal_index =
+            Self::first_unfinished_terminal_index(state).unwrap_or(state.total_terminals);
         Self::recompute_task_completion(state);
     }
 
@@ -296,7 +392,11 @@ impl OrchestratorState {
                 .iter()
                 .rev()
                 .filter(|m| m.role != "system")
-                .take(config.max_conversation_history.saturating_sub(system_msgs.len()))
+                .take(
+                    config
+                        .max_conversation_history
+                        .saturating_sub(system_msgs.len()),
+                )
                 .cloned()
                 .collect();
 
@@ -670,5 +770,27 @@ mod tests {
         let task_state = state.task_states.get("task-1").expect("task state exists");
         assert_eq!(task_state.completed_terminals.len(), 2);
         assert_eq!(task_state.failed_terminals.len(), 0);
+    }
+
+    #[test]
+    fn workflow_strategy_routes_context_by_archetype() {
+        let greenfield = WorkflowStrategy::new(WorkflowArchetype::Greenfield);
+        assert!(greenfield.is_full_delivery());
+        assert!(!greenfield.should_pass_initial_goal(0));
+        assert!(greenfield.should_pass_initial_goal(1));
+        assert!(!greenfield.should_pass_foundation_context(0));
+        assert!(greenfield.should_pass_foundation_context(1));
+
+        let existing = WorkflowStrategy::new(WorkflowArchetype::ExistingCodebase);
+        assert!(!existing.is_full_delivery());
+        assert!(existing.should_pass_initial_goal(0));
+        assert!(existing.should_pass_initial_goal(3));
+        assert!(!existing.should_pass_foundation_context(0));
+        assert!(!existing.should_pass_foundation_context(3));
+
+        let hybrid = WorkflowStrategy::new(WorkflowArchetype::HybridFoundation);
+        assert!(hybrid.is_full_delivery());
+        assert!(hybrid.should_pass_initial_goal(0));
+        assert!(hybrid.should_pass_foundation_context(1));
     }
 }

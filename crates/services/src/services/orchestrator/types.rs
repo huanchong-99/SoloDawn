@@ -51,14 +51,9 @@ pub enum OrchestratorInstruction {
         final_status: Option<String>,
     },
     /// 标记任务规划完成；当全部终端结束后任务将进入最终状态
-    CompleteTask {
-        task_id: String,
-        summary: String,
-    },
+    CompleteTask { task_id: String, summary: String },
     /// 标记工作流规划完成，后续不再增加任务/终端
-    SetWorkflowPlanningComplete {
-        summary: Option<String>,
-    },
+    SetWorkflowPlanningComplete { summary: Option<String> },
     /// 发送消息到终端
     SendToTerminal {
         terminal_id: String,
@@ -308,7 +303,6 @@ pub enum PromptState {
     WaitingForApproval,
 }
 
-
 /// Retry window for re-processing an identical prompt while mid-flight.
 ///
 /// This prevents long-term suppression when prompt state gets stuck in
@@ -371,7 +365,8 @@ impl TerminalPromptStateMachine {
             }
             PromptState::WaitingForApproval => {
                 // G07-008: Auto-reset after timeout so terminals don't hang forever.
-                let timed_out = self.is_stale(chrono::Duration::seconds(WAITING_FOR_APPROVAL_TIMEOUT_SECS));
+                let timed_out =
+                    self.is_stale(chrono::Duration::seconds(WAITING_FOR_APPROVAL_TIMEOUT_SECS));
                 if timed_out {
                     tracing::warn!(
                         "WaitingForApproval timed out after {}s, allowing prompt re-processing",
@@ -478,6 +473,13 @@ impl AcceptanceReviewResult {
         }
     }
 
+    pub fn rejected(fix_instructions: impl Into<String>) -> Self {
+        Self {
+            verdict: AcceptanceVerdict::Rejected,
+            fix_instructions: fix_instructions.into(),
+        }
+    }
+
     pub fn parse(response: &str) -> Self {
         let trimmed = response.trim();
         // Try to extract JSON from the response
@@ -492,14 +494,19 @@ impl AcceptanceReviewResult {
         };
 
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_str) {
-            let verdict_str = value
-                .get("verdict")
-                .and_then(|v| v.as_str())
-                .unwrap_or("APPROVED");
+            let Some(verdict_str) = value.get("verdict").and_then(|v| v.as_str()) else {
+                return Self::rejected(
+                    "Acceptance review response was invalid: missing `verdict` field.",
+                );
+            };
             let verdict = if verdict_str.eq_ignore_ascii_case("REJECTED") {
                 AcceptanceVerdict::Rejected
-            } else {
+            } else if verdict_str.eq_ignore_ascii_case("APPROVED") {
                 AcceptanceVerdict::Approved
+            } else {
+                return Self::rejected(format!(
+                    "Acceptance review response was invalid: unsupported verdict `{verdict_str}`."
+                ));
             };
             let fix_instructions = value
                 .get("fix_instructions")
@@ -514,12 +521,11 @@ impl AcceptanceReviewResult {
         } else {
             // Fallback: check for REJECTED keyword in raw text
             if trimmed.to_uppercase().contains("REJECTED") {
-                Self {
-                    verdict: AcceptanceVerdict::Rejected,
-                    fix_instructions: trimmed.to_string(),
-                }
+                Self::rejected(trimmed.to_string())
             } else {
-                Self::approved()
+                Self::rejected(
+                    "Acceptance review response was not valid JSON and did not contain an explicit REJECTED verdict.",
+                )
             }
         }
     }
@@ -616,5 +622,30 @@ mod tests {
             !sm.should_process(&prompt),
             "waiting-for-approval must continue to block auto processing"
         );
+    }
+
+    #[test]
+    fn acceptance_review_parse_approves_explicit_json_only() {
+        let parsed =
+            AcceptanceReviewResult::parse(r#"{"verdict":"APPROVED","fix_instructions":""}"#);
+
+        assert_eq!(parsed.verdict, AcceptanceVerdict::Approved);
+    }
+
+    #[test]
+    fn acceptance_review_parse_rejects_invalid_json_without_fail_open() {
+        let parsed = AcceptanceReviewResult::parse("Looks fine to me.");
+
+        assert_eq!(parsed.verdict, AcceptanceVerdict::Rejected);
+        assert!(parsed.fix_instructions.contains("not valid JSON"));
+    }
+
+    #[test]
+    fn acceptance_review_parse_rejects_missing_or_unknown_verdict() {
+        let missing = AcceptanceReviewResult::parse(r#"{"fix_instructions":""}"#);
+        let unknown = AcceptanceReviewResult::parse(r#"{"verdict":"MAYBE","fix_instructions":""}"#);
+
+        assert_eq!(missing.verdict, AcceptanceVerdict::Rejected);
+        assert_eq!(unknown.verdict, AcceptanceVerdict::Rejected);
     }
 }

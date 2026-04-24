@@ -3,22 +3,30 @@
 //! 编排 Provider → 收集报告 → 求值 → 决策
 //! 这是质量门的顶层入口
 
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    sync::Arc,
+};
+
 use tracing::{info, warn};
 
-use crate::config::{QualityGateConfig, QualityGateMode};
-use crate::discovery::RepositoryDiscovery;
-use crate::gate::evaluator::ConditionEvaluator;
-use crate::gate::result::{EvaluationResult, MeasureValue};
-use crate::gate::QualityGateLevel;
-use crate::issue::QualityIssue;
-use crate::metrics::MetricKey;
-use crate::provider::QualityProvider;
-use crate::report::QualityReport;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::sarif;
+use crate::{
+    config::{QualityGateConfig, QualityGateMode},
+    discovery::RepositoryDiscovery,
+    gate::{
+        QualityGateLevel,
+        evaluator::ConditionEvaluator,
+        result::{EvaluationResult, MeasureValue},
+        status::Level,
+    },
+    issue::QualityIssue,
+    metrics::MetricKey,
+    provider::QualityProvider,
+    report::QualityReport,
+    rule::{AnalyzerSource, RuleType, Severity},
+    sarif,
+};
 
 /// 质量门执行引擎
 ///
@@ -31,6 +39,34 @@ use crate::sarif;
 pub struct QualityEngine {
     config: QualityGateConfig,
     providers: Vec<Arc<dyn QualityProvider>>,
+}
+
+/// Compatibility-layer quality scope.
+///
+/// V1 keeps provider signatures stable by folding scope back to the legacy
+/// `changed_files` shape where possible. Full provider-native scope support can
+/// be added incrementally after the orchestration split is proven stable.
+#[derive(Debug, Clone)]
+pub enum QualityScope {
+    /// Only changed files introduced by the terminal/task should be evaluated.
+    IntroducedOnly {
+        merge_base: String,
+        head: String,
+        files: Vec<String>,
+    },
+    /// Whole task branch scope. Legacy providers receive `None`.
+    TaskBranch { merge_base: String, head: String },
+    /// Final repository scope. Legacy providers receive `None`.
+    RepoFinal { head: String },
+}
+
+impl QualityScope {
+    fn changed_files(&self) -> Option<&[String]> {
+        match self {
+            Self::IntroducedOnly { files, .. } => Some(files.as_slice()),
+            Self::TaskBranch { .. } | Self::RepoFinal { .. } => None,
+        }
+    }
 }
 
 impl QualityEngine {
@@ -75,9 +111,7 @@ impl QualityEngine {
 
         // Built-in providers (no external service dependencies)
         if config.providers.builtin_rust {
-            providers.push(Arc::new(
-                crate::provider::builtin_rust::BuiltinRustProvider,
-            ));
+            providers.push(Arc::new(crate::provider::builtin_rust::BuiltinRustProvider));
         }
         if config.providers.builtin_frontend {
             providers.push(Arc::new(
@@ -90,9 +124,7 @@ impl QualityEngine {
             ));
         }
         if config.providers.coverage {
-            providers.push(Arc::new(
-                crate::provider::coverage::CoverageProvider,
-            ));
+            providers.push(Arc::new(crate::provider::coverage::CoverageProvider));
         }
         if config.providers.completeness {
             providers.push(Arc::new(
@@ -121,7 +153,10 @@ impl QualityEngine {
             return Ok(QualityReport::aggregate(vec![]));
         }
 
-        info!("Starting quality gate analysis: {} (mode={:?})", level, self.config.mode);
+        info!(
+            "Starting quality gate analysis: {} (mode={:?})",
+            level, self.config.mode
+        );
 
         let discovery = Arc::new(RepositoryDiscovery::discover(project_root)?);
         info!(
@@ -154,11 +189,17 @@ impl QualityEngine {
         for handle in handles {
             match handle.await {
                 Ok(Ok(report)) => {
-                    info!("Provider '{}' completed in {}ms", report.provider_name, report.duration_ms);
+                    info!(
+                        "Provider '{}' completed in {}ms",
+                        report.provider_name, report.duration_ms
+                    );
                     reports.push(report);
                 }
                 Ok(Err(e)) => {
-                    warn!("Provider analysis failed: {} — metrics from this provider will be missing, which may cause quality gate conditions to WARN", e);
+                    warn!(
+                        "Provider analysis failed: {} — metrics from this provider will be missing, which may cause quality gate conditions to WARN",
+                        e
+                    );
                     // Include a failed provider report so the evaluator sees the gap
                     reports.push(crate::provider::ProviderReport::failure(
                         "unknown-provider",
@@ -167,7 +208,10 @@ impl QualityEngine {
                     ));
                 }
                 Err(e) => {
-                    warn!("Provider task panicked: {} — metrics from this provider will be missing, which may cause quality gate conditions to WARN", e);
+                    warn!(
+                        "Provider task panicked: {} — metrics from this provider will be missing, which may cause quality gate conditions to WARN",
+                        e
+                    );
                     reports.push(crate::provider::ProviderReport::failure(
                         "unknown-provider",
                         0,
@@ -201,17 +245,23 @@ impl QualityEngine {
         // G16-005: Only evaluate conditions whose metric is supported by at least
         // one active provider. This prevents cross-stack false positives (e.g.,
         // CargoCheckErrors blocking a pure TypeScript project).
-        let supported: HashSet<MetricKey> = self.providers.iter()
+        let supported: HashSet<MetricKey> = self
+            .providers
+            .iter()
             .flat_map(|p| p.applicable_metrics(&discovery, changed_files))
             .collect();
 
-        let applicable_conditions: Vec<_> = gate.conditions.iter()
+        let applicable_conditions: Vec<_> = gate
+            .conditions
+            .iter()
             .filter(|c| supported.contains(&c.metric))
             .cloned()
             .collect();
 
         if applicable_conditions.len() < gate.conditions.len() {
-            let skipped: Vec<_> = gate.conditions.iter()
+            let skipped: Vec<_> = gate
+                .conditions
+                .iter()
                 .filter(|c| !supported.contains(&c.metric))
                 .map(|c| format!("{:?}", c.metric))
                 .collect();
@@ -239,8 +289,10 @@ impl QualityEngine {
         let has_js_evidence = has_targets || discovery.has_subdirectory_js_manifests();
         let gate_has_rules = !gate.conditions.is_empty();
         let no_provider_metric_matched = applicable_conditions.is_empty();
-        let trigger_empty_scan_block =
-            self.config.is_enforcing() && has_js_evidence && gate_has_rules && no_provider_metric_matched;
+        let trigger_empty_scan_block = self.config.is_enforcing()
+            && has_js_evidence
+            && gate_has_rules
+            && no_provider_metric_matched;
 
         let final_eval_results: Vec<EvaluationResult> = if trigger_empty_scan_block {
             let js_count = discovery.js_targets().len();
@@ -289,6 +341,42 @@ impl QualityEngine {
             eval_results
         };
 
+        let mut synthetic_count = 0usize;
+        for result in &final_eval_results {
+            if result.level != Level::Error {
+                continue;
+            }
+            let rule_id = format!("quality_gate::{}::evaluation_error", result.metric.as_str());
+            if quality_report
+                .all_issues
+                .iter()
+                .any(|issue| issue.rule_id == rule_id)
+            {
+                continue;
+            }
+            let message = result.message.clone().unwrap_or_else(|| {
+                format!(
+                    "Quality gate condition for {} failed without a provider issue.",
+                    result.metric
+                )
+            });
+            quality_report.all_issues.push(
+                QualityIssue::new(
+                    rule_id,
+                    RuleType::Bug,
+                    Severity::Blocker,
+                    AnalyzerSource::Other("quality-gate".to_string()),
+                    message,
+                )
+                .with_effort(5),
+            );
+            synthetic_count += 1;
+        }
+        if synthetic_count > 0 {
+            quality_report.summary =
+                crate::issue::IssueSummary::from_issues(&quality_report.all_issues);
+        }
+
         // 生成质量门决策
         let decision = gate.evaluate(&final_eval_results);
 
@@ -297,6 +385,17 @@ impl QualityEngine {
         quality_report = quality_report.with_decision(decision);
 
         Ok(quality_report)
+    }
+
+    /// Execute with a strategy-aware scope while preserving the legacy provider
+    /// interface in V1.
+    pub async fn run_with_scope(
+        &self,
+        project_root: &Path,
+        level: QualityGateLevel,
+        scope: QualityScope,
+    ) -> anyhow::Result<QualityReport> {
+        self.run(project_root, level, scope.changed_files()).await
     }
 
     /// 获取当前配置
@@ -384,12 +483,13 @@ impl QualityEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::config::QualityGateMode;
-    use crate::gate::status::QualityGateStatus;
     use std::path::Path as StdPath;
-    use uuid::Uuid;
+
     use async_trait::async_trait;
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::{config::QualityGateMode, gate::status::QualityGateStatus};
 
     fn temp_root() -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("quality-engine-{}", Uuid::new_v4()));
@@ -429,7 +529,39 @@ mod tests {
             _discovery: &RepositoryDiscovery,
             _changed_files: Option<&[String]>,
         ) -> anyhow::Result<crate::provider::ProviderReport> {
-            Ok(crate::provider::ProviderReport::success("empty-provider", 0))
+            Ok(crate::provider::ProviderReport::success(
+                "empty-provider",
+                0,
+            ))
+        }
+    }
+
+    struct MissingMetricProvider;
+    #[async_trait]
+    impl QualityProvider for MissingMetricProvider {
+        fn name(&self) -> &str {
+            "missing-metric-provider"
+        }
+        fn supported_metrics(&self) -> Vec<MetricKey> {
+            vec![MetricKey::TscErrors]
+        }
+        fn applicable_metrics(
+            &self,
+            _discovery: &RepositoryDiscovery,
+            _changed_files: Option<&[String]>,
+        ) -> Vec<MetricKey> {
+            vec![MetricKey::TscErrors]
+        }
+        async fn analyze(
+            &self,
+            _project_root: &Path,
+            _discovery: &RepositoryDiscovery,
+            _changed_files: Option<&[String]>,
+        ) -> anyhow::Result<crate::provider::ProviderReport> {
+            Ok(crate::provider::ProviderReport::success(
+                "missing-metric-provider",
+                0,
+            ))
         }
     }
 
@@ -474,7 +606,9 @@ mod tests {
         );
         let blocking = report.blocking_issues();
         assert!(
-            blocking.iter().any(|i| i.rule_id == "quality_engine::empty_scan"),
+            blocking
+                .iter()
+                .any(|i| i.rule_id == "quality_engine::empty_scan"),
             "expected synthetic empty_scan blocking issue in report.all_issues"
         );
         // Primary-brain rejection v1 follow-up: summary must be recomputed
@@ -493,6 +627,33 @@ mod tests {
             "summary.total must be >=1 after empty-scan injection (was {})",
             report.summary.total
         );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn evaluator_error_creates_synthetic_blocking_issue() {
+        let root = temp_root();
+        write(
+            &root.join("package.json"),
+            r#"{ "name":"app", "scripts": {"type-check":"tsc --noEmit"} }"#,
+        );
+        write(&root.join("tsconfig.json"), r#"{ "compilerOptions": {} }"#);
+
+        let providers: Vec<std::sync::Arc<dyn QualityProvider>> =
+            vec![std::sync::Arc::new(MissingMetricProvider)];
+        let engine = QualityEngine::new(enforce_config_with_terminal_gate(), providers);
+
+        let report = engine
+            .run(&root, QualityGateLevel::Terminal, None)
+            .await
+            .unwrap();
+
+        assert_eq!(report.overall_status(), QualityGateStatus::Error);
+        assert!(report.all_issues.iter().any(|issue| {
+            issue.rule_id == "quality_gate::tsc_errors::evaluation_error" && issue.is_blocking()
+        }));
+        assert!(report.summary.blocking_issues >= 1);
 
         let _ = std::fs::remove_dir_all(&root);
     }

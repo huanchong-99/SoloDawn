@@ -12,7 +12,7 @@ use tracing::{debug, info, warn};
 
 use super::{
     constants::WORKFLOW_STATUS_RUNNING,
-    state::{OrchestratorState, TaskExecutionState},
+    state::{OrchestratorState, TaskExecutionState, WorkflowStrategy},
     types::LLMMessage,
 };
 
@@ -30,6 +30,10 @@ pub struct PersistedState {
     /// Whether workflow planning has finished and no more tasks should be added.
     #[serde(default = "default_true")]
     pub workflow_planning_complete: bool,
+
+    /// Stable orchestration strategy for this workflow.
+    #[serde(default)]
+    pub workflow_strategy: WorkflowStrategy,
 
     /// Conversation history for LLM context
     pub conversation_history: Vec<LLMMessage>,
@@ -111,6 +115,7 @@ impl From<OrchestratorState> for PersistedState {
                 .map(|(k, v)| (k, v.into()))
                 .collect(),
             workflow_planning_complete: state.workflow_planning_complete,
+            workflow_strategy: state.workflow_strategy,
             conversation_history: state.conversation_history,
             total_tokens_used: state.total_tokens_used,
             error_count: state.error_count,
@@ -131,6 +136,7 @@ impl From<&OrchestratorState> for PersistedState {
                 .map(|(k, v)| (k.clone(), v.clone().into()))
                 .collect(),
             workflow_planning_complete: state.workflow_planning_complete,
+            workflow_strategy: state.workflow_strategy,
             conversation_history: state.conversation_history.clone(),
             total_tokens_used: state.total_tokens_used,
             error_count: state.error_count,
@@ -217,6 +223,7 @@ impl StatePersistence {
                 .map(|(k, v)| (k, v.into()))
                 .collect();
             state.workflow_planning_complete = persisted.workflow_planning_complete;
+            state.workflow_strategy = persisted.workflow_strategy;
             state.conversation_history = persisted.conversation_history;
             state.total_tokens_used = persisted.total_tokens_used;
             state.error_count = persisted.error_count;
@@ -319,5 +326,22 @@ impl StatePersistence {
 
 #[cfg(test)]
 mod tests {
-    // Note: Integration tests are in persistence_test.rs
+    use super::*;
+    use crate::services::orchestrator::state::{WorkflowArchetype, WorkflowStrategy};
+
+    #[test]
+    fn persisted_state_preserves_workflow_strategy_roundtrip() {
+        let mut state = OrchestratorState::new("workflow-1".to_string());
+        state.workflow_strategy = WorkflowStrategy::new(WorkflowArchetype::Greenfield);
+
+        let persisted = PersistedState::from(&state);
+        let json = serde_json::to_string(&persisted).expect("serialize persisted state");
+        let decoded: PersistedState =
+            serde_json::from_str(&json).expect("deserialize persisted state");
+
+        assert_eq!(
+            decoded.workflow_strategy,
+            WorkflowStrategy::new(WorkflowArchetype::Greenfield)
+        );
+    }
 }
