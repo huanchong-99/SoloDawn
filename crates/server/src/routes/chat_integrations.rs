@@ -389,12 +389,12 @@ async fn handle_chat_event(
         },
     };
 
-    let ResponseJson(api_response) = submit_orchestrator_chat(
+    let ResponseJson(api_response) = Box::pin(submit_orchestrator_chat(
         State(deployment),
         headers,
         Path(Uuid::parse_str(&binding.workflow_id).map_err(|e| ApiError::BadRequest(format!("Invalid workflow ID: {e}")))?),
         Json(submit_payload),
-    )
+    ))
     .await?;
 
     let submit_response = api_response.into_data().ok_or_else(|| {
