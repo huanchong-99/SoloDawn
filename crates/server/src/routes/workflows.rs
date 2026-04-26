@@ -15,35 +15,39 @@ use axum::{
     routing::{get, post, put},
 };
 use chrono::Utc;
+#[cfg(test)]
+use db::models::workflow::{CreateTerminalRequest, CreateWorkflowTaskRequest};
 use db::models::{
     CliType, CreateWorkflowRequest, InlineModelConfig, ModelConfig, SlashCommandPreset, Terminal,
-    Workflow, WorkflowCommand, WorkflowOrchestratorCommand, WorkflowOrchestratorMessage,
-    WorkflowTask,
-    project::Project,
+    TerminalLog, Workflow, WorkflowCommand, WorkflowOrchestratorCommand,
+    WorkflowOrchestratorMessage, WorkflowTask, project::Project,
 };
 use deployment::Deployment;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use services::services::{
     cc_switch::CCSwitchService,
     config::Config as AppConfig,
     git::GitServiceError,
-    orchestrator::{BusMessage, OrchestratorRuntime, TerminalCoordinator, constants::WORKFLOW_STATUS_PAUSED},
+    orchestrator::{
+        BusMessage, OrchestratorRuntime, TerminalCoordinator,
+        constants::{WORKFLOW_STATUS_PAUSED, configured_max_concurrent_terminals},
+    },
     terminal::TerminalLauncher,
 };
-use once_cell::sync::Lazy;
-use regex::Regex;
 use sha2::{Digest, Sha256};
 use utils::{response::ApiResponse, text};
 use uuid::Uuid;
 
 // Import DTOs
 use crate::routes::terminals::start_terminal;
-use crate::routes::workflows_dto::{TerminalDto, WorkflowDetailDto, WorkflowListItemDto};
-use crate::{DeploymentImpl, error::ApiError};
-
-#[cfg(test)]
-use db::models::workflow::{CreateTerminalRequest, CreateWorkflowTaskRequest};
+use crate::{
+    DeploymentImpl,
+    error::ApiError,
+    routes::workflows_dto::{TerminalDto, WorkflowDetailDto, WorkflowListItemDto},
+};
 
 // ============================================================================
 // Request/Response Types
@@ -135,8 +139,13 @@ const WORKFLOW_STATUSES: [&str; 9] = [
 const WORKFLOW_EXECUTION_MODES: [&str; 2] = ["diy", "agent_planned"];
 
 const MERGE_ALLOWED_WORKFLOW_STATUSES: [&str; 2] = ["completed", "merging"];
-const RUNTIME_MUTABLE_WORKFLOW_STATUSES: [&str; 5] =
-    ["created", "starting", "ready", "running", WORKFLOW_STATUS_PAUSED];
+const RUNTIME_MUTABLE_WORKFLOW_STATUSES: [&str; 5] = [
+    "created",
+    "starting",
+    "ready",
+    "running",
+    WORKFLOW_STATUS_PAUSED,
+];
 const ORCHESTRATOR_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 const ORCHESTRATOR_RATE_LIMIT_MAX_REQUESTS: usize = 12;
 const ORCHESTRATOR_CIRCUIT_BREAKER_THRESHOLD: usize = 3;
@@ -182,7 +191,10 @@ pub fn workflows_routes() -> Router<DeploymentImpl> {
             "/{workflow_id}/prompts/respond",
             post(submit_prompt_response),
         )
-        .route("/{workflow_id}/orchestrator/chat", post(submit_orchestrator_chat))
+        .route(
+            "/{workflow_id}/orchestrator/chat",
+            post(submit_orchestrator_chat),
+        )
         .route(
             "/{workflow_id}/orchestrator/messages",
             get(list_orchestrator_messages),
@@ -221,14 +233,21 @@ fn is_valid_workflow_status_transition(current: &str, next: &str) -> bool {
 
     matches!(
         (current, next),
-        ("created" | "failed", "starting") |
-("created" | "starting" | "ready" | "running" | "paused" | "merging",
-"failed") |
-("created" | "starting" | "ready" | "running" | "paused" | "failed",
-"cancelled") | ("starting" | "paused", "ready") |
-("ready" | "paused", "running") | ("running", "paused" | "completed") |
-("completed", "merging" | "created") | ("merging", "completed") |
-("failed" | "cancelled", "created")
+        ("created" | "failed", "starting")
+            | (
+                "created" | "starting" | "ready" | "running" | "paused" | "merging",
+                "failed"
+            )
+            | (
+                "created" | "starting" | "ready" | "running" | "paused" | "failed",
+                "cancelled"
+            )
+            | ("starting" | "paused", "ready")
+            | ("ready" | "paused", "running")
+            | ("running", "paused" | "completed")
+            | ("completed", "merging" | "created")
+            | ("merging", "completed")
+            | ("failed" | "cancelled", "created")
     )
 }
 
@@ -282,8 +301,11 @@ fn has_configured_workflow_models(config: &AppConfig) -> bool {
 }
 
 fn is_orchestrator_chat_feature_enabled() -> bool {
-    utils::env_compat::var_opt_with_compat("SOLODAWN_ORCHESTRATOR_CHAT_ENABLED", "GITCORTEX_ORCHESTRATOR_CHAT_ENABLED")
-        .map_or(true, |value| value.trim().eq_ignore_ascii_case("true"))
+    utils::env_compat::var_opt_with_compat(
+        "SOLODAWN_ORCHESTRATOR_CHAT_ENABLED",
+        "GITCORTEX_ORCHESTRATOR_CHAT_ENABLED",
+    )
+    .map_or(true, |value| value.trim().eq_ignore_ascii_case("true"))
 }
 
 fn redact_sensitive_content(content: &str) -> String {
@@ -451,16 +473,18 @@ fn build_orchestrator_receipt_message(
 
 fn build_orchestrator_summary_message(status: &str, source: &str) -> String {
     match status {
-        "succeeded" => format!(
-            "Execution summary: command completed successfully (source={source})."
-        ),
+        "succeeded" => {
+            format!("Execution summary: command completed successfully (source={source}).")
+        }
         "failed" => format!(
             "Execution summary: command failed and requires operator attention (source={source})."
         ),
         "cancelled" => {
             format!("Execution summary: command was cancelled (source={source}).")
         }
-        other => format!("Execution summary: command finished with status={other} (source={source})."),
+        other => {
+            format!("Execution summary: command finished with status={other} (source={source}).")
+        }
     }
 }
 
@@ -511,6 +535,85 @@ async fn broadcast_runtime_terminal_status(
         .message_bus()
         .broadcast(message)
         .map_err(|e| anyhow::anyhow!("Failed to broadcast terminal status: {e}"))?;
+
+    Ok(())
+}
+
+async fn cleanup_finished_workflow_logs_best_effort(deployment: &DeploymentImpl, reason: &str) {
+    match TerminalLog::cleanup_finished_workflow_logs(&deployment.db().pool).await {
+        Ok(deleted) => {
+            tracing::info!(
+                deleted,
+                reason,
+                "Cleaned terminal logs for finished workflows"
+            );
+            if deleted > 0
+                && let Err(e) = TerminalLog::checkpoint_after_cleanup(&deployment.db().pool).await
+            {
+                tracing::warn!(
+                    error = %e,
+                    reason,
+                    "SQLite checkpoint after terminal-log cleanup failed"
+                );
+            }
+        }
+        Err(e) => tracing::warn!(
+            error = %e,
+            reason,
+            "Failed to clean terminal logs for finished workflows"
+        ),
+    }
+}
+
+async fn cascade_finished_workflow_children(
+    deployment: &DeploymentImpl,
+    workflow_id: &str,
+    reason: &str,
+) -> Result<(), ApiError> {
+    let pool = &deployment.db().pool;
+    let tasks = WorkflowTask::find_by_workflow(pool, workflow_id).await?;
+    for task in &tasks {
+        if !matches!(task.status.as_str(), "completed" | "failed" | "cancelled") {
+            WorkflowTask::update_status(pool, &task.id, "cancelled").await?;
+            if let Err(e) = broadcast_task_status(deployment, task, "cancelled").await {
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    task_id = %task.id,
+                    error = %e,
+                    reason,
+                    "Failed to broadcast task cancellation during workflow finalization"
+                );
+            }
+        }
+    }
+
+    let terminals = Terminal::find_by_workflow(pool, workflow_id).await?;
+    for terminal in &terminals {
+        if !matches!(
+            terminal.status.as_str(),
+            "completed" | "failed" | "cancelled"
+        ) {
+            Terminal::update_status(pool, &terminal.id, "cancelled").await?;
+            Terminal::update_process(pool, &terminal.id, None, None).await?;
+            Terminal::update_session(pool, &terminal.id, None, None).await?;
+
+            if let Some(task) = tasks
+                .iter()
+                .find(|task| task.id == terminal.workflow_task_id)
+                && let Err(e) =
+                    broadcast_runtime_terminal_status(deployment, task, &terminal.id, "cancelled")
+                        .await
+            {
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    terminal_id = %terminal.id,
+                    error = %e,
+                    reason,
+                    "Failed to broadcast terminal cancellation during workflow finalization"
+                );
+            }
+        }
+    }
 
     Ok(())
 }
@@ -715,7 +818,9 @@ async fn validate_cli_and_model_configs(
             .await
             .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
 
-        let model_config = if let Some(mc) = model_config { mc } else {
+        let model_config = if let Some(mc) = model_config {
+            mc
+        } else {
             // Model config not found - try to create from inline data
             let inline = inline.ok_or_else(|| ApiError::BadRequest(format!(
                 "Model config not found: {model_config_id}. Provide inline modelConfig to auto-create."
@@ -799,9 +904,7 @@ async fn create_workflow(
     let _project = Project::find_by_id(&deployment.db().pool, project_id)
         .await
         .map_err(|e| ApiError::Internal(format!("Database error checking project: {e}")))?
-        .ok_or_else(|| {
-            ApiError::BadRequest(format!("Project {project_id} not found"))
-        })?;
+        .ok_or_else(|| ApiError::BadRequest(format!("Project {project_id} not found")))?;
 
     // Validate CLI types and model configs exist in database
     validate_cli_and_model_configs(&deployment.db().pool, &req).await?;
@@ -948,15 +1051,18 @@ async fn create_workflow(
         // Only bind vk_task_id when the referenced VK task actually exists in
         // the tasks table.  The wizard sends frontend-generated UUIDs as task.id
         // for internal tracking; these must NOT be treated as FK references.
-        let vk_task_id = match task_req.id.as_deref().and_then(|id| Uuid::parse_str(id).ok()) {
+        let vk_task_id = match task_req
+            .id
+            .as_deref()
+            .and_then(|id| Uuid::parse_str(id).ok())
+        {
             Some(candidate) => {
-                let exists: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?)",
-                )
-                .bind(candidate)
-                .fetch_one(&deployment.db().pool)
-                .await
-                .unwrap_or(false);
+                let exists: bool =
+                    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?)")
+                        .bind(candidate)
+                        .fetch_one(&deployment.db().pool)
+                        .await
+                        .unwrap_or(false);
                 if exists { Some(candidate) } else { None }
             }
             None => None,
@@ -1026,9 +1132,10 @@ async fn create_workflow(
     // 4. Create slash command associations inside a transaction (G01-003)
     let mut commands: Vec<WorkflowCommand> = Vec::new();
     if let Some(command_reqs) = req.commands {
-        let mut tx = deployment.db().pool.begin().await.map_err(|e| {
-            ApiError::Internal(format!("Failed to begin command transaction: {e}"))
-        })?;
+        let mut tx =
+            deployment.db().pool.begin().await.map_err(|e| {
+                ApiError::Internal(format!("Failed to begin command transaction: {e}"))
+            })?;
 
         for (index, cmd_req) in command_reqs.iter().enumerate() {
             let index = i32::try_from(index)
@@ -1199,6 +1306,12 @@ async fn update_workflow_status(
     }
 
     Workflow::update_status(&deployment.db().pool, &workflow_id, &target_status).await?;
+    if matches!(target_status.as_str(), "failed" | "cancelled") {
+        cascade_finished_workflow_children(&deployment, &workflow_id, "status endpoint").await?;
+    }
+    if matches!(target_status.as_str(), "completed" | "failed" | "cancelled") {
+        cleanup_finished_workflow_logs_best_effort(&deployment, "status endpoint").await;
+    }
     Ok(ResponseJson(ApiResponse::success(())))
 }
 
@@ -1339,11 +1452,10 @@ async fn resolve_workflow_working_dir(
     // G23-006: Check if there is a task worktree for this workflow. If so, use
     // the first task's worktree path as the working directory so that each
     // terminal operates in its own isolated checkout instead of the repo root.
-    let first_task =
-        WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow.id)
-            .await
-            .ok()
-            .and_then(|tasks| tasks.into_iter().next());
+    let first_task = WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow.id)
+        .await
+        .ok()
+        .and_then(|tasks| tasks.into_iter().next());
 
     if let Some(task) = first_task {
         let worktree_path =
@@ -1468,6 +1580,8 @@ async fn prepare_workflow(
     Path(workflow_id): Path<Uuid>,
 ) -> Result<ResponseJson<ApiResponse<()>>, ApiError> {
     let workflow_id = workflow_id.to_string();
+    cleanup_finished_workflow_logs_best_effort(&deployment, "prepare workflow").await;
+
     // Check workflow exists
     let workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
         .await?
@@ -1507,8 +1621,13 @@ async fn prepare_workflow(
     let coordinator =
         TerminalCoordinator::with_message_bus(db_arc.clone(), deployment.message_bus().clone());
 
-    // Step 1: Transition terminals to "starting" status using TerminalCoordinator
-    if let Err(e) = coordinator.start_terminals_for_workflow(&workflow_id).await {
+    // Step 1: Transition only launch-slot holders to "starting"; remaining
+    // terminals stay not_started and are queued by the orchestrator.
+    let max_concurrent_terminals = configured_max_concurrent_terminals();
+    if let Err(e) = coordinator
+        .start_terminals_for_workflow_with_limit(&workflow_id, max_concurrent_terminals)
+        .await
+    {
         // Log the error for debugging
         tracing::error!(
             workflow_id = %workflow_id,
@@ -1538,7 +1657,8 @@ async fn prepare_workflow(
         }
     };
 
-    // Step 3: Launch PTY processes for all terminals
+    // Step 3: Launch PTY processes for prepared terminals only. Queued
+    // terminals remain not_started until a process slot is released.
     let cc_switch = Arc::new(CCSwitchService::new(db_arc.clone()));
     let process_manager = deployment.process_manager().clone();
     let message_bus = deployment.message_bus().clone();
@@ -1611,7 +1731,8 @@ async fn prepare_workflow(
     tracing::info!(
         workflow_id = %workflow_id,
         launched_count = launched_count,
-        "All terminals launched successfully"
+        max_concurrent_terminals,
+        "Prepared terminals launched successfully; excess terminals remain queued"
     );
 
     // All terminals prepared successfully, mark workflow as ready
@@ -1680,7 +1801,8 @@ async fn start_workflow(
 
         if cas_result.rows_affected() == 0 {
             return Err(ApiError::Conflict(
-                "Cannot start workflow: status changed concurrently during stale-state recovery".to_string(),
+                "Cannot start workflow: status changed concurrently during stale-state recovery"
+                    .to_string(),
             ));
         }
         workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
@@ -1696,15 +1818,20 @@ async fn start_workflow(
         let terminals =
             db::models::Terminal::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
 
-        let needs_reprepare = terminals.iter().any(|terminal| {
-            terminal.status != "waiting"
-                || terminal
+        let needs_reprepare = terminals
+            .iter()
+            .any(|terminal| match terminal.status.as_str() {
+                // Queued terminals are valid under the global concurrency cap.
+                "not_started" => false,
+                // Waiting terminals must have a live PTY/session binding.
+                "waiting" => terminal
                     .pty_session_id
                     .as_deref()
                     .map(str::trim)
                     .filter(|session| !session.is_empty())
-                    .is_none()
-        });
+                    .is_none(),
+                _ => true,
+            });
 
         if needs_reprepare {
             tracing::warn!(
@@ -1716,13 +1843,19 @@ async fn start_workflow(
             Workflow::update_status(&deployment.db().pool, &workflow_id, "created").await?;
 
             // G03-002: Wrap re-prepare error with descriptive context
-            let _ = prepare_workflow(State(deployment.clone()), Path(Uuid::parse_str(&workflow_id).map_err(|e| ApiError::BadRequest(format!("Invalid workflow ID: {e}")))?))
-                .await
-                .map_err(|e| {
-                    ApiError::Internal(format!(
-                        "Start-phase re-prepare failed for workflow {workflow_id}: {e}"
-                    ))
-                })?;
+            let _ = prepare_workflow(
+                State(deployment.clone()),
+                Path(
+                    Uuid::parse_str(&workflow_id)
+                        .map_err(|e| ApiError::BadRequest(format!("Invalid workflow ID: {e}")))?,
+                ),
+            )
+            .await
+            .map_err(|e| {
+                ApiError::Internal(format!(
+                    "Start-phase re-prepare failed for workflow {workflow_id}: {e}"
+                ))
+            })?;
 
             // G03-003: Verify workflow status is back to "ready" after re-prepare
             workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
@@ -1793,37 +1926,28 @@ async fn start_workflow(
         // Transition all tasks from "pending" → "running" and terminals from
         // "waiting" → "working" so the user can send instructions via the
         // terminal WebSocket.
-        let tasks =
-            WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
+        let tasks = WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
         for task in &tasks {
             if task.status == "pending" {
                 WorkflowTask::update_status(&deployment.db().pool, &task.id, "running")
                     .await
                     .map_err(|e| {
-                        ApiError::Internal(format!(
-                            "Failed to activate DIY task {}: {e}",
-                            task.id
-                        ))
+                        ApiError::Internal(format!("Failed to activate DIY task {}: {e}", task.id))
                     })?;
             }
         }
 
-        let terminals =
-            Terminal::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
+        let terminals = Terminal::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
         for terminal in &terminals {
             if terminal.status == "waiting" {
-                Terminal::update_status(
-                    &deployment.db().pool,
-                    &terminal.id,
-                    "working",
-                )
-                .await
-                .map_err(|e| {
-                    ApiError::Internal(format!(
-                        "Failed to activate DIY terminal {}: {e}",
-                        terminal.id
-                    ))
-                })?;
+                Terminal::update_status(&deployment.db().pool, &terminal.id, "working")
+                    .await
+                    .map_err(|e| {
+                        ApiError::Internal(format!(
+                            "Failed to activate DIY terminal {}: {e}",
+                            terminal.id
+                        ))
+                    })?;
             }
         }
 
@@ -1876,12 +2000,7 @@ async fn start_workflow(
                                 // Send submit keystroke after a brief delay
                                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                                 dispatch_bus
-                                    .publish_terminal_input(
-                                        &terminal.id,
-                                        pty_session_id,
-                                        "",
-                                        None,
-                                    )
+                                    .publish_terminal_input(&terminal.id, pty_session_id, "", None)
                                     .await;
                                 tracing::info!(
                                     terminal_id = %terminal.id,
@@ -1924,7 +2043,9 @@ async fn start_workflow(
                     _ => break,
                 };
 
-                let tasks = match db::models::WorkflowTask::find_by_workflow(&diy_db, &diy_wf_id).await {
+                let tasks = match db::models::WorkflowTask::find_by_workflow(&diy_db, &diy_wf_id)
+                    .await
+                {
                     Ok(t) => t,
                     Err(e) => {
                         tracing::warn!(workflow_id = %diy_wf_id, error = %e, "DIY: failed to fetch tasks");
@@ -1939,7 +2060,9 @@ async fn start_workflow(
                     }
                     all_tasks_done = false;
 
-                    let terminals = match db::models::Terminal::find_by_task(&diy_db, &task.id).await {
+                    let terminals = match db::models::Terminal::find_by_task(&diy_db, &task.id)
+                        .await
+                    {
                         Ok(t) => t,
                         Err(e) => {
                             tracing::warn!(task_id = %task.id, error = %e, "DIY: failed to fetch terminals for task");
@@ -1965,7 +2088,8 @@ async fn start_workflow(
                         .await;
                         let is_quiet = match latest_logs {
                             Ok(logs) if !logs.is_empty() => {
-                                let age = chrono::Utc::now().signed_duration_since(logs[0].created_at);
+                                let age =
+                                    chrono::Utc::now().signed_duration_since(logs[0].created_at);
                                 age.num_seconds() > QUIET_SECS as i64
                             }
                             _ => false,
@@ -1979,19 +2103,26 @@ async fn start_workflow(
                                 "DIY: terminal quiet for {}s, marking completed", QUIET_SECS
                             );
                             if let Err(e) = db::models::Terminal::update_status(
-                                &diy_db, &terminal.id, "completed",
-                            ).await {
+                                &diy_db,
+                                &terminal.id,
+                                "completed",
+                            )
+                            .await
+                            {
                                 tracing::warn!(terminal_id = %terminal.id, error = %e, "DIY: failed to update terminal status");
                             }
                             // Broadcast terminal status change so frontend updates
-                            if let Err(e) = diy_message_bus.publish_workflow_event(
-                                &diy_wf_id,
-                                BusMessage::TerminalStatusUpdate {
-                                    workflow_id: diy_wf_id.clone(),
-                                    terminal_id: terminal.id.clone(),
-                                    status: "completed".to_string(),
-                                },
-                            ).await {
+                            if let Err(e) = diy_message_bus
+                                .publish_workflow_event(
+                                    &diy_wf_id,
+                                    BusMessage::TerminalStatusUpdate {
+                                        workflow_id: diy_wf_id.clone(),
+                                        terminal_id: terminal.id.clone(),
+                                        status: "completed".to_string(),
+                                    },
+                                )
+                                .await
+                            {
                                 tracing::warn!(terminal_id = %terminal.id, error = %e, "DIY: failed to broadcast terminal status update");
                             }
                         }
@@ -2000,21 +2131,32 @@ async fn start_workflow(
                     // Check if all terminals in this task are done
                     let refreshed = db::models::Terminal::find_by_task(&diy_db, &task.id).await;
                     if let Ok(terms) = refreshed {
-                        let all_done = terms.iter().all(|t| t.status == "completed" || t.status == "failed");
+                        let all_done = terms
+                            .iter()
+                            .all(|t| t.status == "completed" || t.status == "failed");
                         if all_done && !terms.is_empty() {
                             tracing::info!(task_id = %task.id, task_name = %task.name, "DIY: all terminals done, marking task completed");
-                            if let Err(e) = db::models::WorkflowTask::update_status(&diy_db, &task.id, "completed").await {
+                            if let Err(e) = db::models::WorkflowTask::update_status(
+                                &diy_db,
+                                &task.id,
+                                "completed",
+                            )
+                            .await
+                            {
                                 tracing::warn!(task_id = %task.id, error = %e, "DIY: failed to update task status");
                             }
                             // Broadcast task status change so frontend updates
-                            if let Err(e) = diy_message_bus.publish_workflow_event(
-                                &diy_wf_id,
-                                BusMessage::TaskStatusUpdate {
-                                    workflow_id: diy_wf_id.clone(),
-                                    task_id: task.id.clone(),
-                                    status: "completed".to_string(),
-                                },
-                            ).await {
+                            if let Err(e) = diy_message_bus
+                                .publish_workflow_event(
+                                    &diy_wf_id,
+                                    BusMessage::TaskStatusUpdate {
+                                        workflow_id: diy_wf_id.clone(),
+                                        task_id: task.id.clone(),
+                                        status: "completed".to_string(),
+                                    },
+                                )
+                                .await
+                            {
                                 tracing::warn!(task_id = %task.id, error = %e, "DIY: failed to broadcast task status update");
                             }
                         }
@@ -2022,21 +2164,31 @@ async fn start_workflow(
                 }
 
                 // Re-check: are ALL tasks now completed?
-                if let Ok(refreshed_tasks) = db::models::WorkflowTask::find_by_workflow(&diy_db, &diy_wf_id).await {
-                    let all_done = refreshed_tasks.iter().all(|t| t.status == "completed" || t.status == "failed");
+                if let Ok(refreshed_tasks) =
+                    db::models::WorkflowTask::find_by_workflow(&diy_db, &diy_wf_id).await
+                {
+                    let all_done = refreshed_tasks
+                        .iter()
+                        .all(|t| t.status == "completed" || t.status == "failed");
                     if all_done && !refreshed_tasks.is_empty() {
                         tracing::info!(workflow_id = %diy_wf_id, "DIY: all tasks completed, marking workflow completed");
-                        if let Err(e) = db::models::Workflow::update_status(&diy_db, &diy_wf_id, "completed").await {
+                        if let Err(e) =
+                            db::models::Workflow::update_status(&diy_db, &diy_wf_id, "completed")
+                                .await
+                        {
                             tracing::warn!(workflow_id = %diy_wf_id, error = %e, "DIY: failed to update workflow status");
                         }
                         // Broadcast workflow status change so frontend updates
-                        if let Err(e) = diy_message_bus.publish_workflow_event(
-                            &diy_wf_id,
-                            BusMessage::StatusUpdate {
-                                workflow_id: diy_wf_id.clone(),
-                                status: "completed".to_string(),
-                            },
-                        ).await {
+                        if let Err(e) = diy_message_bus
+                            .publish_workflow_event(
+                                &diy_wf_id,
+                                BusMessage::StatusUpdate {
+                                    workflow_id: diy_wf_id.clone(),
+                                    status: "completed".to_string(),
+                                },
+                            )
+                            .await
+                        {
                             tracing::warn!(workflow_id = %diy_wf_id, error = %e, "DIY: failed to broadcast workflow status update");
                         }
                         break;
@@ -2072,9 +2224,9 @@ pub async fn auto_prepare_and_start(
     deployment: DeploymentImpl,
     workflow_id: &str,
 ) -> Result<(), AutoStartError> {
-    let wf_uuid: uuid::Uuid = workflow_id.parse().map_err(|e| {
-        ApiError::Internal(format!("Invalid workflow UUID: {e}"))
-    })?;
+    let wf_uuid: uuid::Uuid = workflow_id
+        .parse()
+        .map_err(|e| ApiError::Internal(format!("Invalid workflow UUID: {e}")))?;
 
     // Prepare
     let _ = prepare_workflow(State(deployment.clone()), Path(wf_uuid)).await?;
@@ -2199,13 +2351,19 @@ async fn resume_workflow(
 
             Workflow::update_status(&deployment.db().pool, &workflow_id, "created").await?;
 
-            let _ = prepare_workflow(State(deployment.clone()), Path(Uuid::parse_str(&workflow_id).map_err(|e| ApiError::BadRequest(format!("Invalid workflow ID: {e}")))?))
-                .await
-                .map_err(|e| {
-                    ApiError::Internal(format!(
-                        "Resume-phase re-prepare failed for workflow {workflow_id}: {e}"
-                    ))
-                })?;
+            let _ = prepare_workflow(
+                State(deployment.clone()),
+                Path(
+                    Uuid::parse_str(&workflow_id)
+                        .map_err(|e| ApiError::BadRequest(format!("Invalid workflow ID: {e}")))?,
+                ),
+            )
+            .await
+            .map_err(|e| {
+                ApiError::Internal(format!(
+                    "Resume-phase re-prepare failed for workflow {workflow_id}: {e}"
+                ))
+            })?;
 
             // Verify workflow status is back to "ready" after re-prepare, then
             // transition to paused so the runtime resume CAS (paused -> ready) succeeds.
@@ -2220,7 +2378,8 @@ async fn resume_workflow(
                 )));
             }
 
-            Workflow::update_status(&deployment.db().pool, &workflow_id, WORKFLOW_STATUS_PAUSED).await?;
+            Workflow::update_status(&deployment.db().pool, &workflow_id, WORKFLOW_STATUS_PAUSED)
+                .await?;
         }
     }
 
@@ -2294,6 +2453,8 @@ async fn stop_workflow(
             Terminal::update_process(&deployment.db().pool, &terminal.id, None, None).await?;
         }
     }
+
+    cleanup_finished_workflow_logs_best_effort(&deployment, "workflow cancellation").await;
 
     // G23-004: Clean up worktree directories to free disk space
     cleanup_workflow_worktrees(&deployment, &workflow, &tasks).await;
@@ -2418,7 +2579,12 @@ async fn cleanup_workflow_worktrees(
         .collect();
 
     if !worktree_cleanups.is_empty() {
-        if let Err(e) = services::services::worktree_manager::WorktreeManager::batch_cleanup_worktrees(&worktree_cleanups).await {
+        if let Err(e) =
+            services::services::worktree_manager::WorktreeManager::batch_cleanup_worktrees(
+                &worktree_cleanups,
+            )
+            .await
+        {
             tracing::warn!(
                 workflow_id = %workflow.id,
                 error = %e,
@@ -2452,32 +2618,43 @@ async fn create_runtime_task(
         return Err(ApiError::BadRequest("name is required".to_string()));
     }
 
-    let existing_tasks = WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
+    let existing_tasks =
+        WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
     let order_index = match req.order_index {
         Some(order_index) => {
-            if existing_tasks.iter().any(|task| task.order_index == order_index) {
+            if existing_tasks
+                .iter()
+                .any(|task| task.order_index == order_index)
+            {
                 return Err(ApiError::Conflict(format!(
                     "Task orderIndex {order_index} already exists in workflow {workflow_id}"
                 )));
             }
             order_index
         }
-        None => existing_tasks
-            .last()
-            .map_or(0, |task| task.order_index + 1),
+        None => existing_tasks.last().map_or(0, |task| task.order_index + 1),
     };
 
     let branch = if let Some(custom_branch) = req.branch {
-        if existing_tasks.iter().any(|task| task.branch == custom_branch) {
+        if existing_tasks
+            .iter()
+            .any(|task| task.branch == custom_branch)
+        {
             return Err(ApiError::Conflict(format!(
                 "Task branch '{custom_branch}' already exists in workflow {workflow_id}"
             )));
         }
         custom_branch
     } else {
-        let existing_branches: Vec<String> =
-            existing_tasks.iter().map(|task| task.branch.clone()).collect();
-        let base_branch = format!("workflow/{}/{}", workflow_id, text::git_branch_id(task_name));
+        let existing_branches: Vec<String> = existing_tasks
+            .iter()
+            .map(|task| task.branch.clone())
+            .collect();
+        let base_branch = format!(
+            "workflow/{}/{}",
+            workflow_id,
+            text::git_branch_id(task_name)
+        );
         let mut candidate = base_branch.clone();
         let mut counter = 2;
 
@@ -2546,7 +2723,9 @@ async fn create_runtime_terminal(
 
     let model_config_id = req.model_config_id.trim();
     if model_config_id.is_empty() {
-        return Err(ApiError::BadRequest("modelConfigId is required".to_string()));
+        return Err(ApiError::BadRequest(
+            "modelConfigId is required".to_string(),
+        ));
     }
 
     let cli_exists = CliType::find_by_id(&deployment.db().pool, cli_type_id)
@@ -2626,7 +2805,14 @@ async fn create_runtime_terminal(
         .map_err(|e| ApiError::Internal(format!("Failed to create terminal: {e}")))?;
 
     let terminal = if req.start_immediately {
-        let _ = start_terminal(State(deployment.clone()), Path(Uuid::parse_str(&created_terminal.id).map_err(|e| ApiError::Internal(format!("Invalid terminal ID: {e}")))?)).await?;
+        let _ = start_terminal(
+            State(deployment.clone()),
+            Path(
+                Uuid::parse_str(&created_terminal.id)
+                    .map_err(|e| ApiError::Internal(format!("Invalid terminal ID: {e}")))?,
+            ),
+        )
+        .await?;
         Terminal::find_by_id(&deployment.db().pool, &created_terminal.id)
             .await?
             .ok_or_else(|| ApiError::NotFound("Terminal not found after start".to_string()))?
@@ -2651,7 +2837,9 @@ async fn create_runtime_terminal(
         created_terminal
     };
 
-    Ok(ResponseJson(ApiResponse::success(TerminalDto::from_terminal(&terminal))))
+    Ok(ResponseJson(ApiResponse::success(
+        TerminalDto::from_terminal(&terminal),
+    )))
 }
 
 /// POST /api/workflows/recover
@@ -2778,7 +2966,9 @@ fn paginate_orchestrator_messages(
     limit: Option<usize>,
 ) -> (usize, usize) {
     let limit = limit.unwrap_or(50).clamp(1, 200);
-    let start = cursor.unwrap_or_else(|| total.saturating_sub(limit)).min(total);
+    let start = cursor
+        .unwrap_or_else(|| total.saturating_sub(limit))
+        .min(total);
     let end = start.saturating_add(limit).min(total);
     (start, end)
 }
@@ -2832,6 +3022,11 @@ async fn update_task_status(
                     workflow_id = %workflow_id,
                     "Workflow auto-synced to completed after all tasks completed"
                 );
+                cleanup_finished_workflow_logs_best_effort(
+                    &deployment,
+                    "task status auto-complete",
+                )
+                .await;
             }
             Ok(false) => {
                 tracing::warn!(
@@ -2882,7 +3077,8 @@ async fn list_task_terminals(
     validate_task_workflow_scope(&task, &workflow_id)?;
 
     let terminals = Terminal::find_by_task(&deployment.db().pool, &task_id).await?;
-    let terminals_dto: Vec<TerminalDto> = terminals.iter().map(TerminalDto::from_terminal).collect();
+    let terminals_dto: Vec<TerminalDto> =
+        terminals.iter().map(TerminalDto::from_terminal).collect();
     Ok(ResponseJson(ApiResponse::success(terminals_dto)))
 }
 
@@ -2987,17 +3183,12 @@ pub(crate) async fn submit_orchestrator_chat(
         ));
     }
 
-    let operator_id = normalize_operator_id(
-        payload
-            .metadata
-            .operator_id
-            .as_deref()
-            .or_else(|| {
-                headers
-                    .get("x-orchestrator-operator-id")
-                    .and_then(|value| value.to_str().ok())
-            }),
-    );
+    let operator_id =
+        normalize_operator_id(payload.metadata.operator_id.as_deref().or_else(|| {
+            headers
+                .get("x-orchestrator-operator-id")
+                .and_then(|value| value.to_str().ok())
+        }));
     let role = extract_role_from_headers(&headers);
 
     let workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
@@ -3162,20 +3353,22 @@ pub(crate) async fn submit_orchestrator_chat(
 
     if response.status == "succeeded"
         && let Ok(messages) = runtime.get_orchestrator_messages(&workflow_id).await
-            && let Some(last_assistant) =
-                messages.iter().rev().find(|entry| entry.role == "assistant")
-        {
-            let assistant_message = WorkflowOrchestratorMessage::new(
-                &workflow_id,
-                Some(&command_id),
-                "assistant",
-                &last_assistant.content,
-                "orchestrator",
-                None,
-            );
-            let _ =
-                WorkflowOrchestratorMessage::insert(&deployment.db().pool, &assistant_message).await;
-        }
+        && let Some(last_assistant) = messages
+            .iter()
+            .rev()
+            .find(|entry| entry.role == "assistant")
+    {
+        let assistant_message = WorkflowOrchestratorMessage::new(
+            &workflow_id,
+            Some(&command_id),
+            "assistant",
+            &last_assistant.content,
+            "orchestrator",
+            None,
+        );
+        let _ =
+            WorkflowOrchestratorMessage::insert(&deployment.db().pool, &assistant_message).await;
+    }
 
     let receipt_message = WorkflowOrchestratorMessage::new(
         &workflow_id,
@@ -3204,7 +3397,9 @@ pub(crate) async fn submit_orchestrator_chat(
 
     let circuit_opened = update_orchestrator_circuit_breaker(&workflow_id, &response.status).await;
     if circuit_opened && workflow.status == "running" {
-        let _ = Workflow::update_status(&deployment.db().pool, &workflow_id, WORKFLOW_STATUS_PAUSED).await;
+        let _ =
+            Workflow::update_status(&deployment.db().pool, &workflow_id, WORKFLOW_STATUS_PAUSED)
+                .await;
         tracing::warn!(
             target: "audit.orchestrator_chat",
             workflow_id = %workflow_id,
@@ -3279,7 +3474,9 @@ async fn list_orchestrator_messages(
             .bind(&workflow_id)
             .fetch_one(&deployment.db().pool)
             .await
-            .map_err(|e| ApiError::Internal(format!("Failed to count orchestrator messages: {e}")))?;
+            .map_err(|e| {
+                ApiError::Internal(format!("Failed to count orchestrator messages: {e}"))
+            })?;
             (total.0 as usize).saturating_sub(limit)
         }
     };
@@ -3321,11 +3518,8 @@ async fn list_orchestrator_messages(
             ApiError::BadRequest(format!("Failed to list orchestrator messages: {e}"))
         })?;
 
-    let (start, end) = paginate_orchestrator_messages(
-        runtime_messages.len(),
-        params.cursor,
-        params.limit,
-    );
+    let (start, end) =
+        paginate_orchestrator_messages(runtime_messages.len(), params.cursor, params.limit);
     let response = runtime_messages
         .into_iter()
         .skip(start)
@@ -3384,10 +3578,8 @@ async fn merge_workflow(
     // G06-002: acquire the per-workflow merge lock BEFORE the CAS so that
     // auto-merge (orchestrator) and manual merge (this endpoint) cannot both
     // pass the CAS check concurrently.
-    let _merge_guard = services::services::merge_coordinator::acquire_workflow_merge_lock(
-        &workflow_id,
-    )
-    .await;
+    let _merge_guard =
+        services::services::merge_coordinator::acquire_workflow_merge_lock(&workflow_id).await;
 
     // G06-001: CAS — atomically transition completed → merging to prevent concurrent merges.
     // Works in tandem with the mutex above: the mutex prevents races between code paths
@@ -3482,8 +3674,9 @@ async fn merge_workflow(
         }
 
         // G23-002: Use WorktreeManager base dir instead of hardcoded "worktrees" subpath
-        let task_worktree_path = services::services::worktree_manager::WorktreeManager::get_worktree_base_dir()
-            .join(task_branch);
+        let task_worktree_path =
+            services::services::worktree_manager::WorktreeManager::get_worktree_base_dir()
+                .join(task_branch);
         // Fallback: if the managed path doesn't exist, try the legacy repo-relative path
         let task_worktree_path = if task_worktree_path.exists() {
             task_worktree_path
@@ -3554,25 +3747,38 @@ async fn merge_workflow(
         }
     }
 
-    Workflow::set_merge_completed(&deployment.db().pool, &workflow_id).await
+    Workflow::set_merge_completed(&deployment.db().pool, &workflow_id)
+        .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // G06-006: Clean up worktree directories after successful merge
-    let worktree_cleanups: Vec<services::services::worktree_manager::WorktreeCleanup> = merged_tasks
-        .iter()
-        .filter_map(|t| {
-            let branch = t.get("branch")?.as_str()?;
-            let managed_path = services::services::worktree_manager::WorktreeManager::get_worktree_base_dir().join(branch);
-            let legacy_path = base_repo_path.join("worktrees").join(branch);
-            let worktree_path = if managed_path.exists() { managed_path } else { legacy_path };
-            Some(services::services::worktree_manager::WorktreeCleanup::new(
-                worktree_path,
-                Some(base_repo_path.clone()),
-            ))
-        })
-        .collect();
+    let worktree_cleanups: Vec<services::services::worktree_manager::WorktreeCleanup> =
+        merged_tasks
+            .iter()
+            .filter_map(|t| {
+                let branch = t.get("branch")?.as_str()?;
+                let managed_path =
+                    services::services::worktree_manager::WorktreeManager::get_worktree_base_dir()
+                        .join(branch);
+                let legacy_path = base_repo_path.join("worktrees").join(branch);
+                let worktree_path = if managed_path.exists() {
+                    managed_path
+                } else {
+                    legacy_path
+                };
+                Some(services::services::worktree_manager::WorktreeCleanup::new(
+                    worktree_path,
+                    Some(base_repo_path.clone()),
+                ))
+            })
+            .collect();
     if !worktree_cleanups.is_empty() {
-        if let Err(e) = services::services::worktree_manager::WorktreeManager::batch_cleanup_worktrees(&worktree_cleanups).await {
+        if let Err(e) =
+            services::services::worktree_manager::WorktreeManager::batch_cleanup_worktrees(
+                &worktree_cleanups,
+            )
+            .await
+        {
             tracing::warn!(
                 workflow_id = %workflow_id,
                 error = %e,
@@ -3906,7 +4112,8 @@ mod recovery_response_tests {
 
     use super::*;
 
-    async fn setup_runtime_with_running_workflow() -> (OrchestratorRuntime, String, sqlx::SqlitePool) {
+    async fn setup_runtime_with_running_workflow() -> (OrchestratorRuntime, String, sqlx::SqlitePool)
+    {
         let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
         sqlx::query(
             r"

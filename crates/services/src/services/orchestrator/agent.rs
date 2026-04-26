@@ -1,7 +1,7 @@
 //! Orchestrator agent loop and event handling.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     sync::Arc,
     time::Instant,
@@ -9,7 +9,6 @@ use std::{
 
 use anyhow::anyhow;
 use db::DBService;
-use futures::future;
 #[cfg(unix)]
 use nix::unistd::Pid;
 use once_cell::sync::Lazy;
@@ -44,7 +43,9 @@ use super::{
     message_bus::{BusMessage, SharedMessageBus},
     persistence::StatePersistence,
     prompt_handler::{LLMPromptCallback, PromptHandler},
-    runtime_actions::{RuntimeActionService, RuntimeTaskSpec, RuntimeTerminalSpec},
+    runtime_actions::{
+        RuntimeActionService, RuntimeTaskSpec, RuntimeTerminalSpec, StartTerminalOutcome,
+    },
     state::{
         OrchestratorRunState, OrchestratorState, SharedOrchestratorState, WorkflowArchetype,
         WorkflowStrategy,
@@ -74,6 +75,8 @@ pub struct OrchestratorAgent {
     persistence: Option<Arc<StatePersistence>>,
     last_state_save: Arc<tokio::sync::Mutex<tokio::time::Instant>>,
     concierge_broadcaster: Option<Arc<ConciergeBroadcaster>>,
+    queued_terminal_dispatches: Arc<tokio::sync::Mutex<VecDeque<QueuedTerminalDispatch>>>,
+    terminal_input_failures: Arc<tokio::sync::Mutex<HashMap<String, u32>>>,
 }
 
 // G10-007: Use `[ \t]` instead of `\s` to prevent cross-line matching.
@@ -92,6 +95,13 @@ struct InferredNoMetadataCompletion {
     total_terminals: usize,
 }
 
+#[derive(Debug, Clone)]
+struct QueuedTerminalDispatch {
+    task_id: String,
+    terminal_id: String,
+    instruction: String,
+}
+
 #[derive(Debug, Default)]
 struct StallRecoveryTracker {
     last_recoveries: HashMap<String, Instant>,
@@ -101,6 +111,7 @@ struct StallRecoveryTracker {
 /// Maximum stall recovery attempts before force-completing a terminal.
 /// With 30s cooldown, 10 attempts = ~5 minutes of stall tolerance.
 const MAX_STALL_RECOVERY_ATTEMPTS: u32 = 10;
+const TERMINAL_INPUT_FAILURE_LIMIT: u32 = 3;
 
 impl StallRecoveryTracker {
     fn should_skip_due_to_cooldown(
@@ -229,6 +240,8 @@ impl OrchestratorAgent {
             persistence: None,
             last_state_save: Arc::new(tokio::sync::Mutex::new(tokio::time::Instant::now())),
             concierge_broadcaster: None,
+            queued_terminal_dispatches: Arc::new(tokio::sync::Mutex::new(VecDeque::new())),
+            terminal_input_failures: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         })
     }
 
@@ -257,6 +270,8 @@ impl OrchestratorAgent {
             persistence: None,
             last_state_save: Arc::new(tokio::sync::Mutex::new(tokio::time::Instant::now())),
             concierge_broadcaster: None,
+            queued_terminal_dispatches: Arc::new(tokio::sync::Mutex::new(VecDeque::new())),
+            terminal_input_failures: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         })
     }
 
@@ -1014,6 +1029,13 @@ impl OrchestratorAgent {
                     }
                 }
                 _ = watchdog.tick() => {
+                    if let Err(error) = self.dispatch_queued_terminals().await {
+                        tracing::warn!(
+                            workflow_id = %workflow_id,
+                            error = %error,
+                            "Failed while dispatching queued terminals"
+                        );
+                    }
                     if let Err(error) = self
                         .recover_stalled_terminals(&mut stall_recovery_tracker)
                         .await
@@ -1445,9 +1467,15 @@ impl OrchestratorAgent {
         );
 
         if Self::needs_explicit_submit(terminal) {
-            self.message_bus
-                .publish_terminal_input(&terminal.id, &pty_session_id, &instruction, None)
-                .await;
+            self.publish_terminal_input_checked(
+                workflow_id,
+                &terminal.id,
+                &pty_session_id,
+                &instruction,
+                "stall_recovery_instruction",
+                true,
+            )
+            .await;
         } else {
             self.message_bus
                 .publish(
@@ -1465,9 +1493,15 @@ impl OrchestratorAgent {
             .enumerate()
         {
             sleep(Duration::from_millis(*delay_ms)).await;
-            self.message_bus
-                .publish_terminal_input(&terminal.id, &pty_session_id, "", None)
-                .await;
+            self.publish_terminal_input_checked(
+                workflow_id,
+                &terminal.id,
+                &pty_session_id,
+                "",
+                "stall_recovery_submit",
+                false,
+            )
+            .await;
             tracing::debug!(
                 workflow_id = %workflow_id,
                 task_id = %task.id,
@@ -1574,6 +1608,411 @@ impl OrchestratorAgent {
                 false
             }
         }
+    }
+
+    async fn cleanup_finished_workflow_logs_best_effort(&self, reason: &str) {
+        match db::models::terminal::TerminalLog::cleanup_finished_workflow_logs(&self.db.pool).await
+        {
+            Ok(deleted) => {
+                tracing::info!(
+                    deleted,
+                    reason,
+                    "Cleaned terminal logs for finished workflows"
+                );
+                if deleted > 0
+                    && let Err(e) =
+                        db::models::terminal::TerminalLog::checkpoint_after_cleanup(&self.db.pool)
+                            .await
+                {
+                    tracing::warn!(
+                        error = %e,
+                        reason,
+                        "SQLite checkpoint after terminal-log cleanup failed"
+                    );
+                }
+            }
+            Err(e) => tracing::warn!(
+                error = %e,
+                reason,
+                "Failed to clean terminal logs for finished workflows"
+            ),
+        }
+    }
+
+    async fn cascade_failed_workflow_children(
+        &self,
+        workflow_id: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, workflow_id).await?;
+        for task in &tasks {
+            if !matches!(
+                task.status.as_str(),
+                TASK_STATUS_COMPLETED | TASK_STATUS_FAILED | TASK_STATUS_CANCELLED
+            ) {
+                db::models::WorkflowTask::update_status(
+                    &self.db.pool,
+                    &task.id,
+                    TASK_STATUS_CANCELLED,
+                )
+                .await?;
+                if let Err(e) = self
+                    .message_bus
+                    .publish_workflow_event(
+                        workflow_id,
+                        BusMessage::TaskStatusUpdate {
+                            workflow_id: workflow_id.to_string(),
+                            task_id: task.id.clone(),
+                            status: TASK_STATUS_CANCELLED.to_string(),
+                        },
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        workflow_id = %workflow_id,
+                        task_id = %task.id,
+                        error = %e,
+                        reason,
+                        "Failed to publish task cancellation during workflow failure cascade"
+                    );
+                }
+            }
+        }
+
+        let terminals = db::models::Terminal::find_by_workflow(&self.db.pool, workflow_id).await?;
+        for terminal in &terminals {
+            if !matches!(
+                terminal.status.as_str(),
+                TERMINAL_STATUS_COMPLETED | TERMINAL_STATUS_FAILED | TERMINAL_STATUS_CANCELLED
+            ) {
+                db::models::Terminal::update_status(
+                    &self.db.pool,
+                    &terminal.id,
+                    TERMINAL_STATUS_CANCELLED,
+                )
+                .await?;
+                db::models::Terminal::update_process(&self.db.pool, &terminal.id, None, None)
+                    .await?;
+                db::models::Terminal::update_session(&self.db.pool, &terminal.id, None, None)
+                    .await?;
+                if let Err(e) = self
+                    .message_bus
+                    .publish_workflow_event(
+                        workflow_id,
+                        BusMessage::TerminalStatusUpdate {
+                            workflow_id: workflow_id.to_string(),
+                            terminal_id: terminal.id.clone(),
+                            status: TERMINAL_STATUS_CANCELLED.to_string(),
+                        },
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        workflow_id = %workflow_id,
+                        terminal_id = %terminal.id,
+                        error = %e,
+                        reason,
+                        "Failed to publish terminal cancellation during workflow failure cascade"
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn mark_workflow_failed(&self, workflow_id: &str, reason: &str) -> anyhow::Result<()> {
+        db::models::Workflow::update_status(&self.db.pool, workflow_id, WORKFLOW_STATUS_FAILED)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to update workflow status: {e}"))?;
+
+        self.cascade_failed_workflow_children(workflow_id, reason)
+            .await?;
+        self.cleanup_finished_workflow_logs_best_effort(reason)
+            .await;
+
+        if let Err(e) = self
+            .message_bus
+            .publish_workflow_event(
+                workflow_id,
+                BusMessage::StatusUpdate {
+                    workflow_id: workflow_id.to_string(),
+                    status: WORKFLOW_STATUS_FAILED.to_string(),
+                },
+            )
+            .await
+        {
+            tracing::warn!(workflow_id = %workflow_id, error = %e, "Failed to publish workflow failed status update");
+        }
+
+        self.state.write().await.run_state = OrchestratorRunState::Idle;
+        Ok(())
+    }
+
+    async fn handle_terminal_input_delivery_failure(
+        &self,
+        workflow_id: &str,
+        terminal_id: &str,
+        context: &str,
+    ) {
+        let terminal = match db::models::Terminal::find_by_id(&self.db.pool, terminal_id).await {
+            Ok(Some(terminal)) => Some(terminal),
+            Ok(None) => None,
+            Err(e) => {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    error = %e,
+                    "Cannot load terminal after input delivery failure"
+                );
+                return;
+            }
+        };
+
+        if let Some(terminal) = terminal.as_ref() {
+            let task_status = match db::models::WorkflowTask::find_by_id(
+                &self.db.pool,
+                &terminal.workflow_task_id,
+            )
+            .await
+            {
+                Ok(Some(task)) => Some(task.status),
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::warn!(
+                        terminal_id = %terminal.id,
+                        task_id = %terminal.workflow_task_id,
+                        error = %e,
+                        "Failed to load task while classifying terminal input delivery failure"
+                    );
+                    None
+                }
+            };
+
+            if Self::is_nonfatal_terminal_input_delivery_failure(
+                terminal,
+                task_status.as_deref(),
+                context,
+            ) {
+                self.terminal_input_failures
+                    .lock()
+                    .await
+                    .remove(terminal_id);
+                tracing::info!(
+                    workflow_id = %workflow_id,
+                    terminal_id = %terminal_id,
+                    terminal_status = %terminal.status,
+                    task_status = ?task_status,
+                    context,
+                    "Ignoring terminal input delivery failure for post-completion/review feedback"
+                );
+                return;
+            }
+        }
+
+        let failure_count = {
+            let mut failures = self.terminal_input_failures.lock().await;
+            let count = failures.entry(terminal_id.to_string()).or_insert(0);
+            *count += 1;
+            *count
+        };
+
+        if failure_count < TERMINAL_INPUT_FAILURE_LIMIT {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                terminal_id = %terminal_id,
+                context,
+                failure_count,
+                limit = TERMINAL_INPUT_FAILURE_LIMIT,
+                "Terminal input delivery failed; waiting for retry before marking terminal failed"
+            );
+            return;
+        }
+
+        tracing::error!(
+            workflow_id = %workflow_id,
+            terminal_id = %terminal_id,
+            context,
+            failure_count,
+            "Terminal input delivery failed repeatedly; marking terminal and workflow failed"
+        );
+
+        let terminal = match terminal {
+            Some(terminal) => terminal,
+            None => {
+                tracing::warn!(terminal_id = %terminal_id, "Cannot fail missing terminal after input delivery failures");
+                let _ = self
+                    .mark_workflow_failed(
+                        workflow_id,
+                        &format!("Terminal input delivery failed repeatedly for missing terminal {terminal_id}"),
+                    )
+                    .await;
+                return;
+            }
+        };
+
+        if matches!(
+            terminal.status.as_str(),
+            TERMINAL_STATUS_COMPLETED | TERMINAL_STATUS_FAILED | TERMINAL_STATUS_CANCELLED
+        ) {
+            tracing::debug!(
+                terminal_id = %terminal.id,
+                status = %terminal.status,
+                "Ignoring repeated terminal input delivery failures for finalized terminal"
+            );
+            return;
+        }
+
+        let _ = self
+            .try_finalize_terminal(
+                &terminal.id,
+                &terminal.workflow_task_id,
+                TERMINAL_STATUS_FAILED,
+            )
+            .await;
+        if let Err(e) =
+            db::models::Terminal::update_process(&self.db.pool, &terminal.id, None, None).await
+        {
+            tracing::warn!(terminal_id = %terminal.id, error = %e, "Failed to clear terminal process after delivery failures");
+        }
+        if let Err(e) =
+            db::models::Terminal::update_session(&self.db.pool, &terminal.id, None, None).await
+        {
+            tracing::warn!(terminal_id = %terminal.id, error = %e, "Failed to clear terminal session after delivery failures");
+        }
+
+        if let Err(e) = self
+            .message_bus
+            .publish_workflow_event(
+                workflow_id,
+                BusMessage::TerminalStatusUpdate {
+                    workflow_id: workflow_id.to_string(),
+                    terminal_id: terminal.id.clone(),
+                    status: TERMINAL_STATUS_FAILED.to_string(),
+                },
+            )
+            .await
+        {
+            tracing::warn!(terminal_id = %terminal.id, error = %e, "Failed to publish terminal failed status after delivery failures");
+        }
+
+        if let Ok(Some(task)) =
+            db::models::WorkflowTask::find_by_id(&self.db.pool, &terminal.workflow_task_id).await
+            && !matches!(
+                task.status.as_str(),
+                TASK_STATUS_COMPLETED | TASK_STATUS_FAILED | TASK_STATUS_CANCELLED
+            )
+        {
+            if let Err(e) =
+                db::models::WorkflowTask::update_status(&self.db.pool, &task.id, TASK_STATUS_FAILED)
+                    .await
+            {
+                tracing::warn!(task_id = %task.id, error = %e, "Failed to mark task failed after terminal delivery failures");
+            }
+            if let Err(e) = self
+                .message_bus
+                .publish_workflow_event(
+                    workflow_id,
+                    BusMessage::TaskStatusUpdate {
+                        workflow_id: workflow_id.to_string(),
+                        task_id: task.id.clone(),
+                        status: TASK_STATUS_FAILED.to_string(),
+                    },
+                )
+                .await
+            {
+                tracing::warn!(task_id = %task.id, error = %e, "Failed to publish task failed status after delivery failures");
+            }
+        }
+
+        let _ = self
+            .mark_workflow_failed(
+                workflow_id,
+                &format!(
+                    "Terminal {terminal_id} stopped accepting input after {failure_count} attempts ({context})"
+                ),
+            )
+            .await;
+    }
+
+    fn is_nonfatal_terminal_input_delivery_failure(
+        terminal: &db::models::Terminal,
+        task_status: Option<&str>,
+        context: &str,
+    ) -> bool {
+        if matches!(
+            terminal.status.as_str(),
+            TERMINAL_STATUS_COMPLETED
+                | TERMINAL_STATUS_FAILED
+                | TERMINAL_STATUS_CANCELLED
+                | TERMINAL_STATUS_QUALITY_PENDING
+                | TERMINAL_STATUS_REVIEW_PASSED
+                | TERMINAL_STATUS_REVIEW_REJECTED
+        ) {
+            return true;
+        }
+
+        if task_status == Some(TASK_STATUS_REVIEW_PENDING) {
+            return true;
+        }
+
+        Self::is_post_gate_feedback_context(context) && Self::terminal_has_recorded_commit(terminal)
+    }
+
+    fn is_post_gate_feedback_context(context: &str) -> bool {
+        matches!(
+            context,
+            "acceptance_review_rejection"
+                | "quality_gate_fix_message"
+                | "quality_gate_infra_message"
+        )
+    }
+
+    fn terminal_has_recorded_commit(terminal: &db::models::Terminal) -> bool {
+        terminal
+            .last_commit_hash
+            .as_deref()
+            .is_some_and(|hash| !hash.trim().is_empty())
+            || terminal
+                .last_commit_message
+                .as_deref()
+                .is_some_and(|message| message.contains(GIT_COMMIT_METADATA_SEPARATOR))
+    }
+
+    async fn publish_terminal_input_checked(
+        &self,
+        workflow_id: &str,
+        terminal_id: &str,
+        session_id: &str,
+        input: &str,
+        context: &str,
+        fail_after_retries: bool,
+    ) -> bool {
+        let delivered = self
+            .message_bus
+            .publish_terminal_input(terminal_id, session_id, input, None)
+            .await;
+        if delivered {
+            self.terminal_input_failures
+                .lock()
+                .await
+                .remove(terminal_id);
+            return true;
+        }
+
+        if fail_after_retries {
+            self.handle_terminal_input_delivery_failure(workflow_id, terminal_id, context)
+                .await;
+        } else {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                terminal_id = %terminal_id,
+                session_id = %session_id,
+                context,
+                "Terminal input delivery failed for non-critical control input"
+            );
+        }
+
+        false
     }
 
     /// Handles terminal completion events.
@@ -1927,6 +2366,7 @@ impl OrchestratorAgent {
             }
         }
 
+        self.dispatch_queued_terminals().await?;
         self.auto_sync_workflow_completion(&workflow_id).await?;
 
         self.maybe_save_state().await;
@@ -2851,8 +3291,12 @@ impl OrchestratorAgent {
                         // dispatch_terminal CAS-updates waiting → working
                         // and routes through the proper start path; it
                         // honours QUALITY_REQUIREMENTS_SUFFIX append.
-                        self.dispatch_terminal(&event.task_id, &restarted, &fix_message)
-                            .await?;
+                        self.dispatch_terminal_when_ready_or_queue(
+                            &event.task_id,
+                            &restarted,
+                            &fix_message,
+                        )
+                        .await?;
                         Ok(())
                     }
                     .await;
@@ -2867,23 +3311,33 @@ impl OrchestratorAgent {
                     // Healthy PTY without stop-hook — original path.
                     // G31-001: targeted delivery to specific terminal PTY.
                     let delivered = self
-                        .message_bus
-                        .publish_terminal_input(&event.terminal_id, &session_id, &fix_message, None)
+                        .publish_terminal_input_checked(
+                            &event.workflow_id,
+                            &event.terminal_id,
+                            &session_id,
+                            &fix_message,
+                            "quality_gate_fix_message",
+                            false,
+                        )
                         .await;
                     if !delivered {
                         // R8-B4 fallback: bus delivery failed despite a
                         // valid session — try clean-context relaunch as a
                         // last resort instead of silently dropping.
                         tracing::warn!(
-                            terminal_id = %event.terminal_id,
-                            "R8-B4: publish_terminal_input returned false; falling back to clean-context relaunch"
-                        );
+                                terminal_id = %event.terminal_id,
+                        "R8-B4: publish_terminal_input returned false; falling back to clean-context relaunch"
+                            );
                         if let Ok(ra) = self.runtime_actions() {
                             if let Ok(restarted) =
                                 ra.relaunch_terminal_clean_context(&event.terminal_id).await
                             {
                                 let _ = self
-                                    .dispatch_terminal(&event.task_id, &restarted, &fix_message)
+                                    .dispatch_terminal_when_ready_or_queue(
+                                        &event.task_id,
+                                        &restarted,
+                                        &fix_message,
+                                    )
                                     .await;
                             }
                         }
@@ -2935,9 +3389,15 @@ impl OrchestratorAgent {
                      pass. (Summary: {})",
                     event.summary
                 );
-                self.message_bus
-                    .publish_terminal_input(&event.terminal_id, &session_id, &infra_message, None)
-                    .await;
+                self.publish_terminal_input_checked(
+                    &event.workflow_id,
+                    &event.terminal_id,
+                    &session_id,
+                    &infra_message,
+                    "quality_gate_infra_message",
+                    false,
+                )
+                .await;
             }
             return Ok(());
         }
@@ -3303,6 +3763,218 @@ impl OrchestratorAgent {
         }
     }
 
+    async fn enqueue_terminal_dispatch(&self, task_id: &str, terminal_id: &str, instruction: &str) {
+        let mut queue = self.queued_terminal_dispatches.lock().await;
+        queue.retain(|queued| queued.terminal_id != terminal_id);
+        queue.push_back(QueuedTerminalDispatch {
+            task_id: task_id.to_string(),
+            terminal_id: terminal_id.to_string(),
+            instruction: instruction.to_string(),
+        });
+        tracing::info!(
+            task_id = %task_id,
+            terminal_id = %terminal_id,
+            queued_count = queue.len(),
+            "Terminal dispatch queued until a global launch slot is available"
+        );
+    }
+
+    async fn dispatch_terminal_when_ready_or_queue(
+        &self,
+        task_id: &str,
+        terminal: &db::models::Terminal,
+        instruction: &str,
+    ) -> anyhow::Result<()> {
+        let terminal = db::models::Terminal::find_by_id(&self.db.pool, &terminal.id)
+            .await?
+            .unwrap_or_else(|| terminal.clone());
+
+        match terminal.status.as_str() {
+            TERMINAL_STATUS_WAITING => {
+                self.dispatch_terminal(task_id, &terminal, instruction)
+                    .await
+            }
+            TERMINAL_STATUS_NOT_STARTED | TERMINAL_STATUS_FAILED | TERMINAL_STATUS_CANCELLED => {
+                let outcome = self
+                    .runtime_actions()?
+                    .try_start_terminal(&terminal.id)
+                    .await?;
+
+                match outcome {
+                    StartTerminalOutcome::Started(started) => {
+                        let planning_complete = self.task_planning_complete(task_id).await;
+                        self.sync_task_state_from_db(task_id, Some(planning_complete))
+                            .await?;
+                        if started.status == TERMINAL_STATUS_WAITING {
+                            self.dispatch_terminal(task_id, &started, instruction).await
+                        } else {
+                            self.enqueue_terminal_dispatch(task_id, &started.id, instruction)
+                                .await;
+                            Ok(())
+                        }
+                    }
+                    StartTerminalOutcome::Queued(queued) => {
+                        self.enqueue_terminal_dispatch(task_id, &queued.id, instruction)
+                            .await;
+                        Ok(())
+                    }
+                }
+            }
+            TERMINAL_STATUS_STARTING => {
+                self.enqueue_terminal_dispatch(task_id, &terminal.id, instruction)
+                    .await;
+                Ok(())
+            }
+            TERMINAL_STATUS_WORKING
+            | TERMINAL_STATUS_COMPLETED
+            | TERMINAL_STATUS_QUALITY_PENDING
+            | TERMINAL_STATUS_REVIEW_PASSED
+            | TERMINAL_STATUS_REVIEW_REJECTED => {
+                tracing::debug!(
+                    terminal_id = %terminal.id,
+                    task_id = %task_id,
+                    status = %terminal.status,
+                    "Skipping dispatch because terminal is not dispatch-ready"
+                );
+                Ok(())
+            }
+            status => {
+                tracing::warn!(
+                    terminal_id = %terminal.id,
+                    task_id = %task_id,
+                    status,
+                    "Skipping dispatch for unknown terminal status"
+                );
+                Ok(())
+            }
+        }
+    }
+
+    async fn dispatch_queued_terminals(&self) -> anyhow::Result<()> {
+        loop {
+            let queued = {
+                let mut queue = self.queued_terminal_dispatches.lock().await;
+                queue.pop_front()
+            };
+
+            let Some(queued) = queued else {
+                return Ok(());
+            };
+
+            let Some(task) =
+                db::models::WorkflowTask::find_by_id(&self.db.pool, &queued.task_id).await?
+            else {
+                tracing::warn!(
+                    task_id = %queued.task_id,
+                    terminal_id = %queued.terminal_id,
+                    "Dropping queued terminal dispatch because task no longer exists"
+                );
+                continue;
+            };
+
+            let Some(workflow) =
+                db::models::Workflow::find_by_id(&self.db.pool, &task.workflow_id).await?
+            else {
+                tracing::warn!(
+                    task_id = %queued.task_id,
+                    terminal_id = %queued.terminal_id,
+                    "Dropping queued terminal dispatch because workflow no longer exists"
+                );
+                continue;
+            };
+
+            if workflow.status != WORKFLOW_STATUS_RUNNING {
+                if matches!(
+                    workflow.status.as_str(),
+                    WORKFLOW_STATUS_COMPLETED
+                        | WORKFLOW_STATUS_FAILED
+                        | WORKFLOW_STATUS_MERGE_PARTIAL_FAILED
+                ) || workflow.status == "cancelled"
+                {
+                    tracing::debug!(
+                        workflow_id = %workflow.id,
+                        status = %workflow.status,
+                        terminal_id = %queued.terminal_id,
+                        "Dropping queued terminal dispatch because workflow has finished"
+                    );
+                    continue;
+                }
+                tracing::debug!(
+                    workflow_id = %workflow.id,
+                    status = %workflow.status,
+                    terminal_id = %queued.terminal_id,
+                    "Leaving queued terminal dispatch idle because workflow is not running"
+                );
+                let mut queue = self.queued_terminal_dispatches.lock().await;
+                queue.push_front(queued);
+                return Ok(());
+            }
+
+            let Some(terminal) =
+                db::models::Terminal::find_by_id(&self.db.pool, &queued.terminal_id).await?
+            else {
+                tracing::warn!(
+                    terminal_id = %queued.terminal_id,
+                    "Dropping queued terminal dispatch because terminal no longer exists"
+                );
+                continue;
+            };
+
+            match terminal.status.as_str() {
+                TERMINAL_STATUS_WAITING => {
+                    self.dispatch_terminal(&queued.task_id, &terminal, &queued.instruction)
+                        .await?;
+                }
+                TERMINAL_STATUS_NOT_STARTED
+                | TERMINAL_STATUS_FAILED
+                | TERMINAL_STATUS_CANCELLED => match self
+                    .runtime_actions()?
+                    .try_start_terminal(&terminal.id)
+                    .await?
+                {
+                    StartTerminalOutcome::Started(started) => {
+                        if started.status == TERMINAL_STATUS_WAITING {
+                            self.dispatch_terminal(&queued.task_id, &started, &queued.instruction)
+                                .await?;
+                        } else {
+                            let mut queue = self.queued_terminal_dispatches.lock().await;
+                            queue.push_front(queued);
+                            return Ok(());
+                        }
+                    }
+                    StartTerminalOutcome::Queued(_) => {
+                        let mut queue = self.queued_terminal_dispatches.lock().await;
+                        queue.push_front(queued);
+                        return Ok(());
+                    }
+                },
+                TERMINAL_STATUS_STARTING => {
+                    let mut queue = self.queued_terminal_dispatches.lock().await;
+                    queue.push_front(queued);
+                    return Ok(());
+                }
+                TERMINAL_STATUS_WORKING
+                | TERMINAL_STATUS_COMPLETED
+                | TERMINAL_STATUS_QUALITY_PENDING
+                | TERMINAL_STATUS_REVIEW_PASSED
+                | TERMINAL_STATUS_REVIEW_REJECTED => {
+                    tracing::debug!(
+                        terminal_id = %terminal.id,
+                        status = %terminal.status,
+                        "Dropping queued dispatch because terminal has already advanced"
+                    );
+                }
+                status => {
+                    tracing::warn!(
+                        terminal_id = %terminal.id,
+                        status,
+                        "Dropping queued dispatch for unknown terminal status"
+                    );
+                }
+            }
+        }
+    }
+
     /// Dispatches the next terminal in a task sequence.
     async fn dispatch_next_terminal(
         &self,
@@ -3328,7 +4000,10 @@ impl OrchestratorAgent {
         let mut active_terminal = terminal;
 
         for attempt in 0..=Self::NEXT_TERMINAL_WAIT_RETRY_ATTEMPTS {
-            if active_terminal.status == TERMINAL_STATUS_WAITING {
+            if matches!(
+                active_terminal.status.as_str(),
+                TERMINAL_STATUS_WAITING | TERMINAL_STATUS_NOT_STARTED
+            ) {
                 break;
             }
 
@@ -3416,7 +4091,7 @@ impl OrchestratorAgent {
             foundation_ctx.as_deref(),
             initial_goal.as_deref(),
         );
-        self.dispatch_terminal(task_id, &active_terminal, &instruction)
+        self.dispatch_terminal_when_ready_or_queue(task_id, &active_terminal, &instruction)
             .await
     }
 
@@ -3938,6 +4613,22 @@ impl OrchestratorAgent {
             }
         }
 
+        if let Err(e) = db::models::Terminal::update_last_commit(
+            &self.db.pool,
+            terminal_id,
+            commit_hash,
+            commit_message,
+        )
+        .await
+        {
+            tracing::warn!(
+                terminal_id = %terminal_id,
+                commit_hash = %commit_hash,
+                error = %e,
+                "Failed to record terminal completion commit before gates"
+            );
+        }
+
         let workflow_id = self.state.read().await.workflow_id.clone();
         let event = TerminalCompletionEvent {
             terminal_id: terminal_id.to_string(),
@@ -4299,14 +4990,39 @@ impl OrchestratorAgent {
             .filter(|s| !s.trim().is_empty());
 
         if let Some(session_id) = session_id_opt {
-            self.message_bus
-                .publish_terminal_input(&event.terminal_id, &session_id, &fix_message, None)
+            let delivered = self
+                .publish_terminal_input_checked(
+                    &event.workflow_id,
+                    &event.terminal_id,
+                    &session_id,
+                    &fix_message,
+                    "acceptance_review_rejection",
+                    false,
+                )
                 .await;
+            if !delivered {
+                tracing::warn!(
+                    terminal_id = %event.terminal_id,
+                    "Acceptance review feedback could not be delivered to existing session; relaunching clean context"
+                );
+                if let Ok(ra) = self.runtime_actions()
+                    && let Ok(restarted) =
+                        ra.relaunch_terminal_clean_context(&event.terminal_id).await
+                {
+                    let _ = self
+                        .dispatch_terminal_when_ready_or_queue(
+                            &event.task_id,
+                            &restarted,
+                            &fix_message,
+                        )
+                        .await;
+                }
+            }
         } else if let Ok(ra) = self.runtime_actions()
             && let Ok(restarted) = ra.relaunch_terminal_clean_context(&event.terminal_id).await
         {
             let _ = self
-                .dispatch_terminal(&event.task_id, &restarted, &fix_message)
+                .dispatch_terminal_when_ready_or_queue(&event.task_id, &restarted, &fix_message)
                 .await;
         }
 
@@ -4721,12 +5437,12 @@ impl OrchestratorAgent {
                     );
                     // G24-009: Mark workflow as failed after provider exhaustion,
                     // not just an Error event, so the workflow doesn't hang indefinitely.
-                    if let Err(e2) = db::models::Workflow::update_status(
-                        &self.db.pool,
-                        &workflow_id,
-                        WORKFLOW_STATUS_FAILED,
-                    )
-                    .await
+                    if let Err(e2) = self
+                        .mark_workflow_failed(
+                            &workflow_id,
+                            "LLM provider exhausted - all retries failed",
+                        )
+                        .await
                     {
                         tracing::warn!(error = %e2, "Failed to mark workflow as failed after LLM exhaustion");
                     }
@@ -4742,19 +5458,6 @@ impl OrchestratorAgent {
                         .await
                     {
                         tracing::warn!(error = %e2, "Failed to publish LLM exhaustion error event");
-                    }
-                    if let Err(e2) = self
-                        .message_bus
-                        .publish_workflow_event(
-                            &workflow_id,
-                            BusMessage::StatusUpdate {
-                                workflow_id: workflow_id.clone(),
-                                status: WORKFLOW_STATUS_FAILED.to_string(),
-                            },
-                        )
-                        .await
-                    {
-                        tracing::warn!(error = %e2, "Failed to publish workflow failed status after LLM exhaustion");
                     }
                 }
 
@@ -4909,50 +5612,6 @@ impl OrchestratorAgent {
                     state.workflow_id.clone()
                 };
                 // Validate cli_type_id and model_config_id — LLM may return invalid IDs.
-                // Fallback is resolved lazily (only on validation failure).
-                let valid_cli = if db::models::CliType::find_by_id(&self.db.pool, &cli_type_id)
-                    .await
-                    .is_ok()
-                {
-                    cli_type_id
-                } else {
-                    let (fb_cli, _) =
-                        db::models::ModelConfig::first_user_configured_ids(&self.db.pool)
-                            .await
-                            .ok()
-                            .flatten()
-                            .unwrap_or_else(|| {
-                                (
-                                    "cli-claude-code".to_string(),
-                                    "model-claude-sonnet".to_string(),
-                                )
-                            });
-                    tracing::warn!(invalid_cli = %cli_type_id, fallback = %fb_cli, "LLM provided invalid cli_type_id, using fallback");
-                    fb_cli
-                };
-                let valid_model = if db::models::ModelConfig::find_by_id(
-                    &self.db.pool,
-                    &model_config_id,
-                )
-                .await
-                .is_ok()
-                {
-                    model_config_id
-                } else {
-                    let (_, fb_model) =
-                        db::models::ModelConfig::first_user_configured_ids(&self.db.pool)
-                            .await
-                            .ok()
-                            .flatten()
-                            .unwrap_or_else(|| {
-                                (
-                                    "cli-claude-code".to_string(),
-                                    "model-claude-sonnet".to_string(),
-                                )
-                            });
-                    tracing::warn!(invalid_model = %model_config_id, fallback = %fb_model, "LLM provided invalid model_config_id, using fallback");
-                    fb_model
-                };
                 let planning_complete = self.task_planning_complete(&task_id).await;
                 self.runtime_actions()?
                     .create_terminal(
@@ -4960,8 +5619,8 @@ impl OrchestratorAgent {
                         RuntimeTerminalSpec {
                             terminal_id,
                             task_id: task_id.clone(),
-                            cli_type_id: valid_cli,
-                            model_config_id: valid_model,
+                            cli_type_id,
+                            model_config_id,
                             custom_base_url,
                             custom_api_key,
                             role,
@@ -4979,7 +5638,9 @@ impl OrchestratorAgent {
                 instruction,
             } => {
                 self.ensure_agent_planned_workflow().await?;
-                let terminal = self.runtime_actions()?.start_terminal(&terminal_id).await?;
+                let terminal = db::models::Terminal::find_by_id(&self.db.pool, &terminal_id)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("Terminal {terminal_id} not found"))?;
                 let task_id = terminal.workflow_task_id.clone();
                 let planning_complete = self.task_planning_complete(&task_id).await;
                 self.sync_task_state_from_db(&task_id, Some(planning_complete))
@@ -4989,7 +5650,7 @@ impl OrchestratorAgent {
                 // Add timeout to dispatch to prevent indefinite hangs
                 match tokio::time::timeout(
                     std::time::Duration::from_secs(30),
-                    self.dispatch_terminal(&task_id, &terminal, &instruction),
+                    self.dispatch_terminal_when_ready_or_queue(&task_id, &terminal, &instruction),
                 )
                 .await
                 {
@@ -5023,6 +5684,7 @@ impl OrchestratorAgent {
                     state.workflow_id.clone()
                 };
                 self.auto_sync_workflow_completion(&workflow_id).await?;
+                self.dispatch_queued_terminals().await?;
             }
             OrchestratorInstruction::CompleteTask { task_id, summary } => {
                 self.ensure_agent_planned_workflow().await?;
@@ -5085,6 +5747,10 @@ impl OrchestratorAgent {
                 message,
             } => {
                 tracing::info!("Sending to terminal {}: {}", terminal_id, message);
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
 
                 // 1. Get terminal from database
                 let terminal = db::models::Terminal::find_by_id(&self.db.pool, &terminal_id)
@@ -5132,9 +5798,15 @@ impl OrchestratorAgent {
                     .enumerate()
                 {
                     sleep(Duration::from_millis(*delay_ms)).await;
-                    self.message_bus
-                        .publish_terminal_input(&terminal.id, &pty_session_id, "", None)
-                        .await;
+                    self.publish_terminal_input_checked(
+                        &workflow_id,
+                        &terminal.id,
+                        &pty_session_id,
+                        "",
+                        "send_to_terminal_submit",
+                        false,
+                    )
+                    .await;
                     tracing::debug!(
                         terminal_id = %terminal.id,
                         attempt = attempt + 1,
@@ -5272,6 +5944,8 @@ impl OrchestratorAgent {
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to publish completion event: {e}"))?;
+                self.cleanup_finished_workflow_logs_best_effort("complete_workflow")
+                    .await;
 
                 // Transition to Idle
                 self.state.write().await.run_state = OrchestratorRunState::Idle;
@@ -5287,14 +5961,7 @@ impl OrchestratorAgent {
                     state.workflow_id.clone()
                 };
 
-                // Update workflow status to failed
-                db::models::Workflow::update_status(
-                    &self.db.pool,
-                    &workflow_id,
-                    WORKFLOW_STATUS_FAILED,
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to update workflow status: {e}"))?;
+                self.mark_workflow_failed(&workflow_id, &reason).await?;
 
                 // Publish failure event
                 self.message_bus
@@ -5307,25 +5974,6 @@ impl OrchestratorAgent {
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to publish failure event: {e}"))?;
-
-                // G11-003: Also broadcast a StatusUpdate so the frontend can detect
-                // the workflow failure in real-time via the standard status channel.
-                if let Err(e) = self
-                    .message_bus
-                    .publish_workflow_event(
-                        &workflow_id,
-                        BusMessage::StatusUpdate {
-                            workflow_id: workflow_id.clone(),
-                            status: WORKFLOW_STATUS_FAILED.to_string(),
-                        },
-                    )
-                    .await
-                {
-                    tracing::warn!(error = %e, "Failed to publish workflow failed status update event");
-                }
-
-                // Transition to Idle
-                self.state.write().await.run_state = OrchestratorRunState::Idle;
 
                 tracing::error!("Workflow {} failed: {}", workflow_id, reason);
             }
@@ -5384,7 +6032,7 @@ impl OrchestratorAgent {
                     let terminal = terminals.get(index).cloned().ok_or_else(|| {
                         anyhow::anyhow!("Terminal index {index} out of range for task {task_id}")
                     })?;
-                    self.dispatch_terminal(&task.id, &terminal, &instruction)
+                    self.dispatch_terminal_when_ready_or_queue(&task.id, &terminal, &instruction)
                         .await?;
                 } else {
                     tracing::info!("No pending terminals for task {task_id}");
@@ -5444,19 +6092,13 @@ impl OrchestratorAgent {
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to create reviewer terminal: {e}"))?;
 
-                // 3. Start the reviewer terminal (launches PTY)
-                let reviewer_terminal = self
-                    .runtime_actions()?
-                    .start_terminal(&reviewer_terminal.id)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to start reviewer terminal: {e}"))?;
-
-                // 4. Sync task state with the new terminal
+                // 3. Sync task state with the new terminal
                 let planning_complete = self.task_planning_complete(&task_id).await;
                 self.sync_task_state_from_db(&task_id, Some(planning_complete))
                     .await?;
 
-                // 5. Build review instruction and dispatch
+                // 4. Build review instruction and dispatch/start through the
+                // global terminal concurrency queue.
                 let review_instruction = format!(
                     "Review the code changes from commit {commit_hash} on terminal {terminal_id}.\n\
                      \n\
@@ -5466,8 +6108,12 @@ impl OrchestratorAgent {
                      If there are issues, commit with metadata status: review_reject, reviewed_terminal: {terminal_id}, and list issues."
                 );
 
-                self.dispatch_terminal(&task_id, &reviewer_terminal, &review_instruction)
-                    .await?;
+                self.dispatch_terminal_when_ready_or_queue(
+                    &task_id,
+                    &reviewer_terminal,
+                    &review_instruction,
+                )
+                .await?;
 
                 tracing::info!(
                     reviewer_id = %reviewer_terminal.id,
@@ -5520,19 +6166,13 @@ impl OrchestratorAgent {
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to create fixer terminal: {e}"))?;
 
-                // 2. Start the fixer terminal (launches PTY)
-                let fixer_terminal = self
-                    .runtime_actions()?
-                    .start_terminal(&fixer_terminal.id)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to start fixer terminal: {e}"))?;
-
-                // 3. Sync task state with the new terminal
+                // 2. Sync task state with the new terminal
                 let planning_complete = self.task_planning_complete(&task_id).await;
                 self.sync_task_state_from_db(&task_id, Some(planning_complete))
                     .await?;
 
-                // 4. Build fix instruction with numbered issues and dispatch
+                // 3. Build fix instruction with numbered issues and dispatch/start
+                // through the global terminal concurrency queue.
                 let numbered_issues: String = issues
                     .iter()
                     .enumerate()
@@ -5548,8 +6188,12 @@ impl OrchestratorAgent {
                      After fixing all issues, commit with metadata status: completed."
                 );
 
-                self.dispatch_terminal(&task_id, &fixer_terminal, &fix_instruction)
-                    .await?;
+                self.dispatch_terminal_when_ready_or_queue(
+                    &task_id,
+                    &fixer_terminal,
+                    &fix_instruction,
+                )
+                .await?;
 
                 tracing::info!(
                     fixer_id = %fixer_terminal.id,
@@ -5800,9 +6444,15 @@ impl OrchestratorAgent {
         }
 
         if Self::needs_explicit_submit(&active_terminal) {
-            self.message_bus
-                .publish_terminal_input(&active_terminal.id, &pty_session_id, instruction, None)
-                .await;
+            self.publish_terminal_input_checked(
+                &workflow_id,
+                &active_terminal.id,
+                &pty_session_id,
+                instruction,
+                "dispatch_terminal_instruction",
+                true,
+            )
+            .await;
         } else {
             // 6. Send instruction to PTY session.
             self.message_bus
@@ -5823,9 +6473,15 @@ impl OrchestratorAgent {
             .enumerate()
         {
             sleep(Duration::from_millis(*delay_ms)).await;
-            self.message_bus
-                .publish_terminal_input(&active_terminal.id, &pty_session_id, "", None)
-                .await;
+            self.publish_terminal_input_checked(
+                &workflow_id,
+                &active_terminal.id,
+                &pty_session_id,
+                "",
+                "dispatch_terminal_submit",
+                false,
+            )
+            .await;
             tracing::debug!(
                 terminal_id = %active_terminal.id,
                 cli_type_id = %active_terminal.cli_type_id,
@@ -5890,9 +6546,15 @@ impl OrchestratorAgent {
             }
 
             // Also send to terminal.input topic for targeted delivery
-            self.message_bus
-                .publish_terminal_input(&terminal.id, session_id, "\u{3}", None)
-                .await;
+            self.publish_terminal_input_checked(
+                workflow_id,
+                &terminal.id,
+                session_id,
+                "\u{3}",
+                "terminal_shutdown_interrupt",
+                false,
+            )
+            .await;
 
             if let Err(e) = self
                 .message_bus
@@ -6278,9 +6940,9 @@ impl OrchestratorAgent {
     /// dispatch payloads. State initialization must be sequential because it holds
     /// a write lock on self.state.
     ///
-    /// Phase 2 (parallel): Dispatch all collected terminals concurrently using
-    /// `futures::future::join_all`. Individual dispatch failures are logged but
-    /// do not abort other dispatches.
+    /// Phase 2 (throttled): Dispatch collected terminals sequentially so each
+    /// start path honors the global process cap before the next terminal is
+    /// considered.
     async fn auto_dispatch_initial_tasks(&self) -> anyhow::Result<()> {
         let (workflow_id, strategy) = {
             let state = self.state.read().await;
@@ -6383,8 +7045,12 @@ impl OrchestratorAgent {
                 continue;
             };
 
-            // Only dispatch terminals in waiting status
-            if terminal.status != TERMINAL_STATUS_WAITING {
+            // Waiting terminals can be dispatched immediately; not_started
+            // terminals are queued/started through the global cap-aware path.
+            if !matches!(
+                terminal.status.as_str(),
+                TERMINAL_STATUS_WAITING | TERMINAL_STATUS_NOT_STARTED
+            ) {
                 tracing::debug!(
                     "Skipping terminal {} for task {} due to status {}",
                     terminal.id,
@@ -6426,22 +7092,17 @@ impl OrchestratorAgent {
         }
 
         tracing::info!(
-            "Phase 2: dispatching {} terminals in parallel",
+            "Phase 2: dispatching {} terminals with global concurrency throttle",
             dispatch_queue.len()
         );
 
-        // Phase 2 (parallel): dispatch all collected terminals concurrently.
-        // G03-005: join_all reduces startup latency when there are many tasks.
-        let dispatch_futures: Vec<_> = dispatch_queue
-            .iter()
-            .map(|(task_id, terminal, instruction)| {
-                self.dispatch_terminal(task_id, terminal, instruction)
-            })
-            .collect();
-
-        let results = future::join_all(dispatch_futures).await;
-        for (result, (task_id, terminal, _)) in results.into_iter().zip(dispatch_queue.iter()) {
-            if let Err(e) = result {
+        // Phase 2: start/dispatch one terminal at a time. This avoids a
+        // process-launch burst and lets excess work remain queued.
+        for (task_id, terminal, instruction) in &dispatch_queue {
+            if let Err(e) = self
+                .dispatch_terminal_when_ready_or_queue(task_id, terminal, instruction)
+                .await
+            {
                 tracing::error!(
                     "Failed to auto-dispatch terminal {} for task {}: {}",
                     terminal.id,
@@ -6497,6 +7158,12 @@ impl OrchestratorAgent {
             state.workflow_id.clone()
         };
 
+        if status == WORKFLOW_STATUS_FAILED {
+            self.mark_workflow_failed(&workflow_id, "workflow status broadcast")
+                .await?;
+            return Ok(());
+        }
+
         // 2. Update database (synchronously await result)
         db::models::Workflow::update_status(&self.db.pool, &workflow_id, status).await?;
 
@@ -6510,6 +7177,11 @@ impl OrchestratorAgent {
             .await?;
 
         tracing::debug!("Broadcast workflow status: {} -> {}", workflow_id, status);
+
+        if status == WORKFLOW_STATUS_COMPLETED {
+            self.cleanup_finished_workflow_logs_best_effort("workflow completed")
+                .await;
+        }
 
         Ok(())
     }
@@ -6995,20 +7667,56 @@ impl OrchestratorAgent {
             return Ok(());
         }
 
-        // G15-001: Do not auto-sync to completed while the Agent is still planning.
-        // G15-002: Even after planning_complete, the LLM event loop may still create
-        // new tasks on terminal completion events. Only auto-sync after a grace period
-        // where no new tasks have been created and the LLM is idle.
-        {
+        let workflow_planning_complete = {
             let state = self.state.read().await;
-            if !state.workflow_planning_complete {
-                return Ok(());
-            }
             // Check if the LLM is currently processing (run_state != Idle).
             // If the agent is actively handling events, it may create new tasks.
             if !matches!(state.run_state, OrchestratorRunState::Idle) {
                 return Ok(());
             }
+            state.workflow_planning_complete
+        };
+
+        let all_tasks_final = !tasks.is_empty()
+            && tasks.iter().all(|task| {
+                matches!(
+                    task.status.as_str(),
+                    TASK_STATUS_COMPLETED | TASK_STATUS_FAILED | TASK_STATUS_CANCELLED
+                )
+            });
+        let any_task_failed = tasks.iter().any(|task| {
+            matches!(
+                task.status.as_str(),
+                TASK_STATUS_FAILED | TASK_STATUS_CANCELLED
+            )
+        });
+        if all_tasks_final && any_task_failed {
+            tracing::error!(
+                workflow_id = %workflow_id,
+                failed_tasks = tasks
+                    .iter()
+                    .filter(|task| task.status == TASK_STATUS_FAILED)
+                    .count(),
+                cancelled_tasks = tasks
+                    .iter()
+                    .filter(|task| task.status == TASK_STATUS_CANCELLED)
+                    .count(),
+                "Workflow has no runnable terminals and all tasks are final, but at least one task failed"
+            );
+            self.mark_workflow_failed(
+                workflow_id,
+                "all workflow tasks are final but at least one task failed or was cancelled",
+            )
+            .await?;
+            return Ok(());
+        }
+
+        // G15-001: Do not auto-sync to completed while the Agent is still planning.
+        // G15-002: Even after planning_complete, the LLM event loop may still create
+        // new tasks on terminal completion events. Only auto-sync after a grace period
+        // where no new tasks have been created and the LLM is idle.
+        if !workflow_planning_complete {
+            return Ok(());
         }
 
         // Auto-sync to completed when all tasks are done and no terminals are running.
@@ -7067,6 +7775,8 @@ impl OrchestratorAgent {
         );
 
         self.persist_event("workflow_status", "Workflow completed")
+            .await;
+        self.cleanup_finished_workflow_logs_best_effort("workflow auto-complete")
             .await;
 
         // Auto-merge completed task branches
@@ -8804,7 +9514,8 @@ mod tests {
     use crate::services::orchestrator::{
         BusMessage, LLMClient, LLMMessage, LLMResponse, LLMUsage, MessageBus, MockLLMClient,
         OrchestratorConfig, TerminalCompletionEvent, TerminalCompletionStatus, WorkflowArchetype,
-        WorkflowStrategy, constants::TASK_STATUS_REVIEW_PENDING,
+        WorkflowStrategy,
+        constants::{TASK_STATUS_REVIEW_PENDING, TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_RUNNING},
     };
 
     fn run_git(repo_path: &Path, args: &[&str]) -> String {
@@ -9632,6 +10343,104 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(task.status, TASK_STATUS_REVIEW_PENDING);
+    }
+
+    #[tokio::test]
+    async fn review_feedback_delivery_failure_after_completion_commit_is_nonfatal() {
+        let fixture = setup_acceptance_review_gate_fixture(|_| {
+            Box::new(MockLLMClient::with_response(
+                r#"{"verdict":"REJECTED","fix_instructions":"Add missing tests."}"#,
+            ))
+        })
+        .await;
+
+        db::models::Terminal::update_last_commit(
+            &fixture.db.pool,
+            &fixture.event.terminal_id,
+            fixture.event.commit_hash.as_deref().unwrap(),
+            fixture
+                .event
+                .commit_message
+                .as_deref()
+                .unwrap_or("completed"),
+        )
+        .await
+        .unwrap();
+        db::models::WorkflowTask::update_status(
+            &fixture.db.pool,
+            &fixture.event.task_id,
+            TASK_STATUS_REVIEW_PENDING,
+        )
+        .await
+        .unwrap();
+
+        for _ in 0..3 {
+            fixture
+                .agent
+                .handle_terminal_input_delivery_failure(
+                    &fixture.event.workflow_id,
+                    &fixture.event.terminal_id,
+                    "acceptance_review_rejection",
+                )
+                .await;
+        }
+
+        let workflow =
+            db::models::Workflow::find_by_id(&fixture.db.pool, &fixture.event.workflow_id)
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(workflow.status, WORKFLOW_STATUS_RUNNING);
+
+        let task = db::models::WorkflowTask::find_by_id(&fixture.db.pool, &fixture.event.task_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status, TASK_STATUS_REVIEW_PENDING);
+
+        let terminal =
+            db::models::Terminal::find_by_id(&fixture.db.pool, &fixture.event.terminal_id)
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(terminal.status, TERMINAL_STATUS_WORKING);
+    }
+
+    #[tokio::test]
+    async fn git_completion_records_terminal_last_commit_before_gates() {
+        let fixture = setup_acceptance_review_gate_fixture(|_| {
+            Box::new(MockLLMClient::with_response(
+                r#"{"verdict":"APPROVED","fix_instructions":""}"#,
+            ))
+        })
+        .await;
+        let commit_hash = fixture.event.commit_hash.clone().unwrap();
+        let commit_message = fixture.event.commit_message.clone().unwrap();
+
+        fixture
+            .agent
+            .handle_git_terminal_completed(
+                &fixture.event.terminal_id,
+                &fixture.event.task_id,
+                &commit_hash,
+                &commit_message,
+            )
+            .await
+            .unwrap();
+
+        let terminal =
+            db::models::Terminal::find_by_id(&fixture.db.pool, &fixture.event.terminal_id)
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            terminal.last_commit_hash.as_deref(),
+            Some(commit_hash.as_str())
+        );
+        assert_eq!(
+            terminal.last_commit_message.as_deref(),
+            Some(commit_message.as_str())
+        );
     }
 
     #[tokio::test]

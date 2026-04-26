@@ -2,17 +2,22 @@
 //!
 //! Runs all language-agnostic quality rules (duplication, secret detection, etc.)
 
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+    time::Instant,
+};
+
 use async_trait::async_trait;
-use std::path::Path;
-use std::time::Instant;
 use tracing::{debug, warn};
 
-use crate::analysis;
-use crate::gate::result::MeasureValue;
-use crate::metrics::MetricKey;
-use crate::provider::{ProviderReport, QualityProvider};
-use crate::rules::common::all_common_rules;
-use crate::rules::{CommonAnalysisContext, RuleConfig};
+use crate::{
+    analysis,
+    gate::result::MeasureValue,
+    metrics::MetricKey,
+    provider::{ProviderReport, QualityProvider},
+    rules::{CommonAnalysisContext, RuleConfig, common::all_common_rules},
+};
 
 /// Built-in common (language-agnostic) quality provider
 ///
@@ -24,6 +29,32 @@ pub struct BuiltinCommonProvider;
 /// Combined filter: accepts Rust and TS/JS source files.
 fn is_rust_or_ts_file(p: &Path) -> bool {
     analysis::is_rust_file(p) || analysis::is_ts_file(p)
+}
+
+fn files_for_scope(project_root: &Path, changed_files: Option<&[String]>) -> Vec<PathBuf> {
+    match changed_files {
+        Some(files) => files
+            .iter()
+            .filter_map(|file| changed_file_path(project_root, file))
+            .filter(|path| path.is_file() && is_rust_or_ts_file(path))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        None => analysis::collect_files(project_root, is_rust_or_ts_file),
+    }
+}
+
+fn changed_file_path(project_root: &Path, file: &str) -> Option<PathBuf> {
+    let trimmed = file.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(trimmed);
+    if path.is_absolute() {
+        Some(path)
+    } else {
+        Some(project_root.join(trimmed))
+    }
 }
 
 #[async_trait]
@@ -44,12 +75,12 @@ impl QualityProvider for BuiltinCommonProvider {
         &self,
         project_root: &Path,
         _discovery: &crate::discovery::RepositoryDiscovery,
-        _changed_files: Option<&[String]>,
+        changed_files: Option<&[String]>,
     ) -> anyhow::Result<ProviderReport> {
         let start = Instant::now();
         debug!("builtin-common: starting analysis");
 
-        let files = analysis::collect_files(project_root, is_rust_or_ts_file);
+        let files = files_for_scope(project_root, changed_files);
         debug!("builtin-common: collected {} source files", files.len());
 
         let rules = all_common_rules();
@@ -60,7 +91,11 @@ impl QualityProvider for BuiltinCommonProvider {
             let bytes = match std::fs::read(file_path) {
                 Ok(b) => b,
                 Err(e) => {
-                    warn!("builtin-common: failed to read {}: {}", file_path.display(), e);
+                    warn!(
+                        "builtin-common: failed to read {}: {}",
+                        file_path.display(),
+                        e
+                    );
                     continue;
                 }
             };
@@ -117,11 +152,101 @@ impl QualityProvider for BuiltinCommonProvider {
         );
 
         let report = ProviderReport::success("builtin-common", duration_ms)
-            .with_metric(MetricKey::BuiltinCommonIssues, MeasureValue::Int(total_issues))
-            .with_metric(MetricKey::DuplicatedBlocks, MeasureValue::Int(duplicated_blocks))
-            .with_metric(MetricKey::SecretsDetected, MeasureValue::Int(secrets_detected))
+            .with_metric(
+                MetricKey::BuiltinCommonIssues,
+                MeasureValue::Int(total_issues),
+            )
+            .with_metric(
+                MetricKey::DuplicatedBlocks,
+                MeasureValue::Int(duplicated_blocks),
+            )
+            .with_metric(
+                MetricKey::SecretsDetected,
+                MeasureValue::Int(secrets_detected),
+            )
             .with_issues(all_issues);
 
         Ok(report)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::discovery::RepositoryDiscovery;
+
+    fn temp_root() -> PathBuf {
+        let root = std::env::temp_dir().join(format!("builtin-common-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("src")).expect("temp src dir");
+        root
+    }
+
+    #[tokio::test]
+    async fn changed_files_scope_does_not_scan_unrelated_secret_files() {
+        let root = temp_root();
+        fs::write(
+            root.join("src").join("config.ts"),
+            r#"password = "super_secret_value_here";"#,
+        )
+        .expect("secret file");
+        fs::write(
+            root.join("src").join("clean.ts"),
+            "export const ok = true;\n",
+        )
+        .expect("clean file");
+
+        let discovery = RepositoryDiscovery::discover(&root).expect("discovery");
+        let provider = BuiltinCommonProvider;
+        let changed_files = vec!["src/clean.ts".to_string()];
+        let report = provider
+            .analyze(&root, &discovery, Some(&changed_files))
+            .await
+            .expect("provider report");
+
+        assert!(
+            report
+                .issues
+                .iter()
+                .all(|issue| issue.rule_id != "common:secret-detection"),
+            "Unchanged secret-looking files must stay out of IntroducedOnly scope"
+        );
+        assert_eq!(
+            report.metrics.get(&MetricKey::SecretsDetected),
+            Some(&MeasureValue::Int(0))
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn changed_files_scope_still_reports_changed_secret_files() {
+        let root = temp_root();
+        fs::write(
+            root.join("src").join("config.ts"),
+            r#"password = "super_secret_value_here";"#,
+        )
+        .expect("secret file");
+
+        let discovery = RepositoryDiscovery::discover(&root).expect("discovery");
+        let provider = BuiltinCommonProvider;
+        let changed_files = vec!["src/config.ts".to_string()];
+        let report = provider
+            .analyze(&root, &discovery, Some(&changed_files))
+            .await
+            .expect("provider report");
+
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|issue| issue.rule_id == "common:secret-detection"),
+            "Changed source files must still report production-looking secrets"
+        );
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

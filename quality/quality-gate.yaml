@@ -50,6 +50,16 @@ terminal_gate:
     - metric: test_file_absence
       operator: "GT"
       threshold: "0"
+    - metric: stub_test_count
+      operator: "GT"
+      threshold: "0"
+    - metric: coverage_exclusion_issues
+      operator: "GT"
+      threshold: "0"
+    # Security: block known ReDoS patterns immediately
+    - metric: redos_risks
+      operator: "GT"
+      threshold: "0"
 
 # ── 分支级质量门 ──
 # 触发时机: 任务最后一个终端通过后
@@ -104,9 +114,18 @@ branch_gate:
     - metric: test_file_absence
       operator: "GT"
       threshold: "0"
+    - metric: stub_test_count
+      operator: "GT"
+      threshold: "0"
+    - metric: coverage_exclusion_issues
+      operator: "GT"
+      threshold: "0"
     - metric: todo_density
       operator: "GT"
       threshold: "5"
+    - metric: redos_risks
+      operator: "GT"
+      threshold: "0"
 
 # ── 仓库级质量门 ──
 # 触发时机: 合并主分支前 / GitHub Actions
@@ -168,9 +187,18 @@ repo_gate:
     - metric: test_file_absence
       operator: "GT"
       threshold: "0"
+    - metric: stub_test_count
+      operator: "GT"
+      threshold: "0"
+    - metric: coverage_exclusion_issues
+      operator: "GT"
+      threshold: "0"
     - metric: todo_density
       operator: "GT"
       threshold: "3"
+    - metric: redos_risks
+      operator: "GT"
+      threshold: "0"
 
 # ── Provider 启用/禁用 ──
 providers:

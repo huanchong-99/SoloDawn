@@ -2,17 +2,20 @@
 
 use regex::Regex;
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{CommonAnalysisContext, CommonRule, Rule};
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{CommonAnalysisContext, CommonRule, Rule},
+};
 
 /// Detects potential secrets, API keys, tokens, and passwords in source code.
 ///
 /// Scans text files line by line for common secret patterns such as AWS keys,
 /// API keys, passwords, private keys, GitHub tokens, Slack tokens, Google API keys,
 /// Stripe keys, database connection strings, npm tokens, and generic hex tokens.
-/// Files named `.env.example` and lines containing `TODO`, `placeholder`, `example`,
-/// `dummy`, `mock`, `fake`, `changeme`, or `your-key-here` are skipped.
+/// Files named `.env.example`, test/fixture paths, and lines containing `TODO`,
+/// `placeholder`, `example`, `dummy`, `mock`, `fake`, `changeme`, or `your-key-here`
+/// are skipped.
 #[derive(Debug)]
 pub struct SecretDetectionRule {
     patterns: Vec<SecretPattern>,
@@ -77,10 +80,8 @@ impl Default for SecretDetectionRule {
             },
             SecretPattern {
                 name: "Unquoted Secret Assignment",
-                regex: Regex::new(
-                    r#"(?i)(password|secret|token|api_key)\s*=\s*[^\s'"]{8,}"#,
-                )
-                .unwrap(),
+                regex: Regex::new(r#"(?i)(password|secret|token|api_key)\s*=\s*[^\s'"]{8,}"#)
+                    .unwrap(),
             },
         ];
 
@@ -120,6 +121,9 @@ impl CommonRule for SecretDetectionRule {
 
         // Skip .env.example files
         if ctx.file_path.ends_with(".env.example") {
+            return Vec::new();
+        }
+        if is_test_or_fixture_path(ctx.file_path) {
             return Vec::new();
         }
 
@@ -170,6 +174,33 @@ impl CommonRule for SecretDetectionRule {
     }
 }
 
+fn is_test_or_fixture_path(file_path: &str) -> bool {
+    let normalized = file_path.replace('\\', "/").to_ascii_lowercase();
+    let segments: Vec<&str> = normalized.split('/').collect();
+    if segments.iter().any(|segment| {
+        matches!(
+            *segment,
+            "test" | "tests" | "__tests__" | "fixture" | "fixtures" | "mock" | "mocks"
+        )
+    }) {
+        return true;
+    }
+
+    let Some(file_name) = segments.last() else {
+        return false;
+    };
+
+    file_name.ends_with("_test.rs")
+        || file_name.ends_with(".test.ts")
+        || file_name.ends_with(".test.tsx")
+        || file_name.ends_with(".test.js")
+        || file_name.ends_with(".test.jsx")
+        || file_name.ends_with(".spec.ts")
+        || file_name.ends_with(".spec.tsx")
+        || file_name.ends_with(".spec.js")
+        || file_name.ends_with(".spec.jsx")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,7 +239,11 @@ password = "super_secret_value_here"
 token = "mytoken12345678"
 "#;
         let issues = analyze_text("app.py", content);
-        assert!(issues.len() >= 3, "Expected at least 3 issues, got {}", issues.len());
+        assert!(
+            issues.len() >= 3,
+            "Expected at least 3 issues, got {}",
+            issues.len()
+        );
     }
 
     #[test]
@@ -234,6 +269,36 @@ token = "mytoken12345678"
         let content = "api_key = \"abcdefghij1234567890\"\n";
         let issues = analyze_text(".env.example", content);
         assert!(issues.is_empty(), "Should skip .env.example files");
+    }
+
+    #[test]
+    fn skips_test_and_fixture_paths() {
+        let content = r#"
+password = "super_secret_value_here"
+token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+"#;
+        for path in [
+            "tests/auth.test.ts",
+            "src/__tests__/auth.spec.ts",
+            "src/fixtures/tokens.ts",
+            "src/auth_test.rs",
+            r"src\mocks\tokens.ts",
+        ] {
+            let issues = analyze_text(path, content);
+            assert!(issues.is_empty(), "Should skip test fixture path {path}");
+        }
+    }
+
+    #[test]
+    fn still_detects_same_secret_in_source_files() {
+        let content = r#"password = "super_secret_value_here""#;
+        let issues = analyze_text("src/config.ts", content);
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.message.contains("Generic Secret/Password/Token")),
+            "Source files must still report production-looking secrets"
+        );
     }
 
     #[test]

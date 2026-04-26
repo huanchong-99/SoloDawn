@@ -465,6 +465,66 @@ impl Terminal {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Count terminal rows that currently occupy a process launch slot.
+    ///
+    /// These states represent either an already spawned PTY or a row that has
+    /// reserved a slot immediately before spawn. Completed/rejected/cancelled
+    /// states intentionally do not count so a finished terminal releases
+    /// capacity for queued work.
+    pub async fn count_active_launch_slots(pool: &SqlitePool) -> sqlx::Result<i64> {
+        sqlx::query_scalar::<_, i64>(
+            r"
+            SELECT COUNT(*)
+            FROM terminal
+            WHERE status IN ('starting', 'waiting', 'working', 'quality_pending')
+            ",
+        )
+        .fetch_one(pool)
+        .await
+    }
+
+    /// CAS terminal to `starting` only when the global launch-slot cap allows it.
+    ///
+    /// The current row is excluded from the count so stale `waiting` rows can be
+    /// relaunched without consuming two slots. This is the single database guard
+    /// used by both HTTP prepare and runtime StartTerminal paths.
+    pub async fn try_set_starting_with_global_limit(
+        pool: &SqlitePool,
+        id: &str,
+        max_concurrent_terminals: usize,
+    ) -> sqlx::Result<bool> {
+        if max_concurrent_terminals == 0 {
+            return Ok(false);
+        }
+
+        let max_concurrent = i64::try_from(max_concurrent_terminals).unwrap_or(i64::MAX);
+        let now = Utc::now();
+        let status = TerminalStatus::Starting.to_string();
+        let result = sqlx::query(
+            r"
+            UPDATE terminal
+            SET status = ?, updated_at = ?
+            WHERE id = ?
+              AND status IN ('not_started', 'failed', 'cancelled', 'waiting')
+              AND (
+                SELECT COUNT(*)
+                FROM terminal
+                WHERE id != ?
+                  AND status IN ('starting', 'waiting', 'working', 'quality_pending')
+              ) < ?
+            ",
+        )
+        .bind(status)
+        .bind(now)
+        .bind(id)
+        .bind(id)
+        .bind(max_concurrent)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Set terminal to waiting status (CAS: only from `starting`).
     ///
     /// Returns `true` when the transition succeeds, `false` when the terminal
@@ -661,6 +721,18 @@ impl TerminalLog {
         .execute(pool)
         .await?;
         Ok(result.rows_affected())
+    }
+
+    /// Best-effort database maintenance after bulk terminal-log deletion.
+    ///
+    /// Deleting old logs frees rows, but SQLite WAL files may keep disk pressure high
+    /// until a checkpoint runs. Callers should treat failures as non-fatal.
+    pub async fn checkpoint_after_cleanup(pool: &SqlitePool) -> sqlx::Result<()> {
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(pool)
+            .await?;
+        sqlx::query("PRAGMA optimize").execute(pool).await?;
+        Ok(())
     }
 }
 
@@ -1076,10 +1148,9 @@ mod tests {
             .await
             .unwrap();
 
-        let transitioned =
-            Terminal::set_completed_cas(&pool, "term-cas-2", "working", "completed")
-                .await
-                .unwrap();
+        let transitioned = Terminal::set_completed_cas(&pool, "term-cas-2", "working", "completed")
+            .await
+            .unwrap();
         assert!(transitioned);
 
         let status: String = sqlx::query_scalar("SELECT status FROM terminal WHERE id = ?1")
@@ -1089,12 +1160,13 @@ mod tests {
             .unwrap();
         assert_eq!(status, "completed");
 
-        let completed_exists: i64 =
-            sqlx::query_scalar("SELECT CASE WHEN completed_at IS NULL THEN 0 ELSE 1 END FROM terminal WHERE id = ?1")
-                .bind("term-cas-2")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let completed_exists: i64 = sqlx::query_scalar(
+            "SELECT CASE WHEN completed_at IS NULL THEN 0 ELSE 1 END FROM terminal WHERE id = ?1",
+        )
+        .bind("term-cas-2")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(completed_exists, 1);
 
         let cas_miss = Terminal::set_completed_cas(&pool, "term-cas-2", "working", "failed")
@@ -1154,11 +1226,12 @@ mod tests {
                 .unwrap();
         assert!(!finalized_skip);
 
-        let completed_stays: String = sqlx::query_scalar("SELECT status FROM terminal WHERE id = ?1")
-            .bind("term-fallback-2")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let completed_stays: String =
+            sqlx::query_scalar("SELECT status FROM terminal WHERE id = ?1")
+                .bind("term-fallback-2")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(completed_stays, "completed");
 
         sqlx::query("INSERT INTO terminal (id, status, completed_at) VALUES (?1, ?2, NULL)")
@@ -1174,11 +1247,12 @@ mod tests {
                 .unwrap();
         assert!(!cancelled_skip);
 
-        let cancelled_stays: String = sqlx::query_scalar("SELECT status FROM terminal WHERE id = ?1")
-            .bind("term-fallback-3")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let cancelled_stays: String =
+            sqlx::query_scalar("SELECT status FROM terminal WHERE id = ?1")
+                .bind("term-fallback-3")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(cancelled_stays, "cancelled");
     }
 }

@@ -63,6 +63,8 @@ const LOGGER_SHUTDOWN_TIMEOUT_SECS: u64 = 2;
 const LOGGER_TASK_SHUTDOWN_TIMEOUT_SECS: u64 = LOGGER_SHUTDOWN_TIMEOUT_SECS * 2;
 /// SQLite error code for FOREIGN KEY constraint failed.
 const SQLITE_FOREIGN_KEY_CONSTRAINT_CODE: &str = "787";
+/// SQLite extended error code observed for disk I/O failures under log bloat.
+const SQLITE_DISK_IO_ERROR_CODE: &str = "778";
 
 // ============================================================================
 // Spawn Configuration (Process Isolation)
@@ -425,8 +427,9 @@ impl ProcessManager {
             return;
         };
 
-        if let Ok(join_result) = tokio::time::timeout(Duration::from_secs(READER_SHUTDOWN_TIMEOUT_SECS), &mut task)
-            .await {
+        if let Ok(join_result) =
+            tokio::time::timeout(Duration::from_secs(READER_SHUTDOWN_TIMEOUT_SECS), &mut task).await
+        {
             if let Err(e) = join_result {
                 tracing::warn!(
                     terminal_id = %terminal_id,
@@ -461,7 +464,8 @@ impl ProcessManager {
             Duration::from_secs(LOGGER_TASK_SHUTDOWN_TIMEOUT_SECS),
             &mut task,
         )
-        .await {
+        .await
+        {
             if let Err(e) = join_result {
                 tracing::warn!(
                     terminal_id = %terminal_id,
@@ -879,7 +883,9 @@ impl ProcessManager {
                 }
 
                 Ok(())
-            }).await.map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))??;
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))??;
         }
 
         Ok(())
@@ -1174,7 +1180,9 @@ impl ProcessManager {
 
         let (existing_shutdown, existing_task) = {
             let mut processes = self.processes.write().await;
-            let tracked = if let Some(tracked) = processes.get_mut(terminal_id) { tracked } else {
+            let tracked = if let Some(tracked) = processes.get_mut(terminal_id) {
+                tracked
+            } else {
                 drop(processes);
                 Self::stop_logger_task_gracefully(
                     terminal_id,
@@ -1214,7 +1222,9 @@ impl Drop for ProcessManager {
         let processes = match self.processes.try_read() {
             Ok(guard) => guard,
             Err(_) => {
-                tracing::warn!("ProcessManager dropped while processes lock is held; skipping cleanup");
+                tracing::warn!(
+                    "ProcessManager dropped while processes lock is held; skipping cleanup"
+                );
                 return;
             }
         };
@@ -1224,7 +1234,10 @@ impl Drop for ProcessManager {
                 if pid > 0 {
                     #[cfg(unix)]
                     {
-                        use nix::{sys::signal::{self, Signal}, unistd::Pid};
+                        use nix::{
+                            sys::signal::{self, Signal},
+                            unistd::Pid,
+                        };
                         let _ = signal::kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
                     }
                     #[cfg(windows)]
@@ -1423,6 +1436,49 @@ impl TerminalLogger {
                 }
                 return Ok(());
             }
+            if Self::is_sqlite_disk_io_error(&error) {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    log_type = %log_type,
+                    entries = entries.len(),
+                    error = %error,
+                    "Terminal logger hit SQLite disk I/O error; cleaning finished workflow logs before one retry"
+                );
+                match db::models::terminal::TerminalLog::cleanup_finished_workflow_logs(&db.pool)
+                    .await
+                {
+                    Ok(deleted) => {
+                        tracing::info!(
+                            terminal_id = %terminal_id,
+                            deleted,
+                            "Cleaned terminal logs for finished workflows after SQLite disk I/O error"
+                        );
+                        if deleted > 0
+                            && let Err(checkpoint_error) =
+                                db::models::terminal::TerminalLog::checkpoint_after_cleanup(
+                                    &db.pool,
+                                )
+                                .await
+                        {
+                            tracing::warn!(
+                                terminal_id = %terminal_id,
+                                error = %checkpoint_error,
+                                "SQLite checkpoint after terminal-log cleanup failed"
+                            );
+                        }
+                    }
+                    Err(cleanup_error) => {
+                        tracing::warn!(
+                            terminal_id = %terminal_id,
+                            error = %cleanup_error,
+                            "Failed to clean finished workflow logs after SQLite disk I/O error"
+                        );
+                    }
+                }
+
+                Self::persist_entries(db, terminal_id, log_type, &entries).await?;
+                return Ok(());
+            }
             return Err(error);
         }
 
@@ -1560,8 +1616,9 @@ impl TerminalLogger {
             return;
         };
 
-        if let Ok(join_result) = tokio::time::timeout(Duration::from_secs(LOGGER_SHUTDOWN_TIMEOUT_SECS), &mut task)
-            .await {
+        if let Ok(join_result) =
+            tokio::time::timeout(Duration::from_secs(LOGGER_SHUTDOWN_TIMEOUT_SECS), &mut task).await
+        {
             if let Err(e) = join_result {
                 tracing::warn!(
                     terminal_id = %self.terminal_id,
@@ -1590,7 +1647,8 @@ impl TerminalLogger {
             let mut buffer = self.buffer.write().await;
             let line_bytes = line.len();
             buffer.push(line.to_string());
-            let current_bytes = self.buffer_bytes.fetch_add(line_bytes, Ordering::Relaxed) + line_bytes;
+            let current_bytes =
+                self.buffer_bytes.fetch_add(line_bytes, Ordering::Relaxed) + line_bytes;
             // [G09-006] Flush when entry count OR byte size exceeds limits
             buffer.len() >= self.max_buffer_size || current_bytes >= MAX_BUFFER_BYTES
         };
@@ -1641,6 +1699,24 @@ impl TerminalLogger {
                             .message()
                             .to_ascii_lowercase()
                             .contains("foreign key constraint failed")
+                }
+                _ => false,
+            }
+        })
+    }
+
+    fn is_sqlite_disk_io_error(error: &anyhow::Error) -> bool {
+        error.chain().any(|cause| {
+            let Some(sqlx_error) = cause.downcast_ref::<sqlx::Error>() else {
+                return false;
+            };
+            match sqlx_error {
+                sqlx::Error::Database(db_error) => {
+                    db_error.code().as_deref() == Some(SQLITE_DISK_IO_ERROR_CODE)
+                        || db_error
+                            .message()
+                            .to_ascii_lowercase()
+                            .contains("disk i/o error")
                 }
                 _ => false,
             }

@@ -289,9 +289,7 @@ impl GitWatcher {
         // restart get permanently skipped.
         let cursor_preseeded = { self.last_commit_hash.lock().await.is_some() };
         if cursor_preseeded {
-            tracing::info!(
-                "GitWatcher using pre-seeded cursor (skipping HEAD initialization)"
-            );
+            tracing::info!("GitWatcher using pre-seeded cursor (skipping HEAD initialization)");
         } else if let Ok(initial_commit) = self.get_latest_commit(&repo_path).await {
             {
                 let mut hash = self.last_commit_hash.lock().await;
@@ -381,11 +379,11 @@ impl GitWatcher {
     ) -> Result<Vec<ParsedCommit>> {
         use tokio::process::Command;
 
-        // G10-004: Use `--all` so that commits on non-HEAD branches (e.g. during a
-        // fast-forward push or after a detached-HEAD checkout) are not missed.
-        // We pair `--all` with a branch-name filter derived from the worktree's
-        // current HEAD so that only commits reachable from the task branch are
-        // returned, avoiding cross-workflow contamination from unrelated branches.
+        const MAX_NEW_COMMITS_PER_POLL: &str = "128";
+
+        // Keep polling bounded to the current worktree branch. Older test runs can
+        // leave many local branches behind; `git log --branches --not <last>` then
+        // walks unrelated history and has caused Windows git subprocess OOM.
         //
         // Revision range logic:
         //   - With a known last commit: `<last>..<head_branch>` limits results to
@@ -393,20 +391,25 @@ impl GitWatcher {
         //   - Without a known last commit: retrieve only the single latest commit
         //     on the current HEAD to seed the cursor without replaying history.
         //   - If head_branch cannot be determined, fall back to "HEAD" so git log
-        //     still works (the --all flag ensures reachability from HEAD as well).
+        //     still works without scanning all local branches.
         let head_branch = self.get_head_branch(repo_path).await;
-        let branch_ref = if head_branch == "unknown" { "HEAD" } else { &head_branch };
+        let branch_ref = if head_branch == "unknown" {
+            "HEAD"
+        } else {
+            &head_branch
+        };
 
         let mut cmd = Command::new("git");
-        cmd.current_dir(repo_path)
-            .args(["log", "--branches", "--format=%H", "--reverse"]);
+        cmd.current_dir(repo_path).args([
+            "log",
+            "--format=%H",
+            "--reverse",
+            "--max-count",
+            MAX_NEW_COMMITS_PER_POLL,
+        ]);
 
         if let Some(last_hash) = last_seen {
-            // Use --not <last_hash> to exclude already-seen commits and their ancestors.
-            // Combined with --branches (local branches only, excluding remote tracking refs),
-            // this finds new commits on ANY local task branch without replaying old history
-            // from remote tracking branches (remotes/origin/develop, etc.).
-            cmd.args(["--not", last_hash]);
+            cmd.arg(format!("{last_hash}..{branch_ref}"));
         } else {
             // No cursor yet: just grab the most recent commit on the current branch
             // to initialize the cursor without replaying entire history.
@@ -514,7 +517,11 @@ impl GitWatcher {
                     .lines()
                     .find_map(|line| {
                         let stripped = line.trim().strip_prefix("* ").unwrap_or(line.trim());
-                        if stripped.is_empty() { None } else { Some(stripped.to_string()) }
+                        if stripped.is_empty() {
+                            None
+                        } else {
+                            Some(stripped.to_string())
+                        }
                     })
                     .unwrap_or_else(|| {
                         // Commit not yet reachable from any local branch (e.g. detached HEAD);
@@ -565,9 +572,7 @@ impl GitWatcher {
             .output()
             .await;
         match out {
-            Ok(o) if o.status.success() => {
-                String::from_utf8_lossy(&o.stdout).trim().to_string()
-            }
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
             _ => {
                 tracing::warn!(
                     "Failed to determine HEAD branch from {}",
@@ -597,7 +602,9 @@ impl GitWatcher {
     /// commit through two independent code paths.
     async fn handle_new_commit(&self, commit: ParsedCommit) -> Result<()> {
         // Check if commit has metadata
-        let metadata = if let Some(m) = commit.metadata { m } else {
+        let metadata = if let Some(m) = commit.metadata {
+            m
+        } else {
             // No metadata - publish GitEvent to wake up orchestrator
             let Some(workflow_id) = self.workflow_id.as_deref() else {
                 tracing::debug!(
@@ -1048,11 +1055,8 @@ next_action: continue";
             .expect("create mock git repo should succeed");
 
         let message_bus = MessageBus::new(16);
-        let watcher = GitWatcher::new(
-            GitWatcherConfig::new(repo_path.clone(), 100),
-            message_bus,
-        )
-        .expect("watcher should be created");
+        let watcher = GitWatcher::new(GitWatcherConfig::new(repo_path.clone(), 100), message_bus)
+            .expect("watcher should be created");
 
         assert!(
             watcher.last_commit_hash.lock().await.is_none(),

@@ -19,6 +19,21 @@ pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 300;
 pub const DEFAULT_MAX_RETRIES: u32 = 3;
 pub const DEFAULT_RETRY_DELAY_MS: u64 = 1000;
 pub const DEFAULT_LLM_RATE_LIMIT_PER_SECOND: u32 = 10;
+pub const DEFAULT_MAX_CONCURRENT_TERMINALS: usize = 4;
+pub const MAX_CONCURRENT_TERMINALS_ENV: &str = "SOLODAWN_MAX_CONCURRENT_TERMINALS";
+
+/// Resolve the process-level terminal concurrency cap.
+///
+/// The default is intentionally conservative for Windows/WebView hosts: the
+/// bottleneck is process fan-out, not memory. Invalid values fail closed to the
+/// default instead of disabling the cap.
+pub fn configured_max_concurrent_terminals() -> usize {
+    std::env::var(MAX_CONCURRENT_TERMINALS_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_MAX_CONCURRENT_TERMINALS)
+}
 
 /// Terminal status values
 pub const TERMINAL_STATUS_NOT_STARTED: &str = "not_started";
@@ -151,16 +166,17 @@ Before committing, verify each item by actually running the command:\n\
 
 /// Scoped quality requirements for existing-codebase workflows.
 ///
-/// This keeps incremental tasks focused on the requested change. Full project
-/// artifacts (Docker/CI/README) are only required when the task explicitly asks
-/// for them or when the workflow strategy is full-delivery.
+/// This keeps incremental tasks focused on the requested change while still
+/// allowing small, score-critical handoff artifacts when the existing repo lacks
+/// them. The boundary is "minimal delivery readiness", not unrelated churn.
 pub const QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX: &str = "\n\n---\n\
 ## MANDATORY QUALITY STANDARDS (Existing Codebase)\n\
 \n\
 ### 1. Preserve Existing Behavior\n\
 - Follow the repository's current architecture, scripts, naming, and test style\n\
 - Keep the change scoped to the requested task\n\
-- Do NOT add or rewrite Docker, CI, README, or deployment files unless the task explicitly requires it\n\
+- Do not rewrite existing Docker, CI, README, or deployment files without a task reason\n\
+- If a score-critical handoff artifact is missing and fits the repo type, add the smallest non-invasive version: setup notes, CI for requested checks, .env.example for new env vars, or a minimal Dockerfile for server apps\n\
 \n\
 Think: \"Did I solve the requested problem without expanding the project's surface area?\"\n\
 \n\
@@ -169,6 +185,8 @@ Think: \"Did I solve the requested problem without expanding the project's surfa
 - Fix all errors introduced by your changes\n\
 - If the repository already has unrelated failures, document them in the commit notes instead of broadening scope\n\
 - Add or update tests for new or modified logic\n\
+- Tests must assert real behavior; never use placeholder tests such as expect(true).toBe(true)\n\
+- Coverage configuration must measure changed core layers; do not exclude services, controllers, routes, models, repositories, or middleware to inflate coverage\n\
 \n\
 Think: \"Can reviewers tell which checks cover my exact change?\"\n\
 \n\
@@ -176,10 +194,13 @@ Think: \"Can reviewers tell which checks cover my exact change?\"\n\
 - Do not introduce hardcoded secrets, weak defaults, or unsafe fallback credentials\n\
 - Validate new external inputs and preserve existing public APIs unless the task requires a breaking change\n\
 - New environment variables must be documented in the existing env/example mechanism\n\
+- Avoid ReDoS-prone regular expressions; do not use nested quantifiers on user-controlled input\n\
 \n\
 ### SELF-VERIFICATION CHECKLIST (run before your final commit)\n\
 [ ] Existing project checks relevant to my changed code pass, or pre-existing failures are clearly identified\n\
 [ ] New/modified behavior has tests\n\
+[ ] Missing score-critical handoff artifacts are present or explicitly not applicable\n\
+[ ] Tests assert behavior and coverage does not exclude changed core layers\n\
 [ ] No unrelated infrastructure/documentation churn\n\
 [ ] No new secrets or weak defaults";
 
@@ -213,6 +234,11 @@ mod tests {
     #[test]
     fn test_startable_terminal_statuses() {
         assert_eq!(STARTABLE_TERMINAL_STATUSES, &[TERMINAL_STATUS_WAITING]);
+    }
+
+    #[test]
+    fn test_terminal_concurrency_default_is_conservative() {
+        assert_eq!(DEFAULT_MAX_CONCURRENT_TERMINALS, 4);
     }
 
     #[test]
@@ -273,8 +299,11 @@ mod tests {
     #[test]
     fn incremental_quality_suffix_avoids_greenfield_artifact_churn() {
         assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("Existing Codebase"));
-        assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("Do NOT add or rewrite Docker"));
+        assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("smallest non-invasive"));
+        assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("minimal Dockerfile"));
         assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("pre-existing failures"));
+        assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("expect(true).toBe(true)"));
+        assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("ReDoS"));
         assert!(QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX.contains("No unrelated infrastructure"));
     }
 
