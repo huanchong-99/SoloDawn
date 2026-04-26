@@ -120,11 +120,9 @@ impl ConciergeSession {
     }
 
     pub async fn list_all(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
-        sqlx::query_as::<_, Self>(
-            "SELECT * FROM concierge_session ORDER BY updated_at DESC",
-        )
-        .fetch_all(pool)
-        .await
+        sqlx::query_as::<_, Self>("SELECT * FROM concierge_session ORDER BY updated_at DESC")
+            .fetch_all(pool)
+            .await
     }
 
     /// Find the session bound to a specific channel (e.g. feishu chat_id).
@@ -597,10 +595,7 @@ impl ConciergeMessage {
         Ok(())
     }
 
-    pub async fn list_by_session(
-        pool: &SqlitePool,
-        session_id: &str,
-    ) -> sqlx::Result<Vec<Self>> {
+    pub async fn list_by_session(pool: &SqlitePool, session_id: &str) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, Self>(
             "SELECT * FROM concierge_message WHERE session_id = ?1 ORDER BY created_at ASC, id ASC",
         )

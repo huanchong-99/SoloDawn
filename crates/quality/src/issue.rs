@@ -171,10 +171,7 @@ impl QualityIssue {
 
     /// 生成终端回流用的结构化修复描述
     pub fn to_fix_instruction(&self) -> String {
-        let mut instruction = format!(
-            "[{}] {} ({})\n",
-            self.severity, self.message, self.rule_id
-        );
+        let mut instruction = format!("[{}] {} ({})\n", self.severity, self.message, self.rule_id);
         if let Some(ref path) = self.file_path {
             instruction.push_str(&format!("  File: {}", path));
             if let Some(line) = self.line {
@@ -205,7 +202,10 @@ pub struct IssueSummary {
 impl IssueSummary {
     /// 从问题列表生成摘要
     pub fn from_issues(issues: &[QualityIssue]) -> Self {
-        let mut summary = Self { total: issues.len(), ..Self::default() };
+        let mut summary = Self {
+            total: issues.len(),
+            ..Self::default()
+        };
         for issue in issues {
             match issue.severity {
                 Severity::Blocker => summary.blocker += 1,
@@ -228,8 +228,14 @@ impl IssueSummary {
     pub fn one_line_summary(&self) -> String {
         format!(
             "{} issues ({} blocker, {} critical, {} major, {} minor, {} info) | {} new | {} blocking",
-            self.total, self.blocker, self.critical, self.major, self.minor, self.info,
-            self.new_issues, self.blocking_issues
+            self.total,
+            self.blocker,
+            self.critical,
+            self.major,
+            self.minor,
+            self.info,
+            self.new_issues,
+            self.blocking_issues
         )
     }
 }

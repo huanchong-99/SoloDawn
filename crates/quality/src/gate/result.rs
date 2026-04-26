@@ -2,8 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::gate::status::Level;
-use crate::metrics::MetricKey;
+use crate::{gate::status::Level, metrics::MetricKey};
 
 /// 度量值（统一的可比较值类型）
 ///
@@ -97,7 +96,11 @@ impl EvaluationResult {
     }
 
     /// 创建 WARN 结果
-    pub fn warn(metric: MetricKey, value: Option<MeasureValue>, message: impl Into<String>) -> Self {
+    pub fn warn(
+        metric: MetricKey,
+        value: Option<MeasureValue>,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             level: Level::Warn,
             metric,

@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
+use db::models::concierge::{ConciergeMessage, ConciergeSession};
 use sqlx::SqlitePool;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing;
 
 use super::sync::{ConciergeBroadcaster, ConciergeEvent};
-use db::models::concierge::{ConciergeMessage, ConciergeSession};
 
 /// Classify bus messages into notification categories for toggle filtering.
 enum NotificationKind {

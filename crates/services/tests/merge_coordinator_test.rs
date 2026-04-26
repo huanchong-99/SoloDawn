@@ -4,10 +4,7 @@
 
 use std::sync::Arc;
 
-use services::{
-    git::GitService,
-    orchestrator::message_bus::MessageBus,
-};
+use services::{git::GitService, orchestrator::message_bus::MessageBus};
 
 #[test]
 fn test_merge_coordinator_creation() {
@@ -29,8 +26,7 @@ fn test_merge_coordinator_struct_fields() {
     // If this compiles, the struct definition is correct
     use db::DBService;
     use services::{
-        merge_coordinator::MergeCoordinator,
-        orchestrator::message_bus::SharedMessageBus,
+        merge_coordinator::MergeCoordinator, orchestrator::message_bus::SharedMessageBus,
     };
 
     // Just verify types line up - won't actually run without DB instance

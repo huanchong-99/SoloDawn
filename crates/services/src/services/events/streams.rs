@@ -55,7 +55,13 @@ impl TaskProjectCache {
 
     fn insert(&self, task_id: Uuid, project_id: Uuid) {
         let mut map = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        map.insert(task_id, CacheEntry { project_id, inserted_at: Instant::now() });
+        map.insert(
+            task_id,
+            CacheEntry {
+                project_id,
+                inserted_at: Instant::now(),
+            },
+        );
     }
 }
 
@@ -65,8 +71,7 @@ impl EventService {
         pool: &sqlx::SqlitePool,
         project_id: Uuid,
     ) -> Result<LogMsg, sqlx::Error> {
-        let tasks =
-            Task::find_by_project_id_with_attempt_status(pool, project_id).await?;
+        let tasks = Task::find_by_project_id_with_attempt_status(pool, project_id).await?;
         let tasks_map: serde_json::Map<String, serde_json::Value> = tasks
             .into_iter()
             .map(|task| {
@@ -101,7 +106,10 @@ impl EventService {
             .map(|task| {
                 let id = task.id.to_string();
                 // G33-010: avoid unwrap
-                (id, serde_json::to_value(&task).unwrap_or(serde_json::Value::Null))
+                (
+                    id,
+                    serde_json::to_value(&task).unwrap_or(serde_json::Value::Null),
+                )
             })
             .collect();
 
@@ -169,13 +177,10 @@ impl EventService {
                                                 path_str.strip_prefix("/tasks/").unwrap_or("");
                                             if let Ok(task_id) = task_id_str.parse::<Uuid>() {
                                                 // Fast path: check the in-memory cache first
-                                                if let Some(cached_project_id) =
-                                                    cache.get(task_id)
+                                                if let Some(cached_project_id) = cache.get(task_id)
                                                 {
                                                     if cached_project_id == project_id {
-                                                        return Some(Ok(LogMsg::JsonPatch(
-                                                            patch,
-                                                        )));
+                                                        return Some(Ok(LogMsg::JsonPatch(patch)));
                                                     }
                                                     // Belongs to a different project
                                                     return None;
@@ -187,9 +192,7 @@ impl EventService {
                                                 {
                                                     if task.project_id == project_id {
                                                         cache.insert(task_id, task.project_id);
-                                                        return Some(Ok(LogMsg::JsonPatch(
-                                                            patch,
-                                                        )));
+                                                        return Some(Ok(LogMsg::JsonPatch(patch)));
                                                     }
                                                 }
                                             }
@@ -219,20 +222,18 @@ impl EventService {
                                         }
                                         RecordTypes::Workspace(workspace) => {
                                             // G33-008: check cache before hitting DB
-                                            let task_pid =
-                                                if let Some(pid) =
-                                                    cache.get(workspace.task_id)
-                                                {
-                                                    Some(pid)
-                                                } else if let Ok(Some(task)) =
-                                                    Task::find_by_id(&db_pool, workspace.task_id)
-                                                        .await
-                                                {
-                                                    cache.insert(workspace.task_id, task.project_id);
-                                                    Some(task.project_id)
-                                                } else {
-                                                    None
-                                                };
+                                            let task_pid = if let Some(pid) =
+                                                cache.get(workspace.task_id)
+                                            {
+                                                Some(pid)
+                                            } else if let Ok(Some(task)) =
+                                                Task::find_by_id(&db_pool, workspace.task_id).await
+                                            {
+                                                cache.insert(workspace.task_id, task.project_id);
+                                                Some(task.project_id)
+                                            } else {
+                                                None
+                                            };
                                             if task_pid == Some(project_id) {
                                                 return Some(Ok(LogMsg::JsonPatch(patch)));
                                             }
@@ -242,18 +243,18 @@ impl EventService {
                                             ..
                                         } => {
                                             // Check if deleted workspace belonged to a task in our project
-                                            let task_pid =
-                                                if let Some(pid) = cache.get(*deleted_task_id) {
-                                                    Some(pid)
-                                                } else if let Ok(Some(task)) =
-                                                    Task::find_by_id(&db_pool, *deleted_task_id)
-                                                        .await
-                                                {
-                                                    cache.insert(*deleted_task_id, task.project_id);
-                                                    Some(task.project_id)
-                                                } else {
-                                                    None
-                                                };
+                                            let task_pid = if let Some(pid) =
+                                                cache.get(*deleted_task_id)
+                                            {
+                                                Some(pid)
+                                            } else if let Ok(Some(task)) =
+                                                Task::find_by_id(&db_pool, *deleted_task_id).await
+                                            {
+                                                cache.insert(*deleted_task_id, task.project_id);
+                                                Some(task.project_id)
+                                            } else {
+                                                None
+                                            };
                                             if task_pid == Some(project_id) {
                                                 return Some(Ok(LogMsg::JsonPatch(patch)));
                                             }
@@ -339,7 +340,8 @@ impl EventService {
                     match msg_result {
                         Ok(LogMsg::JsonPatch(patch)) => {
                             if let Some(patch_op) = patch.0.first()
-                                && (patch_op.path().starts_with("/projects/") || patch_op.path() == "/projects")
+                                && (patch_op.path().starts_with("/projects/")
+                                    || patch_op.path() == "/projects")
                             {
                                 return Some(Ok(LogMsg::JsonPatch(patch)));
                             }
@@ -433,10 +435,10 @@ impl EventService {
             "path": "/execution_processes",
             "value": processes_map
         }]);
-        let initial_msg = LogMsg::JsonPatch(
-            serde_json::from_value(initial_patch)
-                .map_err(|e| EventError::Other(anyhow::anyhow!("execution_processes snapshot: {e}")))?,
-        );
+        let initial_msg =
+            LogMsg::JsonPatch(serde_json::from_value(initial_patch).map_err(|e| {
+                EventError::Other(anyhow::anyhow!("execution_processes snapshot: {e}"))
+            })?);
 
         // G33-003: track process_id → session_id for Remove verification
         let session_ownership_cache: Arc<Mutex<HashMap<Uuid, Uuid>>> =
@@ -467,7 +469,8 @@ impl EventService {
                                             {
                                                 // Populate ownership cache
                                                 {
-                                                    let mut map = ownership.lock()
+                                                    let mut map = ownership
+                                                        .lock()
                                                         .unwrap_or_else(PoisonError::into_inner);
                                                     map.insert(process.id, process.session_id);
                                                 }
@@ -490,7 +493,8 @@ impl EventService {
                                                 && process.session_id == session_id
                                             {
                                                 {
-                                                    let mut map = ownership.lock()
+                                                    let mut map = ownership
+                                                        .lock()
                                                         .unwrap_or_else(PoisonError::into_inner);
                                                     map.insert(process.id, process.session_id);
                                                 }
@@ -513,7 +517,8 @@ impl EventService {
                                             if let Ok(proc_id) = proc_id_str.parse::<Uuid>() {
                                                 // Check in-memory ownership cache first
                                                 let cached_sid = {
-                                                    let map = ownership.lock()
+                                                    let map = ownership
+                                                        .lock()
                                                         .unwrap_or_else(PoisonError::into_inner);
                                                     map.get(&proc_id).copied()
                                                 };
@@ -535,12 +540,18 @@ impl EventService {
                                                             .await
                                                         {
                                                             if proc.session_id == session_id {
-                                                                let mut map = ownership.lock()
-                                                                    .unwrap_or_else(PoisonError::into_inner);
-                                                                map.insert(proc_id, proc.session_id);
-                                                                return Some(Ok(LogMsg::JsonPatch(
-                                                                    patch,
-                                                                )));
+                                                                let mut map = ownership
+                                                                    .lock()
+                                                                    .unwrap_or_else(
+                                                                        PoisonError::into_inner,
+                                                                    );
+                                                                map.insert(
+                                                                    proc_id,
+                                                                    proc.session_id,
+                                                                );
+                                                                return Some(Ok(
+                                                                    LogMsg::JsonPatch(patch),
+                                                                ));
                                                             }
                                                             return None;
                                                         }
@@ -800,90 +811,93 @@ impl EventService {
 
         let db_pool_ws = self.db.pool.clone();
 
-        let filtered_stream = BroadcastStream::new(self.msg_store.get_receiver()).filter_map(
-            move |msg_result| {
+        let filtered_stream =
+            BroadcastStream::new(self.msg_store.get_receiver()).filter_map(move |msg_result| {
                 let db_pool_ws = db_pool_ws.clone();
                 async move {
-                match msg_result {
-                    Ok(LogMsg::JsonPatch(patch)) => {
-                        if let Some(op) = patch.0.first()
-                            && (op.path().starts_with("/workspaces/") || op.path() == "/workspaces")
-                        {
-                            // If archived filter is set, handle state transitions
-                            if let Some(archived_filter) = archived {
-                                // Extract workspace data from Add/Replace operations
-                                let value = match op {
-                                    json_patch::PatchOperation::Add(a) => Some(&a.value),
-                                    json_patch::PatchOperation::Replace(r) => Some(&r.value),
-                                    json_patch::PatchOperation::Remove(_) => {
-                                        // Allow remove operations through - client will handle
-                                        return Some(Ok(LogMsg::JsonPatch(patch)));
-                                    }
-                                    _ => None,
-                                };
-
-                                if let Some(v) = value
-                                    && let Some(ws_archived) =
-                                        v.get("archived").and_then(serde_json::Value::as_bool)
-                                {
-                                    if ws_archived == archived_filter {
-                                        // Workspace matches this filter
-                                        // Convert Replace to Add since workspace may be new to this filtered stream
-                                        if let json_patch::PatchOperation::Replace(r) = op {
-                                            let add_patch = json_patch::Patch(vec![
-                                                json_patch::PatchOperation::Add(
-                                                    json_patch::AddOperation {
-                                                        path: r.path.clone(),
-                                                        value: r.value.clone(),
-                                                    },
-                                                ),
-                                            ]);
-                                            return Some(Ok(LogMsg::JsonPatch(add_patch)));
+                    match msg_result {
+                        Ok(LogMsg::JsonPatch(patch)) => {
+                            if let Some(op) = patch.0.first()
+                                && (op.path().starts_with("/workspaces/")
+                                    || op.path() == "/workspaces")
+                            {
+                                // If archived filter is set, handle state transitions
+                                if let Some(archived_filter) = archived {
+                                    // Extract workspace data from Add/Replace operations
+                                    let value = match op {
+                                        json_patch::PatchOperation::Add(a) => Some(&a.value),
+                                        json_patch::PatchOperation::Replace(r) => Some(&r.value),
+                                        json_patch::PatchOperation::Remove(_) => {
+                                            // Allow remove operations through - client will handle
+                                            return Some(Ok(LogMsg::JsonPatch(patch)));
                                         }
-                                        return Some(Ok(LogMsg::JsonPatch(patch)));
+                                        _ => None,
+                                    };
+
+                                    if let Some(v) = value
+                                        && let Some(ws_archived) =
+                                            v.get("archived").and_then(serde_json::Value::as_bool)
+                                    {
+                                        if ws_archived == archived_filter {
+                                            // Workspace matches this filter
+                                            // Convert Replace to Add since workspace may be new to this filtered stream
+                                            if let json_patch::PatchOperation::Replace(r) = op {
+                                                let add_patch = json_patch::Patch(vec![
+                                                    json_patch::PatchOperation::Add(
+                                                        json_patch::AddOperation {
+                                                            path: r.path.clone(),
+                                                            value: r.value.clone(),
+                                                        },
+                                                    ),
+                                                ]);
+                                                return Some(Ok(LogMsg::JsonPatch(add_patch)));
+                                            }
+                                            return Some(Ok(LogMsg::JsonPatch(patch)));
+                                        }
+                                        // Workspace no longer matches this filter - send remove
+                                        let remove_patch = json_patch::Patch(vec![
+                                            json_patch::PatchOperation::Remove(
+                                                json_patch::RemoveOperation {
+                                                    path: op
+                                                        .path()
+                                                        .to_string()
+                                                        .try_into()
+                                                        .expect("Workspace path should be valid"),
+                                                },
+                                            ),
+                                        ]);
+                                        return Some(Ok(LogMsg::JsonPatch(remove_patch)));
                                     }
-                                    // Workspace no longer matches this filter - send remove
-                                    let remove_patch = json_patch::Patch(vec![
-                                        json_patch::PatchOperation::Remove(
-                                            json_patch::RemoveOperation {
-                                                path: op
-                                                    .path()
-                                                    .to_string()
-                                                    .try_into()
-                                                    .expect("Workspace path should be valid"),
-                                            },
-                                        ),
-                                    ]);
-                                    return Some(Ok(LogMsg::JsonPatch(remove_patch)));
                                 }
+                                return Some(Ok(LogMsg::JsonPatch(patch)));
                             }
-                            return Some(Ok(LogMsg::JsonPatch(patch)));
+                            None
                         }
-                        None
-                    }
-                    Ok(other) => Some(Ok(other)),
-                    // G33-001: resync workspaces snapshot on Lagged
-                    Err(BroadcastStreamRecvError::Lagged(skipped)) => {
-                        tracing::warn!(
-                            skipped = skipped,
-                            "workspaces stream lagged; resyncing snapshot"
-                        );
-                        match Self::build_workspaces_snapshot(&db_pool_ws, archived, limit).await {
-                            Ok(snapshot) => Some(Ok(snapshot)),
-                            Err(err) => {
-                                tracing::error!(
-                                    error = %err,
-                                    "failed to resync workspaces after lag"
-                                );
-                                Some(Err(std::io::Error::other(format!(
-                                    "failed to resync workspaces after lag: {err}"
-                                ))))
+                        Ok(other) => Some(Ok(other)),
+                        // G33-001: resync workspaces snapshot on Lagged
+                        Err(BroadcastStreamRecvError::Lagged(skipped)) => {
+                            tracing::warn!(
+                                skipped = skipped,
+                                "workspaces stream lagged; resyncing snapshot"
+                            );
+                            match Self::build_workspaces_snapshot(&db_pool_ws, archived, limit)
+                                .await
+                            {
+                                Ok(snapshot) => Some(Ok(snapshot)),
+                                Err(err) => {
+                                    tracing::error!(
+                                        error = %err,
+                                        "failed to resync workspaces after lag"
+                                    );
+                                    Some(Err(std::io::Error::other(format!(
+                                        "failed to resync workspaces after lag: {err}"
+                                    ))))
+                                }
                             }
                         }
                     }
                 }
-            }},
-        );
+            });
 
         let initial_stream = futures::stream::iter(vec![Ok(initial_msg), Ok(LogMsg::Ready)]);
         Ok(initial_stream.chain(filtered_stream).boxed())

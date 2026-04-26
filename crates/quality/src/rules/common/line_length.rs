@@ -1,8 +1,10 @@
 //! Line length rule — flags source files that contain excessively long lines.
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{CommonAnalysisContext, CommonRule, Rule};
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{CommonAnalysisContext, CommonRule, Rule},
+};
 
 /// Checks that individual lines in text files do not exceed a configurable maximum length.
 ///
@@ -71,9 +73,7 @@ impl CommonRule for LineLengthRule {
 
         let violation_count = text
             .lines()
-            .filter(|line| {
-                line.len() > max_length && !is_url_line(line) && !is_import_line(line)
-            })
+            .filter(|line| line.len() > max_length && !is_url_line(line) && !is_import_line(line))
             .count();
 
         if violation_count == 0 {
@@ -107,10 +107,7 @@ mod tests {
     use super::*;
     use crate::rules::RuleConfig;
 
-    fn make_ctx<'a>(
-        text: &'a str,
-        config: &'a RuleConfig,
-    ) -> CommonAnalysisContext<'a> {
+    fn make_ctx<'a>(text: &'a str, config: &'a RuleConfig) -> CommonAnalysisContext<'a> {
         CommonAnalysisContext {
             file_path: "src/example.rs",
             content: text.as_bytes(),
@@ -142,7 +139,10 @@ mod tests {
         let issues = rule.analyze(&ctx);
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].rule_id, "common:line-length");
-        assert!(issues[0].message.contains('2'), "Should report 2 violations");
+        assert!(
+            issues[0].message.contains('2'),
+            "Should report 2 violations"
+        );
         assert!(issues[0].message.contains("120"));
     }
 
@@ -161,7 +161,10 @@ mod tests {
     #[test]
     fn import_lines_are_skipped() {
         let rule = LineLengthRule;
-        let long_import = format!("use crate::some::very::deeply::nested::module::{{{}}};", "A, ".repeat(50));
+        let long_import = format!(
+            "use crate::some::very::deeply::nested::module::{{{}}};",
+            "A, ".repeat(50)
+        );
         let content = format!("{}\nshort\n", long_import);
         let config = RuleConfig::default();
         let ctx = make_ctx(&content, &config);
@@ -191,7 +194,9 @@ mod tests {
         let rule = LineLengthRule;
         let content = "x".repeat(85);
         let mut config = RuleConfig::default();
-        config.params.insert("max_length".to_string(), "80".to_string());
+        config
+            .params
+            .insert("max_length".to_string(), "80".to_string());
         let ctx = make_ctx(&content, &config);
 
         let issues = rule.analyze(&ctx);

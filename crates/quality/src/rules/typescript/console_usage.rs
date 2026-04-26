@@ -5,9 +5,11 @@
 
 use regex::Regex;
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, TsRule, TsAnalysisContext, RuleConfig};
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RuleConfig, TsAnalysisContext, TsRule},
+};
 
 /// Detects `console.*()` calls in production TypeScript/JavaScript code.
 ///
@@ -24,7 +26,7 @@ impl Default for ConsoleUsageRule {
     fn default() -> Self {
         Self {
             console_pattern: Regex::new(
-                r"console\.(?:log|warn|error|debug|info|trace|dir|table)\s*\("
+                r"console\.(?:log|warn|error|debug|info|trace|dir|table)\s*\(",
             )
             .expect("invalid console pattern regex"),
         }
@@ -160,7 +162,10 @@ function init() {
 
         let ctx = make_context("src/__tests__/app.test.ts", src, &lines, &config);
         let rule = ConsoleUsageRule::default();
-        assert!(rule.analyze(&ctx).is_empty(), "should skip __tests__ directory");
+        assert!(
+            rule.analyze(&ctx).is_empty(),
+            "should skip __tests__ directory"
+        );
 
         let ctx2 = make_context("src/utils.spec.ts", src, &lines, &config);
         assert!(rule.analyze(&ctx2).is_empty(), "should skip .spec. files");
@@ -182,7 +187,11 @@ console.debug("this one is real");
         let ctx = make_context("src/app.ts", src, &lines, &config);
         let rule = ConsoleUsageRule::default();
         let issues = rule.analyze(&ctx);
-        assert_eq!(issues.len(), 1, "expected only the non-commented console call");
+        assert_eq!(
+            issues.len(),
+            1,
+            "expected only the non-commented console call"
+        );
         assert!(issues[0].message.contains("console.debug"));
     }
 
@@ -198,6 +207,9 @@ function add(a: number, b: number): number {
         let ctx = make_context("src/math.ts", src, &lines, &config);
         let rule = ConsoleUsageRule::default();
         let issues = rule.analyze(&ctx);
-        assert!(issues.is_empty(), "expected no issues for code without console calls");
+        assert!(
+            issues.is_empty(),
+            "expected no issues for code without console calls"
+        );
     }
 }

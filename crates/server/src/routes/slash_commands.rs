@@ -51,9 +51,7 @@ pub async fn list_command_presets(
 ) -> Result<ResponseJson<ApiResponse<Vec<SlashCommandPreset>>>, ApiError> {
     let presets = SlashCommandPreset::find_all(&deployment.db().pool)
         .await
-        .map_err(|e| {
-            ApiError::Internal(format!("Failed to fetch command presets: {e}"))
-        })?;
+        .map_err(|e| ApiError::Internal(format!("Failed to fetch command presets: {e}")))?;
 
     Ok(Json(ApiResponse::success(presets)))
 }
@@ -70,9 +68,7 @@ pub async fn get_command_preset(
             .bind(&id)
             .fetch_optional(&deployment.db().pool)
             .await
-            .map_err(|e| {
-                ApiError::Internal(format!("Failed to fetch command preset: {e}"))
-            })?
+            .map_err(|e| ApiError::Internal(format!("Failed to fetch command preset: {e}")))?
             .ok_or_else(|| ApiError::NotFound(format!("Command preset not found: {id}")))?;
 
     Ok(Json(ApiResponse::success(preset)))
@@ -152,9 +148,7 @@ pub async fn update_command_preset(
             .bind(&id)
             .fetch_optional(&deployment.db().pool)
             .await
-            .map_err(|e| {
-                ApiError::Internal(format!("Failed to fetch command preset: {e}"))
-            })?
+            .map_err(|e| ApiError::Internal(format!("Failed to fetch command preset: {e}")))?
             .ok_or_else(|| ApiError::NotFound(format!("Command preset not found: {id}")))?;
 
     // Don't allow modifying system presets
@@ -218,9 +212,7 @@ pub async fn delete_command_preset(
             .bind(&id)
             .fetch_optional(&deployment.db().pool)
             .await
-            .map_err(|e| {
-                ApiError::Internal(format!("Failed to fetch command preset: {e}"))
-            })?
+            .map_err(|e| ApiError::Internal(format!("Failed to fetch command preset: {e}")))?
             .ok_or_else(|| ApiError::NotFound(format!("Command preset not found: {id}")))?;
 
     // Don't allow deleting system presets
@@ -235,9 +227,7 @@ pub async fn delete_command_preset(
         .bind(&id)
         .execute(&deployment.db().pool)
         .await
-        .map_err(|e| {
-            ApiError::Internal(format!("Failed to delete command preset: {e}"))
-        })?;
+        .map_err(|e| ApiError::Internal(format!("Failed to delete command preset: {e}")))?;
 
     if result.rows_affected() == 0 {
         return Err(ApiError::NotFound(format!(

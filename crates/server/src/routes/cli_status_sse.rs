@@ -4,8 +4,7 @@
 //! that pushes `CliStatusChange` events whenever the background health monitor
 //! detects a change in CLI availability.
 
-use std::convert::Infallible;
-use std::time::Duration;
+use std::{convert::Infallible, time::Duration};
 
 use axum::{
     Extension, Router,
@@ -37,13 +36,10 @@ pub fn cli_status_sse_routes() -> Router<crate::DeploymentImpl> {
 /// 1. A `connection_established` event with the current cached statuses.
 /// 2. Subsequent `cli_status_change` events whenever the monitor detects a change.
 /// 3. Keep-alive comment frames every 30 seconds.
-async fn cli_status_stream(
-    Extension(monitor): Extension<SharedCliHealthMonitor>,
-) -> Response {
+async fn cli_status_stream(Extension(monitor): Extension<SharedCliHealthMonitor>) -> Response {
     // Snapshot current cached statuses for the initial event
     let cached = monitor.get_cached_statuses().await;
-    let initial_data =
-        serde_json::to_string(&cached).unwrap_or_else(|_| "[]".to_string());
+    let initial_data = serde_json::to_string(&cached).unwrap_or_else(|_| "[]".to_string());
 
     let initial_event: Result<Event, Infallible> = Ok(Event::default()
         .event("connection_established")
@@ -55,11 +51,8 @@ async fn cli_status_stream(
     let change_stream = BroadcastStream::new(rx).filter_map(|result| async {
         match result {
             Ok(change) => {
-                let data = serde_json::to_string(&change)
-                    .unwrap_or_else(|_| "{}".to_string());
-                Some(Ok(Event::default()
-                    .event("cli_status_change")
-                    .data(data)))
+                let data = serde_json::to_string(&change).unwrap_or_else(|_| "{}".to_string());
+                Some(Ok(Event::default().event("cli_status_change").data(data)))
             }
             Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
                 tracing::warn!(skipped = n, "CLI status SSE client lagged behind");

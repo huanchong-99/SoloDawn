@@ -190,7 +190,8 @@ pub trait ContainerService {
             let workspace_id = ctx.workspace.id;
             let task_id = ctx.task.id;
             tokio::spawn(async move {
-                let repo_path = match WorkspaceRepo::find_by_workspace_id(&pool, workspace_id).await {
+                let repo_path = match WorkspaceRepo::find_by_workspace_id(&pool, workspace_id).await
+                {
                     Ok(ws_repos) if !ws_repos.is_empty() => {
                         match Repo::find_by_id(&pool, ws_repos[0].repo_id).await {
                             Ok(Some(repo)) => repo.path,
@@ -202,7 +203,10 @@ pub trait ContainerService {
                 let path = std::path::Path::new(&repo_path);
                 match quality::engine::QualityEngine::from_project(path) {
                     Ok(engine) => {
-                        match engine.run(path, quality::gate::QualityGateLevel::Terminal, None).await {
+                        match engine
+                            .run(path, quality::gate::QualityGateLevel::Terminal, None)
+                            .await
+                        {
                             Ok(report) => {
                                 tracing::info!(
                                     task_id = %task_id,
@@ -767,19 +771,13 @@ pub trait ContainerService {
                     #[cfg(feature = "qa-mode")]
                     {
                         let executor = QaMockExecutor;
-                        executor.normalize_logs(
-                            temp_store.clone(),
-                            &effective_dir,
-                        );
+                        executor.normalize_logs(temp_store.clone(), &effective_dir);
                     }
                     #[cfg(not(feature = "qa-mode"))]
                     {
                         let executor = ExecutorConfigs::get_cached()
                             .get_coding_agent_or_default(&request.executor_profile_id);
-                        executor.normalize_logs(
-                            temp_store.clone(),
-                            &effective_dir,
-                        );
+                        executor.normalize_logs(temp_store.clone(), &effective_dir);
                     }
                 }
                 ExecutorActionType::CodingAgentFollowUpRequest(request) => {
@@ -793,19 +791,13 @@ pub trait ContainerService {
                     #[cfg(feature = "qa-mode")]
                     {
                         let executor = QaMockExecutor;
-                        executor.normalize_logs(
-                            temp_store.clone(),
-                            &effective_dir,
-                        );
+                        executor.normalize_logs(temp_store.clone(), &effective_dir);
                     }
                     #[cfg(not(feature = "qa-mode"))]
                     {
                         let executor = ExecutorConfigs::get_cached()
                             .get_coding_agent_or_default(&request.executor_profile_id);
-                        executor.normalize_logs(
-                            temp_store.clone(),
-                            &effective_dir,
-                        );
+                        executor.normalize_logs(temp_store.clone(), &effective_dir);
                     }
                 }
                 #[cfg(feature = "qa-mode")]
@@ -1102,7 +1094,12 @@ pub trait ContainerService {
         }
 
         if let Err(start_error) = self
-            .start_execution_inner(workspace, &execution_process, executor_action, session.model_config_id.as_deref())
+            .start_execution_inner(
+                workspace,
+                &execution_process,
+                executor_action,
+                session.model_config_id.as_deref(),
+            )
             .await
         {
             // Mark process as failed
@@ -1164,15 +1161,18 @@ pub trait ContainerService {
         #[cfg_attr(feature = "qa-mode", allow(unused_variables))]
         if let Some(msg_store) = self.get_msg_store_by_id(&execution_process.id).await
             && let Some((executor_profile_id, working_dir)) = match executor_action.typ() {
-                ExecutorActionType::CodingAgentInitialRequest(request) => {
-                    request.effective_dir(&workspace_root).ok().map(|dir| (&request.executor_profile_id, dir))
-                }
-                ExecutorActionType::CodingAgentFollowUpRequest(request) => {
-                    request.effective_dir(&workspace_root).ok().map(|dir| (&request.executor_profile_id, dir))
-                }
-                ExecutorActionType::ReviewRequest(request) => {
-                    request.effective_dir(&workspace_root).ok().map(|dir| (&request.executor_profile_id, dir))
-                }
+                ExecutorActionType::CodingAgentInitialRequest(request) => request
+                    .effective_dir(&workspace_root)
+                    .ok()
+                    .map(|dir| (&request.executor_profile_id, dir)),
+                ExecutorActionType::CodingAgentFollowUpRequest(request) => request
+                    .effective_dir(&workspace_root)
+                    .ok()
+                    .map(|dir| (&request.executor_profile_id, dir)),
+                ExecutorActionType::ReviewRequest(request) => request
+                    .effective_dir(&workspace_root)
+                    .ok()
+                    .map(|dir| (&request.executor_profile_id, dir)),
                 ExecutorActionType::ScriptRequest(_) => None,
             }
         {
@@ -1183,8 +1183,8 @@ pub trait ContainerService {
             }
             #[cfg(not(feature = "qa-mode"))]
             {
-                let executor = ExecutorConfigs::get_cached()
-                    .get_coding_agent_or_default(executor_profile_id);
+                let executor =
+                    ExecutorConfigs::get_cached().get_coding_agent_or_default(executor_profile_id);
                 executor.normalize_logs(msg_store, &working_dir);
             }
         }

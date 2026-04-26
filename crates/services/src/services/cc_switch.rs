@@ -69,7 +69,10 @@ fn create_codex_auth(codex_home: &Path, api_key: &str) -> anyhow::Result<()> {
 /// Default to `responses` for OpenAI-compatible gateways.
 /// Allow override via env: SOLODAWN_CODEX_WIRE_API=responses|codex
 fn resolve_codex_wire_api() -> String {
-    if let Some(raw) = utils::env_compat::var_opt_with_compat("SOLODAWN_CODEX_WIRE_API", "GITCORTEX_CODEX_WIRE_API") {
+    if let Some(raw) = utils::env_compat::var_opt_with_compat(
+        "SOLODAWN_CODEX_WIRE_API",
+        "GITCORTEX_CODEX_WIRE_API",
+    ) {
         let normalized = raw.trim().to_ascii_lowercase();
         if normalized == "responses" || normalized == "codex" {
             return normalized;
@@ -118,7 +121,8 @@ base_url = "{base_url_str}"
 
     config_content.push_str(&format!("wire_api = \"{wire_api}\"\n"));
     config_content.push_str("approval_policy = \"on-request\"\n");
-    config_content.push_str("sandbox_permissions = [\"disk-full-read-access\", \"disk-write-folder\"]\n");
+    config_content
+        .push_str("sandbox_permissions = [\"disk-full-read-access\", \"disk-write-folder\"]\n");
 
     std::fs::write(&config_path, config_content)
         .map_err(|e| anyhow::anyhow!("Failed to write Codex config.toml: {e}"))?;
@@ -554,14 +558,17 @@ impl CCSwitchService {
             return Ok((None, None));
         };
 
-        let workflow = if let Some(workflow) = Workflow::find_by_id(&self.db.pool, &workflow_id).await? { workflow } else {
-            tracing::warn!(
-                workflow_id = %workflow_id,
-                workflow_task_id = %workflow_task_id,
-                "Workflow not found while resolving Codex API fallback"
-            );
-            return Ok((None, None));
-        };
+        let workflow =
+            if let Some(workflow) = Workflow::find_by_id(&self.db.pool, &workflow_id).await? {
+                workflow
+            } else {
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    workflow_task_id = %workflow_task_id,
+                    "Workflow not found while resolving Codex API fallback"
+                );
+                return Ok((None, None));
+            };
 
         let api_key = match workflow.get_api_key() {
             Ok(api_key) => api_key,
@@ -737,7 +744,9 @@ impl CCSwitchService {
         };
 
         // Parse CLI type
-        let cli = if let Some(cli) = CcCliType::parse(&cli_type.name) { cli } else {
+        let cli = if let Some(cli) = CcCliType::parse(&cli_type.name) {
+            cli
+        } else {
             tracing::warn!(
                 cli_name = %cli_type.name,
                 terminal_id = %terminal.id,
@@ -928,13 +937,13 @@ impl CCSwitchService {
                     );
                     create_claude_config(&claude_home, key, effective_base_url.as_deref())
                         .map_err(|e| {
-                        tracing::error!(
-                            terminal_id = %terminal.id,
-                            error = %e,
-                            "Failed to create Claude config.json for authentication skip"
-                        );
-                        e
-                    })?;
+                            tracing::error!(
+                                terminal_id = %terminal.id,
+                                error = %e,
+                                "Failed to create Claude config.json for authentication skip"
+                            );
+                            e
+                        })?;
                 } else if using_native_auth {
                     // Copy native credentials into the isolated CLAUDE_HOME
                     // so the CLI can authenticate in the sandboxed environment.
@@ -964,7 +973,8 @@ impl CCSwitchService {
                     );
                     // Mark that we need to remove --bare later (after apply_auto_confirm_args).
                     // --bare flag breaks OAuth token loading in Claude Code CLI.
-                    env.set.insert("__SOLODAWN_NATIVE_AUTH".to_string(), "1".to_string());
+                    env.set
+                        .insert("__SOLODAWN_NATIVE_AUTH".to_string(), "1".to_string());
                 } else if effective_base_url.is_some() {
                     return Err(anyhow::anyhow!(
                         "Claude Code auth token not configured for custom API endpoint. Please set terminal custom_api_key"
@@ -1347,15 +1357,22 @@ mod tests {
         assert_eq!(updated["nested"]["a"], 1);
 
         // Test with custom base_url (third-party API): should remove primaryApiKey
-        create_claude_config(claude_home, "third-party-key", Some("https://example.com/api"))
-            .expect("create_claude_config with custom base_url should succeed");
+        create_claude_config(
+            claude_home,
+            "third-party-key",
+            Some("https://example.com/api"),
+        )
+        .expect("create_claude_config with custom base_url should succeed");
 
         let updated: Value = serde_json::from_str(
             &std::fs::read_to_string(&config_path).expect("failed to read updated config.json"),
         )
         .expect("config.json should be valid JSON");
 
-        assert!(updated.get("primaryApiKey").is_none(), "primaryApiKey should be removed for custom base_url");
+        assert!(
+            updated.get("primaryApiKey").is_none(),
+            "primaryApiKey should be removed for custom base_url"
+        );
         assert_eq!(updated["foo"], "bar");
         assert_eq!(updated["nested"]["a"], 1);
     }

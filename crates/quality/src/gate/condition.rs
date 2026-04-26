@@ -95,12 +95,14 @@ impl Condition {
 
     /// 解析阈值为 f64
     pub fn parse_threshold_f64(&self) -> anyhow::Result<f64> {
-        self.error_threshold
-            .parse::<f64>()
-            .map_err(|e| anyhow::anyhow!(
+        self.error_threshold.parse::<f64>().map_err(|e| {
+            anyhow::anyhow!(
                 "Quality Gate: Unable to parse threshold '{}' for metric {}: {}",
-                self.error_threshold, self.metric, e
-            ))
+                self.error_threshold,
+                self.metric,
+                e
+            )
+        })
     }
 
     /// 解析阈值为 i64

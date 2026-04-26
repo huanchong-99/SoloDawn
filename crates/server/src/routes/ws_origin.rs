@@ -13,8 +13,9 @@ use axum::http::{HeaderMap, StatusCode};
 ///
 /// Returns `Ok(())` if the origin is allowed, or `Err((StatusCode, String))` to reject.
 pub fn validate_ws_origin(headers: &HeaderMap) -> Result<(), (StatusCode, String)> {
-    let origins_env = utils::env_compat::var_with_compat("SOLODAWN_CORS_ORIGINS", "GITCORTEX_CORS_ORIGINS")
-        .unwrap_or_default();
+    let origins_env =
+        utils::env_compat::var_with_compat("SOLODAWN_CORS_ORIGINS", "GITCORTEX_CORS_ORIGINS")
+            .unwrap_or_default();
     let trimmed = origins_env.trim();
 
     // Dev mode: no allowlist configured — allow everything with a warning.

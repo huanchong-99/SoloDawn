@@ -69,10 +69,7 @@ pub fn parse_message_event(event: &FeishuEvent) -> anyhow::Result<ReceivedMessag
             .as_str()
             .unwrap_or_default()
             .to_string(),
-        content: message["content"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
+        content: message["content"].as_str().unwrap_or_default().to_string(),
     })
 }
 

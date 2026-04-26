@@ -2,10 +2,11 @@
 //!
 //! Stores Feishu (Lark) application configuration for connector integration.
 
+use std::fmt;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
-use std::fmt;
 use uuid::Uuid;
 
 /// Feishu App Config
@@ -103,11 +104,9 @@ impl FeishuAppConfig {
 
     /// Find the currently enabled feishu app config
     pub async fn find_enabled(pool: &SqlitePool) -> sqlx::Result<Option<Self>> {
-        sqlx::query_as::<_, Self>(
-            "SELECT * FROM feishu_app_config WHERE enabled = 1 LIMIT 1",
-        )
-        .fetch_optional(pool)
-        .await
+        sqlx::query_as::<_, Self>("SELECT * FROM feishu_app_config WHERE enabled = 1 LIMIT 1")
+            .fetch_optional(pool)
+            .await
     }
 
     /// G32-007: Find the first feishu app config regardless of enabled status.
@@ -115,28 +114,20 @@ impl FeishuAppConfig {
     /// Used by upsert flows (e.g. PUT /config) where a disabled config should
     /// still be found and updated rather than creating a duplicate row.
     pub async fn find_first(pool: &SqlitePool) -> sqlx::Result<Option<Self>> {
-        sqlx::query_as::<_, Self>(
-            "SELECT * FROM feishu_app_config ORDER BY created_at ASC LIMIT 1",
-        )
-        .fetch_optional(pool)
-        .await
+        sqlx::query_as::<_, Self>("SELECT * FROM feishu_app_config ORDER BY created_at ASC LIMIT 1")
+            .fetch_optional(pool)
+            .await
     }
 
     /// List all feishu app configs
     pub async fn find_all(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
-        sqlx::query_as::<_, Self>(
-            "SELECT * FROM feishu_app_config ORDER BY created_at DESC",
-        )
-        .fetch_all(pool)
-        .await
+        sqlx::query_as::<_, Self>("SELECT * FROM feishu_app_config ORDER BY created_at DESC")
+            .fetch_all(pool)
+            .await
     }
 
     /// Update the enabled flag
-    pub async fn update_enabled(
-        pool: &SqlitePool,
-        id: &str,
-        enabled: bool,
-    ) -> sqlx::Result<()> {
+    pub async fn update_enabled(pool: &SqlitePool, id: &str, enabled: bool) -> sqlx::Result<()> {
         sqlx::query(
             "UPDATE feishu_app_config SET enabled = ?2, updated_at = datetime('now') WHERE id = ?1",
         )

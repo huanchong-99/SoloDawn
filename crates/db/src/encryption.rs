@@ -99,7 +99,10 @@ mod tests {
     #[test]
     fn round_trip() {
         temp_env::with_vars(
-            [("SOLODAWN_ENCRYPTION_KEY", Some("12345678901234567890123456789012"))],
+            [(
+                "SOLODAWN_ENCRYPTION_KEY",
+                Some("12345678901234567890123456789012"),
+            )],
             || {
                 let original = "sk-test-secret-key-12345";
                 let encrypted = encrypt(original).expect("encryption should succeed");

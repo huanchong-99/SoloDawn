@@ -29,15 +29,60 @@ struct ExpectedColumn {
 }
 
 const SCHEMA_EXPECTATIONS: &[ExpectedColumn] = &[
-    ExpectedColumn { table: "workflow", column: "orchestrator_state", col_type: "TEXT", default: None },
-    ExpectedColumn { table: "workflow", column: "orchestrator_api_key_encrypted", col_type: "TEXT", default: None },
-    ExpectedColumn { table: "workflow", column: "git_watcher_enabled", col_type: "INTEGER", default: Some("1") },
-    ExpectedColumn { table: "workflow", column: "execution_mode", col_type: "TEXT", default: Some("'diy'") },
-    ExpectedColumn { table: "workflow", column: "initial_goal", col_type: "TEXT", default: None },
-    ExpectedColumn { table: "workflow", column: "pause_reason", col_type: "TEXT", default: None },
-    ExpectedColumn { table: "model_config", column: "encrypted_api_key", col_type: "TEXT", default: None },
-    ExpectedColumn { table: "model_config", column: "base_url", col_type: "TEXT", default: None },
-    ExpectedColumn { table: "model_config", column: "api_type", col_type: "TEXT", default: None },
+    ExpectedColumn {
+        table: "workflow",
+        column: "orchestrator_state",
+        col_type: "TEXT",
+        default: None,
+    },
+    ExpectedColumn {
+        table: "workflow",
+        column: "orchestrator_api_key_encrypted",
+        col_type: "TEXT",
+        default: None,
+    },
+    ExpectedColumn {
+        table: "workflow",
+        column: "git_watcher_enabled",
+        col_type: "INTEGER",
+        default: Some("1"),
+    },
+    ExpectedColumn {
+        table: "workflow",
+        column: "execution_mode",
+        col_type: "TEXT",
+        default: Some("'diy'"),
+    },
+    ExpectedColumn {
+        table: "workflow",
+        column: "initial_goal",
+        col_type: "TEXT",
+        default: None,
+    },
+    ExpectedColumn {
+        table: "workflow",
+        column: "pause_reason",
+        col_type: "TEXT",
+        default: None,
+    },
+    ExpectedColumn {
+        table: "model_config",
+        column: "encrypted_api_key",
+        col_type: "TEXT",
+        default: None,
+    },
+    ExpectedColumn {
+        table: "model_config",
+        column: "base_url",
+        col_type: "TEXT",
+        default: None,
+    },
+    ExpectedColumn {
+        table: "model_config",
+        column: "api_type",
+        col_type: "TEXT",
+        default: None,
+    },
 ];
 
 async fn verify_schema(pool: &Pool<Sqlite>) -> Result<(), Error> {
@@ -54,7 +99,9 @@ async fn verify_schema(pool: &Pool<Sqlite>) -> Result<(), Error> {
         .unwrap_or(false);
 
         if !exists {
-            let default_clause = exp.default.map_or_else(String::new, |d| format!(" DEFAULT {d}"));
+            let default_clause = exp
+                .default
+                .map_or_else(String::new, |d| format!(" DEFAULT {d}"));
             let sql = format!(
                 "ALTER TABLE {} ADD COLUMN {} {}{}",
                 exp.table, exp.column, exp.col_type, default_clause
@@ -89,7 +136,10 @@ async fn verify_schema(pool: &Pool<Sqlite>) -> Result<(), Error> {
              This indicates stale compiled migrations. Run: cargo clean -p db && cargo build"
         );
     } else {
-        tracing::info!("Startup self-check: schema verification passed ({} columns verified)", SCHEMA_EXPECTATIONS.len());
+        tracing::info!(
+            "Startup self-check: schema verification passed ({} columns verified)",
+            SCHEMA_EXPECTATIONS.len()
+        );
     }
 
     Ok(())
@@ -116,7 +166,10 @@ async fn run_migrations(pool: &Pool<Sqlite>) -> Result<(), Error> {
                 let new_migrations = after - before;
 
                 if new_migrations > 0 || before == 0 {
-                    tracing::info!(applied = new_migrations, "New migrations applied, running schema self-check");
+                    tracing::info!(
+                        applied = new_migrations,
+                        "New migrations applied, running schema self-check"
+                    );
                     verify_schema(pool).await?;
                 }
 

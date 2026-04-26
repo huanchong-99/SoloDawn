@@ -138,10 +138,7 @@ impl QualityIssueRecord {
     }
 
     /// Find issues by quality run ID
-    pub async fn find_by_run(
-        pool: &SqlitePool,
-        quality_run_id: &str,
-    ) -> sqlx::Result<Vec<Self>> {
+    pub async fn find_by_run(pool: &SqlitePool, quality_run_id: &str) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, QualityIssueRecord>(
             r"SELECT * FROM quality_issue WHERE quality_run_id = ? ORDER BY severity DESC, file_path ASC, line ASC",
         )

@@ -1,11 +1,10 @@
 use axum::{Extension, extract::State, http::StatusCode, response::Json};
 use db::models::{feishu_config::FeishuAppConfig, system_settings::SystemSetting};
 use deployment::Deployment;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use utils::response::ApiResponse;
 
-use crate::DeploymentImpl;
-use crate::feishu_handle::SharedFeishuHandle;
+use crate::{DeploymentImpl, feishu_handle::SharedFeishuHandle};
 
 pub async fn health_check() -> Json<ApiResponse<String>> {
     Json(ApiResponse::success("OK".to_string()))
@@ -26,7 +25,9 @@ pub async fn readyz(
         .fetch_one(&deployment.db().pool)
         .await
         .is_ok();
-    let asset_ok = utils::assets::asset_dir().map(|p| p.exists()).unwrap_or(false);
+    let asset_ok = utils::assets::asset_dir()
+        .map(|p| p.exists())
+        .unwrap_or(false);
     let temp_ok = {
         let dir = utils::path::get_solodawn_temp_dir();
         std::fs::create_dir_all(&dir).is_ok() && dir.exists()
@@ -36,11 +37,18 @@ pub async fn readyz(
     let feishu_status = resolve_feishu_health(&deployment, &feishu_handle).await;
 
     let ready = db_ok && asset_ok && temp_ok;
-    let status = if ready { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
-    (status, Json(json!({
-        "ready": ready,
-        "feishu": feishu_status,
-    })))
+    let status = if ready {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        status,
+        Json(json!({
+            "ready": ready,
+            "feishu": feishu_status,
+        })),
+    )
 }
 
 /// Resolve Feishu health information for the readiness probe.

@@ -100,9 +100,7 @@ async fn handle_raw_logs_ws(
             LogMsg::Finished => LogMsg::Finished.to_ws_message_unchecked(),
             other => {
                 tracing::error!("Unexpected raw stream variant: {:?}", other.name());
-                Message::Text(
-                    r#"{"error":"unexpected_stream_variant"}"#.to_string().into(),
-                )
+                Message::Text(r#"{"error":"unexpected_stream_variant"}"#.to_string().into())
             }
         }
     });
@@ -421,10 +419,7 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
             "/stream/session/ws",
             get(stream_execution_processes_by_session_ws),
         )
-        .route(
-            "/by-session",
-            get(get_execution_processes_by_session),
-        )
+        .route("/by-session", get(get_execution_processes_by_session))
         .nest("/{id}", workspace_id_router);
 
     Router::new().nest("/execution-processes", workspaces_router)

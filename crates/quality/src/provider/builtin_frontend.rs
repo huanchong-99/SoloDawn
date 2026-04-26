@@ -2,20 +2,24 @@
 //!
 //! Runs built-in TypeScript/JavaScript rules against discovered JS/TS target roots.
 
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    time::Instant,
+};
+
 use async_trait::async_trait;
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
-use std::time::Instant;
 use tracing::{debug, warn};
 
-use crate::analysis;
-use crate::discovery::RepositoryDiscovery;
-use crate::gate::result::MeasureValue;
-use crate::metrics::MetricKey;
-use crate::provider::{ProviderReport, QualityProvider};
-use crate::rule::Severity;
-use crate::rules::typescript::all_ts_rules;
-use crate::rules::{RuleConfig, TsAnalysisContext};
+use crate::{
+    analysis,
+    discovery::RepositoryDiscovery,
+    gate::result::MeasureValue,
+    metrics::MetricKey,
+    provider::{ProviderReport, QualityProvider},
+    rule::Severity,
+    rules::{RuleConfig, TsAnalysisContext, typescript::all_ts_rules},
+};
 
 /// Built-in frontend quality provider.
 #[derive(Default)]
@@ -82,7 +86,11 @@ impl QualityProvider for BuiltinFrontendProvider {
             let content = match std::fs::read_to_string(file_path) {
                 Ok(content) => content,
                 Err(error) => {
-                    warn!("builtin-frontend: failed to read {}: {}", file_path.display(), error);
+                    warn!(
+                        "builtin-frontend: failed to read {}: {}",
+                        file_path.display(),
+                        error
+                    );
                     continue;
                 }
             };
@@ -124,8 +132,14 @@ impl QualityProvider for BuiltinFrontendProvider {
 
         let duration_ms = start.elapsed().as_millis() as u64;
         Ok(ProviderReport::success("builtin-frontend", duration_ms)
-            .with_metric(MetricKey::BuiltinFrontendIssues, MeasureValue::Int(total_issues))
-            .with_metric(MetricKey::BuiltinFrontendCritical, MeasureValue::Int(critical_count))
+            .with_metric(
+                MetricKey::BuiltinFrontendIssues,
+                MeasureValue::Int(total_issues),
+            )
+            .with_metric(
+                MetricKey::BuiltinFrontendCritical,
+                MeasureValue::Int(critical_count),
+            )
             .with_issues(all_issues))
     }
 }
@@ -194,7 +208,10 @@ mod tests {
     use super::*;
 
     fn temp_project_root() -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("builtin-frontend-discovery-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "builtin-frontend-discovery-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&path).unwrap();
         path
     }
@@ -240,7 +257,10 @@ mod tests {
 
         let discovery = RepositoryDiscovery::discover(&root).unwrap();
         let provider = BuiltinFrontendProvider;
-        assert_eq!(provider.applicable_metrics(&discovery, None), provider.supported_metrics());
+        assert_eq!(
+            provider.applicable_metrics(&discovery, None),
+            provider.supported_metrics()
+        );
         cleanup(&root);
     }
 
@@ -254,7 +274,12 @@ mod tests {
         let deduped = dedupe_scan_roots([web.as_path(), nested.as_path(), other.as_path()]);
         let deduped: Vec<_> = deduped
             .into_iter()
-            .map(|path| path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"))
+            .map(|path| {
+                path.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
             .collect();
 
         assert_eq!(deduped, vec!["web", "shared"]);
@@ -274,18 +299,33 @@ mod tests {
         );
         write_file(&root.join("web/package.json"), r#"{ "name": "web" }"#);
         write_file(&root.join("web/tsconfig.json"), "{}");
-        write_file(&root.join("web/src/changed.ts"), "console.log('changed');\n");
-        write_file(&root.join("web/src/unchanged.ts"), "console.log('unchanged');\n");
+        write_file(
+            &root.join("web/src/changed.ts"),
+            "console.log('changed');\n",
+        );
+        write_file(
+            &root.join("web/src/unchanged.ts"),
+            "console.log('unchanged');\n",
+        );
 
         let discovery = RepositoryDiscovery::discover(&root).unwrap();
         let provider = BuiltinFrontendProvider;
         let changed = vec!["web/src/changed.ts".to_string()];
 
-        let report = provider.analyze(&root, &discovery, Some(&changed)).await.unwrap();
+        let report = provider
+            .analyze(&root, &discovery, Some(&changed))
+            .await
+            .unwrap();
 
-        assert_eq!(report.metrics.get(&MetricKey::BuiltinFrontendIssues), Some(&MeasureValue::Int(1)));
+        assert_eq!(
+            report.metrics.get(&MetricKey::BuiltinFrontendIssues),
+            Some(&MeasureValue::Int(1))
+        );
         assert_eq!(report.issues.len(), 1);
-        assert_eq!(report.issues[0].file_path.as_deref(), Some("web/src/changed.ts"));
+        assert_eq!(
+            report.issues[0].file_path.as_deref(),
+            Some("web/src/changed.ts")
+        );
         cleanup(&root);
     }
 
@@ -309,9 +349,15 @@ mod tests {
         let provider = BuiltinFrontendProvider;
         let changed: Vec<String> = Vec::new();
 
-        let report = provider.analyze(&root, &discovery, Some(&changed)).await.unwrap();
+        let report = provider
+            .analyze(&root, &discovery, Some(&changed))
+            .await
+            .unwrap();
 
-        assert_eq!(report.metrics.get(&MetricKey::BuiltinFrontendIssues), Some(&MeasureValue::Int(2)));
+        assert_eq!(
+            report.metrics.get(&MetricKey::BuiltinFrontendIssues),
+            Some(&MeasureValue::Int(2))
+        );
         cleanup(&root);
     }
 }

@@ -103,8 +103,16 @@ impl CliDetector {
         // Whitelist validation: only allow known CLI binary names to prevent command injection
         // via crafted detect_command values when using `cmd /c` on Windows.
         const ALLOWED_CLI_COMMANDS: &[&str] = &[
-            "claude", "gemini", "codex", "amp", "cursor", "cursor-agent",
-            "qwen", "gh", "opencode", "droid",
+            "claude",
+            "gemini",
+            "codex",
+            "amp",
+            "cursor",
+            "cursor-agent",
+            "qwen",
+            "gh",
+            "opencode",
+            "droid",
         ];
         if !ALLOWED_CLI_COMMANDS.contains(&cmd) {
             tracing::warn!(
@@ -297,7 +305,6 @@ mod tests {
         #[cfg(unix)]
         {
             // Skip on Unix
-            
         }
     }
 

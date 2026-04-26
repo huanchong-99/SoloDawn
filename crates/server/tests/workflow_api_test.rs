@@ -161,7 +161,14 @@ async fn test_start_workflow_requires_ready_status() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle(), create_test_cli_health_monitor(), create_test_concierge_agent(), create_test_concierge_broadcaster());
+    let app = server::routes::build_router(
+        deployment.clone(),
+        create_test_hub(),
+        server::feishu_handle::new_shared_handle(),
+        create_test_cli_health_monitor(),
+        create_test_concierge_agent(),
+        create_test_concierge_broadcaster(),
+    );
 
     let request = Request::builder()
         .method("POST")
@@ -245,7 +252,14 @@ async fn test_start_workflow_without_orchestrator() {
     };
     use tower::ServiceExt;
 
-    let app = server::routes::build_router(deployment.clone(), create_test_hub(), server::feishu_handle::new_shared_handle(), create_test_cli_health_monitor(), create_test_concierge_agent(), create_test_concierge_broadcaster());
+    let app = server::routes::build_router(
+        deployment.clone(),
+        create_test_hub(),
+        server::feishu_handle::new_shared_handle(),
+        create_test_cli_health_monitor(),
+        create_test_concierge_agent(),
+        create_test_concierge_broadcaster(),
+    );
 
     let request = Request::builder()
         .method("POST")

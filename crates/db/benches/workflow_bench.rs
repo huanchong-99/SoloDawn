@@ -269,7 +269,9 @@ fn bench_find_by_project(c: &mut Criterion) {
             b.iter(|| {
                 let pool = pool.clone();
                 rt.block_on(async move {
-                    let result = Workflow::find_by_project(&pool, black_box(project_uuid("project-0"))).await;
+                    let result =
+                        Workflow::find_by_project(&pool, black_box(project_uuid("project-0")))
+                            .await;
                     let _ = black_box(result);
                 });
             });

@@ -25,7 +25,8 @@ impl ReconnectPolicy {
         }
         // G32-011: Exponential backoff: base * 2^attempt, capped at MAX_BACKOFF_SECS
         let base_secs = self.config.reconnect_interval;
-        let backoff_secs = base_secs.saturating_mul(1u64.checked_shl(self.attempt).unwrap_or(u64::MAX));
+        let backoff_secs =
+            base_secs.saturating_mul(1u64.checked_shl(self.attempt).unwrap_or(u64::MAX));
         let capped_secs = backoff_secs.min(MAX_BACKOFF_SECS);
         let base_ms = capped_secs * 1000;
         // G32-010: Improved jitter using mixed bits instead of raw nanoseconds

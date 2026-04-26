@@ -28,7 +28,10 @@ pub use review::RepoReviewContext;
 
 /// Validates that an optional relative working_dir does not escape the workspace root.
 /// Returns the effective directory to use, or a PermissionDenied error if path traversal is detected.
-pub fn validate_working_dir(current_dir: &Path, working_dir: &Option<String>) -> Result<PathBuf, io::Error> {
+pub fn validate_working_dir(
+    current_dir: &Path,
+    working_dir: &Option<String>,
+) -> Result<PathBuf, io::Error> {
     match working_dir {
         None => Ok(current_dir.to_path_buf()),
         Some(rel_path) => {

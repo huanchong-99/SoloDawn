@@ -7,8 +7,7 @@
 //! The `RunnerClientImpl` enum delegates to the appropriate implementation
 //! based on the `SOLODAWN_RUNNER_MODE` environment variable.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
@@ -129,9 +128,9 @@ impl RunnerClient for LocalRunner {
             .await
             .ok_or_else(|| anyhow::anyhow!("Terminal not found: {terminal_id}"))?;
 
-        let writer = handle
-            .writer
-            .ok_or_else(|| anyhow::anyhow!("No PTY writer available for terminal: {terminal_id}"))?;
+        let writer = handle.writer.ok_or_else(|| {
+            anyhow::anyhow!("No PTY writer available for terminal: {terminal_id}")
+        })?;
 
         let data = data.to_vec();
         tokio::task::spawn_blocking(move || {
@@ -225,7 +224,9 @@ impl RemoteRunner {
         }
         let client = RunnerServiceClient::connect(self.addr.clone())
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to connect to remote runner at {}: {e}", self.addr))?;
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to connect to remote runner at {}: {e}", self.addr)
+            })?;
         tracing::info!(addr = %self.addr, "RemoteRunner lazily connected via gRPC");
         *guard = Some(client.clone());
         Ok(client)
@@ -377,8 +378,9 @@ impl RunnerClientImpl {
     /// - `SOLODAWN_RUNNER_MODE`: `"local"` (default) or `"remote"`
     /// - `SOLODAWN_RUNNER_ADDR`: remote runner address (required when mode is `"remote"`)
     pub fn from_env(process_manager: Arc<ProcessManager>) -> Result<Self> {
-        let mode = utils::env_compat::var_with_compat("SOLODAWN_RUNNER_MODE", "GITCORTEX_RUNNER_MODE")
-            .unwrap_or_else(|_| "local".to_string());
+        let mode =
+            utils::env_compat::var_with_compat("SOLODAWN_RUNNER_MODE", "GITCORTEX_RUNNER_MODE")
+                .unwrap_or_else(|_| "local".to_string());
 
         match mode.to_lowercase().as_str() {
             "local" => {
@@ -386,7 +388,11 @@ impl RunnerClientImpl {
                 Ok(Self::Local(LocalRunner::new(process_manager)))
             }
             "remote" => {
-                let addr = utils::env_compat::var_with_compat("SOLODAWN_RUNNER_ADDR", "GITCORTEX_RUNNER_ADDR").unwrap_or_else(|_| {
+                let addr = utils::env_compat::var_with_compat(
+                    "SOLODAWN_RUNNER_ADDR",
+                    "GITCORTEX_RUNNER_ADDR",
+                )
+                .unwrap_or_else(|_| {
                     tracing::warn!(
                         "SOLODAWN_RUNNER_ADDR not set, defaulting to http://runner:50051"
                     );
@@ -396,9 +402,7 @@ impl RunnerClientImpl {
                 Ok(Self::Remote(RemoteRunner::new(addr)))
             }
             other => {
-                bail!(
-                    "Unknown SOLODAWN_RUNNER_MODE: '{other}'. Expected 'local' or 'remote'."
-                );
+                bail!("Unknown SOLODAWN_RUNNER_MODE: '{other}'. Expected 'local' or 'remote'.");
             }
         }
     }

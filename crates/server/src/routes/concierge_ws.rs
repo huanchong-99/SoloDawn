@@ -48,9 +48,11 @@ async fn concierge_ws_handler(
         .map_err(|e| ApiError::Internal(format!("{e}")))?
         .ok_or_else(|| ApiError::NotFound("Session not found".to_string()))?;
 
-    Ok(ws.on_upgrade(move |socket| {
-        handle_concierge_ws(socket, concierge, broadcaster, session_id)
-    }))
+    Ok(
+        ws.on_upgrade(move |socket| {
+            handle_concierge_ws(socket, concierge, broadcaster, session_id)
+        }),
+    )
 }
 
 async fn handle_concierge_ws(

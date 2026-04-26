@@ -12,7 +12,10 @@ async fn test_terminal_ws_rejects_invalid_terminal_id() {
         .await
         .expect("Failed to create deployment");
     let app = Router::new()
-        .nest("/api/terminal", server::routes::terminal_ws::terminal_ws_routes())
+        .nest(
+            "/api/terminal",
+            server::routes::terminal_ws::terminal_ws_routes(),
+        )
         .with_state(deployment);
 
     let request = Request::builder()

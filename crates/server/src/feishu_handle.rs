@@ -1,10 +1,9 @@
 //! Shared handle for the running Feishu service.
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
-use feishu_connector::events::FeishuEvent;
-use feishu_connector::messages::FeishuMessenger;
+use feishu_connector::{events::FeishuEvent, messages::FeishuMessenger};
+use tokio::sync::RwLock;
 
 /// Shared state for the Feishu connector, accessible from route handlers.
 #[derive(Clone)]

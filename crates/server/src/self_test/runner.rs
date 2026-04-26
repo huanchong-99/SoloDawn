@@ -3,8 +3,7 @@
 //! Boots a real SoloDawn server with a temporary database, listens on a
 //! random port, and provides a handle for shutdown + cleanup.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Result;
 use deployment::Deployment;
@@ -114,9 +113,7 @@ impl TestServer {
         let mut attempts = 0;
         loop {
             if attempts > 60 {
-                return Err(anyhow::anyhow!(
-                    "Timeout waiting for server to start (30s)"
-                ));
+                return Err(anyhow::anyhow!("Timeout waiting for server to start (30s)"));
             }
             match client.get(&healthz_url).send().await {
                 Ok(resp) if resp.status().is_success() => break,

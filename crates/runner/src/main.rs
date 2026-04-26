@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
+use runner::{proto::runner_service_server::RunnerServiceServer, service::RunnerGrpcService};
+use services::terminal::process::ProcessManager;
 use tonic::transport::Server;
 use tracing_subscriber::EnvFilter;
-
-use runner::proto::runner_service_server::RunnerServiceServer;
-use runner::service::RunnerGrpcService;
-use services::terminal::process::ProcessManager;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

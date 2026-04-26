@@ -267,4 +267,3 @@ impl CliDetectionCache {
         Ok(())
     }
 }
-

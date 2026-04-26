@@ -247,7 +247,6 @@ impl SubscriptionHub {
             "Replayed pending workflow events to first subscriber"
         );
     }
-
 }
 
 impl Default for SubscriptionHub {

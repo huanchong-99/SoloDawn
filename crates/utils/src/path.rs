@@ -100,7 +100,9 @@ pub fn normalize_macos_private_alias<P: AsRef<Path>>(p: P) -> PathBuf {
 }
 
 pub fn get_solodawn_temp_dir() -> std::path::PathBuf {
-    if let Some(d) = crate::env_compat::var_opt_with_compat("SOLODAWN_TEMP_DIR", "GITCORTEX_TEMP_DIR") {
+    if let Some(d) =
+        crate::env_compat::var_opt_with_compat("SOLODAWN_TEMP_DIR", "GITCORTEX_TEMP_DIR")
+    {
         return std::path::PathBuf::from(d);
     }
 

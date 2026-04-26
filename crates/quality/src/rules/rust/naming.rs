@@ -3,10 +3,13 @@
 //! Checks Rust naming conventions: snake_case for functions/variables,
 //! CamelCase for types/traits, UPPER_SNAKE_CASE for constants/statics.
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, RustRule, RustAnalysisContext, RuleConfig};
 use syn::visit::Visit;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RuleConfig, RustAnalysisContext, RustRule},
+};
 
 /// Rule that checks Rust naming conventions.
 pub struct NamingConventionRule;
@@ -46,7 +49,10 @@ impl Rule for NamingConventionRule {
 
 impl RustRule for NamingConventionRule {
     fn analyze(&self, ctx: &RustAnalysisContext) -> Vec<QualityIssue> {
-        let severity = ctx.config.severity_override.unwrap_or_else(|| self.default_severity());
+        let severity = ctx
+            .config
+            .severity_override
+            .unwrap_or_else(|| self.default_severity());
 
         let mut visitor = NamingVisitor {
             severity,
@@ -87,10 +93,7 @@ impl<'ast> Visit<'ast> for NamingVisitor {
         if !name.starts_with('_') && !is_snake_case(&name) {
             let line = node.sig.ident.span().start().line;
             self.report(
-                format!(
-                    "Function `{}` should use snake_case naming",
-                    name
-                ),
+                format!("Function `{}` should use snake_case naming", name),
                 line,
             );
         }
@@ -102,10 +105,7 @@ impl<'ast> Visit<'ast> for NamingVisitor {
         if !name.starts_with('_') && !is_upper_camel_case(&name) {
             let line = node.ident.span().start().line;
             self.report(
-                format!(
-                    "Struct `{}` should use CamelCase naming",
-                    name
-                ),
+                format!("Struct `{}` should use CamelCase naming", name),
                 line,
             );
         }
@@ -116,13 +116,7 @@ impl<'ast> Visit<'ast> for NamingVisitor {
         let name = node.ident.to_string();
         if !name.starts_with('_') && !is_upper_camel_case(&name) {
             let line = node.ident.span().start().line;
-            self.report(
-                format!(
-                    "Enum `{}` should use CamelCase naming",
-                    name
-                ),
-                line,
-            );
+            self.report(format!("Enum `{}` should use CamelCase naming", name), line);
         }
         syn::visit::visit_item_enum(self, node);
     }
@@ -132,10 +126,7 @@ impl<'ast> Visit<'ast> for NamingVisitor {
         if !name.starts_with('_') && !is_upper_camel_case(&name) {
             let line = node.ident.span().start().line;
             self.report(
-                format!(
-                    "Trait `{}` should use CamelCase naming",
-                    name
-                ),
+                format!("Trait `{}` should use CamelCase naming", name),
                 line,
             );
         }
@@ -147,10 +138,7 @@ impl<'ast> Visit<'ast> for NamingVisitor {
         if !name.starts_with('_') && !is_upper_snake_case(&name) {
             let line = node.ident.span().start().line;
             self.report(
-                format!(
-                    "Constant `{}` should use UPPER_SNAKE_CASE naming",
-                    name
-                ),
+                format!("Constant `{}` should use UPPER_SNAKE_CASE naming", name),
                 line,
             );
         }
@@ -162,10 +150,7 @@ impl<'ast> Visit<'ast> for NamingVisitor {
         if !name.starts_with('_') && !is_upper_snake_case(&name) {
             let line = node.ident.span().start().line;
             self.report(
-                format!(
-                    "Static `{}` should use UPPER_SNAKE_CASE naming",
-                    name
-                ),
+                format!("Static `{}` should use UPPER_SNAKE_CASE naming", name),
                 line,
             );
         }
@@ -278,7 +263,11 @@ const MAX_SIZE: usize = 100;
 static GLOBAL_COUNT: u32 = 0;
 "#;
         let issues = analyze_code(source);
-        assert!(issues.is_empty(), "correctly named items should produce no issues, got: {:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(
+            issues.is_empty(),
+            "correctly named items should produce no issues, got: {:?}",
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -322,7 +311,10 @@ struct _Hidden;
 const _secret: i32 = 0;
 "#;
         let issues = analyze_code(source);
-        assert!(issues.is_empty(), "underscore-prefixed names should be skipped");
+        assert!(
+            issues.is_empty(),
+            "underscore-prefixed names should be skipped"
+        );
     }
 
     #[test]

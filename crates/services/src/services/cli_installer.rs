@@ -102,10 +102,10 @@ impl CliInstaller {
         let mut candidates = Vec::new();
 
         // Check SOLODAWN_INSTALL_DIR (set by installer)
-        if let Some(install_dir) = utils::env_compat::var_opt_with_compat("SOLODAWN_INSTALL_DIR", "GITCORTEX_INSTALL_DIR") {
-            candidates.push(
-                PathBuf::from(&install_dir).join("scripts/install-single-cli.ps1"),
-            );
+        if let Some(install_dir) =
+            utils::env_compat::var_opt_with_compat("SOLODAWN_INSTALL_DIR", "GITCORTEX_INSTALL_DIR")
+        {
+            candidates.push(PathBuf::from(&install_dir).join("scripts/install-single-cli.ps1"));
         }
 
         // Check relative to executable
@@ -126,9 +126,7 @@ impl CliInstaller {
 
     /// Resolve the bash install script path on Unix.
     fn resolve_unix_script_path() -> Option<PathBuf> {
-        let mut candidates = vec![PathBuf::from(
-            "/opt/solodawn/install/install-single-cli.sh",
-        )];
+        let mut candidates = vec![PathBuf::from("/opt/solodawn/install/install-single-cli.sh")];
         if let Ok(cwd) = std::env::current_dir() {
             candidates.push(cwd.join("scripts/docker/install/install-single-cli.sh"));
         }

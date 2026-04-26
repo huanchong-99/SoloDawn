@@ -1,25 +1,32 @@
+use std::{collections::HashMap, sync::Arc};
+
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use prost::Message as ProstMessage;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, RwLock};
-use tokio::task::JoinHandle;
+use tokio::{
+    sync::{Mutex, RwLock, mpsc},
+    task::JoinHandle,
+};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 use tracing;
 
-use crate::auth::FeishuAuth;
-use crate::events::FeishuEvent;
-use crate::proto::{
-    Frame, Header, HEADER_BIZ_RT, HEADER_MESSAGE_ID, HEADER_SEQ, HEADER_SUM, HEADER_TYPE,
-    METHOD_CONTROL, METHOD_DATA, MSG_TYPE_EVENT, MSG_TYPE_PING, MSG_TYPE_PONG,
+use crate::{
+    auth::FeishuAuth,
+    events::FeishuEvent,
+    proto::{
+        Frame, HEADER_BIZ_RT, HEADER_MESSAGE_ID, HEADER_SEQ, HEADER_SUM, HEADER_TYPE, Header,
+        METHOD_CONTROL, METHOD_DATA, MSG_TYPE_EVENT, MSG_TYPE_PING, MSG_TYPE_PONG,
+    },
+    types::{ClientConfig, FeishuConfig},
 };
-use crate::types::{ClientConfig, FeishuConfig};
 
 /// Extract a header value by key from a Frame's headers.
 fn get_header<'a>(headers: &'a [Header], key: &str) -> Option<&'a str> {
-    headers.iter().find(|h| h.key == key).map(|h| h.value.as_str())
+    headers
+        .iter()
+        .find(|h| h.key == key)
+        .map(|h| h.value.as_str())
 }
 
 /// Build a ping Frame for the given service_id.
@@ -59,12 +66,13 @@ impl FragmentCache {
         self.entries
             .retain(|_, e| now.duration_since(e.created).as_secs() < 5);
 
-        let entry = self.entries.entry(msg_id.to_string()).or_insert_with(|| {
-            FragmentEntry {
+        let entry = self
+            .entries
+            .entry(msg_id.to_string())
+            .or_insert_with(|| FragmentEntry {
                 parts: vec![None; sum],
                 created: now,
-            }
-        });
+            });
 
         if seq < entry.parts.len() {
             entry.parts[seq] = Some(data);
@@ -116,9 +124,9 @@ impl FeishuClient {
     /// Start the WebSocket connection loop (runs until disconnected)
     pub async fn connect(&self) -> Result<()> {
         let endpoint = self.auth.acquire_ws_endpoint().await?;
-        let data = endpoint
-            .data
-            .ok_or_else(|| anyhow::anyhow!("No endpoint data in response (code={})", endpoint.code))?;
+        let data = endpoint.data.ok_or_else(|| {
+            anyhow::anyhow!("No endpoint data in response (code={})", endpoint.code)
+        })?;
 
         if let Some(cfg) = data.client_config {
             *self.config.write().await = cfg;
@@ -257,7 +265,9 @@ impl FeishuClient {
     async fn handle_data_frame(
         mut frame: Frame,
         event_tx: &mpsc::Sender<FeishuEvent>,
-        write: &Arc<Mutex<impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin>>,
+        write: &Arc<
+            Mutex<impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin>,
+        >,
         fragment_cache: &mut FragmentCache,
     ) {
         let msg_type = get_header(&frame.headers, HEADER_TYPE).unwrap_or("");

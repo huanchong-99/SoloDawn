@@ -1333,7 +1333,8 @@ impl GitService {
         )?;
 
         let parse_date = |raw: Option<&str>| -> DateTime<Utc> {
-            raw.and_then(|value| DateTime::parse_from_rfc3339(value).ok()).map_or_else(Utc::now, |dt| dt.with_timezone(&Utc))
+            raw.and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                .map_or_else(Utc::now, |dt| dt.with_timezone(&Utc))
         };
 
         let mut branches = Vec::new();

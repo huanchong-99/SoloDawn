@@ -13,9 +13,8 @@ pub fn is_rust_file(path: &Path) -> bool {
 
 /// Check if a file path is a TypeScript/JavaScript source file
 pub fn is_ts_file(path: &Path) -> bool {
-    path.extension().is_some_and(|ext| {
-        ext == "ts" || ext == "tsx" || ext == "js" || ext == "jsx"
-    })
+    path.extension()
+        .is_some_and(|ext| ext == "ts" || ext == "tsx" || ext == "js" || ext == "jsx")
 }
 
 /// Check if a file path should be excluded from analysis

@@ -7,8 +7,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+};
 
 /// SARIF 2.1.0 顶层结构（简化版）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,9 +151,12 @@ pub fn sarif_to_issues(report: &SarifReport, source: AnalyzerSource) -> Vec<Qual
                     if let Some(ref artifact) = phys.artifact_location {
                         let file_path = artifact.uri.trim_start_matches("file:///").to_string();
                         if let Some(ref region) = phys.region {
-                            if let (Some(sl), Some(sc), Some(el), Some(ec)) =
-                                (region.start_line, region.start_column, region.end_line, region.end_column)
-                            {
+                            if let (Some(sl), Some(sc), Some(el), Some(ec)) = (
+                                region.start_line,
+                                region.start_column,
+                                region.end_line,
+                                region.end_column,
+                            ) {
                                 issue = issue.with_range(file_path, sl, sc, el, ec);
                             } else if let Some(line) = region.start_line {
                                 issue = issue.with_location(file_path, line);

@@ -4,7 +4,9 @@ use rust_embed::RustEmbed;
 const PROJECT_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 pub fn asset_dir() -> std::io::Result<std::path::PathBuf> {
-    if let Some(d) = crate::env_compat::var_opt_with_compat("SOLODAWN_ASSET_DIR", "GITCORTEX_ASSET_DIR") {
+    if let Some(d) =
+        crate::env_compat::var_opt_with_compat("SOLODAWN_ASSET_DIR", "GITCORTEX_ASSET_DIR")
+    {
         let path = std::path::PathBuf::from(d);
         std::fs::create_dir_all(&path)?;
         return Ok(path);

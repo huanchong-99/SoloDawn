@@ -13,17 +13,17 @@ pub mod rust_analyzer;
 pub mod security;
 pub mod sonar;
 
+use std::{collections::HashMap, path::Path};
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::Path;
 
-use crate::discovery::{
-    NodeQualityCommand, PackageManager, RepositoryDiscovery, resolve_node_command,
+use crate::{
+    discovery::{NodeQualityCommand, PackageManager, RepositoryDiscovery, resolve_node_command},
+    gate::result::MeasureValue,
+    issue::QualityIssue,
+    metrics::MetricKey,
 };
-use crate::gate::result::MeasureValue;
-use crate::issue::QualityIssue;
-use crate::metrics::MetricKey;
 
 /// Provider 分析报告
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,7 +59,11 @@ impl ProviderReport {
     }
 
     /// 创建失败报告
-    pub fn failure(provider_name: impl Into<String>, duration_ms: u64, error: impl Into<String>) -> Self {
+    pub fn failure(
+        provider_name: impl Into<String>,
+        duration_ms: u64,
+        error: impl Into<String>,
+    ) -> Self {
         Self {
             provider_name: provider_name.into(),
             success: false,
@@ -176,15 +180,16 @@ mod tests {
     /// cannot leak into a Node test runner and hijack them.
     #[tokio::test]
     async fn run_node_quality_command_strips_solodawn_dev_ports() {
-        if std::process::Command::new("node").arg("-v").output().is_err() {
+        if std::process::Command::new("node")
+            .arg("-v")
+            .output()
+            .is_err()
+        {
             eprintln!("node not found; skipping env-strip regression test");
             return;
         }
 
-        let tmp = std::env::temp_dir().join(format!(
-            "quality-env-strip-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let tmp = std::env::temp_dir().join(format!("quality-env-strip-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
 
         std::fs::write(

@@ -15,8 +15,9 @@ use anyhow::{self, Error as AnyhowError};
 use clap::{Parser, Subcommand};
 use deployment::{Deployment, DeploymentError};
 use server::{
-    DeploymentImpl, routes,
+    DeploymentImpl,
     feishu_handle::{FeishuHandle, SharedFeishuHandle},
+    routes,
     routes::{SharedSubscriptionHub, event_bridge::EventBridge, subscription_hub::SubscriptionHub},
 };
 use services::services::container::ContainerService;
@@ -79,7 +80,10 @@ fn ensure_api_token_in_release() {
 fn ensure_dev_encryption_key() {
     if !cfg!(debug_assertions) {
         // G18-003: In release mode, require a valid encryption key — do not silently proceed
-        match utils::env_compat::var_with_compat("SOLODAWN_ENCRYPTION_KEY", "GITCORTEX_ENCRYPTION_KEY") {
+        match utils::env_compat::var_with_compat(
+            "SOLODAWN_ENCRYPTION_KEY",
+            "GITCORTEX_ENCRYPTION_KEY",
+        ) {
             Ok(value) if value.len() == 32 => {}
             Ok(value) => {
                 panic!(
@@ -104,7 +108,8 @@ fn ensure_dev_encryption_key() {
         return;
     }
 
-    match utils::env_compat::var_with_compat("SOLODAWN_ENCRYPTION_KEY", "GITCORTEX_ENCRYPTION_KEY") {
+    match utils::env_compat::var_with_compat("SOLODAWN_ENCRYPTION_KEY", "GITCORTEX_ENCRYPTION_KEY")
+    {
         Ok(value) if value.len() == 32 => {}
         Ok(value) => {
             tracing::warn!(
@@ -116,9 +121,7 @@ fn ensure_dev_encryption_key() {
             unsafe {
                 std::env::set_var("SOLODAWN_ENCRYPTION_KEY", DEV_DEFAULT_ENCRYPTION_KEY);
             }
-            tracing::warn!(
-                "SOLODAWN_ENCRYPTION_KEY not set; using development fallback key"
-            );
+            tracing::warn!("SOLODAWN_ENCRYPTION_KEY not set; using development fallback key");
         }
     }
 }
@@ -140,7 +143,11 @@ async fn main() -> Result<(), SoloDawnError> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::SelfTest { json, filter, orchestration }) => {
+        Some(Commands::SelfTest {
+            json,
+            filter,
+            orchestration,
+        }) => {
             let exit_code = server::self_test::run(json, filter, orchestration).await;
             std::process::exit(exit_code);
         }
@@ -214,7 +221,8 @@ async fn run_server() -> Result<(), SoloDawnError> {
     tracing::info!("WebSocket event bridge started");
 
     // Initialize Concierge Agent (must be created before Feishu connector)
-    let concierge_broadcaster = Arc::new(services::services::concierge::ConciergeBroadcaster::new());
+    let concierge_broadcaster =
+        Arc::new(services::services::concierge::ConciergeBroadcaster::new());
     let concierge_agent = {
         let mut agent = services::services::concierge::ConciergeAgent::new(
             deployment.db().pool.clone(),
@@ -240,7 +248,9 @@ async fn run_server() -> Result<(), SoloDawnError> {
             Err(e) => tracing::warn!("Feishu connector startup skipped: {e}"),
         }
     } else {
-        tracing::debug!("Feishu integration disabled (neither env var nor database setting enabled)");
+        tracing::debug!(
+            "Feishu integration disabled (neither env var nor database setting enabled)"
+        );
     }
 
     // Sync config.json model library → DB on startup so the Orchestrator
@@ -251,23 +261,43 @@ async fn run_server() -> Result<(), SoloDawnError> {
         for item in &cfg.workflow_model_library {
             let cli_type_id = item.cli_type_id.as_deref().unwrap_or("cli-codex");
             if let Err(e) = db::models::ModelConfig::create_custom(
-                pool, &item.id, cli_type_id, &item.display_name, &item.model_id,
-            ).await {
+                pool,
+                &item.id,
+                cli_type_id,
+                &item.display_name,
+                &item.model_id,
+            )
+            .await
+            {
                 tracing::warn!(model_id = %item.id, error = %e, "Startup model sync failed");
                 continue;
             }
             if !item.api_key.is_empty() {
                 let mut tmp_model = db::models::ModelConfig {
-                    id: String::new(), cli_type_id: String::new(), name: String::new(),
-                    display_name: String::new(), api_model_id: None, is_default: false,
-                    is_official: false, created_at: chrono::Utc::now(), updated_at: chrono::Utc::now(),
-                    encrypted_api_key: None, base_url: None, api_type: None, has_api_key: false,
+                    id: String::new(),
+                    cli_type_id: String::new(),
+                    name: String::new(),
+                    display_name: String::new(),
+                    api_model_id: None,
+                    is_default: false,
+                    is_official: false,
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                    encrypted_api_key: None,
+                    base_url: None,
+                    api_type: None,
+                    has_api_key: false,
                 };
                 if let Ok(()) = tmp_model.set_api_key(&item.api_key) {
                     if let Some(ref encrypted) = tmp_model.encrypted_api_key {
                         let _ = db::models::ModelConfig::update_credentials(
-                            pool, &item.id, encrypted, Some(&item.base_url), &item.api_type,
-                        ).await;
+                            pool,
+                            &item.id,
+                            encrypted,
+                            Some(&item.base_url),
+                            &item.api_type,
+                        )
+                        .await;
                     }
                 }
             }
@@ -378,11 +408,7 @@ pub async fn shutdown_signal() {
 }
 
 pub async fn perform_cleanup_actions(deployment: &DeploymentImpl) {
-    if let Err(e) = deployment
-        .container()
-        .kill_all_running_processes()
-        .await
-    {
+    if let Err(e) = deployment.container().kill_all_running_processes().await {
         tracing::error!(error = %e, "Failed to cleanly kill running execution processes during shutdown");
     }
 }
@@ -424,7 +450,8 @@ async fn start_feishu_connector(
     let (reconnect_tx, mut reconnect_rx) = tokio::sync::mpsc::channel::<()>(1);
     let connected = service.connected_flag();
     let messenger = service.messenger().clone();
-    let (event_tx, _) = tokio::sync::broadcast::channel::<feishu_connector::events::FeishuEvent>(64);
+    let (event_tx, _) =
+        tokio::sync::broadcast::channel::<feishu_connector::events::FeishuEvent>(64);
     service.set_event_broadcaster(event_tx.clone());
 
     let handle = FeishuHandle {

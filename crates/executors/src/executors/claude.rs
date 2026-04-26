@@ -1233,9 +1233,7 @@ impl ClaudeLogProcessor {
                 let entry = NormalizedEntry {
                     timestamp: None,
                     entry_type: NormalizedEntryType::SystemMessage,
-                    content: format!(
-                        "Unrecognized JSON message: {raw_json}"
-                    ),
+                    content: format!("Unrecognized JSON message: {raw_json}"),
                     metadata: None,
                 };
                 let idx = entry_index_provider.next();

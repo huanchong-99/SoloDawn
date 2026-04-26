@@ -1,5 +1,6 @@
-use serde::{Deserialize, Serialize};
 use std::fmt;
+
+use serde::{Deserialize, Serialize};
 
 /// Identifies which wire protocol / response format to expect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -210,7 +211,10 @@ mod tests {
     #[test]
     fn legacy_anthropic_compatible_gets_v1() {
         assert_eq!(
-            normalize_base_url("anthropic-compatible", "https://open.bigmodel.cn/api/anthropic"),
+            normalize_base_url(
+                "anthropic-compatible",
+                "https://open.bigmodel.cn/api/anthropic"
+            ),
             "https://open.bigmodel.cn/api/anthropic/v1"
         );
     }
@@ -219,7 +223,10 @@ mod tests {
     #[test]
     fn legacy_anthropic_compatible_already_has_v1() {
         assert_eq!(
-            normalize_base_url("anthropic-compatible", "https://open.bigmodel.cn/api/anthropic/v1"),
+            normalize_base_url(
+                "anthropic-compatible",
+                "https://open.bigmodel.cn/api/anthropic/v1"
+            ),
             "https://open.bigmodel.cn/api/anthropic/v1"
         );
     }

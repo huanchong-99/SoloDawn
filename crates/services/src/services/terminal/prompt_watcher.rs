@@ -1194,7 +1194,9 @@ next_action: handoff\n"
     pub async fn process_output(&self, terminal_id: &str, output: &str) {
         let mut terminals = self.terminals.write().await;
 
-        let state = if let Some(s) = terminals.get_mut(terminal_id) { s } else {
+        let state = if let Some(s) = terminals.get_mut(terminal_id) {
+            s
+        } else {
             tracing::trace!(
                 terminal_id = %terminal_id,
                 "Terminal not registered for prompt watching, ignoring output"
@@ -1453,9 +1455,8 @@ next_action: handoff\n"
                 );
 
                 drop(terminals);
-                let direct_input = Self::normalize_input_for_direct_write(
-                    CLAUDE_MODEL_UNAVAILABLE_RECOVERY_INPUT,
-                );
+                let direct_input =
+                    Self::normalize_input_for_direct_write(CLAUDE_MODEL_UNAVAILABLE_RECOVERY_INPUT);
                 let sent_direct = self
                     .try_direct_terminal_input(
                         &response_terminal_id,
@@ -1591,7 +1592,8 @@ next_action: handoff\n"
         // Chunk-level fallback: Codex can ask whether it should continue after
         // seeing "unexpected changes I didn't make". Auto-answer this to keep
         // orchestrated workflows non-blocking.
-        if state.auto_confirm && !state.should_debounce() && has_unexpected_changes_followup_context {
+        if state.auto_confirm && !state.should_debounce() && has_unexpected_changes_followup_context
+        {
             let decision = PromptDecision::LLMDecision {
                 response: UNEXPECTED_CHANGES_CONTINUE_RESPONSE.to_string(),
                 reasoning:
@@ -1877,9 +1879,8 @@ next_action: handoff\n"
                 );
 
                 drop(terminals);
-                let direct_input = Self::normalize_input_for_direct_write(
-                    CLAUDE_MODEL_UNAVAILABLE_RECOVERY_INPUT,
-                );
+                let direct_input =
+                    Self::normalize_input_for_direct_write(CLAUDE_MODEL_UNAVAILABLE_RECOVERY_INPUT);
                 let sent_direct = self
                     .try_direct_terminal_input(
                         &response_terminal_id,
@@ -2941,7 +2942,8 @@ WARNING: Claude Code running in Bypass Permissions mode
 
         watcher.process_output("term-1", prompt_single_line).await;
 
-        let third_event = tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv()).await;
+        let third_event =
+            tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv()).await;
         assert!(
             third_event.is_err(),
             "Claude bypass retry should only fire once while prompt remains visible"
@@ -4318,8 +4320,8 @@ WARNING: Claude Code running in Bypass Permissions mode
     }
 
     #[tokio::test]
-    async fn test_process_output_claude_model_not_found_prompt_line_by_line_sends_recovery_instruction(
-    ) {
+    async fn test_process_output_claude_model_not_found_prompt_line_by_line_sends_recovery_instruction()
+     {
         let message_bus = Arc::new(MessageBus::new(100));
         let process_manager = Arc::new(ProcessManager::new());
         let watcher = PromptWatcher::new(message_bus.clone(), process_manager);

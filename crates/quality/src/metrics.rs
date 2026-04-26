@@ -69,6 +69,9 @@ pub enum MetricKey {
     /// 安全审计问题数
     #[serde(rename = "security_issues")]
     SecurityIssues,
+    /// 潜在 ReDoS 风险数量
+    #[serde(rename = "redos_risks")]
+    RedosRisks,
 
     // ── Repo/Infra 指标 ──
     /// 类型生成检查失败
@@ -140,6 +143,12 @@ pub enum MetricKey {
     /// TODO/FIXME 密度百分比（TODO 行数 / 总行数 * 100）
     #[serde(rename = "todo_density")]
     TodoDensity,
+    /// 占位/空洞测试数量
+    #[serde(rename = "stub_test_count")]
+    StubTestCount,
+    /// 覆盖率配置排除核心业务层的可疑项数量
+    #[serde(rename = "coverage_exclusion_issues")]
+    CoverageExclusionIssues,
 
     // ── Quality engine internal sentinels ──
     /// 强制模式下，仓库已发现 target 但没有任何 provider 能评估任一 gate condition
@@ -170,6 +179,7 @@ impl MetricKey {
             Self::Vulnerabilities => "vulnerabilities",
             Self::DuplicatedLinesDensity => "duplicated_lines_density",
             Self::SecurityIssues => "security_issues",
+            Self::RedosRisks => "redos_risks",
             Self::GenerateTypesCheckFailures => "generate_types_check_failures",
             Self::PrepareDbCheckFailures => "prepare_db_check_failures",
             Self::SonarQualityGateStatus => "sonar_quality_gate_status",
@@ -189,6 +199,8 @@ impl MetricKey {
             Self::BranchCoverage => "branch_coverage",
             Self::TestFileAbsence => "test_file_absence",
             Self::TodoDensity => "todo_density",
+            Self::StubTestCount => "stub_test_count",
+            Self::CoverageExclusionIssues => "coverage_exclusion_issues",
             Self::QualityGateEmptyScan => "quality_gate_empty_scan",
         }
     }
@@ -214,6 +226,7 @@ impl MetricKey {
             Self::Vulnerabilities => "Vulnerabilities",
             Self::DuplicatedLinesDensity => "Duplicated Lines (%)",
             Self::SecurityIssues => "Security Issues",
+            Self::RedosRisks => "ReDoS Risks",
             Self::GenerateTypesCheckFailures => "Type Generation Failures",
             Self::PrepareDbCheckFailures => "DB Preparation Failures",
             Self::SonarQualityGateStatus => "Sonar Quality Gate",
@@ -233,6 +246,8 @@ impl MetricKey {
             Self::BranchCoverage => "Branch Coverage (%)",
             Self::TestFileAbsence => "Test File Absence",
             Self::TodoDensity => "TODO Density (%)",
+            Self::StubTestCount => "Stub Test Count",
+            Self::CoverageExclusionIssues => "Coverage Exclusion Issues",
             Self::QualityGateEmptyScan => "Empty Quality Scan",
         }
     }

@@ -8,12 +8,13 @@ use axum::{
     response::Json as ResponseJson,
     routing::{get, post, put},
 };
-use db::models::planning_draft::{PlanningDraft, PlanningDraftMessage, PLANNING_DRAFT_STATUSES};
+use db::models::planning_draft::{PLANNING_DRAFT_STATUSES, PlanningDraft, PlanningDraftMessage};
 use deployment::Deployment;
 use serde::{Deserialize, Serialize};
 use services::services::orchestrator::{
-    LLMMessage, OrchestratorConfig, create_claude_code_native_client, create_llm_client,
+    LLMMessage, OrchestratorConfig,
     config::{PromptProfile, system_prompt_for_profile},
+    create_claude_code_native_client, create_llm_client,
 };
 use utils::response::ApiResponse;
 use uuid::Uuid;
@@ -136,7 +137,9 @@ async fn create_draft(
     draft.planner_api_type = req.planner_api_type;
     draft.planner_base_url = req.planner_base_url;
     if let Some(ref api_key) = req.planner_api_key {
-        draft.set_api_key(api_key).map_err(|e| ApiError::Internal(format!("Failed to encrypt API key: {e}")))?;
+        draft
+            .set_api_key(api_key)
+            .map_err(|e| ApiError::Internal(format!("Failed to encrypt API key: {e}")))?;
     }
 
     PlanningDraft::insert(&deployment.db().pool, &draft)
@@ -208,10 +211,7 @@ async fn update_spec(
             ));
         }
         // Enforce forward-only state transitions
-        let valid_transitions = [
-            ("gathering", "spec_ready"),
-            ("spec_ready", "confirmed"),
-        ];
+        let valid_transitions = [("gathering", "spec_ready"), ("spec_ready", "confirmed")];
         if new_status != &draft.status {
             let is_valid = valid_transitions
                 .iter()
@@ -303,15 +303,21 @@ async fn send_message(
 
     // 1. Auto-fill planner config from workflow_model_library if missing
     let mut draft = draft;
-    let missing_planner = draft.planner_model_id.as_deref().map_or(true, str::is_empty)
-        || draft.planner_base_url.as_deref().map_or(true, str::is_empty);
+    let missing_planner = draft
+        .planner_model_id
+        .as_deref()
+        .map_or(true, str::is_empty)
+        || draft
+            .planner_base_url
+            .as_deref()
+            .map_or(true, str::is_empty);
     if missing_planner {
         {
             let cfg = deployment.config().read().await;
             // Priority 1: Anthropic-protocol models (most common for orchestrator chat)
             if let Some(model) = cfg.workflow_model_library.iter().find(|m| {
                 !m.api_key.is_empty()
-                && matches!(m.api_type.as_str(), "anthropic" | "anthropic-compatible")
+                    && matches!(m.api_type.as_str(), "anthropic" | "anthropic-compatible")
             }) {
                 tracing::info!(
                     draft_id = %draft_id,
@@ -328,7 +334,7 @@ async fn send_message(
             // Priority 2: OpenAI-protocol models (fallback)
             else if let Some(model) = cfg.workflow_model_library.iter().find(|m| {
                 !m.api_key.is_empty()
-                && matches!(m.api_type.as_str(), "openai" | "openai-compatible")
+                    && matches!(m.api_type.as_str(), "openai" | "openai-compatible")
             }) {
                 tracing::info!(
                     draft_id = %draft_id,
@@ -343,7 +349,11 @@ async fn send_message(
                 }
             }
             // Priority 3: Any model with API key (last resort)
-            else if let Some(model) = cfg.workflow_model_library.iter().find(|m| !m.api_key.is_empty()) {
+            else if let Some(model) = cfg
+                .workflow_model_library
+                .iter()
+                .find(|m| !m.api_key.is_empty())
+            {
                 tracing::info!(
                     draft_id = %draft_id,
                     model_id = %model.model_id,
@@ -408,24 +418,26 @@ async fn send_message(
                 // Auto-transition: if LLM produced a ```json PLANNING_SPEC block,
                 // move draft from gathering → spec_ready and extract spec content.
                 if draft.status == "gathering"
-                    && (response.content.contains("```json\n") || response.content.contains("```\n"))
+                    && (response.content.contains("```json\n")
+                        || response.content.contains("```\n"))
                     && response.content.contains("\"productGoal\"")
                 {
                     // Extract the JSON block from the fenced code block
-                    let json_block = response.content
-                        .split("```json\n").nth(1)
+                    let json_block = response
+                        .content
+                        .split("```json\n")
+                        .nth(1)
                         .or_else(|| response.content.split("```\n").nth(1))
                         .and_then(|s| s.split("```").next())
                         .unwrap_or("");
 
-                    let (req_summary, tech_spec) = if let Ok(spec) =
-                        serde_json::from_str::<serde_json::Value>(json_block)
-                    {
-                        let goal = spec["productGoal"].as_str().unwrap_or("").to_string();
-                        (goal, json_block.to_string())
-                    } else {
-                        (String::new(), json_block.to_string())
-                    };
+                    let (req_summary, tech_spec) =
+                        if let Ok(spec) = serde_json::from_str::<serde_json::Value>(json_block) {
+                            let goal = spec["productGoal"].as_str().unwrap_or("").to_string();
+                            (goal, json_block.to_string())
+                        } else {
+                            (String::new(), json_block.to_string())
+                        };
 
                     // Store extracted spec content
                     if let Err(e) = PlanningDraft::update_spec(
@@ -434,16 +446,15 @@ async fn send_message(
                         Some(&req_summary),
                         Some(&tech_spec),
                         None,
-                    ).await {
+                    )
+                    .await
+                    {
                         tracing::warn!(draft_id = %draft_id, "Failed to save extracted spec: {e}");
                     }
 
-                    if let Err(e) = PlanningDraft::update_status(
-                        &deployment.db().pool,
-                        &draft_id,
-                        "spec_ready",
-                    )
-                    .await
+                    if let Err(e) =
+                        PlanningDraft::update_status(&deployment.db().pool, &draft_id, "spec_ready")
+                            .await
                     {
                         tracing::warn!(draft_id = %draft_id, "Failed to auto-transition to spec_ready: {e}");
                     } else {
@@ -457,8 +468,7 @@ async fn send_message(
                 let error_content = format!(
                     "LLM call failed: {e}\n\nPlease check your model configuration (API key, base URL, model name) in Settings."
                 );
-                let error_msg =
-                    PlanningDraftMessage::new(&draft_id, "assistant", &error_content);
+                let error_msg = PlanningDraftMessage::new(&draft_id, "assistant", &error_content);
                 if let Ok(()) =
                     PlanningDraftMessage::insert(&deployment.db().pool, &error_msg).await
                 {
@@ -472,13 +482,9 @@ async fn send_message(
             "No LLM config on planning draft — model credentials may be missing"
         );
         // Surface as an assistant message so the user knows what's wrong
-        let error_content =
-            "Model not configured for this workspace. Please check Settings → Models and ensure the selected model has a valid API key and base URL.";
-        let error_msg =
-            PlanningDraftMessage::new(&draft_id, "assistant", error_content);
-        if let Ok(()) =
-            PlanningDraftMessage::insert(&deployment.db().pool, &error_msg).await
-        {
+        let error_content = "Model not configured for this workspace. Please check Settings → Models and ensure the selected model has a valid API key and base URL.";
+        let error_msg = PlanningDraftMessage::new(&draft_id, "assistant", error_content);
+        if let Ok(()) = PlanningDraftMessage::insert(&deployment.db().pool, &error_msg).await {
             result.push(MessageResponse::from(error_msg));
         }
     }
@@ -498,7 +504,11 @@ async fn send_message(
                     drop(handle_guard);
                     tokio::spawn(async move {
                         for (role, content) in messages_to_push {
-                            let prefix = if role == "user" { "[User]" } else { "[Assistant]" };
+                            let prefix = if role == "user" {
+                                "[User]"
+                            } else {
+                                "[Assistant]"
+                            };
                             let text = format!("{prefix} {content}");
                             let truncated = if text.len() > 4000 {
                                 let boundary = text.floor_char_boundary(4000);
@@ -544,7 +554,10 @@ fn build_llm_client_from_draft(
             key
         }
         Err(e) => {
-            tracing::warn!("Failed to decrypt planner API key for draft {}: {e}", draft.id);
+            tracing::warn!(
+                "Failed to decrypt planner API key for draft {}: {e}",
+                draft.id
+            );
             return None;
         }
     };
@@ -636,9 +649,7 @@ async fn toggle_feishu_sync(
         };
 
         if !*h.connected.read().await {
-            return Err(ApiError::Conflict(
-                "Feishu is not connected".to_string(),
-            ));
+            return Err(ApiError::Conflict("Feishu is not connected".to_string()));
         }
 
         let messenger = h.messenger.clone();
@@ -650,7 +661,9 @@ async fn toggle_feishu_sync(
         // Also check any concierge session that already has a feishu_chat_id
         let session_chat_id = {
             use db::models::concierge::ConciergeSession;
-            let sessions = ConciergeSession::list_all(&deployment.db().pool).await.unwrap_or_default();
+            let sessions = ConciergeSession::list_all(&deployment.db().pool)
+                .await
+                .unwrap_or_default();
             sessions.into_iter().find_map(|s| s.feishu_chat_id)
         };
 
@@ -674,27 +687,20 @@ async fn toggle_feishu_sync(
                 bot_chat
             } else {
                 return Err(ApiError::BadRequest(
-                    "No Feishu chat found. Send a message to the bot in Feishu first."
-                        .to_string(),
+                    "No Feishu chat found. Send a message to the bot in Feishu first.".to_string(),
                 ));
             }
         };
 
-        PlanningDraft::update_feishu_sync(
-            &deployment.db().pool,
-            &draft_id,
-            true,
-            Some(&chat_id),
-        )
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to update feishu sync: {e}")))?;
+        PlanningDraft::update_feishu_sync(&deployment.db().pool, &draft_id, true, Some(&chat_id))
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to update feishu sync: {e}")))?;
 
         // If sync_history, push existing messages to Feishu
         if req.sync_history {
-            let messages =
-                PlanningDraftMessage::list_by_draft(&deployment.db().pool, &draft_id)
-                    .await
-                    .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
+            let messages = PlanningDraftMessage::list_by_draft(&deployment.db().pool, &draft_id)
+                .await
+                .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
 
             let chat_id_clone = chat_id.clone();
             let draft_name = draft.name.clone();
@@ -703,7 +709,10 @@ async fn toggle_feishu_sync(
                 if let Err(e) = messenger
                     .send_text(
                         &chat_id_clone,
-                        &format!("[Planning Draft: {}] Syncing conversation history...", draft_name),
+                        &format!(
+                            "[Planning Draft: {}] Syncing conversation history...",
+                            draft_name
+                        ),
                     )
                     .await
                 {
@@ -711,7 +720,11 @@ async fn toggle_feishu_sync(
                     return;
                 }
                 for msg in &messages {
-                    let prefix = if msg.role == "user" { "[User]" } else { "[Assistant]" };
+                    let prefix = if msg.role == "user" {
+                        "[User]"
+                    } else {
+                        "[Assistant]"
+                    };
                     let text = format!("{prefix} {}", msg.content);
                     // Truncate very long messages for Feishu
                     let truncated = if text.len() > 4000 {
@@ -766,15 +779,15 @@ async fn materialize_draft(
     let now = chrono::Utc::now();
     let workflow_id = Uuid::new_v4().to_string();
 
-    let requirement_summary = draft
-        .requirement_summary
-        .clone()
-        .unwrap_or_default();
+    let requirement_summary = draft.requirement_summary.clone().unwrap_or_default();
 
-    let initial_goal = match (draft.requirement_summary.as_ref(), draft.technical_spec.as_ref()) {
-        (Some(summary), Some(spec)) => {
-            Some(format!("{summary}\n\n---\n\nTechnical Specification:\n{spec}"))
-        }
+    let initial_goal = match (
+        draft.requirement_summary.as_ref(),
+        draft.technical_spec.as_ref(),
+    ) {
+        (Some(summary), Some(spec)) => Some(format!(
+            "{summary}\n\n---\n\nTechnical Specification:\n{spec}"
+        )),
         (Some(summary), None) => Some(summary.clone()),
         (None, Some(spec)) => Some(spec.clone()),
         (None, None) => None,
@@ -787,7 +800,12 @@ async fn materialize_draft(
             .await
             .ok()
             .flatten()
-            .unwrap_or_else(|| ("cli-claude-code".to_string(), "model-claude-sonnet".to_string()));
+            .unwrap_or_else(|| {
+                (
+                    "cli-claude-code".to_string(),
+                    "model-claude-sonnet".to_string(),
+                )
+            });
 
     let mut workflow = Workflow {
         id: workflow_id.clone(),
@@ -822,10 +840,13 @@ async fn materialize_draft(
         pause_reason: None,
     };
 
-    let decrypted_key = draft.get_api_key()
+    let decrypted_key = draft
+        .get_api_key()
         .map_err(|e| ApiError::Internal(format!("Failed to decrypt planner API key: {e}")))?;
     if let Some(ref api_key) = decrypted_key {
-        workflow.set_api_key(api_key).map_err(|e| ApiError::Internal(format!("Failed to encrypt API key: {e}")))?;
+        workflow
+            .set_api_key(api_key)
+            .map_err(|e| ApiError::Internal(format!("Failed to encrypt API key: {e}")))?;
     }
 
     Workflow::create(&deployment.db().pool, &workflow)
@@ -849,9 +870,14 @@ async fn materialize_draft(
             .map_err(|e| ApiError::Internal(format!("Invalid workflow UUID: {e}")))?;
         let dep = deployment.clone();
         tokio::spawn(async move {
-            match crate::routes::workflows::auto_prepare_and_start(dep, &wf_uuid.to_string()).await {
-                Ok(()) => tracing::info!(workflow_id = %wf_uuid, "Auto-started materialized workflow"),
-                Err(e) => tracing::warn!(workflow_id = %wf_uuid, error = ?e, "Failed to auto-start workflow"),
+            match crate::routes::workflows::auto_prepare_and_start(dep, &wf_uuid.to_string()).await
+            {
+                Ok(()) => {
+                    tracing::info!(workflow_id = %wf_uuid, "Auto-started materialized workflow")
+                }
+                Err(e) => {
+                    tracing::warn!(workflow_id = %wf_uuid, error = ?e, "Failed to auto-start workflow")
+                }
             }
         });
     }

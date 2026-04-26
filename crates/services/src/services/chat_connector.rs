@@ -54,9 +54,12 @@ impl TelegramConnector {
     /// Try to create a connector from the `SOLODAWN_TELEGRAM_BOT_TOKEN`
     /// environment variable. Returns `None` when the variable is unset.
     pub fn from_env() -> Option<Self> {
-        utils::env_compat::var_opt_with_compat("SOLODAWN_TELEGRAM_BOT_TOKEN", "GITCORTEX_TELEGRAM_BOT_TOKEN")
-            .filter(|t| !t.is_empty())
-            .map(Self::new)
+        utils::env_compat::var_opt_with_compat(
+            "SOLODAWN_TELEGRAM_BOT_TOKEN",
+            "GITCORTEX_TELEGRAM_BOT_TOKEN",
+        )
+        .filter(|t| !t.is_empty())
+        .map(Self::new)
     }
 
     fn api_url(&self, method: &str) -> String {

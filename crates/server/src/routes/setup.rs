@@ -1,4 +1,8 @@
-use axum::{Json, Router, extract::State, routing::{get, post}};
+use axum::{
+    Json, Router,
+    extract::State,
+    routing::{get, post},
+};
 use db::models::{project::Project, system_settings::SystemSetting};
 use deployment::Deployment;
 use serde_json::{Value, json};

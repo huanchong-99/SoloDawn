@@ -500,7 +500,10 @@ mod conversion_tests {
         assert_eq!(dto.name, "Test Workflow");
         assert_eq!(dto.status, "created");
         assert_eq!(dto.execution_mode, "diy");
-        assert_eq!(dto.initial_goal.as_deref(), Some("Ship dual-mode orchestration"));
+        assert_eq!(
+            dto.initial_goal.as_deref(),
+            Some("Ship dual-mode orchestration")
+        );
         assert!(dto.use_slash_commands);
     }
 }

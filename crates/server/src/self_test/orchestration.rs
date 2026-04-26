@@ -4,8 +4,10 @@
 //! These tests are opt-in: they only run when `E2E_API_KEY` env var is set.
 //! On CI, the key comes from GitHub Secrets. Locally, set it manually.
 
-use std::path::Path;
-use std::time::{Duration, Instant};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use serde_json::{Value, json};
 
@@ -41,10 +43,7 @@ fn e2e_model() -> String {
 }
 
 /// Run all orchestration E2E tests. Returns results for each test.
-pub async fn run_orchestration_tests(
-    base_url: &str,
-    temp_dir: &Path,
-) -> Vec<TestResult> {
+pub async fn run_orchestration_tests(base_url: &str, temp_dir: &Path) -> Vec<TestResult> {
     if !orchestration_enabled() {
         eprintln!("Orchestration tests SKIPPED — E2E_API_KEY not set");
         return vec![TestResult {
@@ -137,14 +136,8 @@ pub async fn run_orchestration_tests(
 
     // Test 5: Create workflow + prepare + start + monitor
     let start = Instant::now();
-    let workflow_result = test_full_workflow(
-        &client,
-        &api,
-        &project_id,
-        &model_config_id,
-        &repo_path,
-    )
-    .await;
+    let workflow_result =
+        test_full_workflow(&client, &api, &project_id, &model_config_id, &repo_path).await;
     results.push(TestResult {
         name: "full_workflow_execution".to_string(),
         group: "orchestration".to_string(),
@@ -154,7 +147,10 @@ pub async fn run_orchestration_tests(
     });
 
     // Cleanup project
-    let _ = client.delete(api(&format!("/projects/{project_id}"))).send().await;
+    let _ = client
+        .delete(api(&format!("/projects/{project_id}")))
+        .send()
+        .await;
 
     results
 }
@@ -207,7 +203,10 @@ fn find_claude_binary() -> Result<String, String> {
         }
     } else {
         // Unix: try directly
-        if let Ok(output) = std::process::Command::new("claude").arg("--version").output() {
+        if let Ok(output) = std::process::Command::new("claude")
+            .arg("--version")
+            .output()
+        {
             if output.status.success() {
                 return Ok("claude".to_string());
             }
@@ -334,8 +333,12 @@ async fn test_create_project(
 
     let status = resp.status().as_u16();
     let body_text = resp.text().await.map_err(|e| format!("Read body: {e}"))?;
-    let body: Value = serde_json::from_str(&body_text)
-        .map_err(|e| format!("Parse project JSON ({status}): {e}\nBody: {}", &body_text[..body_text.len().min(500)]))?;
+    let body: Value = serde_json::from_str(&body_text).map_err(|e| {
+        format!(
+            "Parse project JSON ({status}): {e}\nBody: {}",
+            &body_text[..body_text.len().min(500)]
+        )
+    })?;
 
     if status >= 400 {
         return Err(format!("Create project returned {status}: {body}"));
@@ -397,8 +400,12 @@ async fn test_full_workflow(
 
     let status = resp.status().as_u16();
     let body_text = resp.text().await.map_err(|e| format!("Read body: {e}"))?;
-    let body: Value = serde_json::from_str(&body_text)
-        .map_err(|e| format!("Parse JSON ({status}): {e}\nBody: {}", &body_text[..body_text.len().min(500)]))?;
+    let body: Value = serde_json::from_str(&body_text).map_err(|e| {
+        format!(
+            "Parse JSON ({status}): {e}\nBody: {}",
+            &body_text[..body_text.len().min(500)]
+        )
+    })?;
     if status >= 400 {
         return Err(format!("Create workflow {status}: {body}"));
     }
@@ -533,10 +540,7 @@ async fn test_full_workflow(
                     .post(api(&format!("/workflows/{workflow_id}/stop")))
                     .send()
                     .await;
-                return Err(format!(
-                    "Workflow failed\n\nTerminal logs:\n{}",
-                    logs
-                ));
+                return Err(format!("Workflow failed\n\nTerminal logs:\n{}", logs));
             }
             _ => continue,
         }
@@ -655,10 +659,7 @@ async fn collect_terminal_logs(
                     .or_else(|| entry.get("log_type"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                let content = entry
-                    .get("content")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let content = entry.get("content").and_then(|v| v.as_str()).unwrap_or("");
                 output.push_str(&format!("[{log_type}] {content}\n"));
             }
             if output.is_empty() {
@@ -667,6 +668,9 @@ async fn collect_terminal_logs(
                 output
             }
         }
-        None => format!("[Unexpected log format: {}]", &body.to_string()[..body.to_string().len().min(500)]),
+        None => format!(
+            "[Unexpected log format: {}]",
+            &body.to_string()[..body.to_string().len().min(500)]
+        ),
     }
 }

@@ -71,7 +71,9 @@ impl WorktreeManager {
             .current_dir(repo_path)
             .output()
             .await
-            .map_err(|e| WorktreeError::Repository(format!("Failed to run git fetch --unshallow: {e}")))?;
+            .map_err(|e| {
+                WorktreeError::Repository(format!("Failed to run git fetch --unshallow: {e}"))
+            })?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             // "not a shallow repository" is expected for normal repos — not an error

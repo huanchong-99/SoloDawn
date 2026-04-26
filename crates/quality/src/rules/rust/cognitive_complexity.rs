@@ -18,7 +18,6 @@ pub struct CognitiveComplexityRule {
     _private: (),
 }
 
-
 impl Rule for CognitiveComplexityRule {
     fn id(&self) -> &str {
         "rust:cognitive-complexity"

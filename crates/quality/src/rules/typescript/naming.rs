@@ -5,9 +5,11 @@
 
 use regex::Regex;
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, TsRule, TsAnalysisContext, RuleConfig};
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RuleConfig, TsAnalysisContext, TsRule},
+};
 
 /// Checks TypeScript/JavaScript naming conventions.
 ///
@@ -30,16 +32,13 @@ pub struct NamingConventionRule {
 impl Default for NamingConventionRule {
     fn default() -> Self {
         Self {
-            fn_pattern: Regex::new(r"function\s+(\w+)")
-                .expect("invalid fn_pattern regex"),
-            class_pattern: Regex::new(r"class\s+(\w+)")
-                .expect("invalid class_pattern regex"),
+            fn_pattern: Regex::new(r"function\s+(\w+)").expect("invalid fn_pattern regex"),
+            class_pattern: Regex::new(r"class\s+(\w+)").expect("invalid class_pattern regex"),
             interface_pattern: Regex::new(r"interface\s+(\w+)")
                 .expect("invalid interface_pattern regex"),
             type_pattern: Regex::new(r"\btype\s+(\w+)\s*[=<{]")
                 .expect("invalid type_pattern regex"),
-            enum_pattern: Regex::new(r"enum\s+(\w+)")
-                .expect("invalid enum_pattern regex"),
+            enum_pattern: Regex::new(r"enum\s+(\w+)").expect("invalid enum_pattern regex"),
             const_upper_pattern: Regex::new(r"const\s+([A-Z_]+)\s*=")
                 .expect("invalid const_upper_pattern regex"),
             react_component_pattern: Regex::new(r"function\s+([A-Z]\w*)\s*\(")
@@ -147,10 +146,7 @@ impl TsRule for NamingConventionRule {
                             RuleType::CodeSmell,
                             Severity::Minor,
                             crate::rule::AnalyzerSource::Other("built-in".into()),
-                            format!(
-                                "Function '{}' should use camelCase naming",
-                                name
-                            ),
+                            format!("Function '{}' should use camelCase naming", name),
                         )
                         .with_location(ctx.file_path.to_string(), line_number),
                     );
@@ -167,10 +163,7 @@ impl TsRule for NamingConventionRule {
                             RuleType::CodeSmell,
                             Severity::Minor,
                             crate::rule::AnalyzerSource::Other("built-in".into()),
-                            format!(
-                                "Class '{}' should use PascalCase naming",
-                                name
-                            ),
+                            format!("Class '{}' should use PascalCase naming", name),
                         )
                         .with_location(ctx.file_path.to_string(), line_number),
                     );
@@ -216,10 +209,7 @@ impl TsRule for NamingConventionRule {
                             RuleType::CodeSmell,
                             Severity::Minor,
                             crate::rule::AnalyzerSource::Other("built-in".into()),
-                            format!(
-                                "Type alias '{}' should use PascalCase naming",
-                                name
-                            ),
+                            format!("Type alias '{}' should use PascalCase naming", name),
                         )
                         .with_location(ctx.file_path.to_string(), line_number),
                     );
@@ -236,10 +226,7 @@ impl TsRule for NamingConventionRule {
                             RuleType::CodeSmell,
                             Severity::Minor,
                             crate::rule::AnalyzerSource::Other("built-in".into()),
-                            format!(
-                                "Enum '{}' should use PascalCase naming",
-                                name
-                            ),
+                            format!("Enum '{}' should use PascalCase naming", name),
                         )
                         .with_location(ctx.file_path.to_string(), line_number),
                     );

@@ -53,10 +53,7 @@ impl QualityPolicySnapshot {
     }
 
     /// Insert a new quality policy snapshot record
-    pub async fn insert(
-        pool: &SqlitePool,
-        snapshot: &QualityPolicySnapshot,
-    ) -> sqlx::Result<()> {
+    pub async fn insert(pool: &SqlitePool, snapshot: &QualityPolicySnapshot) -> sqlx::Result<()> {
         sqlx::query(
             r"INSERT INTO quality_policy_snapshot (
                 id, quality_run_id, config_yaml, mode, tier,

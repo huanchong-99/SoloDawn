@@ -129,7 +129,10 @@ async fn trigger_pr_description_follow_up(
             None => {
                 Session::create(
                     &deployment.db().pool,
-                    &CreateSession { executor: None, model_config_id: None },
+                    &CreateSession {
+                        executor: None,
+                        model_config_id: None,
+                    },
                     Uuid::new_v4(),
                     workspace.id,
                 )
@@ -203,7 +206,9 @@ pub async fn create_pr(
     // G34-002: Validate title is non-empty and within length limits
     let title_trimmed = request.title.trim();
     if title_trimmed.is_empty() {
-        return Err(ApiError::BadRequest("PR title must not be empty".to_string()));
+        return Err(ApiError::BadRequest(
+            "PR title must not be empty".to_string(),
+        ));
     }
     if title_trimmed.len() > 256 {
         return Err(ApiError::BadRequest(

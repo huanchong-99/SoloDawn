@@ -9,9 +9,13 @@
 //! 4. 按操作符执行比较
 //! 5. 返回 EvaluationResult (Level + Value)
 
-use crate::gate::condition::Condition;
-use crate::gate::result::{EvaluationResult, MeasureValue};
-use crate::metrics::MetricKey;
+use crate::{
+    gate::{
+        condition::Condition,
+        result::{EvaluationResult, MeasureValue},
+    },
+    metrics::MetricKey,
+};
 
 /// 条件求值引擎
 ///
@@ -28,7 +32,10 @@ impl ConditionEvaluator {
     ///
     /// # 返回
     /// - `EvaluationResult`: 求值等级和实际值
-    pub fn evaluate(condition: &Condition, measure_value: Option<&MeasureValue>) -> EvaluationResult {
+    pub fn evaluate(
+        condition: &Condition,
+        measure_value: Option<&MeasureValue>,
+    ) -> EvaluationResult {
         // Missing metric → ERROR (fail-closed).  If a metric is defined as a gate
         // condition but has no value, quality was NOT verified — this must block in
         // enforce mode.  Previously returned WARN which `is_passed()` treated as
@@ -146,9 +153,13 @@ impl ConditionEvaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gate::condition::{Condition, Operator};
-    use crate::gate::status::Level;
-    use crate::metrics::MetricKey;
+    use crate::{
+        gate::{
+            condition::{Condition, Operator},
+            status::Level,
+        },
+        metrics::MetricKey,
+    };
 
     #[test]
     fn test_evaluate_gt_triggered() {
@@ -198,7 +209,13 @@ mod tests {
         let measure = MeasureValue::Int(-1);
         let result = ConditionEvaluator::evaluate(&condition, Some(&measure));
         assert_eq!(result.level, Level::Error);
-        assert!(result.message.unwrap().to_lowercase().contains("unavailable"));
+        assert!(
+            result
+                .message
+                .unwrap()
+                .to_lowercase()
+                .contains("unavailable")
+        );
     }
 
     #[test]
@@ -216,8 +233,8 @@ mod tests {
 
         let results = ConditionEvaluator::evaluate_all(&conditions, &measures);
 
-        assert_eq!(results[0].level, Level::Ok);    // clippy: 0 not > 0
-        assert_eq!(results[1].level, Level::Error);  // tests: 2 > 0
-        assert_eq!(results[2].level, Level::Ok);    // coverage: 90 not < 80
+        assert_eq!(results[0].level, Level::Ok); // clippy: 0 not > 0
+        assert_eq!(results[1].level, Level::Error); // tests: 2 > 0
+        assert_eq!(results[2].level, Level::Ok); // coverage: 90 not < 80
     }
 }

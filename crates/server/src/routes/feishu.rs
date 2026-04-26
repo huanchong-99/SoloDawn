@@ -126,7 +126,11 @@ async fn get_status(
             };
             (true, status.to_string(), Some(config_to_summary(cfg)))
         }
-        Some(ref cfg) => (false, "not_configured".to_string(), Some(config_to_summary(cfg))),
+        Some(ref cfg) => (
+            false,
+            "not_configured".to_string(),
+            Some(config_to_summary(cfg)),
+        ),
         None => (false, "not_configured".to_string(), None),
     };
 
@@ -259,7 +263,8 @@ async fn reconnect(
                     "A reconnect is already in progress. Please wait and try again.".to_string(),
                 )),
                 tokio::sync::mpsc::error::TrySendError::Closed(()) => Err(ApiError::Internal(
-                    "Feishu reconnect channel is closed. The connector may have shut down.".to_string(),
+                    "Feishu reconnect channel is closed. The connector may have shut down."
+                        .to_string(),
                 )),
             };
         }
@@ -322,9 +327,7 @@ async fn test_send(
     };
 
     if !*h.connected.read().await {
-        return Err(ApiError::Conflict(
-            "Feishu is not connected".to_string(),
-        ));
+        return Err(ApiError::Conflict("Feishu is not connected".to_string()));
     }
 
     let messenger = h.messenger.clone();
@@ -361,7 +364,13 @@ async fn test_send(
         }
     };
 
-    match messenger.send_text(&chat_id, "Hello from SoloDawn / 你好，来自 SoloDawn 的测试消息").await {
+    match messenger
+        .send_text(
+            &chat_id,
+            "Hello from SoloDawn / 你好，来自 SoloDawn 的测试消息",
+        )
+        .await
+    {
         Ok(_) => Ok(Json(ApiResponse::success(TestResultResponse {
             success: true,
             message: "Test message sent successfully".to_string(),
@@ -394,9 +403,7 @@ async fn test_receive(
     };
 
     if !*h.connected.read().await {
-        return Err(ApiError::Conflict(
-            "Feishu is not connected".to_string(),
-        ));
+        return Err(ApiError::Conflict("Feishu is not connected".to_string()));
     }
 
     let mut rx = h.event_tx.subscribe();
@@ -413,7 +420,8 @@ async fn test_receive(
                             if let Ok(msg) = feishu_connector::events::parse_message_event(&event) {
                                 // Save chat_id for test-send
                                 *last_chat_id.write().await = Some(msg.chat_id.clone());
-                                let text = feishu_connector::events::parse_text_content(&msg.content);
+                                let text =
+                                    feishu_connector::events::parse_text_content(&msg.content);
                                 return text;
                             }
                         }

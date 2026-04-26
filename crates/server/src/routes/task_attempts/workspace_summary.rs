@@ -131,11 +131,10 @@ pub async fn get_workspace_summaries(
         })
         .collect();
 
-    let diff_results: Vec<Option<(Uuid, DiffStats)>> =
-        futures_util::stream::iter(diff_futures)
-            .buffer_unordered(8)
-            .collect()
-            .await;
+    let diff_results: Vec<Option<(Uuid, DiffStats)>> = futures_util::stream::iter(diff_futures)
+        .buffer_unordered(8)
+        .collect()
+        .await;
     let diff_stats: HashMap<Uuid, DiffStats> = diff_results.into_iter().flatten().collect();
 
     // 8. Assemble response

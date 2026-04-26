@@ -103,10 +103,12 @@ async fn get_first_model(client: &Client, cli_type_id: &str) -> String {
         .get(format!("{}/cli_types/{}/models", API_BASE, cli_type_id))
         .send()
         .await
-        .unwrap_or_else(|e| panic!(
-            "Failed to GET /cli_types/{}/models - server may not be running: {}",
-            cli_type_id, e
-        ));
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to GET /cli_types/{}/models - server may not be running: {}",
+                cli_type_id, e
+            )
+        });
 
     assert_eq!(
         models_response.status(),

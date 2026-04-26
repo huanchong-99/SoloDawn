@@ -441,8 +441,12 @@ impl StandardCodingAgentExecutor for CursorAgent {
                             let status = match &tool_call {
                                 CursorToolCall::Shell { result, .. } => {
                                     if let Some(res) = result {
-                                        match serde_json::from_value::<CursorShellResult>(res.clone()) {
-                                            Ok(CursorShellResult::Wrapped(ref w)) if w.failure.is_some() && w.success.is_none() => {
+                                        match serde_json::from_value::<CursorShellResult>(
+                                            res.clone(),
+                                        ) {
+                                            Ok(CursorShellResult::Wrapped(ref w))
+                                                if w.failure.is_some() && w.success.is_none() =>
+                                            {
                                                 ToolStatus::Failed
                                             }
                                             Ok(r) => {
@@ -464,19 +468,30 @@ impl StandardCodingAgentExecutor for CursorAgent {
                                 }
                                 CursorToolCall::Mcp { result, .. } => {
                                     if let Some(res) = result {
-                                        match serde_json::from_value::<CursorMcpResult>(res.clone()) {
-                                            Ok(CursorMcpResult::Wrapped(ref w)) if w.failure.is_some() && w.success.is_none() => {
+                                        match serde_json::from_value::<CursorMcpResult>(res.clone())
+                                        {
+                                            Ok(CursorMcpResult::Wrapped(ref w))
+                                                if w.failure.is_some() && w.success.is_none() =>
+                                            {
                                                 ToolStatus::Failed
                                             }
-                                            Ok(CursorMcpResult::Flat(ref o)) if o.is_error.unwrap_or(false) => {
+                                            Ok(CursorMcpResult::Flat(ref o))
+                                                if o.is_error.unwrap_or(false) =>
+                                            {
                                                 ToolStatus::Failed
                                             }
                                             Ok(CursorMcpResult::Wrapped(ref w)) => {
-                                                let is_err = w.success.as_ref()
+                                                let is_err = w
+                                                    .success
+                                                    .as_ref()
                                                     .or(w.failure.as_ref())
                                                     .and_then(|o| o.is_error)
                                                     .unwrap_or(false);
-                                                if is_err { ToolStatus::Failed } else { ToolStatus::Success }
+                                                if is_err {
+                                                    ToolStatus::Failed
+                                                } else {
+                                                    ToolStatus::Success
+                                                }
                                             }
                                             _ => ToolStatus::Success,
                                         }

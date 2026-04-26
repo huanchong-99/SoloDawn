@@ -1,9 +1,12 @@
 //! Any type usage rule — detects usage of the `any` type in TypeScript code.
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{Rule, TsAnalysisContext, TsRule};
 use regex::Regex;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{Rule, TsAnalysisContext, TsRule},
+};
 
 /// Detects usage of the `any` type in TypeScript source files.
 ///

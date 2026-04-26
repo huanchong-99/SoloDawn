@@ -15,7 +15,10 @@ async fn test_get_terminal_logs_returns_empty_list_for_unknown_terminal() {
         .await
         .expect("Failed to create deployment");
     let app = Router::new()
-        .nest("/api/terminals", server::routes::terminals::terminal_routes())
+        .nest(
+            "/api/terminals",
+            server::routes::terminals::terminal_routes(),
+        )
         .with_state(deployment);
 
     let terminal_id = Uuid::new_v4().to_string();
@@ -36,9 +39,7 @@ async fn test_get_terminal_logs_returns_empty_list_for_unknown_terminal() {
 
     assert_eq!(json["success"], true);
     assert!(
-        json["data"]
-            .as_array()
-            .is_some_and(std::vec::Vec::is_empty),
+        json["data"].as_array().is_some_and(std::vec::Vec::is_empty),
         "Expected empty logs for unknown terminal"
     );
 }

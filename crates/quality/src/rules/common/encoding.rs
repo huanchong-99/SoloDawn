@@ -3,9 +3,11 @@
 //! Source code files should be encoded as UTF-8 without BOM to ensure maximum
 //! portability and avoid subtle parsing issues.
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{CommonAnalysisContext, CommonRule, Rule};
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{CommonAnalysisContext, CommonRule, Rule},
+};
 
 /// Source code file extensions that are expected to be valid UTF-8.
 const SOURCE_EXTENSIONS: &[&str] = &[
@@ -228,7 +230,10 @@ mod tests {
         };
 
         let issues = rule.analyze(&ctx);
-        assert!(issues.is_empty(), "Expected no issues for a clean UTF-8 file");
+        assert!(
+            issues.is_empty(),
+            "Expected no issues for a clean UTF-8 file"
+        );
     }
 
     #[test]

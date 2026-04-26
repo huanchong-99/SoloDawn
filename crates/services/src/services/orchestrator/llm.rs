@@ -11,11 +11,9 @@ use governor::{
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use twox_hash::XxHash64;
-
-use utils::url::{ApiFormat, resolve_endpoint};
-
 #[allow(deprecated, unused_imports)]
 use utils::url::normalize_base_url;
+use utils::url::{ApiFormat, resolve_endpoint};
 
 use super::{
     config::OrchestratorConfig,
@@ -295,11 +293,17 @@ impl OpenAICompatibleClient {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
             // { "content": "..." } direct
             if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
-                return Ok(LLMResponse { content: content.to_string(), usage: None });
+                return Ok(LLMResponse {
+                    content: content.to_string(),
+                    usage: None,
+                });
             }
             // { "output": "..." } (OpenAI Responses API string form)
             if let Some(output) = json.get("output").and_then(|o| o.as_str()) {
-                return Ok(LLMResponse { content: output.to_string(), usage: None });
+                return Ok(LLMResponse {
+                    content: output.to_string(),
+                    usage: None,
+                });
             }
             // { "output": [{ "type": "message", "content": [{ "type": "output_text", "text": "..." }] }] }
             if let Some(arr) = json.get("output").and_then(|o| o.as_array()) {
@@ -318,12 +322,18 @@ impl OpenAICompatibleClient {
                     }
                 }
                 if !text.is_empty() {
-                    return Ok(LLMResponse { content: text, usage: None });
+                    return Ok(LLMResponse {
+                        content: text,
+                        usage: None,
+                    });
                 }
             }
             // Error object
             if let Some(error) = json.get("error") {
-                let msg = error.get("message").and_then(|m| m.as_str()).unwrap_or("unknown");
+                let msg = error
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("unknown");
                 return Err(anyhow::anyhow!("LLM API returned error: {msg}"));
             }
         }
@@ -333,7 +343,9 @@ impl OpenAICompatibleClient {
             body_preview = %body.chars().take(500).collect::<String>(),
             "Failed to parse OpenAI-compatible response in all known formats"
         );
-        Err(anyhow::anyhow!("error decoding response body: unrecognized format"))
+        Err(anyhow::anyhow!(
+            "error decoding response body: unrecognized format"
+        ))
     }
 }
 
@@ -481,20 +493,25 @@ impl AnthropicCompatibleClient {
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
                     match event.get("type").and_then(|t| t.as_str()) {
                         Some("content_block_delta") => {
-                            if let Some(text) = event
-                                .pointer("/delta/text")
-                                .and_then(|t| t.as_str())
+                            if let Some(text) =
+                                event.pointer("/delta/text").and_then(|t| t.as_str())
                             {
                                 content.push_str(text);
                             }
                         }
                         Some("message_start") => {
-                            if let Some(u) = event.pointer("/message/usage/input_tokens").and_then(serde_json::Value::as_i64) {
+                            if let Some(u) = event
+                                .pointer("/message/usage/input_tokens")
+                                .and_then(serde_json::Value::as_i64)
+                            {
                                 input_tokens = u as i32;
                             }
                         }
                         Some("message_delta") => {
-                            if let Some(u) = event.pointer("/usage/output_tokens").and_then(serde_json::Value::as_i64) {
+                            if let Some(u) = event
+                                .pointer("/usage/output_tokens")
+                                .and_then(serde_json::Value::as_i64)
+                            {
                                 output_tokens = u as i32;
                             }
                         }
@@ -520,10 +537,16 @@ impl AnthropicCompatibleClient {
                     }
                 }
                 // Also try extracting usage from the non-streaming response
-                if let Some(u) = json.pointer("/usage/input_tokens").and_then(serde_json::Value::as_i64) {
+                if let Some(u) = json
+                    .pointer("/usage/input_tokens")
+                    .and_then(serde_json::Value::as_i64)
+                {
                     input_tokens = u as i32;
                 }
-                if let Some(u) = json.pointer("/usage/output_tokens").and_then(serde_json::Value::as_i64) {
+                if let Some(u) = json
+                    .pointer("/usage/output_tokens")
+                    .and_then(serde_json::Value::as_i64)
+                {
                     output_tokens = u as i32;
                 }
             }
@@ -648,8 +671,8 @@ impl ClaudeCodeNativeClient {
     /// Read OAuth access token from credentials file.
     /// Called per-request to pick up token refreshes.
     fn read_access_token() -> anyhow::Result<String> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let home =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
         let creds_path = home.join(".claude").join(".credentials.json");
         let creds_str = std::fs::read_to_string(&creds_path)
             .map_err(|e| anyhow::anyhow!("Cannot read Claude credentials: {e}"))?;
@@ -657,7 +680,13 @@ impl ClaudeCodeNativeClient {
             .map_err(|e| anyhow::anyhow!("Cannot parse Claude credentials: {e}"))?;
         let token = creds
             .claude_ai_oauth
-            .and_then(|o| if o.access_token.is_empty() { None } else { Some(o.access_token) })
+            .and_then(|o| {
+                if o.access_token.is_empty() {
+                    None
+                } else {
+                    Some(o.access_token)
+                }
+            })
             .ok_or_else(|| anyhow::anyhow!("Claude OAuth token not found in credentials"))?;
         Ok(token)
     }
@@ -674,10 +703,7 @@ impl ClaudeCodeNativeClient {
     }
 
     /// Build the request body with correct cch hash.
-    fn build_body(
-        &self,
-        messages: Vec<LLMMessage>,
-    ) -> anyhow::Result<String> {
+    fn build_body(&self, messages: Vec<LLMMessage>) -> anyhow::Result<String> {
         // Separate system messages from conversation
         let mut user_system_prompt = String::new();
         let mut api_messages = Vec::new();
@@ -754,17 +780,25 @@ impl ClaudeCodeNativeClient {
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
                     match event.get("type").and_then(|t| t.as_str()) {
                         Some("content_block_delta") => {
-                            if let Some(text) = event.pointer("/delta/text").and_then(|t| t.as_str()) {
+                            if let Some(text) =
+                                event.pointer("/delta/text").and_then(|t| t.as_str())
+                            {
                                 content.push_str(text);
                             }
                         }
                         Some("message_start") => {
-                            if let Some(u) = event.pointer("/message/usage/input_tokens").and_then(serde_json::Value::as_i64) {
+                            if let Some(u) = event
+                                .pointer("/message/usage/input_tokens")
+                                .and_then(serde_json::Value::as_i64)
+                            {
                                 input_tokens = u as i32;
                             }
                         }
                         Some("message_delta") => {
-                            if let Some(u) = event.pointer("/usage/output_tokens").and_then(serde_json::Value::as_i64) {
+                            if let Some(u) = event
+                                .pointer("/usage/output_tokens")
+                                .and_then(serde_json::Value::as_i64)
+                            {
                                 output_tokens = u as i32;
                             }
                         }
@@ -786,17 +820,25 @@ impl ClaudeCodeNativeClient {
                         }
                     }
                 }
-                if let Some(u) = json.pointer("/usage/input_tokens").and_then(serde_json::Value::as_i64) {
+                if let Some(u) = json
+                    .pointer("/usage/input_tokens")
+                    .and_then(serde_json::Value::as_i64)
+                {
                     input_tokens = u as i32;
                 }
-                if let Some(u) = json.pointer("/usage/output_tokens").and_then(serde_json::Value::as_i64) {
+                if let Some(u) = json
+                    .pointer("/usage/output_tokens")
+                    .and_then(serde_json::Value::as_i64)
+                {
                     output_tokens = u as i32;
                 }
             }
         }
 
         if content.is_empty() {
-            return Err(anyhow::anyhow!("Claude Code native API returned empty content"));
+            return Err(anyhow::anyhow!(
+                "Claude Code native API returned empty content"
+            ));
         }
 
         let usage = if input_tokens > 0 || output_tokens > 0 {
@@ -874,7 +916,9 @@ fn detect_cc_version() -> Option<String> {
         .or_else(|| version.strip_prefix("claude/"))
         .or_else(|| {
             // Try to extract version number from anywhere in the string
-            version.split_whitespace().find(|s| s.chars().next().is_some_and(|c| c.is_ascii_digit()))
+            version
+                .split_whitespace()
+                .find(|s| s.chars().next().is_some_and(|c| c.is_ascii_digit()))
         })
         .map(|v| v.trim().to_string())
 }
@@ -943,8 +987,7 @@ pub fn create_llm_client(config: &OrchestratorConfig) -> anyhow::Result<Box<dyn 
         let rps = config.rate_limit_requests_per_second;
         let primary_client: Box<dyn LLMClient> = build_single_client(config)?;
 
-        let mut providers: Vec<(String, Box<dyn LLMClient>)> =
-            vec![(primary_name, primary_client)];
+        let mut providers: Vec<(String, Box<dyn LLMClient>)> = vec![(primary_name, primary_client)];
 
         let mut fallbacks: Vec<_> = config.fallback_providers.clone();
         fallbacks.sort_by_key(|p| p.priority);
@@ -966,12 +1009,15 @@ pub fn create_llm_client(config: &OrchestratorConfig) -> anyhow::Result<Box<dyn 
         tracing::info!(
             "ResilientLLMClient created with {} providers: {:?}",
             providers.len(),
-            providers.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            providers
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>(),
         );
 
-        Ok(Box::new(
-            super::resilient_llm::ResilientLLMClient::new(providers),
-        ))
+        Ok(Box::new(super::resilient_llm::ResilientLLMClient::new(
+            providers,
+        )))
     }
 }
 
@@ -1000,12 +1046,12 @@ mod rate_limit_tests {
         assert!(client.chat(messages.clone()).await.is_ok());
 
         // Third request will block briefly until a token refills, then succeed.
-        let result = tokio::time::timeout(
-            Duration::from_secs(3),
-            client.chat(messages.clone()),
-        )
-        .await;
-        assert!(result.is_ok(), "until_ready should unblock within the timeout");
+        let result =
+            tokio::time::timeout(Duration::from_secs(3), client.chat(messages.clone())).await;
+        assert!(
+            result.is_ok(),
+            "until_ready should unblock within the timeout"
+        );
         assert!(result.unwrap().is_ok(), "chat should succeed after waiting");
     }
 
@@ -1038,7 +1084,11 @@ mod anthropic_protocol_tests {
             ..Default::default()
         };
         let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
-        assert_eq!(endpoint.api_format, ApiFormat::OpenAIChat, "openai-compatible must use OpenAI format regardless of URL content");
+        assert_eq!(
+            endpoint.api_format,
+            ApiFormat::OpenAIChat,
+            "openai-compatible must use OpenAI format regardless of URL content"
+        );
     }
 
     #[test]
@@ -1064,7 +1114,11 @@ mod anthropic_protocol_tests {
             ..Default::default()
         };
         let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
-        assert_eq!(endpoint.api_format, ApiFormat::OpenAIChat, "unknown api_type defaults to OpenAI, no URL guessing");
+        assert_eq!(
+            endpoint.api_format,
+            ApiFormat::OpenAIChat,
+            "unknown api_type defaults to OpenAI, no URL guessing"
+        );
     }
 
     #[test]
@@ -1096,10 +1150,7 @@ mod url_normalization_tests {
     #[allow(deprecated)]
     #[test]
     fn test_openai_compatible_no_v1_append() {
-        let url = normalize_base_url(
-            "openai-compatible",
-            "https://open.bigmodel.cn/api/paas/v4",
-        );
+        let url = normalize_base_url("openai-compatible", "https://open.bigmodel.cn/api/paas/v4");
         assert_eq!(url, "https://open.bigmodel.cn/api/paas/v4");
     }
 }
@@ -1124,11 +1175,21 @@ mod full_chain_tests {
         assert!(config.validate().is_ok(), "Config should be valid");
 
         let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
-        assert_eq!(endpoint.api_format, ApiFormat::OpenAIChat, "ZhipuAI openai-compatible should use OpenAI format");
-        assert_eq!(endpoint.url, "https://open.bigmodel.cn/api/paas/v4", "URL preserved, no /v1 appended");
+        assert_eq!(
+            endpoint.api_format,
+            ApiFormat::OpenAIChat,
+            "ZhipuAI openai-compatible should use OpenAI format"
+        );
+        assert_eq!(
+            endpoint.url, "https://open.bigmodel.cn/api/paas/v4",
+            "URL preserved, no /v1 appended"
+        );
 
         let chat_url = endpoint.chat_endpoint();
-        assert_eq!(chat_url, "https://open.bigmodel.cn/api/paas/v4/chat/completions");
+        assert_eq!(
+            chat_url,
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        );
     }
 
     #[test]
@@ -1149,7 +1210,10 @@ mod full_chain_tests {
         assert_eq!(endpoint.url, "https://open.bigmodel.cn/api/anthropic");
 
         let msg_url = endpoint.chat_endpoint();
-        assert_eq!(msg_url, "https://open.bigmodel.cn/api/anthropic/v1/messages");
+        assert_eq!(
+            msg_url,
+            "https://open.bigmodel.cn/api/anthropic/v1/messages"
+        );
     }
 
     #[test]
@@ -1293,7 +1357,10 @@ mod full_chain_tests {
             ("openai", "https://api.openai.com"),
             ("openai-compatible", "https://open.bigmodel.cn/api/paas/v4"),
             ("anthropic", "https://api.anthropic.com"),
-            ("anthropic-compatible", "https://open.bigmodel.cn/api/anthropic"),
+            (
+                "anthropic-compatible",
+                "https://open.bigmodel.cn/api/anthropic",
+            ),
             ("google", "https://generativelanguage.googleapis.com"),
         ];
 
@@ -1361,7 +1428,10 @@ mod claude_code_native_tests {
         let body2 = r#"{"model":"b","messages":[],"cch=00000"}"#;
         let cch1 = ClaudeCodeNativeClient::compute_cch(body1);
         let cch2 = ClaudeCodeNativeClient::compute_cch(body2);
-        assert_ne!(cch1, cch2, "Different inputs should produce different cch values");
+        assert_ne!(
+            cch1, cch2,
+            "Different inputs should produce different cch values"
+        );
     }
 
     #[test]
@@ -1399,16 +1469,15 @@ mod claude_code_native_tests {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
         // Change this to test a different candidate model.
-        let candidate = std::env::var("PROBE_MODEL")
-            .unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+        let candidate =
+            std::env::var("PROBE_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
 
         let client = ClaudeCodeNativeClient::try_new(&candidate)
             .expect("Claude Code OAuth credentials must be present at ~/.claude/.credentials.json");
 
         let messages = vec![LLMMessage {
             role: "user".to_string(),
-            content: "Respond with the single word 'ok' and nothing else."
-                .to_string(),
+            content: "Respond with the single word 'ok' and nothing else.".to_string(),
         }];
 
         match client.chat(messages).await {

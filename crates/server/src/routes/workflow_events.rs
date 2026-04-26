@@ -447,14 +447,14 @@ impl WsEvent {
                     "blocking_issues": event.blocking_issues,
                     "new_issues": event.new_issues
                 });
-                Some((workflow_id, Self::new(WsEventType::QualityGateResult, payload)))
+                Some((
+                    workflow_id,
+                    Self::new(WsEventType::QualityGateResult, payload),
+                ))
             }
 
             // Provider state change events
-            BusMessage::ProviderStateChanged {
-                workflow_id,
-                event,
-            } => {
+            BusMessage::ProviderStateChanged { workflow_id, event } => {
                 let (event_type, payload) = match &event {
                     ProviderEvent::Switched {
                         from_provider,

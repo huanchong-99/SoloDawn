@@ -52,28 +52,29 @@ pub async fn require_api_token(req: Request, next: Next) -> Result<Response, Res
     // Check if API token is configured.
     // NOTE(G35-002): std::env::var() is called per-request intentionally. The cost is
     // negligible (< 1µs on all platforms) and allows runtime token rotation without restart.
-    let token = match utils::env_compat::var_with_compat("SOLODAWN_API_TOKEN", "GITCORTEX_API_TOKEN") {
-        Ok(value) if !value.trim().is_empty() => value,
-        Err(_) => {
-            // SEC-002: In local mode (installer), suppress per-request warnings
-            if !utils::env_compat::var_is_set("SOLODAWN_LOCAL_MODE", "GITCORTEX_LOCAL_MODE") {
-                tracing::warn!(
-                    "SEC-002: SOLODAWN_API_TOKEN not set — all requests are unauthenticated! \
+    let token =
+        match utils::env_compat::var_with_compat("SOLODAWN_API_TOKEN", "GITCORTEX_API_TOKEN") {
+            Ok(value) if !value.trim().is_empty() => value,
+            Err(_) => {
+                // SEC-002: In local mode (installer), suppress per-request warnings
+                if !utils::env_compat::var_is_set("SOLODAWN_LOCAL_MODE", "GITCORTEX_LOCAL_MODE") {
+                    tracing::warn!(
+                        "SEC-002: SOLODAWN_API_TOKEN not set — all requests are unauthenticated! \
                      Set SOLODAWN_API_TOKEN to secure API access."
-                );
+                    );
+                }
+                return Ok(next.run(req).await);
             }
-            return Ok(next.run(req).await);
-        }
-        _ => {
-            if !utils::env_compat::var_is_set("SOLODAWN_LOCAL_MODE", "GITCORTEX_LOCAL_MODE") {
-                tracing::warn!(
-                    "SEC-002: SOLODAWN_API_TOKEN is empty — all requests are unauthenticated! \
+            _ => {
+                if !utils::env_compat::var_is_set("SOLODAWN_LOCAL_MODE", "GITCORTEX_LOCAL_MODE") {
+                    tracing::warn!(
+                        "SEC-002: SOLODAWN_API_TOKEN is empty — all requests are unauthenticated! \
                      Set a non-empty SOLODAWN_API_TOKEN to secure API access."
-                );
+                    );
+                }
+                return Ok(next.run(req).await);
             }
-            return Ok(next.run(req).await);
-        }
-    };
+        };
 
     // Extract Authorization header
     let auth_header = req
@@ -108,7 +109,8 @@ pub async fn require_api_token(req: Request, next: Next) -> Result<Response, Res
                 "success": false,
                 "error": "Unauthorized: invalid or missing authentication token"
             })),
-        ).into_response())
+        )
+            .into_response())
     }
 }
 

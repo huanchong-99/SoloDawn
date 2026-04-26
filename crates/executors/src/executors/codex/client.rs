@@ -494,11 +494,11 @@ fn request_id(request: &ClientRequest) -> RequestId {
         | ClientRequest::SendUserMessage { request_id, .. }
         | ClientRequest::ReviewStart { request_id, .. } => request_id.clone(),
         _ => {
-                tracing::warn!(
-                    "request_id called for unknown ClientRequest variant; returning default id"
-                );
-                RequestId::Integer(0)
-            }
+            tracing::warn!(
+                "request_id called for unknown ClientRequest variant; returning default id"
+            );
+            RequestId::Integer(0)
+        }
     }
 }
 

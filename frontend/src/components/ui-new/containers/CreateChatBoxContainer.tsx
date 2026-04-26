@@ -7,7 +7,7 @@ import { useCreateMode } from '@/contexts/CreateModeContext';
 import { useUserSystem } from '@/components/ConfigProvider';
 import { useCreateAttachments } from '@/hooks/useCreateAttachments';
 import { WorkflowProgressContainer } from './WorkflowProgressContainer';
-import { useWorkflow } from '@/hooks/useWorkflows';
+import { useWorkflowLiveStatus } from '@/hooks/useWorkflowLiveStatus';
 import { getVariantOptions, areProfilesEqual } from '@/utils/executor';
 import type { ExecutorProfileId, BaseCodingAgent } from 'shared/types';
 import type { ModelConfig as WorkflowModelConfig } from '@/components/workflow/types';
@@ -28,40 +28,64 @@ import {
 } from '@/hooks/usePlanningDraft';
 import { CreateChatBox } from '../primitives/CreateChatBox';
 
-function WorkflowStatusBadge({ workflowId }: Readonly<{ workflowId: string | null }>) {
-  const { data: workflow } = useWorkflow(workflowId ?? '');
-  const status = workflow?.status ?? 'running';
+function WorkflowStatusBadge({
+  workflowId,
+}: Readonly<{ workflowId: string | null }>) {
+  const { workflowStatus } = useWorkflowLiveStatus(workflowId ?? '');
+  const status = workflowStatus ?? 'loading';
   const isCompleted = status === 'completed';
   const isFailed = status === 'failed';
-  let colorClass = 'bg-brand/10 text-brand animate-pulse';
-  let label = 'Running';
+  let colorClass = 'bg-muted text-muted-foreground';
+  let label = 'Loading';
   if (isCompleted) {
     colorClass = 'bg-success/10 text-success';
     label = 'Completed';
   } else if (isFailed) {
     colorClass = 'bg-error/10 text-error';
     label = 'Failed';
+  } else if (status === 'running') {
+    colorClass = 'bg-brand/10 text-brand animate-pulse';
+    label = 'Running';
+  } else if (status === 'ready') {
+    colorClass = 'bg-brand/10 text-brand';
+    label = 'Ready';
+  } else if (status === 'cancelled') {
+    colorClass = 'bg-muted text-muted-foreground';
+    label = 'Cancelled';
   }
   return (
-    <span className={`ml-auto text-sm px-base py-half rounded font-medium ${colorClass}`}>
+    <span
+      className={`ml-auto text-sm px-base py-half rounded font-medium ${colorClass}`}
+    >
       {label}
     </span>
   );
 }
 
 function useSyncDraftState(
-  planningDraft: { projectId?: string; materializedWorkflowId?: string | null } | null | undefined,
+  planningDraft:
+    | { projectId?: string; materializedWorkflowId?: string | null }
+    | null
+    | undefined,
   selectedProjectId: string | null | undefined,
   setSelectedProjectId: (id: string) => void,
-  setMaterializedWorkflowId: (id: string | null) => void,
+  setMaterializedWorkflowId: (id: string | null) => void
 ) {
   useEffect(() => {
     if (!planningDraft) return;
-    if (planningDraft.projectId && planningDraft.projectId !== selectedProjectId) {
+    if (
+      planningDraft.projectId &&
+      planningDraft.projectId !== selectedProjectId
+    ) {
       setSelectedProjectId(planningDraft.projectId);
     }
     setMaterializedWorkflowId(planningDraft.materializedWorkflowId ?? null);
-  }, [planningDraft, selectedProjectId, setSelectedProjectId, setMaterializedWorkflowId]);
+  }, [
+    planningDraft,
+    selectedProjectId,
+    setSelectedProjectId,
+    setMaterializedWorkflowId,
+  ]);
 }
 
 function useFeishuConnectionStatus(planningDraftId: string | null): boolean {
@@ -69,12 +93,17 @@ function useFeishuConnectionStatus(planningDraftId: string | null): boolean {
   useEffect(() => {
     if (!planningDraftId) return;
     let cancelled = false;
-    feishuApi.getStatus().then((status) => {
-      if (!cancelled) setConnected(status.connectionStatus === 'connected');
-    }).catch(() => {
-      if (!cancelled) setConnected(false);
-    });
-    return () => { cancelled = true; };
+    feishuApi
+      .getStatus()
+      .then((status) => {
+        if (!cancelled) setConnected(status.connectionStatus === 'connected');
+      })
+      .catch(() => {
+        if (!cancelled) setConnected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [planningDraftId]);
   return connected;
 }
@@ -82,7 +111,7 @@ function useFeishuConnectionStatus(planningDraftId: string | null): boolean {
 function resolveEffectiveProfile(
   selectedProfile: ExecutorProfileId | null,
   savedProfile: ExecutorProfileId | undefined,
-  profiles: Record<string, Record<string, unknown>> | null | undefined,
+  profiles: Record<string, Record<string, unknown>> | null | undefined
 ): ExecutorProfileId | null {
   if (selectedProfile) return selectedProfile;
   if (savedProfile) return savedProfile;
@@ -96,17 +125,18 @@ function resolveEffectiveProfile(
 
 function checkProfileChanged(
   effectiveProfile: ExecutorProfileId | null,
-  savedProfile: ExecutorProfileId | undefined,
+  savedProfile: ExecutorProfileId | undefined
 ): boolean {
   if (!savedProfile || !effectiveProfile) return false;
   return !areProfilesEqual(effectiveProfile, savedProfile);
 }
 
 function extractPlannerModelConfig(
-  config: Record<string, unknown> | null | undefined,
+  config: Record<string, unknown> | null | undefined
 ): WorkflowModelConfig | null {
-  const lib = (config as Record<string, unknown>)
-    ?.workflow_model_library as WorkflowModelConfig[] | undefined;
+  const lib = (config as Record<string, unknown>)?.workflow_model_library as
+    | WorkflowModelConfig[]
+    | undefined;
   if (!lib || lib.length === 0) return null;
   return lib.find((m) => m.apiKey) ?? lib[0] ?? null;
 }
@@ -114,7 +144,7 @@ function extractPlannerModelConfig(
 function resolveVariantForExecutor(
   executor: BaseCodingAgent,
   profiles: Record<string, Record<string, unknown>> | null | undefined,
-  savedProfile: ExecutorProfileId | null | undefined,
+  savedProfile: ExecutorProfileId | null | undefined
 ): string | null {
   const executorConfig = profiles?.[executor];
   if (!executorConfig) return null;
@@ -159,7 +189,9 @@ function PlanningStatusBar({
   const { t: tTasks } = useTranslation('tasks');
   return (
     <div className="shrink-0 px-double py-half border-b flex items-center gap-half">
-      <span className="text-xs text-low">{tTasks('conversation.planning.title')}</span>
+      <span className="text-xs text-low">
+        {tTasks('conversation.planning.title')}
+      </span>
       {draftStatus && (
         <span className="text-xs px-1 py-px rounded bg-brand/10 text-brand">
           {tTasks(`conversation.planning.status.${draftStatus}`)}
@@ -176,7 +208,9 @@ function PlanningStatusBar({
           }`}
           title={feishuSyncEnabled ? '飞书同步已开启' : '飞书同步已关闭'}
         >
-          <span className={`inline-block size-1.5 rounded-full ${feishuSyncEnabled ? 'bg-brand' : 'bg-secondary'}`} />{' '}
+          <span
+            className={`inline-block size-1.5 rounded-full ${feishuSyncEnabled ? 'bg-brand' : 'bg-secondary'}`}
+          />{' '}
           飞书同步
         </button>
       )}
@@ -196,7 +230,9 @@ function PlanningStatusBar({
           disabled={confirmMutation.isPending}
           className="ml-auto text-xs px-base py-half rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50"
         >
-          {confirmMutation.isPending ? '...' : tTasks('conversation.planning.confirmButton')}
+          {confirmMutation.isPending
+            ? '...'
+            : tTasks('conversation.planning.confirmButton')}
         </button>
       )}
       {isConfirmed && (
@@ -205,10 +241,17 @@ function PlanningStatusBar({
           disabled={materializeMutation.isPending}
           className="ml-auto text-xs px-base py-half rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50"
         >
-          {materializeMutation.isPending ? '...' : tTasks('conversation.planning.materializeButton')}
+          {materializeMutation.isPending
+            ? '...'
+            : tTasks('conversation.planning.materializeButton')}
         </button>
       )}
-      {isMaterialized && <WorkflowStatusBadge key={materializedWorkflowId} workflowId={materializedWorkflowId} />}
+      {isMaterialized && (
+        <WorkflowStatusBadge
+          key={materializedWorkflowId}
+          workflowId={materializedWorkflowId}
+        />
+      )}
     </div>
   );
 }
@@ -232,7 +275,9 @@ function usePlanningDraftActions({
   message: string;
   setMessage: (v: string) => void;
   setIsThinking: (v: boolean) => void;
-  setLocalMessages: React.Dispatch<React.SetStateAction<PlanningMessageResponse[]>>;
+  setLocalMessages: React.Dispatch<
+    React.SetStateAction<PlanningMessageResponse[]>
+  >;
   setMaterializedWorkflowId: (id: string | null) => void;
   sendMessageMutation: ReturnType<typeof useSendPlanningMessage>;
   confirmMutation: ReturnType<typeof useConfirmDraft>;
@@ -259,7 +304,15 @@ function usePlanningDraftActions({
     } finally {
       setIsThinking(false);
     }
-  }, [message, planningDraftId, setMessage, sendMessageMutation, setIsThinking, setLocalMessages, showToast]);
+  }, [
+    message,
+    planningDraftId,
+    setMessage,
+    sendMessageMutation,
+    setIsThinking,
+    setLocalMessages,
+    showToast,
+  ]);
 
   const handleConfirm = useCallback(async () => {
     if (!planningDraftId) return;
@@ -282,7 +335,12 @@ function usePlanningDraftActions({
       const err = e as { message?: string };
       showToast(err.message ?? 'Failed to materialize draft', 'error');
     }
-  }, [planningDraftId, materializeMutation, setMaterializedWorkflowId, showToast]);
+  }, [
+    planningDraftId,
+    materializeMutation,
+    setMaterializedWorkflowId,
+    showToast,
+  ]);
 
   const handleToggleFeishuSync = useCallback(() => {
     if (!planningDraftId || !planningDraft) return;
@@ -303,7 +361,12 @@ function usePlanningDraftActions({
     );
   }, [planningDraftId, planningDraft, feishuSyncMutation, showToast]);
 
-  return { handlePlanningMessage, handleConfirm, handleMaterialize, handleToggleFeishuSync };
+  return {
+    handlePlanningMessage,
+    handleConfirm,
+    handleMaterialize,
+    handleToggleFeishuSync,
+  };
 }
 
 export function CreateChatBoxContainer() {
@@ -334,17 +397,24 @@ export function CreateChatBoxContainer() {
   const planningDraftId = searchParams.get('draftId');
   const setPlanningDraftId = useCallback(
     (id: string | null) => {
-      setSearchParams((prev) => {
-        id ? prev.set('draftId', id) : prev.delete('draftId');
-        return prev;
-      }, { replace: true });
+      setSearchParams(
+        (prev) => {
+          id ? prev.set('draftId', id) : prev.delete('draftId');
+          return prev;
+        },
+        { replace: true }
+      );
     },
     [setSearchParams]
   );
   const [isCreatingDraft, setIsCreatingDraft] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
-  const [localMessages, setLocalMessages] = useState<PlanningMessageResponse[]>([]);
-  const [materializedWorkflowId, setMaterializedWorkflowId] = useState<string | null>(null);
+  const [localMessages, setLocalMessages] = useState<PlanningMessageResponse[]>(
+    []
+  );
+  const [materializedWorkflowId, setMaterializedWorkflowId] = useState<
+    string | null
+  >(null);
 
   const { data: planningDraft } = usePlanningDraft(planningDraftId);
   const { data: serverMessages } = usePlanningDraftMessages(planningDraftId);
@@ -361,7 +431,12 @@ export function CreateChatBoxContainer() {
   const planningMessages = hasServerMessages ? serverMessages : localMessages;
 
   // Sync draft-derived state when switching drafts
-  useSyncDraftState(planningDraft, selectedProjectId, setSelectedProjectId, setMaterializedWorkflowId);
+  useSyncDraftState(
+    planningDraft,
+    selectedProjectId,
+    setSelectedProjectId,
+    setMaterializedWorkflowId
+  );
 
   // Attachment handling
   const handleInsertMarkdown = useCallback(
@@ -375,8 +450,13 @@ export function CreateChatBoxContainer() {
     useCreateAttachments(handleInsertMarkdown);
 
   const effectiveProfile = useMemo(
-    () => resolveEffectiveProfile(selectedProfile, config?.executor_profile, profiles),
-    [selectedProfile, config?.executor_profile, profiles],
+    () =>
+      resolveEffectiveProfile(
+        selectedProfile,
+        config?.executor_profile,
+        profiles
+      ),
+    [selectedProfile, config?.executor_profile, profiles]
   );
 
   // Model config selection
@@ -388,7 +468,9 @@ export function CreateChatBoxContainer() {
     setSelectedModelConfigId,
   } = useModelConfigForExecutor(
     effectiveProfile?.executor ?? null,
-    (config as Record<string, unknown>)?.workflow_model_library as WorkflowModelConfig[] | undefined
+    (config as Record<string, unknown>)?.workflow_model_library as
+      | WorkflowModelConfig[]
+      | undefined
   );
 
   const variantOptions = useMemo(
@@ -398,7 +480,7 @@ export function CreateChatBoxContainer() {
 
   const hasChangedFromDefault = useMemo(
     () => checkProfileChanged(effectiveProfile, config?.executor_profile),
-    [effectiveProfile, config?.executor_profile],
+    [effectiveProfile, config?.executor_profile]
   );
 
   useEffect(() => {
@@ -426,7 +508,7 @@ export function CreateChatBoxContainer() {
       const variant = resolveVariantForExecutor(
         executor,
         profiles,
-        config?.executor_profile,
+        config?.executor_profile
       );
       setSelectedProfile({ executor, variant });
     },
@@ -435,16 +517,19 @@ export function CreateChatBoxContainer() {
 
   const plannerModelConfig = useMemo(
     () => extractPlannerModelConfig(config),
-    [config],
+    [config]
   );
 
   /** Resolve the model config that matches the user's dropdown selection. */
   const selectedPlannerModelConfig = useMemo(() => {
     if (!selectedModelConfigId) return plannerModelConfig;
-    const lib = (config as Record<string, unknown>)
-      ?.workflow_model_library as WorkflowModelConfig[] | undefined;
+    const lib = (config as Record<string, unknown>)?.workflow_model_library as
+      | WorkflowModelConfig[]
+      | undefined;
     if (!lib) return plannerModelConfig;
-    return lib.find((m) => m.id === selectedModelConfigId) ?? plannerModelConfig;
+    return (
+      lib.find((m) => m.id === selectedModelConfigId) ?? plannerModelConfig
+    );
   }, [selectedModelConfigId, config, plannerModelConfig]);
 
   // === Phase 1: Initial submit — create planning draft ===
@@ -453,8 +538,10 @@ export function CreateChatBoxContainer() {
     setSubmitError(null);
     if (!canSubmit || !projectId) return;
 
-    const shouldSaveDefault = saveAsDefault && hasChangedFromDefault && effectiveProfile;
-    if (shouldSaveDefault) await updateAndSaveConfig({ executor_profile: effectiveProfile });
+    const shouldSaveDefault =
+      saveAsDefault && hasChangedFromDefault && effectiveProfile;
+    if (shouldSaveDefault)
+      await updateAndSaveConfig({ executor_profile: effectiveProfile });
 
     setIsCreatingDraft(true);
     setIsThinking(true);
@@ -470,7 +557,10 @@ export function CreateChatBoxContainer() {
       });
       setPlanningDraftId(draft.id);
 
-      const newMessages = await planningDraftsApi.sendMessage(draft.id, message);
+      const newMessages = await planningDraftsApi.sendMessage(
+        draft.id,
+        message
+      );
       setLocalMessages(newMessages);
       // Invalidate React Query cache so serverMessages eventually catches up.
       // handleInitialSubmit bypasses the mutation, so invalidation must be manual.
@@ -504,25 +594,31 @@ export function CreateChatBoxContainer() {
   ]);
 
   // === Planning draft action handlers (extracted to reduce cognitive complexity) ===
-  const { handlePlanningMessage, handleConfirm, handleMaterialize, handleToggleFeishuSync } =
-    usePlanningDraftActions({
-      planningDraftId,
-      planningDraft,
-      message,
-      setMessage,
-      setIsThinking,
-      setLocalMessages,
-      setMaterializedWorkflowId,
-      sendMessageMutation,
-      confirmMutation,
-      materializeMutation,
-      feishuSyncMutation,
-      showToast,
-    });
+  const {
+    handlePlanningMessage,
+    handleConfirm,
+    handleMaterialize,
+    handleToggleFeishuSync,
+  } = usePlanningDraftActions({
+    planningDraftId,
+    planningDraft,
+    message,
+    setMessage,
+    setIsThinking,
+    setLocalMessages,
+    setMaterializedWorkflowId,
+    sendMessageMutation,
+    confirmMutation,
+    materializeMutation,
+    feishuSyncMutation,
+    showToast,
+  });
 
   const handleOpenBoard = useCallback(() => {
     if (!materializedWorkflowId) return;
-    navigate(`/board?workflowId=${materializedWorkflowId}&projectId=${projectId ?? ''}`);
+    navigate(
+      `/board?workflowId=${materializedWorkflowId}&projectId=${projectId ?? ''}`
+    );
   }, [materializedWorkflowId, projectId, navigate]);
 
   // === Feishu history sync — one-time full push ===
@@ -563,9 +659,7 @@ export function CreateChatBoxContainer() {
           <h2 className="text-lg font-medium text-high mb-2">
             {t('workspace.selectProjectTitle')}
           </h2>
-          <p className="text-sm text-low">
-            {t('workspace.selectProjectHint')}
-          </p>
+          <p className="text-sm text-low">{t('workspace.selectProjectHint')}</p>
         </div>
       </div>
     );
@@ -574,7 +668,8 @@ export function CreateChatBoxContainer() {
   // Determine if we're in planning conversation mode
   const isInPlanningMode = !!planningDraftId;
   const draftStatus = planningDraft?.status;
-  const isMaterialized = draftStatus === 'materialized' || !!materializedWorkflowId;
+  const isMaterialized =
+    draftStatus === 'materialized' || !!materializedWorkflowId;
   const isSpecReady = draftStatus === 'spec_ready';
   const isConfirmed = draftStatus === 'confirmed' && !isMaterialized;
 
@@ -636,52 +731,66 @@ export function CreateChatBoxContainer() {
       )}
 
       {/* Input area — same CreateChatBox for both phases */}
-      <div className={isInPlanningMode ? 'shrink-0 pb-[48px]' : 'flex-1 flex flex-col justify-end'}>
+      <div
+        className={
+          isInPlanningMode
+            ? 'shrink-0 pb-[48px]'
+            : 'flex-1 flex flex-col justify-end'
+        }
+      >
         <div className="flex justify-center @container">
           <CreateChatBox
-          editor={{
-            value: message,
-            onChange: setMessage,
-          }}
-          onSend={isInPlanningMode ? handlePlanningMessage : handleInitialSubmit}
-          isSending={isCreatingDraft || isThinking}
-          executor={{
-            selected: effectiveProfile?.executor ?? null,
-            options: Object.keys(profiles || {}) as BaseCodingAgent[],
-            onChange: handleExecutorChange,
-          }}
-          modelConfig={
-            availableModels.length > 0
-              ? {
-                  customModels,
-                  officialModels,
-                  selectedId: selectedModelConfigId,
-                  onChange: setSelectedModelConfigId,
-                }
-              : undefined
-          }
-          variant={
-            effectiveProfile
-              ? {
-                  selected: effectiveProfile.variant ?? 'DEFAULT',
-                  options: variantOptions,
-                  onChange: handleVariantChange,
-                }
-              : undefined
-          }
-          saveAsDefault={{
-            checked: saveAsDefault,
-            onChange: setSaveAsDefault,
-            visible: hasChangedFromDefault,
-          }}
-          error={displayError}
-          projectId={projectId}
-          agent={effectiveProfile?.executor ?? null}
-          onPasteFiles={uploadFiles}
-          localImages={localImages}
-          sendLabel={isInPlanningMode ? tTasks('conversation.actions.send') : undefined}
-          sendingLabel={isInPlanningMode ? tTasks('conversation.planning.thinking') : undefined}
-        />
+            editor={{
+              value: message,
+              onChange: setMessage,
+            }}
+            onSend={
+              isInPlanningMode ? handlePlanningMessage : handleInitialSubmit
+            }
+            isSending={isCreatingDraft || isThinking}
+            executor={{
+              selected: effectiveProfile?.executor ?? null,
+              options: Object.keys(profiles || {}) as BaseCodingAgent[],
+              onChange: handleExecutorChange,
+            }}
+            modelConfig={
+              availableModels.length > 0
+                ? {
+                    customModels,
+                    officialModels,
+                    selectedId: selectedModelConfigId,
+                    onChange: setSelectedModelConfigId,
+                  }
+                : undefined
+            }
+            variant={
+              effectiveProfile
+                ? {
+                    selected: effectiveProfile.variant ?? 'DEFAULT',
+                    options: variantOptions,
+                    onChange: handleVariantChange,
+                  }
+                : undefined
+            }
+            saveAsDefault={{
+              checked: saveAsDefault,
+              onChange: setSaveAsDefault,
+              visible: hasChangedFromDefault,
+            }}
+            error={displayError}
+            projectId={projectId}
+            agent={effectiveProfile?.executor ?? null}
+            onPasteFiles={uploadFiles}
+            localImages={localImages}
+            sendLabel={
+              isInPlanningMode ? tTasks('conversation.actions.send') : undefined
+            }
+            sendingLabel={
+              isInPlanningMode
+                ? tTasks('conversation.planning.thinking')
+                : undefined
+            }
+          />
         </div>
       </div>
     </div>

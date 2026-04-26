@@ -6,10 +6,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::gate::status::QualityGateStatus;
-use crate::gate::QualityGateDecision;
-use crate::issue::{IssueSummary, QualityIssue};
-use crate::provider::ProviderReport;
+use crate::{
+    gate::{QualityGateDecision, status::QualityGateStatus},
+    issue::{IssueSummary, QualityIssue},
+    provider::ProviderReport,
+};
 
 /// 聚合质量报告
 #[derive(Debug, Clone, Serialize, Deserialize)]

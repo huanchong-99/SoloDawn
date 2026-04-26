@@ -2,17 +2,19 @@
 //!
 //! Executes lint / type-check / test commands for discovered JS/TS package targets.
 
+use std::{path::Path, time::Instant};
+
 use async_trait::async_trait;
-use std::path::Path;
-use std::time::Instant;
 use tracing::{debug, warn};
 
-use crate::discovery::{JsTarget, NodeQualityCommand, RepositoryDiscovery};
-use crate::gate::result::MeasureValue;
-use crate::issue::QualityIssue;
-use crate::metrics::MetricKey;
-use crate::provider::{run_node_quality_command, ProviderReport, QualityProvider};
-use crate::rule::{AnalyzerSource, RuleType, Severity};
+use crate::{
+    discovery::{JsTarget, NodeQualityCommand, RepositoryDiscovery},
+    gate::result::MeasureValue,
+    issue::QualityIssue,
+    metrics::MetricKey,
+    provider::{ProviderReport, QualityProvider, run_node_quality_command},
+    rule::{AnalyzerSource, RuleType, Severity},
+};
 
 /// Frontend 分析器 Provider
 pub struct FrontendProvider {
@@ -62,9 +64,9 @@ impl QualityProvider for FrontendProvider {
                 .iter()
                 .any(|target| target.capabilities().lint.is_some());
         let has_typecheck = self.enable_check
-            && targets.iter().any(|target| {
-                target.capabilities().typecheck.is_some() || target.has_tsconfig()
-            });
+            && targets
+                .iter()
+                .any(|target| target.capabilities().typecheck.is_some() || target.has_tsconfig());
         let has_test = self.enable_test
             && targets
                 .iter()
@@ -74,8 +76,8 @@ impl QualityProvider for FrontendProvider {
         // declared-vs-imported test deps validated. We detect "test files"
         // by capability OR a fast filesystem probe so even repos without an
         // explicit `test` script still get the check.
-        let has_test_files = self.enable_test
-            && targets.iter().any(|target| target_has_test_files(target));
+        let has_test_files =
+            self.enable_test && targets.iter().any(|target| target_has_test_files(target));
 
         let mut metrics = Vec::new();
         if has_lint {
@@ -203,7 +205,11 @@ impl QualityProvider for FrontendProvider {
                 );
                 report.metrics.insert(
                     MetricKey::EslintWarnings,
-                    MeasureValue::Int(if lint_failed_closed { -1 } else { advisory_total }),
+                    MeasureValue::Int(if lint_failed_closed {
+                        -1
+                    } else {
+                        advisory_total
+                    }),
                 );
             }
         }
@@ -341,7 +347,11 @@ impl QualityProvider for FrontendProvider {
             if test_attempted {
                 report.metrics.insert(
                     MetricKey::FrontendTestFailures,
-                    MeasureValue::Int(if test_failed_closed { -1 } else { test_failures }),
+                    MeasureValue::Int(if test_failed_closed {
+                        -1
+                    } else {
+                        test_failures
+                    }),
                 );
             }
         }
@@ -357,8 +367,7 @@ impl QualityProvider for FrontendProvider {
                     continue;
                 }
                 any_target_with_tests = true;
-                let (missing_count, issues) =
-                    scan_test_dependency_coherence(target, project_root);
+                let (missing_count, issues) = scan_test_dependency_coherence(target, project_root);
                 total_missing += missing_count;
                 all_issues.extend(issues);
             }
@@ -450,26 +459,27 @@ fn stderr_head(stderr: &str) -> String {
 
 fn resolve_typecheck_command(target: &JsTarget) -> Option<NodeQualityCommand> {
     target.capabilities().typecheck.clone().or_else(|| {
-        target.has_tsconfig().then_some(NodeQualityCommand::PackageExec {
-            binary: "tsc".to_string(),
-            args: vec!["--noEmit".to_string()],
-        })
+        target
+            .has_tsconfig()
+            .then_some(NodeQualityCommand::PackageExec {
+                binary: "tsc".to_string(),
+                args: vec!["--noEmit".to_string()],
+            })
     })
 }
 
 /// Module names whose presence in test files implies a hard package.json
 /// declaration. Restricted to obvious test runtimes / DOM testing helpers,
 /// not generic libraries — avoids flagging e.g. `from "react"`.
-const TEST_DEP_GUARDED_PREFIXES: &[&str] = &[
-    "@testing-library/",
-    "@playwright/test",
-    "playwright",
-];
+const TEST_DEP_GUARDED_PREFIXES: &[&str] = &["@testing-library/", "@playwright/test", "playwright"];
 
 /// Quick scan: does any source file under `target.root()` look like a unit /
 /// integration / e2e test file? Excludes `node_modules`, `dist`, `build`.
 fn target_has_test_files(target: &JsTarget) -> bool {
-    crate::analysis::collect_files(target.root(), is_test_file).into_iter().next().is_some()
+    crate::analysis::collect_files(target.root(), is_test_file)
+        .into_iter()
+        .next()
+        .is_some()
 }
 
 fn is_test_file(path: &Path) -> bool {
@@ -480,7 +490,10 @@ fn is_test_file(path: &Path) -> bool {
         Some(n) => n,
         None => return false,
     };
-    name.contains(".test.") || name.contains(".spec.") || name.ends_with("Test.tsx") || name.ends_with("Test.ts")
+    name.contains(".test.")
+        || name.contains(".spec.")
+        || name.ends_with("Test.tsx")
+        || name.ends_with("Test.ts")
 }
 
 /// Walk every test file under `target.root()`, parse its imports, and emit a
@@ -498,12 +511,16 @@ fn scan_test_dependency_coherence(
         std::collections::HashMap::new();
 
     for test_file in crate::analysis::collect_files(target.root(), is_test_file) {
-        let Ok(source) = std::fs::read_to_string(&test_file) else { continue };
+        let Ok(source) = std::fs::read_to_string(&test_file) else {
+            continue;
+        };
         for module in extract_imported_modules(&source) {
             // Only audit the curated guard list — third-party generic libs
             // are out of scope; a missing `react` import would be caught by
             // tsc itself.
-            let Some(guarded) = guarded_module_root(&module) else { continue };
+            let Some(guarded) = guarded_module_root(&module) else {
+                continue;
+            };
             if declared.contains(&guarded) {
                 continue;
             }
@@ -561,10 +578,8 @@ fn extract_imported_modules(source: &str) -> Vec<String> {
         // Primary-brain rejection v1 follow-up: dynamic `import('x')` was
         // missed by v1 — adding explicit `\bimport\s*\(` branch closes the
         // hole.
-        regex::Regex::new(
-            r#"(?:(?:from|require)\s*\(?|\bimport\s*\(|\bimport)\s*['"]([^'"]+)['"]"#,
-        )
-        .expect("import regex must compile")
+        regex::Regex::new(r#"(?:(?:from|require)\s*\(?|\bimport\s*\(|\bimport)\s*['"]([^'"]+)['"]"#)
+            .expect("import regex must compile")
     });
     let mut out = Vec::new();
     for cap in re.captures_iter(source) {
@@ -604,7 +619,11 @@ fn guarded_module_root(module: &str) -> Option<String> {
     None
 }
 
-fn prefix_issues(repo_root: &Path, target: &JsTarget, issues: Vec<QualityIssue>) -> Vec<QualityIssue> {
+fn prefix_issues(
+    repo_root: &Path,
+    target: &JsTarget,
+    issues: Vec<QualityIssue>,
+) -> Vec<QualityIssue> {
     let prefix = target.relative_root(repo_root);
     if prefix == "." {
         return issues;
@@ -673,8 +692,14 @@ fn parse_eslint_output(output: &str) -> (i64, i64, Vec<QualityIssue>) {
     }
 
     if errors == 0 && warnings == 0 {
-        errors = issues.iter().filter(|issue| issue.rule_id == "eslint::error").count() as i64;
-        warnings = issues.iter().filter(|issue| issue.rule_id == "eslint::warning").count() as i64;
+        errors = issues
+            .iter()
+            .filter(|issue| issue.rule_id == "eslint::error")
+            .count() as i64;
+        warnings = issues
+            .iter()
+            .filter(|issue| issue.rule_id == "eslint::warning")
+            .count() as i64;
     }
 
     (errors, warnings, issues)
@@ -763,7 +788,7 @@ async fn run_target_quality_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::discovery::{resolve_node_command, PackageManager, RepositoryDiscovery};
+    use crate::discovery::{PackageManager, RepositoryDiscovery, resolve_node_command};
 
     fn fake_output(stdout: &str, stderr: &str, success: bool) -> CommandOutput {
         CommandOutput {
@@ -774,7 +799,10 @@ mod tests {
     }
 
     fn temp_project_root() -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("quality-frontend-provider-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!(
+            "quality-frontend-provider-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -827,10 +855,8 @@ mod tests {
         );
         let discovery = RepositoryDiscovery::discover(&temp).unwrap();
         let provider = FrontendProvider::default();
-        let metrics = provider.applicable_metrics(
-            &discovery,
-            Some(&["backend/src/index.ts".to_string()]),
-        );
+        let metrics =
+            provider.applicable_metrics(&discovery, Some(&["backend/src/index.ts".to_string()]));
         assert!(metrics.contains(&MetricKey::TscErrors));
         remove_temp_project_root(&temp);
     }
@@ -888,11 +914,7 @@ mod tests {
 
     #[test]
     fn classify_tsc_failure_with_errors_is_usable() {
-        let out = fake_output(
-            "src/foo.ts(12,5): error TS2322: Type mismatch.",
-            "",
-            false,
-        );
+        let out = fake_output("src/foo.ts(12,5): error TS2322: Type mismatch.", "", false);
         assert_eq!(
             classify_outcome(&out, TSC_ERROR_PATTERNS),
             ToolOutcome::Usable
@@ -982,19 +1004,19 @@ mod tests {
         // to tell environment blockers from code blockers. All three current
         // producers in analyze() MUST honor it; losing the suffix breaks the
         // bootstrap classifier in agent.rs Fix B.
-        for rule_id in ["eslint::unavailable", "tsc::unavailable", "vitest::unavailable"] {
+        for rule_id in [
+            "eslint::unavailable",
+            "tsc::unavailable",
+            "vitest::unavailable",
+        ] {
             assert!(
                 rule_id.ends_with(UNAVAILABLE_RULE_SUFFIX),
                 "expected `{}` to end with `{}`",
                 rule_id,
                 UNAVAILABLE_RULE_SUFFIX
             );
-            let issue = unavailable_issue(
-                rule_id,
-                AnalyzerSource::TypeScript,
-                "tool not found",
-                "",
-            );
+            let issue =
+                unavailable_issue(rule_id, AnalyzerSource::TypeScript, "tool not found", "");
             assert!(issue.is_blocking(), "{} must stay blocking", rule_id);
             assert!(
                 issue.rule_id.ends_with(UNAVAILABLE_RULE_SUFFIX),
@@ -1109,14 +1131,20 @@ test('renders', () => { render(<div />); });
             Some(MeasureValue::Int(v)) => *v,
             other => panic!("expected metric, got {other:?}"),
         };
-        assert!(count >= 1, "expected at least one missing test dep, got {count}");
+        assert!(
+            count >= 1,
+            "expected at least one missing test dep, got {count}"
+        );
 
         let blocking_count = report
             .issues
             .iter()
             .filter(|i| i.rule_id == "frontend::test_dep_missing" && i.is_blocking())
             .count();
-        assert!(blocking_count >= 1, "expected blocking test_dep_missing issue");
+        assert!(
+            blocking_count >= 1,
+            "expected blocking test_dep_missing issue"
+        );
 
         remove_temp_project_root(&temp);
     }

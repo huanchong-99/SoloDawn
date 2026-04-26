@@ -7,10 +7,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use sqlx::SqlitePool;
-use tokio::sync::mpsc;
-use tracing;
-
 use db::models::{ExternalConversationBinding, Workflow, feishu_config::FeishuAppConfig};
 use feishu_connector::{
     client::FeishuClient,
@@ -18,9 +14,11 @@ use feishu_connector::{
     messages::FeishuMessenger,
     types::FeishuConfig,
 };
+use sqlx::SqlitePool;
+use tokio::sync::mpsc;
+use tracing;
 
-use super::chat_connector::ChatConnector;
-use super::orchestrator::message_bus::SharedMessageBus;
+use super::{chat_connector::ChatConnector, orchestrator::message_bus::SharedMessageBus};
 
 const FEISHU_PROVIDER: &str = "feishu";
 use feishu_connector::events::EVENT_TYPE_MESSAGE;
@@ -72,10 +70,7 @@ impl FeishuService {
     }
 
     /// Set the shared config for reading workflow model library.
-    pub fn set_shared_config(
-        &mut self,
-        config: Arc<tokio::sync::RwLock<super::config::Config>>,
-    ) {
+    pub fn set_shared_config(&mut self, config: Arc<tokio::sync::RwLock<super::config::Config>>) {
         self.shared_config = Some(config);
     }
 
@@ -155,8 +150,15 @@ impl FeishuService {
             } else {
                 tracing::debug!("No broadcaster configured");
             }
-            if let Err(e) =
-                Self::handle_event_inner(&event, pool, bus, messenger, concierge_agent, shared_config).await
+            if let Err(e) = Self::handle_event_inner(
+                &event,
+                pool,
+                bus,
+                messenger,
+                concierge_agent,
+                shared_config,
+            )
+            .await
             {
                 tracing::warn!(error = %e, "Failed to handle Feishu event");
             }
@@ -179,7 +181,15 @@ impl FeishuService {
 
         match header.event_type.as_str() {
             EVENT_TYPE_MESSAGE => {
-                Self::handle_message_inner(event, pool, bus, messenger, concierge_agent, shared_config).await
+                Self::handle_message_inner(
+                    event,
+                    pool,
+                    bus,
+                    messenger,
+                    concierge_agent,
+                    shared_config,
+                )
+                .await
             }
             other => {
                 tracing::debug!(event_type = %other, "Ignoring unhandled Feishu event type");
@@ -240,7 +250,8 @@ impl FeishuService {
             return Self::handle_new_session(&msg, name, pool, messenger, shared_config).await;
         }
         if text.eq_ignore_ascii_case("/new") {
-            return Self::handle_new_session(&msg, "New Session", pool, messenger, shared_config).await;
+            return Self::handle_new_session(&msg, "New Session", pool, messenger, shared_config)
+                .await;
         }
         if let Some(num_str) = text.strip_prefix("/switch ").map(str::trim) {
             return Self::handle_switch_session(&msg, num_str, pool, messenger).await;
@@ -248,7 +259,15 @@ impl FeishuService {
 
         // If Concierge Agent is available, route through it
         if let Some(concierge) = concierge_agent {
-            return Self::handle_via_concierge(&msg, text, pool, messenger, concierge, shared_config).await;
+            return Self::handle_via_concierge(
+                &msg,
+                text,
+                pool,
+                messenger,
+                concierge,
+                shared_config,
+            )
+            .await;
         }
 
         // Fallback: legacy direct orchestrator forwarding
@@ -275,7 +294,8 @@ impl FeishuService {
                 Some(s) => {
                     // Ensure chat_id is persisted on existing sessions
                     if s.feishu_chat_id.is_none() {
-                        let _ = ConciergeSession::update_feishu_chat_id(pool, &s.id, &msg.chat_id).await;
+                        let _ = ConciergeSession::update_feishu_chat_id(pool, &s.id, &msg.chat_id)
+                            .await;
                     }
                     s
                 }
@@ -383,10 +403,7 @@ impl FeishuService {
                     "Concierge processing failed"
                 );
                 messenger
-                    .reply_text(
-                        &msg.message_id,
-                        &format!("抱歉，出现了错误: {e}"),
-                    )
+                    .reply_text(&msg.message_id, &format!("抱歉，出现了错误: {e}"))
                     .await?;
             }
         }
@@ -444,9 +461,7 @@ impl FeishuService {
     }
 
     /// Build a user-facing model selection prompt.
-    fn build_model_selection_prompt(
-        models: &[super::config::WorkflowModelLibraryItem],
-    ) -> String {
+    fn build_model_selection_prompt(models: &[super::config::WorkflowModelLibraryItem]) -> String {
         let mut prompt = String::from("请选择要使用的 AI 模型（输入数字）：\n\n");
         for (i, m) in models.iter().enumerate() {
             let verified_tag = if m.is_verified { " ✅" } else { "" };
@@ -496,11 +511,10 @@ impl FeishuService {
         .join("\n")
     }
 
-    async fn handle_help(
-        msg: &ReceivedMessage,
-        messenger: &Arc<FeishuMessenger>,
-    ) -> Result<()> {
-        messenger.reply_text(&msg.message_id, &Self::build_help_text()).await?;
+    async fn handle_help(msg: &ReceivedMessage, messenger: &Arc<FeishuMessenger>) -> Result<()> {
+        messenger
+            .reply_text(&msg.message_id, &Self::build_help_text())
+            .await?;
         Ok(())
     }
 
@@ -511,9 +525,12 @@ impl FeishuService {
     ) -> Result<()> {
         use db::models::concierge::ConciergeSession;
 
-        let sessions = ConciergeSession::find_all_by_channel(pool, FEISHU_PROVIDER, &msg.chat_id).await?;
+        let sessions =
+            ConciergeSession::find_all_by_channel(pool, FEISHU_PROVIDER, &msg.chat_id).await?;
         if sessions.is_empty() {
-            messenger.reply_text(&msg.message_id, "暂无会话。发送任意消息开始新对话。").await?;
+            messenger
+                .reply_text(&msg.message_id, "暂无会话。发送任意消息开始新对话。")
+                .await?;
             return Ok(());
         }
 
@@ -522,13 +539,23 @@ impl FeishuService {
 
         let mut lines = vec!["📋 会话列表：\n".to_string()];
         for (i, session) in sessions.iter().enumerate() {
-            let marker = if Some(&session.id) == active_id.as_ref() { "👉 " } else { "   " };
-            let name = if session.name.is_empty() { &session.id[..8] } else { &session.name };
+            let marker = if Some(&session.id) == active_id.as_ref() {
+                "👉 "
+            } else {
+                "   "
+            };
+            let name = if session.name.is_empty() {
+                &session.id[..8]
+            } else {
+                &session.name
+            };
             lines.push(format!("{}{}. {}", marker, i + 1, name));
         }
         lines.push("\n使用 /switch <编号> 切换会话".to_string());
 
-        messenger.reply_text(&msg.message_id, &lines.join("\n")).await?;
+        messenger
+            .reply_text(&msg.message_id, &lines.join("\n"))
+            .await?;
         Ok(())
     }
 
@@ -539,16 +566,31 @@ impl FeishuService {
     ) -> Result<()> {
         use db::models::concierge::ConciergeSession;
 
-        let session = ConciergeSession::find_by_channel(pool, FEISHU_PROVIDER, &msg.chat_id).await?;
+        let session =
+            ConciergeSession::find_by_channel(pool, FEISHU_PROVIDER, &msg.chat_id).await?;
         match session {
             Some(s) => {
-                let name = if s.name.is_empty() { s.id[..8].to_string() } else { s.name.clone() };
+                let name = if s.name.is_empty() {
+                    s.id[..8].to_string()
+                } else {
+                    s.name.clone()
+                };
                 let wf = s.active_workflow_id.as_deref().unwrap_or("无");
-                let text = format!("📌 当前会话：{}\n🔗 工作流：{}\n🤖 模型：{}", name, wf, s.llm_model_id.as_deref().unwrap_or("未配置"));
+                let text = format!(
+                    "📌 当前会话：{}\n🔗 工作流：{}\n🤖 模型：{}",
+                    name,
+                    wf,
+                    s.llm_model_id.as_deref().unwrap_or("未配置")
+                );
                 messenger.reply_text(&msg.message_id, &text).await?;
             }
             None => {
-                messenger.reply_text(&msg.message_id, "当前没有活跃会话。发送任意消息开始新对话。").await?;
+                messenger
+                    .reply_text(
+                        &msg.message_id,
+                        "当前没有活跃会话。发送任意消息开始新对话。",
+                    )
+                    .await?;
             }
         }
         Ok(())
@@ -584,7 +626,8 @@ impl FeishuService {
             FEISHU_PROVIDER,
             &msg.chat_id,
             Some(&msg.sender_open_id),
-        ).await?;
+        )
+        .await?;
 
         tracing::info!(session_id = %new_session.id, name = %name, "Created new session via /new command");
 
@@ -605,22 +648,41 @@ impl FeishuService {
     ) -> Result<()> {
         use db::models::concierge::{ConciergeSession, ConciergeSessionChannel};
 
-        let sessions = ConciergeSession::find_all_by_channel(pool, FEISHU_PROVIDER, &msg.chat_id).await?;
+        let sessions =
+            ConciergeSession::find_all_by_channel(pool, FEISHU_PROVIDER, &msg.chat_id).await?;
         let idx: usize = match num_str.trim().parse::<usize>() {
             Ok(n) if n >= 1 && n <= sessions.len() => n - 1,
             _ => {
-                messenger.reply_text(&msg.message_id, &format!("请输入 1-{} 之间的数字。使用 /list 查看会话列表。", sessions.len())).await?;
+                messenger
+                    .reply_text(
+                        &msg.message_id,
+                        &format!(
+                            "请输入 1-{} 之间的数字。使用 /list 查看会话列表。",
+                            sessions.len()
+                        ),
+                    )
+                    .await?;
                 return Ok(());
             }
         };
 
         let target = &sessions[idx];
         ConciergeSessionChannel::switch_active_session(
-            pool, FEISHU_PROVIDER, &msg.chat_id, &target.id,
-        ).await?;
+            pool,
+            FEISHU_PROVIDER,
+            &msg.chat_id,
+            &target.id,
+        )
+        .await?;
 
-        let name = if target.name.is_empty() { &target.id[..8] } else { &target.name };
-        messenger.reply_text(&msg.message_id, &format!("🔄 已切换到会话「{}」", name)).await?;
+        let name = if target.name.is_empty() {
+            &target.id[..8]
+        } else {
+            &target.name
+        };
+        messenger
+            .reply_text(&msg.message_id, &format!("🔄 已切换到会话「{}」", name))
+            .await?;
         Ok(())
     }
 
@@ -733,10 +795,7 @@ impl FeishuService {
         // changes across the orchestrator agent, so we document the mapping instead.
         use super::orchestrator::message_bus::BusMessage;
         let instruction_msg = BusMessage::TerminalMessage {
-            message: format!(
-                "[feishu:{}:{}] {}",
-                msg.chat_id, msg.sender_open_id, text
-            ),
+            message: format!("[feishu:{}:{}] {}", msg.chat_id, msg.sender_open_id, text),
         };
         let topic = format!("workflow:{}", binding.workflow_id);
         bus.publish(&topic, instruction_msg).await?;
@@ -782,7 +841,10 @@ pub struct FeishuConnector {
 impl FeishuConnector {
     /// Create a new connector from a shared messenger and the client's live
     /// connected flag (obtained via [`FeishuService::connected_flag`]).
-    pub fn new(messenger: Arc<FeishuMessenger>, ws_connected: Arc<tokio::sync::RwLock<bool>>) -> Self {
+    pub fn new(
+        messenger: Arc<FeishuMessenger>,
+        ws_connected: Arc<tokio::sync::RwLock<bool>>,
+    ) -> Self {
         Self {
             messenger,
             ws_connected,

@@ -15,9 +15,7 @@ pub mod status;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use self::condition::Condition;
-use self::result::EvaluationResult;
-use self::status::QualityGateStatus;
+use self::{condition::Condition, result::EvaluationResult, status::QualityGateStatus};
 
 /// 质量门定义
 ///
@@ -45,7 +43,11 @@ impl QualityGate {
     }
 
     /// 从配置创建，使用指定 ID
-    pub fn with_id(id: impl Into<String>, name: impl Into<String>, conditions: Vec<Condition>) -> Self {
+    pub fn with_id(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        conditions: Vec<Condition>,
+    ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
@@ -134,16 +136,23 @@ impl std::fmt::Display for QualityGateLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gate::condition::{Condition, Operator};
-    use crate::gate::result::EvaluationResult;
-    use crate::metrics::MetricKey;
+    use crate::{
+        gate::{
+            condition::{Condition, Operator},
+            result::EvaluationResult,
+        },
+        metrics::MetricKey,
+    };
 
     #[test]
     fn test_quality_gate_all_pass() {
-        let gate = QualityGate::new("Test Gate", vec![
-            Condition::new(MetricKey::ClippyWarnings, Operator::GreaterThan, "0"),
-            Condition::new(MetricKey::TestFailures, Operator::GreaterThan, "0"),
-        ]);
+        let gate = QualityGate::new(
+            "Test Gate",
+            vec![
+                Condition::new(MetricKey::ClippyWarnings, Operator::GreaterThan, "0"),
+                Condition::new(MetricKey::TestFailures, Operator::GreaterThan, "0"),
+            ],
+        );
 
         let results = vec![
             EvaluationResult::ok(MetricKey::ClippyWarnings, Some(0.into())),
@@ -157,13 +166,19 @@ mod tests {
 
     #[test]
     fn test_quality_gate_one_fail() {
-        let gate = QualityGate::new("Test Gate", vec![
-            Condition::new(MetricKey::ClippyWarnings, Operator::GreaterThan, "0"),
-        ]);
+        let gate = QualityGate::new(
+            "Test Gate",
+            vec![Condition::new(
+                MetricKey::ClippyWarnings,
+                Operator::GreaterThan,
+                "0",
+            )],
+        );
 
-        let results = vec![
-            EvaluationResult::error(MetricKey::ClippyWarnings, Some(5.into())),
-        ];
+        let results = vec![EvaluationResult::error(
+            MetricKey::ClippyWarnings,
+            Some(5.into()),
+        )];
 
         let decision = gate.evaluate(&results);
         assert!(decision.is_blocked());

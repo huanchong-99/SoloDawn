@@ -1,10 +1,13 @@
 //! Detects `unsafe` blocks, `unsafe fn` declarations, and `unsafe impl` blocks
 //! for security review.
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{Rule, RustAnalysisContext, RustRule};
 use syn::visit::Visit;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{Rule, RustAnalysisContext, RustRule},
+};
 
 /// Detects unsafe code usage that requires security review.
 #[derive(Debug, Default)]
@@ -137,7 +140,11 @@ fn safe_wrapper() {
 }
 "#;
         let issues = analyze_code(code);
-        assert_eq!(issues.len(), 2, "expected 2 issues: unsafe fn + unsafe block");
+        assert_eq!(
+            issues.len(),
+            2,
+            "expected 2 issues: unsafe fn + unsafe block"
+        );
 
         let fn_issue = issues.iter().find(|i| i.message.contains("fn")).unwrap();
         assert_eq!(fn_issue.rule_id, "rust:unsafe-usage");

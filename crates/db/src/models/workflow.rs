@@ -817,10 +817,9 @@ impl Workflow {
         tasks: Vec<(WorkflowTask, Vec<Terminal>)>,
     ) -> anyhow::Result<()> {
         // Pre-flight: verify reference tables are populated (common cause of FK failures)
-        let cli_count: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM cli_type")
-                .fetch_one(pool)
-                .await?;
+        let cli_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM cli_type")
+            .fetch_one(pool)
+            .await?;
         if cli_count.0 == 0 {
             anyhow::bail!(
                 "cli_type table is empty. Run `pnpm run prepare-db` to initialize seed data."

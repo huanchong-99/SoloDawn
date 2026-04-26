@@ -7,8 +7,8 @@
 //! - End-to-end command execution flow
 
 use db::models::{
-    CreateWorkflowRequest, SlashCommandPreset, TerminalConfig, Workflow,
-    WorkflowCommand, WorkflowCommandRequest,
+    CreateWorkflowRequest, SlashCommandPreset, TerminalConfig, Workflow, WorkflowCommand,
+    WorkflowCommandRequest,
 };
 use server::{Deployment, DeploymentImpl};
 use uuid::Uuid;
@@ -22,19 +22,17 @@ async fn setup_test() -> (DeploymentImpl, String) {
     // Create a test project via raw SQL (Project struct uses Uuid, not String)
     let project_id = Uuid::new_v4();
     let project_id_str = project_id.to_string();
-    sqlx::query(
-        "INSERT INTO projects (id, name) VALUES (?1, ?2)"
-    )
-    .bind(project_id)
-    .bind("Test Project")
-    .execute(&deployment.db().pool)
-    .await
-    .expect("Failed to create project");
+    sqlx::query("INSERT INTO projects (id, name) VALUES (?1, ?2)")
+        .bind(project_id)
+        .bind("Test Project")
+        .execute(&deployment.db().pool)
+        .await
+        .expect("Failed to create project");
 
     // Create CLI type via raw SQL (CliType has no create method)
     sqlx::query(
         r"INSERT INTO cli_type (id, name, display_name, detect_command, is_system, created_at)
-          VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))"
+          VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))",
     )
     .bind("test-cli")
     .bind("test-cli")

@@ -9,8 +9,7 @@ use std::{
 };
 
 use anyhow::{Result, anyhow};
-use db::models::WorkflowOrchestratorCommand;
-use db::DBService;
+use db::{DBService, models::WorkflowOrchestratorCommand};
 use sqlx::Row;
 use tokio::{
     sync::{Mutex, RwLock},
@@ -27,8 +26,10 @@ use super::{
     runtime_actions::RuntimeActionService,
     types::LLMMessage,
 };
-use crate::services::concierge::ConciergeBroadcaster;
-use crate::services::git_watcher::{GitWatcher, GitWatcherConfig};
+use crate::services::{
+    concierge::ConciergeBroadcaster,
+    git_watcher::{GitWatcher, GitWatcherConfig},
+};
 
 /// Configuration for the OrchestratorRuntime
 #[derive(Debug, Clone)]
@@ -186,15 +187,17 @@ impl OrchestratorRuntime {
         }
 
         // Get project to find repo path
-        let project =
-            if let Some(project) = db::models::project::Project::find_by_id(&self.db.pool, workflow.project_id)
-                .await? { project } else {
-                warn!(
-                    "Project {} not found for workflow {}, git watcher disabled",
-                    workflow.project_id, workflow_id
-                );
-                return Ok(None);
-            };
+        let project = if let Some(project) =
+            db::models::project::Project::find_by_id(&self.db.pool, workflow.project_id).await?
+        {
+            project
+        } else {
+            warn!(
+                "Project {} not found for workflow {}, git watcher disabled",
+                workflow.project_id, workflow_id
+            );
+            return Ok(None);
+        };
 
         // Resolve repo path: prefer project.default_agent_working_dir, then fallback to project repos
         let repo_path = match project.default_agent_working_dir.clone() {
@@ -363,7 +366,11 @@ impl OrchestratorRuntime {
             OrchestratorConfig::from_workflow(
                 workflow.orchestrator_api_type.as_deref(),
                 workflow.orchestrator_base_url.as_deref(),
-                if api_key.is_empty() { None } else { Some(&api_key) },
+                if api_key.is_empty() {
+                    None
+                } else {
+                    Some(&api_key)
+                },
                 workflow.orchestrator_model.as_deref(),
             )
         } else {
@@ -467,7 +474,10 @@ impl OrchestratorRuntime {
 
         // Start GitWatcher for this workflow (non-blocking, failure is not fatal).
         // Fresh start → no resume_cursor; watcher seeds from HEAD as usual.
-        match self.try_start_git_watcher(workflow_id, &workflow, None).await {
+        match self
+            .try_start_git_watcher(workflow_id, &workflow, None)
+            .await
+        {
             Ok(Some(handle)) => {
                 let mut watchers = self.git_watchers.lock().await;
                 watchers.insert(workflow_id.to_string(), handle);
@@ -701,7 +711,12 @@ impl OrchestratorRuntime {
         // the agent task is guaranteed to receive the signal before we
         // discard the task handle.  The workflow topic is derived from the
         // workflow_id, so the agent's bus subscription will pick it up.
-        if self.running_workflows.lock().await.contains_key(workflow_id) {
+        if self
+            .running_workflows
+            .lock()
+            .await
+            .contains_key(workflow_id)
+        {
             self.message_bus
                 .publish(
                     &format!("workflow:{workflow_id}"),
@@ -820,9 +835,7 @@ impl OrchestratorRuntime {
     ) -> Option<Vec<super::resilient_llm::ProviderStatusReport>> {
         let agent = {
             let running = self.running_workflows.lock().await;
-            running
-                .get(workflow_id)
-                .map(|rw| Arc::clone(&rw.agent))
+            running.get(workflow_id).map(|rw| Arc::clone(&rw.agent))
         };
 
         match agent {
@@ -836,11 +849,7 @@ impl OrchestratorRuntime {
     /// Returns `Ok(true)` if the provider was found and reset,
     /// `Ok(false)` if the provider name was not found,
     /// `Err` if the workflow is not running.
-    pub async fn reset_provider(
-        &self,
-        workflow_id: &str,
-        provider_name: &str,
-    ) -> Result<bool> {
+    pub async fn reset_provider(&self, workflow_id: &str, provider_name: &str) -> Result<bool> {
         let agent = {
             let running = self.running_workflows.lock().await;
             running
@@ -1013,9 +1022,12 @@ impl OrchestratorRuntime {
                         error = %e,
                         "R7-PB1: recovery resume errored; marking workflow as paused (never auto-failing on restart artifact)"
                     );
-                    if let Err(e) =
-                        db::models::Workflow::update_status(pool, &workflow_id, WORKFLOW_STATUS_PAUSED)
-                            .await
+                    if let Err(e) = db::models::Workflow::update_status(
+                        pool,
+                        &workflow_id,
+                        WORKFLOW_STATUS_PAUSED,
+                    )
+                    .await
                     {
                         error!(
                             "Failed to mark workflow {} as paused during recovery: {}",
@@ -1060,7 +1072,11 @@ impl OrchestratorRuntime {
             OrchestratorConfig::from_workflow(
                 workflow.orchestrator_api_type.as_deref(),
                 workflow.orchestrator_base_url.as_deref(),
-                if api_key.is_empty() { None } else { Some(&api_key) },
+                if api_key.is_empty() {
+                    None
+                } else {
+                    Some(&api_key)
+                },
                 workflow.orchestrator_model.as_deref(),
             )
         } else {
@@ -1687,9 +1703,11 @@ mod tests {
             .await
             .expect("should fetch conversation messages");
 
-        assert!(messages.iter().any(|message| {
-            message.role == "user" && message.content == "hello orchestrator"
-        }));
+        assert!(
+            messages.iter().any(|message| {
+                message.role == "user" && message.content == "hello orchestrator"
+            })
+        );
         assert!(messages.iter().any(|message| {
             message.role == "assistant" && message.content == "Mock response for testing"
         }));
@@ -1727,7 +1745,10 @@ mod tests {
             )
             .await
             .expect("first orchestrator chat should be forwarded");
-        assert_eq!(first_command.status, OrchestratorChatCommandStatus::Succeeded);
+        assert_eq!(
+            first_command.status,
+            OrchestratorChatCommandStatus::Succeeded
+        );
 
         let duplicate_command = runtime
             .submit_orchestrator_chat(
@@ -1738,10 +1759,7 @@ mod tests {
             )
             .await
             .expect("duplicate orchestrator chat should be ignored");
-        assert_eq!(
-            duplicate_command.command_id,
-            first_command.command_id
-        );
+        assert_eq!(duplicate_command.command_id, first_command.command_id);
         assert_eq!(duplicate_command.status, first_command.status);
 
         let messages = runtime
@@ -1751,9 +1769,7 @@ mod tests {
 
         let user_message_count = messages
             .iter()
-            .filter(|message| {
-                message.role == "user" && message.content == "hello orchestrator"
-            })
+            .filter(|message| message.role == "user" && message.content == "hello orchestrator")
             .count();
 
         assert_eq!(user_message_count, 1);
@@ -2032,8 +2048,7 @@ mod tests {
             .unwrap()
             .expect("workflow row should still exist");
         assert_eq!(
-            recovered.status,
-            WORKFLOW_STATUS_PAUSED,
+            recovered.status, WORKFLOW_STATUS_PAUSED,
             "R7-PB1: a workflow with an in-flight running task at restart MUST be paused (resumable), NEVER auto-failed"
         );
     }
@@ -2075,7 +2090,10 @@ mod tests {
 
         // No history → None (fresh workflow, caller seeds HEAD).
         assert!(
-            resume_cursor_for_workflow(&pool, wf).await.unwrap().is_none(),
+            resume_cursor_for_workflow(&pool, wf)
+                .await
+                .unwrap()
+                .is_none(),
             "fresh workflow with no history must return None"
         );
 
@@ -2104,7 +2122,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            resume_cursor_for_workflow(&pool, wf).await.unwrap().as_deref(),
+            resume_cursor_for_workflow(&pool, wf)
+                .await
+                .unwrap()
+                .as_deref(),
             Some("bbbb2222"),
             "resume cursor must pick the newest commit across BOTH tables — \
              handoff commits live only in quality_run and would be skipped \
@@ -2123,7 +2144,10 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            resume_cursor_for_workflow(&pool, wf).await.unwrap().as_deref(),
+            resume_cursor_for_workflow(&pool, wf)
+                .await
+                .unwrap()
+                .as_deref(),
             Some("bbbb2222"),
             "cross-workflow commits must not leak into the cursor"
         );
@@ -2140,7 +2164,10 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            resume_cursor_for_workflow(&pool, wf).await.unwrap().as_deref(),
+            resume_cursor_for_workflow(&pool, wf)
+                .await
+                .unwrap()
+                .as_deref(),
             Some("bbbb2222"),
             "empty commit_hash must be excluded so we never seed with a garbage cursor"
         );

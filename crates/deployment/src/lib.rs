@@ -160,13 +160,16 @@ pub trait Deployment: Clone + Send + Sync + 'static {
 
     /// Trigger background auto-setup of default projects for new users
     async fn trigger_auto_project_setup(&self) {
-        let auto_setup_enabled = utils::env_compat::var_opt_with_compat("SOLODAWN_AUTO_SETUP_PROJECTS", "GITCORTEX_AUTO_SETUP_PROJECTS")
-            .map_or(true, |value| {
-                !matches!(
-                    value.trim().to_ascii_lowercase().as_str(),
-                    "0" | "false" | "no" | "off"
-                )
-            });
+        let auto_setup_enabled = utils::env_compat::var_opt_with_compat(
+            "SOLODAWN_AUTO_SETUP_PROJECTS",
+            "GITCORTEX_AUTO_SETUP_PROJECTS",
+        )
+        .map_or(true, |value| {
+            !matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "no" | "off"
+            )
+        });
 
         if !auto_setup_enabled {
             tracing::info!("Auto project setup disabled via SOLODAWN_AUTO_SETUP_PROJECTS");

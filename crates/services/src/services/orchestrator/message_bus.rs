@@ -10,8 +10,8 @@ use super::{
     constants::WORKFLOW_TOPIC_PREFIX,
     resilient_llm::ProviderEvent,
     types::{
-        OrchestratorInstruction, PromptDecision, QualityGateResultEvent,
-        TerminalCompletionEvent, TerminalPromptEvent,
+        OrchestratorInstruction, PromptDecision, QualityGateResultEvent, TerminalCompletionEvent,
+        TerminalPromptEvent,
     },
 };
 
@@ -249,9 +249,7 @@ impl RedisBus {
         let client = redis::Client::open(redis_url)?;
         // Verify connectivity
         let mut conn = client.get_multiplexed_async_connection().await?;
-        redis::cmd("PING")
-            .query_async::<String>(&mut conn)
-            .await?;
+        redis::cmd("PING").query_async::<String>(&mut conn).await?;
         tracing::info!(url = %redis_url, "RedisBus connected successfully");
 
         let (broadcast_tx, _) = broadcast::channel(capacity);
@@ -429,15 +427,18 @@ impl MessageBus {
     /// Reads `SOLODAWN_MESSAGE_BUS` (values: `"redis"` or `"memory"`, default `"memory"`)
     /// and `SOLODAWN_REDIS_URL` (required when bus is `"redis"`).
     pub fn from_env(capacity: usize) -> anyhow::Result<Self> {
-        let bus_type = utils::env_compat::var_with_compat("SOLODAWN_MESSAGE_BUS", "GITCORTEX_MESSAGE_BUS")
-            .unwrap_or_else(|_| "memory".into());
+        let bus_type =
+            utils::env_compat::var_with_compat("SOLODAWN_MESSAGE_BUS", "GITCORTEX_MESSAGE_BUS")
+                .unwrap_or_else(|_| "memory".into());
         match bus_type.as_str() {
             "redis" => {
-                let url = utils::env_compat::var_with_compat("SOLODAWN_REDIS_URL", "GITCORTEX_REDIS_URL").map_err(|_| {
-                    anyhow::anyhow!(
-                        "SOLODAWN_REDIS_URL must be set when SOLODAWN_MESSAGE_BUS=redis"
-                    )
-                })?;
+                let url =
+                    utils::env_compat::var_with_compat("SOLODAWN_REDIS_URL", "GITCORTEX_REDIS_URL")
+                        .map_err(|_| {
+                            anyhow::anyhow!(
+                                "SOLODAWN_REDIS_URL must be set when SOLODAWN_MESSAGE_BUS=redis"
+                            )
+                        })?;
                 // We need a runtime to create the Redis connection; use block_on
                 // if called outside of an async context, otherwise use spawn.
                 let rt = tokio::runtime::Handle::try_current().map_err(|_| {
@@ -714,7 +715,10 @@ impl MessageBus {
                 }
                 // Also publish to session fallback topic
                 let fallback_topic = session_id.to_string();
-                if let Err(err) = self.publish_to_topic(&fallback_topic, message.clone()).await {
+                if let Err(err) = self
+                    .publish_to_topic(&fallback_topic, message.clone())
+                    .await
+                {
                     tracing::debug!(
                         ?err,
                         terminal_id = %terminal_id,
@@ -804,10 +808,7 @@ impl MessageBus {
     pub async fn publish_quality_gate_result(&self, event: QualityGateResultEvent) {
         let workflow_id = event.workflow_id.clone();
         if let Err(e) = self
-            .publish_workflow_event(
-                &workflow_id,
-                BusMessage::TerminalQualityGateResult(event),
-            )
+            .publish_workflow_event(&workflow_id, BusMessage::TerminalQualityGateResult(event))
             .await
         {
             tracing::warn!(

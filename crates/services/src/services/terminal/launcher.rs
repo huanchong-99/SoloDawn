@@ -125,13 +125,19 @@ impl TerminalLauncher {
         let terminals = Terminal::find_by_workflow(&self.db.pool, workflow_id).await?;
         let mut results = Vec::new();
 
-        tracing::info!(
-            "Launching {} terminals for workflow {}",
-            terminals.len(),
-            workflow_id
-        );
+        tracing::info!("Launching prepared terminals for workflow {}", workflow_id);
 
         for terminal in terminals {
+            if terminal.status != "starting" {
+                tracing::info!(
+                    terminal_id = %terminal.id,
+                    workflow_id = %workflow_id,
+                    status = %terminal.status,
+                    "Skipping terminal launch because it has not acquired a launch slot"
+                );
+                continue;
+            }
+
             let result = self.launch_terminal(&terminal).await;
             results.push(result);
             // No delay needed - environment variable injection is immediate

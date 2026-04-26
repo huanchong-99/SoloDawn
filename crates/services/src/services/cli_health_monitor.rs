@@ -3,13 +3,14 @@
 //! Background service that periodically checks CLI availability and publishes
 //! status changes via a broadcast channel for real-time SSE consumption.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use db::DBService;
-use tokio::sync::{broadcast, RwLock};
-use tokio::time::Duration;
+use tokio::{
+    sync::{RwLock, broadcast},
+    time::Duration,
+};
 
 use super::terminal::detector::CliDetector;
 
@@ -60,9 +61,12 @@ impl CliHealthMonitor {
     /// (falling back to 300 seconds / 5 minutes).
     pub fn new(interval_secs: u64) -> Self {
         let effective_interval = if interval_secs == 0 {
-            utils::env_compat::var_opt_with_compat("SOLODAWN_CLI_HEALTH_INTERVAL_SECS", "GITCORTEX_CLI_HEALTH_INTERVAL_SECS")
-                .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(300)
+            utils::env_compat::var_opt_with_compat(
+                "SOLODAWN_CLI_HEALTH_INTERVAL_SECS",
+                "GITCORTEX_CLI_HEALTH_INTERVAL_SECS",
+            )
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(300)
         } else {
             interval_secs
         };
@@ -138,9 +142,7 @@ impl CliHealthMonitor {
 
             // Detect changes in installation status or version
             let changed = match cached {
-                Some(prev) => {
-                    prev.installed != status.installed || prev.version != status.version
-                }
+                Some(prev) => prev.installed != status.installed || prev.version != status.version,
                 None => true, // First detection counts as a change
             };
 

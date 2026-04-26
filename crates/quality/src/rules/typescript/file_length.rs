@@ -1,8 +1,10 @@
 //! File length rule — flags TypeScript/JavaScript source files that exceed a configurable maximum line count.
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{Rule, TsAnalysisContext, TsRule};
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{Rule, TsAnalysisContext, TsRule},
+};
 
 /// Checks that TypeScript/JavaScript source files do not exceed a maximum number of lines.
 #[derive(Debug)]

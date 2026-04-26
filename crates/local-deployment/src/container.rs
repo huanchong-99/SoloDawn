@@ -923,12 +923,20 @@ impl LocalContainerService {
 
             // Fallback: inject credentials from model_config if no global auth
             if !has_global_auth {
-                match db::models::ModelConfig::resolve_preferred_or_default(pool, model_config_id, "cli-claude-code").await {
+                match db::models::ModelConfig::resolve_preferred_or_default(
+                    pool,
+                    model_config_id,
+                    "cli-claude-code",
+                )
+                .await
+                {
                     Ok(Some(model_config)) => {
                         if let Ok(Some(api_key)) = model_config.get_api_key() {
                             vars.insert("ANTHROPIC_API_KEY".to_string(), api_key.clone());
                             vars.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key);
-                            tracing::info!("Injected API key from model_config for Claude Code workspace");
+                            tracing::info!(
+                                "Injected API key from model_config for Claude Code workspace"
+                            );
 
                             if let Some(ref base_url) = model_config.base_url {
                                 vars.insert("ANTHROPIC_BASE_URL".to_string(), base_url.clone());
@@ -940,24 +948,37 @@ impl LocalContainerService {
                             let mut config_json = if config_path.exists() {
                                 std::fs::read_to_string(&config_path)
                                     .ok()
-                                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                                    .and_then(|s| {
+                                        serde_json::from_str::<serde_json::Value>(&s).ok()
+                                    })
                                     .unwrap_or_else(|| serde_json::json!({}))
                             } else {
                                 serde_json::json!({})
                             };
                             if let Some(obj) = config_json.as_object_mut() {
-                                obj.insert("primaryApiKey".to_string(), serde_json::json!(vars.get("ANTHROPIC_API_KEY").unwrap()));
+                                obj.insert(
+                                    "primaryApiKey".to_string(),
+                                    serde_json::json!(vars.get("ANTHROPIC_API_KEY").unwrap()),
+                                );
                                 if let Some(base_url) = model_config.base_url.as_ref() {
-                                    obj.insert("apiBaseUrl".to_string(), serde_json::json!(base_url));
+                                    obj.insert(
+                                        "apiBaseUrl".to_string(),
+                                        serde_json::json!(base_url),
+                                    );
                                 }
                             }
-                            if let Err(e) = std::fs::write(&config_path, serde_json::to_string_pretty(&config_json).unwrap_or_default()) {
+                            if let Err(e) = std::fs::write(
+                                &config_path,
+                                serde_json::to_string_pretty(&config_json).unwrap_or_default(),
+                            ) {
                                 tracing::warn!(error = %e, "Failed to write Claude config.json with API key");
                             }
                         }
                     }
                     Ok(None) => {
-                        tracing::warn!("No global Claude auth and no model_config credentials found for workspace mode");
+                        tracing::warn!(
+                            "No global Claude auth and no model_config credentials found for workspace mode"
+                        );
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to query model_config credentials for Claude Code");
@@ -978,31 +999,40 @@ impl LocalContainerService {
 
         if matches!(base_executor, BaseCodingAgent::Codex) {
             // Reuse the canonical codex_home() resolver from the executors crate.
-            let global_codex_home =
-                match executors::executors::codex::codex_home() {
-                    Some(p) if p.exists() => p,
-                    _ => {
-                        // No global codex home — try model_config fallback
-                        match db::models::ModelConfig::resolve_preferred_or_default(pool, model_config_id, "cli-codex").await {
-                            Ok(Some(model_config)) => {
-                                if let Ok(Some(api_key)) = model_config.get_api_key() {
-                                    vars.insert("OPENAI_API_KEY".to_string(), api_key);
-                                    tracing::info!("Injected API key from model_config for Codex workspace");
-                                    if let Some(ref base_url) = model_config.base_url {
-                                        vars.insert("OPENAI_BASE_URL".to_string(), base_url.clone());
-                                    }
+            let global_codex_home = match executors::executors::codex::codex_home() {
+                Some(p) if p.exists() => p,
+                _ => {
+                    // No global codex home — try model_config fallback
+                    match db::models::ModelConfig::resolve_preferred_or_default(
+                        pool,
+                        model_config_id,
+                        "cli-codex",
+                    )
+                    .await
+                    {
+                        Ok(Some(model_config)) => {
+                            if let Ok(Some(api_key)) = model_config.get_api_key() {
+                                vars.insert("OPENAI_API_KEY".to_string(), api_key);
+                                tracing::info!(
+                                    "Injected API key from model_config for Codex workspace"
+                                );
+                                if let Some(ref base_url) = model_config.base_url {
+                                    vars.insert("OPENAI_BASE_URL".to_string(), base_url.clone());
                                 }
                             }
-                            Ok(None) => {
-                                tracing::warn!("Codex home not found and no model_config credentials available");
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "Failed to query model_config credentials for Codex");
-                            }
                         }
-                        return vars;
+                        Ok(None) => {
+                            tracing::warn!(
+                                "Codex home not found and no model_config credentials available"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "Failed to query model_config credentials for Codex");
+                        }
                     }
-                };
+                    return vars;
+                }
+            };
 
             // Create an isolated CODEX_HOME and copy auth + config from global
             let home_id = format!("ws-{}", uuid::Uuid::new_v4().as_simple());
@@ -1044,7 +1074,13 @@ impl LocalContainerService {
 
         if matches!(base_executor, BaseCodingAgent::Gemini) {
             // Inject Gemini credentials from model_config
-            match db::models::ModelConfig::resolve_preferred_or_default(pool, model_config_id, "cli-gemini-cli").await {
+            match db::models::ModelConfig::resolve_preferred_or_default(
+                pool,
+                model_config_id,
+                "cli-gemini-cli",
+            )
+            .await
+            {
                 Ok(Some(model_config)) => {
                     if let Ok(Some(api_key)) = model_config.get_api_key() {
                         vars.insert("GEMINI_API_KEY".to_string(), api_key);
@@ -1167,11 +1203,8 @@ impl ContainerService for LocalContainerService {
         Workspace::touch(&self.db.pool, workspace.id).await?;
         // Use the target-branch-aware query so recovery can recreate lost branches.
         let repos_with_branch =
-            WorkspaceRepo::find_repos_with_target_branch_for_workspace(
-                &self.db.pool,
-                workspace.id,
-            )
-            .await?;
+            WorkspaceRepo::find_repos_with_target_branch_for_workspace(&self.db.pool, workspace.id)
+                .await?;
 
         if repos_with_branch.is_empty() {
             return Err(ContainerError::Other(anyhow!(
@@ -1211,8 +1244,7 @@ impl ContainerService for LocalContainerService {
         self.copy_files_and_images(&workspace_dir, workspace)
             .await?;
 
-        let repositories: Vec<Repo> =
-            repos_with_branch.iter().map(|r| r.repo.clone()).collect();
+        let repositories: Vec<Repo> = repos_with_branch.iter().map(|r| r.repo.clone()).collect();
         Self::create_workspace_config_files(&workspace_dir, &repositories).await?;
 
         Ok(workspace_dir.to_string_lossy().to_string())
@@ -1300,7 +1332,13 @@ impl ContainerService for LocalContainerService {
         // isolated workspace environment doesn't inherit global CLI configs.
         // Falls back to model_config stored credentials when global auth is missing.
         if let Some(base_executor) = executor_action.base_executor() {
-            let profile_vars = Self::resolve_executor_env_vars(base_executor, executor_action, &self.db.pool, model_config_id).await;
+            let profile_vars = Self::resolve_executor_env_vars(
+                base_executor,
+                executor_action,
+                &self.db.pool,
+                model_config_id,
+            )
+            .await;
             env.merge(&profile_vars);
         }
 

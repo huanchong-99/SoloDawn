@@ -2082,10 +2082,14 @@ pub async fn mark_seen(
 async fn get_planning_messages(
     State(deployment): State<DeploymentImpl>,
     Extension(workspace): Extension<Workspace>,
-) -> Result<ResponseJson<ApiResponse<Vec<db::models::planning_draft::PlanningDraftMessage>>>, ApiError>
-{
-    use db::models::planning_draft::{PlanningDraft, PlanningDraftMessage};
-    use db::models::workflow::WorkflowTask;
+) -> Result<
+    ResponseJson<ApiResponse<Vec<db::models::planning_draft::PlanningDraftMessage>>>,
+    ApiError,
+> {
+    use db::models::{
+        planning_draft::{PlanningDraft, PlanningDraftMessage},
+        workflow::WorkflowTask,
+    };
 
     let pool = &deployment.db().pool;
     let empty = || ResponseJson(ApiResponse::success(vec![]));

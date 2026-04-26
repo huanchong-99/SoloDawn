@@ -1,5 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 use glob::Pattern;
@@ -53,7 +55,11 @@ impl PackageManager {
         }
     }
 
-    fn detect(project_root: &Path, start_dir: &Path, package_manager_field: Option<&str>) -> Option<Self> {
+    fn detect(
+        project_root: &Path,
+        start_dir: &Path,
+        package_manager_field: Option<&str>,
+    ) -> Option<Self> {
         Self::from_package_manager_field(package_manager_field)
             .or_else(|| Self::from_lockfiles(project_root, start_dir))
     }
@@ -109,7 +115,11 @@ pub fn resolve_node_exe(name: &str) -> String {
 
         if let Some(path_var) = std::env::var_os("PATH") {
             for dir in std::env::split_paths(&path_var) {
-                for candidate in [format!("{name}.cmd"), format!("{name}.exe"), name.to_string()] {
+                for candidate in [
+                    format!("{name}.cmd"),
+                    format!("{name}.exe"),
+                    name.to_string(),
+                ] {
                     let path = dir.join(&candidate);
                     if path.is_file() {
                         return path.to_string_lossy().into_owned();
@@ -178,9 +188,10 @@ pub fn resolve_node_command(
 ) -> (String, Vec<String>) {
     let package_manager = package_manager.unwrap_or(PackageManager::Npm);
     match command {
-        NodeQualityCommand::Script { script } => {
-            (resolve_node_exe(package_manager.command()), package_manager.script_args(script))
-        }
+        NodeQualityCommand::Script { script } => (
+            resolve_node_exe(package_manager.command()),
+            package_manager.script_args(script),
+        ),
         NodeQualityCommand::PackageExec { binary, args } => {
             package_manager.exec_command(binary, args)
         }
@@ -250,7 +261,9 @@ impl JsTarget {
     }
 
     pub fn display_name(&self, repo_root: &Path) -> String {
-        self.name.clone().unwrap_or_else(|| self.relative_root(repo_root))
+        self.name
+            .clone()
+            .unwrap_or_else(|| self.relative_root(repo_root))
     }
 
     pub fn relative_root(&self, repo_root: &Path) -> String {
@@ -291,15 +304,21 @@ impl RepositoryDiscovery {
         let root_manifest_path = project_root.join("package.json");
         let root_manifest = read_manifest(&root_manifest_path)?;
         let repo_package_manager = root_manifest.as_ref().and_then(|manifest| {
-            PackageManager::detect(project_root, project_root, manifest.package_manager.as_deref())
+            PackageManager::detect(
+                project_root,
+                project_root,
+                manifest.package_manager.as_deref(),
+            )
         });
 
-        let workspace_patterns = read_workspace_pattern_strings(project_root, root_manifest.as_ref())?;
+        let workspace_patterns =
+            read_workspace_pattern_strings(project_root, root_manifest.as_ref())?;
         let workspace_matchers = compile_workspace_patterns(&workspace_patterns)?;
 
         let mut js_targets = Vec::new();
         if let Some(root_manifest) = root_manifest.as_ref() {
-            let include_root_target = workspace_matchers.is_empty() || project_root.join("tsconfig.json").exists();
+            let include_root_target =
+                workspace_matchers.is_empty() || project_root.join("tsconfig.json").exists();
             if include_root_target {
                 js_targets.push(build_js_target(
                     project_root,
@@ -331,7 +350,10 @@ impl RepositoryDiscovery {
                         .to_string_lossy(),
                 );
 
-                if !workspace_matchers.iter().any(|pattern| pattern.matches(&relative_dir)) {
+                if !workspace_matchers
+                    .iter()
+                    .any(|pattern| pattern.matches(&relative_dir))
+                {
                     continue;
                 }
 
@@ -384,7 +406,8 @@ impl RepositoryDiscovery {
             .unwrap_or_default();
         let rust_manifests = scanned_manifests.cargo_toml;
         let js_dependents = build_js_dependents(&js_targets);
-        let has_subdirectory_js_manifests = root_manifest.is_none() && !scanned_manifests.package_json.is_empty();
+        let has_subdirectory_js_manifests =
+            root_manifest.is_none() && !scanned_manifests.package_json.is_empty();
 
         debug!(
             js_targets = js_targets.len(),
@@ -571,11 +594,11 @@ fn read_manifest(path: &Path) -> anyhow::Result<Option<NodeManifest>> {
 
 fn resolve_repo_checks(manifest: &NodeManifest) -> RepoChecks {
     RepoChecks {
-        generate_types: manifest
-            .has_script("generate-types:check")
-            .then(|| NodeQualityCommand::Script {
+        generate_types: manifest.has_script("generate-types:check").then(|| {
+            NodeQualityCommand::Script {
                 script: "generate-types:check".to_string(),
-            }),
+            }
+        }),
         prepare_db: manifest
             .has_script("prepare-db:check")
             .then(|| NodeQualityCommand::Script {
@@ -595,8 +618,8 @@ fn is_stub_script_body(body: &str) -> bool {
     let lower = body.to_lowercase();
     // A body that doesn't mention ANY known quality tool is suspect.
     const TOOL_TOKENS: &[&str] = &[
-        "tsc", "eslint", "vitest", "jest", "prettier", "biome", "rome", "swc",
-        "vue-tsc", "tsup", "rollup", "vite", "webpack", "xo",
+        "tsc", "eslint", "vitest", "jest", "prettier", "biome", "rome", "swc", "vue-tsc", "tsup",
+        "rollup", "vite", "webpack", "xo",
     ];
     let mentions_tool = TOOL_TOKENS.iter().any(|tok| lower.contains(tok));
     if mentions_tool {
@@ -613,10 +636,7 @@ fn is_stub_script_body(body: &str) -> bool {
     bypass_markers.iter().any(|m| trimmed.contains(m))
 }
 
-fn pick_real_script<'a>(
-    manifest: &'a NodeManifest,
-    candidates: &[&'a str],
-) -> Option<&'a str> {
+fn pick_real_script<'a>(manifest: &'a NodeManifest, candidates: &[&'a str]) -> Option<&'a str> {
     // Priority 1: first candidate that exists AND whose body is not a stub.
     for name in candidates {
         if let Some(body) = manifest.script_body(name) {
@@ -647,24 +667,28 @@ fn resolve_js_capabilities(root: &Path, manifest: &NodeManifest) -> JsTargetCapa
     ];
     let test_candidates = &["quality:test", "test:ci", "test:run", "test"];
 
-    let lint = pick_real_script(manifest, lint_candidates).map(|script| {
-        NodeQualityCommand::Script { script: script.to_string() }
-    });
-
-    let typecheck = pick_real_script(manifest, typecheck_candidates)
-        .map(|script| NodeQualityCommand::Script { script: script.to_string() })
-        .or_else(|| {
-            (root.join("tsconfig.json").exists() && manifest.has_dependency("typescript")).then(|| {
-                NodeQualityCommand::PackageExec {
-                    binary: "tsc".to_string(),
-                    args: vec!["--noEmit".to_string()],
-                }
-            })
+    let lint =
+        pick_real_script(manifest, lint_candidates).map(|script| NodeQualityCommand::Script {
+            script: script.to_string(),
         });
 
-    let test = pick_real_script(manifest, test_candidates).map(|script| {
-        NodeQualityCommand::Script { script: script.to_string() }
-    });
+    let typecheck = pick_real_script(manifest, typecheck_candidates)
+        .map(|script| NodeQualityCommand::Script {
+            script: script.to_string(),
+        })
+        .or_else(|| {
+            (root.join("tsconfig.json").exists() && manifest.has_dependency("typescript")).then(
+                || NodeQualityCommand::PackageExec {
+                    binary: "tsc".to_string(),
+                    args: vec!["--noEmit".to_string()],
+                },
+            )
+        });
+
+    let test =
+        pick_real_script(manifest, test_candidates).map(|script| NodeQualityCommand::Script {
+            script: script.to_string(),
+        });
 
     JsTargetCapabilities {
         lint,
@@ -769,7 +793,6 @@ struct PnpmWorkspace {
     packages: Vec<String>,
 }
 
-
 #[derive(Default)]
 struct ScannedManifests {
     package_json: Vec<PathBuf>,
@@ -817,7 +840,9 @@ fn scan_known_manifests_recursive(current: &Path, found: &mut ScannedManifests) 
 fn should_skip_directory(path: &Path) -> bool {
     matches!(
         path.file_name().and_then(|name| name.to_str()),
-        Some(".git" | "node_modules" | "target" | "dist" | "build" | "vendor" | ".next" | "coverage")
+        Some(
+            ".git" | "node_modules" | "target" | "dist" | "build" | "vendor" | ".next" | "coverage"
+        )
     )
 }
 
@@ -997,7 +1022,10 @@ mod tests {
 ",
         );
         write_file(&root.join("apps/web/package.json"), r#"{ "name": "web" }"#);
-        write_file(&root.join("packages/shared/package.json"), r#"{ "name": "shared" }"#);
+        write_file(
+            &root.join("packages/shared/package.json"),
+            r#"{ "name": "shared" }"#,
+        );
 
         let discovery = RepositoryDiscovery::discover(&root).unwrap();
         let roots: Vec<_> = discovery
@@ -1042,10 +1070,15 @@ mod tests {
             &root.join("package.json"),
             r#"{ "name": "repo", "private": true }"#,
         );
-        write_file(&root.join("pnpm-workspace.yaml"), "packages: [
-");
+        write_file(
+            &root.join("pnpm-workspace.yaml"),
+            "packages: [
+",
+        );
 
-        let error = RepositoryDiscovery::discover(&root).unwrap_err().to_string();
+        let error = RepositoryDiscovery::discover(&root)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("pnpm workspace file"));
         cleanup(&root);
     }
@@ -1061,9 +1094,12 @@ mod tests {
   "packageManager": "pnpm@10.0.0"
 }"#,
         );
-        write_file(&root.join("pnpm-workspace.yaml"), "packages:
+        write_file(
+            &root.join("pnpm-workspace.yaml"),
+            "packages:
   - apps/*
-");
+",
+        );
         write_file(&root.join("apps/web/package.json"), r#"{ "name": "web" }"#);
 
         let discovery = RepositoryDiscovery::discover(&root).unwrap();
@@ -1089,9 +1125,12 @@ mod tests {
 }"#,
         );
         write_file(&root.join("tsconfig.json"), "{}");
-        write_file(&root.join("pnpm-workspace.yaml"), "packages:
+        write_file(
+            &root.join("pnpm-workspace.yaml"),
+            "packages:
   - apps/*
-");
+",
+        );
         write_file(&root.join("apps/web/package.json"), r#"{ "name": "web" }"#);
 
         let discovery = RepositoryDiscovery::discover(&root).unwrap();
@@ -1241,8 +1280,12 @@ mod tests {
         assert!(!is_stub_script_body("vitest run"));
         assert!(!is_stub_script_body("jest --coverage"));
         // Chains that ultimately invoke a real tool are fine.
-        assert!(!is_stub_script_body("pnpm -w run lint && prettier --check ."));
-        assert!(!is_stub_script_body("npm run type-check:client && npm run type-check:server"));
+        assert!(!is_stub_script_body(
+            "pnpm -w run lint && prettier --check ."
+        ));
+        assert!(!is_stub_script_body(
+            "npm run type-check:client && npm run type-check:server"
+        ));
     }
 
     #[test]
@@ -1269,7 +1312,10 @@ mod tests {
         // Expect the :all / :ci real aliases to win over the plain stubs.
         match &caps.typecheck {
             Some(NodeQualityCommand::Script { script }) => {
-                assert_eq!(script, "type-check:all", "must pick the real alias, not the stub")
+                assert_eq!(
+                    script, "type-check:all",
+                    "must pick the real alias, not the stub"
+                )
             }
             other => panic!("expected typecheck Script, got {other:?}"),
         }
@@ -1435,8 +1481,14 @@ mod tests {
         assert!(discovery.has_subdirectory_js_manifests());
 
         // At least one target must have a typecheck capability (client has tsc)
-        let has_typecheck = discovery.js_targets().iter().any(|t| t.capabilities().typecheck.is_some());
-        assert!(has_typecheck, "at least one target must have typecheck capability");
+        let has_typecheck = discovery
+            .js_targets()
+            .iter()
+            .any(|t| t.capabilities().typecheck.is_some());
+        assert!(
+            has_typecheck,
+            "at least one target must have typecheck capability"
+        );
 
         cleanup(&root);
     }

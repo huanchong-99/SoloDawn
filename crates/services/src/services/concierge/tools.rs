@@ -1,15 +1,16 @@
 //! Concierge tool definitions and execution logic.
 
 use anyhow::{Context, Result, anyhow};
+use db::models::{
+    concierge::ConciergeSession,
+    project::Project,
+    project_repo::ProjectRepo,
+    repo::Repo,
+    terminal::Terminal,
+    workflow::{Workflow, WorkflowTask},
+};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-
-use db::models::concierge::ConciergeSession;
-use db::models::project::Project;
-use db::models::project_repo::ProjectRepo;
-use db::models::repo::Repo;
-use db::models::terminal::Terminal;
-use db::models::workflow::{Workflow, WorkflowTask};
 
 // ---------------------------------------------------------------------------
 // Tool call parsing
@@ -146,9 +147,7 @@ pub async fn execute_tool(
         "toggle_progress_notifications" => {
             execute_toggle_progress(pool, session, &tool_call.params).await
         }
-        "toggle_feishu_sync" => {
-            execute_toggle_feishu_sync(pool, session, &tool_call.params).await
-        }
+        "toggle_feishu_sync" => execute_toggle_feishu_sync(pool, session, &tool_call.params).await,
         "show_overview" => execute_show_overview(pool).await,
         // Runtime tools need orchestrator access — marked for agent-level handling
         "send_to_orchestrator" | "prepare_workflow" | "start_workflow" => Ok(format!(
@@ -297,9 +296,7 @@ async fn execute_select_project(
     let project_id_str = params["project_id"]
         .as_str()
         .context("Missing 'project_id' parameter")?;
-    let project_id: uuid::Uuid = project_id_str
-        .parse()
-        .context("Invalid project_id UUID")?;
+    let project_id: uuid::Uuid = project_id_str.parse().context("Invalid project_id UUID")?;
     let project = Project::find_by_id(pool, project_id)
         .await?
         .context("Project not found")?;
@@ -314,8 +311,9 @@ async fn execute_list_cli_types(
     pool: &SqlitePool,
     shared_config: Option<&std::sync::Arc<tokio::sync::RwLock<crate::services::config::Config>>>,
 ) -> Result<String> {
-    use db::models::cli_type::CliType;
     use std::collections::HashMap;
+
+    use db::models::cli_type::CliType;
 
     let cli_types = CliType::find_all(pool).await?;
 
@@ -343,15 +341,22 @@ async fn execute_list_cli_types(
     let mut by_cli: HashMap<String, Vec<&crate::services::config::WorkflowModelLibraryItem>> =
         HashMap::new();
     for m in &config_models {
-        let cli_id = m.cli_type_id.clone().unwrap_or_else(|| "unknown".to_string());
+        let cli_id = m
+            .cli_type_id
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
         by_cli.entry(cli_id).or_default().push(m);
     }
 
-    let mut result = String::from("Available AI CLI tools and models (only those with API keys):\n\n");
+    let mut result =
+        String::from("Available AI CLI tools and models (only those with API keys):\n\n");
     let mut index = 1;
     for ct in &cli_types {
         if let Some(models) = by_cli.get(&ct.id) {
-            result.push_str(&format!("**{}** (cli_type_id: `{}`)\n", ct.display_name, ct.id));
+            result.push_str(&format!(
+                "**{}** (cli_type_id: `{}`)\n",
+                ct.display_name, ct.id
+            ));
             for m in models {
                 let verified = if m.is_verified { " ✅" } else { "" };
                 result.push_str(&format!(
@@ -419,7 +424,11 @@ async fn execute_create_workflow(
             // Model not in DB — sync from config.json
             if let Some(cfg) = shared_config {
                 let cfg = cfg.read().await;
-                if let Some(item) = cfg.workflow_model_library.iter().find(|m| m.id == model_config_id) {
+                if let Some(item) = cfg
+                    .workflow_model_library
+                    .iter()
+                    .find(|m| m.id == model_config_id)
+                {
                     // Create the model_config record
                     ModelConfig::create_custom(
                         pool,
@@ -493,8 +502,10 @@ async fn execute_create_workflow(
     // Create a companion Task + Workspace so the sidebar "活跃" list picks it up.
     // The workspace system (old) requires a task_id → workspace_id link.
     {
-        use db::models::task::{CreateTask, Task};
-        use db::models::workspace::{CreateWorkspace, Workspace};
+        use db::models::{
+            task::{CreateTask, Task},
+            workspace::{CreateWorkspace, Workspace},
+        };
 
         let task_id = uuid::Uuid::new_v4();
         let ws_id = uuid::Uuid::new_v4();
@@ -659,10 +670,7 @@ async fn execute_list_tasks(
     Ok(result)
 }
 
-async fn execute_get_task_detail(
-    pool: &SqlitePool,
-    params: &serde_json::Value,
-) -> Result<String> {
+async fn execute_get_task_detail(pool: &SqlitePool, params: &serde_json::Value) -> Result<String> {
     let task_id = params["task_id"]
         .as_str()
         .context("Missing 'task_id' parameter")?;

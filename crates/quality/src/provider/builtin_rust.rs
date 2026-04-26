@@ -3,19 +3,19 @@
 //! Runs all built-in Rust quality rules without external tools.
 //! Parses each `.rs` file with `syn` and applies every rule from `crate::rules::rust`.
 
-use std::path::Path;
-use std::time::Instant;
+use std::{path::Path, time::Instant};
 
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
-use crate::analysis;
-use crate::gate::result::MeasureValue;
-use crate::metrics::MetricKey;
-use crate::provider::{ProviderReport, QualityProvider};
-use crate::rule::Severity;
-use crate::rules::rust::all_rust_rules;
-use crate::rules::{RuleConfig, RustAnalysisContext};
+use crate::{
+    analysis,
+    gate::result::MeasureValue,
+    metrics::MetricKey,
+    provider::{ProviderReport, QualityProvider},
+    rule::Severity,
+    rules::{RuleConfig, RustAnalysisContext, rust::all_rust_rules},
+};
 
 /// Built-in Rust quality provider
 ///
@@ -128,7 +128,10 @@ impl QualityProvider for BuiltinRustProvider {
         );
 
         let report = ProviderReport::success("builtin-rust", duration_ms)
-            .with_metric(MetricKey::BuiltinRustIssues, MeasureValue::Int(total_issues))
+            .with_metric(
+                MetricKey::BuiltinRustIssues,
+                MeasureValue::Int(total_issues),
+            )
             .with_metric(
                 MetricKey::BuiltinRustCritical,
                 MeasureValue::Int(critical_count),

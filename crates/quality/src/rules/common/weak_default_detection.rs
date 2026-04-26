@@ -6,9 +6,11 @@
 
 use regex::Regex;
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{CommonAnalysisContext, CommonRule, Rule};
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{CommonAnalysisContext, CommonRule, Rule},
+};
 
 #[derive(Debug)]
 pub struct WeakDefaultDetectionRule {
@@ -225,12 +227,7 @@ mod tests {
         let rule = WeakDefaultDetectionRule::default();
         let config = RuleConfig::default();
         let text = "GF_SECURITY_ADMIN_PASSWORD: admin\n";
-        let ctx = make_ctx(
-            "docker-compose.example.yml",
-            text,
-            text.as_bytes(),
-            &config,
-        );
+        let ctx = make_ctx("docker-compose.example.yml", text, text.as_bytes(), &config);
         let issues = rule.analyze(&ctx);
         assert!(issues.is_empty());
     }

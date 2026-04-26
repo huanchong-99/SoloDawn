@@ -16,8 +16,7 @@ use serde::Serialize;
 use ts_rs::TS;
 use utils::response::ApiResponse;
 
-use crate::DeploymentImpl;
-use crate::error::ApiError;
+use crate::{DeploymentImpl, error::ApiError};
 
 /// Summary response for a quality run, tailored for list views.
 #[derive(Debug, Clone, Serialize, TS)]
@@ -143,10 +142,9 @@ pub async fn get_terminal_latest_quality(
     State(deployment): State<DeploymentImpl>,
     Path(terminal_id): Path<String>,
 ) -> Result<Json<ApiResponse<Option<QualityRunSummary>>>, ApiError> {
-    let run =
-        db::models::QualityRun::find_latest_by_terminal(&deployment.db().pool, &terminal_id)
-            .await
-            .map_err(ApiError::Database)?;
+    let run = db::models::QualityRun::find_latest_by_terminal(&deployment.db().pool, &terminal_id)
+        .await
+        .map_err(ApiError::Database)?;
 
     Ok(Json(ApiResponse::success(run.map(QualityRunSummary::from))))
 }
@@ -165,5 +163,8 @@ pub fn quality_routes() -> Router<DeploymentImpl> {
 
 /// Quality routes nested under /terminals
 pub fn quality_terminal_routes() -> Router<DeploymentImpl> {
-    Router::new().route("/{terminal_id}/quality/latest", get(get_terminal_latest_quality))
+    Router::new().route(
+        "/{terminal_id}/quality/latest",
+        get(get_terminal_latest_quality),
+    )
 }

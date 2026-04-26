@@ -3,10 +3,13 @@
 //! Checks that control structure nesting within Rust functions does not exceed a configurable
 //! maximum depth. Deeply nested code is hard to read and maintain.
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, RustRule, RustAnalysisContext, RuleConfig};
 use syn::visit::Visit;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RuleConfig, RustAnalysisContext, RustRule},
+};
 
 /// Rule that flags functions whose control-flow nesting depth exceeds a threshold.
 pub struct NestingDepthRule;
@@ -46,7 +49,10 @@ impl Rule for NestingDepthRule {
 impl RustRule for NestingDepthRule {
     fn analyze(&self, ctx: &RustAnalysisContext) -> Vec<QualityIssue> {
         let max_depth = ctx.config.get_param_usize("max_depth", 5);
-        let severity = ctx.config.severity_override.unwrap_or_else(|| self.default_severity());
+        let severity = ctx
+            .config
+            .severity_override
+            .unwrap_or_else(|| self.default_severity());
 
         let mut visitor = NestingDepthVisitor {
             max_depth,
@@ -215,7 +221,10 @@ fn shallow() {
 }
 "#;
         let issues = analyze_code(source, 5);
-        assert!(issues.is_empty(), "shallow nesting should not trigger an issue");
+        assert!(
+            issues.is_empty(),
+            "shallow nesting should not trigger an issue"
+        );
     }
 
     #[test]
@@ -238,7 +247,10 @@ fn deep() {
 }
 "#;
         let issues = analyze_code(source, 5);
-        assert!(!issues.is_empty(), "deeply nested function should trigger an issue");
+        assert!(
+            !issues.is_empty(),
+            "deeply nested function should trigger an issue"
+        );
         assert!(
             issues[0].message.contains("deep"),
             "issue message should contain function name"

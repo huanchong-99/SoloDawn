@@ -593,17 +593,21 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     if command_text.is_empty() {
                         continue;
                     }
-                    let command_state = state.commands.entry(call_id.clone()).or_insert_with(|| CommandState {
-                        index: None,
-                        command: command_text.clone(),
-                        stdout: String::new(),
-                        stderr: String::new(),
-                        formatted_output: None,
-                        status: ToolStatus::Created,
-                        exit_code: None,
-                        awaiting_approval: false,
-                        call_id: call_id.clone(),
-                    });
+                    let command_state =
+                        state
+                            .commands
+                            .entry(call_id.clone())
+                            .or_insert_with(|| CommandState {
+                                index: None,
+                                command: command_text.clone(),
+                                stdout: String::new(),
+                                stderr: String::new(),
+                                formatted_output: None,
+                                status: ToolStatus::Created,
+                                exit_code: None,
+                                awaiting_approval: false,
+                                call_id: call_id.clone(),
+                            });
                     command_state.command = command_text;
                     command_state.awaiting_approval = false;
                     command_state.status = ToolStatus::Created;

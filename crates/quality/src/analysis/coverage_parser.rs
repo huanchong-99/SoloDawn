@@ -1,8 +1,9 @@
 //! Coverage report parser for lcov and Cobertura XML formats.
 
+use std::path::Path;
+
 use anyhow::{self, Context};
 use regex::Regex;
-use std::path::Path;
 
 /// Parsed coverage report data.
 #[derive(Debug, Clone, PartialEq)]
@@ -112,8 +113,8 @@ pub fn parse_cobertura(content: &str) -> anyhow::Result<CoverageReport> {
         .context("no <coverage> element found in Cobertura XML")?;
     let attrs = &caps[1];
 
-    let line_rate = extract_attr_f64(attrs, "line-rate")
-        .context("missing or invalid line-rate attribute")?;
+    let line_rate =
+        extract_attr_f64(attrs, "line-rate").context("missing or invalid line-rate attribute")?;
     let branch_rate = extract_attr_f64(attrs, "branch-rate")
         .context("missing or invalid branch-rate attribute")?;
 

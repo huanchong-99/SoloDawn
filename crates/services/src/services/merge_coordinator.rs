@@ -2,11 +2,7 @@
 //!
 //! Coordinates merging of task branches into the base branch with conflict detection.
 
-use std::{
-    collections::HashMap,
-    path::Path,
-    sync::Arc,
-};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use anyhow::Result;
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};

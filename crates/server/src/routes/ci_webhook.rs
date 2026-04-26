@@ -1,7 +1,11 @@
-use axum::{Router, routing::post, http::StatusCode, response::Json};
-use axum::http::HeaderMap;
+use axum::{
+    Router,
+    http::{HeaderMap, StatusCode},
+    response::Json,
+    routing::post,
+};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 /// Payload sent by the ci-notify.yml GitHub Actions workflow.
@@ -22,12 +26,12 @@ pub struct CiWebhookPayload {
 /// G35-009: When `SOLODAWN_CI_WEBHOOK_SECRET` is set, validates the
 /// `X-Webhook-Signature` header (HMAC-SHA256) before accepting payloads.
 /// When unset, accepts all payloads (development mode).
-pub async fn ci_webhook(
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> (StatusCode, Json<Value>) {
+pub async fn ci_webhook(headers: HeaderMap, body: axum::body::Bytes) -> (StatusCode, Json<Value>) {
     // G35-009: Validate HMAC signature if webhook secret is configured
-    if let Ok(secret) = utils::env_compat::var_with_compat("SOLODAWN_CI_WEBHOOK_SECRET", "GITCORTEX_CI_WEBHOOK_SECRET") {
+    if let Ok(secret) = utils::env_compat::var_with_compat(
+        "SOLODAWN_CI_WEBHOOK_SECRET",
+        "GITCORTEX_CI_WEBHOOK_SECRET",
+    ) {
         if !secret.trim().is_empty() {
             let signature = headers
                 .get("x-webhook-signature")
@@ -61,11 +65,16 @@ pub async fn ci_webhook(
     }
 
     // G35-009: Warn when accepting unauthenticated webhooks (no secret configured)
-    if utils::env_compat::var_with_compat("SOLODAWN_CI_WEBHOOK_SECRET", "GITCORTEX_CI_WEBHOOK_SECRET")
-        .map(|s| s.trim().is_empty())
-        .unwrap_or(true)
+    if utils::env_compat::var_with_compat(
+        "SOLODAWN_CI_WEBHOOK_SECRET",
+        "GITCORTEX_CI_WEBHOOK_SECRET",
+    )
+    .map(|s| s.trim().is_empty())
+    .unwrap_or(true)
     {
-        tracing::warn!("CI webhook accepting unauthenticated request — SOLODAWN_CI_WEBHOOK_SECRET is not configured");
+        tracing::warn!(
+            "CI webhook accepting unauthenticated request — SOLODAWN_CI_WEBHOOK_SECRET is not configured"
+        );
     }
 
     // Parse payload after signature validation
@@ -92,10 +101,13 @@ pub async fn ci_webhook(
         "CI webhook received"
     );
 
-    (StatusCode::ACCEPTED, Json(json!({
-        "status": "accepted",
-        "message": "CI webhook notification received"
-    })))
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "status": "accepted",
+            "message": "CI webhook notification received"
+        })),
+    )
 }
 
 /// Verify HMAC-SHA256 signature using the standard construction.
@@ -193,8 +205,7 @@ fn hex_nibble(b: u8) -> Option<u8> {
 }
 
 pub fn ci_webhook_routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
-    Router::new()
-        .route("/webhook", post(ci_webhook))
+    Router::new().route("/webhook", post(ci_webhook))
 }
 
 #[cfg(test)]
@@ -203,10 +214,12 @@ mod tests {
 
     fn bytes_to_hex(bytes: &[u8]) -> String {
         use std::fmt::Write;
-        bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        })
+        bytes
+            .iter()
+            .fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
+                let _ = write!(s, "{b:02x}");
+                s
+            })
     }
 
     #[test]
@@ -230,7 +243,11 @@ mod tests {
 
         assert!(verify_hmac_sha256(key, body, &format!("sha256={hex_sig}")));
         assert!(verify_hmac_sha256(key, body, &hex_sig));
-        assert!(!verify_hmac_sha256(key, body, "sha256=0000000000000000000000000000000000000000000000000000000000000000"));
+        assert!(!verify_hmac_sha256(
+            key,
+            body,
+            "sha256=0000000000000000000000000000000000000000000000000000000000000000"
+        ));
     }
 
     #[test]

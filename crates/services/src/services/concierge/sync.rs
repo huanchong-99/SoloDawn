@@ -15,16 +15,9 @@ use tracing;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConciergeEvent {
-    NewMessage {
-        message: ConciergeMessage,
-    },
-    ToolExecuting {
-        tool: String,
-        status: String,
-    },
-    SessionUpdated {
-        session: ConciergeSession,
-    },
+    NewMessage { message: ConciergeMessage },
+    ToolExecuting { tool: String, status: String },
+    SessionUpdated { session: ConciergeSession },
 }
 
 // ---------------------------------------------------------------------------
@@ -74,8 +67,7 @@ impl ConciergeBroadcaster {
 
     /// Register a Feishu chat as a push target for a session.
     pub fn register_feishu(&self, session_id: &str, target: FeishuTarget) {
-        self.feishu_channels
-            .insert(session_id.to_string(), target);
+        self.feishu_channels.insert(session_id.to_string(), target);
     }
 
     /// Remove a Feishu target for a session.
@@ -124,8 +116,7 @@ impl ConciergeBroadcaster {
                     // Don't echo back to Feishu if the message came from Feishu
                     let from_feishu = source_provider == Some("feishu");
                     if !from_feishu {
-                        self.push_text_to_feishu(session_id, &message.content)
-                            .await;
+                        self.push_text_to_feishu(session_id, &message.content).await;
                     }
                 }
                 ConciergeEvent::ToolExecuting { tool, status } if sync_tools => {
@@ -138,11 +129,7 @@ impl ConciergeBroadcaster {
     }
 
     /// Push a completion notification to all Feishu-synced sessions for a workflow.
-    pub async fn push_completion_notification(
-        &self,
-        session_id: &str,
-        text: &str,
-    ) {
+    pub async fn push_completion_notification(&self, session_id: &str, text: &str) {
         self.push_text_to_feishu(session_id, text).await;
     }
 
@@ -154,9 +141,7 @@ impl ConciergeBroadcaster {
             let sender = target.sender.clone();
             tokio::spawn(async move {
                 if let Err(e) = sender.send_text(&chat_id, &text).await {
-                    tracing::warn!(
-                        "Failed to push concierge message to Feishu: {e}"
-                    );
+                    tracing::warn!("Failed to push concierge message to Feishu: {e}");
                 }
             });
         }

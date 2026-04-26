@@ -381,8 +381,7 @@ impl Codex {
         let resume_session = resume_session.map(ToString::to_string);
         let auto_approve = matches!(
             (&self.sandbox, &self.ask_for_approval),
-            (Some(SandboxMode::DangerFullAccess), None)
-                | (_, Some(AskForApproval::Never))
+            (Some(SandboxMode::DangerFullAccess), None) | (_, Some(AskForApproval::Never))
         );
         let approvals = self.approvals.clone();
         tokio::spawn(async move {

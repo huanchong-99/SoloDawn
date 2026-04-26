@@ -69,15 +69,11 @@ async fn list_models(
     let client = http_client()?;
 
     let models = match query.api_type.as_str() {
-        "openai" | "openai-compatible" => {
-            list_openai_models(&client, &base_url, &api_key).await?
-        }
+        "openai" | "openai-compatible" => list_openai_models(&client, &base_url, &api_key).await?,
         "anthropic" | "anthropic-compatible" => {
             list_anthropic_models(&client, &base_url, &api_key).await?
         }
-        "google" => {
-            list_google_models(&client, &base_url, &api_key).await?
-        }
+        "google" => list_google_models(&client, &base_url, &api_key).await?,
         other => {
             return Err(ApiError::BadRequest(format!(
                 "Unsupported apiType: {other}"
@@ -249,7 +245,11 @@ async fn verify_openai_model(
         return Ok(false);
     }
 
-    if !verify_response_body_ok(&response.text().await.unwrap_or_default(), &["choices", "content"], "OpenAI") {
+    if !verify_response_body_ok(
+        &response.text().await.unwrap_or_default(),
+        &["choices", "content"],
+        "OpenAI",
+    ) {
         return Ok(false);
     }
 
@@ -325,7 +325,11 @@ async fn verify_anthropic_model(
         return Ok(false);
     }
 
-    if !verify_response_body_ok(&response.text().await.unwrap_or_default(), &["content", "id"], "Anthropic") {
+    if !verify_response_body_ok(
+        &response.text().await.unwrap_or_default(),
+        &["content", "id"],
+        "Anthropic",
+    ) {
         return Ok(false);
     }
 
@@ -399,7 +403,9 @@ fn verify_response_body_ok(body: &str, expected_keys: &[&str], label: &str) -> b
                 return false;
             }
             if !expected_keys.is_empty() && expected_keys.iter().all(|k| json.get(*k).is_none()) {
-                tracing::warn!("{label} verification returned 200 but body has no {expected_keys:?}: {body}");
+                tracing::warn!(
+                    "{label} verification returned 200 but body has no {expected_keys:?}: {body}"
+                );
                 return false;
             }
             true

@@ -44,8 +44,8 @@ fn elapsed_since_millis(start_millis: u64) -> Duration {
     Duration::from_millis(now.saturating_sub(start_millis))
 }
 
-use crate::{DeploymentImpl, error::ApiError};
 use super::ws_origin::validate_ws_origin;
+use crate::{DeploymentImpl, error::ApiError};
 
 // BACKLOG-002: Runner container separation
 // ============================================================================
@@ -64,9 +64,8 @@ pub(crate) struct TerminalIO {
     /// PTY writer handle, wrapped for shared access across reconnections.
     /// When RunnerClient is integrated, this will be replaced with a gRPC
     /// stream sender for forwarding input to the remote runner.
-    pub writer: Option<
-        std::sync::Arc<std::sync::Mutex<services::services::terminal::process::PtyWriter>>,
-    >,
+    pub writer:
+        Option<std::sync::Arc<std::sync::Mutex<services::services::terminal::process::PtyWriter>>>,
     // RUNNER_CLIENT_MIGRATION: Future fields for gRPC-based I/O:
     //   pub input_stream: Option<tonic::Streaming<TerminalInputChunk>>,
     //   pub output_stream: Option<tonic::Streaming<TerminalOutputChunk>>,
@@ -247,15 +246,18 @@ async fn handle_terminal_socket(
     // Get process handle from ProcessManager
     let process_handle = deployment.process_manager().get_handle(&terminal_id).await;
 
-    let process_handle = if let Some(handle) = process_handle { handle } else {
+    let process_handle = if let Some(handle) = process_handle {
+        handle
+    } else {
         let msg = WsMessage::Error {
-            message: "Terminal process not running. Please start the terminal first."
-                .to_string(),
+            message: "Terminal process not running. Please start the terminal first.".to_string(),
         };
         let _ = ws_sender
             .send(Message::Text(
                 serde_json::to_string(&msg)
-                    .unwrap_or_else(|_| r#"{"type":"error","message":"serialization failed"}"#.to_string())
+                    .unwrap_or_else(|_| {
+                        r#"{"type":"error","message":"serialization failed"}"#.to_string()
+                    })
                     .into(),
             ))
             .await;
@@ -295,7 +297,10 @@ async fn handle_terminal_socket(
     // On reconnect, the client passes `last_seq` as a query parameter so only
     // chunks with seq > last_seq are replayed. When last_seq is None, the full
     // retained replay window is provided (first connect or forced full replay).
-    let mut output_subscription = match process_manager.subscribe_output(&terminal_id, resume_from_seq).await {
+    let mut output_subscription = match process_manager
+        .subscribe_output(&terminal_id, resume_from_seq)
+        .await
+    {
         Ok(sub) => sub,
         Err(e) => {
             tracing::error!(
@@ -568,9 +573,7 @@ async fn handle_terminal_socket(
                                 match ws_msg {
                                     WsMessage::Input { data } => {
                                         // Send to PTY writer
-                                        if let Err(e) =
-                                            ws_tx_input.send(data.into_bytes()).await
-                                        {
+                                        if let Err(e) = ws_tx_input.send(data.into_bytes()).await {
                                             tracing::error!("Failed to send to PTY: {}", e);
                                             break;
                                         }
@@ -620,10 +623,7 @@ async fn handle_terminal_socket(
                             tracing::trace!("Received pong: {} bytes", data.len());
                         }
                         Message::Binary(data) => {
-                            tracing::warn!(
-                                "Received unexpected binary data: {} bytes",
-                                data.len()
-                            );
+                            tracing::warn!("Received unexpected binary data: {} bytes", data.len());
                         }
                     },
                     Err(e) => {
@@ -699,7 +699,8 @@ async fn handle_terminal_socket(
     if terminated_by_idle_timeout {
         let graceful_shutdown_timeout = Duration::from_secs(2);
 
-        if let Err(_elapsed) = tokio::time::timeout(graceful_shutdown_timeout, &mut output_task).await
+        if let Err(_elapsed) =
+            tokio::time::timeout(graceful_shutdown_timeout, &mut output_task).await
         {
             tracing::debug!(
                 terminal_id = %terminal_id,

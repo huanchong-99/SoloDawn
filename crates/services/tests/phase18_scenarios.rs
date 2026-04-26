@@ -346,7 +346,10 @@ async fn test_message_bus_terminal_completion_event() {
         metadata: None,
     };
 
-    message_bus.publish_terminal_completed(event.clone()).await.unwrap();
+    message_bus
+        .publish_terminal_completed(event.clone())
+        .await
+        .unwrap();
 
     // Receive the event
     let received: BusMessage =
@@ -526,7 +529,9 @@ async fn test_terminal_recovery_marks_waiting_as_failed() {
 
     // Simulate terminal left in "waiting" status (e.g., after crash)
     // CAS requires not_started -> starting -> waiting transition
-    Terminal::set_starting(&db.pool, &terminal_id).await.unwrap();
+    Terminal::set_starting(&db.pool, &terminal_id)
+        .await
+        .unwrap();
     Terminal::set_started(&db.pool, &terminal_id).await.unwrap();
 
     // Verify terminal is in waiting state

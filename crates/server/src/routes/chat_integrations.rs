@@ -30,8 +30,7 @@ use crate::{
     DeploymentImpl,
     error::ApiError,
     routes::workflows::{
-        OrchestratorChatRequestMetadata, SubmitOrchestratorChatRequest,
-        submit_orchestrator_chat,
+        OrchestratorChatRequestMetadata, SubmitOrchestratorChatRequest, submit_orchestrator_chat,
     },
 };
 
@@ -93,13 +92,19 @@ fn ensure_supported_provider(provider: &str) -> Result<(), ApiError> {
 }
 
 fn is_chat_connector_feature_enabled() -> bool {
-    utils::env_compat::var_opt_with_compat("SOLODAWN_CHAT_CONNECTOR_ENABLED", "GITCORTEX_CHAT_CONNECTOR_ENABLED")
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
+    utils::env_compat::var_opt_with_compat(
+        "SOLODAWN_CHAT_CONNECTOR_ENABLED",
+        "GITCORTEX_CHAT_CONNECTOR_ENABLED",
+    )
+    .is_some_and(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
 }
 
 fn read_chat_webhook_secret() -> Result<String, ApiError> {
-    utils::env_compat::var_with_compat("SOLODAWN_CHAT_WEBHOOK_SECRET", "GITCORTEX_CHAT_WEBHOOK_SECRET")
-        .map_err(|_| ApiError::Conflict("SOLODAWN_CHAT_WEBHOOK_SECRET is not configured".to_string()))
+    utils::env_compat::var_with_compat(
+        "SOLODAWN_CHAT_WEBHOOK_SECRET",
+        "GITCORTEX_CHAT_WEBHOOK_SECRET",
+    )
+    .map_err(|_| ApiError::Conflict("SOLODAWN_CHAT_WEBHOOK_SECRET is not configured".to_string()))
 }
 
 fn compute_chat_signature(secret: &str, provider: &str, payload: &ChatEventRequest) -> String {
@@ -172,20 +177,28 @@ async fn ensure_not_replayed(provider: &str, provider_message_id: &str) -> Resul
     Ok(())
 }
 
-fn build_external_template(status: &str, retryable: bool, error: Option<&str>) -> (&'static str, String) {
+fn build_external_template(
+    status: &str,
+    retryable: bool,
+    error: Option<&str>,
+) -> (&'static str, String) {
     match status {
-        "succeeded" => (
-            "success",
-            "任务已接收并执行完成".to_string(),
-        ),
+        "succeeded" => ("success", "任务已接收并执行完成".to_string()),
         "failed" => (
-            if retryable { "need_confirmation" } else { "unexecutable" },
+            if retryable {
+                "need_confirmation"
+            } else {
+                "unexecutable"
+            },
             match error {
                 Some(err) => format!("执行失败：{err}"),
                 None => "执行失败，请稍后重试".to_string(),
             },
         ),
-        "cancelled" => ("need_confirmation", "执行已取消，请确认是否重试".to_string()),
+        "cancelled" => (
+            "need_confirmation",
+            "执行已取消，请确认是否重试".to_string(),
+        ),
         _ => ("unexecutable", "当前状态不可执行，请稍后重试".to_string()),
     }
 }
@@ -248,13 +261,10 @@ async fn unbind_conversation(
 
     ensure_supported_provider(&provider)?;
 
-    let affected = ExternalConversationBinding::deactivate(
-        &deployment.db().pool,
-        &provider,
-        &conversation_id,
-    )
-    .await
-    .map_err(|e| ApiError::Internal(format!("Failed to unbind conversation: {e}")))?;
+    let affected =
+        ExternalConversationBinding::deactivate(&deployment.db().pool, &provider, &conversation_id)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to unbind conversation: {e}")))?;
 
     if affected == 0 {
         return Err(ApiError::NotFound(
@@ -369,7 +379,10 @@ async fn handle_chat_event(
     };
 
     let mut headers = HeaderMap::new();
-    headers.insert("x-orchestrator-role", "operator".parse().expect("valid header value"));
+    headers.insert(
+        "x-orchestrator-role",
+        "operator".parse().expect("valid header value"),
+    );
     headers.insert(
         "x-orchestrator-operator-id",
         payload
@@ -392,7 +405,10 @@ async fn handle_chat_event(
     let ResponseJson(api_response) = Box::pin(submit_orchestrator_chat(
         State(deployment),
         headers,
-        Path(Uuid::parse_str(&binding.workflow_id).map_err(|e| ApiError::BadRequest(format!("Invalid workflow ID: {e}")))?),
+        Path(
+            Uuid::parse_str(&binding.workflow_id)
+                .map_err(|e| ApiError::BadRequest(format!("Invalid workflow ID: {e}")))?,
+        ),
         Json(submit_payload),
     ))
     .await?;
@@ -474,8 +490,12 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn bind_and_unbind_conversation_succeeds_for_agent_planned_workflow() {
-        unsafe { std::env::set_var("SOLODAWN_CHAT_CONNECTOR_ENABLED", "true"); }
-        let deployment = DeploymentImpl::new().await.expect("deployment should start");
+        unsafe {
+            std::env::set_var("SOLODAWN_CHAT_CONNECTOR_ENABLED", "true");
+        }
+        let deployment = DeploymentImpl::new()
+            .await
+            .expect("deployment should start");
         let app = router().with_state(deployment.clone());
 
         let project_id = Uuid::new_v4();
@@ -530,12 +550,7 @@ mod tests {
 
         Workflow::create(
             &deployment.db().pool,
-            &build_agent_planned_workflow(
-                workflow_id.clone(),
-                project_id,
-                &cli_id,
-                &model_id,
-            ),
+            &build_agent_planned_workflow(workflow_id.clone(), project_id, &cli_id, &model_id),
         )
         .await
         .expect("workflow should be inserted");
@@ -560,13 +575,10 @@ mod tests {
             .expect("bind request should execute");
         assert_eq!(bind_response.status(), StatusCode::OK);
 
-        let binding = ExternalConversationBinding::find_active(
-            &deployment.db().pool,
-            "telegram",
-            "conv-1",
-        )
-        .await
-        .expect("binding lookup should succeed");
+        let binding =
+            ExternalConversationBinding::find_active(&deployment.db().pool, "telegram", "conv-1")
+                .await
+                .expect("binding lookup should succeed");
         assert!(binding.is_some());
 
         let unbind_request = Request::builder()
@@ -589,7 +601,9 @@ mod tests {
             std::env::set_var("SOLODAWN_CHAT_WEBHOOK_SECRET", "secret-1");
         }
 
-        let deployment = DeploymentImpl::new().await.expect("deployment should start");
+        let deployment = DeploymentImpl::new()
+            .await
+            .expect("deployment should start");
         let app = router().with_state(deployment);
 
         let payload = serde_json::json!({
@@ -608,10 +622,7 @@ mod tests {
             .header("content-type", "application/json")
             .body(Body::from(payload))
             .expect("request should build");
-        let response = app
-            .oneshot(request)
-            .await
-            .expect("request should execute");
+        let response = app.oneshot(request).await.expect("request should execute");
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
         let body = to_bytes(response.into_body(), usize::MAX)

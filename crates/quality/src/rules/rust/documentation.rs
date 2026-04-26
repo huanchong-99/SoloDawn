@@ -2,10 +2,13 @@
 //!
 //! Checks for missing documentation on public items in Rust code.
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, RustRule, RustAnalysisContext, RuleConfig};
 use syn::visit::Visit;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RuleConfig, RustAnalysisContext, RustRule},
+};
 
 /// Rule that flags public items lacking documentation comments.
 pub struct DocumentationRule;
@@ -44,7 +47,10 @@ impl Rule for DocumentationRule {
 
 impl RustRule for DocumentationRule {
     fn analyze(&self, ctx: &RustAnalysisContext) -> Vec<QualityIssue> {
-        let severity = ctx.config.severity_override.unwrap_or_else(|| self.default_severity());
+        let severity = ctx
+            .config
+            .severity_override
+            .unwrap_or_else(|| self.default_severity());
 
         let mut visitor = DocumentationVisitor {
             severity,
@@ -98,7 +104,14 @@ fn is_pub(vis: &syn::Visibility) -> bool {
 }
 
 impl DocumentationVisitor {
-    fn check_item(&mut self, attrs: &[syn::Attribute], vis: &syn::Visibility, name: &str, line: usize, kind: &str) {
+    fn check_item(
+        &mut self,
+        attrs: &[syn::Attribute],
+        vis: &syn::Visibility,
+        name: &str,
+        line: usize,
+        kind: &str,
+    ) {
         if !is_pub(vis) {
             return;
         }
@@ -199,7 +212,11 @@ pub trait DocumentedTrait {}
 pub type DocumentedType = i32;
 "#;
         let issues = analyze_code(source);
-        assert!(issues.is_empty(), "documented public items should not trigger issues, got: {:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(
+            issues.is_empty(),
+            "documented public items should not trigger issues, got: {:?}",
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -216,7 +233,13 @@ pub trait UndocumentedTrait {}
 pub type UndocumentedType = i32;
 "#;
         let issues = analyze_code(source);
-        assert_eq!(issues.len(), 5, "expected 5 issues for 5 undocumented public items, got {}: {:?}", issues.len(), issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert_eq!(
+            issues.len(),
+            5,
+            "expected 5 issues for 5 undocumented public items, got {}: {:?}",
+            issues.len(),
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -240,7 +263,10 @@ pub fn _hidden_fn() {}
 pub struct _HiddenStruct;
 "#;
         let issues = analyze_code(source);
-        assert!(issues.is_empty(), "underscore-prefixed items should be skipped");
+        assert!(
+            issues.is_empty(),
+            "underscore-prefixed items should be skipped"
+        );
     }
 
     #[test]
@@ -250,6 +276,9 @@ pub struct _HiddenStruct;
 pub fn suppressed_fn() {}
 "#;
         let issues = analyze_code(source);
-        assert!(issues.is_empty(), "#[allow(missing_docs)] should suppress the issue");
+        assert!(
+            issues.is_empty(),
+            "#[allow(missing_docs)] should suppress the issue"
+        );
     }
 }

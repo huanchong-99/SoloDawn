@@ -24,9 +24,8 @@ use super::{
 };
 
 /// Callback type for LLM-powered prompt input generation.
-pub type LLMPromptCallback = Arc<
-    dyn Fn(String) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync,
->;
+pub type LLMPromptCallback =
+    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync>;
 
 // ============================================================================
 // Constants
@@ -55,15 +54,7 @@ const DESTRUCTIVE_WARNING_MARKERS: [&str; 7] = [
     "destroy",
 ];
 const DANGEROUS_CONFIRMATION_OPTIONS: [&str; 9] = [
-    "yes",
-    "no",
-    "cancel",
-    "abort",
-    "continue",
-    "proceed",
-    "confirm",
-    "delete",
-    "keep",
+    "yes", "no", "cancel", "abort", "continue", "proceed", "confirm", "delete", "keep",
 ];
 const DANGEROUS_CONFIRMATION_QUESTION_MARKERS: [&str; 14] = [
     "delete",
@@ -86,7 +77,11 @@ fn advisory_checklist_item_count(raw_text: &str) -> usize {
     raw_text
         .lines()
         .map(str::trim_start)
-        .filter(|line| ADVISORY_CHECKLIST_PREFIXES.iter().any(|prefix| line.starts_with(prefix)))
+        .filter(|line| {
+            ADVISORY_CHECKLIST_PREFIXES
+                .iter()
+                .any(|prefix| line.starts_with(prefix))
+        })
         .count()
 }
 
@@ -516,11 +511,8 @@ impl PromptHandler {
                          Respond with ONLY the input text.",
                         raw = prompt.raw_text,
                     );
-                    match tokio::time::timeout(
-                        Duration::from_secs(30),
-                        (callback)(llm_prompt),
-                    )
-                    .await
+                    match tokio::time::timeout(Duration::from_secs(30), (callback)(llm_prompt))
+                        .await
                     {
                         Ok(Some(response)) => {
                             tracing::info!(
@@ -534,10 +526,14 @@ impl PromptHandler {
                             };
                         }
                         Ok(None) => {
-                            tracing::warn!("LLM input callback returned None, falling back to AskUser");
+                            tracing::warn!(
+                                "LLM input callback returned None, falling back to AskUser"
+                            );
                         }
                         Err(_) => {
-                            tracing::warn!("LLM input callback timed out (30s), falling back to AskUser");
+                            tracing::warn!(
+                                "LLM input callback timed out (30s), falling back to AskUser"
+                            );
                         }
                     }
                 }
@@ -986,9 +982,9 @@ mod tests {
             PromptDecision::AskUser { reason, .. } => {
                 assert!(reason.contains("Dangerous"));
             }
-            _ => panic!(
-                "Expected AskUser decision for mixed checklist with dangerous enter-confirm"
-            ),
+            _ => {
+                panic!("Expected AskUser decision for mixed checklist with dangerous enter-confirm")
+            }
         }
     }
 

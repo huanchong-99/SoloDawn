@@ -14,9 +14,7 @@
 //! contract from primary brain rejection v1 (Fix #2 must not break out-of-tree
 //! builds).
 
-use std::env;
-use std::fs;
-use std::path::PathBuf;
+use std::{env, fs, path::PathBuf};
 
 const OUTPUT_FILE: &str = "quality-gate.yaml";
 

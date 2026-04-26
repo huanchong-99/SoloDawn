@@ -5,11 +5,14 @@
 //! - Hooks called inside loops
 //! - Hooks called after early returns
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, TsRule, TsAnalysisContext};
-use super::count_structural_braces;
 use regex::Regex;
+
+use super::count_structural_braces;
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, TsAnalysisContext, TsRule},
+};
 
 /// Built-in rule that checks React hooks usage rules in TypeScript/JSX files.
 #[derive(Debug, Default)]
@@ -53,8 +56,7 @@ impl TsRule for ReactHooksRule {
         let hook_re = Regex::new(r"use[A-Z]\w*\(").expect("invalid hook regex");
         let conditional_kw_re =
             Regex::new(r"\b(if|else\s+if|else)\b").expect("invalid conditional keyword regex");
-        let loop_kw_re =
-            Regex::new(r"\b(for|while)\s*\(").expect("invalid loop keyword regex");
+        let loop_kw_re = Regex::new(r"\b(for|while)\s*\(").expect("invalid loop keyword regex");
         let return_re = Regex::new(r"\breturn\b").expect("invalid return regex");
 
         let mut issues = Vec::new();
@@ -82,11 +84,14 @@ impl TsRule for ReactHooksRule {
             }
 
             // Detect function/component boundaries to scope early return tracking
-            if (trimmed.contains("function ") || trimmed.contains("=> {") || trimmed.contains("=>{"))
-                && function_scope_depth.is_none() {
-                    function_scope_depth = Some(brace_depth);
-                    had_early_return = false;
-                }
+            if (trimmed.contains("function ")
+                || trimmed.contains("=> {")
+                || trimmed.contains("=>{"))
+                && function_scope_depth.is_none()
+            {
+                function_scope_depth = Some(brace_depth);
+                had_early_return = false;
+            }
 
             // Detect conditional keywords
             if conditional_kw_re.is_match(trimmed) && !trimmed.starts_with("//") {
@@ -276,7 +281,10 @@ function MyComponent() {
 }
 "#;
         let issues = analyze_tsx(source);
-        assert!(issues.is_empty(), "Top-level hooks should produce no issues");
+        assert!(
+            issues.is_empty(),
+            "Top-level hooks should produce no issues"
+        );
     }
 
     #[test]

@@ -3,10 +3,9 @@ use axum::{
     http::{HeaderValue, Method},
     routing::{IntoMakeService, get},
 };
-use tower_http::cors::{AllowOrigin, Any, CorsLayer};
-pub use subscription_hub::SharedSubscriptionHub;
-
 use services::services::cli_health_monitor::SharedCliHealthMonitor;
+pub use subscription_hub::SharedSubscriptionHub;
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use crate::{DeploymentImpl, feishu_handle::SharedFeishuHandle, middleware::require_api_token};
 
@@ -15,8 +14,9 @@ use crate::{DeploymentImpl, feishu_handle::SharedFeishuHandle, middleware::requi
 /// - If `SOLODAWN_CORS_ORIGINS` is set: only allow those origins (comma-separated).
 /// - If unset or empty: allow all origins (development mode).
 fn build_cors_layer() -> CorsLayer {
-    let origins_env = utils::env_compat::var_with_compat("SOLODAWN_CORS_ORIGINS", "GITCORTEX_CORS_ORIGINS")
-        .unwrap_or_default();
+    let origins_env =
+        utils::env_compat::var_with_compat("SOLODAWN_CORS_ORIGINS", "GITCORTEX_CORS_ORIGINS")
+            .unwrap_or_default();
     let trimmed = origins_env.trim();
 
     if trimmed.is_empty() {
@@ -65,18 +65,18 @@ fn build_cors_layer() -> CorsLayer {
 pub mod approvals;
 pub mod chat_integrations;
 pub mod ci_webhook;
-pub mod concierge;
-pub mod concierge_ws;
 pub mod cli_status_sse;
 pub mod cli_types;
+pub mod concierge;
+pub mod concierge_ws;
 pub mod config;
 pub mod containers;
 pub mod filesystem;
 // pub mod github;
 pub mod event_bridge;
 pub mod events;
-pub mod feishu;
 pub mod execution_processes;
+pub mod feishu;
 pub mod frontend;
 pub mod git;
 pub mod health;
@@ -104,8 +104,8 @@ pub mod terminals;
 pub mod workflow_events;
 pub mod workflow_ws;
 pub mod workflows;
-pub mod ws_origin;
 pub mod workflows_dto;
+pub mod ws_origin;
 
 pub fn router(
     deployment: DeploymentImpl,
@@ -115,7 +115,15 @@ pub fn router(
     concierge_agent: std::sync::Arc<services::services::concierge::ConciergeAgent>,
     concierge_broadcaster: std::sync::Arc<services::services::concierge::ConciergeBroadcaster>,
 ) -> IntoMakeService<Router> {
-    build_router(deployment, hub, feishu_handle, cli_health_monitor, concierge_agent, concierge_broadcaster).into_make_service()
+    build_router(
+        deployment,
+        hub,
+        feishu_handle,
+        cli_health_monitor,
+        concierge_agent,
+        concierge_broadcaster,
+    )
+    .into_make_service()
 }
 
 pub fn build_router(

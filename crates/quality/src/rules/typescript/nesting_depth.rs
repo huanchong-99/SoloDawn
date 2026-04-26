@@ -5,10 +5,12 @@
 
 use regex::Regex;
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, TsRule, TsAnalysisContext, RuleConfig};
 use super::count_structural_braces;
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RuleConfig, TsAnalysisContext, TsRule},
+};
 
 /// Reports lines where control-flow nesting depth exceeds a configurable maximum.
 #[derive(Debug)]
@@ -21,8 +23,9 @@ impl Default for NestingDepthRule {
     fn default() -> Self {
         Self {
             nesting_pattern: Regex::new(
-                r"\b(?:if\s*\(|else\s*\{|for\s*\(|while\s*\(|switch\s*\(|try\s*\{|catch\s*\()"
-            ).expect("invalid nesting pattern regex"),
+                r"\b(?:if\s*\(|else\s*\{|for\s*\(|while\s*\(|switch\s*\(|try\s*\{|catch\s*\()",
+            )
+            .expect("invalid nesting pattern regex"),
         }
     }
 }

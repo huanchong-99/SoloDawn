@@ -12,10 +12,9 @@ pub struct SystemSetting {
 impl SystemSetting {
     /// Fetch all system settings, ordered by key.
     pub async fn find_all(pool: &SqlitePool) -> anyhow::Result<Vec<Self>> {
-        let rows =
-            sqlx::query_as::<_, Self>("SELECT * FROM system_settings ORDER BY key")
-                .fetch_all(pool)
-                .await?;
+        let rows = sqlx::query_as::<_, Self>("SELECT * FROM system_settings ORDER BY key")
+            .fetch_all(pool)
+            .await?;
         Ok(rows)
     }
 
@@ -32,8 +31,7 @@ impl SystemSetting {
     /// Get a boolean setting. Returns `true` if the stored value is `"true"` or `"1"`.
     pub async fn get_bool(pool: &SqlitePool, key: &str) -> anyhow::Result<bool> {
         let value = Self::get(pool, key).await?;
-        Ok(value
-            .is_some_and(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"))
+        Ok(value.is_some_and(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"))
     }
 
     /// Upsert a setting value. Creates the row if it doesn't exist, otherwise updates it.

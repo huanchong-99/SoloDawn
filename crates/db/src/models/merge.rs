@@ -343,14 +343,12 @@ impl TryFrom<MergeRow> for DirectMerge {
             id: row.id,
             workspace_id: row.workspace_id,
             repo_id: row.repo_id,
-            merge_commit: row.merge_commit.ok_or_else(|| {
-                sqlx::Error::ColumnDecode {
-                    index: "merge_commit".to_string(),
-                    source: Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "direct merge must have merge_commit",
-                    )),
-                }
+            merge_commit: row.merge_commit.ok_or_else(|| sqlx::Error::ColumnDecode {
+                index: "merge_commit".to_string(),
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "direct merge must have merge_commit",
+                )),
             })?,
             target_branch_name: row.target_branch_name,
             created_at: row.created_at,

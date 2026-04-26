@@ -2,10 +2,12 @@
 
 use regex::Regex;
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, TsRule, TsAnalysisContext, RuleConfig};
 use super::count_structural_braces;
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RuleConfig, TsAnalysisContext, TsRule},
+};
 
 /// Checks that individual functions do not exceed a maximum number of lines.
 ///
@@ -20,8 +22,7 @@ impl Default for FunctionLengthRule {
     fn default() -> Self {
         Self {
             fn_decl_re: Regex::new(r"function\s+(\w+)").unwrap(),
-            arrow_fn_re: Regex::new(r"(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>")
-                .unwrap(),
+            arrow_fn_re: Regex::new(r"(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>").unwrap(),
             method_re: Regex::new(r"(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{").unwrap(),
         }
     }
@@ -50,7 +51,9 @@ impl Rule for FunctionLengthRule {
 
     fn default_config(&self) -> RuleConfig {
         let mut config = RuleConfig::default();
-        config.params.insert("max_lines".to_string(), "50".to_string());
+        config
+            .params
+            .insert("max_lines".to_string(), "50".to_string());
         config
     }
 }
@@ -74,14 +77,21 @@ impl TsRule for FunctionLengthRule {
             let trimmed = line.trim();
 
             // Skip comments and imports
-            if trimmed.starts_with("//") || trimmed.starts_with('*') || trimmed.starts_with("/*") || trimmed.starts_with("import ") {
+            if trimmed.starts_with("//")
+                || trimmed.starts_with('*')
+                || trimmed.starts_with("/*")
+                || trimmed.starts_with("import ")
+            {
                 continue;
             }
 
             // Check for function declarations: `function foo(`
             if let Some(caps) = self.fn_decl_re.captures(line) {
                 let name = caps.get(1).map_or("anonymous", |m| m.as_str()).to_string();
-                functions.push(FunctionInfo { name, start_line: i });
+                functions.push(FunctionInfo {
+                    name,
+                    start_line: i,
+                });
                 continue;
             }
 
@@ -94,7 +104,10 @@ impl TsRule for FunctionLengthRule {
                     || trimmed.starts_with("var ")
                     || trimmed.starts_with("export ")
                 {
-                    functions.push(FunctionInfo { name, start_line: i });
+                    functions.push(FunctionInfo {
+                        name,
+                        start_line: i,
+                    });
                     continue;
                 }
             }
@@ -107,7 +120,10 @@ impl TsRule for FunctionLengthRule {
                     name.as_str(),
                     "if" | "else" | "for" | "while" | "switch" | "catch" | "return" | "function"
                 ) {
-                    functions.push(FunctionInfo { name, start_line: i });
+                    functions.push(FunctionInfo {
+                        name,
+                        start_line: i,
+                    });
                 }
             }
         }
@@ -181,7 +197,9 @@ mod tests {
 }"#;
         let lines: Vec<&str> = src.lines().collect();
         let mut config = RuleConfig::default();
-        config.params.insert("max_lines".to_string(), "10".to_string());
+        config
+            .params
+            .insert("max_lines".to_string(), "10".to_string());
         let rule = FunctionLengthRule::default();
         let ctx = make_ctx(src, &lines, &config);
         let issues = rule.analyze(&ctx);
@@ -201,7 +219,9 @@ mod tests {
         let lines: Vec<&str> = src.lines().collect();
 
         let mut config = RuleConfig::default();
-        config.params.insert("max_lines".to_string(), "10".to_string());
+        config
+            .params
+            .insert("max_lines".to_string(), "10".to_string());
 
         let rule = FunctionLengthRule::default();
         let ctx = make_ctx(&src, &lines, &config);
@@ -225,7 +245,9 @@ mod tests {
         let lines: Vec<&str> = src.lines().collect();
 
         let mut config = RuleConfig::default();
-        config.params.insert("max_lines".to_string(), "10".to_string());
+        config
+            .params
+            .insert("max_lines".to_string(), "10".to_string());
 
         let rule = FunctionLengthRule::default();
         let ctx = make_ctx(&src, &lines, &config);

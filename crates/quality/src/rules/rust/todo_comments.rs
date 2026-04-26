@@ -2,9 +2,11 @@
 
 use regex::Regex;
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{Rule, RustAnalysisContext, RustRule};
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{Rule, RustAnalysisContext, RustRule},
+};
 
 /// Detects TODO, FIXME, HACK, and XXX comments in Rust source files.
 ///
@@ -132,7 +134,10 @@ fn main() {
 }
 "#;
         let issues = analyze_content(content);
-        assert!(issues.is_empty(), "Expected no issues for code without TODO markers");
+        assert!(
+            issues.is_empty(),
+            "Expected no issues for code without TODO markers"
+        );
     }
 
     #[test]

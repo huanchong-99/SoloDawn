@@ -16,8 +16,8 @@ pub mod workspace_repo;
 
 // SoloDawn Workflow models
 pub mod cli_install_history;
-pub mod concierge;
 pub mod cli_type;
+pub mod concierge;
 pub mod feishu_config;
 pub mod git_event;
 pub mod orchestrator_message;

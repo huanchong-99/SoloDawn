@@ -13,7 +13,10 @@ async fn test_stop_terminal_returns_not_found_for_unknown_terminal() {
         .await
         .expect("Failed to create deployment");
     let app = Router::new()
-        .nest("/api/terminals", server::routes::terminals::terminal_routes())
+        .nest(
+            "/api/terminals",
+            server::routes::terminals::terminal_routes(),
+        )
         .with_state(deployment);
 
     let terminal_id = Uuid::new_v4().to_string();
@@ -33,7 +36,10 @@ async fn test_stop_terminal_rejects_get_method() {
         .await
         .expect("Failed to create deployment");
     let app = Router::new()
-        .nest("/api/terminals", server::routes::terminals::terminal_routes())
+        .nest(
+            "/api/terminals",
+            server::routes::terminals::terminal_routes(),
+        )
         .with_state(deployment);
 
     let terminal_id = Uuid::new_v4().to_string();
@@ -43,6 +49,9 @@ async fn test_stop_terminal_rejects_get_method() {
         .body(Body::empty())
         .expect("Failed to build request");
 
-    let response = app.oneshot(request).await.expect("Failed to query endpoint");
+    let response = app
+        .oneshot(request)
+        .await
+        .expect("Failed to query endpoint");
     assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
 }

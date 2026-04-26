@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use db::models::{repo::Repo, workspace::Workspace as DbWorkspace, workspace_repo::RepoWithTargetBranch};
+use db::models::{
+    repo::Repo, workspace::Workspace as DbWorkspace, workspace_repo::RepoWithTargetBranch,
+};
 use sqlx::{Pool, Sqlite};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
@@ -188,9 +190,7 @@ impl WorkspaceManager {
         }
 
         // Old layout placed worktree directly at workspace_dir; new layout nests under {repo_name}.
-        if repos.len() == 1
-            && Self::migrate_legacy_worktree(workspace_dir, &repos[0].repo).await?
-        {
+        if repos.len() == 1 && Self::migrate_legacy_worktree(workspace_dir, &repos[0].repo).await? {
             return Ok(());
         }
 

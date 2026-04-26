@@ -4,10 +4,12 @@
 
 use regex::Regex;
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, TsRule, TsAnalysisContext, RuleConfig};
 use super::count_structural_braces;
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RuleConfig, TsAnalysisContext, TsRule},
+};
 
 /// Calculates cyclomatic complexity for TypeScript/JavaScript functions
 /// and reports functions that exceed a configurable threshold.
@@ -20,12 +22,12 @@ pub struct ComplexityRule {
 impl Default for ComplexityRule {
     fn default() -> Self {
         Self {
-            fn_pattern: Regex::new(
-                r"(?:function\s+\w+|=>\s*\{|(\w+)\s*\(.*\)\s*\{)"
-            ).expect("invalid function pattern regex"),
+            fn_pattern: Regex::new(r"(?:function\s+\w+|=>\s*\{|(\w+)\s*\(.*\)\s*\{)")
+                .expect("invalid function pattern regex"),
             decision_pattern: Regex::new(
-                r"\b(?:if|else\s+if|for|while|do|case|catch)\b|\&\&|\|\||\?\?"
-            ).expect("invalid decision pattern regex"),
+                r"\b(?:if|else\s+if|for|while|do|case|catch)\b|\&\&|\|\||\?\?",
+            )
+            .expect("invalid decision pattern regex"),
         }
     }
 }
@@ -120,7 +122,10 @@ fn extract_function_name(matched: &str, line: &str) -> String {
         let re = Regex::new(r"(?:const|let|var)\s+(\w+)").ok();
         if let Some(re) = re {
             if let Some(caps) = re.captures(trimmed) {
-                return caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_else(|| "<arrow>".into());
+                return caps
+                    .get(1)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_else(|| "<arrow>".into());
             }
         }
         return "<arrow>".into();
@@ -130,7 +135,10 @@ fn extract_function_name(matched: &str, line: &str) -> String {
     let re = Regex::new(r"(\w+)\s*\(").ok();
     if let Some(re) = re {
         if let Some(caps) = re.captures(matched) {
-            return caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_else(|| "<anonymous>".into());
+            return caps
+                .get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_else(|| "<anonymous>".into());
         }
     }
 

@@ -3,15 +3,17 @@
 //! Parses coverage reports from well-known locations (tarpaulin, llvm-cov, lcov)
 //! without requiring any external service.
 
+use std::{path::Path, time::Instant};
+
 use async_trait::async_trait;
-use std::path::Path;
-use std::time::Instant;
 use tracing::{debug, info, warn};
 
-use crate::analysis::coverage_parser;
-use crate::gate::result::MeasureValue;
-use crate::metrics::MetricKey;
-use crate::provider::{ProviderReport, QualityProvider};
+use crate::{
+    analysis::coverage_parser,
+    gate::result::MeasureValue,
+    metrics::MetricKey,
+    provider::{ProviderReport, QualityProvider},
+};
 
 /// Well-known coverage report locations relative to the project root.
 const COVERAGE_REPORT_PATHS: &[&str] = &[
@@ -87,7 +89,11 @@ impl QualityProvider for CoverageProvider {
                     reports_found += 1;
                 }
                 Err(e) => {
-                    warn!("Failed to parse coverage report {}: {}", report_path.display(), e);
+                    warn!(
+                        "Failed to parse coverage report {}: {}",
+                        report_path.display(),
+                        e
+                    );
                 }
             }
         }
@@ -118,7 +124,10 @@ impl QualityProvider for CoverageProvider {
 
         let report = ProviderReport::success("coverage", duration_ms)
             .with_metric(MetricKey::LineCoverage, MeasureValue::Float(line_coverage))
-            .with_metric(MetricKey::BranchCoverage, MeasureValue::Float(branch_coverage));
+            .with_metric(
+                MetricKey::BranchCoverage,
+                MeasureValue::Float(branch_coverage),
+            );
 
         Ok(report)
     }

@@ -2,10 +2,13 @@
 //!
 //! Checks that Rust functions and methods do not exceed a configurable maximum line count.
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, RustRule, RustAnalysisContext, RuleConfig};
 use syn::visit::Visit;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RuleConfig, RustAnalysisContext, RustRule},
+};
 
 /// Rule that flags functions/methods exceeding a maximum line count.
 pub struct FunctionLengthRule;
@@ -45,7 +48,10 @@ impl Rule for FunctionLengthRule {
 impl RustRule for FunctionLengthRule {
     fn analyze(&self, ctx: &RustAnalysisContext) -> Vec<QualityIssue> {
         let max_lines = ctx.config.get_param_usize("max_lines", 60);
-        let severity = ctx.config.severity_override.unwrap_or_else(|| self.default_severity());
+        let severity = ctx
+            .config
+            .severity_override
+            .unwrap_or_else(|| self.default_severity());
 
         let mut visitor = FunctionLengthVisitor {
             max_lines,
@@ -145,7 +151,10 @@ fn short() {
 }
 "#;
         let issues = analyze_code(source, 60);
-        assert!(issues.is_empty(), "short function should not trigger an issue");
+        assert!(
+            issues.is_empty(),
+            "short function should not trigger an issue"
+        );
     }
 
     #[test]

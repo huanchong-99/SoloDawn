@@ -61,6 +61,30 @@ impl TerminalCoordinator {
     /// * `Err(anyhow::Error)` if status update or event publish fails
     #[instrument(skip(self), fields(workflow_id))]
     pub async fn start_terminals_for_workflow(&self, workflow_id: &str) -> Result<()> {
+        self.start_terminals_for_workflow_inner(workflow_id, None)
+            .await
+    }
+
+    /// Prepare as many terminals as the global process cap allows.
+    ///
+    /// Terminals that cannot acquire a launch slot remain `not_started`; the
+    /// orchestrator dispatch queue will start them when another terminal
+    /// releases capacity.
+    #[instrument(skip(self), fields(workflow_id, max_concurrent_terminals))]
+    pub async fn start_terminals_for_workflow_with_limit(
+        &self,
+        workflow_id: &str,
+        max_concurrent_terminals: usize,
+    ) -> Result<()> {
+        self.start_terminals_for_workflow_inner(workflow_id, Some(max_concurrent_terminals))
+            .await
+    }
+
+    async fn start_terminals_for_workflow_inner(
+        &self,
+        workflow_id: &str,
+        max_concurrent_terminals: Option<usize>,
+    ) -> Result<()> {
         info!("Starting terminal preparation sequence for workflow");
 
         // Step 1: Load all tasks for the workflow
@@ -88,6 +112,7 @@ impl TerminalCoordinator {
         // Step 3: Transition terminals to "starting" status
         // Note: Model switching is now done at spawn time via environment variables
         let mut prepared_terminals = Vec::new();
+        let mut queued_terminals = Vec::new();
         let topic = format!("{WORKFLOW_TOPIC_PREFIX}{workflow_id}");
         for terminal in &all_terminals {
             info!(
@@ -97,17 +122,41 @@ impl TerminalCoordinator {
                 "Preparing terminal (config will be applied at spawn time)"
             );
 
-            if let Err(e) = Terminal::set_starting(&self.db.pool, &terminal.id).await {
-                error!(
-                    terminal_id = %terminal.id,
-                    error = %e,
-                    "Failed to mark terminal as starting"
-                );
-                return Err(anyhow::anyhow!(
-                    "Failed to mark terminal as starting {}: {}",
-                    terminal.id,
-                    e
-                ));
+            let acquired = if let Some(max_concurrent_terminals) = max_concurrent_terminals {
+                Terminal::try_set_starting_with_global_limit(
+                    &self.db.pool,
+                    &terminal.id,
+                    max_concurrent_terminals,
+                )
+                .await
+            } else {
+                Terminal::set_starting(&self.db.pool, &terminal.id).await
+            };
+
+            match acquired {
+                Ok(true) => {}
+                Ok(false) => {
+                    queued_terminals.push(terminal.id.clone());
+                    info!(
+                        terminal_id = %terminal.id,
+                        workflow_id = %workflow_id,
+                        max_concurrent_terminals = ?max_concurrent_terminals,
+                        "Terminal preparation queued because no launch slot is available"
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    error!(
+                        terminal_id = %terminal.id,
+                        error = %e,
+                        "Failed to mark terminal as starting"
+                    );
+                    return Err(anyhow::anyhow!(
+                        "Failed to mark terminal as starting {}: {}",
+                        terminal.id,
+                        e
+                    ));
+                }
             }
 
             if let Some(message_bus) = &self.message_bus {
@@ -153,7 +202,8 @@ impl TerminalCoordinator {
         info!(
             workflow_id = %workflow_id,
             count = prepared_terminals.len(),
-            "All terminals successfully prepared"
+            queued = queued_terminals.len(),
+            "Terminal preparation completed"
         );
 
         Ok(())

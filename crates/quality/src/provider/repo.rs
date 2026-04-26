@@ -2,15 +2,17 @@
 //!
 //! Runs explicitly declared repository-level checks discovered from the root manifest.
 
+use std::{path::Path, time::Instant};
+
 use async_trait::async_trait;
-use std::path::Path;
-use std::time::Instant;
 use tracing::{debug, warn};
 
-use crate::discovery::{NodeQualityCommand, PackageManager, RepositoryDiscovery};
-use crate::gate::result::MeasureValue;
-use crate::metrics::MetricKey;
-use crate::provider::{run_node_quality_command, ProviderReport, QualityProvider};
+use crate::{
+    discovery::{NodeQualityCommand, PackageManager, RepositoryDiscovery},
+    gate::result::MeasureValue,
+    metrics::MetricKey,
+    provider::{ProviderReport, QualityProvider, run_node_quality_command},
+};
 
 /// 仓库级分析器 Provider
 pub struct RepoProvider {
@@ -67,7 +69,9 @@ impl QualityProvider for RepoProvider {
         if self.enable_types_check {
             if let Some(command) = discovery.repo_checks().generate_types.as_ref() {
                 debug!(command = %command.describe(), "Running repo generate-types check");
-                match run_repo_command(project_root, discovery.repo_package_manager(), command).await {
+                match run_repo_command(project_root, discovery.repo_package_manager(), command)
+                    .await
+                {
                     Ok(out) => {
                         let failures = if out.status.success() { 0 } else { 1 };
                         report.metrics.insert(
@@ -77,10 +81,9 @@ impl QualityProvider for RepoProvider {
                     }
                     Err(error) => {
                         warn!("generate-types check failed to execute: {}", error);
-                        report.metrics.insert(
-                            MetricKey::GenerateTypesCheckFailures,
-                            MeasureValue::Int(-1),
-                        );
+                        report
+                            .metrics
+                            .insert(MetricKey::GenerateTypesCheckFailures, MeasureValue::Int(-1));
                     }
                 }
             }
@@ -89,7 +92,9 @@ impl QualityProvider for RepoProvider {
         if self.enable_db_check {
             if let Some(command) = discovery.repo_checks().prepare_db.as_ref() {
                 debug!(command = %command.describe(), "Running repo prepare-db check");
-                match run_repo_command(project_root, discovery.repo_package_manager(), command).await {
+                match run_repo_command(project_root, discovery.repo_package_manager(), command)
+                    .await
+                {
                     Ok(out) => {
                         let failures = if out.status.success() { 0 } else { 1 };
                         report.metrics.insert(
@@ -99,10 +104,9 @@ impl QualityProvider for RepoProvider {
                     }
                     Err(error) => {
                         warn!("prepare-db check failed to execute: {}", error);
-                        report.metrics.insert(
-                            MetricKey::PrepareDbCheckFailures,
-                            MeasureValue::Int(-1),
-                        );
+                        report
+                            .metrics
+                            .insert(MetricKey::PrepareDbCheckFailures, MeasureValue::Int(-1));
                     }
                 }
             }
@@ -127,7 +131,8 @@ mod tests {
     use crate::discovery::resolve_node_command;
 
     fn temp_project_root() -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("repo-provider-discovery-{}", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("repo-provider-discovery-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).unwrap();
         path
     }

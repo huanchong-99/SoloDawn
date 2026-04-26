@@ -826,11 +826,12 @@ mod orchestrator_tests {
     async fn test_execute_instruction_supports_runtime_planning_array() {
         use std::{path::PathBuf, sync::Arc};
 
-        use crate::services::terminal::{PromptWatcher, process::ProcessManager};
         use chrono::Utc;
         use db::{DBService, models::Workflow};
         use sqlx::sqlite::SqlitePoolOptions;
         use uuid::Uuid;
+
+        use crate::services::terminal::{PromptWatcher, process::ProcessManager};
 
         let pool = SqlitePoolOptions::new().connect(":memory:").await.unwrap();
 
@@ -893,7 +894,7 @@ mod orchestrator_tests {
             OrchestratorConfig {
                 api_key: "test-key".to_string(),
                 quality_gate_mode: "off".to_string(),
-            ..Default::default()
+                ..Default::default()
             },
             workflow.id.clone(),
             message_bus.clone(),
@@ -1499,8 +1500,15 @@ mod orchestrator_tests {
         let msg = timeout.unwrap().unwrap();
         match msg {
             BusMessage::TerminalMessage { message } => {
-                assert!(message.starts_with("echo start"), "Instruction should start with original text, got: {}", &message[..message.len().min(50)]);
-                assert!(message.contains("MANDATORY"), "Quality suffix should be appended");
+                assert!(
+                    message.starts_with("echo start"),
+                    "Instruction should start with original text, got: {}",
+                    &message[..message.len().min(50)]
+                );
+                assert!(
+                    message.contains("MANDATORY"),
+                    "Quality suffix should be appended"
+                );
             }
             other => panic!("Expected TerminalMessage, got {other:?}"),
         }
@@ -1664,8 +1672,14 @@ mod orchestrator_tests {
 
         match new_msg {
             BusMessage::TerminalMessage { message } => {
-                assert!(message.starts_with("echo latest-pty"), "Instruction should start with original text");
-                assert!(message.contains("MANDATORY"), "Quality suffix should be appended");
+                assert!(
+                    message.starts_with("echo latest-pty"),
+                    "Instruction should start with original text"
+                );
+                assert!(
+                    message.contains("MANDATORY"),
+                    "Quality suffix should be appended"
+                );
             }
             other => panic!("Expected TerminalMessage, got {other:?}"),
         }
@@ -1902,8 +1916,14 @@ mod orchestrator_tests {
 
         match first_dispatch {
             BusMessage::TerminalMessage { message } => {
-                assert!(message.starts_with("echo start"), "Instruction should start with original text");
-                assert!(message.contains("MANDATORY"), "Quality suffix should be appended");
+                assert!(
+                    message.starts_with("echo start"),
+                    "Instruction should start with original text"
+                );
+                assert!(
+                    message.contains("MANDATORY"),
+                    "Quality suffix should be appended"
+                );
             }
             other => panic!("Expected TerminalMessage for first dispatch, got {other:?}"),
         }
@@ -2005,8 +2025,14 @@ mod orchestrator_tests {
             } => {
                 assert_eq!(tid, terminal_id);
                 assert_eq!(session_id, pty_session_id);
-                assert!(input.starts_with("echo start"), "Instruction should start with original text");
-                assert!(input.contains("MANDATORY"), "Quality suffix should be appended");
+                assert!(
+                    input.starts_with("echo start"),
+                    "Instruction should start with original text"
+                );
+                assert!(
+                    input.contains("MANDATORY"),
+                    "Quality suffix should be appended"
+                );
             }
             other => panic!("Expected TerminalInput for codex instruction, got {other:?}"),
         }
@@ -2080,7 +2106,10 @@ mod orchestrator_tests {
         // execute_instruction logs errors internally but returns Ok (batch continuation).
         // Verify the failure through side effects instead.
         let result = agent.execute_instruction(&instruction_json).await;
-        assert!(result.is_ok(), "execute_instruction should return Ok (errors are handled internally)");
+        assert!(
+            result.is_ok(),
+            "execute_instruction should return Ok (errors are handled internally)"
+        );
 
         let terminal = Terminal::find_by_id(&db.pool, &terminal_id)
             .await
@@ -2935,7 +2964,10 @@ next_action: handoff";
         // A 500 error should be propagated immediately.
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("500"), "Error should contain status code: {err_msg}");
+        assert!(
+            err_msg.contains("500"),
+            "Error should contain status code: {err_msg}"
+        );
     }
 
     // =========================================================================

@@ -3,17 +3,19 @@
 //! 集成本地运行的 SonarQube 服务和 sonar-scanner
 //! 支持 SARIF 2.1.0 外部问题导入
 
+use std::{path::Path, time::Instant};
+
 use async_trait::async_trait;
-use std::path::Path;
-use std::time::Instant;
 use tracing::{debug, info, warn};
 
-use crate::gate::result::MeasureValue;
-use crate::issue::QualityIssue;
-use crate::metrics::MetricKey;
-use crate::provider::{ProviderReport, QualityProvider};
-use crate::rule::AnalyzerSource;
-use crate::sarif;
+use crate::{
+    gate::result::MeasureValue,
+    issue::QualityIssue,
+    metrics::MetricKey,
+    provider::{ProviderReport, QualityProvider},
+    rule::AnalyzerSource,
+    sarif,
+};
 
 /// SonarQube 本地分析 Provider
 ///
@@ -239,7 +241,11 @@ impl QualityProvider for SonarProvider {
         }
 
         // 执行 sonar-scanner
-        let scanner_cmd = if cfg!(windows) { "sonar-scanner.bat" } else { "sonar-scanner" };
+        let scanner_cmd = if cfg!(windows) {
+            "sonar-scanner.bat"
+        } else {
+            "sonar-scanner"
+        };
         let string_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
         let output = tokio::process::Command::new(scanner_cmd)
@@ -275,7 +281,10 @@ impl QualityProvider for SonarProvider {
         };
 
         // 查询质量门状态
-        let gate_status = self.wait_for_quality_gate("").await.unwrap_or("UNKNOWN".to_string());
+        let gate_status = self
+            .wait_for_quality_gate("")
+            .await
+            .unwrap_or("UNKNOWN".to_string());
         report.metrics.insert(
             MetricKey::SonarQualityGateStatus,
             MeasureValue::String(gate_status),

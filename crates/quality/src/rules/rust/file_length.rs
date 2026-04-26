@@ -1,8 +1,10 @@
 //! File length rule — flags Rust source files that exceed a configurable maximum line count.
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{Rule, RustAnalysisContext, RustRule};
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{Rule, RustAnalysisContext, RustRule},
+};
 
 /// Checks that Rust source files do not exceed a maximum number of lines.
 #[derive(Debug)]

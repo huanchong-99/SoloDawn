@@ -40,7 +40,8 @@ mod tests {
             .list_directory(None)
             .expect("workspace root should be browsable");
 
-        let canonical_workspace = dunce::canonicalize(workspace.path()).expect("canonical workspace");
+        let canonical_workspace =
+            dunce::canonicalize(workspace.path()).expect("canonical workspace");
         assert_eq!(
             result.current_path,
             canonical_workspace.to_string_lossy().to_string()
@@ -127,7 +128,9 @@ impl FilesystemService {
 
     fn get_env_allowed_roots() -> Vec<PathBuf> {
         let mut roots = Vec::new();
-        if let Ok(raw) = utils::env_compat::var_with_compat("SOLODAWN_ALLOWED_ROOTS", "GITCORTEX_ALLOWED_ROOTS") {
+        if let Ok(raw) =
+            utils::env_compat::var_with_compat("SOLODAWN_ALLOWED_ROOTS", "GITCORTEX_ALLOWED_ROOTS")
+        {
             for item in raw.split([',', ';']) {
                 let trimmed = item.trim();
                 if trimmed.is_empty() {
@@ -467,7 +470,10 @@ impl FilesystemService {
     fn default_browse_root(&self) -> PathBuf {
         let mut preferred_paths: Vec<PathBuf> = Vec::new();
 
-        if let Ok(workspace_root) = utils::env_compat::var_with_compat("SOLODAWN_WORKSPACE_ROOT", "GITCORTEX_WORKSPACE_ROOT") {
+        if let Ok(workspace_root) = utils::env_compat::var_with_compat(
+            "SOLODAWN_WORKSPACE_ROOT",
+            "GITCORTEX_WORKSPACE_ROOT",
+        ) {
             let trimmed = workspace_root.trim();
             if !trimmed.is_empty() {
                 preferred_paths.push(PathBuf::from(trimmed));

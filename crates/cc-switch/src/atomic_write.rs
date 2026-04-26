@@ -47,7 +47,7 @@ async fn create_unique_temp_file(path: &Path) -> Result<(PathBuf, tokio::fs::Fil
             .await
         {
             Ok(file) => return Ok((temp_path, file)),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {},
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => {
                 return Err(CCSwitchError::AtomicWriteError(format!(
                     "Failed to create temp file for {}: {}",

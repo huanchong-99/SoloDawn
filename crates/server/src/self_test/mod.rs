@@ -57,10 +57,7 @@ pub async fn run(json: bool, filter: Option<String>, orchestration: bool) -> i32
         }
     };
 
-    eprintln!(
-        "Server running on {} — executing tests...",
-        server.base_url
-    );
+    eprintln!("Server running on {} — executing tests...", server.base_url);
 
     let start = Instant::now();
 

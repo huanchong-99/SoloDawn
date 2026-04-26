@@ -209,10 +209,7 @@ mod tests {
             .build_follow_up(&additional)
             .expect("should build follow-up");
         assert_eq!(command.program, "claude");
-        assert_eq!(
-            command.args,
-            vec!["--print", "--resume", "session-123"]
-        );
+        assert_eq!(command.args, vec!["--print", "--resume", "session-123"]);
     }
 
     #[test]

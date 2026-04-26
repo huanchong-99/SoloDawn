@@ -1,17 +1,14 @@
-use std::sync::Arc;
-use std::time::UNIX_EPOCH;
+use std::{sync::Arc, time::UNIX_EPOCH};
 
+use services::terminal::process::{ProcessManager, SpawnCommand, SpawnEnv};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
-use services::terminal::process::{ProcessManager, SpawnCommand, SpawnEnv};
-
-use crate::proto::runner_service_server::RunnerService;
 use crate::proto::{
     HealthRequest, HealthResponse, IsRunningRequest, IsRunningResponse, KillTerminalRequest,
     KillTerminalResponse, ResizeRequest, ResizeResponse, SpawnTerminalRequest,
     SpawnTerminalResponse, StreamOutputRequest, TerminalOutputChunk, WriteInputRequest,
-    WriteInputResponse,
+    WriteInputResponse, runner_service_server::RunnerService,
 };
 
 /// gRPC service implementation for the Runner, backed by ProcessManager.

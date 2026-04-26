@@ -1,6 +1,7 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use reqwest::Client;
-use std::sync::Arc;
 
 use crate::auth::FeishuAuth;
 
@@ -91,10 +92,7 @@ impl FeishuMessenger {
     /// List chats the bot belongs to, returning the first chat_id found.
     pub async fn first_bot_chat_id(&self) -> Result<Option<String>> {
         let token = self.auth.get_tenant_token().await?;
-        let url = format!(
-            "{}/open-apis/im/v1/chats?page_size=1",
-            self.base_url
-        );
+        let url = format!("{}/open-apis/im/v1/chats?page_size=1", self.base_url);
         let resp = self
             .http_client
             .get(&url)

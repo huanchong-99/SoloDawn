@@ -1,15 +1,21 @@
 //! Resilient LLM client with multi-provider failover and circuit breaking.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use super::llm::LLMClient;
-use super::types::{LLMMessage, LLMResponse};
+use super::{
+    llm::LLMClient,
+    types::{LLMMessage, LLMResponse},
+};
 
 /// Number of consecutive failures before a provider is marked dead.
 const CIRCUIT_BREAKER_THRESHOLD: u32 = 5;
@@ -27,7 +33,6 @@ struct ProviderState {
     total_requests: u64,
     total_failures: u64,
 }
-
 
 /// A single provider entry: client + mutable health state.
 struct ProviderEntry {
@@ -57,13 +62,9 @@ pub enum ProviderEvent {
         to_provider: String,
     },
     /// All providers have been exhausted (all dead or failed).
-    Exhausted {
-        provider_count: usize,
-    },
+    Exhausted { provider_count: usize },
     /// A previously dead provider recovered via successful probe.
-    Recovered {
-        provider_name: String,
-    },
+    Recovered { provider_name: String },
 }
 
 /// An LLM client that wraps multiple providers with automatic circuit-breaking
@@ -88,7 +89,10 @@ impl ResilientLLMClient {
     /// The first entry is treated as the primary provider; subsequent entries
     /// are fallbacks tried in order.  Panics if `providers` is empty.
     pub fn new(providers: Vec<(String, Box<dyn LLMClient>)>) -> Self {
-        assert!(!providers.is_empty(), "ResilientLLMClient requires at least one provider");
+        assert!(
+            !providers.is_empty(),
+            "ResilientLLMClient requires at least one provider"
+        );
 
         let entries = providers
             .into_iter()
@@ -163,12 +167,9 @@ impl ResilientLLMClient {
     fn switch_to_next(&self, current: usize) {
         let next = (current + 1) % self.providers.len();
         // Best-effort CAS; if another thread already switched, that's fine.
-        let _ = self.active_index.compare_exchange(
-            current,
-            next,
-            Ordering::AcqRel,
-            Ordering::Relaxed,
-        );
+        let _ =
+            self.active_index
+                .compare_exchange(current, next, Ordering::AcqRel, Ordering::Relaxed);
         tracing::warn!(
             "ResilientLLMClient: switching from provider {} ({}) to {} ({})",
             current,
@@ -353,8 +354,7 @@ impl LLMClient for ResilientLLMClient {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::super::llm::MockLLMClient;
+    use super::{super::llm::MockLLMClient, *};
 
     fn msg() -> Vec<LLMMessage> {
         vec![LLMMessage {
@@ -365,9 +365,8 @@ mod tests {
 
     #[tokio::test]
     async fn single_provider_success() {
-        let client = ResilientLLMClient::new(vec![
-            ("primary".into(), Box::new(MockLLMClient::new())),
-        ]);
+        let client =
+            ResilientLLMClient::new(vec![("primary".into(), Box::new(MockLLMClient::new()))]);
         let result = client.chat(msg()).await;
         assert!(result.is_ok());
         assert_eq!(client.active_provider_name(), "primary");
@@ -391,7 +390,12 @@ mod tests {
         ]);
         let result = client.chat(msg()).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("All LLM providers exhausted"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("All LLM providers exhausted")
+        );
     }
 
     #[tokio::test]
@@ -410,14 +414,15 @@ mod tests {
         }
 
         let status = client.provider_status().await;
-        assert!(status[0].is_dead, "primary should be dead after threshold failures");
+        assert!(
+            status[0].is_dead,
+            "primary should be dead after threshold failures"
+        );
     }
 
     #[tokio::test]
     async fn provider_status_reports_correct_counts() {
-        let client = ResilientLLMClient::new(vec![
-            ("only".into(), Box::new(MockLLMClient::new())),
-        ]);
+        let client = ResilientLLMClient::new(vec![("only".into(), Box::new(MockLLMClient::new()))]);
 
         client.chat(msg()).await.unwrap();
         client.chat(msg()).await.unwrap();

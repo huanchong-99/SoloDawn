@@ -58,7 +58,8 @@ pub async fn get_provider_status(
     if let Some(reports) = runtime.get_provider_status(&workflow_id).await {
         let active_provider = reports
             .iter()
-            .find(|r| r.is_active).map_or_else(|| "none".to_string(), |r| r.name.clone());
+            .find(|r| r.is_active)
+            .map_or_else(|| "none".to_string(), |r| r.name.clone());
 
         let providers: Vec<ProviderStatus> = reports
             .into_iter()
@@ -132,10 +133,7 @@ pub async fn reset_provider(
 /// Build the provider health sub-router.
 pub fn provider_health_routes() -> Router<DeploymentImpl> {
     Router::new()
-        .route(
-            "/{workflow_id}/providers/status",
-            get(get_provider_status),
-        )
+        .route("/{workflow_id}/providers/status", get(get_provider_status))
         .route(
             "/{workflow_id}/providers/{provider_name}/reset",
             post(reset_provider),

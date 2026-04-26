@@ -15,7 +15,7 @@ use deployment::Deployment;
 use serde::Deserialize;
 use services::services::{
     cc_switch::CCSwitchService,
-    orchestrator::BusMessage,
+    orchestrator::{BusMessage, constants::configured_max_concurrent_terminals},
     terminal::{
         bridge::TerminalBridge,
         process::{DEFAULT_COLS, DEFAULT_ROWS},
@@ -312,22 +312,19 @@ pub async fn start_terminal(
 
     tracing::info!(terminal_id = %id, working_dir = %working_dir.display(), "Resolved terminal working directory");
 
-    // G16-015: CAS transition to "starting" - only one caller can move from a startable status
-    let cas_result = sqlx::query(
-        r"
-        UPDATE terminal
-        SET status = 'starting', updated_at = datetime('now')
-        WHERE id = ? AND status IN ('not_started', 'failed', 'cancelled', 'waiting', 'working')
-        ",
+    // G16-015 + global cap: CAS transition to "starting" only if a process
+    // launch slot is available.
+    let launch_slot_acquired = Terminal::try_set_starting_with_global_limit(
+        &deployment.db().pool,
+        &id,
+        configured_max_concurrent_terminals(),
     )
-    .bind(&id)
-    .execute(&deployment.db().pool)
     .await
     .map_err(|e| ApiError::Internal(format!("Failed to update terminal status: {e}")))?;
 
-    if cas_result.rows_affected() == 0 {
+    if !launch_slot_acquired {
         return Err(ApiError::Conflict(format!(
-            "Terminal {id} cannot be started: status changed concurrently"
+            "Terminal {id} cannot be started: status changed concurrently or global launch limit is reached"
         )));
     }
     if let Err(e) = broadcast_terminal_status(&deployment, &terminal, "starting").await {
@@ -567,8 +564,8 @@ async fn get_terminal_working_dir(
             .await?
             .flatten();
 
-    let workflow_id = workflow_id
-        .ok_or_else(|| anyhow::anyhow!("Workflow task {workflow_task_id} not found"))?;
+    let workflow_id =
+        workflow_id.ok_or_else(|| anyhow::anyhow!("Workflow task {workflow_task_id} not found"))?;
 
     // Get project_id from workflow
     let project_id: Option<Vec<u8>> =

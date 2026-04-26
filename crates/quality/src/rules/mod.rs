@@ -9,8 +9,10 @@ pub mod typescript;
 
 use std::collections::HashMap;
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+};
 
 /// Core trait for all built-in quality rules
 pub trait Rule: Send + Sync {

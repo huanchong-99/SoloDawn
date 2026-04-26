@@ -8,7 +8,7 @@ use ts_rs::TS;
 use workspace_utils::shell::get_shell_command;
 
 use crate::{
-    actions::{validate_working_dir, Executable},
+    actions::{Executable, validate_working_dir},
     approvals::ExecutorApprovalService,
     env::ExecutionEnv,
     executors::{ExecutorError, SpawnedChild},

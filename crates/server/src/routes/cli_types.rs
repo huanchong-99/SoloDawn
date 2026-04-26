@@ -1,7 +1,9 @@
 //! CLI Type API Routes
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex},
+};
 
 use axum::{
     Router,
@@ -11,17 +13,18 @@ use axum::{
     },
     http::StatusCode,
     response::{IntoResponse, Json as ResponseJson},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use chrono::{DateTime, Utc};
 use db::models::{CliDetectionStatus, CliType, CliType as CliTypeModel, ModelConfig};
-use axum::routing::put;
 use deployment::Deployment;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use services::services::cli_installer::{CliInstaller, InstallOutputLine as ServiceInstallOutputLine};
-use services::services::terminal::detector::CliDetector;
+use services::services::{
+    cli_installer::{CliInstaller, InstallOutputLine as ServiceInstallOutputLine},
+    terminal::detector::CliDetector,
+};
 use tokio::sync::broadcast;
 
 use crate::{DeploymentImpl, error::ApiError};
@@ -40,8 +43,8 @@ use crate::{DeploymentImpl, error::ApiError};
 pub struct CliInstallHistory {
     pub id: String,
     pub cli_type_id: String,
-    pub action: String,       // "install" | "uninstall"
-    pub status: String,       // "running" | "completed" | "failed"
+    pub action: String, // "install" | "uninstall"
+    pub status: String, // "running" | "completed" | "failed"
     pub exit_code: Option<i32>,
     pub output: Option<String>,
     pub error: Option<String>,
@@ -230,9 +233,10 @@ async fn update_model_credentials(
         .set_api_key(&payload.api_key)
         .map_err(|e| ApiError::Internal(format!("Failed to encrypt API key: {e}")))?;
 
-    let encrypted = temp_model.encrypted_api_key.as_deref().ok_or_else(|| {
-        ApiError::Internal("Encryption produced no output".to_string())
-    })?;
+    let encrypted = temp_model
+        .encrypted_api_key
+        .as_deref()
+        .ok_or_else(|| ApiError::Internal("Encryption produced no output".to_string()))?;
 
     ModelConfig::update_credentials(
         &deployment.db().pool,

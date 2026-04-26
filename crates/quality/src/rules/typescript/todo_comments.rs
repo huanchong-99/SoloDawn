@@ -1,10 +1,13 @@
 //! TODO/FIXME comment detection rule — flags TODO, FIXME, HACK, and XXX comments
 //! in TypeScript/JavaScript source files.
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{Rule, TsAnalysisContext, TsRule};
 use regex::Regex;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{Rule, TsAnalysisContext, TsRule},
+};
 
 /// Detects TODO, FIXME, HACK, and XXX comments in TypeScript/JavaScript files.
 ///
@@ -53,8 +56,7 @@ impl TsRule for TodoCommentsRule {
             .severity_override
             .unwrap_or_else(|| self.default_severity());
 
-        let pattern =
-            Regex::new(r"(?i)(//|/\*)\s*(TODO|FIXME|HACK|XXX)\b").expect("valid regex");
+        let pattern = Regex::new(r"(?i)(//|/\*)\s*(TODO|FIXME|HACK|XXX)\b").expect("valid regex");
 
         let mut issues = Vec::new();
 
@@ -75,10 +77,7 @@ impl TsRule for TodoCommentsRule {
                 // Extract the rest of the comment text after the match for context.
                 let comment_text = line[mat.start()..].trim();
 
-                let message = format!(
-                    "Found comment marker: {}",
-                    comment_text,
-                );
+                let message = format!("Found comment marker: {}", comment_text,);
 
                 let issue = QualityIssue::new(
                     self.id(),
@@ -176,8 +175,13 @@ const tpl = `// HACK: template string`;
 // TODO: real comment
 "#;
         let issues = run_rule(source);
-        assert_eq!(issues.len(), 1, "expected 1 issue (real comment only), got {}: {:?}",
-            issues.len(), issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert_eq!(
+            issues.len(),
+            1,
+            "expected 1 issue (real comment only), got {}: {:?}",
+            issues.len(),
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
         assert_eq!(issues[0].line, Some(4));
     }
 

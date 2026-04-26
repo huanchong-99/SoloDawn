@@ -3,10 +3,13 @@
 //! Calculates cyclomatic complexity for each function/method using the `syn` crate's
 //! Visitor pattern. Complexity = 1 + number of decision points.
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, RustAnalysisContext, RustRule};
 use syn::visit::Visit;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RustAnalysisContext, RustRule},
+};
 
 /// Built-in rule that checks cyclomatic complexity of Rust functions and methods.
 #[derive(Debug, Default)]

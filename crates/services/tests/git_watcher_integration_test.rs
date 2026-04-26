@@ -221,8 +221,7 @@ mod git_watcher_tests {
         // Subscribe to messages before creating watcher (which consumes message_bus)
         let mut receiver = message_bus.subscribe_broadcast();
 
-        let watcher =
-            GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
+        let watcher = GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
         // Start watching in background
         let watcher_handle = tokio::spawn(async move {
@@ -270,8 +269,7 @@ mod git_watcher_tests {
         // Subscribe to messages before creating watcher
         let mut receiver = message_bus.subscribe_broadcast();
 
-        let watcher =
-            GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
+        let watcher = GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
         // Start watching in background
         let watcher_handle = tokio::spawn(async move {
@@ -310,8 +308,7 @@ mod git_watcher_tests {
         // Subscribe to messages before creating watcher
         let mut receiver = message_bus.subscribe_broadcast();
 
-        let watcher =
-            GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
+        let watcher = GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
         // Start watching in background
         let watcher_handle = tokio::spawn(async move {
@@ -366,8 +363,7 @@ mod git_watcher_tests {
         };
 
         let mut receiver = message_bus.subscribe_broadcast();
-        let watcher =
-            GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
+        let watcher = GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
         let watcher_handle = tokio::spawn(async move {
             watcher.watch().await.unwrap();
@@ -422,8 +418,7 @@ mod git_watcher_tests {
             poll_interval_ms: 50,
         };
 
-        let watcher =
-            GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
+        let watcher = GitWatcher::new(config, message_bus).expect("Failed to create GitWatcher");
 
         // Start watching
         let handle =

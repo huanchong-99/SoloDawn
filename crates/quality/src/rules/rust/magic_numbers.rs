@@ -3,10 +3,13 @@
 //! Flags integer and float literals that are not common exempt values (0, 1, 2, -1, 0.0, 1.0)
 //! and are not inside `const`/`static` declarations or array indexing expressions.
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, RustRule, RustAnalysisContext};
 use syn::visit::Visit;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RustAnalysisContext, RustRule},
+};
 
 /// Rule that detects magic numbers (numeric literals) in Rust code
 /// that should be extracted into named constants.

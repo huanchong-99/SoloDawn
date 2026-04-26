@@ -1,8 +1,10 @@
 //! Trailing whitespace rule — detects lines with trailing spaces or tabs in text files.
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{CommonAnalysisContext, CommonRule, Rule};
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{CommonAnalysisContext, CommonRule, Rule},
+};
 
 /// Detects trailing whitespace (spaces or tabs at end of lines) in text files.
 #[derive(Debug)]
@@ -49,9 +51,7 @@ impl CommonRule for TrailingWhitespaceRule {
 
         let count = text
             .lines()
-            .filter(|line| {
-                line.ends_with(' ') || line.ends_with('\t')
-            })
+            .filter(|line| line.ends_with(' ') || line.ends_with('\t'))
             .count();
 
         if count == 0 {

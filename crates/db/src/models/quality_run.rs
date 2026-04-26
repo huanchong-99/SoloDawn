@@ -155,11 +155,7 @@ impl QualityRun {
     }
 
     /// Mark the run as failed with an error message
-    pub async fn set_failed(
-        pool: &SqlitePool,
-        id: &str,
-        error_message: &str,
-    ) -> sqlx::Result<()> {
+    pub async fn set_failed(pool: &SqlitePool, id: &str, error_message: &str) -> sqlx::Result<()> {
         sqlx::query(
             r"UPDATE quality_run
             SET gate_status = 'error', error_message = ?1, completed_at = ?2
@@ -174,10 +170,7 @@ impl QualityRun {
     }
 
     /// Find quality runs by workflow ID
-    pub async fn find_by_workflow(
-        pool: &SqlitePool,
-        workflow_id: &str,
-    ) -> sqlx::Result<Vec<Self>> {
+    pub async fn find_by_workflow(pool: &SqlitePool, workflow_id: &str) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, QualityRun>(
             r"SELECT * FROM quality_run WHERE workflow_id = ? ORDER BY created_at DESC",
         )
@@ -187,10 +180,7 @@ impl QualityRun {
     }
 
     /// Find quality runs by terminal ID
-    pub async fn find_by_terminal(
-        pool: &SqlitePool,
-        terminal_id: &str,
-    ) -> sqlx::Result<Vec<Self>> {
+    pub async fn find_by_terminal(pool: &SqlitePool, terminal_id: &str) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, QualityRun>(
             r"SELECT * FROM quality_run WHERE terminal_id = ? ORDER BY created_at DESC",
         )
@@ -213,10 +203,7 @@ impl QualityRun {
     }
 
     /// Find quality runs by task ID
-    pub async fn find_by_task(
-        pool: &SqlitePool,
-        task_id: &str,
-    ) -> sqlx::Result<Vec<Self>> {
+    pub async fn find_by_task(pool: &SqlitePool, task_id: &str) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, QualityRun>(
             r"SELECT * FROM quality_run WHERE task_id = ? ORDER BY created_at DESC",
         )

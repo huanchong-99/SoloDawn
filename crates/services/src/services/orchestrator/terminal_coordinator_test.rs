@@ -4,17 +4,20 @@
 //! Note: Model configuration is now handled at spawn time via environment variables,
 //! not by the coordinator.
 
-
 use std::sync::Arc;
-use db::models::Terminal;
-use crate::services::orchestrator::TerminalCoordinator;
+
 use chrono::Utc;
 use db::{
     DBService,
-    models::cli_type::{CliType, ModelConfig},
+    models::{
+        Terminal,
+        cli_type::{CliType, ModelConfig},
+    },
 };
 use sqlx::sqlite::SqlitePoolOptions;
 use uuid::Uuid;
+
+use crate::services::orchestrator::TerminalCoordinator;
 #[allow(dead_code)]
 // Helper function to create test database with real migrations
 async fn setup_test_db() -> DBService {
@@ -305,6 +308,37 @@ async fn test_terminal_startup_updates_all_terminals() {
             "Terminal should be in starting status"
         );
     }
+}
+
+#[tokio::test]
+async fn test_terminal_startup_with_limit_queues_excess_terminals() {
+    let db = setup_test_db().await;
+
+    let coordinator = TerminalCoordinator::new(Arc::new(db.clone()));
+    let (workflow_id, terminal_ids) = create_workflow_with_terminals(&db, 3, 2).await;
+
+    let result = coordinator
+        .start_terminals_for_workflow_with_limit(&workflow_id, 4)
+        .await;
+
+    assert!(result.is_ok(), "limited terminal startup should succeed");
+
+    let mut starting = 0;
+    let mut queued = 0;
+    for terminal_id in terminal_ids {
+        let terminal = Terminal::find_by_id(&db.pool, &terminal_id)
+            .await
+            .expect("Failed to query terminal")
+            .expect("Terminal not found");
+        match terminal.status.as_str() {
+            "starting" => starting += 1,
+            "not_started" => queued += 1,
+            status => panic!("unexpected terminal status: {status}"),
+        }
+    }
+
+    assert_eq!(starting, 4);
+    assert_eq!(queued, 2);
 }
 
 #[tokio::test]

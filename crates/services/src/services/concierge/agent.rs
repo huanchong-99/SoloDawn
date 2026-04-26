@@ -1,23 +1,25 @@
 //! ConciergeAgent: LLM-powered session-scoped assistant.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result};
+use db::models::concierge::{ConciergeMessage, ConciergeSession};
 use sqlx::SqlitePool;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tracing;
 
-use db::models::concierge::{ConciergeMessage, ConciergeSession};
-
-use super::prompt::concierge_system_prompt;
-use super::sync::{ConciergeBroadcaster, ConciergeEvent};
-use super::tools::{execute_tool, parse_tool_call};
-use crate::services::orchestrator::config::OrchestratorConfig;
-use crate::services::orchestrator::llm::{LLMClient, create_llm_client};
-use crate::services::orchestrator::message_bus::{MessageBusBackend, SharedMessageBus};
-use crate::services::orchestrator::types::LLMMessage;
+use super::{
+    prompt::concierge_system_prompt,
+    sync::{ConciergeBroadcaster, ConciergeEvent},
+    tools::{execute_tool, parse_tool_call},
+};
+use crate::services::orchestrator::{
+    config::OrchestratorConfig,
+    llm::{LLMClient, create_llm_client},
+    message_bus::{MessageBusBackend, SharedMessageBus},
+    types::LLMMessage,
+};
 
 /// Maximum tool-call loop iterations per user message to prevent infinite loops.
 const MAX_TOOL_ITERATIONS: usize = 5;
@@ -123,8 +125,7 @@ impl ConciergeAgent {
 
             // Load recent conversation history
             let history =
-                ConciergeMessage::list_recent(&self.pool, session_id, MAX_HISTORY_MESSAGES)
-                    .await?;
+                ConciergeMessage::list_recent(&self.pool, session_id, MAX_HISTORY_MESSAGES).await?;
             let llm_messages = self.build_llm_messages(&session, &history);
 
             // Call LLM
@@ -401,7 +402,9 @@ impl ConciergeAgent {
                 .await?;
 
                 if resp.status().is_success() {
-                    Ok(format!("Message sent to orchestrator for workflow {workflow_id}."))
+                    Ok(format!(
+                        "Message sent to orchestrator for workflow {workflow_id}."
+                    ))
                 } else {
                     let status = resp.status();
                     let body = resp.text().await.unwrap_or_default();
@@ -452,8 +455,7 @@ impl ConciergeAgent {
                             let bc = self.broadcaster.clone();
                             let cancel = CancellationToken::new();
                             // Store token so we can cancel when the session is cleaned up
-                            let watcher_key =
-                                format!("{}:{}", session.id, workflow_id);
+                            let watcher_key = format!("{}:{}", session.id, workflow_id);
                             self.watcher_tokens
                                 .lock()
                                 .await

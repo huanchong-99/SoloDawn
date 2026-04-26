@@ -3,10 +3,13 @@
 //! Detects potentially unnecessary `.clone()` calls that may indicate
 //! missed opportunities for borrowing or moving values.
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, RustAnalysisContext, RustRule};
 use syn::visit::Visit;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RustAnalysisContext, RustRule},
+};
 
 /// Built-in rule that detects potentially unnecessary `.clone()` calls.
 #[derive(Debug, Default)]
@@ -43,9 +46,7 @@ impl RustRule for CloneUsageRule {
             .severity_override
             .unwrap_or_else(|| self.default_severity());
 
-        let mut visitor = CloneCallVisitor {
-            clones: Vec::new(),
-        };
+        let mut visitor = CloneCallVisitor { clones: Vec::new() };
         syn::visit::visit_file(&mut visitor, ctx.syntax);
 
         visitor
@@ -117,7 +118,10 @@ mod tests {
             }
         "#;
         let issues = analyze_source(source);
-        assert!(issues.is_empty(), "Code without .clone() should have no issues");
+        assert!(
+            issues.is_empty(),
+            "Code without .clone() should have no issues"
+        );
     }
 
     #[test]

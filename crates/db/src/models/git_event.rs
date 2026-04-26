@@ -96,10 +96,7 @@ impl GitEvent {
     }
 
     /// Find git events by workflow ID
-    pub async fn find_by_workflow(
-        pool: &SqlitePool,
-        workflow_id: &str,
-    ) -> sqlx::Result<Vec<Self>> {
+    pub async fn find_by_workflow(pool: &SqlitePool, workflow_id: &str) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, GitEvent>(
             r"SELECT * FROM git_event WHERE workflow_id = ? ORDER BY created_at DESC",
         )

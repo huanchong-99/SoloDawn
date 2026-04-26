@@ -3,20 +3,27 @@
 //! Detects universal structural completeness issues:
 //! - Missing test files (projects with source code but zero tests)
 //! - High TODO/FIXME density (indicates stub/placeholder code)
+//! - Placeholder tests that assert nothing meaningful
+//! - Coverage configurations that exclude core business layers
+
+use std::{
+    path::{Path, PathBuf},
+    sync::OnceLock,
+    time::Instant,
+};
 
 use async_trait::async_trait;
 use regex::Regex;
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use std::time::Instant;
 use tracing::debug;
 
-use crate::analysis;
-use crate::gate::result::MeasureValue;
-use crate::issue::QualityIssue;
-use crate::metrics::MetricKey;
-use crate::provider::{ProviderReport, QualityProvider};
-use crate::rule::{AnalyzerSource, RuleType, Severity};
+use crate::{
+    analysis,
+    gate::result::MeasureValue,
+    issue::QualityIssue,
+    metrics::MetricKey,
+    provider::{ProviderReport, QualityProvider},
+    rule::{AnalyzerSource, RuleType, Severity},
+};
 
 #[derive(Default)]
 pub struct CompletenessProvider;
@@ -36,9 +43,61 @@ fn todo_re() -> &'static Regex {
 
 fn test_file_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"(?i)(?:\.(?:test|spec)\.[jt]sx?$|_test\.(?:rs|go)$)").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"(?i)(?:\.(?:test|spec)\.[jt]sx?$|_test\.(?:rs|go)$)").unwrap())
+}
+
+fn is_test_file(p: &Path) -> bool {
+    if !is_any_source_file(p) {
+        return false;
+    }
+    let name = p.to_string_lossy().replace('\\', "/").to_lowercase();
+    test_file_re().is_match(&name)
+        || name.contains("/tests/")
+        || name.contains("/__tests__/")
+        || name.contains("/test/")
+}
+
+fn is_coverage_config_file(p: &Path) -> bool {
+    let name = p
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    name == "package.json"
+        || name.starts_with("jest.config.")
+        || name.starts_with("vitest.config.")
+        || name.starts_with("nyc.config.")
+        || name.starts_with("c8.config.")
+        || name == ".nycrc"
+        || name.starts_with(".nycrc.")
+}
+
+fn files_for_scope(
+    project_root: &Path,
+    changed_files: Option<&[String]>,
+    filter: fn(&Path) -> bool,
+) -> Vec<PathBuf> {
+    match changed_files {
+        Some(files) => files
+            .iter()
+            .filter_map(|file| changed_file_path(project_root, file))
+            .filter(|path| path.is_file() && filter(path))
+            .collect(),
+        None => analysis::collect_files(project_root, filter),
+    }
+}
+
+fn changed_file_path(project_root: &Path, file: &str) -> Option<PathBuf> {
+    let trimmed = file.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(trimmed);
+    if path.is_absolute() {
+        Some(path)
+    } else {
+        Some(project_root.join(trimmed))
+    }
 }
 
 #[async_trait]
@@ -48,35 +107,52 @@ impl QualityProvider for CompletenessProvider {
     }
 
     fn supported_metrics(&self) -> Vec<MetricKey> {
-        vec![MetricKey::TestFileAbsence, MetricKey::TodoDensity]
+        vec![
+            MetricKey::TestFileAbsence,
+            MetricKey::TodoDensity,
+            MetricKey::StubTestCount,
+            MetricKey::CoverageExclusionIssues,
+        ]
     }
 
     async fn analyze(
         &self,
         project_root: &Path,
         _discovery: &crate::discovery::RepositoryDiscovery,
-        _changed_files: Option<&[String]>,
+        changed_files: Option<&[String]>,
     ) -> anyhow::Result<ProviderReport> {
         let start = Instant::now();
         debug!("completeness: starting analysis");
 
         let source_files = analysis::collect_files(project_root, is_any_source_file);
+        let scoped_test_files = files_for_scope(project_root, changed_files, is_test_file);
+        let scoped_coverage_config_files =
+            files_for_scope(project_root, changed_files, is_coverage_config_file);
 
         let mut issues = Vec::new();
         let test_absence = detect_test_file_absence(project_root, &source_files, &mut issues);
         let todo_pct = compute_todo_density(project_root, &source_files, &mut issues);
+        let stub_tests = detect_stub_tests(project_root, &scoped_test_files, &mut issues);
+        let coverage_exclusions = detect_suspicious_coverage_exclusions(
+            project_root,
+            &scoped_coverage_config_files,
+            &mut issues,
+        );
 
         let duration_ms = start.elapsed().as_millis() as u64;
         debug!(
-            "completeness: test_absence={test_absence} todo_density={todo_pct:.1}% in {duration_ms}ms"
+            "completeness: test_absence={test_absence} todo_density={todo_pct:.1}% \
+             stub_tests={stub_tests} coverage_exclusions={coverage_exclusions} in {duration_ms}ms"
         );
 
         let report = ProviderReport::success("completeness", duration_ms)
-            .with_metric(
-                MetricKey::TestFileAbsence,
-                MeasureValue::Int(test_absence),
-            )
+            .with_metric(MetricKey::TestFileAbsence, MeasureValue::Int(test_absence))
             .with_metric(MetricKey::TodoDensity, MeasureValue::Float(todo_pct))
+            .with_metric(MetricKey::StubTestCount, MeasureValue::Int(stub_tests))
+            .with_metric(
+                MetricKey::CoverageExclusionIssues,
+                MeasureValue::Int(coverage_exclusions),
+            )
             .with_issues(issues);
 
         Ok(report)
@@ -186,10 +262,133 @@ fn compute_todo_density(
     density
 }
 
+fn detect_stub_tests(
+    project_root: &Path,
+    test_files: &[PathBuf],
+    issues: &mut Vec<QualityIssue>,
+) -> i64 {
+    let mut count = 0;
+    for file in test_files {
+        let content = match std::fs::read_to_string(file) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+        if !contains_stub_test(&content) {
+            continue;
+        }
+        count += 1;
+        let line = stub_test_line(&content).unwrap_or(1);
+        let rel = rel_path(project_root, file);
+        issues.push(
+            QualityIssue::new(
+                "completeness:stub-test",
+                RuleType::Bug,
+                Severity::Blocker,
+                AnalyzerSource::Other("completeness".into()),
+                "Test file contains placeholder assertions such as expect(true).toBe(true); \
+                 tests must assert real behavior",
+            )
+            .with_location(rel, line),
+        );
+    }
+    count
+}
+
+fn contains_stub_test(content: &str) -> bool {
+    let compact = content
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_lowercase();
+    compact.contains("expect(true).tobe(true)")
+        || compact.contains("expect(1).tobe(1)")
+        || compact.contains("assert(true)")
+        || compact.contains("assert.ok(true)")
+        || compact.contains("t.pass()")
+}
+
+fn stub_test_line(content: &str) -> Option<u32> {
+    content.lines().enumerate().find_map(|(idx, line)| {
+        if contains_stub_test(line) {
+            Some((idx + 1) as u32)
+        } else {
+            None
+        }
+    })
+}
+
+fn detect_suspicious_coverage_exclusions(
+    project_root: &Path,
+    config_files: &[PathBuf],
+    issues: &mut Vec<QualityIssue>,
+) -> i64 {
+    let mut count = 0;
+    for file in config_files {
+        let content = match std::fs::read_to_string(file) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+        let Some(line) = suspicious_coverage_exclusion_line(&content) else {
+            continue;
+        };
+        count += 1;
+        let rel = rel_path(project_root, file);
+        issues.push(
+            QualityIssue::new(
+                "completeness:coverage-core-exclusion",
+                RuleType::Bug,
+                Severity::Blocker,
+                AnalyzerSource::Other("completeness".into()),
+                "Coverage configuration appears to exclude core business layers \
+                 (services/controllers/routes/models/repositories); coverage must measure changed core code",
+            )
+            .with_location(rel, line),
+        );
+    }
+    count
+}
+
+fn suspicious_coverage_exclusion_line(content: &str) -> Option<u32> {
+    if !content.to_lowercase().contains("coverage") {
+        return None;
+    }
+
+    content.lines().enumerate().find_map(|(idx, line)| {
+        let lower = line.to_lowercase();
+        let excludes = lower.contains("exclude")
+            || lower.contains("ignorepattern")
+            || lower.contains("ignore-pattern");
+        let core_layer = [
+            "services",
+            "controllers",
+            "routes",
+            "models",
+            "repositories",
+            "middleware",
+        ]
+        .iter()
+        .any(|term| lower.contains(term));
+
+        if excludes && core_layer {
+            Some((idx + 1) as u32)
+        } else {
+            None
+        }
+    })
+}
+
+fn rel_path(project_root: &Path, file: &Path) -> String {
+    file.strip_prefix(project_root)
+        .unwrap_or(file)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
+
+    use super::*;
 
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("completeness_test_{}", uuid::Uuid::new_v4()));
@@ -249,6 +448,44 @@ mod tests {
         let density = compute_todo_density(&root, &files, &mut issues);
         assert!((density - 20.0).abs() < 0.1);
         assert!(!issues.is_empty());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn detects_stub_tests() {
+        let root = temp_dir();
+        write(
+            &root,
+            "tests/user.test.ts",
+            "describe('user service', () => {\n  it('works', () => {\n    expect(true).toBe(true);\n  });\n});\n",
+        );
+
+        let files = files_for_scope(&root, None, is_test_file);
+        let mut issues = Vec::new();
+        let count = detect_stub_tests(&root, &files, &mut issues);
+
+        assert_eq!(count, 1);
+        assert_eq!(issues[0].rule_id, "completeness:stub-test");
+        assert_eq!(issues[0].line, Some(3));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn detects_coverage_exclusions_for_core_layers() {
+        let root = temp_dir();
+        write(
+            &root,
+            "jest.config.js",
+            "module.exports = {\n  collectCoverage: true,\n  coveragePathIgnorePatterns: ['/src/services/', '/node_modules/'],\n};\n",
+        );
+
+        let files = files_for_scope(&root, None, is_coverage_config_file);
+        let mut issues = Vec::new();
+        let count = detect_suspicious_coverage_exclusions(&root, &files, &mut issues);
+
+        assert_eq!(count, 1);
+        assert_eq!(issues[0].rule_id, "completeness:coverage-core-exclusion");
+        assert_eq!(issues[0].line, Some(3));
         cleanup(&root);
     }
 }

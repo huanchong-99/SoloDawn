@@ -1,18 +1,58 @@
 //! Import order rule — checks that import statements follow a consistent group ordering
 //! in TypeScript/JavaScript files.
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{Rule, TsAnalysisContext, TsRule};
 use regex::Regex;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{Rule, TsAnalysisContext, TsRule},
+};
 
 /// Node.js built-in module names (without the `node:` prefix).
 const NODE_BUILTINS: &[&str] = &[
-    "assert", "async_hooks", "buffer", "child_process", "cluster", "console", "constants",
-    "crypto", "dgram", "diagnostics_channel", "dns", "domain", "events", "fs", "http", "http2",
-    "https", "inspector", "module", "net", "os", "path", "perf_hooks", "process", "punycode",
-    "querystring", "readline", "repl", "stream", "string_decoder", "sys", "timers", "tls",
-    "trace_events", "tty", "url", "util", "v8", "vm", "wasi", "worker_threads", "zlib",
+    "assert",
+    "async_hooks",
+    "buffer",
+    "child_process",
+    "cluster",
+    "console",
+    "constants",
+    "crypto",
+    "dgram",
+    "diagnostics_channel",
+    "dns",
+    "domain",
+    "events",
+    "fs",
+    "http",
+    "http2",
+    "https",
+    "inspector",
+    "module",
+    "net",
+    "os",
+    "path",
+    "perf_hooks",
+    "process",
+    "punycode",
+    "querystring",
+    "readline",
+    "repl",
+    "stream",
+    "string_decoder",
+    "sys",
+    "timers",
+    "tls",
+    "trace_events",
+    "tty",
+    "url",
+    "util",
+    "v8",
+    "vm",
+    "wasi",
+    "worker_threads",
+    "zlib",
 ];
 
 /// Import group classification, ordered from lowest to highest expected position.
@@ -116,8 +156,7 @@ impl TsRule for ImportOrderRule {
             .unwrap_or_else(|| self.default_severity());
 
         // Match `import ... from '...'` and side-effect `import '...'`
-        let re_from =
-            Regex::new(r#"import\s+.*\s+from\s+['"]([^'"]+)['"]"#).expect("valid regex");
+        let re_from = Regex::new(r#"import\s+.*\s+from\s+['"]([^'"]+)['"]"#).expect("valid regex");
         let re_side = Regex::new(r#"import\s+['"]([^'"]+)['"]"#).expect("valid regex");
 
         // Collect (line_number, group) for each import

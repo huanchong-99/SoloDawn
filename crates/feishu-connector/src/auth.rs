@@ -1,6 +1,7 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use reqwest::Client;
-use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::types::{CachedToken, FeishuConfig, WsEndpointResponse};
@@ -30,7 +31,8 @@ impl FeishuAuth {
         {
             let cached = self.tenant_token.read().await;
             if let Some(ref token) = *cached {
-                if token.expires_at > std::time::Instant::now() + std::time::Duration::from_secs(300)
+                if token.expires_at
+                    > std::time::Instant::now() + std::time::Duration::from_secs(300)
                 {
                     return Ok(token.token.clone());
                 }
@@ -42,7 +44,8 @@ impl FeishuAuth {
         {
             let cached = self.tenant_token.read().await;
             if let Some(ref token) = *cached {
-                if token.expires_at > std::time::Instant::now() + std::time::Duration::from_secs(300)
+                if token.expires_at
+                    > std::time::Instant::now() + std::time::Duration::from_secs(300)
                 {
                     return Ok(token.token.clone());
                 }

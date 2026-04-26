@@ -2,9 +2,11 @@
 
 use std::collections::HashMap;
 
-use crate::issue::QualityIssue;
-use crate::rule::{AnalyzerSource, RuleType, Severity};
-use crate::rules::{CommonAnalysisContext, CommonRule, Rule};
+use crate::{
+    issue::QualityIssue,
+    rule::{AnalyzerSource, RuleType, Severity},
+    rules::{CommonAnalysisContext, CommonRule, Rule},
+};
 
 /// Detects duplicated code blocks within a single file using rolling-window line hashing.
 #[derive(Debug)]
@@ -170,7 +172,10 @@ mod tests {
         };
 
         let issues = rule.analyze(&ctx);
-        assert!(issues.is_empty(), "Expected no issues when there is no duplication");
+        assert!(
+            issues.is_empty(),
+            "Expected no issues when there is no duplication"
+        );
     }
 
     #[test]

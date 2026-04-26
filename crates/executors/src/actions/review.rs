@@ -6,7 +6,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
-    actions::{validate_working_dir, Executable},
+    actions::{Executable, validate_working_dir},
     approvals::ExecutorApprovalService,
     env::ExecutionEnv,
     executors::{BaseCodingAgent, ExecutorError, SpawnedChild, StandardCodingAgentExecutor},

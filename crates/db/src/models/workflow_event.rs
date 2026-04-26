@@ -29,10 +29,7 @@ impl WorkflowEvent {
         Ok(())
     }
 
-    pub async fn find_by_workflow(
-        pool: &SqlitePool,
-        workflow_id: &str,
-    ) -> sqlx::Result<Vec<Self>> {
+    pub async fn find_by_workflow(pool: &SqlitePool, workflow_id: &str) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, Self>(
             "SELECT * FROM workflow_event WHERE workflow_id = ?1 ORDER BY created_at ASC",
         )

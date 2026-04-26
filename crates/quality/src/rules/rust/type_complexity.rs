@@ -3,10 +3,13 @@
 //! Detects overly complex type expressions by measuring the nesting depth of generic
 //! type parameters (e.g., `Arc<Mutex<HashMap<String, Vec<Box<dyn Trait>>>>>`).
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, RustAnalysisContext, RustRule};
 use syn::visit::Visit;
+
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RustAnalysisContext, RustRule},
+};
 
 /// Built-in rule that checks for overly complex type expressions in Rust code.
 #[derive(Debug, Default)]
@@ -107,14 +110,12 @@ fn measure_type_depth(ty: &syn::Type) -> usize {
         syn::Type::Slice(type_slice) => measure_type_depth(&type_slice.elem),
         syn::Type::Array(type_array) => measure_type_depth(&type_array.elem),
         syn::Type::Paren(type_paren) => measure_type_depth(&type_paren.elem),
-        syn::Type::Tuple(type_tuple) => {
-            type_tuple
-                .elems
-                .iter()
-                .map(measure_type_depth)
-                .max()
-                .unwrap_or(0)
-        }
+        syn::Type::Tuple(type_tuple) => type_tuple
+            .elems
+            .iter()
+            .map(measure_type_depth)
+            .max()
+            .unwrap_or(0),
         syn::Type::TraitObject(type_trait) => {
             let mut max_depth = 0;
             for bound in &type_trait.bounds {

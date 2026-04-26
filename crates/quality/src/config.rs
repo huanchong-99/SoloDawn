@@ -2,12 +2,17 @@
 //!
 //! 从 `quality/quality-gate.yaml` 加载质量门策略定义
 
-use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::gate::condition::{Condition, Operator};
-use crate::gate::{QualityGate, QualityGateLevel};
-use crate::metrics::MetricKey;
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    gate::{
+        QualityGate, QualityGateLevel,
+        condition::{Condition, Operator},
+    },
+    metrics::MetricKey,
+};
 
 /// 质量门配置文件结构
 ///
@@ -376,10 +381,8 @@ mod tests {
         // Simulate an external orchestrator-output repo that does NOT carry any
         // local quality-gate.yaml. The loader must hand back the bundled
         // central enforce policy, NOT the lenient shadow default_config.
-        let dir = std::env::temp_dir().join(format!(
-            "quality-config-fallback-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("quality-config-fallback-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
 
         let cfg = QualityGateConfig::load_from_project(&dir).unwrap();
@@ -396,10 +399,8 @@ mod tests {
     #[test]
     fn load_from_project_prefers_repo_local_policy_over_bundled() {
         // If the repo brings its own policy, that wins.
-        let dir = std::env::temp_dir().join(format!(
-            "quality-config-local-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("quality-config-local-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(dir.join("quality")).unwrap();
         std::fs::write(
             dir.join("quality/quality-gate.yaml"),

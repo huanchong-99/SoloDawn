@@ -4,9 +4,11 @@
 
 use regex::Regex;
 
-use crate::issue::QualityIssue;
-use crate::rule::{RuleType, Severity};
-use crate::rules::{Rule, TsRule, TsAnalysisContext, RuleConfig};
+use crate::{
+    issue::QualityIssue,
+    rule::{RuleType, Severity},
+    rules::{Rule, RuleConfig, TsAnalysisContext, TsRule},
+};
 
 /// Detects type assertions (`as Type` and `<Type>value`) in TypeScript code.
 ///
@@ -23,14 +25,12 @@ impl Default for TypeAssertionRule {
     fn default() -> Self {
         Self {
             // Match `as SomeType` — we filter out `as const` in the analyze method
-            as_pattern: Regex::new(r"\bas\s+\w+")
-                .expect("invalid as-assertion regex"),
+            as_pattern: Regex::new(r"\bas\s+\w+").expect("invalid as-assertion regex"),
             // Match `<SomeType>` followed by a word char or paren (value expression),
             // but not common JSX/HTML-like patterns
             angle_pattern: Regex::new(r#"<(\w+)>\s*[\w\(\[\{"']"#)
                 .expect("invalid angle-bracket assertion regex"),
-            comment_pattern: Regex::new(r"^\s*(?://|/\*|\*)")
-                .expect("invalid comment regex"),
+            comment_pattern: Regex::new(r"^\s*(?://|/\*|\*)").expect("invalid comment regex"),
         }
     }
 }
@@ -165,8 +165,13 @@ const z = bar as const;
         let rule = TypeAssertionRule::default();
         let issues = rule.analyze(&ctx);
         // Should detect `as string` and `as number`, but NOT `as const`
-        assert_eq!(issues.len(), 2, "expected 2 issues, got {}: {:?}",
-            issues.len(), issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert_eq!(
+            issues.len(),
+            2,
+            "expected 2 issues, got {}: {:?}",
+            issues.len(),
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
         assert!(issues[0].message.contains("as string"));
         assert!(issues[1].message.contains("as number"));
     }
@@ -198,7 +203,10 @@ const y = <number>otherValue;
         let ctx = make_context("component.tsx", src, &lines, &config);
         let rule = TypeAssertionRule::default();
         let issues = rule.analyze(&ctx);
-        assert!(issues.is_empty(), "should skip angle-bracket patterns in .tsx files");
+        assert!(
+            issues.is_empty(),
+            "should skip angle-bracket patterns in .tsx files"
+        );
     }
 
     #[test]
@@ -216,8 +224,13 @@ const x = value as string;
         let rule = TypeAssertionRule::default();
         let issues = rule.analyze(&ctx);
         // Should only detect the real assertion on `value as string`, not import/export renames
-        assert_eq!(issues.len(), 1, "expected 1 issue, got {}: {:?}",
-            issues.len(), issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert_eq!(
+            issues.len(),
+            1,
+            "expected 1 issue, got {}: {:?}",
+            issues.len(),
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
         assert!(issues[0].message.contains("as string"));
     }
 
@@ -234,7 +247,11 @@ const z = real as unknown;
         let ctx = make_context("test.ts", src, &lines, &config);
         let rule = TypeAssertionRule::default();
         let issues = rule.analyze(&ctx);
-        assert_eq!(issues.len(), 1, "should only detect the non-comment assertion");
+        assert_eq!(
+            issues.len(),
+            1,
+            "should only detect the non-comment assertion"
+        );
         assert!(issues[0].message.contains("as unknown"));
     }
 }

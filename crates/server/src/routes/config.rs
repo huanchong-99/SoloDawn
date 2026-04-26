@@ -75,9 +75,12 @@ impl Default for Environment {
 impl Environment {
     pub fn new() -> Self {
         let info = os_info::get();
-        let workspace_root_hint = utils::env_compat::var_opt_with_compat("SOLODAWN_WORKSPACE_ROOT", "GITCORTEX_WORKSPACE_ROOT")
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
+        let workspace_root_hint = utils::env_compat::var_opt_with_compat(
+            "SOLODAWN_WORKSPACE_ROOT",
+            "GITCORTEX_WORKSPACE_ROOT",
+        )
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
 
         Environment {
             os_type: info.os_type().to_string(),
@@ -500,32 +503,40 @@ fn set_mcp_servers_in_config_path(
         if current.get(part).is_none() {
             current
                 .as_object_mut()
-                .ok_or_else(|| std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("Expected JSON object at path segment '{part}'"),
-                ))?
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected JSON object at path segment '{part}'"),
+                    )
+                })?
                 .insert(part.clone(), serde_json::json!({}));
         }
-        current = current.get_mut(part).ok_or_else(|| std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Failed to navigate to path segment '{part}'"),
-        ))?;
+        current = current.get_mut(part).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to navigate to path segment '{part}'"),
+            )
+        })?;
         if !current.is_object() {
             *current = serde_json::json!({});
         }
     }
 
     // Set the final attribute
-    let final_attr = path.last().ok_or_else(|| std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        "MCP servers path is empty after validation",
-    ))?;
+    let final_attr = path.last().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "MCP servers path is empty after validation",
+        )
+    })?;
     current
         .as_object_mut()
-        .ok_or_else(|| std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Final config node is not a JSON object",
-        ))?
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Final config node is not a JSON object",
+            )
+        })?
         .insert(final_attr.clone(), serde_json::to_value(servers)?);
 
     Ok(())
@@ -720,9 +731,10 @@ fn resolve_install_single_cli_script() -> Option<PathBuf> {
         let mut candidates = Vec::new();
 
         // Check SOLODAWN_INSTALL_DIR (set by tray app)
-        if let Some(install_dir) = utils::env_compat::var_opt_with_compat("SOLODAWN_INSTALL_DIR", "GITCORTEX_INSTALL_DIR") {
-            candidates
-                .push(PathBuf::from(&install_dir).join("scripts/install-single-cli.ps1"));
+        if let Some(install_dir) =
+            utils::env_compat::var_opt_with_compat("SOLODAWN_INSTALL_DIR", "GITCORTEX_INSTALL_DIR")
+        {
+            candidates.push(PathBuf::from(&install_dir).join("scripts/install-single-cli.ps1"));
         }
 
         // Relative to executable
@@ -812,8 +824,9 @@ async fn install_ai_clis(
                 Ok(Err(err)) => {
                     all_success = false;
                     last_exit_code = -1;
-                    combined_output
-                        .push_str(&format!("[ERROR] Failed to run script for {cli_name}: {err}\n"));
+                    combined_output.push_str(&format!(
+                        "[ERROR] Failed to run script for {cli_name}: {err}\n"
+                    ));
                 }
                 Err(_) => {
                     all_success = false;
@@ -918,7 +931,14 @@ fn detect_tool_version(cmd: &str, args: &[&str]) -> (bool, Option<String>) {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let version = stdout.lines().next().unwrap_or("").trim().to_string();
-            (true, if version.is_empty() { None } else { Some(version) })
+            (
+                true,
+                if version.is_empty() {
+                    None
+                } else {
+                    Some(version)
+                },
+            )
         }
         _ => (false, None),
     }
@@ -998,8 +1018,7 @@ pub struct NativeCredentialsStatus {
 /// Checks whether the local Claude Code CLI has valid OAuth credentials
 /// in `~/.claude/.credentials.json`. This enables the "Native Subscription"
 /// model option in the frontend without requiring manual API key configuration.
-async fn get_native_credentials_status(
-) -> ResponseJson<ApiResponse<NativeCredentialsStatus>> {
+async fn get_native_credentials_status() -> ResponseJson<ApiResponse<NativeCredentialsStatus>> {
     let status = tokio::task::spawn_blocking(|| {
         let home = dirs::home_dir();
         let creds_available = home
@@ -1008,8 +1027,7 @@ async fn get_native_credentials_status(
                 let creds_path = h.join(".claude").join(".credentials.json");
                 if let Ok(content) = std::fs::read_to_string(&creds_path) {
                     // Check for valid OAuth token without logging it
-                    content.contains("accessToken")
-                        && content.contains("claudeAiOauth")
+                    content.contains("accessToken") && content.contains("claudeAiOauth")
                 } else {
                     false
                 }

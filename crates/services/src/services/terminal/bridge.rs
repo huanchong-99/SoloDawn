@@ -349,9 +349,9 @@ impl TerminalBridge {
             ));
         }
 
-        let writer = handle.writer.ok_or_else(|| {
-            anyhow::anyhow!("PTY writer unavailable for terminal {terminal_id}")
-        })?;
+        let writer = handle
+            .writer
+            .ok_or_else(|| anyhow::anyhow!("PTY writer unavailable for terminal {terminal_id}"))?;
 
         // Create channel for writer task
         let (tx, mut writer_rx) = mpsc::channel::<Vec<u8>>(BRIDGE_CHANNEL_CAPACITY);

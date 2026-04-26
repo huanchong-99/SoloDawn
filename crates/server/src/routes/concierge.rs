@@ -305,9 +305,12 @@ async fn update_settings(
                         Some(cid.clone())
                     } else if let Some(cid) = last_id {
                         Some(cid)
-                    } else if let Some(b) = db::models::ExternalConversationBinding::find_latest_active(
-                        pool, "feishu",
-                    ).await.ok().flatten() {
+                    } else if let Some(b) =
+                        db::models::ExternalConversationBinding::find_latest_active(pool, "feishu")
+                            .await
+                            .ok()
+                            .flatten()
+                    {
                         Some(b.conversation_id)
                     } else {
                         messenger.first_bot_chat_id().await.unwrap_or(None)
@@ -347,9 +350,7 @@ async fn update_settings(
                                 } else {
                                     text
                                 };
-                                if let Err(e) =
-                                    messenger.send_text(&chat_id, &truncated).await
-                                {
+                                if let Err(e) = messenger.send_text(&chat_id, &truncated).await {
                                     tracing::warn!(
                                         "Failed to push concierge message to Feishu: {e}"
                                     );
@@ -390,7 +391,9 @@ async fn update_settings(
             payload.sync_tools.unwrap_or(current.sync_tools),
             payload.sync_terminal.unwrap_or(current.sync_terminal),
             payload.sync_progress.unwrap_or(current.sync_progress),
-            payload.notify_on_completion.unwrap_or(current.notify_on_completion),
+            payload
+                .notify_on_completion
+                .unwrap_or(current.notify_on_completion),
         )
         .await
         .map_err(|e| ApiError::Internal(format!("{e}")))?;
@@ -441,10 +444,7 @@ async fn get_feishu_channel(
         let session = ConciergeSession::find_by_id(pool, &ch.session_id)
             .await
             .map_err(|e| ApiError::Internal(format!("{e}")))?;
-        (
-            Some(ch.session_id.clone()),
-            session.map(|s| s.name),
-        )
+        (Some(ch.session_id.clone()), session.map(|s| s.name))
     } else {
         (None, None)
     };

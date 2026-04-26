@@ -23,7 +23,9 @@ pub async fn load_project_middleware(
         Ok(Some(project)) => project,
         Ok(None) => {
             tracing::warn!("Project {} not found", project_id);
-            return Err(ApiError::NotFound(format!("Project {project_id} not found")));
+            return Err(ApiError::NotFound(format!(
+                "Project {project_id} not found"
+            )));
         }
         Err(e) => {
             tracing::error!("Failed to fetch project {}: {}", project_id, e);
@@ -77,11 +79,15 @@ pub async fn load_workspace_middleware(
         Ok(Some(w)) => w,
         Ok(None) => {
             tracing::warn!("Workspace {} not found", workspace_id);
-            return Err(ApiError::NotFound(format!("Workspace {workspace_id} not found")));
+            return Err(ApiError::NotFound(format!(
+                "Workspace {workspace_id} not found"
+            )));
         }
         Err(e) => {
             tracing::error!("Failed to fetch Workspace {}: {}", workspace_id, e);
-            return Err(ApiError::Internal(format!("Failed to fetch workspace: {e}")));
+            return Err(ApiError::Internal(format!(
+                "Failed to fetch workspace: {e}"
+            )));
         }
     };
 
@@ -104,11 +110,15 @@ pub async fn load_execution_process_middleware(
             Ok(Some(process)) => process,
             Ok(None) => {
                 tracing::warn!("ExecutionProcess {} not found", process_id);
-                return Err(ApiError::NotFound(format!("ExecutionProcess {process_id} not found")));
+                return Err(ApiError::NotFound(format!(
+                    "ExecutionProcess {process_id} not found"
+                )));
             }
             Err(e) => {
                 tracing::error!("Failed to fetch execution process {}: {}", process_id, e);
-                return Err(ApiError::Internal(format!("Failed to fetch execution process: {e}")));
+                return Err(ApiError::Internal(format!(
+                    "Failed to fetch execution process: {e}"
+                )));
             }
         };
 
@@ -157,7 +167,9 @@ pub async fn load_session_middleware(
         Ok(Some(session)) => session,
         Ok(None) => {
             tracing::warn!("Session {} not found", session_id);
-            return Err(ApiError::NotFound(format!("Session {session_id} not found")));
+            return Err(ApiError::NotFound(format!(
+                "Session {session_id} not found"
+            )));
         }
         Err(e) => {
             tracing::error!("Failed to fetch session {}: {}", session_id, e);

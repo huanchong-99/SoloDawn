@@ -34,8 +34,7 @@ fn environment() -> &'static str {
 
 pub fn init_once(source: SentrySource) {
     INIT_GUARD.get_or_init(|| {
-        let dsn = std::env::var("SENTRY_DSN")
-            .unwrap_or_else(|_| DEFAULT_SENTRY_DSN.to_string());
+        let dsn = std::env::var("SENTRY_DSN").unwrap_or_else(|_| DEFAULT_SENTRY_DSN.to_string());
         sentry::init((
             dsn,
             sentry::ClientOptions {

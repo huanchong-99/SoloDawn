@@ -108,8 +108,10 @@ fn build_log_replay_script(log_file: &Path) -> String {
 
     #[cfg(not(windows))]
     {
-        let quoted_path = shlex::try_quote(log_file.to_string_lossy().as_ref())
-            .map_or_else(|_| format!("\"{}\"", log_file.display()), |quoted| quoted.to_string());
+        let quoted_path = shlex::try_quote(log_file.to_string_lossy().as_ref()).map_or_else(
+            |_| format!("\"{}\"", log_file.display()),
+            |quoted| quoted.to_string(),
+        );
 
         format!(
             "while IFS= read -r line; do printf '%s\\n' \"$line\"; sleep 1; done < {quoted_path}; rm -f {quoted_path}"
@@ -378,10 +380,7 @@ mod tests {
         let logs = generate_mock_logs("test prompt");
         for (i, log) in logs.iter().enumerate() {
             let parsed: Result<serde_json::Value, _> = serde_json::from_str(log);
-            assert!(
-                parsed.is_ok(),
-                "Log entry {i} should be valid JSON: {log}"
-            );
+            assert!(parsed.is_ok(), "Log entry {i} should be valid JSON: {log}");
         }
     }
 

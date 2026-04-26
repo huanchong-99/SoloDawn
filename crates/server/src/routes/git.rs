@@ -57,7 +57,9 @@ fn user_home_directory() -> Option<PathBuf> {
 
 fn get_env_allowed_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
-    if let Ok(raw) = utils::env_compat::var_with_compat("SOLODAWN_ALLOWED_ROOTS", "GITCORTEX_ALLOWED_ROOTS") {
+    if let Ok(raw) =
+        utils::env_compat::var_with_compat("SOLODAWN_ALLOWED_ROOTS", "GITCORTEX_ALLOWED_ROOTS")
+    {
         for item in raw.split([',', ';']) {
             let trimmed = item.trim();
             if trimmed.is_empty() {
@@ -463,8 +465,7 @@ mod path_boundary_tests {
 
         assert_eq!(
             canonical,
-            dunce::canonicalize(outside_root.path())
-                .expect("failed to canonicalize outside root")
+            dunce::canonicalize(outside_root.path()).expect("failed to canonicalize outside root")
         );
 
         let result = ensure_path_within_allowed_roots(
@@ -552,8 +553,11 @@ mod path_boundary_tests {
         std::fs::write(repo_dir.path().join("new_file.txt"), "hello")
             .expect("should write test file");
 
-        let change_count =
-            git_uncommitted_change_count_via_cli(repo_dir.path()).expect("status should be readable");
-        assert!(change_count >= 1, "should detect at least one uncommitted change");
+        let change_count = git_uncommitted_change_count_via_cli(repo_dir.path())
+            .expect("status should be readable");
+        assert!(
+            change_count >= 1,
+            "should detect at least one uncommitted change"
+        );
     }
 }

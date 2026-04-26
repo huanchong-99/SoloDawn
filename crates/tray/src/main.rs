@@ -7,19 +7,26 @@
 // Hide console window on Windows
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
-use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tray_icon::{Icon, TrayIconBuilder};
-use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
-use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::window::WindowId;
+use tray_icon::{
+    Icon, TrayIconBuilder,
+    menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
+};
+use winit::{
+    application::ApplicationHandler,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, EventLoop},
+    window::WindowId,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -159,8 +166,8 @@ impl TrayApp {
 
         // Rotate logs: keep daily logs, auto-delete files older than 7 days
         if let Ok(entries) = fs::read_dir(&logs_dir) {
-            let week_ago = std::time::SystemTime::now()
-                - std::time::Duration::from_secs(7 * 24 * 3600);
+            let week_ago =
+                std::time::SystemTime::now() - std::time::Duration::from_secs(7 * 24 * 3600);
             for entry in entries.flatten() {
                 if let Ok(meta) = entry.metadata() {
                     if let Ok(modified) = meta.modified() {
@@ -200,10 +207,13 @@ impl TrayApp {
         #[cfg(target_os = "windows")]
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
-        match cmd.spawn()
-        {
+        match cmd.spawn() {
             Ok(child) => {
-                tracing::info!("Server started (PID: {}), log: {}", child.id(), log_file_path.display());
+                tracing::info!(
+                    "Server started (PID: {}), log: {}",
+                    child.id(),
+                    log_file_path.display()
+                );
                 *guard = Some(child);
                 SERVER_RUNNING.store(true, Ordering::SeqCst);
             }
@@ -308,37 +318,29 @@ impl ApplicationHandler for TrayAppHandler {
         // Detect Chinese locale for menu labels
         let is_chinese = Self::is_chinese_locale();
 
-        let label_open = if is_chinese { "打开 SoloDawn" } else { "Open SoloDawn" };
-        let label_start = if is_chinese { "启动服务" } else { "Start Server" };
-        let label_stop = if is_chinese { "停止服务" } else { "Stop Server" };
+        let label_open = if is_chinese {
+            "打开 SoloDawn"
+        } else {
+            "Open SoloDawn"
+        };
+        let label_start = if is_chinese {
+            "启动服务"
+        } else {
+            "Start Server"
+        };
+        let label_stop = if is_chinese {
+            "停止服务"
+        } else {
+            "Stop Server"
+        };
         let label_quit = if is_chinese { "退出" } else { "Quit" };
 
         // Build the context menu
         let menu = Menu::new();
-        let item_open = MenuItem::with_id(
-            self.app.menu_open_id.clone(),
-            label_open,
-            true,
-            None,
-        );
-        let item_start = MenuItem::with_id(
-            self.app.menu_start_id.clone(),
-            label_start,
-            true,
-            None,
-        );
-        let item_stop = MenuItem::with_id(
-            self.app.menu_stop_id.clone(),
-            label_stop,
-            true,
-            None,
-        );
-        let item_quit = MenuItem::with_id(
-            self.app.menu_quit_id.clone(),
-            label_quit,
-            true,
-            None,
-        );
+        let item_open = MenuItem::with_id(self.app.menu_open_id.clone(), label_open, true, None);
+        let item_start = MenuItem::with_id(self.app.menu_start_id.clone(), label_start, true, None);
+        let item_stop = MenuItem::with_id(self.app.menu_stop_id.clone(), label_stop, true, None);
+        let item_quit = MenuItem::with_id(self.app.menu_quit_id.clone(), label_quit, true, None);
 
         let _ = menu.append(&item_open);
         let _ = menu.append(&PredefinedMenuItem::separator());

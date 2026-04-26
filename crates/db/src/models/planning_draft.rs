@@ -38,8 +38,13 @@ pub struct PlanningDraft {
 }
 
 /// Valid status transitions: gathering -> spec_ready -> confirmed -> materialized
-pub const PLANNING_DRAFT_STATUSES: [&str; 5] =
-    ["gathering", "spec_ready", "confirmed", "materialized", "cancelled"];
+pub const PLANNING_DRAFT_STATUSES: [&str; 5] = [
+    "gathering",
+    "spec_ready",
+    "confirmed",
+    "materialized",
+    "cancelled",
+];
 
 impl PlanningDraft {
     /// Encrypt and store the planner API key.
@@ -59,10 +64,7 @@ impl PlanningDraft {
             None => Ok(None),
             Some(encoded) => {
                 let decrypted = crate::encryption::decrypt(encoded)?;
-                tracing::debug!(
-                    key_len = decrypted.len(),
-                    "API key decrypted successfully"
-                );
+                tracing::debug!(key_len = decrypted.len(), "API key decrypted successfully");
                 Ok(Some(decrypted))
             }
         }
@@ -154,11 +156,9 @@ impl PlanningDraft {
     }
 
     pub async fn find_all(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
-        sqlx::query_as::<_, Self>(
-            "SELECT * FROM planning_draft ORDER BY created_at DESC",
-        )
-        .fetch_all(pool)
-        .await
+        sqlx::query_as::<_, Self>("SELECT * FROM planning_draft ORDER BY created_at DESC")
+            .fetch_all(pool)
+            .await
     }
 
     pub async fn find_by_project(pool: &SqlitePool, project_id: Uuid) -> sqlx::Result<Vec<Self>> {
