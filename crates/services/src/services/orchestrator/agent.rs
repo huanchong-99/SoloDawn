@@ -32,9 +32,9 @@ use super::{
         TASK_STATUS_RUNNING, TERMINAL_STATUS_CANCELLED, TERMINAL_STATUS_COMPLETED,
         TERMINAL_STATUS_FAILED, TERMINAL_STATUS_NOT_STARTED, TERMINAL_STATUS_QUALITY_PENDING,
         TERMINAL_STATUS_REVIEW_PASSED, TERMINAL_STATUS_REVIEW_REJECTED, TERMINAL_STATUS_STARTING,
-        TERMINAL_STATUS_WAITING, TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_COMPLETED,
-        WORKFLOW_STATUS_FAILED, WORKFLOW_STATUS_MERGE_PARTIAL_FAILED, WORKFLOW_STATUS_PAUSED,
-        WORKFLOW_STATUS_RUNNING, WORKFLOW_TOPIC_PREFIX,
+        TERMINAL_STATUS_WAITING, TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_CANCELLED,
+        WORKFLOW_STATUS_COMPLETED, WORKFLOW_STATUS_FAILED, WORKFLOW_STATUS_MERGE_PARTIAL_FAILED,
+        WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_RUNNING, WORKFLOW_TOPIC_PREFIX,
     },
     llm::{
         LLMClient, build_terminal_completion_prompt, create_claude_code_native_client,
@@ -1722,12 +1722,17 @@ impl OrchestratorAgent {
     }
 
     async fn mark_workflow_failed(&self, workflow_id: &str, reason: &str) -> anyhow::Result<()> {
+        self.clear_queued_terminal_dispatches("workflow_failed", reason)
+            .await;
+
         db::models::Workflow::update_status(&self.db.pool, workflow_id, WORKFLOW_STATUS_FAILED)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to update workflow status: {e}"))?;
 
         self.cascade_failed_workflow_children(workflow_id, reason)
             .await?;
+        self.persist_event("workflow_status", &format!("Workflow failed: {reason}"))
+            .await;
         self.cleanup_finished_workflow_logs_best_effort(reason)
             .await;
 
@@ -1747,6 +1752,23 @@ impl OrchestratorAgent {
 
         self.state.write().await.run_state = OrchestratorRunState::Idle;
         Ok(())
+    }
+
+    async fn clear_queued_terminal_dispatches(&self, trigger: &str, reason: &str) {
+        let cleared = {
+            let mut queue = self.queued_terminal_dispatches.lock().await;
+            let cleared = queue.len();
+            queue.clear();
+            cleared
+        };
+        if cleared > 0 {
+            tracing::warn!(
+                trigger,
+                reason,
+                cleared,
+                "Cleared queued terminal dispatches"
+            );
+        }
     }
 
     async fn handle_terminal_input_delivery_failure(
@@ -3779,6 +3801,134 @@ impl OrchestratorAgent {
         );
     }
 
+    fn task_status_blocks_dispatch(status: &str) -> bool {
+        matches!(
+            status,
+            TASK_STATUS_COMPLETED | TASK_STATUS_FAILED | TASK_STATUS_CANCELLED
+        )
+    }
+
+    fn workflow_status_is_finished(status: &str) -> bool {
+        matches!(
+            status,
+            WORKFLOW_STATUS_COMPLETED
+                | WORKFLOW_STATUS_FAILED
+                | WORKFLOW_STATUS_CANCELLED
+                | WORKFLOW_STATUS_MERGE_PARTIAL_FAILED
+        )
+    }
+
+    async fn task_and_workflow_allow_dispatch(
+        &self,
+        task_id: &str,
+        terminal_id: &str,
+    ) -> anyhow::Result<bool> {
+        let Some(task) = db::models::WorkflowTask::find_by_id(&self.db.pool, task_id).await? else {
+            tracing::warn!(
+                task_id,
+                terminal_id,
+                "Skipping terminal dispatch because task no longer exists"
+            );
+            return Ok(false);
+        };
+
+        if Self::task_status_blocks_dispatch(&task.status) {
+            tracing::info!(
+                workflow_id = %task.workflow_id,
+                task_id,
+                terminal_id,
+                task_status = %task.status,
+                "Skipping terminal dispatch because task is final"
+            );
+            return Ok(false);
+        }
+
+        let Some(workflow) =
+            db::models::Workflow::find_by_id(&self.db.pool, &task.workflow_id).await?
+        else {
+            tracing::warn!(
+                workflow_id = %task.workflow_id,
+                task_id,
+                terminal_id,
+                "Skipping terminal dispatch because workflow no longer exists"
+            );
+            return Ok(false);
+        };
+
+        if workflow.status != WORKFLOW_STATUS_RUNNING {
+            tracing::info!(
+                workflow_id = %workflow.id,
+                task_id,
+                terminal_id,
+                workflow_status = %workflow.status,
+                "Skipping terminal dispatch because workflow is not running"
+            );
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
+    async fn abort_dispatch_after_cas(
+        &self,
+        workflow_id: &str,
+        task_id: &str,
+        terminal: &db::models::Terminal,
+    ) -> anyhow::Result<()> {
+        let task = db::models::WorkflowTask::find_by_id(&self.db.pool, task_id).await?;
+        let workflow = if let Some(task) = task.as_ref() {
+            db::models::Workflow::find_by_id(&self.db.pool, &task.workflow_id).await?
+        } else {
+            None
+        };
+
+        let workflow_status = workflow
+            .as_ref()
+            .map(|workflow| workflow.status.as_str())
+            .unwrap_or(WORKFLOW_STATUS_FAILED);
+        let task_status = task
+            .as_ref()
+            .map(|task| task.status.as_str())
+            .unwrap_or(TASK_STATUS_CANCELLED);
+
+        let target_status = if workflow_status == WORKFLOW_STATUS_PAUSED
+            && !Self::task_status_blocks_dispatch(task_status)
+        {
+            TERMINAL_STATUS_WAITING
+        } else {
+            self.enforce_terminal_completion_shutdown(workflow_id, terminal)
+                .await;
+            db::models::Terminal::update_process(&self.db.pool, &terminal.id, None, None).await?;
+            db::models::Terminal::update_session(&self.db.pool, &terminal.id, None, None).await?;
+            TERMINAL_STATUS_CANCELLED
+        };
+
+        db::models::Terminal::update_status(&self.db.pool, &terminal.id, target_status).await?;
+        self.message_bus
+            .publish_workflow_event(
+                workflow_id,
+                BusMessage::TerminalStatusUpdate {
+                    workflow_id: workflow_id.to_string(),
+                    terminal_id: terminal.id.clone(),
+                    status: target_status.to_string(),
+                },
+            )
+            .await
+            .ok();
+
+        tracing::warn!(
+            workflow_id,
+            task_id,
+            terminal_id = %terminal.id,
+            workflow_status,
+            task_status,
+            target_status,
+            "Aborted terminal dispatch after CAS because workflow/task became non-runnable"
+        );
+
+        Ok(())
+    }
+
     async fn dispatch_terminal_when_ready_or_queue(
         &self,
         task_id: &str,
@@ -3788,6 +3938,17 @@ impl OrchestratorAgent {
         let terminal = db::models::Terminal::find_by_id(&self.db.pool, &terminal.id)
             .await?
             .unwrap_or_else(|| terminal.clone());
+
+        if !self
+            .task_and_workflow_allow_dispatch(task_id, &terminal.id)
+            .await?
+        {
+            self.queued_terminal_dispatches
+                .lock()
+                .await
+                .retain(|queued| queued.terminal_id != terminal.id);
+            return Ok(());
+        }
 
         match terminal.status.as_str() {
             TERMINAL_STATUS_WAITING => {
@@ -3872,6 +4033,16 @@ impl OrchestratorAgent {
                 continue;
             };
 
+            if Self::task_status_blocks_dispatch(&task.status) {
+                tracing::info!(
+                    task_id = %task.id,
+                    terminal_id = %queued.terminal_id,
+                    task_status = %task.status,
+                    "Dropping queued terminal dispatch because task is final"
+                );
+                continue;
+            }
+
             let Some(workflow) =
                 db::models::Workflow::find_by_id(&self.db.pool, &task.workflow_id).await?
             else {
@@ -3884,13 +4055,7 @@ impl OrchestratorAgent {
             };
 
             if workflow.status != WORKFLOW_STATUS_RUNNING {
-                if matches!(
-                    workflow.status.as_str(),
-                    WORKFLOW_STATUS_COMPLETED
-                        | WORKFLOW_STATUS_FAILED
-                        | WORKFLOW_STATUS_MERGE_PARTIAL_FAILED
-                ) || workflow.status == "cancelled"
-                {
+                if Self::workflow_status_is_finished(&workflow.status) {
                     tracing::debug!(
                         workflow_id = %workflow.id,
                         status = %workflow.status,
@@ -5107,7 +5272,7 @@ impl OrchestratorAgent {
             completion_ctx.changed_files_content.len()
         );
 
-        match self.call_llm_safe(&prompt).await {
+        match self.call_llm_nonfatal(&prompt, "acceptance_review").await {
             Some(response) => {
                 let result = AcceptanceReviewResult::parse(&response);
                 tracing::info!(
@@ -5384,6 +5549,48 @@ impl OrchestratorAgent {
         }
 
         Ok(response.content)
+    }
+
+    async fn call_llm_nonfatal(&self, prompt: &str, context: &str) -> Option<String> {
+        match self.call_llm(prompt).await {
+            Ok(response) => {
+                let mut state = self.state.write().await;
+                state.error_count = 0;
+                drop(state);
+                self.maybe_save_state().await;
+                Some(response)
+            }
+            Err(e) => {
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
+
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    context,
+                    error = %e,
+                    "Nonfatal LLM call failed"
+                );
+
+                if let Err(e2) = self
+                    .message_bus
+                    .publish_workflow_event(
+                        &workflow_id,
+                        BusMessage::Error {
+                            workflow_id: workflow_id.clone(),
+                            error: format!("LLM call failed during {context}: {e}"),
+                        },
+                    )
+                    .await
+                {
+                    tracing::warn!(error = %e2, "Failed to publish nonfatal LLM failure event");
+                }
+
+                self.maybe_save_state().await;
+                None
+            }
+        }
     }
 
     /// Wrapper around `call_llm` that catches errors instead of propagating them.
@@ -6307,6 +6514,15 @@ impl OrchestratorAgent {
             state.mark_terminal_dispatched(task_id, &active_terminal.id);
         }
 
+        if !self
+            .task_and_workflow_allow_dispatch(task_id, &active_terminal.id)
+            .await?
+        {
+            self.abort_dispatch_after_cas(&workflow_id, task_id, &active_terminal)
+                .await?;
+            return Ok(());
+        }
+
         // 3. Get PTY session ID, fail if not available.
         let pty_session_id = if let Some(id) = active_terminal.pty_session_id.as_deref() {
             id.to_string()
@@ -6473,6 +6689,14 @@ impl OrchestratorAgent {
             .enumerate()
         {
             sleep(Duration::from_millis(*delay_ms)).await;
+            if !self
+                .task_and_workflow_allow_dispatch(task_id, &active_terminal.id)
+                .await?
+            {
+                self.abort_dispatch_after_cas(&workflow_id, task_id, &active_terminal)
+                    .await?;
+                return Ok(());
+            }
             self.publish_terminal_input_checked(
                 &workflow_id,
                 &active_terminal.id,
@@ -9515,7 +9739,10 @@ mod tests {
         BusMessage, LLMClient, LLMMessage, LLMResponse, LLMUsage, MessageBus, MockLLMClient,
         OrchestratorConfig, TerminalCompletionEvent, TerminalCompletionStatus, WorkflowArchetype,
         WorkflowStrategy,
-        constants::{TASK_STATUS_REVIEW_PENDING, TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_RUNNING},
+        constants::{
+            TASK_STATUS_CANCELLED, TASK_STATUS_REVIEW_PENDING, TERMINAL_STATUS_CANCELLED,
+            TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_RUNNING,
+        },
     };
 
     fn run_git(repo_path: &Path, args: &[&str]) -> String {
@@ -10343,6 +10570,14 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(task.status, TASK_STATUS_REVIEW_PENDING);
+
+        let workflow =
+            db::models::Workflow::find_by_id(&fixture.db.pool, &fixture.event.workflow_id)
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(workflow.status, WORKFLOW_STATUS_RUNNING);
+        assert_eq!(fixture.agent.state.read().await.error_count, 0);
     }
 
     #[tokio::test]
@@ -10407,6 +10642,124 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn queued_dispatch_drops_cancelled_task_without_restarting_terminal() {
+        let db = in_memory_db().await;
+        let now = Utc::now();
+        let project_id = Uuid::new_v4();
+        let workflow_id = Uuid::new_v4().to_string();
+        let task_id = Uuid::new_v4().to_string();
+        let terminal_id = Uuid::new_v4().to_string();
+
+        sqlx::query(
+            "INSERT INTO projects (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(project_id)
+        .bind("queued-dispatch-project")
+        .bind(now)
+        .bind(now)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r"
+            INSERT INTO workflow (
+                id, project_id, name, status, target_branch,
+                merge_terminal_cli_id, merge_terminal_model_id,
+                created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ",
+        )
+        .bind(&workflow_id)
+        .bind(project_id)
+        .bind("queued-dispatch-workflow")
+        .bind(WORKFLOW_STATUS_RUNNING)
+        .bind("main")
+        .bind("cli-claude-code")
+        .bind("model-claude-sonnet")
+        .bind(now)
+        .bind(now)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r"
+            INSERT INTO workflow_task (
+                id, workflow_id, name, branch, status, order_index,
+                completed_at, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ",
+        )
+        .bind(&task_id)
+        .bind(&workflow_id)
+        .bind("cancelled-task")
+        .bind("feature/cancelled-task")
+        .bind(TASK_STATUS_CANCELLED)
+        .bind(0)
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r"
+            INSERT INTO terminal (
+                id, workflow_task_id, cli_type_id, model_config_id,
+                order_index, status, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ",
+        )
+        .bind(&terminal_id)
+        .bind(&task_id)
+        .bind("cli-claude-code")
+        .bind("model-claude-sonnet")
+        .bind(0)
+        .bind(TERMINAL_STATUS_CANCELLED)
+        .bind(now)
+        .bind(now)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let config = OrchestratorConfig {
+            api_type: "openai".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: "sk-test".to_string(),
+            model: "gpt-4".to_string(),
+            ..Default::default()
+        };
+        let agent = OrchestratorAgent::with_llm_client(
+            config,
+            workflow_id,
+            Arc::new(MessageBus::new(100)),
+            db.clone(),
+            Box::new(MockLLMClient::new()),
+        )
+        .unwrap();
+
+        agent
+            .enqueue_terminal_dispatch(&task_id, &terminal_id, "do work")
+            .await;
+        agent.dispatch_queued_terminals().await.unwrap();
+
+        assert!(
+            agent.queued_terminal_dispatches.lock().await.is_empty(),
+            "cancelled task dispatch should be removed from queue"
+        );
+
+        let terminal = db::models::Terminal::find_by_id(&db.pool, &terminal_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal.status, TERMINAL_STATUS_CANCELLED);
+        assert!(terminal.process_id.is_none());
+        assert!(terminal.pty_session_id.is_none());
+    }
+
+    #[tokio::test]
     async fn git_completion_records_terminal_last_commit_before_gates() {
         let fixture = setup_acceptance_review_gate_fixture(|_| {
             Box::new(MockLLMClient::with_response(
@@ -10460,6 +10813,14 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(task.status, TASK_STATUS_REVIEW_PENDING);
+
+        let workflow =
+            db::models::Workflow::find_by_id(&fixture.db.pool, &fixture.event.workflow_id)
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(workflow.status, WORKFLOW_STATUS_RUNNING);
+        assert_eq!(fixture.agent.state.read().await.error_count, 0);
     }
 
     #[tokio::test]

@@ -10,7 +10,41 @@ const { getPorts } = require("./setup-dev-environment");
 const children = new Set();
 let shuttingDown = false;
 const devLockPath = path.join(os.tmpdir(), "solodawn", "run-dev.lock");
+const runtimeLogDir = path.join(__dirname, "..", "runtime-logs");
+const combinedLogPath = path.join(runtimeLogDir, "dev-restart.log");
 let lockFd = null;
+let combinedLogStream = null;
+const processLogStreams = new Map();
+
+function ensureLogStreams() {
+  fs.mkdirSync(runtimeLogDir, { recursive: true });
+  if (!combinedLogStream) {
+    combinedLogStream = fs.createWriteStream(combinedLogPath, { flags: "a" });
+    combinedLogStream.write(
+      `\n\n===== dev session ${new Date().toISOString()} pid=${process.pid} =====\n`
+    );
+  }
+}
+
+function writeLogLine(name, streamName, chunk) {
+  ensureLogStreams();
+  let processLogStream = processLogStreams.get(name);
+  if (!processLogStream) {
+    const processLogPath = path.join(runtimeLogDir, `${name}.log`);
+    processLogStream = fs.createWriteStream(processLogPath, { flags: "a" });
+    processLogStreams.set(name, processLogStream);
+    processLogStream.write(
+      `\n\n===== ${name} session ${new Date().toISOString()} pid=${process.pid} =====\n`
+    );
+  }
+  processLogStream.write(chunk);
+
+  combinedLogStream.write(`[${name}:${streamName}] `);
+  combinedLogStream.write(chunk);
+  if (!String(chunk).endsWith("\n")) {
+    combinedLogStream.write("\n");
+  }
+}
 
 function getPathKey(env) {
   return Object.keys(env).find((name) => name.toLowerCase() === "path") ?? "PATH";
@@ -109,6 +143,14 @@ function acquireDevLock() {
 }
 
 function releaseDevLock() {
+  for (const stream of processLogStreams.values()) {
+    stream.end();
+  }
+  processLogStreams.clear();
+  if (combinedLogStream) {
+    combinedLogStream.end();
+    combinedLogStream = null;
+  }
   if (lockFd !== null) {
     try {
       fs.closeSync(lockFd);
@@ -206,8 +248,9 @@ function resolveCommand(command, args) {
  */
 function run(name, command, args, options) {
   const resolved = resolveCommand(command, args);
+  ensureLogStreams();
   const spawnOptions = {
-    stdio: "inherit",
+    stdio: ["inherit", "pipe", "pipe"],
     ...options
   };
   const executable = resolveExecutable(resolved.command, spawnOptions.env ?? process.env);
@@ -218,6 +261,16 @@ function run(name, command, args, options) {
   const child = spawn(executable, resolved.args, spawnOptions);
 
   children.add(child);
+
+  child.stdout?.on("data", (chunk) => {
+    process.stdout.write(chunk);
+    writeLogLine(name, "stdout", chunk);
+  });
+
+  child.stderr?.on("data", (chunk) => {
+    process.stderr.write(chunk);
+    writeLogLine(name, "stderr", chunk);
+  });
 
   child.on("error", (err) => {
     console.error(`[dev] Failed to start ${name}: ${err.message}`);
