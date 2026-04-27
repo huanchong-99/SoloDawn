@@ -46,6 +46,17 @@ function writeLogLine(name, streamName, chunk) {
   }
 }
 
+function devLog(message, streamName = "stdout") {
+  ensureLogStreams();
+  const line = `${message}\n`;
+  if (streamName === "stderr") {
+    process.stderr.write(line);
+  } else {
+    process.stdout.write(line);
+  }
+  combinedLogStream.write(`[dev:${streamName}] ${line}`);
+}
+
 function getPathKey(env) {
   return Object.keys(env).find((name) => name.toLowerCase() === "path") ?? "PATH";
 }
@@ -170,6 +181,40 @@ function envFlag(name, defaultValue = false) {
   const raw = process.env[name];
   if (raw == null || raw === "") return defaultValue;
   return /^(1|true|yes|on)$/i.test(raw.trim());
+}
+
+function hasCliFlag(name) {
+  return process.argv.slice(2).includes(name);
+}
+
+function backendProfile() {
+  if (hasCliFlag("--release")) {
+    return "release";
+  }
+  const raw = (
+    process.env.SOLODAWN_DEV_BACKEND_PROFILE ??
+    process.env.DEV_BACKEND_PROFILE ??
+    "debug"
+  )
+    .trim()
+    .toLowerCase();
+  if (raw === "release" || raw === "prod" || raw === "production") {
+    return "release";
+  }
+  return "debug";
+}
+
+function backendCargoRunArgs(profile) {
+  const args = ["run"];
+  if (profile === "release") {
+    args.push("--release");
+  }
+  args.push("--bin", "server");
+  return args;
+}
+
+function backendWatchArgs(profile) {
+  return ["watch", "-w", "crates", "--", "cargo", ...backendCargoRunArgs(profile)];
 }
 
 function windowsPortCleanupMode() {
@@ -493,12 +538,14 @@ if (process.platform === "win32") {
 
 async function main() {
   acquireDevLock();
-  console.log("[dev] Setting up development environment...");
+  devLog("[dev] Setting up development environment...");
 
   const ports = await getPorts();
+  const profile = backendProfile();
 
-  console.log(`[dev] Frontend port: ${ports.frontend}`);
-  console.log(`[dev] Backend port: ${ports.backend}`);
+  devLog(`[dev] Frontend port: ${ports.frontend}`);
+  devLog(`[dev] Backend port: ${ports.backend}`);
+  devLog(`[dev] Backend profile: ${profile}`);
 
   // Clean stale listeners up-front to avoid partial startup followed by
   // cascading shutdown (frontend failure causing backend to exit).
@@ -523,17 +570,18 @@ async function main() {
     FRONTEND_PORT: String(ports.frontend),
     BACKEND_PORT: String(ports.backend),
     DISABLE_WORKTREE_ORPHAN_CLEANUP: "1",
-    RUST_LOG: "debug",
+    RUST_LOG: process.env.RUST_LOG ?? (profile === "release" ? "info" : "debug"),
+    ...(profile === "release"
+      ? {
+          SOLODAWN_LOCAL_MODE: process.env.SOLODAWN_LOCAL_MODE ?? "1",
+          SOLODAWN_NO_BROWSER: process.env.SOLODAWN_NO_BROWSER ?? "1",
+        }
+      : {}),
     ...(protoc ? { PROTOC: protoc } : {}),
   };
 
   // Start backend
-  run(
-    "backend",
-    "cargo",
-    ["watch", "-w", "crates", "--", "cargo", "run", "--bin", "server"],
-    { env }
-  );
+  run("backend", "cargo", backendWatchArgs(profile), { env });
 
   console.log(
     `[dev] Waiting for backend readiness on 127.0.0.1:${ports.backend}...`
