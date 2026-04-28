@@ -873,10 +873,10 @@ async fn materialize_draft(
             match crate::routes::workflows::auto_prepare_and_start(dep, &wf_uuid.to_string()).await
             {
                 Ok(()) => {
-                    tracing::info!(workflow_id = %wf_uuid, "Auto-started materialized workflow")
+                    tracing::info!(workflow_id = %wf_uuid, "Auto-started materialized workflow");
                 }
                 Err(e) => {
-                    tracing::warn!(workflow_id = %wf_uuid, error = ?e, "Failed to auto-start workflow")
+                    tracing::warn!(workflow_id = %wf_uuid, error = ?e, "Failed to auto-start workflow");
                 }
             }
         });

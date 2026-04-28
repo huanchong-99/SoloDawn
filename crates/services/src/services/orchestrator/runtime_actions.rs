@@ -682,7 +682,7 @@ impl RuntimeActionService {
 fn normalize_runtime_config_hint(value: &str) -> String {
     value
         .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
+        .filter(char::is_ascii_alphanumeric)
         .map(|ch| ch.to_ascii_lowercase())
         .collect()
 }

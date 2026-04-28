@@ -1380,15 +1380,16 @@ mod orchestrator_tests {
         sqlx::query(
             r"
             INSERT INTO workflow (
-                id, project_id, name, target_branch,
+                id, project_id, name, status, target_branch,
                 merge_terminal_cli_id, merge_terminal_model_id,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             ",
         )
         .bind(&workflow_id)
         .bind(project_id)
         .bind("test-workflow")
+        .bind("running")
         .bind("main")
         .bind("cli-claude-code")
         .bind("model-claude-sonnet")
@@ -1402,15 +1403,16 @@ mod orchestrator_tests {
         sqlx::query(
             r"
             INSERT INTO workflow_task (
-                id, workflow_id, name, branch, order_index,
+                id, workflow_id, name, branch, status, order_index,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ",
         )
         .bind(&task_id)
         .bind(&workflow_id)
         .bind("test-task")
         .bind("feature/test")
+        .bind("running")
         .bind(0)
         .bind(chrono::Utc::now())
         .bind(chrono::Utc::now())
@@ -1598,7 +1600,7 @@ mod orchestrator_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(task.status, "pending");
+        assert_eq!(task.status, "running");
     }
 
     #[tokio::test]
@@ -2321,8 +2323,7 @@ next_action: handoff",
         );
 
         // Handle git event
-        agent
-            .handle_git_event(&workflow.id, "abc123", "main", commit_message.as_str())
+        Box::pin(agent.handle_git_event(&workflow.id, "abc123", "main", commit_message.as_str()))
             .await
             .unwrap();
 
@@ -2411,8 +2412,7 @@ next_action: handoff",
         );
 
         // Terminal has recent activity (updated_at from setup), so completion should be deferred.
-        agent
-            .handle_git_event(&workflow.id, "abc123", "main", commit_message.as_str())
+        Box::pin(agent.handle_git_event(&workflow.id, "abc123", "main", commit_message.as_str()))
             .await
             .unwrap();
 
@@ -2496,18 +2496,18 @@ next_action: handoff",
             workflow.id, terminal.workflow_task_id, terminal.id
         );
 
-        let first_call = agent.handle_git_event(
+        let first_call = Box::pin(agent.handle_git_event(
             &workflow.id,
             "race_completion_hash_1",
             "main",
             commit_message.as_str(),
-        );
-        let second_call = agent.handle_git_event(
+        ));
+        let second_call = Box::pin(agent.handle_git_event(
             &workflow.id,
             "race_completion_hash_2",
             "main",
             commit_message.as_str(),
-        );
+        ));
 
         let (first_result, second_result) = tokio::join!(first_call, second_call);
         assert!(
@@ -2594,8 +2594,7 @@ next_action: handoff",
             workflow.id, terminal.workflow_task_id, terminal.id
         );
 
-        agent
-            .handle_git_event(&workflow.id, "abc123", "main", commit_message.as_str())
+        Box::pin(agent.handle_git_event(&workflow.id, "abc123", "main", commit_message.as_str()))
             .await
             .unwrap();
 
@@ -2670,8 +2669,7 @@ next_action: handoff",
             workflow_id, task_id, second_terminal_id
         );
 
-        agent
-            .handle_git_event(&workflow_id, "def456", "main", commit_message.as_str())
+        Box::pin(agent.handle_git_event(&workflow_id, "def456", "main", commit_message.as_str()))
             .await
             .unwrap();
 
@@ -2759,14 +2757,13 @@ next_action: handoff",
             workflow_id, task_id, first_terminal_id
         );
 
-        let result = agent
-            .handle_git_event(
-                &workflow_id,
-                "metadata_handoff_without_state_1",
-                "main",
-                &commit_message,
-            )
-            .await;
+        let result = Box::pin(agent.handle_git_event(
+            &workflow_id,
+            "metadata_handoff_without_state_1",
+            "main",
+            &commit_message,
+        ))
+        .await;
         assert!(
             result.is_ok(),
             "Metadata completion event should be handled"
@@ -2846,8 +2843,7 @@ reviewed_terminal: {}",
             workflow.id, terminal.workflow_task_id, terminal.id
         );
 
-        agent
-            .handle_git_event(&workflow.id, "abc123", "main", commit_message.as_str())
+        Box::pin(agent.handle_git_event(&workflow.id, "abc123", "main", commit_message.as_str()))
             .await
             .unwrap();
 
@@ -2916,9 +2912,8 @@ status: completed
 next_action: handoff";
 
         // Should succeed but do nothing (workflow mismatch)
-        let result = agent
-            .handle_git_event(&workflow.id, "abc123", "main", commit_message)
-            .await;
+        let result =
+            Box::pin(agent.handle_git_event(&workflow.id, "abc123", "main", commit_message)).await;
 
         assert!(result.is_ok());
     }
@@ -3101,15 +3096,15 @@ next_action: handoff",
         let commit_hash = "unique_commit_hash_123";
 
         // First call should process the commit
-        let result1 = agent
-            .handle_git_event(&workflow.id, commit_hash, "main", &commit_message)
-            .await;
+        let result1 =
+            Box::pin(agent.handle_git_event(&workflow.id, commit_hash, "main", &commit_message))
+                .await;
         assert!(result1.is_ok(), "First call should succeed");
 
         // Second call with same commit hash should be idempotent (no error, but no processing)
-        let result2 = agent
-            .handle_git_event(&workflow.id, commit_hash, "main", &commit_message)
-            .await;
+        let result2 =
+            Box::pin(agent.handle_git_event(&workflow.id, commit_hash, "main", &commit_message))
+                .await;
         assert!(result2.is_ok(), "Second call should succeed (idempotent)");
 
         // Verify terminal status is still completed (not double-processed)
@@ -3181,14 +3176,13 @@ next_action: handoff",
             .expect("Task ID should have prefix");
         let commit_message = format!("chore: no-op advance for task {task_prefix}");
 
-        let result = agent
-            .handle_git_event(
-                &workflow_id,
-                "no_metadata_commit_456",
-                "main",
-                &commit_message,
-            )
-            .await;
+        let result = Box::pin(agent.handle_git_event(
+            &workflow_id,
+            "no_metadata_commit_456",
+            "main",
+            &commit_message,
+        ))
+        .await;
         assert!(result.is_ok(), "No-metadata commit should be handled");
 
         let first_terminal = Terminal::find_by_id(&db.pool, &first_terminal_id)
@@ -3321,27 +3315,25 @@ next_action: handoff",
         .unwrap();
 
         let commit_message = "chore: advance orchestrator (no changes needed)";
-        let first_result = agent
-            .handle_git_event(
-                &workflow.id,
-                "no_metadata_parallel_commit_1",
-                "main",
-                commit_message,
-            )
-            .await;
+        let first_result = Box::pin(agent.handle_git_event(
+            &workflow.id,
+            "no_metadata_parallel_commit_1",
+            "main",
+            commit_message,
+        ))
+        .await;
         assert!(
             first_result.is_ok(),
             "First no-metadata commit should be handled"
         );
 
-        let second_result = agent
-            .handle_git_event(
-                &workflow.id,
-                "no_metadata_parallel_commit_2",
-                "main",
-                commit_message,
-            )
-            .await;
+        let second_result = Box::pin(agent.handle_git_event(
+            &workflow.id,
+            "no_metadata_parallel_commit_2",
+            "main",
+            commit_message,
+        ))
+        .await;
         assert!(
             second_result.is_ok(),
             "Second no-metadata commit should be handled"
@@ -3434,14 +3426,13 @@ next_action: handoff",
         .unwrap();
 
         let commit_message = "chore: no-op advance for task deadbeef";
-        let result = agent
-            .handle_git_event(
-                &workflow.id,
-                "no_metadata_commit_789",
-                "main",
-                commit_message,
-            )
-            .await;
+        let result = Box::pin(agent.handle_git_event(
+            &workflow.id,
+            "no_metadata_commit_789",
+            "main",
+            commit_message,
+        ))
+        .await;
         assert!(
             result.is_ok(),
             "No-metadata inference failure should not crash agent"

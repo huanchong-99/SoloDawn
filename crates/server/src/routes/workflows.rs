@@ -3385,15 +3385,14 @@ pub(crate) async fn submit_orchestrator_chat(
         "Orchestrator command accepted"
     );
 
-    let command_result = runtime
-        .submit_orchestrator_chat_with_command_id(
-            &workflow_id,
-            message,
-            source,
-            external_message_id,
-            Some(command_id.clone()),
-        )
-        .await;
+    let command_result = Box::pin(runtime.submit_orchestrator_chat_with_command_id(
+        &workflow_id,
+        message,
+        source,
+        external_message_id,
+        Some(command_id.clone()),
+    ))
+    .await;
 
     let (status, error, retryable) = match command_result {
         Ok(result) => (

@@ -1,3 +1,4 @@
+#![allow(clippy::large_futures)]
 //! Orchestrator 主 Agent 模块
 //!
 //! 负责协调多个 AI 编码代理完成软件开发任务。

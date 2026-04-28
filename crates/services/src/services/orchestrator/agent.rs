@@ -8073,7 +8073,7 @@ impl OrchestratorAgent {
             .iter()
             .rev()
             .find(|terminal| !repair_task_ids.contains(&terminal.workflow_task_id))
-            .or_else(|| terminals.iter().rev().next())
+            .or_else(|| terminals.iter().next_back())
             .ok_or_else(|| anyhow!("no existing terminal runtime is available for repair"))?;
         Ok((source.cli_type_id.clone(), source.model_config_id.clone()))
     }
@@ -8186,10 +8186,10 @@ impl OrchestratorAgent {
     }
 
     fn stable_short_hash(input: &str) -> String {
-        let mut hash = 0xcbf29ce484222325_u64;
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
         for byte in input.bytes() {
             hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x100000001b3);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
         format!("{hash:016x}")
     }
