@@ -6135,6 +6135,7 @@ impl OrchestratorAgent {
                         &workflow_id,
                         "terminal_enforce_blockers",
                         "At least one completed terminal still has unresolved enforce quality blockers. Re-run the failing checks, fix the blocker(s), and commit the integration repair.",
+                        None,
                     )
                     .await?;
                     return Ok(());
@@ -7536,7 +7537,7 @@ impl OrchestratorAgent {
             let reason = artifact_issues.join("; ");
             self.publish_final_gate_blocked(workflow_id, "artifact_readiness", reason.clone())
                 .await;
-            self.ensure_final_repair_task(workflow_id, "artifact_readiness", &reason)
+            self.ensure_final_repair_task(workflow_id, "artifact_readiness", &reason, None)
                 .await?;
             return Ok(false);
         }
@@ -7743,8 +7744,13 @@ impl OrchestratorAgent {
         self.publish_final_gate_blocked(workflow_id, gate_level, fix_instructions.clone())
             .await;
         if self.config.quality_gate_mode == QUALITY_GATE_MODE_ENFORCE {
-            self.ensure_final_repair_task(workflow_id, gate_level, &fix_instructions)
-                .await?;
+            self.ensure_final_repair_task(
+                workflow_id,
+                gate_level,
+                &fix_instructions,
+                Some(run_id.as_str()),
+            )
+            .await?;
         }
 
         Ok(self.config.quality_gate_mode != QUALITY_GATE_MODE_ENFORCE)
@@ -7790,7 +7796,7 @@ impl OrchestratorAgent {
             workflow_id = %workflow_id,
             gate_level,
             reason = %reason,
-            "Final readiness gate blocked workflow completion"
+            "Final readiness gate found repairable workflow final issues"
         );
         let message = BusMessage::Error {
             workflow_id: workflow_id.to_string(),
@@ -7817,13 +7823,14 @@ impl OrchestratorAgent {
         workflow_id: &str,
         gate_level: &str,
         reason: &str,
+        quality_run_id: Option<&str>,
     ) -> anyhow::Result<()> {
         if self.config.quality_gate_mode != QUALITY_GATE_MODE_ENFORCE {
             return Ok(());
         }
 
         let result = self
-            .ensure_final_repair_task_inner(workflow_id, gate_level, reason)
+            .ensure_final_repair_task_inner(workflow_id, gate_level, reason, quality_run_id)
             .await;
         if let Err(error) = result {
             let failure_reason =
@@ -7845,6 +7852,7 @@ impl OrchestratorAgent {
         workflow_id: &str,
         gate_level: &str,
         reason: &str,
+        quality_run_id: Option<&str>,
     ) -> anyhow::Result<()> {
         if !self.is_agent_planned_workflow().await? {
             anyhow::bail!("final repair loop requires an agent_planned workflow");
@@ -7862,10 +7870,28 @@ impl OrchestratorAgent {
                 TASK_STATUS_COMPLETED | TASK_STATUS_FAILED | TASK_STATUS_CANCELLED
             )
         });
+        let fingerprint = Self::final_repair_fingerprint(gate_level, reason);
+        let fingerprint_marker = Self::final_repair_marker(&fingerprint);
+        let repeated_blocker_rounds = repair_tasks
+            .iter()
+            .filter(|task| {
+                task.description
+                    .as_deref()
+                    .is_some_and(|description| description.contains(&fingerprint_marker))
+            })
+            .count();
+        let repair_reason =
+            Self::final_repair_reason_with_escalation(reason, repeated_blocker_rounds);
 
         if let Some(task) = active_repair {
-            self.ensure_final_repair_terminal(workflow_id, task, gate_level, reason)
-                .await?;
+            self.ensure_final_repair_terminal(
+                workflow_id,
+                task,
+                gate_level,
+                &repair_reason,
+                quality_run_id,
+            )
+            .await?;
             return Ok(());
         }
 
@@ -7887,7 +7913,11 @@ impl OrchestratorAgent {
                     description: Some(format!(
                         "Automatically repair final delivery blockers from {gate_level}. \
                          This task must run the real build/tests, fix integration defects, \
-                         commit the repair, and allow final gates to rerun.\n\nBlockers:\n{reason}"
+                         commit the repair, and allow final gates to rerun.\n\n\
+                         Quality run id: {quality_run_id}\n\
+                         {fingerprint_marker}\n\n\
+                         Blockers:\n{repair_reason}",
+                        quality_run_id = quality_run_id.unwrap_or("n/a"),
                     )),
                     branch: Some(branch),
                     order_index: None,
@@ -7908,8 +7938,14 @@ impl OrchestratorAgent {
         .await;
         self.publish_repairing_final_issues_status(workflow_id)
             .await;
-        self.ensure_final_repair_terminal(workflow_id, &task, gate_level, reason)
-            .await
+        self.ensure_final_repair_terminal(
+            workflow_id,
+            &task,
+            gate_level,
+            &repair_reason,
+            quality_run_id,
+        )
+        .await
     }
 
     async fn ensure_final_repair_terminal(
@@ -7918,6 +7954,7 @@ impl OrchestratorAgent {
         task: &db::models::WorkflowTask,
         gate_level: &str,
         reason: &str,
+        quality_run_id: Option<&str>,
     ) -> anyhow::Result<()> {
         let mut terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id).await?;
         if let Some(active) = terminals.iter().find(|terminal| {
@@ -7934,7 +7971,14 @@ impl OrchestratorAgent {
                 TERMINAL_STATUS_WAITING | TERMINAL_STATUS_NOT_STARTED
             ) {
                 let instruction = self
-                    .build_final_repair_instruction(workflow_id, task, active, gate_level, reason)
+                    .build_final_repair_instruction(
+                        workflow_id,
+                        task,
+                        active,
+                        gate_level,
+                        reason,
+                        quality_run_id,
+                    )
                     .await?;
                 self.dispatch_terminal_when_ready_or_queue(&task.id, active, &instruction)
                     .await?;
@@ -7999,7 +8043,14 @@ impl OrchestratorAgent {
         }
 
         let instruction = self
-            .build_final_repair_instruction(workflow_id, task, &terminal, gate_level, reason)
+            .build_final_repair_instruction(
+                workflow_id,
+                task,
+                &terminal,
+                gate_level,
+                reason,
+                quality_run_id,
+            )
             .await?;
         self.dispatch_terminal_when_ready_or_queue(&task.id, &terminal, &instruction)
             .await?;
@@ -8034,6 +8085,7 @@ impl OrchestratorAgent {
         terminal: &db::models::Terminal,
         gate_level: &str,
         reason: &str,
+        quality_run_id: Option<&str>,
     ) -> anyhow::Result<String> {
         let workflow = db::models::Workflow::find_by_id(&self.db.pool, workflow_id)
             .await?
@@ -8070,6 +8122,7 @@ impl OrchestratorAgent {
              ## Original user goal\n{goal}\n\n\
              ## Completed task summary\n{task_summary}\n\n\
              ## Failing final gate\n{gate_level}\n\n\
+             ## Quality run id\n{quality_run_id}\n\n\
              ## Blocking evidence\n{reason}\n\n\
              ## Required repair loop\n\
              1. Reproduce the blocker using the real project entrypoint, package, build, or test command.\n\
@@ -8080,7 +8133,8 @@ impl OrchestratorAgent {
              Identify real entrypoints, package boundaries, stores/composables/i18n/testing conventions first. \
              Reuse the existing architecture. Do not create duplicate engines, duplicate stores, fake apps, \
              or tests that bypass production code.\n\n\
-             Commit message must include this metadata block exactly:\n{metadata}"
+             Commit message must include this metadata block exactly:\n{metadata}",
+            quality_run_id = quality_run_id.unwrap_or("n/a"),
         ))
     }
 
@@ -8108,6 +8162,50 @@ impl OrchestratorAgent {
         task.name
             .trim()
             .eq_ignore_ascii_case(FINAL_REPAIR_TASK_NAME)
+    }
+
+    fn final_repair_fingerprint(gate_level: &str, reason: &str) -> String {
+        let normalized = format!(
+            "{}:{}",
+            gate_level.trim().to_ascii_lowercase(),
+            Self::normalized_final_repair_reason(reason)
+        );
+        Self::stable_short_hash(&normalized)
+    }
+
+    fn final_repair_marker(fingerprint: &str) -> String {
+        format!("Final-Repair-Fingerprint: {fingerprint}")
+    }
+
+    fn normalized_final_repair_reason(reason: &str) -> String {
+        reason
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase()
+    }
+
+    fn stable_short_hash(input: &str) -> String {
+        let mut hash = 0xcbf29ce484222325_u64;
+        for byte in input.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        format!("{hash:016x}")
+    }
+
+    fn final_repair_reason_with_escalation(reason: &str, repeated_blocker_rounds: usize) -> String {
+        if repeated_blocker_rounds == 0 {
+            return reason.to_string();
+        }
+
+        format!(
+            "{reason}\n\n\
+             Repeated final blocker detected: this same blocker fingerprint has already survived \
+             {repeated_blocker_rounds} repair round(s). Do not repeat the previous patch shape. \
+             Reproduce the failing gate first, identify why the earlier repair did not clear it, \
+             then change strategy and commit a verifiable fix."
+        )
     }
 
     fn artifact_readiness_issues(repo_root: &Path, strategy: WorkflowStrategy) -> Vec<String> {
@@ -8212,6 +8310,13 @@ impl OrchestratorAgent {
     //   2. SQLite single-writer ensures the status update is atomic.
     //   3. If a terminal completes after the check, the next event loop iteration
     //      will re-enter this method and the state will converge correctly.
+    pub(crate) async fn reconcile_workflow_completion_from_runtime(
+        &self,
+        workflow_id: &str,
+    ) -> anyhow::Result<()> {
+        self.auto_sync_workflow_completion(workflow_id).await
+    }
+
     async fn auto_sync_workflow_completion(&self, workflow_id: &str) -> anyhow::Result<()> {
         let Some(workflow) = db::models::Workflow::find_by_id(&self.db.pool, workflow_id).await?
         else {
@@ -8313,6 +8418,7 @@ impl OrchestratorAgent {
                 workflow_id,
                 "terminal_enforce_blockers",
                 "Auto-completion is blocked because at least one terminal still has unresolved enforce quality blockers. Fix the blocker(s), run the real build/tests, and commit.",
+                None,
             )
             .await?;
             return Ok(());
@@ -10278,6 +10384,28 @@ mod tests {
         .expect("test artifact");
 
         assert!(OrchestratorAgent::artifact_readiness_issues(root, greenfield).is_empty());
+    }
+
+    #[test]
+    fn final_repair_fingerprint_is_stable_and_escalates_repeated_blockers() {
+        let first =
+            OrchestratorAgent::final_repair_fingerprint("branch", "Missing smoke test\n  in app");
+        let second =
+            OrchestratorAgent::final_repair_fingerprint(" branch ", "missing   smoke test in app");
+        assert_eq!(first, second);
+
+        let marker = OrchestratorAgent::final_repair_marker(&first);
+        assert!(marker.starts_with("Final-Repair-Fingerprint: "));
+
+        let unchanged =
+            OrchestratorAgent::final_repair_reason_with_escalation("Fix branch gate", 0);
+        assert_eq!(unchanged, "Fix branch gate");
+
+        let escalated =
+            OrchestratorAgent::final_repair_reason_with_escalation("Fix branch gate", 2);
+        assert!(escalated.contains("Repeated final blocker detected"));
+        assert!(escalated.contains("2 repair round"));
+        assert!(escalated.contains("change strategy"));
     }
 
     fn make_terminal(order_index: i32) -> db::models::Terminal {

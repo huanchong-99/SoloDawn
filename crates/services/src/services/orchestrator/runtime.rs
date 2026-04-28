@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use super::{
     OrchestratorAgent, OrchestratorConfig, SharedMessageBus,
-    constants::{WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_READY},
+    constants::{WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_READY, WORKFLOW_STATUS_RUNNING},
     persistence::StatePersistence,
     runtime_actions::RuntimeActionService,
     types::LLMMessage,
@@ -824,6 +824,54 @@ impl OrchestratorRuntime {
     pub async fn is_running(&self, workflow_id: &str) -> bool {
         let running = self.running_workflows.lock().await;
         running.contains_key(workflow_id)
+    }
+
+    /// Re-run the agent-side completion reconciliation for a workflow detail
+    /// request or recovery probe.
+    ///
+    /// Returns `Ok(true)` when a live or successfully resumed agent accepted
+    /// the reconciliation request. Returns `Ok(false)` when the workflow is not
+    /// running or no persisted agent state is available to resume.
+    pub async fn reconcile_workflow_completion(&self, workflow_id: &str) -> Result<bool> {
+        if let Some(agent) = {
+            let running = self.running_workflows.lock().await;
+            running.get(workflow_id).map(|rw| Arc::clone(&rw.agent))
+        } {
+            agent
+                .reconcile_workflow_completion_from_runtime(workflow_id)
+                .await?;
+            return Ok(true);
+        }
+
+        let Some(workflow) = db::models::Workflow::find_by_id(&self.db.pool, workflow_id).await?
+        else {
+            return Ok(false);
+        };
+        if workflow.status != WORKFLOW_STATUS_RUNNING {
+            return Ok(false);
+        }
+
+        match self.try_resume_workflow(workflow_id).await {
+            Ok(true) => {
+                if let Some(agent) = {
+                    let running = self.running_workflows.lock().await;
+                    running.get(workflow_id).map(|rw| Arc::clone(&rw.agent))
+                } {
+                    agent
+                        .reconcile_workflow_completion_from_runtime(workflow_id)
+                        .await?;
+                }
+                Ok(true)
+            }
+            Ok(false) => {
+                warn!(
+                    workflow_id = %workflow_id,
+                    "Workflow detail reconciliation found no persisted orchestrator state"
+                );
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Get live provider status for a running workflow.

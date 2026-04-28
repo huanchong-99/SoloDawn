@@ -12,9 +12,11 @@ import {
 import type { ConciergeMessage, ConciergeSession } from '@/lib/conciergeApi';
 import type { WorkflowDetailDto } from 'shared/types';
 import { useTranslation } from 'react-i18next';
+import { getWorkflowDisplayStatus } from '@/utils/workflowDisplayStatus';
 
 function workflowStatusClass(status: string): string {
-  if (status === 'running' || status === 'completed') return 'bg-success/20 text-success';
+  if (status === 'running' || status === 'completed')
+    return 'bg-success/20 text-success';
   if (status === 'failed') return 'bg-error/20 text-error';
   return 'bg-secondary text-low';
 }
@@ -61,13 +63,19 @@ interface ConciergeChatViewProps {
   readonly onToggleFeishuSync?: () => void;
   readonly onSyncHistory?: () => void;
   readonly syncToggles?: SyncToggles;
-  readonly onUpdateSyncToggle?: (key: keyof SyncToggles, value: boolean) => void;
+  readonly onUpdateSyncToggle?: (
+    key: keyof SyncToggles,
+    value: boolean
+  ) => void;
 }
 
 function SourceBadge({ provider }: { readonly provider: string | null }) {
   const { t } = useTranslation('common');
   if (!provider) return null;
-  const label = provider === 'feishu' ? t('concierge.sourceFeishu') : t('concierge.sourceWeb');
+  const label =
+    provider === 'feishu'
+      ? t('concierge.sourceFeishu')
+      : t('concierge.sourceWeb');
   return (
     <span className="inline-flex items-center rounded bg-secondary px-1 py-px text-xs text-low">
       {label}
@@ -113,7 +121,9 @@ function MessageBubble({ message }: { readonly message: ConciergeMessage }) {
   }
 
   return (
-    <div className={`flex gap-half ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+    <div
+      className={`flex gap-half ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
+    >
       <div
         className={`flex size-6 shrink-0 items-center justify-center rounded-full ${
           isUser ? 'bg-brand/20 text-brand' : 'bg-secondary text-normal'
@@ -205,19 +215,30 @@ function SyncTogglesPanel({
   );
 }
 
-function WorkflowProgressPanel({ workflow }: { readonly workflow: WorkflowDetailDto }) {
+function WorkflowProgressPanel({
+  workflow,
+}: {
+  readonly workflow: WorkflowDetailDto;
+}) {
   const { t } = useTranslation('common');
+  const displayStatus = getWorkflowDisplayStatus(workflow);
   const tasks = workflow.tasks ?? [];
-  const completedTasks = tasks.filter(t => t.status === 'completed').length;
-  const allTerminals = tasks.flatMap(t => t.terminals ?? []);
-  const workingTerminals = allTerminals.filter(t => t.status === 'working');
+  const completedTasks = tasks.filter((t) => t.status === 'completed').length;
+  const allTerminals = tasks.flatMap((t) => t.terminals ?? []);
+  const workingTerminals = allTerminals.filter((t) => t.status === 'working');
 
   return (
     <div className="mx-base rounded border bg-secondary/50 px-base py-half">
       <div className="flex items-center gap-half text-sm">
         <span className="font-medium text-normal">{workflow.name}</span>
-        <span className={`rounded-full px-1.5 py-px text-xs ${workflowStatusClass(workflow.status)}`}>
-          {workflow.status}
+        <span
+          className={`rounded-full px-1.5 py-px text-xs ${workflowStatusClass(workflow.status)}`}
+        >
+          {displayStatus === 'repairing_final_issues'
+            ? t('concierge.repairingFinalIssues', {
+                defaultValue: 'repairing final issues',
+              })
+            : workflow.status}
         </span>
         <a
           href={`/pipeline/${workflow.id}`}
@@ -230,15 +251,20 @@ function WorkflowProgressPanel({ workflow }: { readonly workflow: WorkflowDetail
       {tasks.length > 0 && (
         <div className="mt-half flex flex-col gap-px">
           <span className="text-xs text-low">
-            {t('concierge.tasksProgress', { completed: completedTasks, total: tasks.length })}
+            {t('concierge.tasksProgress', {
+              completed: completedTasks,
+              total: tasks.length,
+            })}
           </span>
-          {tasks.map(task => (
+          {tasks.map((task) => (
             <div key={task.id} className="flex items-center gap-half text-xs">
-              <span className={`inline-block size-1.5 rounded-full ${taskDotClass(task.status)}`} />
+              <span
+                className={`inline-block size-1.5 rounded-full ${taskDotClass(task.status)}`}
+              />
               <span className="truncate text-normal">{task.name}</span>
               {(task.terminals ?? []).length > 0 && (
                 <div className="ml-auto flex gap-px">
-                  {(task.terminals ?? []).map(term => (
+                  {(task.terminals ?? []).map((term) => (
                     <span
                       key={term.id}
                       title={`${term.role ?? 'terminal'}: ${term.status}`}
@@ -251,7 +277,9 @@ function WorkflowProgressPanel({ workflow }: { readonly workflow: WorkflowDetail
           ))}
           {workingTerminals.length > 0 && (
             <span className="text-xs text-low">
-              {t('concierge.terminalsWorking', { count: workingTerminals.length })}
+              {t('concierge.terminalsWorking', {
+                count: workingTerminals.length,
+              })}
             </span>
           )}
         </div>
@@ -288,12 +316,14 @@ export function ConciergeChatView({
       {/* Header */}
       <div className="flex items-center gap-base border-b px-base py-half">
         <ChatCircleIcon className="size-icon-sm text-brand" weight="fill" />
-        <h2 className="text-lg font-medium text-high">{sessionName}</h2>{activeWorkflowId && (
+        <h2 className="text-lg font-medium text-high">{sessionName}</h2>
+        {activeWorkflowId && (
           <a
             href={`/pipeline/${activeWorkflowId}`}
             className="flex items-center gap-1 rounded-full bg-success/20 px-base py-px text-xs text-success hover:bg-success/30 transition-colors"
           >
-            <span className="inline-block size-1.5 rounded-full bg-success animate-pulse" /><span>{t('concierge.viewWorkflowProgress')}</span>
+            <span className="inline-block size-1.5 rounded-full bg-success animate-pulse" />
+            <span>{t('concierge.viewWorkflowProgress')}</span>
           </a>
         )}
         {onToggleFeishuSync && (
@@ -305,9 +335,15 @@ export function ConciergeChatView({
                 ? 'bg-brand/20 text-brand hover:bg-brand/30'
                 : 'bg-secondary text-low hover:text-normal'
             }`}
-            title={feishuSync ? t('concierge.feishuSyncEnabled') : t('concierge.feishuSyncDisabled')}
+            title={
+              feishuSync
+                ? t('concierge.feishuSyncEnabled')
+                : t('concierge.feishuSyncDisabled')
+            }
           >
-            <span className={`inline-block size-1.5 rounded-full ${feishuSync ? 'bg-brand' : 'bg-secondary'}`} />{' '}
+            <span
+              className={`inline-block size-1.5 rounded-full ${feishuSync ? 'bg-brand' : 'bg-secondary'}`}
+            />{' '}
             {t('concierge.feishuSync')}
           </button>
         )}

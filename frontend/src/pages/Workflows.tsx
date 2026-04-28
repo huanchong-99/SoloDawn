@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -53,7 +60,10 @@ import {
   type WorkflowStatus,
   type WorkflowTask,
 } from '@/components/workflow/PipelineView';
-import { WizardConfig, wizardConfigToCreateRequest } from '@/components/workflow/types';
+import {
+  WizardConfig,
+  wizardConfigToCreateRequest,
+} from '@/components/workflow/types';
 import type { TerminalStatus } from '@/components/workflow/TerminalCard';
 import { mapTerminalStatus } from '@/utils/terminalStatus';
 import { cn } from '@/lib/utils';
@@ -74,9 +84,14 @@ import {
 } from '@/components/workflow/WorkflowPromptDialog';
 import { useToast } from '@/components/ui/toast';
 import { useUserSystem } from '@/components/ConfigProvider';
+import { getWorkflowDisplayStatus } from '@/utils/workflowDisplayStatus';
 
 // Local type alias — mirrors the non-exported ConnectionStatus from wsStore
-type WsConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+type WsConnectionStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting';
 
 interface WorkflowPromptQueueItem {
   id: string;
@@ -94,10 +109,18 @@ const PROMPT_QUEUE_TIMEOUT_MS = 120_000;
 
 function getPromptContextKey(
   payload:
-    | Pick<TerminalPromptDetectedPayload, 'workflowId' | 'terminalId' | 'sessionId'>
-    | Pick<TerminalPromptDecisionPayload, 'workflowId' | 'terminalId' | 'sessionId'>
+    | Pick<
+        TerminalPromptDetectedPayload,
+        'workflowId' | 'terminalId' | 'sessionId'
+      >
+    | Pick<
+        TerminalPromptDecisionPayload,
+        'workflowId' | 'terminalId' | 'sessionId'
+      >
 ): string {
-  return [payload.workflowId, payload.terminalId, payload.sessionId ?? ''].join(':');
+  return [payload.workflowId, payload.terminalId, payload.sessionId ?? ''].join(
+    ':'
+  );
 }
 
 // G27-003: Include a timestamp component (detectedAt or fallback) in the dedup
@@ -115,7 +138,11 @@ function getPromptQueueItemId(payload: TerminalPromptDetectedPayload): string {
   ].join('::');
 }
 
-function cleanupPromptHistory(history: Map<string, number>, now: number, ttl: number): void {
+function cleanupPromptHistory(
+  history: Map<string, number>,
+  now: number,
+  ttl: number
+): void {
   for (const [key, timestamp] of history.entries()) {
     if (now - timestamp > ttl) {
       history.delete(key);
@@ -141,7 +168,8 @@ function isSamePromptContext(
   // supplementary matching dimension to avoid false positives across different
   // prompt types on the same terminal.
   if (!prompt.sessionId || !decision.sessionId) {
-    const decisionPromptKind = (decision as Record<string, unknown>).promptKind as string | undefined;
+    const decisionPromptKind = (decision as Record<string, unknown>)
+      .promptKind as string | undefined;
     if (prompt.promptKind && decisionPromptKind) {
       return prompt.promptKind === decisionPromptKind;
     }
@@ -228,7 +256,10 @@ function WorkflowDetailActions({
   return (
     <div className="flex gap-2">
       {actions.canPrepare && (
-        <Button onClick={() => handlers.onPrepare(workflowId)} disabled={mutations.anyPending}>
+        <Button
+          onClick={() => handlers.onPrepare(workflowId)}
+          disabled={mutations.anyPending}
+        >
           <Rocket className="w-4 h-4 mr-2" />
           {mutations.preparePending
             ? t('management.actions.preparing')
@@ -236,25 +267,39 @@ function WorkflowDetailActions({
         </Button>
       )}
       {actions.canStart && (
-        <Button onClick={() => handlers.onStart(workflowId)} disabled={mutations.anyPending}>
+        <Button
+          onClick={() => handlers.onStart(workflowId)}
+          disabled={mutations.anyPending}
+        >
           <Play className="w-4 h-4 mr-2" />
           {t('management.actions.start')}
         </Button>
       )}
       {actions.canPause && (
-        <Button variant="outline" onClick={() => handlers.onPause(workflowId)} disabled={mutations.anyPending}>
+        <Button
+          variant="outline"
+          onClick={() => handlers.onPause(workflowId)}
+          disabled={mutations.anyPending}
+        >
           <Pause className="w-4 h-4 mr-2" />
           {t('management.actions.pause')}
         </Button>
       )}
       {actions.canStop && (
-        <Button variant="destructive" onClick={() => handlers.onStop(workflowId)} disabled={mutations.anyPending}>
+        <Button
+          variant="destructive"
+          onClick={() => handlers.onStop(workflowId)}
+          disabled={mutations.anyPending}
+        >
           <Square className="w-4 h-4 mr-2" />
           {t('management.actions.stop')}
         </Button>
       )}
       {actions.canMerge && (
-        <Button onClick={() => handlers.onMerge(workflowId)} disabled={!hasCompletedAllTasks || mutations.anyPending}>
+        <Button
+          onClick={() => handlers.onMerge(workflowId)}
+          disabled={!hasCompletedAllTasks || mutations.anyPending}
+        >
           <GitMerge className="w-4 h-4 mr-2" />
           {mutations.mergePending
             ? t('management.actions.merging')
@@ -262,7 +307,11 @@ function WorkflowDetailActions({
         </Button>
       )}
       {actions.canDelete && (
-        <Button variant="outline" onClick={() => handlers.onDelete(workflowId)} disabled={mutations.anyPending}>
+        <Button
+          variant="outline"
+          onClick={() => handlers.onDelete(workflowId)}
+          disabled={mutations.anyPending}
+        >
           <Trash2 className="w-4 h-4 mr-2" />
           {t('management.actions.delete')}
         </Button>
@@ -320,7 +369,9 @@ function renderBlockingView({
       <div className="flex items-center justify-center min-h-[400px]">
         <Card className="max-w-md">
           <CardContent className="pt-6">
-            <h3 className="text-lg font-semibold mb-2">{noProjectsTitleText}</h3>
+            <h3 className="text-lg font-semibold mb-2">
+              {noProjectsTitleText}
+            </h3>
             <p className="text-sm text-low">{noProjectsDescriptionText}</p>
           </CardContent>
         </Card>
@@ -570,12 +621,13 @@ function renderOrchestratorConversationContent({
 
 function hasConfiguredWorkflowModelLibrary(config: unknown): boolean {
   const rawLibrary =
-    (config as {
-      workflow_model_library?: unknown;
-      workflowModelLibrary?: unknown;
-    } | null)?.workflow_model_library ??
-    (config as { workflowModelLibrary?: unknown } | null)
-      ?.workflowModelLibrary;
+    (
+      config as {
+        workflow_model_library?: unknown;
+        workflowModelLibrary?: unknown;
+      } | null
+    )?.workflow_model_library ??
+    (config as { workflowModelLibrary?: unknown } | null)?.workflowModelLibrary;
   if (!Array.isArray(rawLibrary)) {
     return false;
   }
@@ -619,7 +671,8 @@ function OrchestratorChatPanel({
     () => hasConfiguredWorkflowModelLibrary(userConfig),
     [userConfig]
   );
-  const canSendMessage = orchestratorEnabled && isRunning && hasConfiguredModels;
+  const canSendMessage =
+    orchestratorEnabled && isRunning && hasConfiguredModels;
   const isWsConnected = wsConnectionStatus === 'connected';
 
   // G28-004: Replace 2s polling with WS-driven invalidation.
@@ -697,7 +750,10 @@ function OrchestratorChatPanel({
         source: 'web',
       });
 
-      if (submitResult.status === 'failed' || submitResult.status === 'cancelled') {
+      if (
+        submitResult.status === 'failed' ||
+        submitResult.status === 'cancelled'
+      ) {
         setSubmitError(
           submitResult.error ??
             t('management.orchestratorChat.sendFailed', {
@@ -781,7 +837,9 @@ function OrchestratorChatPanel({
                 'For example: reprioritize tasks and complete the auth module first.',
             })}
             className="w-full min-h-[88px] rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-            disabled={!canSendMessage || submitOrchestratorChatMutation.isPending}
+            disabled={
+              !canSendMessage || submitOrchestratorChatMutation.isPending
+            }
           />
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs text-low">
@@ -810,8 +868,12 @@ function OrchestratorChatPanel({
                   })}
             </Button>
           </div>
-          {submitError ? <p className="text-xs text-error">{submitError}</p> : null}
-          {submitReceipt ? <p className="text-xs text-low">{submitReceipt}</p> : null}
+          {submitError ? (
+            <p className="text-xs text-error">{submitError}</p>
+          ) : null}
+          {submitReceipt ? (
+            <p className="text-xs text-low">{submitReceipt}</p>
+          ) : null}
         </div>
       </CardContent>
     </Card>
@@ -868,8 +930,11 @@ function SelectedWorkflowView({
   const canTriggerMerge =
     actions.canMerge && hasCompletedAllTasks && !mutations.mergePending;
   const executionModeLabel = getExecutionModeLabel(workflow.executionMode, t);
+  const displayStatus = getWorkflowDisplayStatus(workflow);
 
-  const isWsDisconnected = wsConnectionStatus === 'disconnected' || wsConnectionStatus === 'reconnecting';
+  const isWsDisconnected =
+    wsConnectionStatus === 'disconnected' ||
+    wsConnectionStatus === 'reconnecting';
 
   return (
     <div className="h-full min-h-0 overflow-auto space-y-6">
@@ -879,7 +944,8 @@ function SelectedWorkflowView({
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>
             {t('management.wsDisconnected', {
-              defaultValue: 'Real-time connection lost. Updates may be delayed. Write operations are disabled until reconnected.',
+              defaultValue:
+                'Real-time connection lost. Updates may be delayed. Write operations are disabled until reconnected.',
             })}
           </span>
         </div>
@@ -933,8 +999,11 @@ function SelectedWorkflowView({
                 getWorkflowStatusBadgeClass(workflow.status)
               )}
             >
-              {t(`status.${workflow.status}`, {
-                defaultValue: workflow.status,
+              {t(`status.${displayStatus}`, {
+                defaultValue:
+                  displayStatus === 'repairing_final_issues'
+                    ? 'repairing final issues'
+                    : workflow.status,
               })}
             </span>
           </div>
@@ -1110,7 +1179,7 @@ export function Workflows() {
   const validProjectId =
     projectIdFromUrl && projects.some((p) => p.id === projectIdFromUrl)
       ? projectIdFromUrl
-      : projects[0]?.id ?? null;
+      : (projects[0]?.id ?? null);
 
   // Update URL when projectId is invalid or missing
   useEffect(() => {
@@ -1173,8 +1242,16 @@ export function Workflows() {
   const handleTerminalPromptDetected = useCallback(
     (payload: TerminalPromptDetectedPayload) => {
       const now = Date.now();
-      cleanupPromptHistory(promptDetectedHistoryRef.current, now, PROMPT_HISTORY_TTL_MS);
-      cleanupPromptHistory(promptSubmittedHistoryRef.current, now, PROMPT_SUBMITTED_HISTORY_TTL_MS);
+      cleanupPromptHistory(
+        promptDetectedHistoryRef.current,
+        now,
+        PROMPT_HISTORY_TTL_MS
+      );
+      cleanupPromptHistory(
+        promptSubmittedHistoryRef.current,
+        now,
+        PROMPT_SUBMITTED_HISTORY_TTL_MS
+      );
 
       const promptItemId = getPromptQueueItemId(payload);
       const lastDetectedAt = promptDetectedHistoryRef.current.get(promptItemId);
@@ -1185,7 +1262,8 @@ export function Workflows() {
         return;
       }
 
-      const lastSubmittedAt = promptSubmittedHistoryRef.current.get(promptItemId);
+      const lastSubmittedAt =
+        promptSubmittedHistoryRef.current.get(promptItemId);
       if (
         lastSubmittedAt !== undefined &&
         now - lastSubmittedAt < PROMPT_SUBMITTED_HISTORY_TTL_MS
@@ -1213,9 +1291,7 @@ export function Workflows() {
             id: promptItemId,
             detected: payload,
             decision:
-              pendingDecision?.decision === 'ask_user'
-                ? pendingDecision
-                : null,
+              pendingDecision?.decision === 'ask_user' ? pendingDecision : null,
           },
         ];
       });
@@ -1272,24 +1348,29 @@ export function Workflows() {
     }
   }, [queryClient, selectedWorkflowId, validProjectId]);
 
-  const handleQualityGateResult = useCallback((payload: unknown) => {
-    const data = payload as { workflowId?: string; terminalId?: string };
-    if (data.terminalId) {
-      queryClient.invalidateQueries({
-        queryKey: qualityKeys.latestForTerminal(data.terminalId),
-      });
-    }
-    if (data.workflowId) {
-      queryClient.invalidateQueries({
-        queryKey: qualityKeys.runsForWorkflow(data.workflowId),
-      });
-    }
-  }, [queryClient]);
+  const handleQualityGateResult = useCallback(
+    (payload: unknown) => {
+      const data = payload as { workflowId?: string; terminalId?: string };
+      if (data.terminalId) {
+        queryClient.invalidateQueries({
+          queryKey: qualityKeys.latestForTerminal(data.terminalId),
+        });
+      }
+      if (data.workflowId) {
+        queryClient.invalidateQueries({
+          queryKey: qualityKeys.runsForWorkflow(data.workflowId),
+        });
+      }
+    },
+    [queryClient]
+  );
 
   // G08-006: When the server reports a system.lagged event (messages were dropped),
   // invalidate all workflow caches to resync state.
   const handleSystemLagged = useCallback(() => {
-    console.warn('[Workflows] system.lagged received — invalidating all workflow caches');
+    console.warn(
+      '[Workflows] system.lagged received — invalidating all workflow caches'
+    );
     queryClient.invalidateQueries({ queryKey: workflowKeys.all });
   }, [queryClient]);
 
@@ -1316,7 +1397,10 @@ export function Workflows() {
     ]
   );
 
-  const { connectionStatus: wsConnectionStatus } = useWorkflowEvents(selectedWorkflowId, workflowEventHandlers);
+  const { connectionStatus: wsConnectionStatus } = useWorkflowEvents(
+    selectedWorkflowId,
+    workflowEventHandlers
+  );
 
   // Fetch workflow detail when selected (must be before merge progress effect)
   const { data: selectedWorkflowDetail } = useWorkflow(
@@ -1329,13 +1413,13 @@ export function Workflows() {
   // G26-007: Compute merge progress from workflow tasks when status is 'merging'
   useEffect(() => {
     if (selectedWorkflowDetail?.status !== 'merging') {
-      setMergeProgress(prev => prev === null ? prev : null);
+      setMergeProgress((prev) => (prev === null ? prev : null));
       return;
     }
     const tasks = selectedWorkflowDetail.tasks ?? [];
     const totalTasks = tasks.length;
     if (totalTasks === 0) {
-      setMergeProgress(prev => prev === null ? prev : null);
+      setMergeProgress((prev) => (prev === null ? prev : null));
       return;
     }
     const mergedTasks = tasks.filter(
@@ -1437,9 +1521,11 @@ export function Workflows() {
 
       promptSubmittedHistoryRef.current.delete(currentPrompt.id);
       // G30-012: Use i18n for user-facing error messages
-      setPromptSubmitError(t('management.errors.promptWsFailed', {
-        defaultValue: 'Failed to submit prompt response over WebSocket',
-      }));
+      setPromptSubmitError(
+        t('management.errors.promptWsFailed', {
+          defaultValue: 'Failed to submit prompt response over WebSocket',
+        })
+      );
       return true;
     },
     [handlePromptSubmitSuccess, t]
@@ -1447,9 +1533,16 @@ export function Workflows() {
 
   // Helper to handle general prompt submission error
   // G27-004: Surface error with toast and allow retry via lastFailedPromptResponse ref
-  const lastFailedPromptResponseRef = useRef<{ prompt: WorkflowPromptQueueItem; response: string } | null>(null);
+  const lastFailedPromptResponseRef = useRef<{
+    prompt: WorkflowPromptQueueItem;
+    response: string;
+  } | null>(null);
   const handlePromptSubmitError = useCallback(
-    (currentPrompt: WorkflowPromptQueueItem, error: unknown, response?: string) => {
+    (
+      currentPrompt: WorkflowPromptQueueItem,
+      error: unknown,
+      response?: string
+    ) => {
       promptSubmittedHistoryRef.current.delete(currentPrompt.id);
       // G30-012: Use i18n for user-facing error messages
       const message =
@@ -1461,11 +1554,15 @@ export function Workflows() {
       setPromptSubmitError(message);
       // G27-004: Store failed response for retry
       if (response !== undefined) {
-        lastFailedPromptResponseRef.current = { prompt: currentPrompt, response };
+        lastFailedPromptResponseRef.current = {
+          prompt: currentPrompt,
+          response,
+        };
       }
       showToast(
         t('management.errors.promptSubmitFailedToast', {
-          defaultValue: 'Prompt response failed. Use the retry button to try again.',
+          defaultValue:
+            'Prompt response failed. Use the retry button to try again.',
         }),
         'error'
       );
@@ -1491,7 +1588,11 @@ export function Workflows() {
       setPromptSubmitError(null);
 
       const now = Date.now();
-      cleanupPromptHistory(promptSubmittedHistoryRef.current, now, PROMPT_SUBMITTED_HISTORY_TTL_MS);
+      cleanupPromptHistory(
+        promptSubmittedHistoryRef.current,
+        now,
+        PROMPT_SUBMITTED_HISTORY_TTL_MS
+      );
       promptSubmittedHistoryRef.current.set(currentPrompt.id, now);
 
       try {
@@ -1540,18 +1641,21 @@ export function Workflows() {
 
   const activePromptDecision = activePrompt?.decision ?? null;
 
-  const runAsyncSafely = useCallback((task: Promise<unknown>) => {
-    task.catch((error) => {
-      console.error('Async workflow action failed:', error);
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : t('management.errors.asyncActionFailed', {
-              defaultValue: 'Workflow action failed. Please try again.',
-            });
-      showToast(message, 'error');
-    });
-  }, [showToast, t]);
+  const runAsyncSafely = useCallback(
+    (task: Promise<unknown>) => {
+      task.catch((error) => {
+        console.error('Async workflow action failed:', error);
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : t('management.errors.asyncActionFailed', {
+                defaultValue: 'Workflow action failed. Please try again.',
+              });
+        showToast(message, 'error');
+      });
+    },
+    [showToast, t]
+  );
 
   // G27-004: Retry handler for failed prompt submissions
   const handleRetryPromptSubmit = useCallback(() => {
@@ -1622,7 +1726,9 @@ export function Workflows() {
       return;
     }
 
-    const deletingProject = projects.find((project) => project.id === validProjectId);
+    const deletingProject = projects.find(
+      (project) => project.id === validProjectId
+    );
     const result = await ConfirmDialog.show({
       title: t('management.dialogs.deleteProjectTitle'),
       message: t('management.dialogs.deleteProjectMessage', {
@@ -1685,7 +1791,6 @@ export function Workflows() {
     return blockingView;
   }
 
-
   const handleCreateWorkflow = async (wizardConfig: WizardConfig) => {
     const workingDir = wizardConfig.project.workingDirectory?.trim();
     const fallbackProjectId = validProjectId;
@@ -1695,9 +1800,7 @@ export function Workflows() {
       // Only resolve from path when no project is selected yet.
       const projectId =
         fallbackProjectId ??
-        (workingDir
-          ? await resolveProjectIdFromPath(workingDir, null)
-          : null);
+        (workingDir ? await resolveProjectIdFromPath(workingDir, null) : null);
 
       if (!projectId) {
         throw new Error(t('management.errors.noProjectSelected'));
@@ -1807,9 +1910,7 @@ export function Workflows() {
         <div className="flex items-center gap-4 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold">{t('management.title')}</h1>
-            <p className="text-low">
-              {t('management.description')}
-            </p>
+            <p className="text-low">{t('management.description')}</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <Select
@@ -1836,15 +1937,22 @@ export function Workflows() {
             <Button
               variant="outline"
               onClick={() => handleDeleteProject()}
-              disabled={!validProjectId || projects.length <= 1 || isDeletingProject}
+              disabled={
+                !validProjectId || projects.length <= 1 || isDeletingProject
+              }
             >
               <Trash2 className="w-4 h-4 mr-2" />
-              {isDeletingProject ? t('management.deletingProject') : t('management.deleteProject')}
+              {isDeletingProject
+                ? t('management.deletingProject')
+                : t('management.deleteProject')}
             </Button>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => navigate('/workspaces/create')}>
+          <Button
+            variant="outline"
+            onClick={() => navigate('/workspaces/create')}
+          >
             {t('viewSwitcher.createWorkspace')}
           </Button>
           <Button onClick={() => setShowWizard(true)}>
@@ -1885,4 +1993,3 @@ export function Workflows() {
     </div>
   );
 }
-

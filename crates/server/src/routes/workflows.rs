@@ -33,7 +33,13 @@ use services::services::{
     git::GitServiceError,
     orchestrator::{
         BusMessage, OrchestratorRuntime, TerminalCoordinator,
-        constants::{WORKFLOW_STATUS_PAUSED, configured_max_concurrent_terminals},
+        constants::{
+            TASK_STATUS_CANCELLED, TASK_STATUS_COMPLETED, TASK_STATUS_FAILED,
+            TERMINAL_STATUS_CANCELLED, TERMINAL_STATUS_COMPLETED, TERMINAL_STATUS_FAILED,
+            TERMINAL_STATUS_QUALITY_PENDING, TERMINAL_STATUS_STARTING, TERMINAL_STATUS_WAITING,
+            TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_RUNNING,
+            configured_max_concurrent_terminals,
+        },
     },
     terminal::TerminalLauncher,
 };
@@ -1218,12 +1224,12 @@ async fn get_workflow(
 ) -> Result<ResponseJson<ApiResponse<WorkflowDetailDto>>, ApiError> {
     let workflow_id = workflow_id.to_string();
     // Get workflow
-    let workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
+    let mut workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
         .await?
         .ok_or_else(|| ApiError::NotFound("Workflow not found".to_string()))?;
 
     // Get tasks and terminals
-    let tasks = WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
+    let mut tasks = WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
 
     // Get commands with presets
     let commands = WorkflowCommand::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
@@ -1245,6 +1251,39 @@ async fn get_workflow(
         task_details.push((task.clone(), terminals));
     }
 
+    if workflow_detail_needs_completion_reconciliation(&workflow, &task_details) {
+        match deployment
+            .orchestrator_runtime()
+            .reconcile_workflow_completion(&workflow_id)
+            .await
+        {
+            Ok(true) => {
+                workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
+                    .await?
+                    .ok_or_else(|| ApiError::NotFound("Workflow not found".to_string()))?;
+                tasks = WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
+                task_details.clear();
+                for task in &tasks {
+                    let terminals = Terminal::find_by_task(&deployment.db().pool, &task.id).await?;
+                    task_details.push((task.clone(), terminals));
+                }
+            }
+            Ok(false) => {
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    "Workflow detail found stale running workflow but no active/resumable orchestrator agent"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    error = %error,
+                    "Workflow detail reconciliation failed"
+                );
+            }
+        }
+    }
+
     // Convert to DTO
     let dto = WorkflowDetailDto::from_workflow_with_terminals(
         &workflow,
@@ -1253,6 +1292,50 @@ async fn get_workflow(
     );
 
     Ok(ResponseJson(ApiResponse::success(dto)))
+}
+
+fn workflow_detail_needs_completion_reconciliation(
+    workflow: &Workflow,
+    task_details: &[(WorkflowTask, Vec<Terminal>)],
+) -> bool {
+    if workflow.status != WORKFLOW_STATUS_RUNNING || task_details.is_empty() {
+        return false;
+    }
+
+    let all_tasks_final = task_details.iter().all(|(task, _)| {
+        matches!(
+            task.status.as_str(),
+            TASK_STATUS_COMPLETED | TASK_STATUS_FAILED | TASK_STATUS_CANCELLED
+        )
+    });
+    if !all_tasks_final {
+        return false;
+    }
+
+    let has_active_terminal = task_details
+        .iter()
+        .flat_map(|(_, terminals)| terminals)
+        .any(|terminal| {
+            matches!(
+                terminal.status.as_str(),
+                TERMINAL_STATUS_STARTING
+                    | TERMINAL_STATUS_WAITING
+                    | TERMINAL_STATUS_WORKING
+                    | TERMINAL_STATUS_QUALITY_PENDING
+            )
+        });
+
+    let all_terminals_final = task_details
+        .iter()
+        .flat_map(|(_, terminals)| terminals)
+        .all(|terminal| {
+            matches!(
+                terminal.status.as_str(),
+                TERMINAL_STATUS_COMPLETED | TERMINAL_STATUS_FAILED | TERMINAL_STATUS_CANCELLED
+            )
+        });
+
+    !has_active_terminal && all_terminals_final
 }
 
 /// DELETE /api/workflows/:workflow_id
@@ -3885,12 +3968,102 @@ mod workflow_guard_tests {
         build_task_with_status(workflow_id, "pending")
     }
 
+    fn build_workflow_with_status(workflow_id: &str, status: &str) -> Workflow {
+        let now = Utc::now();
+        Workflow {
+            id: workflow_id.to_string(),
+            project_id: Uuid::new_v4(),
+            name: "Workflow".to_string(),
+            description: None,
+            status: status.to_string(),
+            execution_mode: "agent_planned".to_string(),
+            initial_goal: Some("Ship the feature".to_string()),
+            use_slash_commands: true,
+            orchestrator_enabled: true,
+            orchestrator_api_type: None,
+            orchestrator_base_url: None,
+            orchestrator_api_key: None,
+            orchestrator_model: None,
+            error_terminal_enabled: false,
+            error_terminal_cli_id: None,
+            error_terminal_model_id: None,
+            merge_terminal_cli_id: "cli-codex".to_string(),
+            merge_terminal_model_id: "model-1".to_string(),
+            target_branch: "main".to_string(),
+            git_watcher_enabled: true,
+            ready_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: now,
+            updated_at: now,
+            pause_reason: None,
+        }
+    }
+
+    fn build_terminal_with_status(task_id: &str, status: &str) -> Terminal {
+        let now = Utc::now();
+        Terminal {
+            id: "terminal-test".to_string(),
+            workflow_task_id: task_id.to_string(),
+            cli_type_id: "cli-codex".to_string(),
+            model_config_id: "model-1".to_string(),
+            custom_base_url: None,
+            custom_api_key: None,
+            role: Some("developer".to_string()),
+            role_description: None,
+            order_index: 0,
+            status: status.to_string(),
+            process_id: None,
+            pty_session_id: None,
+            session_id: None,
+            execution_process_id: None,
+            vk_session_id: None,
+            auto_confirm: true,
+            last_commit_hash: None,
+            last_commit_message: None,
+            started_at: None,
+            completed_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
     #[test]
     fn merge_status_guard_allows_only_terminal_merge_states() {
         assert!(can_merge_from_workflow_status("completed"));
         assert!(can_merge_from_workflow_status("merging"));
         assert!(!can_merge_from_workflow_status("starting"));
         assert!(!can_merge_from_workflow_status("running"));
+    }
+
+    #[test]
+    fn workflow_detail_reconciliation_detects_stale_running_final_tasks() {
+        let workflow = build_workflow_with_status("workflow-test", WORKFLOW_STATUS_RUNNING);
+        let task = build_task_with_status("workflow-test", TASK_STATUS_COMPLETED);
+        let terminal = build_terminal_with_status(&task.id, TERMINAL_STATUS_COMPLETED);
+
+        assert!(workflow_detail_needs_completion_reconciliation(
+            &workflow,
+            &[(task, vec![terminal])]
+        ));
+    }
+
+    #[test]
+    fn workflow_detail_reconciliation_ignores_active_or_non_running_workflows() {
+        let running = build_workflow_with_status("workflow-test", WORKFLOW_STATUS_RUNNING);
+        let task = build_task_with_status("workflow-test", TASK_STATUS_COMPLETED);
+        let active_terminal = build_terminal_with_status(&task.id, TERMINAL_STATUS_WORKING);
+        assert!(!workflow_detail_needs_completion_reconciliation(
+            &running,
+            &[(task.clone(), vec![active_terminal])]
+        ));
+
+        let completed = build_workflow_with_status("workflow-test", "completed");
+        let terminal = build_terminal_with_status(&task.id, TERMINAL_STATUS_COMPLETED);
+        assert!(!workflow_detail_needs_completion_reconciliation(
+            &completed,
+            &[(task, vec![terminal])]
+        ));
     }
 
     #[test]
