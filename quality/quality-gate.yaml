@@ -60,6 +60,16 @@ terminal_gate:
     - metric: redos_risks
       operator: "GT"
       threshold: "0"
+    # Delivery readiness: block tests that do not bind real code and obvious runtime defects
+    - metric: test_authenticity_issues
+      operator: "GT"
+      threshold: "0"
+    - metric: project_convention_issues
+      operator: "GT"
+      threshold: "0"
+    - metric: runtime_security_smells
+      operator: "GT"
+      threshold: "0"
 
 # ── 分支级质量门 ──
 # 触发时机: 任务最后一个终端通过后
@@ -124,6 +134,16 @@ branch_gate:
       operator: "GT"
       threshold: "5"
     - metric: redos_risks
+      operator: "GT"
+      threshold: "0"
+    # Delivery readiness: existing-codebase integration must be real, not parallel mock code
+    - metric: test_authenticity_issues
+      operator: "GT"
+      threshold: "0"
+    - metric: project_convention_issues
+      operator: "GT"
+      threshold: "0"
+    - metric: runtime_security_smells
       operator: "GT"
       threshold: "0"
 
@@ -199,6 +219,16 @@ repo_gate:
     - metric: redos_risks
       operator: "GT"
       threshold: "0"
+    # Delivery readiness: final repo must not contain fake-entry tests, convention bypasses, or runtime smells
+    - metric: test_authenticity_issues
+      operator: "GT"
+      threshold: "0"
+    - metric: project_convention_issues
+      operator: "GT"
+      threshold: "0"
+    - metric: runtime_security_smells
+      operator: "GT"
+      threshold: "0"
 
 # ── Provider 启用/禁用 ──
 providers:
@@ -213,6 +243,7 @@ providers:
   builtin_common: true
   coverage: true
   completeness: true
+  delivery_readiness: true
 
 # ── SonarQube 本地配置 ──
 sonar:

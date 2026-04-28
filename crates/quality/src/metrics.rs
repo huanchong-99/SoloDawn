@@ -150,6 +150,17 @@ pub enum MetricKey {
     #[serde(rename = "coverage_exclusion_issues")]
     CoverageExclusionIssues,
 
+    // ── Delivery authenticity/readiness 指标 ──
+    /// 测试真实性问题：测试覆盖 fake/mock app、错误 package、未绑定生产入口
+    #[serde(rename = "test_authenticity_issues")]
+    TestAuthenticityIssues,
+    /// 项目惯用法问题：ESM require、i18n namespace 不匹配、跨包重复实现等
+    #[serde(rename = "project_convention_issues")]
+    ProjectConventionIssues,
+    /// 运行时/安全气味：SQLx 拼接、Redis KEYS、明显未定义变量等
+    #[serde(rename = "runtime_security_smells")]
+    RuntimeSecuritySmells,
+
     // ── Quality engine internal sentinels ──
     /// 强制模式下，仓库已发现 target 但没有任何 provider 能评估任一 gate condition
     /// 的兜底信号。等同于"安检员手里没拿到清单"，必须 fail-closed。
@@ -201,6 +212,9 @@ impl MetricKey {
             Self::TodoDensity => "todo_density",
             Self::StubTestCount => "stub_test_count",
             Self::CoverageExclusionIssues => "coverage_exclusion_issues",
+            Self::TestAuthenticityIssues => "test_authenticity_issues",
+            Self::ProjectConventionIssues => "project_convention_issues",
+            Self::RuntimeSecuritySmells => "runtime_security_smells",
             Self::QualityGateEmptyScan => "quality_gate_empty_scan",
         }
     }
@@ -248,6 +262,9 @@ impl MetricKey {
             Self::TodoDensity => "TODO Density (%)",
             Self::StubTestCount => "Stub Test Count",
             Self::CoverageExclusionIssues => "Coverage Exclusion Issues",
+            Self::TestAuthenticityIssues => "Test Authenticity Issues",
+            Self::ProjectConventionIssues => "Project Convention Issues",
+            Self::RuntimeSecuritySmells => "Runtime Security Smells",
             Self::QualityGateEmptyScan => "Empty Quality Scan",
         }
     }

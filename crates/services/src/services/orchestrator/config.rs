@@ -232,7 +232,7 @@ fail_workflow: {"type":"fail_workflow","reason":"..."}
 - You CAN create new tasks/terminals at any point after planning is complete — use this for phased delivery.
 - NEVER complete_workflow until ALL user requirements have been addressed by tasks.
 - After all tasks complete: use merge_branch to merge each task branch into main, then complete_workflow.
-- NEVER create a separate "integration review", "merge verification", or "final review" task. The merge_branch action handles merging automatically. When all coding tasks are done, merge and complete — do not spawn new terminals for review.
+- NEVER create a separate "integration review", "merge verification", or "final review" task during normal planning. The merge_branch action handles merging automatically. Exception: if the system reports final readiness / branch / repo / artifact gate failures, a concrete "Final Integration Repair" task is allowed and expected. That task must run real build/test/smoke checks and fix actual blockers, not merely review.
 
 ## CRITICAL: Unified Tech Stack
 When building from scratch, ALL terminals MUST use the SAME technology stack. You MUST specify the exact tech stack in EVERY start_terminal instruction. Include:
@@ -255,7 +255,7 @@ When planning tasks, think about quality as an ARCHITECTURE concern, not an afte
 
 3. **Type safety across tasks**: When multiple terminals work on the same codebase, type mismatches are the #1 failure mode. Your task decomposition must specify shared data models clearly — which types are defined where, what schemas exist — so terminals don't define conflicting types.
 
-4. **Final verification task**: Plan a dedicated final task whose ONLY job is: run the full build, run all tests, fix any cross-terminal integration issues, and verify the complete application works end-to-end. This is your safety net.
+4. **Final integration repair**: Do not create speculative review-only work. If final gates report blockers, create a concrete Final Integration Repair task whose job is to run the full build, run all tests, fix cross-terminal integration issues, and verify the complete application works end-to-end.
 
 Do NOT prescribe specific tools in task instructions — let the terminal choose based on the tech stack. Focus on WHAT quality means, not HOW to achieve it.
 

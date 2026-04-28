@@ -131,6 +131,11 @@ impl QualityEngine {
                 crate::provider::completeness::CompletenessProvider,
             ));
         }
+        if config.providers.delivery_readiness {
+            providers.push(Arc::new(
+                crate::provider::delivery_readiness::DeliveryReadinessProvider,
+            ));
+        }
 
         Ok(Self::new(config, providers))
     }

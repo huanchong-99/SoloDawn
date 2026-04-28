@@ -112,6 +112,8 @@ struct StallRecoveryTracker {
 /// With 30s cooldown, 10 attempts = ~5 minutes of stall tolerance.
 const MAX_STALL_RECOVERY_ATTEMPTS: u32 = 10;
 const TERMINAL_INPUT_FAILURE_LIMIT: u32 = 3;
+const FINAL_REPAIR_TASK_NAME: &str = "Final Integration Repair";
+const FINAL_REPAIR_MAX_ROUNDS: usize = 4;
 
 impl StallRecoveryTracker {
     fn should_skip_due_to_cooldown(
@@ -1451,6 +1453,10 @@ impl OrchestratorAgent {
                 )
             })?;
 
+        let strategy = {
+            let state = self.state.read().await;
+            state.workflow_strategy
+        };
         let instruction = format!(
             "{} | {}",
             Self::build_task_instruction(
@@ -1461,6 +1467,7 @@ impl OrchestratorAgent {
                 None,
                 &[],
                 None,
+                strategy,
                 None
             ),
             Self::STALL_RECOVERY_SUFFIX
@@ -4254,6 +4261,7 @@ impl OrchestratorAgent {
             prev_context.as_ref(),
             &[],
             foundation_ctx.as_deref(),
+            strategy,
             initial_goal.as_deref(),
         );
         self.dispatch_terminal_when_ready_or_queue(task_id, &active_terminal, &instruction)
@@ -5221,6 +5229,12 @@ impl OrchestratorAgent {
              1. State the requirement\n\
              2. State whether it is MET or UNMET\n\
              3. Cite specific evidence (file name + function/class/route)\n\n\
+             Apply this rubric strictly. Any high-confidence failure in these categories MUST make \
+             the overall verdict REJECTED: missing requirement coverage; changes not wired to the \
+             real application entrypoint/package/export; tests that only cover a fake/mock app or \
+             the wrong package; bypassing existing project conventions; duplicate implementation \
+             of an existing engine/store/component/state mechanism; obvious runtime errors; \
+             security risks; or an unreproducible delivery with missing committed artifacts.\n\n\
              Then give an overall verdict: APPROVED or REJECTED.\n\
              If REJECTED, list exactly what must be fixed.\n\n\
              Respond in this JSON format only:\n\
@@ -6115,8 +6129,14 @@ impl OrchestratorAgent {
                 if workflow_has_unresolved_enforce_blockers(&self.db, &workflow_id).await {
                     tracing::warn!(
                         workflow_id = %workflow_id,
-                        "R8-B3: CompleteWorkflow rejected — at least one terminal has unresolved enforce quality blockers"
+                        "R8-B3: CompleteWorkflow rejected — scheduling final repair for unresolved enforce quality blockers"
                     );
+                    self.ensure_final_repair_task(
+                        &workflow_id,
+                        "terminal_enforce_blockers",
+                        "At least one completed terminal still has unresolved enforce quality blockers. Re-run the failing checks, fix the blocker(s), and commit the integration repair.",
+                    )
+                    .await?;
                     return Ok(());
                 }
 
@@ -7032,6 +7052,7 @@ impl OrchestratorAgent {
         prev_context: Option<&PreviousTerminalContext>,
         sibling_tasks: &[db::models::WorkflowTask],
         foundation_context: Option<&str>,
+        strategy: WorkflowStrategy,
         initial_goal: Option<&str>,
     ) -> String {
         let mut parts = vec![format!("Start task: {} ({})", task.name, task.id)];
@@ -7043,6 +7064,13 @@ impl OrchestratorAgent {
 
         if let Some(ctx) = foundation_context {
             parts.push(ctx.to_string());
+        }
+
+        if strategy.archetype == WorkflowArchetype::ExistingCodebase {
+            parts.push(
+                "Existing-codebase execution contract: before editing, identify the real entrypoints, package/workspace boundary, existing state/composable/store/i18n/testing conventions, and production test entry. Reuse the existing architecture. Do not create duplicate engines/stores/components, mock applications that bypass production code, or tests that cover the wrong package."
+                    .to_string(),
+            );
         }
 
         // Include sibling task overview so each terminal knows the full project plan
@@ -7306,6 +7334,7 @@ impl OrchestratorAgent {
                 None,
                 &tasks,
                 fctx,
+                strategy,
                 goal,
             );
             dispatch_queue.push((task.id.clone(), terminal, instruction));
@@ -7504,12 +7533,11 @@ impl OrchestratorAgent {
 
         let artifact_issues = Self::artifact_readiness_issues(&repo_root, strategy);
         if !artifact_issues.is_empty() {
-            self.publish_final_gate_blocked(
-                workflow_id,
-                "artifact_readiness",
-                artifact_issues.join("; "),
-            )
-            .await;
+            let reason = artifact_issues.join("; ");
+            self.publish_final_gate_blocked(workflow_id, "artifact_readiness", reason.clone())
+                .await;
+            self.ensure_final_repair_task(workflow_id, "artifact_readiness", &reason)
+                .await?;
             return Ok(false);
         }
 
@@ -7617,6 +7645,14 @@ impl OrchestratorAgent {
                         format!("quality engine failed to run: {error}"),
                     )
                     .await;
+                    if self.config.quality_gate_mode == QUALITY_GATE_MODE_ENFORCE {
+                        self.mark_workflow_failed(
+                            workflow_id,
+                            &format!("Final {gate_level} quality gate failed to run: {error}"),
+                        )
+                        .await?;
+                        return Ok(false);
+                    }
                     return Ok(self.config.quality_gate_mode != QUALITY_GATE_MODE_ENFORCE);
                 }
             },
@@ -7634,6 +7670,14 @@ impl OrchestratorAgent {
                     format!("quality engine unavailable: {error}"),
                 )
                 .await;
+                if self.config.quality_gate_mode == QUALITY_GATE_MODE_ENFORCE {
+                    self.mark_workflow_failed(
+                        workflow_id,
+                        &format!("Final {gate_level} quality engine unavailable: {error}"),
+                    )
+                    .await?;
+                    return Ok(false);
+                }
                 return Ok(self.config.quality_gate_mode != QUALITY_GATE_MODE_ENFORCE);
             }
         };
@@ -7695,8 +7739,13 @@ impl OrchestratorAgent {
             return Ok(true);
         }
 
-        self.publish_final_gate_blocked(workflow_id, gate_level, report.to_fix_instructions())
+        let fix_instructions = report.to_fix_instructions();
+        self.publish_final_gate_blocked(workflow_id, gate_level, fix_instructions.clone())
             .await;
+        if self.config.quality_gate_mode == QUALITY_GATE_MODE_ENFORCE {
+            self.ensure_final_repair_task(workflow_id, gate_level, &fix_instructions)
+                .await?;
+        }
 
         Ok(self.config.quality_gate_mode != QUALITY_GATE_MODE_ENFORCE)
     }
@@ -7745,7 +7794,9 @@ impl OrchestratorAgent {
         );
         let message = BusMessage::Error {
             workflow_id: workflow_id.to_string(),
-            error: format!("Final readiness gate blocked completion ({gate_level}): {reason}"),
+            error: format!(
+                "Final readiness gate found repairable issues ({gate_level}); starting Final Integration Repair: {reason}"
+            ),
         };
         if let Err(error) = self
             .message_bus
@@ -7759,6 +7810,304 @@ impl OrchestratorAgent {
                 "Failed to publish final readiness gate block event"
             );
         }
+    }
+
+    async fn ensure_final_repair_task(
+        &self,
+        workflow_id: &str,
+        gate_level: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        if self.config.quality_gate_mode != QUALITY_GATE_MODE_ENFORCE {
+            return Ok(());
+        }
+
+        let result = self
+            .ensure_final_repair_task_inner(workflow_id, gate_level, reason)
+            .await;
+        if let Err(error) = result {
+            let failure_reason =
+                format!("Final Integration Repair could not be started for {gate_level}: {error}");
+            tracing::error!(
+                workflow_id = %workflow_id,
+                gate_level,
+                error = %error,
+                "Final repair loop failed to start"
+            );
+            self.mark_workflow_failed(workflow_id, &failure_reason)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn ensure_final_repair_task_inner(
+        &self,
+        workflow_id: &str,
+        gate_level: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        if !self.is_agent_planned_workflow().await? {
+            anyhow::bail!("final repair loop requires an agent_planned workflow");
+        }
+
+        let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, workflow_id).await?;
+        let repair_tasks: Vec<_> = tasks
+            .iter()
+            .filter(|task| Self::is_final_repair_task(task))
+            .cloned()
+            .collect();
+        let active_repair = repair_tasks.iter().find(|task| {
+            !matches!(
+                task.status.as_str(),
+                TASK_STATUS_COMPLETED | TASK_STATUS_FAILED | TASK_STATUS_CANCELLED
+            )
+        });
+
+        if let Some(task) = active_repair {
+            self.ensure_final_repair_terminal(workflow_id, task, gate_level, reason)
+                .await?;
+            return Ok(());
+        }
+
+        if repair_tasks.len() >= FINAL_REPAIR_MAX_ROUNDS {
+            anyhow::bail!(
+                "final repair exceeded {FINAL_REPAIR_MAX_ROUNDS} rounds without clearing blockers"
+            );
+        }
+
+        let round = repair_tasks.len() + 1;
+        let branch = format!("fix/final-integration-repair-{round}");
+        let task = self
+            .runtime_actions()?
+            .create_task(
+                workflow_id,
+                RuntimeTaskSpec {
+                    task_id: None,
+                    name: FINAL_REPAIR_TASK_NAME.to_string(),
+                    description: Some(format!(
+                        "Automatically repair final delivery blockers from {gate_level}. \
+                         This task must run the real build/tests, fix integration defects, \
+                         commit the repair, and allow final gates to rerun.\n\nBlockers:\n{reason}"
+                    )),
+                    branch: Some(branch),
+                    order_index: None,
+                },
+            )
+            .await?;
+
+        {
+            let mut state = self.state.write().await;
+            state.sync_task_terminals(task.id.clone(), Vec::new(), true);
+            state.set_task_planning_complete(&task.id, true);
+        }
+
+        self.persist_event(
+            "final_repair",
+            &format!("Final Integration Repair round {round} created for {gate_level}"),
+        )
+        .await;
+        self.publish_repairing_final_issues_status(workflow_id)
+            .await;
+        self.ensure_final_repair_terminal(workflow_id, &task, gate_level, reason)
+            .await
+    }
+
+    async fn ensure_final_repair_terminal(
+        &self,
+        workflow_id: &str,
+        task: &db::models::WorkflowTask,
+        gate_level: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        let mut terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id).await?;
+        if let Some(active) = terminals.iter().find(|terminal| {
+            matches!(
+                terminal.status.as_str(),
+                TERMINAL_STATUS_WORKING
+                    | TERMINAL_STATUS_STARTING
+                    | TERMINAL_STATUS_QUALITY_PENDING
+                    | TERMINAL_STATUS_WAITING
+            )
+        }) {
+            if matches!(
+                active.status.as_str(),
+                TERMINAL_STATUS_WAITING | TERMINAL_STATUS_NOT_STARTED
+            ) {
+                let instruction = self
+                    .build_final_repair_instruction(workflow_id, task, active, gate_level, reason)
+                    .await?;
+                self.dispatch_terminal_when_ready_or_queue(&task.id, active, &instruction)
+                    .await?;
+            } else {
+                tracing::info!(
+                    workflow_id = %workflow_id,
+                    task_id = %task.id,
+                    terminal_id = %active.id,
+                    status = %active.status,
+                    "Final repair terminal is already active"
+                );
+            }
+            return Ok(());
+        }
+
+        let terminal = if let Some(startable) = terminals.iter().find(|terminal| {
+            matches!(
+                terminal.status.as_str(),
+                TERMINAL_STATUS_NOT_STARTED | TERMINAL_STATUS_FAILED | TERMINAL_STATUS_CANCELLED
+            )
+        }) {
+            startable.clone()
+        } else {
+            let (cli_type_id, model_config_id) =
+                self.select_final_repair_runtime(workflow_id).await?;
+            let created = self
+                .runtime_actions()?
+                .create_terminal(
+                    workflow_id,
+                    RuntimeTerminalSpec {
+                        terminal_id: None,
+                        task_id: task.id.clone(),
+                        cli_type_id,
+                        model_config_id,
+                        custom_base_url: None,
+                        custom_api_key: None,
+                        role: Some("final-integration-repair".to_string()),
+                        role_description: Some(
+                            "Fix final readiness, branch, repo, and artifact blockers using the real project entrypoints."
+                                .to_string(),
+                        ),
+                        order_index: None,
+                        auto_confirm: Some(true),
+                    },
+                )
+                .await?;
+            terminals.push(created.clone());
+            created
+        };
+
+        {
+            let mut state = self.state.write().await;
+            state.sync_task_terminals(
+                task.id.clone(),
+                terminals
+                    .iter()
+                    .map(|terminal| terminal.id.clone())
+                    .collect(),
+                true,
+            );
+            state.set_task_planning_complete(&task.id, true);
+        }
+
+        let instruction = self
+            .build_final_repair_instruction(workflow_id, task, &terminal, gate_level, reason)
+            .await?;
+        self.dispatch_terminal_when_ready_or_queue(&task.id, &terminal, &instruction)
+            .await?;
+        self.dispatch_queued_terminals().await?;
+        Ok(())
+    }
+
+    async fn select_final_repair_runtime(
+        &self,
+        workflow_id: &str,
+    ) -> anyhow::Result<(String, String)> {
+        let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, workflow_id).await?;
+        let repair_task_ids: HashSet<String> = tasks
+            .iter()
+            .filter(|task| Self::is_final_repair_task(task))
+            .map(|task| task.id.clone())
+            .collect();
+        let terminals = db::models::Terminal::find_by_workflow(&self.db.pool, workflow_id).await?;
+        let source = terminals
+            .iter()
+            .rev()
+            .find(|terminal| !repair_task_ids.contains(&terminal.workflow_task_id))
+            .or_else(|| terminals.iter().rev().next())
+            .ok_or_else(|| anyhow!("no existing terminal runtime is available for repair"))?;
+        Ok((source.cli_type_id.clone(), source.model_config_id.clone()))
+    }
+
+    async fn build_final_repair_instruction(
+        &self,
+        workflow_id: &str,
+        task: &db::models::WorkflowTask,
+        terminal: &db::models::Terminal,
+        gate_level: &str,
+        reason: &str,
+    ) -> anyhow::Result<String> {
+        let workflow = db::models::Workflow::find_by_id(&self.db.pool, workflow_id)
+            .await?
+            .ok_or_else(|| anyhow!("Workflow {workflow_id} not found"))?;
+        let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, workflow_id).await?;
+        let task_summary = tasks
+            .iter()
+            .filter(|task| !Self::is_final_repair_task(task))
+            .map(|task| {
+                format!(
+                    "- {} [{}] branch={} status={}",
+                    task.name, task.id, task.branch, task.status
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let terminal_order = (terminal.order_index + 1).max(1);
+        let metadata = format!(
+            "{separator}\nworkflow_id: {workflow_id}\ntask_id: {task_id}\nterminal_id: {terminal_id}\nterminal_order: {terminal_order}\nstatus: completed\nnext_action: handoff",
+            separator = GIT_COMMIT_METADATA_SEPARATOR,
+            task_id = task.id,
+            terminal_id = terminal.id,
+        );
+        let goal = workflow
+            .initial_goal
+            .as_deref()
+            .or(workflow.description.as_deref())
+            .unwrap_or(&workflow.name);
+
+        Ok(format!(
+            "You are the Final Integration Repair terminal. This task is explicitly allowed: \
+             it is not a review-only task. Its job is to make the real deliverable pass final \
+             readiness, branch, repo, and artifact gates.\n\n\
+             ## Original user goal\n{goal}\n\n\
+             ## Completed task summary\n{task_summary}\n\n\
+             ## Failing final gate\n{gate_level}\n\n\
+             ## Blocking evidence\n{reason}\n\n\
+             ## Required repair loop\n\
+             1. Reproduce the blocker using the real project entrypoint, package, build, or test command.\n\
+             2. Fix the underlying code, tests, docs, or artifact problem. Do not hide the issue with mocks or relaxed checks.\n\
+             3. Run the relevant real build/test/smoke command after the fix.\n\
+             4. Commit the repair before stopping.\n\n\
+             ## Existing-codebase rules\n\
+             Identify real entrypoints, package boundaries, stores/composables/i18n/testing conventions first. \
+             Reuse the existing architecture. Do not create duplicate engines, duplicate stores, fake apps, \
+             or tests that bypass production code.\n\n\
+             Commit message must include this metadata block exactly:\n{metadata}"
+        ))
+    }
+
+    async fn publish_repairing_final_issues_status(&self, workflow_id: &str) {
+        if let Err(error) = self
+            .message_bus
+            .publish_workflow_event(
+                workflow_id,
+                BusMessage::StatusUpdate {
+                    workflow_id: workflow_id.to_string(),
+                    status: WORKFLOW_STATUS_RUNNING.to_string(),
+                },
+            )
+            .await
+        {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                error = %error,
+                "Failed to publish repairing-final-issues workflow status"
+            );
+        }
+    }
+
+    fn is_final_repair_task(task: &db::models::WorkflowTask) -> bool {
+        task.name
+            .trim()
+            .eq_ignore_ascii_case(FINAL_REPAIR_TASK_NAME)
     }
 
     fn artifact_readiness_issues(repo_root: &Path, strategy: WorkflowStrategy) -> Vec<String> {
@@ -7958,8 +8307,14 @@ impl OrchestratorAgent {
         if workflow_has_unresolved_enforce_blockers(&self.db, workflow_id).await {
             tracing::warn!(
                 workflow_id = %workflow_id,
-                "R8-B3: refusing to auto-sync workflow to completed — at least one terminal has unresolved enforce quality blockers"
+                "R8-B3: auto-sync found unresolved enforce quality blockers; scheduling final repair"
             );
+            self.ensure_final_repair_task(
+                workflow_id,
+                "terminal_enforce_blockers",
+                "Auto-completion is blocked because at least one terminal still has unresolved enforce quality blockers. Fix the blocker(s), run the real build/tests, and commit.",
+            )
+            .await?;
             return Ok(());
         }
 
@@ -9969,6 +10324,7 @@ mod tests {
             None,
             &[],
             None,
+            WorkflowStrategy::new(WorkflowArchetype::Greenfield),
             None,
         );
 
@@ -9999,6 +10355,7 @@ mod tests {
             None,
             &[],
             None,
+            WorkflowStrategy::new(WorkflowArchetype::Greenfield),
             None,
         );
 
@@ -10007,6 +10364,30 @@ mod tests {
         assert!(!instruction.contains("Execution context:"));
         assert!(instruction.contains("Completion contract:"));
         assert!(instruction.contains("do not create an extra branch"));
+    }
+
+    #[test]
+    fn build_task_instruction_for_existing_codebase_enforces_real_entry_contract() {
+        let workflow_id = "workflow-1";
+        let task = make_task(Some("Add load testing to the existing app"));
+        let terminal = make_terminal(0);
+
+        let instruction = OrchestratorAgent::build_task_instruction(
+            workflow_id,
+            &task,
+            &terminal,
+            1,
+            None,
+            &[],
+            None,
+            WorkflowStrategy::new(WorkflowArchetype::ExistingCodebase),
+            Some("Modify the existing Hoppscotch codebase"),
+        );
+
+        assert!(instruction.contains("Existing-codebase execution contract:"));
+        assert!(instruction.contains("real entrypoints"));
+        assert!(instruction.contains("Do not create duplicate engines"));
+        assert!(instruction.contains("tests that cover the wrong package"));
     }
 
     #[test]

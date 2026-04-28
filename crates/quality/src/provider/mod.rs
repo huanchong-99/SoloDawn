@@ -7,6 +7,7 @@ pub mod builtin_frontend;
 pub mod builtin_rust;
 pub mod completeness;
 pub mod coverage;
+pub mod delivery_readiness;
 pub mod frontend;
 pub mod repo;
 pub mod rust_analyzer;

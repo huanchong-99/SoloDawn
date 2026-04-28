@@ -108,6 +108,9 @@ pub struct ProvidersConfig {
     /// Completeness checks (skeleton services, test absence, migration debris, TODO density)
     #[serde(default = "default_true")]
     pub completeness: bool,
+    /// Delivery authenticity/readiness checks for real-entry tests, conventions, runtime smells
+    #[serde(default = "default_true")]
+    pub delivery_readiness: bool,
 }
 
 fn default_true() -> bool {
