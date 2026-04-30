@@ -1019,6 +1019,16 @@ pub struct NativeCredentialsStatus {
 /// in `~/.claude/.credentials.json`. This enables the "Native Subscription"
 /// model option in the frontend without requiring manual API key configuration.
 async fn get_native_credentials_status() -> ResponseJson<ApiResponse<NativeCredentialsStatus>> {
+    // V1 test mode: disable native credential detection so only
+    // explicitly-configured models (e.g. GLM-5.1) are available.
+    if std::env::var("DISABLE_NATIVE_CREDENTIALS").is_ok() {
+        return ResponseJson(ApiResponse::success(NativeCredentialsStatus {
+            available: false,
+            cli_version: None,
+            default_model: None,
+        }));
+    }
+
     let status = tokio::task::spawn_blocking(|| {
         let home = dirs::home_dir();
         let creds_available = home
@@ -1026,7 +1036,6 @@ async fn get_native_credentials_status() -> ResponseJson<ApiResponse<NativeCrede
             .map(|h| {
                 let creds_path = h.join(".claude").join(".credentials.json");
                 if let Ok(content) = std::fs::read_to_string(&creds_path) {
-                    // Check for valid OAuth token without logging it
                     content.contains("accessToken") && content.contains("claudeAiOauth")
                 } else {
                     false
