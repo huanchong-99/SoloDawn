@@ -754,11 +754,11 @@ impl AuditScoreResult {
             .ok_or_else(|| format!("missing `{key}`"))?;
         let score = obj
             .get("score")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .ok_or_else(|| format!("`{key}.score` is missing or not a number"))?;
         let max_score = obj
             .get("max_score")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .ok_or_else(|| format!("`{key}.max_score` is missing or not a number"))?;
         let details = obj
             .get("details")
@@ -967,7 +967,7 @@ mod tests {
         let result = AuditScoreResult::parse("This is not JSON at all.");
 
         assert!(!result.passed);
-        assert_eq!(result.total_score, 0.0);
+        assert!(result.total_score.abs() < f64::EPSILON);
         assert!(result.fix_instructions.contains("did not contain a JSON object"));
     }
 
@@ -976,7 +976,7 @@ mod tests {
         let result = AuditScoreResult::parse(r#"{"dimensions": "bad"}"#);
 
         assert!(!result.passed);
-        assert_eq!(result.total_score, 0.0);
+        assert!(result.total_score.abs() < f64::EPSILON);
         assert!(result.fix_instructions.contains("Failed to extract"));
     }
 

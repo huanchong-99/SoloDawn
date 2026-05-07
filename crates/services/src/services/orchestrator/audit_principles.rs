@@ -12,7 +12,7 @@ use super::types::{AuditDimensionSpec, AuditMode, AuditPlan};
 /// This text is embedded verbatim into LLM prompts during acceptance review.
 /// It is derived from V1.0-Acceptance-Criteria.md and covers all five
 /// evaluation dimensions plus three veto rules.
-pub const BUILTIN_AUDIT_PRINCIPLES: &str = r#"# Built-in Audit Scoring Principles (100-point scale, pass threshold: 90)
+pub const BUILTIN_AUDIT_PRINCIPLES: &str = r"# Built-in Audit Scoring Principles (100-point scale, pass threshold: 90)
 
 ## Veto Rules (any trigger = 0 points for entire delivery)
 1. Repository is empty (only initial commit) → 0 points
@@ -105,7 +105,7 @@ Scoring rubric:
    8: README exists with setup steps, has Docker OR CI
    5: README exists but thin, missing deployment/CI config
    2: Only default README
-   0: No README"#;
+   0: No README";
 
 /// Construct the default `AuditPlan` from the built-in principles.
 ///

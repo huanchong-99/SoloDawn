@@ -104,7 +104,7 @@ export function AuditDocPanel({
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 16 16"
           fill="currentColor"
-          className="size-3.5 text-low"
+          className="size-icon-sm text-low"
         >
           <path d="M4 1.75A.75.75 0 0 1 4.75 1h4.914a.75.75 0 0 1 .53.22l3.586 3.586a.75.75 0 0 1 .22.53v8.914a.75.75 0 0 1-.75.75H4.75a.75.75 0 0 1-.75-.75V1.75Zm5.25 1.5v2.5a.75.75 0 0 0 .75.75h2.5L9.25 3.25Z" />
         </svg>
@@ -136,7 +136,7 @@ export function AuditDocPanel({
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 16 16"
             fill="currentColor"
-            className="size-3"
+            className="size-icon-xs"
           >
             <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
           </svg>
@@ -173,7 +173,7 @@ export function AuditDocPanel({
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 16 16"
               fill="currentColor"
-              className="size-4 text-low"
+              className="size-icon-base text-low"
             >
               <path
                 fillRule="evenodd"
@@ -211,7 +211,7 @@ export function AuditDocPanel({
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 16 16"
               fill="currentColor"
-              className="size-3 text-brand shrink-0"
+              className="size-icon-xs text-brand shrink-0"
             >
               <path d="M4 1.75A.75.75 0 0 1 4.75 1h4.914a.75.75 0 0 1 .53.22l3.586 3.586a.75.75 0 0 1 .22.53v8.914a.75.75 0 0 1-.75.75H4.75a.75.75 0 0 1-.75-.75V1.75Zm5.25 1.5v2.5a.75.75 0 0 0 .75.75h2.5L9.25 3.25Z" />
             </svg>
