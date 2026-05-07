@@ -5,6 +5,7 @@ import {
   type PlanningDraftResponse,
   type PlanningMessageResponse,
 } from '@/lib/api';
+import { workflowKeys } from '@/hooks/useWorkflows';
 
 export const planningDraftKeys = {
   all: ['planningDrafts'] as const,
@@ -100,6 +101,9 @@ export function useMaterializeDraft() {
     onSuccess: (_data, draftId) => {
       queryClient.invalidateQueries({
         queryKey: planningDraftKeys.byId(draftId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: workflowKeys.all,
       });
     },
   });

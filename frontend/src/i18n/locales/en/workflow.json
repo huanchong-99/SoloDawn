@@ -118,7 +118,7 @@
   },
   "step2": {
     "header": "Configure {{count}} parallel tasks",
-    "progress": "{{completed}} / {{total}} completed",
+    "progress": "{{percent}}% complete",
     "previousTask": "Previous task",
     "nextTask": "Next task",
     "taskIndicator": "Task {{current}} of {{total}}",
@@ -395,11 +395,17 @@
     "emptyDescriptionAgentPlanned": "Agent-planned workflows can start with an empty graph. Tasks and terminals will appear here after planning begins.",
     "initialGoalLabel": "Initial goal",
     "taskLabel": "Task {{index}}",
+    "merge": "Merge",
     "mergeTerminalRole": "Merge Terminal",
     "terminalsCount": "{{count}} terminals",
     "terminalsCount_one": "{{count}} terminal",
     "slashCommands": "Slash Commands:",
-    "hint": "Click on a terminal to view details"
+    "hint": "Click on a terminal to view details",
+    "orchestrator": {
+      "statusLabel": "Status:",
+      "modelLabel": "Model:",
+      "tokensUsedLabel": "Tokens Used"
+    }
   },
   "terminalCard": {
     "orderLabel": "T{{index}}",

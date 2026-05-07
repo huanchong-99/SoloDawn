@@ -33,7 +33,13 @@ function TaskColumn({ task, isLast }: Readonly<{ task: WorkflowTaskDto; isLast: 
           </div>
         </div>
 
-        {/* Terminal nodes */}
+        {/* Terminal nodes.
+            E10-04: `terminal.id` is used as the React key here and must be
+            unique within a task. The backend (WorkflowTaskDto.terminals) is
+            the source of truth and guarantees uniqueness per task; if that
+            invariant is ever violated React will warn about duplicate keys.
+            Explicit dedup is intentionally NOT done here so such backend
+            bugs surface instead of being silently masked. */}
         {terminals.map((terminal, idx) => (
           <div key={terminal.id} className="relative">
             <TerminalNode terminal={terminal} taskName={task.name} />

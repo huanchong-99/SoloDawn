@@ -188,7 +188,7 @@ export function ProjectSelectorContainer({
       </DropdownMenuTrigger>
       <DropdownMenuContent>
         <DropdownMenuSearchInput
-          placeholder="Search projects..."
+          placeholder={t('projectSelector.searchProjects')}
           value={searchTerm}
           onValueChange={handleSearchTermChange}
           onKeyDown={handleKeyDown}

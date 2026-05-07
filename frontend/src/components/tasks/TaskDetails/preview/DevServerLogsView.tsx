@@ -25,7 +25,15 @@ export function DevServerLogsView({
   const [activeProcessId, setActiveProcessId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (devServerProcesses.length > 0 && !activeProcessId) {
+    if (devServerProcesses.length === 0) {
+      if (activeProcessId !== null) setActiveProcessId(null);
+      return;
+    }
+    // L14: also reset when the previously-active process is no longer in the
+    // list (e.g. it was terminated and pruned). This avoids rendering logs for
+    // a stale id that no longer matches any process.
+    const stillPresent = devServerProcesses.some((p) => p.id === activeProcessId);
+    if (!activeProcessId || !stillPresent) {
       setActiveProcessId(devServerProcesses[0].id);
     }
   }, [devServerProcesses, activeProcessId]);

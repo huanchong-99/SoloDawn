@@ -151,15 +151,35 @@ impl InMemoryMessageBus {
         let mut had_closed_subscribers = false;
 
         for tx in &subscribers {
-            match tx.send(message.clone()).await {
+            // [W2-30-12] Non-blocking path: prefer `try_send` to avoid blocking the
+            // publisher on a slow subscriber. If the channel is full, fall back to
+            // a bounded `send_timeout` so we apply backpressure for a short window
+            // rather than blocking indefinitely.
+            match tx.try_send(message.clone()) {
                 Ok(()) => {
                     delivered += 1;
                 }
-                Err(err) => {
+                Err(mpsc::error::TrySendError::Full(msg)) => {
+                    match tx
+                        .send_timeout(msg, std::time::Duration::from_millis(100))
+                        .await
+                    {
+                        Ok(()) => {
+                            delivered += 1;
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                topic = %topic,
+                                ?err,
+                                "Dropping message: subscriber backpressure timed out"
+                            );
+                        }
+                    }
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
                     had_closed_subscribers = true;
                     tracing::debug!(
                         topic = %topic,
-                        ?err,
                         "Dropping closed topic subscriber during publish"
                     );
                 }

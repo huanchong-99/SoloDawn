@@ -28,6 +28,16 @@ pub struct CurrentUserResponse {
     pub user_id: String,
 }
 
+// NOTE(W2-34-03): If/when OAuth is re-enabled in this deployment, the
+// pre-authentication endpoints below (`/auth/handoff/init`,
+// `/auth/handoff/complete`, `/auth/token`) MUST be moved into
+// `unauthed_routes` in `mod.rs` — mirroring the setup move performed for
+// G08 — because clients hitting them will not yet possess an API token.
+// Today every handler is a stub that returns BadRequest ("OAuth
+// authentication is not supported in this version."), so leaving them in
+// the authed zone is observationally harmless; do not move them while
+// they are stubs or the unauthed surface grows without purpose. Reassess
+// together with the real OAuth implementation.
 pub fn router() -> Router<DeploymentImpl> {
     Router::new()
         .route("/auth/handoff/init", post(handoff_init))

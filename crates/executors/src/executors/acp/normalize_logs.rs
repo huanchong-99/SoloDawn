@@ -314,6 +314,12 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                             result,
                         };
                     }
+                    if tc.path.is_none() {
+                        tracing::debug!(
+                            "ACP Read tool call missing path (id={})",
+                            tc.id.0.as_ref()
+                        );
+                    }
                     ActionType::FileRead {
                         path: tc
                             .path
@@ -325,6 +331,12 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                 }
                 agent_client_protocol::ToolKind::Edit => {
                     let changes = extract_file_changes(tc);
+                    if tc.path.is_none() {
+                        tracing::debug!(
+                            "ACP Edit tool call missing path (id={})",
+                            tc.id.0.as_ref()
+                        );
+                    }
                     ActionType::FileEdit {
                         path: tc
                             .path
@@ -441,7 +453,15 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                         Some(raw.clone())
                     } else if tc.title.trim_start().starts_with('{') {
                         // Title contains JSON arguments for the tool
-                        serde_json::from_str::<serde_json::Value>(&tc.title).ok()
+                        serde_json::from_str::<serde_json::Value>(&tc.title)
+                            .map_err(|e| {
+                                tracing::debug!(
+                                    "failed to parse tool title as JSON arguments: {}",
+                                    e
+                                );
+                                e
+                            })
+                            .ok()
                     } else {
                         None
                     };

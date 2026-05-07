@@ -23,11 +23,15 @@ export function useOrganizationSelection(
     null
   );
 
-  // Sync selectedOrgId when URL changes
+  // Sync selectedOrgId when URL changes. Normalize empty/null values to a
+  // single canonical empty string before comparing to avoid toggling loops
+  // between `null`, `undefined`, and `''`.
   useEffect(() => {
-    if (orgIdParam && orgIdParam !== selectedOrgId) {
-      setSelectedOrgId(orgIdParam);
-    }
+    const normalizedParam = orgIdParam ?? '';
+    const normalizedSelected = selectedOrgId ?? '';
+    if (!normalizedParam) return;
+    if (normalizedParam === normalizedSelected) return;
+    setSelectedOrgId(normalizedParam);
   }, [orgIdParam, selectedOrgId]);
 
   // Default to first available organization if none selected

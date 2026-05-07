@@ -1,3 +1,11 @@
+// W2-37-05 / W2-37-06: This module performs case-insensitive file search via
+// `str::to_lowercase()`. That function uses Unicode's simple (1:1) case-fold
+// mapping and is only correct for ASCII; it does NOT implement full Unicode
+// case folding (e.g. Turkish dotless-I, German ß, or title-case characters).
+// The behaviour here is intentionally best-effort: we treat it as an
+// ASCII-case-insensitive substring match over file paths/names. Callers should
+// not rely on this function for Unicode-correct matching.
+
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -17,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use thiserror::Error;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 use ts_rs::TS;
 
@@ -84,13 +93,42 @@ pub struct FileSearchCache {
     cache: Cache<PathBuf, CachedRepo>,
     git_service: GitService,
     file_ranker: FileRanker,
-    build_queue: mpsc::UnboundedSender<PathBuf>,
-    watchers: DashMap<PathBuf, Debouncer<RecommendedWatcher, RecommendedCache>>,
+    build_queue: mpsc::Sender<PathBuf>,
+    watchers: Arc<DashMap<PathBuf, Debouncer<RecommendedWatcher, RecommendedCache>>>,
+    watcher_tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
+    worker_task: std::sync::Mutex<Option<JoinHandle<()>>>,
+}
+
+impl Drop for FileSearchCache {
+    // [W2-36-02] Abort watcher/worker tasks synchronously without a graceful
+    // shutdown handshake. Acceptable here: these tasks are purely reactive
+    // (file-system watchers and FST index builders) with no non-idempotent
+    // external state; the next startup will rebuild in-memory indexes and
+    // reattach watchers. Performing an awaited shutdown would require a Tokio
+    // runtime inside `Drop`, which is not guaranteed.
+    fn drop(&mut self) {
+        if let Ok(mut tasks) = self.watcher_tasks.lock() {
+            for handle in tasks.drain(..) {
+                handle.abort();
+            }
+        }
+        if let Ok(mut worker) = self.worker_task.lock()
+            && let Some(handle) = worker.take()
+        {
+            handle.abort();
+        }
+    }
 }
 
 impl FileSearchCache {
     pub fn new() -> Self {
-        let (build_sender, build_receiver) = mpsc::unbounded_channel();
+        // [W2-30-03] Bounded build queue (capacity 256). All senders use
+        // `try_send` and warn on `Full`, so a backed-up worker coalesces
+        // rather than growing memory without bound. Cache misses and watcher
+        // refreshes are idempotent — dropping a duplicate enqueue is safe
+        // because the worker will rebuild from the latest HEAD on the next
+        // admitted request.
+        let (build_sender, build_receiver) = mpsc::channel(256);
 
         // Create cache with 100MB limit and 1 hour TTL
         let cache = Cache::builder()
@@ -101,16 +139,22 @@ impl FileSearchCache {
         let cache_for_worker = cache.clone();
         let git_service = GitService::new();
         let file_ranker = FileRanker::new();
+        let watchers: Arc<DashMap<PathBuf, Debouncer<RecommendedWatcher, RecommendedCache>>> =
+            Arc::new(DashMap::new());
 
         // Spawn background worker
         let worker_git_service = git_service.clone();
         let worker_file_ranker = file_ranker.clone();
-        tokio::spawn(async move {
+        let worker_build_sender = build_sender.clone();
+        let worker_watchers = Arc::clone(&watchers);
+        let worker_task = tokio::spawn(async move {
             Self::background_worker(
                 build_receiver,
                 cache_for_worker,
                 worker_git_service,
                 worker_file_ranker,
+                worker_build_sender,
+                worker_watchers,
             )
             .await;
         });
@@ -120,7 +164,9 @@ impl FileSearchCache {
             git_service,
             file_ranker,
             build_queue: build_sender,
-            watchers: DashMap::new(),
+            watchers,
+            watcher_tasks: std::sync::Mutex::new(Vec::new()),
+            worker_task: std::sync::Mutex::new(Some(worker_task)),
         }
     }
 
@@ -143,8 +189,18 @@ impl FileSearchCache {
         }
 
         // Cache miss - trigger background refresh and return error
-        if let Err(e) = self.build_queue.send(repo_path_buf) {
-            warn!("Failed to enqueue cache build: {}", e);
+        // [W2-30-03] Bounded queue: drop on Full rather than await, since we
+        // are in a hot search path and a backlogged worker will pick up the
+        // repo on its next successful enqueue or watcher event.
+        if let Err(e) = self.build_queue.try_send(repo_path_buf) {
+            match e {
+                mpsc::error::TrySendError::Full(path) => {
+                    warn!("Build queue full, dropping cache build for {:?}", path);
+                }
+                mpsc::error::TrySendError::Closed(path) => {
+                    warn!("Build queue closed, cannot enqueue {:?}", path);
+                }
+            }
         }
 
         Err(CacheError::Miss)
@@ -153,11 +209,18 @@ impl FileSearchCache {
     /// Pre-warm cache for given repositories
     pub fn warm_repos(&self, repo_paths: Vec<PathBuf>) -> Result<(), String> {
         for repo_path in repo_paths {
-            if let Err(e) = self.build_queue.send(repo_path.clone()) {
-                error!(
-                    "Failed to enqueue repo for warming: {:?} - {}",
-                    repo_path, e
-                );
+            // [W2-30-03] Bounded queue: warn-and-drop on Full. Warming is
+            // best-effort; if the worker is busy building other repos the
+            // next search miss will re-enqueue this path.
+            if let Err(e) = self.build_queue.try_send(repo_path.clone()) {
+                match e {
+                    mpsc::error::TrySendError::Full(path) => {
+                        warn!("Build queue full, skipping warm for {:?}", path);
+                    }
+                    mpsc::error::TrySendError::Closed(path) => {
+                        error!("Build queue closed, cannot warm {:?}", path);
+                    }
+                }
             }
         }
         Ok(())
@@ -564,22 +627,36 @@ impl FileSearchCache {
 
     /// Background worker for cache building
     async fn background_worker(
-        mut build_receiver: mpsc::UnboundedReceiver<PathBuf>,
+        mut build_receiver: mpsc::Receiver<PathBuf>,
         cache: Cache<PathBuf, CachedRepo>,
         git_service: GitService,
         file_ranker: FileRanker,
+        build_queue: mpsc::Sender<PathBuf>,
+        watchers: Arc<DashMap<PathBuf, Debouncer<RecommendedWatcher, RecommendedCache>>>,
     ) {
         while let Some(repo_path) = build_receiver.recv().await {
             let cache_builder = FileSearchCache {
                 cache: cache.clone(),
                 git_service: git_service.clone(),
                 file_ranker: file_ranker.clone(),
-                build_queue: mpsc::unbounded_channel().0, // Dummy sender
-                watchers: DashMap::new(),
+                build_queue: build_queue.clone(),
+                watchers: Arc::clone(&watchers),
+                watcher_tasks: std::sync::Mutex::new(Vec::new()),
+                worker_task: std::sync::Mutex::new(None),
             };
 
             match cache_builder.build_repo_cache(&repo_path).await {
                 Ok(cached_repo) => {
+                    // E28-12: `build_repo_cache` reads the working tree's
+                    // current HEAD; by the time we insert the result the HEAD
+                    // may already have advanced (concurrent commit/rebase)
+                    // and a subsequent build request for the same repo will
+                    // have been enqueued by the watcher. Last-writer-wins on
+                    // the moka cache is acceptable here because the watcher
+                    // always re-queues the repo after external changes, so
+                    // any stale entry is self-healing within one debounce
+                    // interval. Keep this insert non-conditional; do not add
+                    // CAS here.
                     cache.insert(repo_path.clone(), cached_repo).await;
                     info!("Successfully cached repo: {:?}", repo_path);
                 }
@@ -592,21 +669,33 @@ impl FileSearchCache {
 
     /// Setup file watcher for repository
     pub fn setup_watcher(&self, repo_path: &Path) -> Result<(), String> {
-        let repo_path_buf = repo_path.to_path_buf();
+        use dashmap::mapref::entry::Entry;
 
-        if self.watchers.contains_key(&repo_path_buf) {
-            return Ok(()); // Already watching
-        }
+        let repo_path_buf = repo_path.to_path_buf();
 
         let git_dir = repo_path.join(".git");
         if !git_dir.exists() {
             return Err("Not a git repository".to_string());
         }
 
+        // E27-10: use DashMap entry API to atomically check-and-insert, avoiding a
+        // TOCTOU where two concurrent calls could each observe an empty slot and
+        // both create a watcher.
+        let entry = self.watchers.entry(repo_path_buf.clone());
+        let vacant = match entry {
+            Entry::Occupied(_) => return Ok(()), // Already watching
+            Entry::Vacant(v) => v,
+        };
+
         let build_queue = self.build_queue.clone();
         let watched_path = repo_path_buf.clone();
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        // [W2-30-03] Bounded HEAD-watcher channel (capacity 64). The
+        // debouncer callback is sync, so we use `try_send` and drop events
+        // on `Full`. Dropping is safe: HEAD events are idempotent signals
+        // to re-enqueue the repo build, and the debouncer already coalesces
+        // bursts of filesystem activity within its 500ms window.
+        let (tx, mut rx) = mpsc::channel::<()>(64);
 
         let mut debouncer = new_debouncer(
             Duration::from_millis(500),
@@ -615,10 +704,29 @@ impl FileSearchCache {
                 if let Ok(events) = res {
                     for event in events {
                         // Check if any path contains HEAD file
+                        // L08: Matching on file_name == "HEAD" captures the common
+                        // case where .git/HEAD is replaced atomically via rename.
+                        // On all supported platforms (Unix and Windows) branch
+                        // switches result in a HEAD-named file event, so this
+                        // check is cross-platform.
                         for path in &event.event.paths {
                             if path.file_name().is_some_and(|name| name == "HEAD") {
-                                if let Err(e) = tx.send(()) {
-                                    error!("Failed to send HEAD change event: {}", e);
+                                // [W2-30-03] Bounded channel: drop on Full
+                                // (another HEAD event is already queued; the
+                                // worker will re-read HEAD once drained).
+                                if let Err(e) = tx.try_send(()) {
+                                    match e {
+                                        mpsc::error::TrySendError::Full(()) => {
+                                            warn!(
+                                                "HEAD watcher channel full, dropping event"
+                                            );
+                                        }
+                                        mpsc::error::TrySendError::Closed(()) => {
+                                            warn!(
+                                                "HEAD watcher channel closed, dropping event"
+                                            );
+                                        }
+                                    }
                                 }
                                 break;
                             }
@@ -634,17 +742,20 @@ impl FileSearchCache {
             .map_err(|e| format!("Failed to watch HEAD file: {e}"))?;
 
         // Spawn task to handle HEAD changes
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             while rx.recv().await.is_some() {
                 info!("HEAD changed for repo: {:?}", watched_path);
-                if let Err(e) = build_queue.send(watched_path.clone()) {
+                if let Err(e) = build_queue.send(watched_path.clone()).await {
                     error!("Failed to enqueue cache refresh: {}", e);
                 }
             }
         });
+        if let Ok(mut tasks) = self.watcher_tasks.lock() {
+            tasks.push(handle);
+        }
 
         // Keep debouncer alive for the lifetime of the watcher registration.
-        self.watchers.insert(repo_path_buf, debouncer);
+        vacant.insert(debouncer);
 
         info!("Setup file watcher for repo: {:?}", repo_path);
         Ok(())

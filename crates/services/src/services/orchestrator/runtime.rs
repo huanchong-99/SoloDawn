@@ -21,7 +21,10 @@ use uuid::Uuid;
 
 use super::{
     OrchestratorAgent, OrchestratorConfig, SharedMessageBus,
-    constants::{WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_READY, WORKFLOW_STATUS_RUNNING},
+    constants::{
+        WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_READY, WORKFLOW_STATUS_RUNNING,
+        WORKFLOW_TOPIC_PREFIX,
+    },
     persistence::StatePersistence,
     runtime_actions::RuntimeActionService,
     types::LLMMessage,
@@ -424,6 +427,14 @@ impl OrchestratorRuntime {
 
             // Best-effort cleanup for naturally completed workflow runs.
             // Guard against removing a newly restarted workflow with the same ID.
+            // NOTE(E21-07, W2-19-06, K11): Replace the fixed 5x100ms polling loop
+            // with an event-driven handshake (e.g. notify/condvar on task completion
+            // or a one-shot channel) so cleanup latency is bounded by the actual
+            // finish signal rather than by a hard-coded poll budget. The
+            // `is_finished()` check below is racy by design (we re-check under the
+            // lock), but the 500ms total budget is acceptable for user-visible
+            // workflow teardown. Refactor is tracked but deferred — current behavior
+            // is correct, only sub-optimal.
             let mut removed_running = false;
             for _ in 0..5 {
                 let mut running = running_workflows.lock().await;
@@ -453,6 +464,12 @@ impl OrchestratorRuntime {
                 };
 
                 if let Some(handle) = git_watcher_handle {
+                    // [W2-19-08] Conditional abort is intentional: first request a
+                    // cooperative stop via `watcher.stop()` and give the task 5s to
+                    // observe it and exit cleanly. Only if the cooperative shutdown
+                    // times out do we force-abort. `watcher_task.await.ok()` after
+                    // abort drains the JoinHandle so no resources leak. Both paths
+                    // fully consume `watcher_task` — this is NOT a dropped JoinHandle.
                     handle.watcher.stop();
                     let mut watcher_task = handle.task_handle;
                     let shutdown_result = timeout(Duration::from_secs(5), &mut watcher_task).await;
@@ -719,7 +736,7 @@ impl OrchestratorRuntime {
         {
             self.message_bus
                 .publish(
-                    &format!("workflow:{workflow_id}"),
+                    &format!("{WORKFLOW_TOPIC_PREFIX}{workflow_id}"),
                     super::BusMessage::Shutdown,
                 )
                 .await?;
@@ -1354,6 +1371,10 @@ mod tests {
                 merge_terminal_cli_id TEXT NOT NULL,
                 merge_terminal_model_id TEXT NOT NULL,
                 target_branch TEXT NOT NULL,
+                -- git_watcher_enabled: mirrors the production migration
+                -- (20260224000000_add_git_watcher_enabled.sql). Default `1`
+                -- preserves backward compatibility so pre-existing workflows
+                -- keep the watcher active after upgrade.
                 git_watcher_enabled INTEGER NOT NULL DEFAULT 1,
                 orchestrator_state TEXT,
                 ready_at TEXT,
@@ -1996,6 +2017,10 @@ mod tests {
                 merge_terminal_cli_id TEXT NOT NULL,
                 merge_terminal_model_id TEXT NOT NULL,
                 target_branch TEXT NOT NULL,
+                -- git_watcher_enabled: mirrors the production migration
+                -- (20260224000000_add_git_watcher_enabled.sql). Default `1`
+                -- preserves backward compatibility so pre-existing workflows
+                -- keep the watcher active after upgrade.
                 git_watcher_enabled INTEGER NOT NULL DEFAULT 1,
                 orchestrator_state TEXT,
                 ready_at TEXT,

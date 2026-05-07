@@ -49,6 +49,11 @@ export const useJsonPatchWsStream = <T extends object>(
   const injectInitialEntry = options?.injectInitialEntry;
   const deduplicatePatches = options?.deduplicatePatches;
 
+  // Keep latest initialData in a ref so effect deps stay stable across renders
+  // (callers typically pass an inline () => T lambda whose identity is unstable).
+  const initialDataRef = useRef(initialData);
+  initialDataRef.current = initialData;
+
   function scheduleReconnect() {
     if (retryTimerRef.current) return; // already scheduled
     // Exponential backoff with cap: 1s, 2s, 4s, 8s (max), then stay at 8s
@@ -108,7 +113,7 @@ export const useJsonPatchWsStream = <T extends object>(
 
     // Initialize data
     if (!dataRef.current) {
-      dataRef.current = initialData();
+      dataRef.current = initialDataRef.current();
 
       // Inject initial entry if provided
       if (injectInitialEntry) {
@@ -216,7 +221,6 @@ export const useJsonPatchWsStream = <T extends object>(
   }, [
     endpoint,
     enabled,
-    initialData,
     injectInitialEntry,
     deduplicatePatches,
     retryNonce,

@@ -30,6 +30,6 @@ CREATE TABLE task_images (
 
 
 -- Create indexes for efficient querying
-CREATE INDEX idx_images_hash ON images(hash);
-CREATE INDEX idx_task_images_task_id ON task_images(task_id);
-CREATE INDEX idx_task_images_image_id ON task_images(image_id);
+CREATE INDEX IF NOT EXISTS idx_images_hash ON images(hash);
+CREATE INDEX IF NOT EXISTS idx_task_images_task_id ON task_images(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_images_image_id ON task_images(image_id);

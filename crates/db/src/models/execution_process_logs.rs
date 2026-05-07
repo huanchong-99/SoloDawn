@@ -15,23 +15,64 @@ pub struct ExecutionProcessLogs {
 }
 
 impl ExecutionProcessLogs {
-    /// Find logs by execution process ID
+    /// Hard cap used by `find_by_execution_id` (W2-15-06). Long-running
+    /// processes accumulate thousands of log rows; capping here prevents
+    /// a single caller from materialising megabytes at once. Callers that
+    /// need to walk the full history should use `find_by_execution_id_page`.
+    pub const FIND_BY_EXECUTION_ID_MAX_ROWS: i64 = 5000;
+
+    /// Find logs by execution process ID.
+    ///
+    /// W2-15-06: capped at [`Self::FIND_BY_EXECUTION_ID_MAX_ROWS`] oldest
+    /// chunks. The cap is well above a typical process's chunk count, so
+    /// existing UI callers are unaffected; pathological cases no longer
+    /// OOM.
     pub async fn find_by_execution_id(
         pool: &SqlitePool,
         execution_id: Uuid,
     ) -> Result<Vec<Self>, sqlx::Error> {
-        sqlx::query_as!(
-            ExecutionProcessLogs,
-            r#"SELECT 
-                execution_id as "execution_id!: Uuid",
+        let limit: i64 = Self::FIND_BY_EXECUTION_ID_MAX_ROWS;
+        sqlx::query_as::<_, ExecutionProcessLogs>(
+            r"SELECT
+                execution_id,
                 logs,
                 byte_size,
-                inserted_at as "inserted_at!: DateTime<Utc>"
-               FROM execution_process_logs 
+                inserted_at
+               FROM execution_process_logs
                WHERE execution_id = $1
-               ORDER BY inserted_at ASC"#,
-            execution_id
+               ORDER BY inserted_at ASC
+               LIMIT $2",
         )
+        .bind(execution_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+    }
+
+    /// Paginated variant of `find_by_execution_id`. Use an `inserted_at`
+    /// cursor (exclusive lower bound) to walk the full log history in
+    /// stable chronological order.
+    pub async fn find_by_execution_id_page(
+        pool: &SqlitePool,
+        execution_id: Uuid,
+        after: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<Self>, sqlx::Error> {
+        sqlx::query_as::<_, ExecutionProcessLogs>(
+            r"SELECT
+                execution_id,
+                logs,
+                byte_size,
+                inserted_at
+               FROM execution_process_logs
+               WHERE execution_id = $1
+                 AND ($2 IS NULL OR inserted_at > $2)
+               ORDER BY inserted_at ASC
+               LIMIT $3",
+        )
+        .bind(execution_id)
+        .bind(after)
+        .bind(limit)
         .fetch_all(pool)
         .await
     }

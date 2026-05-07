@@ -50,7 +50,10 @@ const DeleteTaskConfirmationDialogImpl =
     return (
       <Dialog
         open={modal.visible}
-        onOpenChange={(open) => !open && handleCancelDelete()}
+        onOpenChange={(open) => {
+          if (isDeleting) return;
+          if (!open) handleCancelDelete();
+        }}
       >
         <DialogContent>
           <DialogHeader>

@@ -12,6 +12,15 @@ use uuid::Uuid;
 /// Feishu App Config
 ///
 /// Corresponds to database table: feishu_app_config
+///
+// E38-15: `20260315064003_feishu_app_config_unique_app_id.sql` creates a
+// `UNIQUE INDEX` on `app_id` without first cleaning up pre-existing
+// duplicates. If duplicates existed at the time the migration ran, index
+// creation would have failed; any duplicates produced after the migration
+// are now prevented at insert time. The migration is already applied and
+// cannot be modified; callers inserting configs must handle the uniqueness
+// error, and any data migration that requires dedup must be done via a
+// separate follow-up migration.
 #[derive(Clone, FromRow, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeishuAppConfig {

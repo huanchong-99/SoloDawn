@@ -1,11 +1,16 @@
 use std::{collections::HashSet, env, fmt::Write, io::ErrorKind, path::Path};
 
+use once_cell::sync::Lazy;
+use regex::Regex;
 use sha2::{Digest, Sha256};
 use tokio::fs;
 use tracing::warn;
 
 use super::CursorAgent;
 use crate::executors::{CodingAgent, ExecutorError, StandardCodingAgentExecutor};
+
+static PROJECT_SLUG_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"[^A-Za-z0-9]+").expect("valid regex"));
 
 pub async fn ensure_mcp_server_trust(cursor: &CursorAgent, current_dir: &Path) {
     if let Err(err) = ensure_mcp_server_trust_impl(cursor, current_dir).await {
@@ -136,8 +141,7 @@ fn cursor_project_slug(path: &Path) -> Option<String> {
         return None;
     }
 
-    let slug = regex::Regex::new(r"[^A-Za-z0-9]+")
-        .unwrap()
+    let slug = PROJECT_SLUG_RE
         .replace_all(&raw, "-")
         .trim_matches('-')
         .to_string();
@@ -163,7 +167,8 @@ fn compute_cursor_approval_id(
     for byte in &digest {
         let _ = write!(hex, "{byte:02x}");
     }
-    Some(format!("{server_name}-{}", &hex[..16]))
+    let suffix: String = hex.chars().take(16).collect();
+    Some(format!("{server_name}-{suffix}"))
 }
 
 fn default_cursor_mcp_servers(cursor: &CursorAgent) -> serde_json::Value {

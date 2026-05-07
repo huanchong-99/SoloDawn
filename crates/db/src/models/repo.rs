@@ -206,7 +206,7 @@ impl Repo {
             Repo,
             r#"INSERT INTO repos (id, path, name, display_name)
                VALUES ($1, $2, $3, $4)
-               ON CONFLICT(path) DO UPDATE SET updated_at = updated_at
+               ON CONFLICT(path) DO UPDATE SET updated_at = datetime('now', 'subsec')
                RETURNING id as "id!: Uuid",
                          path,
                          name,

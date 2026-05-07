@@ -280,6 +280,8 @@ impl JsTarget {
             return true;
         }
 
+        // E37-02: `/` boundary check — equality (empty rest) or `{root}/` prefix
+        // ensures we don't match e.g. root="foo" against "foobar/x".
         relative_path == root || relative_path.starts_with(&format!("{root}/"))
     }
 }
@@ -349,6 +351,9 @@ impl RepositoryDiscovery {
                         .unwrap_or(manifest_dir)
                         .to_string_lossy(),
                 );
+                // E37-04: normalize Windows backslashes before glob match so
+                // patterns like `packages/*` match on Windows paths too.
+                let relative_dir = relative_dir.replace('\\', "/");
 
                 if !workspace_matchers
                     .iter()
@@ -496,6 +501,8 @@ impl RepositoryDiscovery {
             }
         }
 
+        // E37-08: early return once a repo-global change is detected — avoids
+        // running dependent-target expansion we'd immediately discard.
         if repo_global_change {
             return self.js_targets.iter().collect();
         }
@@ -782,7 +789,18 @@ fn compile_workspace_patterns(patterns: &[String]) -> anyhow::Result<Vec<Pattern
     patterns
         .iter()
         .map(|pattern| {
-            Pattern::new(pattern).with_context(|| format!("invalid workspace pattern: {pattern}"))
+            // E37-10: log a warning so silently-skipped invalid patterns are
+            // surfaced; error is still returned to the caller.
+            Pattern::new(pattern)
+                .map_err(|err| {
+                    tracing::warn!(
+                        pattern = %pattern,
+                        error = %err,
+                        "invalid workspace pattern; will fail compilation"
+                    );
+                    err
+                })
+                .with_context(|| format!("invalid workspace pattern: {pattern}"))
         })
         .collect()
 }

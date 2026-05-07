@@ -67,24 +67,26 @@ export function RetryEditorInline({
     onCancelled?.();
   };
 
+  const retryMutate = retryMutation.mutate;
+  const processes = attemptData.processes;
   const onSend = useCallback(() => {
     if (!canSend) return;
     setSendError(null);
-    retryMutation.mutate({
+    retryMutate({
       message,
       variant: selectedVariant,
       executionProcessId,
       branchStatus,
-      processes: attemptData.processes,
+      processes,
     });
   }, [
     canSend,
-    retryMutation,
+    retryMutate,
     message,
     selectedVariant,
     executionProcessId,
     branchStatus,
-    attemptData.processes,
+    processes,
   ]);
 
   const handleCmdEnter = useCallback(() => {

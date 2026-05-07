@@ -1,5 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string) => {
+      const translations: Record<string, string> = {
+        'pipeline.merge': 'Merge',
+      };
+      return translations[key] ?? key;
+    },
+  }),
+}));
+
 import { MergeTerminalNode } from './MergeTerminalNode';
 
 vi.mock('@/hooks/useWorkflows', () => ({

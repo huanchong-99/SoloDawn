@@ -165,10 +165,11 @@ mod tests {
     fn test_make_path_relative_macos_private_alias() {
         // Simulate a worktree under /var with a path reported under /private/var
         let worktree = "/var/folders/zz/abc123/T/solodawn-dev/worktrees/gc-test";
-        let path_under_private = format!(
-            "/private/var{}/hello-world.txt",
-            worktree.strip_prefix("/var").unwrap()
-        );
+        let worktree_suffix = match worktree.strip_prefix("/var") {
+            Some(suffix) => suffix,
+            None => panic!("test worktree path must start with /var; got {worktree}"),
+        };
+        let path_under_private = format!("/private/var{worktree_suffix}/hello-world.txt");
         assert_eq!(
             make_path_relative(&path_under_private, worktree),
             "hello-world.txt"

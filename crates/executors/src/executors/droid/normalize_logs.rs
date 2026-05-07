@@ -134,22 +134,21 @@ pub fn normalize_logs(
                                 ..
                             } => {
                                 let path = make_path_relative(&file_path, &worktree_path_str);
-                                let tool_state = FileReadState {
+                                let mut tool_state = FileReadState {
                                     index: None,
                                     path: path.clone(),
                                     status: ToolStatus::Created,
                                 };
-                                state.file_reads.insert(id.clone(), tool_state);
-                                state.pending_fifo.push_back(PendingToolCall::Read {
-                                    tool_call_id: id.clone(),
-                                });
-                                let tool_state = state.file_reads.get_mut(&id).unwrap();
                                 let index = add_normalized_entry(
                                     &msg_store,
                                     &entry_index_provider,
                                     tool_state.to_normalized_entry(),
                                 );
                                 tool_state.index = Some(index);
+                                state.file_reads.insert(id.clone(), tool_state);
+                                state.pending_fifo.push_back(PendingToolCall::Read {
+                                    tool_call_id: id.clone(),
+                                });
                             }
 
                             DroidToolData::Grep {
@@ -159,63 +158,60 @@ pub fn normalize_logs(
                                     .as_ref()
                                     .map(|p| make_path_relative(p, &worktree_path_str))
                                     .unwrap_or_default();
-                                let tool_state = FileReadState {
+                                let mut tool_state = FileReadState {
                                     index: None,
                                     path: path.clone(),
                                     status: ToolStatus::Created,
                                 };
+                                let index = add_normalized_entry(
+                                    &msg_store,
+                                    &entry_index_provider,
+                                    tool_state.to_normalized_entry(),
+                                );
+                                tool_state.index = Some(index);
                                 state.file_reads.insert(id.clone(), tool_state);
                                 state.pending_fifo.push_back(PendingToolCall::Read {
                                     tool_call_id: id.clone(),
                                 });
-                                let tool_state = state.file_reads.get_mut(&id).unwrap();
-                                let index = add_normalized_entry(
-                                    &msg_store,
-                                    &entry_index_provider,
-                                    tool_state.to_normalized_entry(),
-                                );
-                                tool_state.index = Some(index);
                             }
 
                             DroidToolData::Glob { patterns, .. } => {
                                 let query = patterns.join(", ");
-                                let tool_state = SearchState {
+                                let mut tool_state = SearchState {
                                     index: None,
                                     query: query.clone(),
                                     status: ToolStatus::Created,
                                 };
-                                state.searches.insert(id.clone(), tool_state);
-                                state.pending_fifo.push_back(PendingToolCall::Search {
-                                    tool_call_id: id.clone(),
-                                });
-                                let tool_state = state.searches.get_mut(&id).unwrap();
                                 let index = add_normalized_entry(
                                     &msg_store,
                                     &entry_index_provider,
                                     tool_state.to_normalized_entry(),
                                 );
                                 tool_state.index = Some(index);
+                                state.searches.insert(id.clone(), tool_state);
+                                state.pending_fifo.push_back(PendingToolCall::Search {
+                                    tool_call_id: id.clone(),
+                                });
                             }
 
                             DroidToolData::Execute { command, .. } => {
-                                let tool_state = CommandRunState {
+                                let mut tool_state = CommandRunState {
                                     index: None,
                                     command: command.clone(),
                                     output: String::new(),
                                     status: ToolStatus::Created,
                                     exit_code: None,
                                 };
-                                state.command_runs.insert(id.clone(), tool_state);
-                                state.pending_fifo.push_back(PendingToolCall::CommandRun {
-                                    tool_call_id: id.clone(),
-                                });
-                                let tool_state = state.command_runs.get_mut(&id).unwrap();
                                 let index = add_normalized_entry(
                                     &msg_store,
                                     &entry_index_provider,
                                     tool_state.to_normalized_entry(),
                                 );
                                 tool_state.index = Some(index);
+                                state.command_runs.insert(id.clone(), tool_state);
+                                state.pending_fifo.push_back(PendingToolCall::CommandRun {
+                                    tool_call_id: id.clone(),
+                                });
                             }
 
                             DroidToolData::Edit {
@@ -234,23 +230,22 @@ pub fn normalize_logs(
                                     has_line_numbers: false,
                                 }];
 
-                                let tool_state = FileEditState {
+                                let mut tool_state = FileEditState {
                                     index: None,
                                     path: path.clone(),
                                     changes: changes.clone(),
                                     status: ToolStatus::Created,
                                 };
-                                state.file_edits.insert(id.clone(), tool_state);
-                                state.pending_fifo.push_back(PendingToolCall::FileEdit {
-                                    tool_call_id: id.clone(),
-                                });
-                                let tool_state = state.file_edits.get_mut(&id).unwrap();
                                 let index = add_normalized_entry(
                                     &msg_store,
                                     &entry_index_provider,
                                     tool_state.to_normalized_entry(),
                                 );
                                 tool_state.index = Some(index);
+                                state.file_edits.insert(id.clone(), tool_state);
+                                state.pending_fifo.push_back(PendingToolCall::FileEdit {
+                                    tool_call_id: id.clone(),
+                                });
                             }
 
                             DroidToolData::MultiEdit { file_path, edits } => {
@@ -259,6 +254,18 @@ pub fn normalize_logs(
                                     .iter()
                                     .filter_map(|edit| {
                                         if edit.old_string.is_some() || edit.new_string.is_some() {
+                                            if edit.old_string.is_none() {
+                                                tracing::debug!(
+                                                    "droid MultiEdit entry missing old_string for file {}",
+                                                    file_path
+                                                );
+                                            }
+                                            if edit.new_string.is_none() {
+                                                tracing::debug!(
+                                                    "droid MultiEdit entry missing new_string for file {}",
+                                                    file_path
+                                                );
+                                            }
                                             Some(FileChange::Edit {
                                                 unified_diff:
                                                     workspace_utils::diff::create_unified_diff(
@@ -280,47 +287,44 @@ pub fn normalize_logs(
                                     })
                                     .collect();
 
-                                let tool_state = FileEditState {
+                                let mut tool_state = FileEditState {
                                     index: None,
                                     path: path.clone(),
                                     changes: changes.clone(),
                                     status: ToolStatus::Created,
                                 };
-                                state.file_edits.insert(id.clone(), tool_state);
-                                state.pending_fifo.push_back(PendingToolCall::FileEdit {
-                                    tool_call_id: id.clone(),
-                                });
-                                let tool_state = state.file_edits.get_mut(&id).unwrap();
                                 let index = add_normalized_entry(
                                     &msg_store,
                                     &entry_index_provider,
                                     tool_state.to_normalized_entry(),
                                 );
                                 tool_state.index = Some(index);
+                                state.file_edits.insert(id.clone(), tool_state);
+                                state.pending_fifo.push_back(PendingToolCall::FileEdit {
+                                    tool_call_id: id.clone(),
+                                });
                             }
 
                             DroidToolData::Create { file_path, content } => {
                                 let path = make_path_relative(&file_path, &worktree_path_str);
                                 let changes = vec![FileChange::Write { content }];
 
-                                let tool_state = FileEditState {
+                                let mut tool_state = FileEditState {
                                     index: None,
                                     path: path.clone(),
                                     changes: changes.clone(),
                                     status: ToolStatus::Created,
                                 };
-                                state.file_edits.insert(id.clone(), tool_state);
-                                state.pending_fifo.push_back(PendingToolCall::FileEdit {
-                                    tool_call_id: id.clone(),
-                                });
-
-                                let tool_state = state.file_edits.get_mut(&id).unwrap();
                                 let index = add_normalized_entry(
                                     &msg_store,
                                     &entry_index_provider,
                                     tool_state.to_normalized_entry(),
                                 );
                                 tool_state.index = Some(index);
+                                state.file_edits.insert(id.clone(), tool_state);
+                                state.pending_fifo.push_back(PendingToolCall::FileEdit {
+                                    tool_call_id: id.clone(),
+                                });
                             }
 
                             DroidToolData::ApplyPatch { input } => {
@@ -328,24 +332,22 @@ pub fn normalize_logs(
                                 let path = make_path_relative(&path, &worktree_path_str);
 
                                 // We get changes from tool result
-                                let tool_state = FileEditState {
+                                let mut tool_state = FileEditState {
                                     index: None,
                                     path: path.clone(),
                                     changes: vec![],
                                     status: ToolStatus::Created,
                                 };
-                                state.file_edits.insert(id.clone(), tool_state);
-                                state.pending_fifo.push_back(PendingToolCall::FileEdit {
-                                    tool_call_id: id.clone(),
-                                });
-
-                                let tool_state = state.file_edits.get_mut(&id).unwrap();
                                 let index = add_normalized_entry(
                                     &msg_store,
                                     &entry_index_provider,
                                     tool_state.to_normalized_entry(),
                                 );
                                 tool_state.index = Some(index);
+                                state.file_edits.insert(id.clone(), tool_state);
+                                state.pending_fifo.push_back(PendingToolCall::FileEdit {
+                                    tool_call_id: id.clone(),
+                                });
                             }
 
                             DroidToolData::TodoWrite { todos } => {
@@ -358,105 +360,96 @@ pub fn normalize_logs(
                                     })
                                     .collect();
 
-                                let tool_state = TodoManagementState {
+                                let mut tool_state = TodoManagementState {
                                     index: None,
                                     todos: todo_items.clone(),
                                     status: ToolStatus::Created,
                                 };
-                                state.todo_updates.insert(id.clone(), tool_state);
-                                state.pending_fifo.push_back(PendingToolCall::Todo {
-                                    tool_call_id: id.clone(),
-                                });
-
-                                let tool_state = state.todo_updates.get_mut(&id).unwrap();
                                 let index = add_normalized_entry(
                                     &msg_store,
                                     &entry_index_provider,
                                     tool_state.to_normalized_entry(),
                                 );
                                 tool_state.index = Some(index);
+                                state.todo_updates.insert(id.clone(), tool_state);
+                                state.pending_fifo.push_back(PendingToolCall::Todo {
+                                    tool_call_id: id.clone(),
+                                });
                             }
 
                             DroidToolData::WebSearch { query, .. } => {
-                                let tool_state = WebFetchState {
+                                let mut tool_state = WebFetchState {
                                     index: None,
                                     url: query.clone(),
                                     status: ToolStatus::Created,
                                 };
-                                state.web_fetches.insert(id.clone(), tool_state);
-                                state.pending_fifo.push_back(PendingToolCall::Fetch {
-                                    tool_call_id: id.clone(),
-                                });
-
-                                let tool_state = state.web_fetches.get_mut(&id).unwrap();
                                 let index = add_normalized_entry(
                                     &msg_store,
                                     &entry_index_provider,
                                     tool_state.to_normalized_entry(),
                                 );
                                 tool_state.index = Some(index);
+                                state.web_fetches.insert(id.clone(), tool_state);
+                                state.pending_fifo.push_back(PendingToolCall::Fetch {
+                                    tool_call_id: id.clone(),
+                                });
                             }
 
                             DroidToolData::FetchUrl { url, .. } => {
-                                let tool_state = WebFetchState {
+                                let mut tool_state = WebFetchState {
                                     index: None,
                                     url: url.clone(),
                                     status: ToolStatus::Created,
                                 };
+                                let index = add_normalized_entry(
+                                    &msg_store,
+                                    &entry_index_provider,
+                                    tool_state.to_normalized_entry(),
+                                );
+                                tool_state.index = Some(index);
                                 state.web_fetches.insert(id.clone(), tool_state);
                                 state.pending_fifo.push_back(PendingToolCall::Fetch {
                                     tool_call_id: id.clone(),
                                 });
-
-                                let tool_state = state.web_fetches.get_mut(&id).unwrap();
-                                let index = add_normalized_entry(
-                                    &msg_store,
-                                    &entry_index_provider,
-                                    tool_state.to_normalized_entry(),
-                                );
-                                tool_state.index = Some(index);
                             }
 
                             DroidToolData::ExitSpecMode { .. } => {
-                                let tool_state = TodoManagementState {
+                                let mut tool_state = TodoManagementState {
                                     index: None,
                                     todos: vec![],
                                     status: ToolStatus::Created,
                                 };
-                                state.todo_updates.insert(id.clone(), tool_state);
-                                state.pending_fifo.push_back(PendingToolCall::Todo {
-                                    tool_call_id: id.clone(),
-                                });
-                                let tool_state = state.todo_updates.get_mut(&id).unwrap();
                                 let index = add_normalized_entry(
                                     &msg_store,
                                     &entry_index_provider,
                                     tool_state.to_normalized_entry(),
                                 );
                                 tool_state.index = Some(index);
+                                state.todo_updates.insert(id.clone(), tool_state);
+                                state.pending_fifo.push_back(PendingToolCall::Todo {
+                                    tool_call_id: id.clone(),
+                                });
                             }
 
                             DroidToolData::SlackPostMessage { .. }
                             | DroidToolData::Unknown { .. } => {
-                                let tool_state = GenericToolState {
+                                let mut tool_state = GenericToolState {
                                     index: None,
                                     name: tool_name.clone(),
                                     arguments: Some(arguments.clone()),
                                     result: None,
                                     status: ToolStatus::Created,
                                 };
-                                state.generic_tools.insert(id.clone(), tool_state);
-                                state.pending_fifo.push_back(PendingToolCall::Generic {
-                                    tool_call_id: id.clone(),
-                                });
-
-                                let tool_state = state.generic_tools.get_mut(&id).unwrap();
                                 let index = add_normalized_entry(
                                     &msg_store,
                                     &entry_index_provider,
                                     tool_state.to_normalized_entry(),
                                 );
                                 tool_state.index = Some(index);
+                                state.generic_tools.insert(id.clone(), tool_state);
+                                state.pending_fifo.push_back(PendingToolCall::Generic {
+                                    tool_call_id: id.clone(),
+                                });
                             }
                         }
                     } else {

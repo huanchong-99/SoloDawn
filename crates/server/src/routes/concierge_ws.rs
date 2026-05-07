@@ -15,7 +15,10 @@ use deployment::Deployment;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use services::services::concierge::{ConciergeAgent, ConciergeBroadcaster};
-use tokio::time::{Duration, interval};
+use tokio::{
+    task::JoinSet,
+    time::{Duration, interval},
+};
 use tracing::{debug, warn};
 
 use crate::{DeploymentImpl, error::ApiError};
@@ -69,6 +72,11 @@ async fn handle_concierge_ws(
     // Heartbeat timer
     let mut heartbeat = interval(Duration::from_secs(WS_HEARTBEAT_INTERVAL_SECS));
 
+    // E25-12: Track message-processing tasks spawned for this WS so they can
+    // be aborted when the connection closes. Without this, a slow
+    // `process_message` call outlives the disconnected client.
+    let mut in_flight: JoinSet<()> = JoinSet::new();
+
     debug!(session_id = %session_id, "Concierge WebSocket connected");
 
     loop {
@@ -77,6 +85,13 @@ async fn handle_concierge_ws(
             event = event_rx.recv() => {
                 match event {
                     Ok(concierge_event) => {
+                        // W2-20-08: Concierge events are intentionally NOT modeled by the
+                        // workflow `WsEventType` enum (see workflow_events.rs). They are
+                        // delivered on a dedicated `/concierge/{session_id}/events`
+                        // socket and consumed by `frontend/src/stores/conciergeWsStore.ts`,
+                        // which defines its own `ConciergeEventType` union. Keeping the
+                        // contracts separate avoids mixing the concierge chat channel
+                        // with workflow-scoped broadcasts that are keyed by workflow id.
                         let event_json = serde_json::json!({
                             "type": match &concierge_event {
                                 services::services::concierge::ConciergeEvent::NewMessage { .. } => "concierge.message",
@@ -110,8 +125,9 @@ async fn handle_concierge_ws(
                                         let concierge = concierge.clone();
                                         let sid = session_id.clone();
                                         let content = content.to_string();
-                                        // Process in background to not block WS loop
-                                        tokio::spawn(async move {
+                                        // E25-12: spawn into `in_flight` so the task is aborted
+                                        // when this WS loop exits (client disconnect).
+                                        in_flight.spawn(async move {
                                             if let Err(e) = concierge.process_message(&sid, &content, Some("web"), None).await {
                                                 warn!("Concierge WS message processing failed: {e}");
                                             }
@@ -142,6 +158,11 @@ async fn handle_concierge_ws(
             }
         }
     }
+
+    // E25-12: abort any still-running message-processing tasks so they don't
+    // outlive the closed connection.
+    in_flight.abort_all();
+    while in_flight.join_next().await.is_some() {}
 
     debug!(session_id = %session_id, "Concierge WebSocket disconnected");
 }

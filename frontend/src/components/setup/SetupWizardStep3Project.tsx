@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   FolderOpenIcon,
@@ -33,7 +34,10 @@ export function SetupWizardStep3Project({
 }: Readonly<SetupWizardStep3ProjectProps>) {
   const { t } = useTranslation(['setup']);
 
-  const canContinue = directory.trim() !== '' && isValid && !isChecking && !isCreating;
+  const canContinue = useMemo(
+    () => directory.trim() !== '' && isValid && !isChecking && !isCreating,
+    [directory, isValid, isChecking, isCreating]
+  );
 
   const validationIndicator = (() => {
     if (isChecking) {

@@ -1,5 +1,6 @@
 import { useMemo, useCallback } from 'react';
 import { create } from 'zustand';
+import { shallow } from 'zustand/shallow';
 import { persist } from 'zustand/middleware';
 import type { RepoAction } from '@/components/ui-new/containers/RepoCard';
 
@@ -379,11 +380,20 @@ export function usePaneSize(
 }
 
 // Hook for bulk expanded state operations
+// W2-22-03: Use shallow equality on a single combined selector so the returned
+// object identity is stable across renders when the underlying state hasn't
+// changed. Previously returning a fresh object literal each render caused
+// unnecessary re-renders for consumers that depended on the returned object
+// identity (e.g. passed into useEffect deps).
 export function useExpandedAll() {
-  const expanded = useUiPreferencesStore((s) => s.expanded);
-  const setExpanded = useUiPreferencesStore((s) => s.setExpanded);
-  const setExpandedAll = useUiPreferencesStore((s) => s.setExpandedAll);
-  return { expanded, setExpanded, setExpandedAll };
+  return useUiPreferencesStore(
+    (s) => ({
+      expanded: s.expanded,
+      setExpanded: s.setExpanded,
+      setExpandedAll: s.setExpandedAll,
+    }),
+    shallow
+  );
 }
 
 // Hook for persisted file tree collapsed paths (per workspace)

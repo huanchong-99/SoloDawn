@@ -25,6 +25,9 @@ impl MeasureValue {
         match (self, other) {
             (MeasureValue::Int(a), MeasureValue::Int(b)) => Some(a.cmp(b)),
             (MeasureValue::Float(a), MeasureValue::Float(b)) => a.partial_cmp(b),
+            // E37-05: TODO — `i64 as f64` loses precision for |v| > 2^53.
+            // Acceptable for current quality metrics (counts, percentages);
+            // revisit if metrics with very large integer magnitudes are added.
             (MeasureValue::Int(a), MeasureValue::Float(b)) => (*a as f64).partial_cmp(b),
             (MeasureValue::Float(a), MeasureValue::Int(b)) => a.partial_cmp(&(*b as f64)),
             (MeasureValue::String(a), MeasureValue::String(b)) => Some(a.cmp(b)),

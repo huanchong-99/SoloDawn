@@ -398,11 +398,17 @@
     "emptyDescriptionAgentPlanned": "AgentPlanned 工作流允许以空图启动。Orchestrator 完成规划后，任务和终端会出现在这里。",
     "initialGoalLabel": "初始目标",
     "taskLabel": "任务 {{index}}",
+    "merge": "合并",
     "mergeTerminalRole": "合并终端",
     "terminalsCount": "{{count}} 个终端",
     "terminalsCount_one": "{{count}} 个终端",
     "slashCommands": "斜杠命令：",
-    "hint": "点击终端查看详情"
+    "hint": "点击终端查看详情",
+    "orchestrator": {
+      "statusLabel": "状态：",
+      "modelLabel": "模型：",
+      "tokensUsedLabel": "已用 Token"
+    }
   },
   "terminalCard": {
     "orderLabel": "T{{index}}",

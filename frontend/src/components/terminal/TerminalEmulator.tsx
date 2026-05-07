@@ -31,6 +31,17 @@ interface Props {
   onError?: (error: Error) => void;
 }
 
+// NOTE(E15-09): display options (cursorBlink/fontSize/fontFamily/scrollback)
+// are intentionally compile-time constants below. Threading them through
+// props would require either re-creating the xterm instance on every change
+// (dropping scrollback) or routing updates through an imperative ref that
+// writes to `terminal.options`. Neither need has surfaced yet; when it does,
+// extend `TerminalEmulatorRef` with a `setDisplayOptions(...)` method.
+const DEFAULT_CURSOR_BLINK = true;
+const DEFAULT_FONT_SIZE = 14;
+const DEFAULT_FONT_FAMILY = 'Menlo, Monaco, "Courier New", monospace';
+const DEFAULT_SCROLLBACK = 10000;
+
 export interface TerminalEmulatorRef {
   write: (data: string) => void;
   clear: () => void;
@@ -46,6 +57,7 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
     const terminalRef = useRef<Terminal | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
+    const wsClosedRef = useRef(false);
     const pendingInputRef = useRef<string[]>([]);
     const terminalReadyRef = useRef(false);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,7 +142,10 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
           setDisconnectHint(null);
         }
         if (wsRef.current) {
-          wsRef.current.close();
+          if (!wsClosedRef.current) {
+            wsClosedRef.current = true;
+            wsRef.current.close();
+          }
           wsRef.current = null;
         }
         setWsKey((k) => k + 1);
@@ -176,16 +191,16 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
       if (!containerRef.current) return;
 
       const terminal = new Terminal({
-        cursorBlink: true,
-        fontSize: 14,
-        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        cursorBlink: DEFAULT_CURSOR_BLINK,
+        fontSize: DEFAULT_FONT_SIZE,
+        fontFamily: DEFAULT_FONT_FAMILY,
         theme: {
           background: '#1e1e1e',
           foreground: '#d4d4d4',
           cursor: '#d4d4d4',
           selectionBackground: '#264f78',
         },
-        scrollback: 10000,
+        scrollback: DEFAULT_SCROLLBACK,
         convertEol: true,
       });
 
@@ -199,8 +214,9 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
       fitAddonRef.current = fitAddon;
       terminalReadyRef.current = true;
 
-      // Handle user input via ref to avoid re-subscribing on prop changes
-      terminal.onData((data) => handleDataRef.current(data));
+      // Handle user input via ref to avoid re-subscribing on prop changes.
+      // E15-01: xterm.js onData returns IDisposable; dispose it on cleanup.
+      const onDataDisposable = terminal.onData((data) => handleDataRef.current(data));
 
       // Handle window resize
       const handleWindowResize = () => {
@@ -214,7 +230,14 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
       return () => {
         globalThis.removeEventListener('resize', handleWindowResize);
         terminalReadyRef.current = false;
+        // E15-01: dispose the onData subscription before disposing the terminal.
+        onDataDisposable.dispose();
+        // E15-02: explicitly dispose the FitAddon before the terminal so its
+        // internal subscriptions are released.
+        fitAddon.dispose();
+        fitAddonRef.current = null;
         terminal.dispose();
+        terminalRef.current = null;
       };
     }, []);
 
@@ -243,6 +266,8 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
       }
 
       let isActive = true;
+      // E15-08: guard against double-close (cleanup + onclose handler).
+      wsClosedRef.current = false;
       const ws = new WebSocket(`${wsUrl}/terminal/${terminalId}`);
 
       ws.onopen = () => {
@@ -255,9 +280,11 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
         setDisconnectHint(null);
         logInfo('Terminal WebSocket connected');
 
-        // Clear xterm buffer on reconnection to avoid stale output before replay
-        if (wsKey > 0) {
-          terminalRef.current?.clear();
+        // Clear xterm buffer on reconnection to avoid stale output before replay.
+        // E15-04: guard against unmount race where terminalRef may have been
+        // cleared by the init effect's cleanup before this callback fires.
+        if (wsKey > 0 && terminalRef.current) {
+          terminalRef.current.clear();
         }
 
         clearKeepAliveTimer();
@@ -314,7 +341,12 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
       ws.onclose = (event?: CloseEvent) => {
         const code = event?.code;
         const isExpectedClose = code === 1000 || code === 1005;
+        // E15-06: clear keep-alive unconditionally on close (including early
+        // closes where the interval may never have been set — harmless no-op).
         clearKeepAliveTimer();
+        // E15-08: mark closed so the cleanup function below does not call
+        // ws.close() a second time.
+        wsClosedRef.current = true;
 
         if (isActive) {
           const reason = event?.reason?.trim();
@@ -338,7 +370,11 @@ export const TerminalEmulator = forwardRef<TerminalEmulatorRef, Props>(
         if (wsRef.current === ws) {
           wsRef.current = null;
         }
-        ws.close();
+        // E15-08: avoid a second close() if onclose already fired.
+        if (!wsClosedRef.current) {
+          wsClosedRef.current = true;
+          ws.close();
+        }
       };
     }, [
       wsUrl,

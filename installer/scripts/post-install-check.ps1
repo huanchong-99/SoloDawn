@@ -263,7 +263,16 @@ function Test-RuntimeTool {
         }
         $stdout = if (Test-Path $tmpOut) { (Get-Content $tmpOut -Raw -ErrorAction SilentlyContinue) } else { "" }
         $stderr = if (Test-Path $tmpErr) { (Get-Content $tmpErr -Raw -ErrorAction SilentlyContinue) } else { "" }
-        Remove-Item $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue
+        # Retry cleanup up to 3x to avoid races with child process handle release
+        for ($i = 0; $i -lt 3; $i++) {
+            try {
+                Remove-Item $tmpOut, $tmpErr -Force -ErrorAction Stop
+                break
+            } catch {
+                if ($i -lt 2) { Start-Sleep -Milliseconds 100 }
+                # else: ignore; temp files will be cleaned by OS eventually
+            }
+        }
         $output = "$stdout $stderr".Trim()
         if ($proc.ExitCode -eq 0 -and $output -match $ExpectPattern) {
             $ver = ($output -split "`n")[0].Trim()
@@ -509,7 +518,7 @@ $DataDir = Join-Path $env:APPDATA "bloop\solodawn"
 if (Test-Path $DataDir) {
     Add-Check -Group "Database" -Name "Data directory exists" -Status "PASS" -Detail $DataDir
 
-    $TmpFile = Join-Path $DataDir ".selfcheck_tmp"
+    $TmpFile = Join-Path $DataDir (".selfcheck_" + [System.IO.Path]::GetRandomFileName())
     try {
         [System.IO.File]::WriteAllText($TmpFile, "check")
         Remove-Item $TmpFile -Force -ErrorAction SilentlyContinue

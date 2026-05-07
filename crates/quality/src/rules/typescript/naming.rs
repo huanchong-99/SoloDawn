@@ -173,10 +173,16 @@ impl TsRule for NamingConventionRule {
             // Interface names should be PascalCase (optionally prefixed with I)
             if let Some(caps) = self.interface_pattern.captures(line) {
                 let name = caps.get(1).unwrap().as_str();
-                // Strip leading 'I' prefix for PascalCase check
-                let name_to_check = if name.len() > 1
-                    && name.starts_with('I')
-                    && name.chars().nth(1).unwrap().is_ascii_uppercase()
+                // Strip leading 'I' prefix only when it matches the
+                // canonical `I[A-Z][a-z]...` convention (e.g. `IFoo`).
+                // Reject `IInterface` (double uppercase after I) and
+                // `Ifoo` (lowercase after I) by not stripping in those
+                // cases so the PascalCase check flags them.
+                let chars: Vec<char> = name.chars().collect();
+                let name_to_check = if chars.len() >= 3
+                    && chars[0] == 'I'
+                    && chars[1].is_ascii_uppercase()
+                    && chars[2].is_ascii_lowercase()
                 {
                     &name[1..]
                 } else {

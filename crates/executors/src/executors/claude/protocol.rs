@@ -61,6 +61,12 @@ impl ProtocolPeer {
                     match line_result {
                         Ok(0) => break, // EOF
                         Ok(_) => {
+                            // E33-07: `trim()` strips both leading and trailing
+                            // whitespace (including the `\n` terminator). This
+                            // is acceptable here because the Claude CLI emits
+                            // one JSON object per line, and any leading/
+                            // trailing whitespace is never semantically
+                            // significant inside the line framing.
                             let line = buffer.trim();
                             if line.is_empty() {
                                 continue;
@@ -118,14 +124,19 @@ impl ProtocolPeer {
                     .on_can_use_tool(tool_name, input, permission_suggestions, tool_use_id)
                     .await
                 {
-                    Ok(result) => {
-                        if let Err(e) = self
-                            .send_hook_response(request_id, serde_json::to_value(result).unwrap())
-                            .await
-                        {
-                            tracing::error!("Failed to send permission result: {e}");
+                    Ok(result) => match serde_json::to_value(result) {
+                        Ok(value) => {
+                            if let Err(e) = self.send_hook_response(request_id, value).await {
+                                tracing::error!("Failed to send permission result: {e}");
+                            }
                         }
-                    }
+                        Err(e) => {
+                            tracing::error!("Failed to serialize permission result: {e}");
+                            if let Err(e2) = self.send_error(request_id, e.to_string()).await {
+                                tracing::error!("Failed to send error response: {e2}");
+                            }
+                        }
+                    },
                     Err(e) => {
                         tracing::error!("Error in on_can_use_tool: {e}");
                         if let Err(e2) = self.send_error(request_id, e.to_string()).await {

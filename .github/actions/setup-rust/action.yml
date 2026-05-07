@@ -53,7 +53,7 @@ runs:
         sudo apt-get install -y $EXTRA_PACKAGES
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+      uses: dtolnay/rust-toolchain@a54c7afa936fefeb4456b2dd8068152669aa8203 # stable
       with:
         toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
@@ -62,6 +62,18 @@ runs:
       shell: bash
       run: |
         echo "CARGO_TERM_COLOR=always" >> "$GITHUB_ENV"
+        # NOTE(W2-35-04): CI sets SQLX_OFFLINE=true but never verifies the
+        # `.sqlx/` cache is in sync with the committed migrations. If a PR
+        # edits a migration but forgets to re-run `cargo sqlx prepare`, CI
+        # will build against stale query metadata and may pass while
+        # production breaks. Add a step that runs
+        # `cargo sqlx prepare --check --workspace` (after applying
+        # migrations to a scratch SQLite file) before `cargo build`.
+        # NOTE(W2-35-05): The `.sqlx/` cache is not scoped per-target; a
+        # query that is valid under one feature flag combination (e.g.
+        # `default-features = false`) can be incorrectly cached from a
+        # build with different features. Document which feature set is
+        # canonical for `cargo sqlx prepare` and enforce it here.
         echo "SQLX_OFFLINE=true" >> "$GITHUB_ENV"
         echo "AWS_LC_SYS_STATIC=1" >> "$GITHUB_ENV"
         echo "AWS_LC_SYS_NO_PREGENERATED_SRC=1" >> "$GITHUB_ENV"
@@ -71,4 +83,4 @@ runs:
       if: inputs.install-nextest == 'true'
       shell: bash
       run: |
-        curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+        cargo install --locked cargo-nextest --version 0.9.88

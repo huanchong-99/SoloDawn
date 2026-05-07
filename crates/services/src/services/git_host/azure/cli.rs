@@ -5,6 +5,7 @@
 
 use std::{
     ffi::{OsStr, OsString},
+    io::Write,
     path::Path,
     process::Command,
 };
@@ -12,6 +13,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use db::models::merge::{MergeStatus, PullRequestInfo};
 use serde::Deserialize;
+use tempfile::NamedTempFile;
 use thiserror::Error;
 use utils::shell::resolve_executable_path_blocking;
 
@@ -157,6 +159,10 @@ impl AzCli {
             return Ok(String::from_utf8_lossy(&output.stdout).to_string());
         }
 
+        // from_utf8_lossy silently replaces invalid bytes with U+FFFD. `az` is
+        // expected to produce UTF-8, but if it ever emits non-UTF-8 stderr we
+        // accept the lossy conversion here rather than failing the whole call;
+        // the resulting string is only used for error classification/reporting.
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
         // Check for authentication errors
@@ -277,6 +283,19 @@ impl AzCli {
     ) -> Result<PullRequestInfo, AzCliError> {
         let body = request.body.as_deref().unwrap_or("");
 
+        // Write body to a temp file (RAII-deleted on drop) to avoid shell escaping
+        // issues and length limits when passing long descriptions on the command line.
+        let mut body_file = NamedTempFile::new()
+            .map_err(|e| AzCliError::CommandFailed(format!("Failed to create temp file: {e}")))?;
+        body_file
+            .write_all(body.as_bytes())
+            .map_err(|e| AzCliError::CommandFailed(format!("Failed to write body: {e}")))?;
+        let body_arg = {
+            let mut s = OsString::from("@");
+            s.push(body_file.path().as_os_str());
+            s
+        };
+
         let mut args: Vec<OsString> = Vec::with_capacity(20);
         args.push(OsString::from("repos"));
         args.push(OsString::from("pr"));
@@ -294,7 +313,8 @@ impl AzCli {
         args.push(OsString::from("--title"));
         args.push(OsString::from(&request.title));
         args.push(OsString::from("--description"));
-        args.push(OsString::from(body));
+        // az CLI supports `@filename` syntax for reading argument values from a file.
+        args.push(body_arg);
         args.push(OsString::from("--output"));
         args.push(OsString::from("json"));
 
@@ -303,6 +323,7 @@ impl AzCli {
         }
 
         let raw = Self::run(args, None)?;
+        // body_file dropped here (RAII cleanup)
         Self::parse_pr_response(&raw)
     }
 
@@ -467,7 +488,13 @@ impl AzCli {
             |u| format!("{u}/pullrequest/{}", pr.pull_request_id),
         );
 
-        let status = pr.status.as_deref().unwrap_or("active");
+        let status = pr.status.as_deref().unwrap_or_else(|| {
+            tracing::warn!(
+                "Azure PR {} missing status field; defaulting to 'unknown'",
+                pr.pull_request_id
+            );
+            "unknown"
+        });
         let merged_at = pr
             .closed_date
             .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
@@ -510,7 +537,12 @@ impl AzCli {
                         continue;
                     }
 
-                    let id = c.id.unwrap_or(0);
+                    let id = c.id.unwrap_or_else(|| {
+                        tracing::warn!(
+                            "Azure PR thread comment missing id; defaulting to 0"
+                        );
+                        0
+                    });
                     let author = c
                         .author
                         .and_then(|a| a.display_name)

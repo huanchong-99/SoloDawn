@@ -1,11 +1,26 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::{Executor, FromRow, Sqlite, SqlitePool, Type};
 use strum_macros::{Display, EnumString};
 use ts_rs::TS;
 use uuid::Uuid;
 
 use super::{project::Project, workspace::Workspace};
+
+/// M38: Tri-state deserializer for `Option<Option<T>>` fields.
+///
+/// - Field absent in JSON  -> outer `None`            (leave unchanged)
+/// - Field present as null -> `Some(None)`            (clear to NULL)
+/// - Field present w/ value -> `Some(Some(value))`    (update to value)
+///
+/// Use with `#[serde(default, deserialize_with = "deserialize_some")]`.
+pub fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
 
 #[derive(
     Debug, Clone, Type, Serialize, Deserialize, PartialEq, TS, EnumString, Display, Default,
@@ -122,7 +137,12 @@ pub struct UpdateTask {
     pub title: Option<String>,
     pub description: Option<String>,
     pub status: Option<TaskStatus>,
-    pub parent_workspace_id: Option<Uuid>,
+    // M38: Tri-state. Outer `None` = field omitted (leave unchanged);
+    // `Some(None)` = explicit null (clear to NULL);
+    // `Some(Some(id))` = update to the given id.
+    #[serde(default, deserialize_with = "deserialize_some")]
+    #[ts(optional, type = "string | null")]
+    pub parent_workspace_id: Option<Option<Uuid>>,
     pub image_ids: Option<Vec<Uuid>>,
 }
 
@@ -262,6 +282,11 @@ ORDER BY t.created_at DESC"#,
         .await
     }
 
+    // NOTE(W2-15-08): Migration `20260417010000_add_perf_indexes.sql` adds
+    // the partial index on `tasks(shared_task_id) WHERE shared_task_id IS
+    // NOT NULL`, so the filter stays cheap. The query remains intentionally
+    // unbounded because current callers consume the full shared-task set; add
+    // pagination if that result becomes materially larger.
     pub async fn find_all_shared(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
         sqlx::query_as!(
             Task,
@@ -296,6 +321,10 @@ ORDER BY t.created_at DESC"#,
         .await
     }
 
+    /// M38: `parent_workspace_id` is a tri-state patch:
+    /// - `None`             -> do not touch the column
+    /// - `Some(None)`       -> SET parent_workspace_id = NULL
+    /// - `Some(Some(id))`   -> SET parent_workspace_id = $id
     pub async fn update(
         pool: &SqlitePool,
         id: Uuid,
@@ -303,23 +332,45 @@ ORDER BY t.created_at DESC"#,
         title: String,
         description: Option<String>,
         status: TaskStatus,
-        parent_workspace_id: Option<Uuid>,
+        parent_workspace_id: Option<Option<Uuid>>,
     ) -> Result<Self, sqlx::Error> {
-        sqlx::query_as!(
-            Task,
-            r#"UPDATE tasks
-               SET title = $3, description = $4, status = $5, parent_workspace_id = $6
-               WHERE id = $1 AND project_id = $2
-               RETURNING id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", parent_workspace_id as "parent_workspace_id: Uuid", shared_task_id as "shared_task_id: Uuid", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>""#,
-            id,
-            project_id,
-            title,
-            description,
-            status,
-            parent_workspace_id
-        )
-        .fetch_one(pool)
-        .await
+        match parent_workspace_id {
+            None => {
+                // Leave parent_workspace_id untouched.
+                sqlx::query_as!(
+                    Task,
+                    r#"UPDATE tasks
+                       SET title = $3, description = $4, status = $5
+                       WHERE id = $1 AND project_id = $2
+                       RETURNING id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", parent_workspace_id as "parent_workspace_id: Uuid", shared_task_id as "shared_task_id: Uuid", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>""#,
+                    id,
+                    project_id,
+                    title,
+                    description,
+                    status,
+                )
+                .fetch_one(pool)
+                .await
+            }
+            Some(new_parent) => {
+                // Set parent_workspace_id to the provided value (which may be NULL).
+                sqlx::query_as!(
+                    Task,
+                    r#"UPDATE tasks
+                       SET title = $3, description = $4, status = $5, parent_workspace_id = $6
+                       WHERE id = $1 AND project_id = $2
+                       RETURNING id as "id!: Uuid", project_id as "project_id!: Uuid", title, description, status as "status!: TaskStatus", parent_workspace_id as "parent_workspace_id: Uuid", shared_task_id as "shared_task_id: Uuid", created_at as "created_at!: DateTime<Utc>", updated_at as "updated_at!: DateTime<Utc>""#,
+                    id,
+                    project_id,
+                    title,
+                    description,
+                    status,
+                    new_parent
+                )
+                .fetch_one(pool)
+                .await
+            }
+        }
     }
 
     pub async fn update_status(
@@ -328,13 +379,33 @@ ORDER BY t.created_at DESC"#,
         status: TaskStatus,
     ) -> Result<(), sqlx::Error> {
         sqlx::query!(
-            "UPDATE tasks SET status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+            "UPDATE tasks SET status = $2, updated_at = datetime('now', 'subsec') WHERE id = $1",
             id,
             status
         )
         .execute(pool)
         .await?;
         Ok(())
+    }
+
+    /// E25-06: Compare-and-swap status update. Returns true if the row was
+    /// updated (i.e., the previous status matched `expected`). This closes the
+    /// check-then-act race between reading `task.status` and updating it.
+    pub async fn update_status_cas(
+        pool: &SqlitePool,
+        id: Uuid,
+        expected: TaskStatus,
+        new_status: TaskStatus,
+    ) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query!(
+            "UPDATE tasks SET status = $3, updated_at = datetime('now', 'subsec') WHERE id = $1 AND status = $2",
+            id,
+            expected,
+            new_status
+        )
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     /// Update the parent_workspace_id field for a task
@@ -344,7 +415,7 @@ ORDER BY t.created_at DESC"#,
         parent_workspace_id: Option<Uuid>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query!(
-            "UPDATE tasks SET parent_workspace_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+            "UPDATE tasks SET parent_workspace_id = $2, updated_at = datetime('now', 'subsec') WHERE id = $1",
             task_id,
             parent_workspace_id
         )
@@ -362,6 +433,10 @@ ORDER BY t.created_at DESC"#,
     where
         E: Executor<'e, Database = Sqlite>,
     {
+        // NOTE(E38-09): If this ever grows into a subquery form
+        // (WHERE parent_workspace_id IN (SELECT ...)), rely on the SQLite
+        // query optimizer; an index on tasks.parent_workspace_id already
+        // supports the current equality predicate.
         let result = sqlx::query!(
             "UPDATE tasks SET parent_workspace_id = NULL WHERE parent_workspace_id = $1",
             workspace_id
@@ -400,6 +475,29 @@ ORDER BY t.created_at DESC"#,
         let result = sqlx::query!("DELETE FROM tasks WHERE id = $1", id)
             .execute(executor)
             .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// W2-18-08: Atomic delete that enforces project ownership in the SQL
+    /// itself, closing the TOCTOU gap between the middleware ownership check
+    /// and the DELETE statement. Callers should treat `rows_affected == 0` as
+    /// a 404/403 — either the row vanished concurrently or the project_id
+    /// guard failed because the row was reparented between check and delete.
+    pub async fn delete_scoped<'e, E>(
+        executor: E,
+        id: Uuid,
+        project_id: Uuid,
+    ) -> Result<u64, sqlx::Error>
+    where
+        E: Executor<'e, Database = Sqlite>,
+    {
+        let result = sqlx::query!(
+            "DELETE FROM tasks WHERE id = $1 AND project_id = $2",
+            id,
+            project_id
+        )
+        .execute(executor)
+        .await?;
         Ok(result.rows_affected())
     }
 

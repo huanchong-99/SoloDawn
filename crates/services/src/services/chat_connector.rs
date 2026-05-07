@@ -112,10 +112,16 @@ impl ChatConnector for TelegramConnector {
             .json::<serde_json::Value>()
             .await?;
 
-        let reply_id = resp["result"]["message_id"]
-            .as_i64()
-            .map(|id| id.to_string())
-            .unwrap_or_default();
+        let reply_id = match resp["result"]["message_id"].as_i64() {
+            Some(id) => id.to_string(),
+            None => {
+                tracing::warn!(
+                    response = %resp,
+                    "Telegram sendMessage response missing result.message_id; returning empty reply id"
+                );
+                String::new()
+            }
+        };
         Ok(reply_id)
     }
 

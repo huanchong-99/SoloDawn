@@ -29,6 +29,9 @@ impl CoverageReport {
         branches_covered: u64,
         branches_total: u64,
     ) -> Self {
+        // E37-03: line and branch coverage are independently guarded against
+        // division-by-zero; each zero-total falls back to 0.0 without affecting
+        // the other metric.
         let line_coverage = if lines_total == 0 {
             0.0
         } else {

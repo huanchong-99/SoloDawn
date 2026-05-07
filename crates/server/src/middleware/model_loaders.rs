@@ -10,14 +10,31 @@ use db::models::{
 use deployment::Deployment;
 use uuid::Uuid;
 
-use crate::{DeploymentImpl, error::ApiError};
+use crate::{DeploymentImpl, error::ApiError, middleware::auth::{RequestContext, assert_authorized}};
 
+// W2-18-02: Project load is gated below by `assert_authorized`, which closes
+// the dev-mode passthrough hole when `SOLODAWN_REQUIRE_AUTH=1`. Per-user
+// project ownership still requires G24 (principal with project scope on
+// `RequestContext`); until that lands, any holder of a valid shared API
+// token can load any project by UUID.
 pub async fn load_project_middleware(
     State(deployment): State<DeploymentImpl>,
     Path(project_id): Path<Uuid>,
     request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Defense-in-depth: opt-in authz gate. Falls through to the legacy
+    // "dev mode" behavior unless SOLODAWN_REQUIRE_AUTH is set.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     // Load the project from the database
     let project = match Project::find_by_id(&deployment.db().pool, project_id).await {
         Ok(Some(project)) => project,
@@ -41,12 +58,29 @@ pub async fn load_project_middleware(
     Ok(next.run(request).await)
 }
 
+// W2-18-03: Same posture as `load_project_middleware` — the opt-in gate
+// below closes the dev-mode passthrough hole, but per-user task ownership
+// still requires G24. The phrase "validate it belongs to the project" in
+// the inline comment further below remains aspirational until principal
+// scoping exists.
 pub async fn load_task_middleware(
     State(deployment): State<DeploymentImpl>,
     Path(task_id): Path<Uuid>,
     request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Defense-in-depth: opt-in authz gate. Falls through to the legacy
+    // "dev mode" behavior unless SOLODAWN_REQUIRE_AUTH is set.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     // Load the task and validate it belongs to the project
     let task = match Task::find_by_id(&deployment.db().pool, task_id).await {
         Ok(Some(task)) => task,
@@ -74,6 +108,17 @@ pub async fn load_workspace_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Same opt-in gate as `load_project_middleware`.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     // Load the Workspace from the database
     let workspace = match Workspace::find_by_id(&deployment.db().pool, workspace_id).await {
         Ok(Some(w)) => w,
@@ -104,6 +149,17 @@ pub async fn load_execution_process_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Same opt-in gate as `load_project_middleware`.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     // Load the execution process from the database
     let execution_process =
         match ExecutionProcess::find_by_id(&deployment.db().pool, process_id).await {
@@ -136,6 +192,17 @@ pub async fn load_tag_middleware(
     request: axum::extract::Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Same opt-in gate as `load_project_middleware`.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     // Load the tag from the database
     let tag = match Tag::find_by_id(&deployment.db().pool, tag_id).await {
         Ok(Some(tag)) => tag,
@@ -163,6 +230,17 @@ pub async fn load_session_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Same opt-in gate as `load_project_middleware`.
+    let default_ctx = RequestContext { authenticated: false };
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(default_ctx);
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     let session = match Session::find_by_id(&deployment.db().pool, session_id).await {
         Ok(Some(session)) => session,
         Ok(None) => {

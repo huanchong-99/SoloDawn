@@ -5,6 +5,7 @@ import { TaskFollowUpSection } from '@/components/tasks/TaskFollowUpSection';
 import { EntriesProvider } from '@/contexts/EntriesContext';
 import { RetryUiProvider } from '@/contexts/RetryUiContext';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface TaskAttemptPanelProps {
   attempt: WorkspaceWithSession | undefined;
@@ -17,17 +18,22 @@ const TaskAttemptPanel = ({
   task,
   children,
 }: Readonly<TaskAttemptPanelProps>) => {
+  const { t } = useTranslation('common');
   if (!attempt) {
-    return <div className="p-6 text-muted-foreground">Loading attempt...</div>;
+    return (
+      <div className="p-6 text-muted-foreground">{t('states.loading')}</div>
+    );
   }
 
   if (!task) {
-    return <div className="p-6 text-muted-foreground">Loading task...</div>;
+    return (
+      <div className="p-6 text-muted-foreground">{t('states.loading')}</div>
+    );
   }
 
   return (
     <EntriesProvider key={attempt.id}>
-      <RetryUiProvider>
+      <RetryUiProvider key={attempt.id}>
         {children({
           logs: (
             <VirtualizedList key={attempt.id} attempt={attempt} task={task} />

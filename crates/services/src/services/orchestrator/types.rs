@@ -191,6 +191,10 @@ pub enum PromptDecision {
         reason: String,
     },
     /// LLM decision: let LLM decide the response
+    // W2-20-10: serde `rename_all = "snake_case"` would produce
+    // `l_l_m_decision` for this variant name. Pin the wire value explicitly
+    // so the JSON tag matches the other variants and the frontend contract.
+    #[serde(rename = "llm_decision")]
     LLMDecision {
         /// Response determined by LLM
         response: String,

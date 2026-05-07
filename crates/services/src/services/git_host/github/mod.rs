@@ -196,7 +196,8 @@ impl GitHostProvider for GitHubProvider {
         // For cross-fork PRs, get the head repo info to format head_branch as "owner:branch".
         let head_branch = if let Some(head_url) = &request.head_repo_url {
             let head_repo_info = self.get_repo_info(head_url, repo_path).await?;
-            if head_repo_info.owner == target_repo_info.owner {
+            // GitHub owner names are case-insensitive; normalize before comparison.
+            if head_repo_info.owner.to_lowercase() == target_repo_info.owner.to_lowercase() {
                 request.head_branch.clone()
             } else {
                 format!("{}:{}", head_repo_info.owner, request.head_branch)

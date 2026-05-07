@@ -1096,7 +1096,13 @@ impl OrchestratorAgent {
             BusMessage::Shutdown => {
                 return Ok(true);
             }
-            BusMessage::Instruction(..)
+            // Outbound-only or UI-notification events — no action needed in agent loop.
+            // M16: Out-of-order completion-like events (TerminalStatusUpdate /
+            // TaskStatusUpdate) arriving before their corresponding TerminalCompleted are
+            // dropped here. A future change could buffer them by terminal_id/task_id and
+            // re-emit them in order. Listed explicitly so adding a new BusMessage variant
+            // causes a compile error rather than silent fall-through.
+            msg @ (BusMessage::Instruction(..)
             | BusMessage::StatusUpdate { .. }
             | BusMessage::TerminalStatusUpdate { .. }
             | BusMessage::TaskStatusUpdate { .. }
@@ -1104,8 +1110,23 @@ impl OrchestratorAgent {
             | BusMessage::TerminalMessage { .. }
             | BusMessage::TerminalInput { .. }
             | BusMessage::TerminalPromptDecision { .. }
-            | BusMessage::ProviderStateChanged { .. } => {
-                // Outbound-only or UI-notification events — no action needed in agent loop
+            | BusMessage::ProviderStateChanged { .. }) => {
+                let variant = match &msg {
+                    BusMessage::Instruction(..) => "Instruction",
+                    BusMessage::StatusUpdate { .. } => "StatusUpdate",
+                    BusMessage::TerminalStatusUpdate { .. } => "TerminalStatusUpdate",
+                    BusMessage::TaskStatusUpdate { .. } => "TaskStatusUpdate",
+                    BusMessage::Error { .. } => "Error",
+                    BusMessage::TerminalMessage { .. } => "TerminalMessage",
+                    BusMessage::TerminalInput { .. } => "TerminalInput",
+                    BusMessage::TerminalPromptDecision { .. } => "TerminalPromptDecision",
+                    BusMessage::ProviderStateChanged { .. } => "ProviderStateChanged",
+                    _ => "unknown",
+                };
+                tracing::trace!(
+                    message_variant = variant,
+                    "Agent loop: ignoring outbound/UI-only event"
+                );
             }
         }
         Ok(false)
@@ -2271,7 +2292,10 @@ impl OrchestratorAgent {
                 .await;
         }
 
-        // Update state and get next terminal info
+        // Update state and get next terminal info.
+        // E21-01: clone needed values inside the lock scope, then explicitly drop the write
+        // guard BEFORE any awaits (including publish_workflow_event below) so the state lock
+        // is never held across `.await` points that perform bus I/O.
         let (next_terminal_index, task_completed, has_next, task_failed) = {
             let mut state = self.state.write().await;
             state.run_state = OrchestratorRunState::Processing;
@@ -2288,7 +2312,9 @@ impl OrchestratorAgent {
             let task_completed = state.is_task_completed(&event.task_id);
             let task_failed = state.task_has_failures(&event.task_id);
 
-            (next_index, task_completed, has_next, task_failed)
+            let result = (next_index, task_completed, has_next, task_failed);
+            drop(state);
+            result
         };
 
         // Update task status based on completion/failure
@@ -2481,12 +2507,19 @@ impl OrchestratorAgent {
             return Ok(());
         }
 
-        // G31-004: merge replay check + idempotent check + insert into a single write-lock
-        // scope to eliminate the TOCTOU window between "check" and "insert".
+        // E21-08: merge DB dedup + replay check + idempotent check + insert into a single
+        // write-lock scope. We accept holding the lock across the DB dedup query because
+        // this is the only way to close the TOCTOU window between "check DB for existing
+        // quality_run" and "insert pending marker": acquire lock -> check in-memory sets
+        // -> if absent, check DB -> if absent, atomically register pending + processed
+        // markers in memory -> release lock -> insert DB row. Chosen over a UNIQUE
+        // constraint on (terminal_id, commit_hash) because that would require a schema
+        // migration and would only surface duplicates at insert time (after side-effects
+        // like pending_quality_checks insertion may already have occurred).
         {
             let mut state = self.state.write().await;
 
-            // Replay protection (under write lock).
+            // Replay protection (in-memory, under write lock).
             if let Some(ref hash) = event.commit_hash {
                 let checkpoint_key = format!("{}:{}", event.terminal_id, hash);
                 if state.processed_checkpoints.contains(&checkpoint_key) {
@@ -2499,7 +2532,7 @@ impl OrchestratorAgent {
                 }
             }
 
-            // Idempotent check (under write lock).
+            // Idempotent check (in-memory, under write lock).
             if state.pending_quality_checks.contains(&event.terminal_id) {
                 tracing::info!(
                     terminal_id = %event.terminal_id,
@@ -2567,13 +2600,16 @@ impl OrchestratorAgent {
         let gate_mode = mode.clone();
 
         tokio::spawn(async move {
-            // G31-008: ensure pending_quality_checks is cleaned up even if this task panics.
-            // We use a flag rather than scopeguard crate to avoid the extra dependency;
-            // the cleanup runs in the same async block via an RAII-like wrapper.
+            // G31-008 / [W2-36-04]: best-effort panic notification for the
+            // pending_quality_checks entry. The Drop impl below cannot touch
+            // AppState (no &state across .await boundaries inside a spawned
+            // task), so on panic it only emits a tracing::error. The actual
+            // removal of the entry from `pending_quality_checks` is performed
+            // on the normal path below (see the `remove(&event.terminal_id)`
+            // call ~line 2178) and on every early return path; the stranded
+            // entry from a panic is additionally self-healing because the
+            // next successful gate result clears it.
             struct PendingGuard {
-                // We cannot hold &state from the outer scope across .await points, so
-                // cleaning up here is a best-effort tracing warning only; the actual
-                // cleanup happens at the end of the spawn body or on early return.
                 terminal_id: String,
             }
             impl Drop for PendingGuard {
@@ -3591,6 +3627,10 @@ impl OrchestratorAgent {
             current_terminal_index = total_terminals.saturating_sub(1);
         }
 
+        // E21-05: All mutation of state happens under this single write lock
+        // acquisition. `sync_task_terminals` and the subsequent task_state
+        // adjustments must stay atomic, so the lock is intentionally held
+        // through the end of this block and released on function return.
         let mut state = self.state.write().await;
         if state.task_states.contains_key(task_id) {
             return Ok(());
@@ -5454,7 +5494,15 @@ impl OrchestratorAgent {
     /// Parse a JSON array element-by-element, skipping items that fail to
     /// deserialize.  Returns `Some` when at least one instruction was recovered.
     fn parse_instructions_individually(json_str: &str) -> Option<Vec<OrchestratorInstruction>> {
-        let arr: Vec<serde_json::Value> = serde_json::from_str(json_str).ok()?;
+        let arr: Vec<serde_json::Value> = serde_json::from_str(json_str)
+            .inspect_err(|e| {
+                tracing::warn!(
+                    error = %e,
+                    preview = &json_str[..json_str.len().min(200)],
+                    "Failed to parse instruction array JSON"
+                );
+            })
+            .ok()?;
         if arr.is_empty() {
             return None;
         }
@@ -6520,6 +6568,24 @@ impl OrchestratorAgent {
         }
 
         // 2. Refresh terminal snapshot after CAS to avoid stale PTY/session metadata.
+        // E21-06 (verified 2026-04-14): The CAS acquired the waiting->working
+        // transition atomically, but between that write and this reload another
+        // task could have flipped the status (e.g. via cancellation). Re-verify
+        // the reloaded status is still WORKING before committing the in-memory
+        // dispatch bookkeeping. If it is not, attempt a best-effort rollback of
+        // the CAS (working->waiting) and return a DispatchConflict error so the
+        // caller can retry the dispatch.
+        //
+        // INVARIANT (E21-06): This function guarantees that when it proceeds
+        // past the state.write() block below to PTY dispatch, BOTH of the
+        // following hold simultaneously:
+        //   (a) DB terminal.status == WORKING, and
+        //   (b) in-memory task_state reflects this terminal as dispatched.
+        // This is enforced by two checks: the first reload+check immediately
+        // after the CAS, and the second re-verify performed while still
+        // holding the state write lock (after mark_terminal_dispatched). Any
+        // status drift between those points causes a rollback + early return
+        // with a DispatchConflict error.
         let active_terminal = db::models::Terminal::find_by_id(&self.db.pool, &terminal.id)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to reload terminal after CAS: {e}"))?
@@ -6530,9 +6596,83 @@ impl OrchestratorAgent {
                 )
             })?;
 
+        if active_terminal.status != TERMINAL_STATUS_WORKING {
+            tracing::warn!(
+                terminal_id = %active_terminal.id,
+                task_id = %task_id,
+                observed_status = %active_terminal.status,
+                "E21-06: Terminal status drifted away from WORKING after CAS; \
+                 attempting rollback and signaling dispatch conflict"
+            );
+            // Best-effort revert: only succeeds if nothing else has written in the
+            // meantime (i.e. status is still WORKING). If someone else already moved
+            // it (e.g. to CANCELLED/FAILED), leave their write in place.
+            let _ = db::models::Terminal::update_status_cas(
+                &self.db.pool,
+                &terminal.id,
+                TERMINAL_STATUS_WORKING,
+                TERMINAL_STATUS_WAITING,
+            )
+            .await;
+            return Err(anyhow::anyhow!(
+                "DispatchConflict: terminal {} status changed from WORKING to {} \
+                 between CAS acquisition and dispatch; caller should retry",
+                terminal.id,
+                active_terminal.status
+            ));
+        }
+
         {
             let mut state = self.state.write().await;
             state.mark_terminal_dispatched(task_id, &active_terminal.id);
+
+            // E21-06: Re-verify under the state write lock that the DB status is
+            // still WORKING. Holding the write lock here ensures no other
+            // orchestrator path observes an inconsistent (dispatched-in-memory but
+            // not-WORKING-in-DB) view between this check and the PTY send.
+            // Invariant: after this block, (DB.status == WORKING) && in-memory
+            // task_state reflects dispatch of this terminal.
+            let verify = db::models::Terminal::find_by_id(&self.db.pool, &terminal.id)
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to re-verify terminal status post-mark: {e}")
+                })?;
+            let still_working = verify
+                .as_ref()
+                .map(|t| t.status == TERMINAL_STATUS_WORKING)
+                .unwrap_or(false);
+            if !still_working {
+                // Rollback the in-memory mark: clearing is_completed back to true
+                // is not safe without the prior value, so instead we leave the
+                // index alone (it is idempotent) and surface the conflict.
+                // Attempt a best-effort DB rollback as above.
+                let observed = verify
+                    .as_ref()
+                    .map(|t| t.status.as_str())
+                    .unwrap_or("<missing>")
+                    .to_string();
+                drop(state);
+                let _ = db::models::Terminal::update_status_cas(
+                    &self.db.pool,
+                    &terminal.id,
+                    TERMINAL_STATUS_WORKING,
+                    TERMINAL_STATUS_WAITING,
+                )
+                .await;
+                tracing::warn!(
+                    terminal_id = %active_terminal.id,
+                    task_id = %task_id,
+                    observed_status = %observed,
+                    "E21-06: Terminal status drifted after mark_terminal_dispatched; \
+                     returning DispatchConflict for caller retry"
+                );
+                return Err(anyhow::anyhow!(
+                    "DispatchConflict: terminal {} status changed to {} after \
+                     in-memory dispatch mark; caller should retry",
+                    terminal.id,
+                    observed
+                ));
+            }
         }
 
         if !self
@@ -10132,10 +10272,17 @@ async fn fetch_previous_terminal_context(
             .unwrap_or_default()
     };
 
-    // 5. Extract handoff notes from the commit message
+    // 5. Extract handoff notes from the commit message.
+    //    E21-03: Extraction MUST run against the untruncated commit_message so the
+    //    HANDOFF: / METADATA markers aren't clipped off by `truncate_with_marker`
+    //    before we've had a chance to parse them. Do not move this below the
+    //    truncation step.
     let handoff_notes = extract_handoff_notes(&commit_message);
 
-    // 6. Truncate fields
+    // 6. Truncate fields.
+    //    E21-03: Truncate the commit_message AFTER extraction, using the untruncated
+    //    value as input. `handoff_notes` is stored separately, so we already have
+    //    the handoff content preserved even if the commit body gets clipped here.
     let commit_message = truncate_with_marker(&commit_message, HANDOFF_COMMIT_MAX_CHARS);
     let handoff_notes = truncate_with_marker(&handoff_notes, HANDOFF_NOTES_MAX_CHARS);
 
@@ -10152,8 +10299,12 @@ async fn fetch_previous_terminal_context(
 /// Looks for "HANDOFF:" or "Handoff Notes:" markers. If not found, returns
 /// the commit message with the METADATA block stripped.
 fn extract_handoff_notes(commit_message: &str) -> String {
-    // Look for handoff markers (case-insensitive)
-    let lower = commit_message.to_lowercase();
+    // Look for handoff markers (case-insensitive).
+    // E21-12: Use `to_ascii_lowercase` since the markers ("handoff:",
+    // "handoff notes:") are pure ASCII, avoiding Unicode-aware case folding
+    // overhead and preserving byte-offset alignment with the original string
+    // (so `pos + marker.len()` stays valid when indexing `commit_message`).
+    let lower = commit_message.to_ascii_lowercase();
     for marker in &["handoff:", "handoff notes:"] {
         if let Some(pos) = lower.find(marker) {
             let start = pos + marker.len();

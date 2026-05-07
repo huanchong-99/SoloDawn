@@ -429,7 +429,13 @@ async fn send_message(
                         .nth(1)
                         .or_else(|| response.content.split("```\n").nth(1))
                         .and_then(|s| s.split("```").next())
-                        .unwrap_or("");
+                        .unwrap_or_else(|| {
+                            tracing::warn!(
+                                draft_id = %draft_id,
+                                "PLANNING_SPEC detected but no fenced JSON block could be extracted; falling back to empty spec"
+                            );
+                            ""
+                        });
 
                     let (req_summary, tech_spec) =
                         if let Ok(spec) = serde_json::from_str::<serde_json::Value>(json_block) {
@@ -511,6 +517,10 @@ async fn send_message(
                             };
                             let text = format!("{prefix} {content}");
                             let truncated = if text.len() > 4000 {
+                                // SAFETY: `text` is constructed from Rust `String`s via
+                                // `format!`, so it is guaranteed valid UTF-8. Therefore
+                                // `floor_char_boundary` always returns a valid boundary
+                                // in-bounds (floor_char_boundary clamps to len internally).
                                 let boundary = text.floor_char_boundary(4000);
                                 format!("{}...(truncated)", &text[..boundary])
                             } else {
@@ -655,7 +665,10 @@ async fn toggle_feishu_sync(
         let messenger = h.messenger.clone();
 
         // Resolve chat_id: explicit param → last received → DB binding
-        let last_id = h.last_chat_id.try_read().ok().and_then(|g| g.clone());
+        // Use blocking read (not try_read) so transient lock contention doesn't
+        // silently fall through to the slower DB path. The lock is only ever
+        // held briefly by Feishu event handlers updating the last chat id.
+        let last_id = h.last_chat_id.read().await.clone();
         drop(handle_guard);
 
         // Also check any concierge session that already has a feishu_chat_id
@@ -683,7 +696,22 @@ async fn toggle_feishu_sync(
 
             if let Some(b) = binding {
                 b.conversation_id
-            } else if let Some(bot_chat) = messenger.first_bot_chat_id().await.unwrap_or(None) {
+            } else if let Some(bot_chat) = messenger
+                .first_bot_chat_id()
+                .await
+                .unwrap_or_else(|e| {
+                    // E30-06: log fetch failures instead of silently treating them
+                    // as "no chat" so missing Feishu credentials / transport errors
+                    // are diagnosable in logs.
+                    tracing::warn!(
+                        draft_id = %draft_id,
+                        error = %e,
+                        "Failed to fetch first bot chat id from Feishu messenger; \
+                         falling back as if no chat was found"
+                    );
+                    None
+                })
+            {
                 bot_chat
             } else {
                 return Err(ApiError::BadRequest(
@@ -728,6 +756,9 @@ async fn toggle_feishu_sync(
                     let text = format!("{prefix} {}", msg.content);
                     // Truncate very long messages for Feishu
                     let truncated = if text.len() > 4000 {
+                        // SAFETY: `text` is built via `format!` from Rust `String`s,
+                        // so it is guaranteed valid UTF-8 and `floor_char_boundary`
+                        // is safe to slice with.
                         let boundary = text.floor_char_boundary(4000);
                         format!("{}...(truncated)", &text[..boundary])
                     } else {

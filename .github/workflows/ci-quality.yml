@@ -8,6 +8,10 @@
 # ============================================================================
 name: Quality Gate Check
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [ main, phase-18-release-readiness ]
@@ -28,7 +32,7 @@ jobs:
     # Usually SonarQube would be run here using the official action
     # Note: Requires SONAR_TOKEN secret to be configured in GitHub repository
     - name: SonarScan
-      uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8 # v5.0.0
+      uses: SonarSource/sonarqube-scan-action@299e4b793aaa83bf2aba7c9c14bedbb485688ec4 # v7.1.0
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

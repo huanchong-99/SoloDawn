@@ -3,6 +3,14 @@
   "title": "斜杠命令",
   "description": "创建和管理工作流的自定义斜杠命令预设。",
   "createButton": "新建命令",
+  "dialogs": {
+    "deleteConfirm": {
+      "title": "删除命令",
+      "message": "确定要删除命令「{{command}}」吗？",
+      "confirm": "删除",
+      "cancel": "取消"
+    }
+  },
   "errors": {
     "loadFailed": "加载斜杠命令失败",
     "deleteConfirm": "确定要删除命令「{{command}}」吗？",

@@ -11,10 +11,13 @@ use std::os::windows::io::{FromRawHandle, IntoRawHandle, OwnedHandle};
 use command_group::AsyncGroupChild;
 use futures::{StreamExt, stream::BoxStream};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::ReaderStream;
 
 use crate::executors::ExecutorError;
+
+/// Bound for duplicate-stdout and injector channels (W2-30-06).
+const STDOUT_DUP_CHANNEL_BOUND: usize = 512;
 
 /// Duplicate stdout from AsyncGroupChild.
 ///
@@ -48,9 +51,12 @@ pub fn duplicate_stdout(
     // Obtain writer from fd
     let mut fd_writer = wrap_fd_as_tokio_writer(pipe_writer);
 
-    // Create the duplicate stdout stream
-    let (dup_writer, dup_reader) =
-        tokio::sync::mpsc::unbounded_channel::<std::io::Result<String>>();
+    // Create the duplicate stdout stream.
+    // W2-30-06: bounded channel + `send().await` backpressure so a slow
+    // consumer cannot cause unbounded memory growth here.
+    let (dup_writer, dup_reader) = tokio::sync::mpsc::channel::<std::io::Result<String>>(
+        STDOUT_DUP_CHANNEL_BOUND,
+    );
 
     // Read original stdout and write to both new ChildStdout and duplicate stream
     tokio::spawn(async move {
@@ -62,24 +68,31 @@ pub fn duplicate_stdout(
                     let _ = fd_writer.write_all(&data).await;
 
                     let string_chunk = String::from_utf8_lossy(&data).into_owned();
-                    let _ = dup_writer.send(Ok(string_chunk));
+                    // W2-30-06: async context -> apply backpressure via send().await.
+                    if dup_writer.send(Ok(string_chunk)).await.is_err() {
+                        // Receiver dropped; stop forwarding.
+                        break;
+                    }
                 }
                 Err(err) => {
                     tracing::error!("Error reading from child stdout: {}", err);
-                    let _ = dup_writer.send(Err(err));
+                    // W2-30-06: async context -> apply backpressure via send().await.
+                    if dup_writer.send(Err(err)).await.is_err() {
+                        break;
+                    }
                 }
             }
         }
     });
 
     // Return the channel receiver as a boxed stream
-    Ok(Box::pin(UnboundedReceiverStream::new(dup_reader)))
+    Ok(Box::pin(ReceiverStream::new(dup_reader)))
 }
 
 /// Handle to append additional lines into the child's stdout stream.
 #[derive(Clone)]
 pub struct StdoutAppender {
-    tx: tokio::sync::mpsc::UnboundedSender<String>,
+    tx: tokio::sync::mpsc::Sender<String>,
 }
 
 impl StdoutAppender {
@@ -89,7 +102,14 @@ impl StdoutAppender {
         while line.ends_with('\n') || line.ends_with('\r') {
             line.pop();
         }
-        let _ = self.tx.send(line);
+        // W2-30-06: sync context -> use try_send and warn on full/closed
+        // instead of an unbounded channel that could grow without limit.
+        match self.tx.try_send(line) {
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                tracing::warn!("stdout_dup: injector channel full; dropping line");
+            }
+            Ok(()) | Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
+        }
     }
 }
 
@@ -117,10 +137,15 @@ pub fn tee_stdout_with_appender(
     let writer = wrap_fd_as_tokio_writer(pipe_writer);
     let shared_writer = std::sync::Arc::new(tokio::sync::Mutex::new(writer));
 
-    // Create duplicate stream publisher
-    let (dup_tx, dup_rx) = tokio::sync::mpsc::unbounded_channel::<std::io::Result<String>>();
-    // Create injector channel
-    let (inj_tx, mut inj_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    // Create duplicate stream publisher.
+    // W2-30-06: bounded channels + `send().await` backpressure so a slow
+    // consumer cannot cause unbounded memory growth here.
+    let (dup_tx, dup_rx) = tokio::sync::mpsc::channel::<std::io::Result<String>>(
+        STDOUT_DUP_CHANNEL_BOUND,
+    );
+    // Create injector channel (bounded; producers use try_send via StdoutAppender).
+    let (inj_tx, mut inj_rx) =
+        tokio::sync::mpsc::channel::<String>(STDOUT_DUP_CHANNEL_BOUND);
 
     // Clone dup_tx for Task 2 before Task 1 moves it
     let dup_tx2 = dup_tx.clone();
@@ -136,12 +161,19 @@ pub fn tee_stdout_with_appender(
                         // forward to child stdout
                         let mut w = shared_writer.lock().await;
                         let _ = w.write_all(&data).await;
+                        drop(w);
                         // publish duplicate
                         let string_chunk = String::from_utf8_lossy(&data).into_owned();
-                        let _ = dup_tx.send(Ok(string_chunk));
+                        // W2-30-06: async -> send().await provides backpressure.
+                        if dup_tx.send(Ok(string_chunk)).await.is_err() {
+                            break;
+                        }
                     }
                     Err(err) => {
-                        let _ = dup_tx.send(Err(err));
+                        // W2-30-06: async -> send().await provides backpressure.
+                        if dup_tx.send(Err(err)).await.is_err() {
+                            break;
+                        }
                     }
                 }
             }
@@ -157,14 +189,18 @@ pub fn tee_stdout_with_appender(
                 data.push(b'\n');
                 let mut w = shared_writer.lock().await;
                 let _ = w.write_all(&data).await;
+                drop(w);
                 let string_chunk = String::from_utf8_lossy(&data).into_owned();
-                let _ = dup_tx2.send(Ok(string_chunk));
+                // W2-30-06: async -> send().await provides backpressure.
+                if dup_tx2.send(Ok(string_chunk)).await.is_err() {
+                    break;
+                }
             }
         });
     }
 
     Ok((
-        Box::pin(UnboundedReceiverStream::new(dup_rx)),
+        Box::pin(ReceiverStream::new(dup_rx)),
         StdoutAppender { tx: inj_tx },
     ))
 }

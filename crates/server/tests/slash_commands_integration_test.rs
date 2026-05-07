@@ -44,7 +44,7 @@ async fn setup_test() -> (DeploymentImpl, String) {
 
     // Create model config via raw SQL (ModelConfig has no create method)
     sqlx::query(
-        r"INSERT INTO model_config (id, cli_type_id, name, display_name, is_default, is_official, created_at, updated_at)
+        r"INSERT OR IGNORE INTO model_config (id, cli_type_id, name, display_name, is_default, is_official, created_at, updated_at)
           VALUES (?1, ?2, ?3, ?4, 0, 0, datetime('now'), datetime('now'))"
     )
     .bind("test-model")
@@ -153,6 +153,33 @@ async fn test_multiple_presets() {
         .filter(|p| p.command.starts_with("/multi-cmd"))
         .collect();
     assert_eq!(test_presets.len(), 2, "Should have 2 test presets");
+}
+
+#[tokio::test]
+async fn test_find_all_presets_is_capped() {
+    let (deployment, _) = setup_test().await;
+    let pool = &deployment.db().pool;
+    let test_run = Uuid::new_v4().simple().to_string();
+
+    for idx in 0..510 {
+        create_test_preset(
+            pool,
+            &format!("/limit-cmd-{test_run}-{idx:03}"),
+            "Bounded list test preset",
+            "Template",
+        )
+        .await;
+    }
+
+    let all = SlashCommandPreset::find_all(pool)
+        .await
+        .expect("Failed to list presets");
+
+    assert_eq!(
+        all.len(),
+        500,
+        "find_all should cap slash command presets at the palette ceiling"
+    );
 }
 
 #[tokio::test]

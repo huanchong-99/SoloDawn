@@ -59,7 +59,7 @@ impl RunnerService for RunnerGrpcService {
                 );
                 Ok(Response::new(SpawnTerminalResponse {
                     success: true,
-                    error: String::new(),
+                    error: None,
                     pid: handle.pid,
                 }))
             }
@@ -71,7 +71,7 @@ impl RunnerService for RunnerGrpcService {
                 );
                 Ok(Response::new(SpawnTerminalResponse {
                     success: false,
-                    error: e.to_string(),
+                    error: Some(e.to_string()),
                     pid: 0,
                 }))
             }

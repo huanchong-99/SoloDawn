@@ -36,6 +36,10 @@ impl SystemSetting {
 
     /// Upsert a setting value. Creates the row if it doesn't exist, otherwise updates it.
     pub async fn set(pool: &SqlitePool, key: &str, value: &str) -> anyhow::Result<()> {
+        // E38-10: `INSERT OR REPLACE` is SQLite-specific; we intentionally keep
+        // it here because this crate is SQLite-only (see `SqlitePool`).
+        // If we ever support another backend, switch to
+        // `ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = ...`.
         sqlx::query(
             "INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))",
         )
@@ -60,6 +64,21 @@ impl SystemSetting {
     pub async fn is_feishu_enabled(pool: &SqlitePool) -> bool {
         // 1. Check env var first (takes precedence)
         if let Some(env_val) = Self::is_feishu_enabled_sync() {
+            // Surface a warning when the env var overrides an explicitly
+            // stored, conflicting database setting so operators are not
+            // surprised by a silent override. We use `get` (not `get_bool`)
+            // so that an unset row does not spuriously trigger the warn.
+            if let Ok(Some(raw)) = Self::get(pool, "feishu_enabled").await {
+                let db_val =
+                    raw.trim().eq_ignore_ascii_case("true") || raw.trim() == "1";
+                if db_val != env_val {
+                    tracing::warn!(
+                        env = env_val,
+                        db = db_val,
+                        "SOLODAWN_FEISHU_ENABLED environment variable overrides conflicting `feishu_enabled` database setting"
+                    );
+                }
+            }
             return env_val;
         }
         // 2. Fall back to database

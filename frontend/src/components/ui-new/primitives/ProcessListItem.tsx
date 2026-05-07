@@ -63,8 +63,11 @@ export function ProcessListItem({
     <button
       type="button"
       onClick={onClick}
+      data-state={selected ? 'selected' : undefined}
+      aria-pressed={selected}
       className={cn(
         'w-full h-[26px] flex items-center gap-half px-half rounded-sm text-left transition-colors',
+        selected && 'bg-surface-2',
         className
       )}
     >

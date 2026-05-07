@@ -140,14 +140,14 @@ const OAuthDialogImpl = NiceModal.create<NoProps>(() => {
     setState({ type: 'select' });
   };
 
-  // Cleanup polling when dialog closes
+  // E12-04: Reset state and clear polling on close/reopen so error states
+  // from a previous session don't persist into a fresh dialog open.
   useEffect(() => {
-    if (!modal.visible) {
-      setIsPolling(false);
-      if (popupRef.current && !popupRef.current.closed) {
-        popupRef.current.close();
-      }
+    setIsPolling(false);
+    if (popupRef.current && !popupRef.current.closed) {
+      popupRef.current.close();
     }
+    setState({ type: 'select' });
   }, [modal.visible]);
 
   const renderContent = () => {

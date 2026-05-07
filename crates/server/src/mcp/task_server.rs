@@ -8,6 +8,7 @@ use db::models::{
     workspace::{Workspace, WorkspaceContext},
 };
 use executors::{executors::BaseCodingAgent, profile::ExecutorProfileId};
+use once_cell::sync::Lazy;
 use regex::Regex;
 use rmcp::{
     ErrorData, ServerHandler,
@@ -284,8 +285,31 @@ pub struct McpContext {
 
 impl TaskServer {
     pub fn new(base_url: &str) -> Self {
+        // Use a 30s default timeout to prevent MCP tool calls from hanging indefinitely
+        // on slow/stalled backend responses. Fall back to the default client if the
+        // builder fails (should not happen with only a timeout set).
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Failed to build reqwest client with timeout, falling back to default: {e}"
+                );
+                reqwest::Client::new()
+            });
+
+        // Warn at startup if the API token is unset so operators notice that the MCP
+        // server is running without authentication (apply_api_token silently skips).
+        if utils::env_compat::var_opt_with_compat("SOLODAWN_API_TOKEN", "GITCORTEX_API_TOKEN")
+            .is_none()
+        {
+            tracing::warn!(
+                "SOLODAWN_API_TOKEN is not set; MCP server will issue backend requests without an Authorization header"
+            );
+        }
+
         Self {
-            client: reqwest::Client::new(),
+            client,
             base_url: base_url.to_string(),
             tool_router: Self::tool_router(),
             context: None,
@@ -327,15 +351,24 @@ impl TaskServer {
             container_ref: normalized_path.to_string_lossy().to_string(),
         };
 
-        let response = tokio::time::timeout(
+        let response = match tokio::time::timeout(
             std::time::Duration::from_millis(500),
             self.apply_api_token(self.client.get(&url))
                 .query(&query)
                 .send(),
         )
         .await
-        .ok()?
-        .ok()?;
+        {
+            Ok(Ok(resp)) => resp,
+            Ok(Err(e)) => {
+                tracing::debug!("attempt-context request failed: {e}");
+                return None;
+            }
+            Err(_) => {
+                tracing::debug!("attempt-context request timed out after 500ms");
+                return None;
+            }
+        };
 
         if !response.status().is_success() {
             return None;
@@ -480,10 +513,11 @@ impl TaskServer {
     /// Returns the original text if expansion fails (e.g., network error).
     /// Unknown tags are left as-is (not expanded, not an error).
     async fn expand_tags(&self, text: &str) -> String {
-        // Pattern matches @tagname where tagname is non-whitespace, non-@ characters
-        let Ok(tag_pattern) = Regex::new(r"@([^\s@]+)") else {
-            return text.to_string();
-        };
+        // Pattern matches @tagname where tagname is non-whitespace, non-@ characters.
+        // Compiled once; the pattern is a static literal, so construction cannot fail.
+        static TAG_PATTERN: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r"@([^\s@]+)").expect("static valid regex"));
+        let tag_pattern = &*TAG_PATTERN;
 
         // Find all unique tag names referenced in the text
         let tag_names: Vec<String> = tag_pattern
@@ -497,16 +531,27 @@ impl TaskServer {
             return text.to_string();
         }
 
-        // Fetch all tags from the API
+        // Fetch all tags from the API. Bound the request with a short timeout so a
+        // stalled backend cannot hang tool calls that reference @tags.
         let url = self.url("/api/tags");
-        let tags: Vec<Tag> = match self.apply_api_token(self.client.get(&url)).send().await {
-            Ok(resp) if resp.status().is_success() => {
+        let send_fut = self.apply_api_token(self.client.get(&url)).send();
+        let tags: Vec<Tag> = match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            send_fut,
+        )
+        .await
+        {
+            Ok(Ok(resp)) if resp.status().is_success() => {
                 match resp.json::<ApiResponseEnvelope<Vec<Tag>>>().await {
                     Ok(envelope) if envelope.success => envelope.data.unwrap_or_default(),
                     _ => return text.to_string(),
                 }
             }
-            _ => return text.to_string(),
+            Ok(_) => return text.to_string(),
+            Err(_) => {
+                tracing::debug!("expand_tags: /api/tags request timed out after 2s");
+                return text.to_string();
+            }
         };
 
         // Build a map of tag_name -> content for quick lookup
@@ -804,6 +849,8 @@ impl TaskServer {
             title,
             description: expanded_description,
             status,
+            // M38: Outer `None` = leave `parent_workspace_id` unchanged.
+            // `Some(None)` would clear it; `Some(Some(id))` would update it.
             parent_workspace_id: None,
             image_ids: None,
         };
@@ -814,8 +861,8 @@ impl TaskServer {
         };
 
         let details = TaskDetails::from_task(updated_task);
-        let repsonse = UpdateTaskResponse { task: details };
-        Ok(TaskServer::success(&repsonse))
+        let response = UpdateTaskResponse { task: details };
+        Ok(TaskServer::success(&response))
     }
 
     #[tool(
@@ -905,6 +952,14 @@ mod tests {
     impl ApiTokenEnvGuard {
         fn set(token: Option<&str>) -> Self {
             let previous = std::env::var("SOLODAWN_API_TOKEN").ok();
+            // SAFETY: Rust 2024 marks `set_var`/`remove_var` as unsafe because
+            // concurrent mutation of the process environment races with other
+            // threads reading it (e.g. libc `getenv`). Tests that use this
+            // guard are annotated with `#[serial]` (via `serial_test`), so
+            // only one such test runs at a time and no production code
+            // observes `SOLODAWN_API_TOKEN` from another thread during the
+            // guard's lifetime. This type is confined to `#[cfg(test)]` and
+            // must not be reused in request-handling code paths.
             unsafe {
                 match token {
                     Some(value) => std::env::set_var("SOLODAWN_API_TOKEN", value),
@@ -918,6 +973,9 @@ mod tests {
 
     impl Drop for ApiTokenEnvGuard {
         fn drop(&mut self) {
+            // SAFETY: See `ApiTokenEnvGuard::set`. The guard restores the
+            // previous value while the `#[serial]` test still holds the
+            // global test lock, so no other thread observes the env var.
             unsafe {
                 match &self.previous {
                     Some(previous) => std::env::set_var("SOLODAWN_API_TOKEN", previous),

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Play,
@@ -150,6 +150,17 @@ function ProcessesTab({ sessionId }: Readonly<ProcessesTabProps>) {
     setLoadingProcessId(null);
   }, [sessionId]);
 
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimeoutRef.current) {
+        clearTimeout(copiedTimeoutRef.current);
+        copiedTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
   const handleCopyLogs = useCallback(async () => {
     if (logs.length === 0) return;
 
@@ -157,7 +168,13 @@ function ProcessesTab({ sessionId }: Readonly<ProcessesTabProps>) {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copiedTimeoutRef.current) {
+        clearTimeout(copiedTimeoutRef.current);
+      }
+      copiedTimeoutRef.current = setTimeout(() => {
+        setCopied(false);
+        copiedTimeoutRef.current = null;
+      }, 2000);
     } catch (err) {
       console.warn('Copy to clipboard failed:', err);
     }

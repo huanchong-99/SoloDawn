@@ -237,9 +237,8 @@ export const handleApiResponse = async <T, E = T>(
     }
 
     logApiError('[API Error]', {
-      message: errorMessage,
+      message: errorMessage.slice(0, 200),
       status: response.status,
-      response,
       endpoint: response.url,
       timestamp: new Date().toISOString(),
     });
@@ -263,9 +262,8 @@ export const handleApiResponse = async <T, E = T>(
     if (result.error_data) {
       logApiError('[API Error with data]', {
         error_data: result.error_data,
-        message: result.message,
+        message: (result.message || '').slice(0, 200),
         status: response.status,
-        response,
         endpoint: response.url,
         timestamp: new Date().toISOString(),
       });
@@ -279,9 +277,8 @@ export const handleApiResponse = async <T, E = T>(
     }
 
     logApiError('[API Error]', {
-      message: result.message || 'API request failed',
+      message: (result.message || 'API request failed').slice(0, 200),
       status: response.status,
-      response,
       endpoint: response.url,
       timestamp: new Date().toISOString(),
     });
@@ -464,6 +461,7 @@ export const tasksApi = {
   share: async (taskId: string): Promise<ShareTaskResponse> => {
     const response = await makeRequest(`/api/tasks/${taskId}/share`, {
       method: 'POST',
+      body: JSON.stringify({}),
     });
     return handleApiResponse<ShareTaskResponse>(response);
   },
@@ -588,7 +586,7 @@ export const planningDraftsApi = {
   confirm: async (draftId: string): Promise<PlanningDraftResponse> => {
     const response = await makeRequest(
       `/api/planning-drafts/${draftId}/confirm`,
-      { method: 'POST' }
+      { method: 'POST', body: JSON.stringify({}) }
     );
     return handleApiResponse<PlanningDraftResponse>(response);
   },
@@ -596,7 +594,7 @@ export const planningDraftsApi = {
   materialize: async (draftId: string): Promise<MaterializeResponse> => {
     const response = await makeRequest(
       `/api/planning-drafts/${draftId}/materialize`,
-      { method: 'POST' }
+      { method: 'POST', body: JSON.stringify({}) }
     );
     return handleApiResponse<MaterializeResponse>(response);
   },
@@ -727,6 +725,7 @@ export const attemptsApi = {
   stop: async (attemptId: string): Promise<void> => {
     const response = await makeRequest(`/api/task-attempts/${attemptId}/stop`, {
       method: 'POST',
+      body: JSON.stringify({}),
     });
     return handleApiResponse<void>(response);
   },
@@ -1149,6 +1148,7 @@ export const configApi = {
   }> => {
     const response = await makeRequest('/api/agents/install-ai-clis', {
       method: 'POST',
+      body: JSON.stringify({}),
       signal: AbortSignal.timeout(30 * 60 * 1000), // 30 min — CLI installation is slow
     });
     return handleApiResponse<{
@@ -1589,6 +1589,7 @@ export const feishuApi = {
   reconnect: async (): Promise<{ status: string; message: string }> => {
     const response = await makeRequest('/api/integrations/feishu/reconnect', {
       method: 'POST',
+      body: JSON.stringify({}),
     });
     return handleApiResponse(response);
   },
