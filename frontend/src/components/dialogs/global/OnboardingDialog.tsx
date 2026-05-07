@@ -64,11 +64,11 @@ const OnboardingDialogImpl = NiceModal.create<NoProps>(() => {
     modal.resolve({
       profile,
       editor: {
-        editor_type: editorType,
-        custom_command:
+        editorType,
+        customCommand:
           editorType === EditorType.CUSTOM ? customCommand || null : null,
-        remote_ssh_host: null,
-        remote_ssh_user: null,
+        remoteSshHost: null,
+        remoteSshUser: null,
       },
     } as OnboardingResult);
   };

@@ -384,12 +384,20 @@ async fn handle_chat_event(
         "operator".parse().expect("valid header value"),
     );
     headers.insert(
-        "x-orchestrator-operator-id",
-        payload
-            .sender_id
-            .parse()
-            .unwrap_or_else(|_| "external-user".parse().expect("valid fallback header")),
+        "x-orchestrator-role",
+        "operator".parse().map_err(|e| {
+            ApiError::Internal(format!("Failed to construct orchestrator role header: {e}"))
+        })?,
     );
+    let operator_id_header = match payload.sender_id.parse() {
+        Ok(value) => value,
+        Err(_) => "external-user".parse().map_err(|e| {
+            ApiError::Internal(format!(
+                "Failed to construct fallback operator id header: {e}"
+            ))
+        })?,
+    };
+    headers.insert("x-orchestrator-operator-id", operator_id_header);
 
     let submit_payload = SubmitOrchestratorChatRequest {
         message: command_text.to_string(),

@@ -933,6 +933,23 @@ export function useUpdateTaskStatus() {
 
       return { previousWorkflow };
     },
+    // E09-02: Merge the server's authoritative task into cache so we replace
+    // the optimistic entry with server truth (timestamps, derived fields, etc.)
+    // without waiting for the onSettled invalidation to resolve.
+    onSuccess: (serverTask, { workflowId, taskId }) => {
+      queryClient.setQueryData<Workflow>(
+        workflowKeys.byId(workflowId),
+        (current) => {
+          if (!current) return current;
+          return {
+            ...current,
+            tasks: (current.tasks ?? []).map((task) =>
+              task.id === taskId ? { ...task, ...serverTask } : task
+            ),
+          };
+        }
+      );
+    },
     onError: (error: Error, { workflowId }, context) => {
       // Rollback on error
       if (context?.previousWorkflow) {

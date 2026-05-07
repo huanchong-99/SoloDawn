@@ -75,7 +75,10 @@ impl FeishuAuth {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing tenant_access_token in response"))?
             .to_string();
-        let expire = resp["expire"].as_u64().unwrap_or(7200);
+        let expire = resp["expire"].as_u64().unwrap_or_else(|| {
+            tracing::warn!("Feishu tenant_access_token response missing 'expire' field; defaulting to 7200s");
+            7200
+        });
 
         let cached = CachedToken {
             token: token.clone(),

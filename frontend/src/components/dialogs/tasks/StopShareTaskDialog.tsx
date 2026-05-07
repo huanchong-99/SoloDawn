@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -27,32 +27,36 @@ const StopShareTaskDialogImpl = NiceModal.create<StopShareTaskDialogProps>(
     const { projectId } = useProject();
     const { stopShareTask } = useTaskMutations(projectId ?? undefined);
     const [error, setError] = useState<string | null>(null);
-    const isProgrammaticCloseRef = useRef(false);
-    const didConfirmRef = useRef(false);
+    // E12-10: Replace the two-ref signaling (isProgrammaticCloseRef +
+    // didConfirmRef) with a single state-machine enum. 'open' is the initial
+    // state; 'confirmed' and 'cancelled' record how the dialog closed so the
+    // radix onOpenChange handler can resolve/reject correctly.
+    const [closeOutcome, setCloseOutcome] = useState<
+      'open' | 'confirmed' | 'cancelled'
+    >('open');
 
     const getReadableError = (err: unknown) =>
       err instanceof Error && err.message
         ? err.message
         : t('stopShareDialog.genericError');
 
-    const requestClose = (didConfirm: boolean) => {
+    const requestClose = (outcome: 'confirmed' | 'cancelled') => {
       if (stopShareTask.isPending) {
         return;
       }
-      isProgrammaticCloseRef.current = true;
-      didConfirmRef.current = didConfirm;
+      setCloseOutcome(outcome);
       modal.hide();
     };
 
     const handleCancel = () => {
-      requestClose(false);
+      requestClose('cancelled');
     };
 
     const handleConfirm = async () => {
       setError(null);
       try {
         await stopShareTask.mutateAsync(sharedTask.id);
-        requestClose(true);
+        requestClose('confirmed');
       } catch (err: unknown) {
         setError(getReadableError(err));
       }
@@ -65,8 +69,7 @@ const StopShareTaskDialogImpl = NiceModal.create<StopShareTaskDialogProps>(
           if (open) {
             stopShareTask.reset();
             setError(null);
-            isProgrammaticCloseRef.current = false;
-            didConfirmRef.current = false;
+            setCloseOutcome('open');
             return;
           }
 
@@ -74,14 +77,11 @@ const StopShareTaskDialogImpl = NiceModal.create<StopShareTaskDialogProps>(
             return;
           }
 
-          const shouldResolve =
-            isProgrammaticCloseRef.current && didConfirmRef.current;
-
-          isProgrammaticCloseRef.current = false;
-          didConfirmRef.current = false;
+          const outcome = closeOutcome;
+          setCloseOutcome('open');
           stopShareTask.reset();
 
-          if (shouldResolve) {
+          if (outcome === 'confirmed') {
             modal.resolve();
           } else {
             modal.reject(new Error('Stop share cancelled by user'));

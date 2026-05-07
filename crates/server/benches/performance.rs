@@ -1,15 +1,47 @@
 //! Performance Benchmarks
 //!
 //! Run with: cargo bench --package server
+//
+// NOTE: Known bench limitations (W2-05-01..08). These benches are not
+// production code; the caveats below are intentional but should frame how
+// results are read:
+//
+// - W2-05-01: FIXED. `bench_db_queries` previously constructed a
+//   `tokio::runtime::Runtime` that was never used (leaking threads for the
+//   life of the process). The unused `_rt` binding has been removed; don't
+//   mirror the old pattern in real code.
+// - W2-05-02: No real SQLite (not even in-memory) is exercised here. Any DB
+//   numbers reported are synthetic and will not catch regressions in sqlx,
+//   the query planner, or index usage.
+// - W2-05-03: `workflow_list_query` and the `result_size` sweep are
+//   `Vec<u8>` allocations, not queries — they measure allocator throughput,
+//   not database selectivity. Fixed parameters mean the branch predictor and
+//   cache are always hot.
+// - W2-05-04: `Vec<u8>` simulations are not representative of row decoding
+//   cost (row-to-struct mapping, TEXT→Uuid parsing, Option handling) that
+//   dominates real workflow queries.
+// - W2-05-05: JSON/UUID/string/SHA256 micro-benches use a single fixed input
+//   per function; no input-size variance beyond the hardcoded `10000` byte
+//   hash case.
+// - W2-05-06: `bench_async_tasks` measures `tokio::spawn` of trivial
+//   futures, which is dominated by scheduler bookkeeping and tells us
+//   nothing about request-handling latency.
+// - W2-05-07: No HTTP/axum layer is exercised — despite the file name,
+//   end-to-end server performance is not benchmarked here.
+// - W2-05-08: Results are not compared against a baseline or regression
+//   threshold in CI; drift is invisible unless someone reads the report.
 
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
-/// Benchmark database query performance
+/// Benchmark database query performance.
+///
+/// W2-05-05: the previous version built a `tokio::runtime::Runtime` it never
+/// used. These benches are placeholders that measure allocator throughput, not
+/// database work; the runtime has been removed and the whole module should be
+/// replaced with real benches when the perf harness is set up.
 fn bench_db_queries(c: &mut Criterion) {
-    let _rt = tokio::runtime::Runtime::new().unwrap();
-
     let mut group = c.benchmark_group("database_queries");
     group.measurement_time(Duration::from_secs(10));
     group.sample_size(50);

@@ -15,10 +15,6 @@ const makeRequest = async (path: string, options: RequestInit = {}) => {
   }
   headers.set('Authorization', `Bearer ${tokenRes.access_token}`);
 
-  if (import.meta.env.DEV) {
-    console.log('VITE_VK_SHARED_API_BASE:', REMOTE_API_URL);
-  }
-
   return fetch(`${REMOTE_API_URL}${path}`, {
     ...options,
     headers,
@@ -31,7 +27,7 @@ export const getSharedTaskAssignees = async (
 ): Promise<UserData[]> => {
   const response = await makeRequest(
     `/v1/tasks/assignees?${new URLSearchParams({
-      project_id: projectId,
+      projectId,
     } as AssigneesQuery)}`
   );
 

@@ -3,6 +3,9 @@
 //! This module defines the API contract for Workflow responses.
 //! All structs use explicit field mappings (no flatten) to prevent conflicts.
 
+use std::str::FromStr;
+
+use db::models::TerminalStatus;
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -71,7 +74,8 @@ pub struct WorkflowTaskDto {
 }
 
 /// Terminal DTO
-// TODO(G17-003): Migrate `status` from String to a typed enum once frontend consumers are updated.
+// W2-31-04: `status` is now a typed enum (`TerminalStatus`) shared with the DB layer.
+// Serialization stays snake_case (matches prior `String` wire format).
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -87,7 +91,7 @@ pub struct TerminalDto {
     pub role: Option<String>,
     pub role_description: Option<String>,
     pub order_index: i32,
-    pub status: String,
+    pub status: TerminalStatus,
     // G17-005: Key fields added to DTO for frontend visibility
     pub auto_confirm: bool,
     pub last_commit_hash: Option<String>,
@@ -276,7 +280,10 @@ impl TerminalDto {
             role: terminal.role.clone(),
             role_description: terminal.role_description.clone(),
             order_index: terminal.order_index,
-            status: terminal.status.clone(),
+            // W2-31-04: Parse the DB TEXT column into the typed enum. If the DB
+            // holds an unexpected legacy value (there's no CHECK constraint yet),
+            // fall back to the enum default (`NotStarted`) rather than panic.
+            status: TerminalStatus::from_str(&terminal.status).unwrap_or_default(),
             // G17-005: Key fields for frontend visibility
             auto_confirm: terminal.auto_confirm,
             last_commit_hash: terminal.last_commit_hash.clone(),

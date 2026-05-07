@@ -175,7 +175,7 @@ export function WorkflowProgressView({
             </span>
             <span className="flex items-center gap-px text-low shrink-0">
               <TerminalIcon className="size-icon-xs" />
-              <span>{task.terminals.length}</span>
+              <span>{(task.terminals ?? []).length}</span>
             </span>
           </div>
         ))}

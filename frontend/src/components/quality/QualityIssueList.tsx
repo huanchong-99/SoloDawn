@@ -59,7 +59,7 @@ const IssueItem = ({ issue }: { issue: QualityIssueRecord }) => {
             </span>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="w-6 h-6 shrink-0 mt-0.5">
+        <Button variant="ghost" size="icon" className="w-6 h-6 shrink-0 mt-0.5" aria-expanded={expanded}>
           {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </Button>
       </button>

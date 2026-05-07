@@ -36,11 +36,17 @@ if (-not $SkipRustBuild) {
 
     Write-Host "  Building solodawn-server..."
     & cargo build --release -p server
-    Copy-Item "target\release\server.exe" (Join-Path $BuildDir "solodawn-server.exe") -Force
+    if ($LASTEXITCODE -ne 0) { throw "cargo build -p server failed (exit=$LASTEXITCODE)" }
+    $ServerSrc = "target\release\server.exe"
+    if (-not (Test-Path $ServerSrc)) { throw "Missing artifact: $ServerSrc" }
+    Copy-Item $ServerSrc (Join-Path $BuildDir "solodawn-server.exe") -Force -ErrorAction Stop
 
     Write-Host "  Building solodawn-tray..."
     & cargo build --release -p solodawn-tray
-    Copy-Item "target\release\solodawn-tray.exe" (Join-Path $BuildDir "solodawn-tray.exe") -Force
+    if ($LASTEXITCODE -ne 0) { throw "cargo build -p solodawn-tray failed (exit=$LASTEXITCODE)" }
+    $TraySrc = "target\release\solodawn-tray.exe"
+    if (-not (Test-Path $TraySrc)) { throw "Missing artifact: $TraySrc" }
+    Copy-Item $TraySrc (Join-Path $BuildDir "solodawn-tray.exe") -Force -ErrorAction Stop
 
     Pop-Location
 }

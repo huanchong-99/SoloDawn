@@ -7,7 +7,7 @@ use executors::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{FromRow, SqlitePool, Type};
+use sqlx::{FromRow, Sqlite, SqlitePool, Type};
 use thiserror::Error;
 use ts_rs::TS;
 use uuid::Uuid;
@@ -134,7 +134,7 @@ pub enum ExecutorActionField {
     Other(Value),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, FromRow)]
 pub struct MissingBeforeContext {
     pub id: Uuid,
     pub session_id: Uuid,
@@ -171,53 +171,51 @@ impl ExecutionProcess {
 
     /// Context for backfilling before_head_commit for legacy rows
     /// List processes that have after_head_commit set but missing before_head_commit, with join context
+    // NOTE(W2-15-05): This backfill path now uses a window function instead of
+    // a correlated subquery, so it no longer re-scans `execution_processes`
+    // per row. It remains intentionally unbounded because startup backfill
+    // should clear the full outstanding set in one sweep.
     pub async fn list_missing_before_context(
         pool: &SqlitePool,
     ) -> Result<Vec<MissingBeforeContext>, sqlx::Error> {
-        let rows = sqlx::query!(
-            r#"SELECT
-                ep.id                         as "id!: Uuid",
-                ep.session_id                 as "session_id!: Uuid",
-                s.workspace_id                as "workspace_id!: Uuid",
-                eprs.repo_id                  as "repo_id!: Uuid",
-                eprs.after_head_commit        as after_head_commit,
-                prev.after_head_commit        as prev_after_head_commit,
-                wr.target_branch              as "target_branch!",
-                r.path                        as repo_path
-            FROM execution_processes ep
-            JOIN sessions s ON s.id = ep.session_id
-            JOIN execution_process_repo_states eprs ON eprs.execution_process_id = ep.id
-            JOIN repos r ON r.id = eprs.repo_id
-            JOIN workspaces w ON w.id = s.workspace_id
-            JOIN workspace_repos wr ON wr.workspace_id = w.id AND wr.repo_id = eprs.repo_id
-            LEFT JOIN execution_process_repo_states prev
-              ON prev.execution_process_id = (
-                   SELECT id FROM execution_processes
-                     WHERE session_id = ep.session_id
-                       AND created_at < ep.created_at
-                     ORDER BY created_at DESC
-                     LIMIT 1
+        sqlx::query_as::<Sqlite, MissingBeforeContext>(
+            r"WITH repo_history AS (
+                   SELECT
+                       ep.id,
+                       ep.session_id,
+                       s.workspace_id,
+                       eprs.repo_id,
+                       eprs.before_head_commit,
+                       eprs.after_head_commit,
+                       LAG(eprs.after_head_commit) OVER (
+                           PARTITION BY ep.session_id, eprs.repo_id
+                           ORDER BY ep.created_at ASC, ep.id ASC
+                       ) AS prev_after_head_commit,
+                       wr.target_branch,
+                       r.path AS repo_path
+                   FROM execution_processes ep
+                   JOIN sessions s ON s.id = ep.session_id
+                   JOIN execution_process_repo_states eprs
+                     ON eprs.execution_process_id = ep.id
+                   JOIN repos r ON r.id = eprs.repo_id
+                   JOIN workspace_repos wr
+                     ON wr.workspace_id = s.workspace_id
+                    AND wr.repo_id = eprs.repo_id
                )
-              AND prev.repo_id = eprs.repo_id
-            WHERE eprs.before_head_commit IS NULL
-              AND eprs.after_head_commit IS NOT NULL"#
+               SELECT
+                   id,
+                   session_id,
+                   workspace_id,
+                   repo_id,
+                   prev_after_head_commit,
+                   target_branch,
+                   repo_path
+               FROM repo_history
+               WHERE before_head_commit IS NULL
+                 AND after_head_commit IS NOT NULL",
         )
         .fetch_all(pool)
-        .await?;
-
-        let result = rows
-            .into_iter()
-            .map(|r| MissingBeforeContext {
-                id: r.id,
-                session_id: r.session_id,
-                workspace_id: r.workspace_id,
-                repo_id: r.repo_id,
-                prev_after_head_commit: r.prev_after_head_commit,
-                target_branch: r.target_branch,
-                repo_path: Some(r.repo_path),
-            })
-            .collect();
-        Ok(result)
+        .await
     }
 
     /// Find execution process by rowid
@@ -243,36 +241,47 @@ impl ExecutionProcess {
         .await
     }
 
-    /// Find all execution processes for a session (optionally include soft-deleted)
+    /// Find execution processes for a session (optionally include soft-deleted).
+    ///
+    /// W2-15-03: capped at [`Self::FIND_BY_SESSION_ID_MAX_ROWS`] rows. Callers
+    /// that need arbitrary depth should use `find_by_session_id_paginated`.
+    /// The cap is high enough that a typical session (≤ a few hundred
+    /// processes) returns everything, while a pathological long-running
+    /// session can no longer OOM a client.
     pub async fn find_by_session_id(
         pool: &SqlitePool,
         session_id: Uuid,
         show_soft_deleted: bool,
     ) -> Result<Vec<Self>, sqlx::Error> {
-        sqlx::query_as!(
-            ExecutionProcess,
-            r#"SELECT
-                      ep.id              as "id!: Uuid",
-                      ep.session_id      as "session_id!: Uuid",
-                      ep.run_reason      as "run_reason!: ExecutionProcessRunReason",
-                      ep.executor_action as "executor_action!: sqlx::types::Json<ExecutorActionField>",
-                      ep.status          as "status!: ExecutionProcessStatus",
+        let limit: i64 = Self::FIND_BY_SESSION_ID_MAX_ROWS;
+        sqlx::query_as::<_, ExecutionProcess>(
+            r"SELECT
+                      ep.id,
+                      ep.session_id,
+                      ep.run_reason,
+                      ep.executor_action,
+                      ep.status,
                       ep.exit_code,
-                      ep.dropped as "dropped!: bool",
-                      ep.started_at      as "started_at!: DateTime<Utc>",
-                      ep.completed_at    as "completed_at?: DateTime<Utc>",
-                      ep.created_at      as "created_at!: DateTime<Utc>",
-                      ep.updated_at      as "updated_at!: DateTime<Utc>"
+                      ep.dropped,
+                      ep.started_at,
+                      ep.completed_at,
+                      ep.created_at,
+                      ep.updated_at
                FROM execution_processes ep
                WHERE ep.session_id = ?
                  AND (? OR ep.dropped = FALSE)
-               ORDER BY ep.created_at ASC"#,
-            session_id,
-            show_soft_deleted
+               ORDER BY ep.created_at ASC
+               LIMIT ?",
         )
+        .bind(session_id)
+        .bind(show_soft_deleted)
+        .bind(limit)
         .fetch_all(pool)
         .await
     }
+
+    /// Hard cap used by `find_by_session_id` (W2-15-03).
+    pub const FIND_BY_SESSION_ID_MAX_ROWS: i64 = 5000;
 
     /// Find execution processes for a session with pagination (most recent first).
     pub async fn find_by_session_id_paginated(
@@ -311,6 +320,10 @@ impl ExecutionProcess {
     }
 
     /// Find running execution processes
+    // NOTE(W2-15-04): Startup orphan cleanup needs the full running set, so
+    // this query remains unbounded by design. Migration
+    // `20260417010000_add_perf_indexes.sql` adds
+    // `idx_exec_proc_status_running` to keep the status filter cheap.
     pub async fn find_running(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
         sqlx::query_as!(
             ExecutionProcess,

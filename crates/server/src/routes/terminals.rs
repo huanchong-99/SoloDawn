@@ -163,6 +163,10 @@ fn get_extended_path() -> String {
         paths.push(format!("{}/bin", home));
     }
 
+    // W2-37-04: `/usr/local/bin` is a Unix-only convention. Although this
+    // function is already `#[cfg(not(windows))]`, the explicit `#[cfg(unix)]`
+    // gate documents intent and keeps parity with terminal/detector.rs.
+    #[cfg(unix)]
     paths.push("/usr/local/bin".to_string());
 
     paths.join(":")

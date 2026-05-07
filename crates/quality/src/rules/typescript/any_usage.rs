@@ -84,7 +84,9 @@ impl TsRule for AnyUsageRule {
             .severity_override
             .unwrap_or_else(|| self.default_severity());
 
-        let pattern = Regex::new(r"(:\s*any\b|as\s+any\b|<any>|any\[\])").expect("valid regex");
+        // Note: `:\s*any\b` would incorrectly match `: any?` (optional marker).
+        // Require a clear terminator so optional-typed fields aren't flagged.
+        let pattern = Regex::new(r"(:\s*any(?:\s|$|;|,|\)|\|)|as\s+any\b|<any>|any\[\])").expect("valid regex");
 
         let mut issues = Vec::new();
         let mut in_block_comment = false;

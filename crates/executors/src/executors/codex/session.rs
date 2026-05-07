@@ -145,6 +145,15 @@ impl SessionHandler {
         session_meta: &mut Value,
         new_id: &str,
     ) -> Result<(), SessionError> {
+        // E33-06: require the new session id to look like a UUID (hyphenated
+        // canonical form), matching the rest of the codex session ecosystem
+        // and the regex used in `extract_session_id_from_rollout_path`.
+        if uuid::Uuid::parse_str(new_id).is_err() {
+            return Err(SessionError::Format(format!(
+                "replace_session_id refused: {new_id:?} is not a valid UUID"
+            )));
+        }
+
         let Value::Object(map) = session_meta else {
             return Err(SessionError::Format(
                 "First line of rollout file is not a JSON object".to_string(),

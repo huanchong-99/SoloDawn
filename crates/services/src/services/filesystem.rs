@@ -20,7 +20,42 @@ pub struct FilesystemService {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
     use super::FilesystemService;
+
+    /// E28-04: Serialize access to `std::env::set_var` across tests in this
+    /// module so that concurrent test execution (`cargo test` default) does
+    /// not race on the shared process environment. The guard is held for the
+    /// duration of each test body and unset on drop.
+    fn env_guard() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    struct WorkspaceRootEnv {
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl WorkspaceRootEnv {
+        fn set(value: &str) -> Self {
+            let guard = env_guard();
+            unsafe {
+                std::env::set_var("SOLODAWN_WORKSPACE_ROOT", value);
+            }
+            Self { _guard: guard }
+        }
+    }
+
+    impl Drop for WorkspaceRootEnv {
+        fn drop(&mut self) {
+            unsafe {
+                std::env::remove_var("SOLODAWN_WORKSPACE_ROOT");
+            }
+        }
+    }
 
     #[test]
     fn list_directory_prefers_workspace_root_when_allowed() {
@@ -29,12 +64,7 @@ mod tests {
 
         let service = FilesystemService::new_with_roots(vec![workspace.path().to_path_buf()]);
 
-        unsafe {
-            std::env::set_var(
-                "SOLODAWN_WORKSPACE_ROOT",
-                workspace.path().to_string_lossy().to_string(),
-            );
-        }
+        let _env = WorkspaceRootEnv::set(&workspace.path().to_string_lossy());
 
         let result = service
             .list_directory(None)
@@ -46,10 +76,6 @@ mod tests {
             result.current_path,
             canonical_workspace.to_string_lossy().to_string()
         );
-
-        unsafe {
-            std::env::remove_var("SOLODAWN_WORKSPACE_ROOT");
-        }
     }
 
     #[test]
@@ -60,12 +86,7 @@ mod tests {
         let outside = tempfile::tempdir().expect("outside tempdir");
         let service = FilesystemService::new_with_roots(vec![allowed.path().to_path_buf()]);
 
-        unsafe {
-            std::env::set_var(
-                "SOLODAWN_WORKSPACE_ROOT",
-                outside.path().to_string_lossy().to_string(),
-            );
-        }
+        let _env = WorkspaceRootEnv::set(&outside.path().to_string_lossy());
 
         let result = service
             .list_directory(None)
@@ -76,10 +97,6 @@ mod tests {
             result.current_path,
             canonical_allowed.to_string_lossy().to_string()
         );
-
-        unsafe {
-            std::env::remove_var("SOLODAWN_WORKSPACE_ROOT");
-        }
     }
 }
 

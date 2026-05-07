@@ -54,7 +54,7 @@ export function GeneralSettingsNew() {
   const { setTheme } = useTheme();
 
   // Check editor availability when draft editor changes
-  const editorAvailability = useEditorAvailability(draft?.editor.editor_type);
+  const editorAvailability = useEditorAvailability(draft?.editor.editorType);
 
   const validateBranchPrefix = useCallback(
     (prefix: string): string | null => {
@@ -157,14 +157,22 @@ export function GeneralSettingsNew() {
     setDirty(false);
   };
 
-  const resetDisclaimer = async () => {
+  const handleResetDisclaimer = async () => {
     if (!config) return;
-    updateAndSaveConfig({ disclaimer_acknowledged: false });
+    try {
+      await updateAndSaveConfig({ disclaimer_acknowledged: false });
+    } catch (err) {
+      console.error('Failed to reset disclaimer:', err);
+    }
   };
 
-  const resetOnboarding = async () => {
+  const handleResetOnboarding = async () => {
     if (!config) return;
-    updateAndSaveConfig({ onboarding_acknowledged: false });
+    try {
+      await updateAndSaveConfig({ onboarding_acknowledged: false });
+    } catch (err) {
+      console.error('Failed to reset onboarding:', err);
+    }
   };
 
   // Theme options for SettingsSelect
@@ -209,11 +217,11 @@ export function GeneralSettingsNew() {
 
   // Editors that support remote SSH
   const supportsRemoteSsh =
-    draft?.editor.editor_type === EditorType.VS_CODE ||
-    draft?.editor.editor_type === EditorType.CURSOR ||
-    draft?.editor.editor_type === EditorType.WINDSURF ||
-    draft?.editor.editor_type === EditorType.GOOGLE_ANTIGRAVITY ||
-    draft?.editor.editor_type === EditorType.ZED;
+    draft?.editor.editorType === EditorType.VS_CODE ||
+    draft?.editor.editorType === EditorType.CURSOR ||
+    draft?.editor.editorType === EditorType.WINDSURF ||
+    draft?.editor.editorType === EditorType.GOOGLE_ANTIGRAVITY ||
+    draft?.editor.editorType === EditorType.ZED;
 
   if (loading) {
     return (
@@ -286,10 +294,10 @@ export function GeneralSettingsNew() {
             <SettingsSelect
               label={t('settings.general.editor.type.label')}
               description={t('settings.general.editor.type.helper')}
-              value={draft?.editor.editor_type ?? EditorType.VS_CODE}
+              value={draft?.editor.editorType ?? EditorType.VS_CODE}
               onChange={(value) =>
                 updateDraft({
-                  editor: { ...draft!.editor, editor_type: value as EditorType },
+                  editor: { ...draft!.editor, editorType: value as EditorType },
                 })
               }
               options={editorOptions}
@@ -297,26 +305,26 @@ export function GeneralSettingsNew() {
             />
 
             {/* Editor availability status indicator */}
-            {draft?.editor.editor_type !== EditorType.CUSTOM && (
+            {draft?.editor.editorType !== EditorType.CUSTOM && (
               <div className="pl-0">
                 <EditorAvailabilityIndicator availability={editorAvailability} />
               </div>
             )}
           </div>
 
-          {draft?.editor.editor_type === EditorType.CUSTOM && (
+          {draft?.editor.editorType === EditorType.CUSTOM && (
             <SettingsInput
               label={t('settings.general.editor.customCommand.label')}
               description={t('settings.general.editor.customCommand.helper')}
               placeholder={t(
                 'settings.general.editor.customCommand.placeholder'
               )}
-              value={draft?.editor.custom_command || ''}
+              value={draft?.editor.customCommand || ''}
               onChange={(value) =>
                 updateDraft({
                   editor: {
                     ...draft!.editor,
-                    custom_command: value || null,
+                    customCommand: value || null,
                   },
                 })
               }
@@ -331,30 +339,30 @@ export function GeneralSettingsNew() {
                 placeholder={t(
                   'settings.general.editor.remoteSsh.host.placeholder'
                 )}
-                value={draft?.editor.remote_ssh_host || ''}
+                value={draft?.editor.remoteSshHost || ''}
                 onChange={(value) =>
                   updateDraft({
                     editor: {
                       ...draft!.editor,
-                      remote_ssh_host: value || null,
+                      remoteSshHost: value || null,
                     },
                   })
                 }
               />
 
-              {draft?.editor.remote_ssh_host && (
+              {draft?.editor.remoteSshHost && (
                 <SettingsInput
                   label={t('settings.general.editor.remoteSsh.user.label')}
                   description={t('settings.general.editor.remoteSsh.user.helper')}
                   placeholder={t(
                     'settings.general.editor.remoteSsh.user.placeholder'
                   )}
-                  value={draft?.editor.remote_ssh_user || ''}
+                  value={draft?.editor.remoteSshUser || ''}
                   onChange={(value) =>
                     updateDraft({
                       editor: {
                         ...draft!.editor,
-                        remote_ssh_user: value || null,
+                        remoteSshUser: value || null,
                       },
                     })
                   }
@@ -445,10 +453,7 @@ export function GeneralSettingsNew() {
                 draft?.pr_auto_description_prompt == null &&
                   'opacity-50 cursor-not-allowed'
               )}
-              value={
-                draft?.pr_auto_description_prompt ??
-                DEFAULT_PR_DESCRIPTION_PROMPT
-              }
+              value={draft?.pr_auto_description_prompt ?? ''}
               disabled={draft?.pr_auto_description_prompt == null}
               onChange={(e) =>
                 updateDraft({
@@ -586,7 +591,7 @@ export function GeneralSettingsNew() {
             </div>
             <button
               type="button"
-              onClick={resetDisclaimer}
+              onClick={handleResetDisclaimer}
               className="inline-flex items-center gap-1.5 shrink-0 rounded border border-border bg-secondary px-base py-1 text-sm text-normal hover:bg-surface-2 transition-colors duration-200"
             >
               <ArrowCounterClockwiseIcon className="size-icon-xs" weight="bold" />
@@ -605,7 +610,7 @@ export function GeneralSettingsNew() {
             </div>
             <button
               type="button"
-              onClick={resetOnboarding}
+              onClick={handleResetOnboarding}
               className="inline-flex items-center gap-1.5 shrink-0 rounded border border-border bg-secondary px-base py-1 text-sm text-normal hover:bg-surface-2 transition-colors duration-200"
             >
               <ArrowCounterClockwiseIcon className="size-icon-xs" weight="bold" />

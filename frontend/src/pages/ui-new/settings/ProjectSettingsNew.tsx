@@ -301,18 +301,21 @@ export function ProjectSettingsNew() {
       setDraft(projectToFormState(updatedProject));
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
-      setSaving(false);
     },
     onUpdateError: (err) => {
       setError(
         err instanceof Error ? err.message : 'Failed to save project settings'
       );
-      setSaving(false);
     },
   });
 
   const handleSave = async () => {
     if (!draft || !selectedProject) return;
+
+    if (!draft.name.trim()) {
+      setError(t('settings.projects.save.error'));
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -324,13 +327,14 @@ export function ProjectSettingsNew() {
         defaultAgentWorkingDir: selectedProject.defaultAgentWorkingDir,
       };
 
-      updateProject.mutate({
+      await updateProject.mutateAsync({
         projectId: selectedProject.id,
         data: updateData,
       });
     } catch (err) {
       setError(t('settings.projects.save.error'));
       console.error('Error saving project settings:', err);
+    } finally {
       setSaving(false);
     }
   };

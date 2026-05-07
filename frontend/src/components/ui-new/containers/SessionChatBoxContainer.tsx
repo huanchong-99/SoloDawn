@@ -201,8 +201,13 @@ export function SessionChatBoxContainer({
   // User profiles, config preference, and latest executor from processes
   const { profiles, config } = useUserSystem();
 
-  // Fetch processes from last session to get full profile (only in new session mode)
-  const lastSessionId = isNewSessionMode ? sessions?.[0]?.id : undefined;
+  // Fetch processes from last session to get full profile (only in new session mode).
+  // E07-09: `useExecutionProcesses` is invoked unconditionally; we only vary
+  // the `sessionId` argument (string | undefined), which keeps the hook input
+  // type consistent across renders and satisfies the rules-of-hooks contract.
+  const lastSessionId: string | undefined = isNewSessionMode
+    ? sessions?.[0]?.id
+    : undefined;
   const { executionProcesses: lastSessionProcesses } =
     useExecutionProcesses(lastSessionId, workspaceId);
 
@@ -509,7 +514,9 @@ export function SessionChatBoxContainer({
       });
 
       // Invalidate workspace summary cache to update sidebar
-      queryClient.invalidateQueries({ queryKey: workspaceSummaryKeys.all });
+      queryClient.invalidateQueries({
+        queryKey: workspaceSummaryKeys.byArchived(false),
+      });
     } catch {
       // Error is handled by mutation
     }
@@ -530,7 +537,9 @@ export function SessionChatBoxContainer({
       await clearDraft();
 
       // Invalidate workspace summary cache to update sidebar
-      queryClient.invalidateQueries({ queryKey: workspaceSummaryKeys.all });
+      queryClient.invalidateQueries({
+        queryKey: workspaceSummaryKeys.byArchived(false),
+      });
     } catch {
       // Error is handled by mutation
     }

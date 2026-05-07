@@ -84,10 +84,20 @@ impl ProjectService {
             let normalized_path = path.to_string_lossy().to_string();
 
             if !seen_names.insert(repo.display_name.clone()) {
+                // E28-11: Surface duplicate entries at debug so operators can
+                // correlate the user-visible error with the offending name.
+                tracing::debug!(
+                    display_name = %repo.display_name,
+                    "duplicate repository display_name in CreateProject payload"
+                );
                 return Err(ProjectServiceError::DuplicateRepositoryName);
             }
 
             if !seen_paths.insert(normalized_path.clone()) {
+                tracing::debug!(
+                    git_repo_path = %normalized_path,
+                    "duplicate repository git_repo_path in CreateProject payload"
+                );
                 return Err(ProjectServiceError::DuplicateGitRepoPath);
             }
 

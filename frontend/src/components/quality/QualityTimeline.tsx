@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { CheckCircle, Circle, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { QualityRun } from 'shared/types';
@@ -21,35 +22,42 @@ function getStepLabelClass(status: string, stepId: string): string {
   return "text-slate-400 dark:text-slate-600";
 }
 
+const STEPS = [
+  { id: 'checkpoint', label: 'Checkpoint' },
+  { id: 'analysis', label: 'Analysis' },
+  { id: 'feedback', label: 'Feedback' },
+  { id: 'passed', label: 'Passed' },
+];
+
 export function QualityTimeline({ runs, className }: Readonly<QualityTimelineProps>) {
-  const steps = [
-    { id: 'checkpoint', label: 'Checkpoint' },
-    { id: 'analysis', label: 'Analysis' },
-    { id: 'feedback', label: 'Feedback' },
-    { id: 'passed', label: 'Passed' },
-  ];
+  const steps = STEPS;
 
-  let currentStep = 'checkpoint';
-  
-  if (runs && runs.length > 0) {
-    const latestRun = runs[0];
-    if (latestRun.gateStatus === 'running' || latestRun.gateStatus === 'pending') {
-      currentStep = 'analysis';
-    } else if (latestRun.gateStatus === 'error' || latestRun.gateStatus === 'warn') {
-      currentStep = 'feedback';
-    } else if (latestRun.gateStatus === 'ok') {
-      currentStep = 'passed';
+  const currentStep = useMemo(() => {
+    if (runs && runs.length > 0) {
+      const latestRun = runs[0];
+      if (latestRun.gateStatus === 'running' || latestRun.gateStatus === 'pending') {
+        return 'analysis';
+      } else if (latestRun.gateStatus === 'error' || latestRun.gateStatus === 'warn') {
+        return 'feedback';
+      } else if (latestRun.gateStatus === 'ok') {
+        return 'passed';
+      }
     }
-  }
+    return 'checkpoint';
+  }, [runs]);
 
-  const getStepStatus = (stepId: string) => {
+  const stepStatuses = useMemo(() => {
     const currentIndex = steps.findIndex(s => s.id === currentStep);
-    const stepIndex = steps.findIndex(s => s.id === stepId);
-    
-    if (stepIndex < currentIndex) return 'completed';
-    if (stepIndex === currentIndex) return 'current';
-    return 'pending';
-  };
+    const map: Record<string, 'completed' | 'current' | 'pending'> = {};
+    steps.forEach((s, idx) => {
+      if (idx < currentIndex) map[s.id] = 'completed';
+      else if (idx === currentIndex) map[s.id] = 'current';
+      else map[s.id] = 'pending';
+    });
+    return map;
+  }, [currentStep, steps]);
+
+  const getStepStatus = (stepId: string) => stepStatuses[stepId] ?? 'pending';
 
   return (
     <div className={cn("relative", className)}>

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE tasks SET status = $3, updated_at = datetime('now', 'subsec') WHERE id = $1 AND status = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "59d2971a345f57cd0cd9d9b57c4ff470b4a7507efe434a3f73c41d972bb8f46c"
+}

@@ -1,9 +1,12 @@
 //! WebSocket event model for workflow event broadcasting.
 //!
 //! Defines the event structure and types for real-time workflow updates.
-// TODO(G17-001): WsEvent and WsEventType derive TS but are not yet included in
-// the generate_types binary output. Add them to `shared/types.ts` so the frontend
-// can import typed event definitions instead of duplicating string literals.
+// W2-31-05: WsEvent and WsEventType derive TS and are emitted to
+// `shared/types.ts` via `crates/server/src/bin/generate_types.rs`
+// (`WsEvent::decl()` / `WsEventType::decl()`). The frontend imports these
+// typed definitions rather than duplicating string literals. This project
+// uses explicit `decl()` aggregation in `generate_types.rs` instead of
+// per-type `#[ts(export)]` attributes — do not add `#[ts(export)]` here.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -168,8 +171,7 @@ fn prompt_decision_detail(decision: &PromptDecision) -> Value {
                 "action": "llm_decision",
                 "response": response,
                 "reasoning": reasoning,
-                "targetIndex": target_index,
-                "target_index": target_index
+                "targetIndex": target_index
             })
         }
         PromptDecision::AskUser {
@@ -388,16 +390,15 @@ impl WsEvent {
             } => {
                 let decision_action = prompt_decision_action(&decision);
                 let decision_detail = prompt_decision_detail(&decision);
-                let mut decision_raw = serde_json::to_value(&decision).unwrap_or_else(|_| {
+                // W2-20-10: PromptDecision serializes with snake_case action tags
+                // including an explicit `#[serde(rename = "llm_decision")]` on the
+                // LLMDecision variant, so no post-serialize fixup is required.
+                let decision_raw = serde_json::to_value(&decision).unwrap_or_else(|_| {
                     json!({
                         "action": decision_action,
                         "error": "serialization_failed"
                     })
                 });
-
-                if decision_raw["action"] == "l_l_m_decision" {
-                    decision_raw["action"] = json!("llm_decision");
-                }
 
                 let payload = json!({
                     "workflowId": workflow_id,
@@ -464,28 +465,21 @@ impl WsEvent {
                         json!({
                             "workflowId": workflow_id,
                             "fromProvider": from_provider,
-                            "toProvider": to_provider,
-                            "workflow_id": workflow_id,
-                            "from_provider": from_provider,
-                            "to_provider": to_provider
+                            "toProvider": to_provider
                         }),
                     ),
                     ProviderEvent::Exhausted { provider_count } => (
                         WsEventType::ProviderExhausted,
                         json!({
                             "workflowId": workflow_id,
-                            "providerCount": provider_count,
-                            "workflow_id": workflow_id,
-                            "provider_count": provider_count
+                            "providerCount": provider_count
                         }),
                     ),
                     ProviderEvent::Recovered { provider_name } => (
                         WsEventType::ProviderRecovered,
                         json!({
                             "workflowId": workflow_id,
-                            "providerName": provider_name,
-                            "workflow_id": workflow_id,
-                            "provider_name": provider_name
+                            "providerName": provider_name
                         }),
                     ),
                 };
@@ -734,7 +728,6 @@ mod tests {
             "safe to proceed"
         );
         assert_eq!(event.payload["decisionDetail"]["targetIndex"], 2);
-        assert_eq!(event.payload["decisionDetail"]["target_index"], 2);
         assert_eq!(event.payload["decisionRaw"]["action"], "llm_decision");
         assert_eq!(event.payload["decisionRaw"]["target_index"], 2);
         assert_eq!(event.payload["workflow_id"], "wf-123");
@@ -886,10 +879,7 @@ mod tests {
             prompt_decision.payload["terminal_id"]
         );
         assert_eq!(prompt_decision.payload["decision"], "llm_decision");
-        assert_eq!(
-            prompt_decision.payload["decisionDetail"]["targetIndex"],
-            prompt_decision.payload["decisionDetail"]["target_index"]
-        );
+        assert_eq!(prompt_decision.payload["decisionDetail"]["targetIndex"], 1);
         assert_eq!(
             prompt_decision.payload["decisionRaw"]["action"],
             "llm_decision"

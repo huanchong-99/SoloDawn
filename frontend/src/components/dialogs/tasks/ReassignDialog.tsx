@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import NiceModal, { useModal } from '@ebay/nice-modal-react';
 import { defineModal } from '@/lib/modals';
 import {
@@ -46,15 +47,16 @@ const buildMemberLabel = (member: OrganizationMemberWithProfile): string => {
 
 const ReassignDialogImpl = NiceModal.create<ReassignDialogProps>(
   ({ sharedTask }) => {
+    const { t } = useTranslation('common');
     const modal = useModal();
     const { userId } = useAuth();
 
     const [selection, setSelection] = useState<string | undefined>(
-      sharedTask.assignee_user_id ?? undefined
+      sharedTask.assigneeUserId ?? undefined
     );
     const [submitError, setSubmitError] = useState<string | null>(null);
 
-    const isCurrentAssignee = sharedTask.assignee_user_id === userId;
+    const isCurrentAssignee = sharedTask.assigneeUserId === userId;
 
     const { projectId } = useProject();
     const membersQuery = useProjectRemoteMembers(projectId);
@@ -63,9 +65,9 @@ const ReassignDialogImpl = NiceModal.create<ReassignDialogProps>(
       if (!modal.visible) {
         return;
       }
-      setSelection(sharedTask.assignee_user_id ?? undefined);
+      setSelection(sharedTask.assigneeUserId ?? undefined);
       setSubmitError(null);
-    }, [modal.visible, sharedTask.assignee_user_id]);
+    }, [modal.visible, sharedTask.assigneeUserId]);
 
     const handleClose = () => {
       modal.resolve(null);
@@ -142,14 +144,14 @@ const ReassignDialogImpl = NiceModal.create<ReassignDialogProps>(
       !membersQuery.isError &&
       !membersError &&
       selection !== undefined &&
-      selection !== (sharedTask.assignee_user_id ?? undefined);
+      selection !== (sharedTask.assigneeUserId ?? undefined);
 
     return (
       <Dialog
         open={modal.visible}
         onOpenChange={(open) => {
           if (open) {
-            setSelection(sharedTask.assignee_user_id ?? undefined);
+            setSelection(sharedTask.assigneeUserId ?? undefined);
             setSubmitError(null);
             reassignMutation.reset();
           } else {
@@ -189,8 +191,8 @@ const ReassignDialogImpl = NiceModal.create<ReassignDialogProps>(
                 <SelectValue
                   placeholder={
                     membersQuery.isPending
-                      ? 'Loading members...'
-                      : 'Select an assignee'
+                      ? t('states.loadingMembers')
+                      : t('actions.selectAssignee')
                   }
                 />
               </SelectTrigger>

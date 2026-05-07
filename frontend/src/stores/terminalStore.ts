@@ -195,11 +195,16 @@ export function useTerminalOutputString(terminalId: string): string {
 
 /**
  * Hook to get active terminal
+ *
+ * W2-22-10: Select the resolved active terminal directly from store state so
+ * we only re-render when the active terminal itself changes. Previously we
+ * subscribed to the full `terminals` Map, causing re-renders for any terminal
+ * mutation even when the active terminal was unchanged.
  */
 export function useActiveTerminal(): TerminalState | undefined {
-  const activeTerminalId = useTerminalStore((state) => state.activeTerminalId);
-  const terminals = useTerminalStore((state) => state.terminals);
-  return activeTerminalId ? terminals.get(activeTerminalId) : undefined;
+  return useTerminalStore((state) =>
+    state.activeTerminalId ? state.terminals.get(state.activeTerminalId) : undefined
+  );
 }
 
 /**

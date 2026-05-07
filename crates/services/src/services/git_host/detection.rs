@@ -28,12 +28,36 @@ pub fn detect_provider_from_url(url: &str) -> ProviderKind {
         return ProviderKind::AzureDevOps;
     }
 
-    // GitHub Enterprise (contains "github." but not the Azure patterns above)
-    if url_lower.contains("github.") {
+    // GitHub Enterprise: hostname starts with "github." (e.g. github.company.com)
+    // or contains ".github." as a domain component. Avoid naive `contains("github.")`
+    // which would match paths like "/nogithub..." or query strings.
+    if let Some(host) = extract_host(&url_lower)
+        && (host.starts_with("github.") || host.contains(".github."))
+    {
         return ProviderKind::GitHub;
     }
 
     ProviderKind::Unknown
+}
+
+/// Extract the hostname from a URL (https://, ssh://, or scp-style git@host:path).
+/// Returns lowercase host without userinfo or port.
+fn extract_host(url_lower: &str) -> Option<String> {
+    // scp-style: user@host:path
+    if let Some(rest) = url_lower.strip_prefix("git@") {
+        return rest.split(':').next().map(std::string::ToString::to_string);
+    }
+
+    // scheme://[user@]host[:port]/path
+    let after_scheme = url_lower.split_once("://").map_or(url_lower, |(_, r)| r);
+    let host_part = after_scheme.split('/').next()?;
+    let without_userinfo = host_part.rsplit_once('@').map_or(host_part, |(_, h)| h);
+    let host = without_userinfo.split(':').next()?;
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
 }
 
 /// Detect the git hosting provider from a PR URL.

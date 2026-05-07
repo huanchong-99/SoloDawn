@@ -118,6 +118,8 @@ impl QualityProvider for BuiltinFrontendProvider {
         }
 
         let total_issues = all_issues.len() as i64;
+        // E37-01: Severity is ordered Info < Minor < Major < Critical < Blocker,
+        // so `>= Critical` correctly includes Blocker. No change needed.
         let critical_count = all_issues
             .iter()
             .filter(|issue| issue.severity >= Severity::Critical)
@@ -153,15 +155,19 @@ fn collect_scan_files(
         let mut selected = Vec::new();
         let mut seen = HashSet::new();
 
-        for relative in files {
-            let normalized = relative.replace('\\', "/");
-            let path = project_root.join(&normalized);
+        // E37-07: normalize all paths up front into a set, so duplicate inputs
+        // (differing only by `\` vs `/`) are collapsed before per-target work.
+        let normalized_files: HashSet<String> =
+            files.iter().map(|relative| relative.replace('\\', "/")).collect();
+
+        for normalized in &normalized_files {
+            let path = project_root.join(normalized);
             if !analysis::is_ts_file(&path) {
                 continue;
             }
             if !targets
                 .iter()
-                .any(|target| target.contains_relative_path(project_root, &normalized))
+                .any(|target| target.contains_relative_path(project_root, normalized))
             {
                 continue;
             }

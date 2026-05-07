@@ -4,11 +4,18 @@ use uuid::Uuid;
 
 #[sqlx::test]
 async fn test_create_workflow_with_tasks_and_terminals(pool: SqlitePool) -> sqlx::Result<()> {
+    // Use UUIDs instead of hardcoded IDs to avoid collisions across parallel test runs
+    let cli_type_id = Uuid::new_v4().to_string();
+    let model_config_id = Uuid::new_v4().to_string();
+
     // Setup: create CLI types and model configs
-    sqlx::query(r"INSERT INTO cli_type (id, name, display_name, detect_command, is_system, created_at) VALUES ('cli-test', 'test', 'Test CLI', 'test --version', 1, datetime('now'))")
+    sqlx::query(r"INSERT INTO cli_type (id, name, display_name, detect_command, is_system, created_at) VALUES (?, 'test', 'Test CLI', 'test --version', 1, datetime('now'))")
+        .bind(&cli_type_id)
         .execute(&pool).await?;
 
-    sqlx::query(r"INSERT INTO model_config (id, cli_type_id, name, display_name, is_default, is_official, created_at, updated_at) VALUES ('model-test', 'cli-test', 'test', 'Test Model', 1, 1, datetime('now'), datetime('now'))")
+    sqlx::query(r"INSERT INTO model_config (id, cli_type_id, name, display_name, is_default, is_official, created_at, updated_at) VALUES (?, ?, 'test', 'Test Model', 1, 1, datetime('now'), datetime('now'))")
+        .bind(&model_config_id)
+        .bind(&cli_type_id)
         .execute(&pool).await?;
 
     let req = CreateWorkflowRequest {
@@ -22,8 +29,8 @@ async fn test_create_workflow_with_tasks_and_terminals(pool: SqlitePool) -> sqlx
         orchestrator_config: None,
         error_terminal_config: None,
         merge_terminal_config: TerminalConfig {
-            cli_type_id: "cli-test".to_string(),
-            model_config_id: "model-test".to_string(),
+            cli_type_id: cli_type_id.clone(),
+            model_config_id: model_config_id.clone(),
             model_config: None,
             custom_base_url: None,
             custom_api_key: None,
@@ -40,8 +47,8 @@ async fn test_create_workflow_with_tasks_and_terminals(pool: SqlitePool) -> sqlx
                 terminals: vec![
                     CreateTerminalRequest {
                         id: None,
-                        cli_type_id: "cli-test".to_string(),
-                        model_config_id: "model-test".to_string(),
+                        cli_type_id: cli_type_id.clone(),
+                        model_config_id: model_config_id.clone(),
                         custom_base_url: None,
                         custom_api_key: None,
                         role: Some("Writer".to_string()),
@@ -54,7 +61,7 @@ async fn test_create_workflow_with_tasks_and_terminals(pool: SqlitePool) -> sqlx
         ],
     };
 
-    let workflow_id = "test-workflow-id".to_string();
+    let workflow_id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now();
 
     let workflow = Workflow {

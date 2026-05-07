@@ -9,6 +9,12 @@ use uuid::Uuid;
 // ConciergeSession
 // ---------------------------------------------------------------------------
 
+// E38-05: `active_project_id` originally had a FK to `projects(id)`, but
+// `20260322210000_fix_concierge_session_fk.sql` rebuilt the table and
+// dropped that constraint because the column types did not line up in
+// SQLite. Deleting a project no longer blocks on concierge_session rows.
+// NOTE(E38-05): Keep this as an application-level reference until the
+// project ID types are aligned well enough to safely reintroduce a FK.
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(clippy::struct_excessive_bools)]
@@ -119,6 +125,11 @@ impl ConciergeSession {
             .await
     }
 
+    // NOTE(W2-15-09): Migration `20260417010000_add_perf_indexes.sql` adds
+    // `idx_concierge_session_updated_at`, so this descending list no longer
+    // pays a full scan + sort cost. The query still returns the full session
+    // set by design; add pagination if concierge session counts grow enough
+    // for list endpoints to need a bounded window.
     pub async fn list_all(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, Self>("SELECT * FROM concierge_session ORDER BY updated_at DESC")
             .fetch_all(pool)

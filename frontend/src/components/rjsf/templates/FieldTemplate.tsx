@@ -46,8 +46,8 @@ export const FieldTemplate = (props: FieldTemplateProps) => {
 
         {rawErrors.length > 0 && (
           <div className="space-y-1">
-            {rawErrors.map((error) => (
-              <p key={`error-${error}`} className="text-sm text-destructive">
+            {rawErrors.map((error, idx) => (
+              <p key={`error-${idx}-${error.slice(0, 32)}`} className="text-sm text-destructive">
                 {error}
               </p>
             ))}

@@ -178,7 +178,7 @@ pub async fn follow_up(
         deployment.container().try_stop(&workspace, false).await;
 
         // Soft-drop the target process and all later processes in that session
-        let _ = ExecutionProcess::drop_at_and_after(pool, process.session_id, proc_id).await?;
+        ExecutionProcess::drop_at_and_after(pool, process.session_id, proc_id).await?;
     }
 
     let latest_agent_session_id =

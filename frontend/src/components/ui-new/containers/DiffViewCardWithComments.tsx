@@ -332,9 +332,13 @@ export function DiffViewCardWithComments({
   // Render existing comments below lines (handles both user and GitHub comments)
   // The library wraps our data in { data: ExtendLineData }
   const renderExtendLine = useCallback(
-    (lineData: { data: ExtendLineData }) => {
-      // Guard against undefined data (can happen when switching diff modes)
-      if (!lineData.data) return null;
+    (lineData: { data?: ExtendLineData } | null | undefined) => {
+      // E07-10: strict null guard. The diff library occasionally calls this
+      // with `{ data: undefined }` (or even without a wrapping object) while
+      // switching diff modes or during initial render. Treat any of those
+      // shapes as "nothing to render" rather than letting a property access
+      // throw.
+      if (!lineData?.data) return null;
 
       if (lineData.data.type === 'github') {
         return <GitHubCommentRenderer comment={lineData.data.comment} />;

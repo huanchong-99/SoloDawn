@@ -82,8 +82,8 @@ pub async fn get_image_metadata(
         })));
     }
 
-    // Reject paths with .. to prevent traversal
-    if query.path.contains("..") {
+    // E29-08: Reject paths with .. and absolute paths to prevent traversal.
+    if query.path.contains("..") || Path::new(&query.path).is_absolute() {
         return Ok(ResponseJson(ApiResponse::success(ImageMetadata {
             exists: false,
             file_name: None,
@@ -153,8 +153,8 @@ pub async fn serve_image(
     Extension(workspace): Extension<Workspace>,
     State(deployment): State<DeploymentImpl>,
 ) -> Result<Response, ApiError> {
-    // Reject paths with .. to prevent traversal
-    if path.contains("..") {
+    // E29-08: Reject paths with .. or absolute paths to prevent traversal.
+    if path.contains("..") || Path::new(&path).is_absolute() {
         return Err(ApiError::Image(ImageError::NotFound));
     }
     let container_ref = deployment
@@ -169,7 +169,9 @@ pub async fn serve_image(
     let vibe_images_dir = base_path.join(utils::path::VIBE_IMAGES_DIR);
     let full_path = vibe_images_dir.join(&path);
 
-    // Security: Canonicalize and verify path is within .vibe-images
+    // Security: Canonicalize and verify path is within .vibe-images. Canonicalize
+    // resolves symlinks, so symlink-based traversal out of the dir is rejected
+    // by the starts_with check below.
     let canonical_path = tokio::fs::canonicalize(&full_path)
         .await
         .map_err(|_| ApiError::Image(ImageError::NotFound))?;
@@ -179,6 +181,15 @@ pub async fn serve_image(
         .map_err(|_| ApiError::Image(ImageError::NotFound))?;
 
     if !canonical_path.starts_with(&canonical_vibe_images) {
+        return Err(ApiError::Image(ImageError::NotFound));
+    }
+
+    // E29-08: Additionally reject if the resolved file itself is a symlink,
+    // even if it points inside the dir, to avoid surprising indirection.
+    let sym_meta = tokio::fs::symlink_metadata(&full_path)
+        .await
+        .map_err(|_| ApiError::Image(ImageError::NotFound))?;
+    if sym_meta.file_type().is_symlink() {
         return Err(ApiError::Image(ImageError::NotFound));
     }
 

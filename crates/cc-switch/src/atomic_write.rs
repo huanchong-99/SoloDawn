@@ -49,6 +49,11 @@ async fn create_unique_temp_file(path: &Path) -> Result<(PathBuf, tokio::fs::Fil
             Ok(file) => return Ok((temp_path, file)),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => {
+                // NOTE: Returning this error does not roll back any earlier
+                // partial state the caller may have created. Callers are
+                // expected to retry the atomic write on failure; the target
+                // path is guaranteed to be untouched by this function when
+                // it returns an error.
                 return Err(CCSwitchError::AtomicWriteError(format!(
                     "Failed to create temp file for {}: {}",
                     path.display(),
@@ -58,6 +63,9 @@ async fn create_unique_temp_file(path: &Path) -> Result<(PathBuf, tokio::fs::Fil
         }
     }
 
+    // NOTE: After exhausting MAX_ATTEMPTS temp-file collisions we give up
+    // without touching the destination. Callers are expected to retry on
+    // failure; original on-disk state is preserved.
     Err(CCSwitchError::AtomicWriteError(format!(
         "Failed to create unique temp file for {} after {MAX_ATTEMPTS} attempts",
         path.display()

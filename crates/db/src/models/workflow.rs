@@ -568,6 +568,11 @@ impl Workflow {
         project_id: Uuid,
     ) -> sqlx::Result<Vec<WorkflowWithCounts>> {
         let start = std::time::Instant::now();
+        // NOTE(E38-14): `COUNT(DISTINCT t.id)` / `COUNT(DISTINCT term.id)`
+        // are not backed by a dedicated covering index. If this list grows and
+        // the query shows up in slow-query traces, consider indexes on
+        // workflow_task(workflow_id) and terminal(workflow_task_id) (both
+        // should already exist as FK indexes) and verify EXPLAIN output.
         let result = sqlx::query_as::<_, WorkflowWithCounts>(
             r"
             SELECT
@@ -1058,14 +1063,25 @@ impl WorkflowTask {
 }
 
 impl SlashCommandPreset {
-    /// Get all slash command presets
+    /// Hard cap used by `find_all` (W2-15-10).
+    pub const FIND_ALL_MAX_ROWS: i64 = 500;
+
+    /// Get slash command presets for the command palette.
+    ///
+    /// W2-15-10: cap the list at [`Self::FIND_ALL_MAX_ROWS`] rows so a large
+    /// user-defined preset set cannot fan an unbounded result into the UI. The
+    /// palette only renders a bounded list, so deeper pagination can be added
+    /// later without changing current callers.
     pub async fn find_all(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
+        let limit: i64 = Self::FIND_ALL_MAX_ROWS;
         sqlx::query_as::<_, SlashCommandPreset>(
             r"
             SELECT * FROM slash_command_preset
             ORDER BY is_system DESC, command ASC
+            LIMIT ?
             ",
         )
+        .bind(limit)
         .fetch_all(pool)
         .await
     }

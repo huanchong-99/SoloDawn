@@ -108,7 +108,11 @@ export function FileTree({
               >
                 <button
                   type="button"
-                  onClick={() => onToggleGitHubComments(!showGitHubComments)}
+                  onClick={() =>
+                    // E08-03: `showGitHubComments` is optional; default to
+                    // false when undefined so we always pass a boolean.
+                    onToggleGitHubComments?.(!(showGitHubComments ?? false))
+                  }
                   className={cn(
                     'p-1 rounded hover:bg-panel transition-colors shrink-0',
                     showGitHubComments ? 'text-normal' : 'text-low',
@@ -133,7 +137,7 @@ export function FileTree({
             <div className="p-base text-low text-sm">
               {searchQuery
                 ? t('common:fileTree.noResults')
-                : 'No changed files'}
+                : t('common:fileTree.noChangedFiles')}
             </div>
           )}
         </div>

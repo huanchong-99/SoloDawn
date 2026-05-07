@@ -94,9 +94,12 @@ pub fn decrypt(encoded: &str) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use super::*;
 
     #[test]
+    #[serial]
     fn round_trip() {
         temp_env::with_vars(
             [(
@@ -113,6 +116,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn rejects_short_key() {
         temp_env::with_vars(
             [

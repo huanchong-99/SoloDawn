@@ -121,7 +121,10 @@ impl TrayApp {
             return;
         }
 
-        let mut guard = self.server_process.lock().unwrap();
+        let mut guard = self
+            .server_process
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if guard.is_some() {
             tracing::warn!("Server is already running");
             return;
@@ -227,7 +230,10 @@ impl TrayApp {
 
     /// Stop the server process.
     fn stop_server(&self) {
-        let mut guard = self.server_process.lock().unwrap();
+        let mut guard = self
+            .server_process
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(mut child) = guard.take() {
             tracing::info!("Stopping server (PID: {})", child.id());
             let _ = child.kill();
@@ -395,7 +401,11 @@ impl ApplicationHandler for TrayAppHandler {
         }
 
         // Check if server process has exited unexpectedly
-        let mut guard = self.app.server_process.lock().unwrap();
+        let mut guard = self
+            .app
+            .server_process
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(ref mut child) = *guard {
             match child.try_wait() {
                 Ok(Some(status)) => {

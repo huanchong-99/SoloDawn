@@ -44,14 +44,13 @@ const CreateOrganizationDialogImpl = NiceModal.create<NoProps>(() => {
     },
   });
 
+  // E12-09: Reset form on both open and close so a rapid reopen after an
+  // error never carries stale error/field state into the new session.
   useEffect(() => {
-    // Reset form when dialog opens
-    if (modal.visible) {
-      setName('');
-      setSlug('');
-      setIsManualSlug(false);
-      setError(null);
-    }
+    setName('');
+    setSlug('');
+    setIsManualSlug(false);
+    setError(null);
   }, [modal.visible]);
 
   // Auto-generate slug from name if not manually edited

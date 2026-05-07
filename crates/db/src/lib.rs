@@ -200,7 +200,15 @@ async fn run_migrations(pool: &Pool<Sqlite>) -> Result<(), Error> {
 
                 // Find the migration with the mismatched version and get its current checksum
                 if let Some(migration) = migrator.iter().find(|m| m.version == version) {
-                    // Update the checksum in _sqlx_migrations to match the current file
+                    // Windows line-ending workaround: CRLF on checkout causes embedded
+                    // migration bytes to differ from the checksum stored in
+                    // `_sqlx_migrations`, even when the logical SQL is unchanged.
+                    // We use dynamic `sqlx::query` (not the `query!` macro) here on
+                    // purpose so that this self-healing path does not depend on
+                    // sqlx offline query caching (no `.sqlx/` entry is generated
+                    // or required), keeping builds reproducible without a live
+                    // database. The parameters are fully bound, so this is not
+                    // vulnerable to SQL injection.
                     sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
                         .bind(&*migration.checksum)
                         .bind(version)
@@ -308,14 +316,227 @@ impl DBService {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
     use sqlx::Row;
+    use uuid::Uuid;
 
     use super::*;
+    use crate::models::{
+        git_event::GitEvent,
+        merge::Merge,
+        project::{CreateProject, Project},
+        task::{CreateTask, Task, TaskStatus},
+        terminal::Terminal,
+        workflow::{Workflow, WorkflowTask},
+        workspace::{CreateWorkspace, Workspace},
+    };
+
+    async fn setup_pool() -> Result<SqlitePool, sqlx::Error> {
+        let pool = SqlitePool::connect("sqlite::memory:").await?;
+        run_migrations(&pool).await?;
+        Ok(pool)
+    }
+
+    async fn create_merge_fixture(
+        pool: &SqlitePool,
+    ) -> Result<(Uuid, Uuid, Uuid), sqlx::Error> {
+        let project_id = Uuid::new_v4();
+        Project::create(
+            pool,
+            &CreateProject {
+                name: "Merge Fixture Project".to_string(),
+                repositories: vec![],
+            },
+            project_id,
+        )
+        .await?;
+
+        let task_id = Uuid::new_v4();
+        Task::create(
+            pool,
+            &CreateTask {
+                project_id,
+                title: "Merge Fixture Task".to_string(),
+                description: None,
+                status: Some(TaskStatus::Todo),
+                parent_workspace_id: None,
+                image_ids: None,
+                shared_task_id: None,
+            },
+            task_id,
+        )
+        .await?;
+
+        let workspace_id = Uuid::new_v4();
+        Workspace::create(
+            pool,
+            &CreateWorkspace {
+                branch: "main".to_string(),
+                agent_working_dir: None,
+            },
+            workspace_id,
+            task_id,
+        )
+        .await
+        .expect("workspace fixture should be created");
+
+        let repo_id = Uuid::new_v4();
+        sqlx::query(
+            r"INSERT INTO repos (id, path, name, display_name)
+               VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(repo_id)
+        .bind(format!("C:/tmp/repo-{repo_id}"))
+        .bind("repo")
+        .bind("Repo")
+        .execute(pool)
+        .await?;
+
+        Merge::create_direct(pool, workspace_id, repo_id, "main", "deadbeef").await?;
+
+        Ok((repo_id, workspace_id, task_id))
+    }
+
+    async fn seed_cli_and_model(
+        pool: &SqlitePool,
+        cli_type_id: &str,
+        model_config_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r"INSERT INTO cli_type (id, name, display_name, detect_command, is_system, created_at)
+               VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))",
+        )
+        .bind(cli_type_id)
+        .bind(cli_type_id)
+        .bind("Test CLI")
+        .bind("echo test")
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r"INSERT INTO model_config (id, cli_type_id, name, display_name, is_default, is_official, created_at, updated_at)
+               VALUES (?1, ?2, ?3, ?4, 0, 0, datetime('now'), datetime('now'))",
+        )
+        .bind(model_config_id)
+        .bind(cli_type_id)
+        .bind(model_config_id)
+        .bind("Test Model")
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn create_git_event_fixture(pool: &SqlitePool) -> Result<(String, String), sqlx::Error> {
+        let project_id = Uuid::new_v4();
+        Project::create(
+            pool,
+            &CreateProject {
+                name: "Git Event Fixture Project".to_string(),
+                repositories: vec![],
+            },
+            project_id,
+        )
+        .await?;
+
+        let cli_type_id = format!("cli-{}", Uuid::new_v4().simple());
+        let model_config_id = format!("model-{}", Uuid::new_v4().simple());
+        seed_cli_and_model(pool, &cli_type_id, &model_config_id).await?;
+
+        let now = Utc::now();
+        let workflow = Workflow {
+            id: Uuid::new_v4().to_string(),
+            project_id,
+            name: "Git Event Workflow".to_string(),
+            description: None,
+            status: "created".to_string(),
+            execution_mode: "diy".to_string(),
+            initial_goal: None,
+            use_slash_commands: false,
+            orchestrator_enabled: false,
+            orchestrator_api_type: None,
+            orchestrator_base_url: None,
+            orchestrator_api_key: None,
+            orchestrator_model: None,
+            error_terminal_enabled: false,
+            error_terminal_cli_id: None,
+            error_terminal_model_id: None,
+            merge_terminal_cli_id: cli_type_id.clone(),
+            merge_terminal_model_id: model_config_id.clone(),
+            target_branch: "main".to_string(),
+            git_watcher_enabled: true,
+            ready_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: now,
+            updated_at: now,
+            pause_reason: None,
+        };
+        Workflow::create(pool, &workflow).await?;
+
+        let workflow_task = WorkflowTask {
+            id: Uuid::new_v4().to_string(),
+            workflow_id: workflow.id.clone(),
+            vk_task_id: None,
+            name: "Git Event Task".to_string(),
+            description: None,
+            branch: "main".to_string(),
+            status: "pending".to_string(),
+            order_index: 0,
+            started_at: None,
+            completed_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        WorkflowTask::create(pool, &workflow_task).await?;
+
+        let terminal = Terminal {
+            id: Uuid::new_v4().to_string(),
+            workflow_task_id: workflow_task.id.clone(),
+            cli_type_id: cli_type_id.clone(),
+            model_config_id: model_config_id.clone(),
+            custom_base_url: None,
+            custom_api_key: None,
+            role: None,
+            role_description: None,
+            order_index: 0,
+            status: "not_started".to_string(),
+            process_id: None,
+            pty_session_id: None,
+            session_id: None,
+            execution_process_id: None,
+            vk_session_id: None,
+            auto_confirm: true,
+            last_commit_hash: None,
+            last_commit_message: None,
+            started_at: None,
+            completed_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        Terminal::create(pool, &terminal).await?;
+
+        let git_event = GitEvent {
+            id: Uuid::new_v4().to_string(),
+            workflow_id: workflow.id,
+            terminal_id: Some(terminal.id.clone()),
+            commit_hash: "deadbeef".to_string(),
+            branch: "main".to_string(),
+            commit_message: "Test commit".to_string(),
+            metadata: None,
+            process_status: "pending".to_string(),
+            agent_response: None,
+            created_at: now,
+            processed_at: None,
+        };
+        GitEvent::insert(pool, &git_event).await?;
+
+        Ok((terminal.id, git_event.id))
+    }
 
     #[tokio::test]
     async fn workflow_project_created_index_exists() -> Result<(), sqlx::Error> {
-        let pool = SqlitePool::connect("sqlite::memory:").await?;
-        run_migrations(&pool).await?;
+        let pool = setup_pool().await?;
 
         let index_names: Vec<String> = sqlx::query("PRAGMA index_list('workflow')")
             .fetch_all(&pool)
@@ -327,6 +548,94 @@ mod tests {
         assert!(
             index_names.contains(&"idx_workflow_project_created".to_string()),
             "Expected idx_workflow_project_created in workflow indexes: {index_names:?}"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn performance_indexes_exist() -> Result<(), sqlx::Error> {
+        let pool = setup_pool().await?;
+
+        let execution_indexes: Vec<String> = sqlx::query("PRAGMA index_list('execution_processes')")
+            .fetch_all(&pool)
+            .await?
+            .iter()
+            .map(|row| row.get::<String, _>("name"))
+            .collect();
+        assert!(
+            execution_indexes.contains(&"idx_exec_proc_status_running".to_string()),
+            "Expected idx_exec_proc_status_running in execution_processes indexes: {execution_indexes:?}"
+        );
+
+        let task_indexes: Vec<String> = sqlx::query("PRAGMA index_list('tasks')")
+            .fetch_all(&pool)
+            .await?
+            .iter()
+            .map(|row| row.get::<String, _>("name"))
+            .collect();
+        assert!(
+            task_indexes.contains(&"idx_tasks_shared_task_id".to_string()),
+            "Expected idx_tasks_shared_task_id in tasks indexes: {task_indexes:?}"
+        );
+
+        let concierge_indexes: Vec<String> = sqlx::query("PRAGMA index_list('concierge_session')")
+            .fetch_all(&pool)
+            .await?
+            .iter()
+            .map(|row| row.get::<String, _>("name"))
+            .collect();
+        assert!(
+            concierge_indexes.contains(&"idx_concierge_session_updated_at".to_string()),
+            "Expected idx_concierge_session_updated_at in concierge_session indexes: {concierge_indexes:?}"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn deleting_repo_cascades_merges() -> Result<(), sqlx::Error> {
+        let pool = setup_pool().await?;
+        let (repo_id, _, _) = create_merge_fixture(&pool).await?;
+
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM merges WHERE repo_id = ?")
+            .bind(repo_id)
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(before, 1, "expected one merge row before deleting repo");
+
+        sqlx::query("DELETE FROM repos WHERE id = ?")
+            .bind(repo_id)
+            .execute(&pool)
+            .await?;
+
+        let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM merges WHERE repo_id = ?")
+            .bind(repo_id)
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(after, 0, "merge rows should cascade away with the repo");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn deleting_terminal_nulls_git_event_terminal_id() -> Result<(), sqlx::Error> {
+        let pool = setup_pool().await?;
+        let (terminal_id, git_event_id) = create_git_event_fixture(&pool).await?;
+
+        sqlx::query("DELETE FROM terminal WHERE id = ?")
+            .bind(&terminal_id)
+            .execute(&pool)
+            .await?;
+
+        let terminal_ref: Option<String> =
+            sqlx::query_scalar("SELECT terminal_id FROM git_event WHERE id = ?")
+                .bind(&git_event_id)
+                .fetch_one(&pool)
+                .await?;
+        assert!(
+            terminal_ref.is_none(),
+            "git_event.terminal_id should be cleared when the terminal is deleted"
         );
 
         Ok(())

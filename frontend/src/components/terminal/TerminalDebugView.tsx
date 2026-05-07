@@ -31,6 +31,10 @@ interface TerminalHistoryState {
 const TERMINAL_HISTORY_LIMIT = 1000;
 const HISTORY_PAGE_SIZE = 200;
 
+// E15-03: preserve tab (0x09), LF (0x0a), CR (0x0d), ESC (0x1b) and printable
+// characters; drop DEL (0x7f) and other C0 controls. ESC is preserved so any
+// residual ANSI sequence (e.g. partial sequence not matched by stripAnsi) is
+// not rendered as a blank character.
 const stripControlCharacters = (value: string): string =>
   Array.from(value)
     .filter((char) => {
@@ -38,10 +42,20 @@ const stripControlCharacters = (value: string): string =>
       if (code === undefined) {
         return false;
       }
-      return code === 0x09 || code === 0x0a || code === 0x0d || (code >= 0x20 && code !== 0x7f);
+      return (
+        code === 0x09 ||
+        code === 0x0a ||
+        code === 0x0d ||
+        code === 0x1b ||
+        (code >= 0x20 && code !== 0x7f)
+      );
     })
     .join('');
 
+// E15-05: ANSI-aware stripping MUST run before the generic control-character
+// filter. If order is swapped, stripControlCharacters would remove the 0x1b
+// lead byte of each escape sequence before stripAnsi can recognise it, leaving
+// the sequence's trailing bytes as visible garbage (e.g. "[31m").
 const sanitizeTerminalHistoryContent = (content: string) =>
   stripControlCharacters(
     stripAnsi(content)
@@ -69,6 +83,10 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
   const autoStartedRef = useRef<Set<string>>(new Set());
   const restartAttemptsRef = useRef<Map<string, number>>(new Map());
   const [historyPage, setHistoryPage] = useState(0);
+  // E15-07: transitioning flag inserted between terminal key changes so the
+  // previous TerminalEmulator fully unmounts (and its WS closes gracefully)
+  // before the next one mounts with a new key.
+  const [isSwitchingTerminal, setIsSwitchingTerminal] = useState(false);
   const MAX_RESTART_ATTEMPTS = 3;
   const defaultRoleLabel = t('terminalCard.defaultRole');
 
@@ -105,15 +123,34 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
 
   // G28-005: Explicitly close the previous terminal's WS connection before
   // switching to avoid race conditions where the old connection lingers.
+  // E15-10: reset refs and related local state atomically in a single effect
+  // so there is no intermediate render where some refs are stale and others
+  // fresh.
+  // E15-07: toggle a transition flag so the TerminalEmulator unmounts for one
+  // render before remounting with the new id. This gives the previous WS a
+  // tick to close gracefully rather than being torn down mid-init.
   useEffect(() => {
     if (prevTerminalIdRef.current && prevTerminalIdRef.current !== selectedTerminalId) {
       // The TerminalEmulator unmounts via key change, but we also reset the ref
       // to ensure no stale reference is held.
       terminalRef.current = null;
+      setIsSwitchingTerminal(true);
     }
     prevTerminalIdRef.current = selectedTerminalId;
     // Reset history page when switching terminals
     setHistoryPage(0);
+
+    if (!selectedTerminalId) {
+      setIsSwitchingTerminal(false);
+      return;
+    }
+
+    // Clear the transition flag on the next tick so the new emulator mounts
+    // after the previous one has finished unmounting.
+    const handle = globalThis.setTimeout(() => setIsSwitchingTerminal(false), 0);
+    return () => {
+      globalThis.clearTimeout(handle);
+    };
   }, [selectedTerminalId]);
 
   const selectedTerminal = allTerminals.find((terminal) => terminal.id === selectedTerminalId);
@@ -648,6 +685,16 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
             </div>
             <div className="flex-1 min-h-0 p-4">
               {(() => {
+                // E15-07: during a terminal switch, render a placeholder for
+                // one tick so the previous TerminalEmulator unmounts (and its
+                // WebSocket closes) before the next one mounts.
+                if (isSwitchingTerminal) {
+                  return (
+                    <div className="h-full flex items-center justify-center text-muted-foreground">
+                      {t('terminalDebug.starting')}
+                    </div>
+                  );
+                }
                 if (shouldRenderLiveTerminal(selectedTerminal)) {
                   return (
                     <TerminalEmulator

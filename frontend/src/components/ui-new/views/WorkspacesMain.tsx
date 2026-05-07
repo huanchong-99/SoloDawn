@@ -100,7 +100,7 @@ export function WorkspacesMain({
                     {planningMessages && planningMessages.length > 0 && (
                       <div className="border-b border-primary mb-base">
                         <button
-                          onClick={onTogglePlanningMessages}
+                          onClick={() => onTogglePlanningMessages?.()}
                           className="w-full flex items-center gap-half px-base py-half text-sm text-low hover:text-normal transition-colors"
                         >
                           <CaretRightIcon

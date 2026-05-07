@@ -145,7 +145,15 @@ impl FeishuService {
                 let count = tx.receiver_count();
                 tracing::debug!(receiver_count = count, "Broadcasting event");
                 if count > 0 {
-                    let _ = tx.send(event.clone());
+                    // [W2-30-10] Log at debug when the broadcast drop happens so
+                    // silent drops are observable. `send` only errors when there
+                    // are no active receivers, but we may race with receiver
+                    // close after the count check above.
+                    if let Err(err) = tx.send(event.clone()) {
+                        tracing::debug!(?err, "Feishu broadcast dropped: no active receivers");
+                    }
+                } else {
+                    tracing::debug!("Feishu broadcast dropped: no receivers");
                 }
             } else {
                 tracing::debug!("No broadcaster configured");

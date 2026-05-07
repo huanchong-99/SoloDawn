@@ -189,7 +189,11 @@ async fn run_session_inner(
 
     let model = config.model.as_deref().map(parse_model);
 
-    let (control_tx, mut control_rx) = mpsc::unbounded_channel::<ControlEvent>();
+    // W2-30-08: bounded control-event channel. Producers use `try_send_control`
+    // which logs on `Full` (backpressure signal) and on `Closed` (receiver
+    // gone). Capacity chosen to absorb a typical reconnect burst without
+    // blocking the event loop.
+    let (control_tx, mut control_rx) = mpsc::channel::<ControlEvent>(256);
 
     let event_resp = tokio::select! {
         () = cancel.cancelled() => return Ok(()),
@@ -240,8 +244,20 @@ async fn run_session_inner(
 
 fn build_default_headers(directory: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
-    if let Ok(value) = HeaderValue::from_str(directory) {
-        headers.insert("x-opencode-directory", value);
+    match HeaderValue::from_str(directory) {
+        Ok(value) => {
+            headers.insert("x-opencode-directory", value);
+        }
+        Err(err) => {
+            // E34-03: previously silent. An invalid directory header means
+            // OpenCode will see requests without the directory context and
+            // most likely fall back to a wrong/default working directory.
+            tracing::warn!(
+                directory = %directory,
+                %err,
+                "opencode sdk: could not encode directory as HTTP header; request will be sent without `x-opencode-directory`"
+            );
+        }
     }
     headers
 }
@@ -268,7 +284,7 @@ async fn run_prompt_with_control(
     prompt_text: &str,
     model: Option<ModelSpec>,
     agent: Option<String>,
-    control_rx: &mut mpsc::UnboundedReceiver<ControlEvent>,
+    control_rx: &mut mpsc::Receiver<ControlEvent>,
     cancel: CancellationToken,
 ) -> Result<(), ExecutorError> {
     let mut idle_seen = false;
@@ -351,7 +367,10 @@ async fn wait_for_health(client: &reqwest::Client, base_url: &str) -> Result<(),
             ))));
         }
 
-        let resp = client.get(format!("{base_url}/global/health")).send().await;
+        // E34-09: strip any trailing slash on `base_url` before formatting so
+        // we don't end up issuing a request to `https://host//global/health`.
+        let base = base_url.trim_end_matches('/');
+        let resp = client.get(format!("{base}/global/health")).send().await;
         match resp {
             Ok(resp) => {
                 if !resp.status().is_success() {
@@ -407,6 +426,19 @@ async fn fork_session(
     directory: &str,
     session_id: &str,
 ) -> Result<String, ExecutorError> {
+    // Validate session_id is safe for direct URL-segment interpolation.
+    // OpenCode session ids are alphanumeric with `-`/`_`; reject anything
+    // else to avoid path traversal or URL injection.
+    if session_id.is_empty()
+        || !session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(ExecutorError::Io(io::Error::other(format!(
+            "OpenCode session.fork refused: invalid session_id {session_id:?}"
+        ))));
+    }
+
     let resp = client
         .post(format!("{base_url}/session/{session_id}/fork"))
         .query(&[("directory", directory)])
@@ -426,6 +458,14 @@ async fn fork_session(
         .json::<SessionResponse>()
         .await
         .map_err(|err| ExecutorError::Io(io::Error::other(err)))?;
+    // E34-14: reject empty/whitespace-only ids returned by the server; an
+    // empty forked id silently breaks every subsequent URL we construct with
+    // it and is more helpful surfaced here.
+    if session.id.trim().is_empty() {
+        return Err(ExecutorError::Io(io::Error::other(
+            "OpenCode session.fork returned an empty session id",
+        )));
+    }
     Ok(session.id)
 }
 
@@ -471,10 +511,25 @@ async fn prompt(
 
     let trimmed = body.trim();
     if trimmed.is_empty() {
+        // E34-11: truncate any fallback error derived from response bodies.
+        // The body here is empty, but downstream error paths embed `trimmed`
+        // directly; keep the message tight.
         return Err(ExecutorError::Io(io::Error::other(
             "OpenCode session.prompt returned empty response body",
         )));
     }
+
+    // E34-11: cap the snippet we include in error messages so a multi-megabyte
+    // error body does not blow up logs / UI. 500 chars matches the guideline.
+    #[allow(clippy::items_after_statements)]
+    const MAX_ERROR_SNIPPET: usize = 500;
+    let trimmed_snippet: String = if trimmed.len() > MAX_ERROR_SNIPPET {
+        let mut s = trimmed.chars().take(MAX_ERROR_SNIPPET).collect::<String>();
+        s.push_str("...[truncated]");
+        s
+    } else {
+        trimmed.to_string()
+    };
 
     let parsed: Value =
         serde_json::from_str(trimmed).map_err(|err| ExecutorError::Io(io::Error::other(err)))?;
@@ -489,14 +544,14 @@ async fn prompt(
         let message = parsed
             .pointer("/data/message")
             .and_then(Value::as_str)
-            .unwrap_or(trimmed);
+            .map_or_else(|| trimmed_snippet.clone(), ToString::to_string);
         return Err(ExecutorError::Io(io::Error::other(format!(
             "OpenCode session.prompt failed: {name}: {message}"
         ))));
     }
 
     Err(ExecutorError::Io(io::Error::other(format!(
-        "OpenCode session.prompt returned unexpected response: {trimmed}"
+        "OpenCode session.prompt returned unexpected response: {trimmed_snippet}"
     ))))
 }
 
@@ -516,6 +571,11 @@ async fn send_abort(client: &reqwest::Client, base_url: &str, directory: &str, s
 }
 
 fn parse_model(model: &str) -> ModelSpec {
+    // OpenCode expects `providerID/modelID` (e.g. `anthropic/claude-3-5-sonnet`).
+    // When no `/` separator is present, we treat the bare string as the model
+    // id and leave provider empty so the server can resolve a default provider.
+    // NOTE: test-intent — if the OpenCode spec instead expects a bare string
+    // to be the provider id, swap the branches below.
     let (provider_id, model_id) = match model.split_once('/') {
         Some((provider, rest)) => (provider.to_string(), rest.to_string()),
         None => (String::new(), model.to_string()),
@@ -569,7 +629,7 @@ struct EventListenerConfig {
     log_writer: LogWriter,
     approvals: Option<Arc<dyn ExecutorApprovalService>>,
     auto_approve: bool,
-    control_tx: mpsc::UnboundedSender<ControlEvent>,
+    control_tx: mpsc::Sender<ControlEvent>,
 }
 
 async fn spawn_event_listener(config: EventListenerConfig, initial_resp: reqwest::Response) {
@@ -611,7 +671,7 @@ async fn spawn_event_listener(config: EventListenerConfig, initial_resp: reqwest
                             .await;
                         attempt += 1;
                         if attempt >= max_attempts {
-                            let _ = control_tx.send(ControlEvent::Disconnected);
+                            try_send_control(&control_tx, ControlEvent::Disconnected);
                             return;
                         }
 
@@ -645,7 +705,7 @@ async fn spawn_event_listener(config: EventListenerConfig, initial_resp: reqwest
             Ok(EventStreamOutcome::Disconnected) | Err(_) => {
                 attempt += 1;
                 if attempt >= max_attempts {
-                    let _ = control_tx.send(ControlEvent::Disconnected);
+                    try_send_control(&control_tx, ControlEvent::Disconnected);
                     return;
                 }
             }
@@ -653,6 +713,26 @@ async fn spawn_event_listener(config: EventListenerConfig, initial_resp: reqwest
 
         tokio::time::sleep(exponential_backoff(base_retry_delay, attempt)).await;
         resp = None;
+    }
+}
+
+/// W2-30-08: Non-blocking send on the bounded control channel. Preserves the
+/// "fire-and-forget" character of the old unbounded sends while surfacing
+/// backpressure (`Full`) or teardown (`Closed`) via logging instead of
+/// silently dropping.
+fn try_send_control(tx: &mpsc::Sender<ControlEvent>, event: ControlEvent) {
+    if let Err(e) = tx.try_send(event) {
+        match e {
+            mpsc::error::TrySendError::Full(dropped) => {
+                tracing::warn!(
+                    dropped_event = ?std::mem::discriminant(&dropped),
+                    "OpenCode control channel full; dropping event"
+                );
+            }
+            mpsc::error::TrySendError::Closed(_) => {
+                tracing::debug!("OpenCode control channel closed; receiver gone");
+            }
+        }
     }
 }
 
@@ -680,7 +760,7 @@ struct EventStreamContext<'a> {
     log_writer: &'a LogWriter,
     approvals: Option<Arc<dyn ExecutorApprovalService>>,
     auto_approve: bool,
-    control_tx: &'a mpsc::UnboundedSender<ControlEvent>,
+    control_tx: &'a mpsc::Sender<ControlEvent>,
     base_retry_delay: &'a mut Duration,
     last_event_id: &'a mut Option<String>,
 }
@@ -733,7 +813,7 @@ async fn process_event_stream(
 
         match event_type {
             "session.idle" => {
-                let _ = ctx.control_tx.send(ControlEvent::Idle);
+                try_send_control(ctx.control_tx, ControlEvent::Idle);
                 return Ok(EventStreamOutcome::Idle);
             }
             "session.error" => {
@@ -750,20 +830,33 @@ async fn process_event_stream(
                     .to_string();
 
                 if error_type == "ProviderAuthError" {
-                    let _ = ctx.control_tx.send(ControlEvent::AuthRequired { message });
+                    try_send_control(ctx.control_tx, ControlEvent::AuthRequired { message });
                     return Ok(EventStreamOutcome::Terminal);
                 }
 
-                let _ = ctx.control_tx.send(ControlEvent::SessionError { message });
+                try_send_control(ctx.control_tx, ControlEvent::SessionError { message });
             }
             "permission.asked" => {
-                let request_id = data
+                // E34-12: distinguish "missing request_id" from "duplicate
+                // request_id". Previously we silently dropped both via a
+                // single `unwrap_or_default()` + empty check; the missing
+                // case indicates an unexpected server payload and deserves a
+                // warn! so we can catch schema drift.
+                let request_id = match data
                     .pointer("/properties/id")
                     .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
+                {
+                    Some(id) if !id.is_empty() => id.to_string(),
+                    _ => {
+                        tracing::warn!(
+                            event = ?data,
+                            "opencode sdk: permission.asked event missing `/properties/id`; dropping"
+                        );
+                        continue;
+                    }
+                };
 
-                if request_id.is_empty() || !ctx.seen_permissions.insert(request_id.clone()) {
+                if !ctx.seen_permissions.insert(request_id.clone()) {
                     continue;
                 }
 
@@ -845,8 +938,22 @@ async fn process_event_stream(
                         serde_json::json!({ "reply": reply })
                     };
 
+                    // E34-07: percent-encode request_id before interpolating
+                    // into the URL path. OpenCode ids appear to be
+                    // alphanumeric today, but nothing in this call site
+                    // guarantees that, and a future id containing e.g. `/`
+                    // would silently alter the request target.
+                    let encoded_request_id: String = request_id
+                        .bytes()
+                        .flat_map(|b| match b {
+                            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                                vec![b as char]
+                            }
+                            _ => format!("%{b:02X}").chars().collect(),
+                        })
+                        .collect();
                     let _ = client
-                        .post(format!("{base_url}/permission/{request_id}/reply"))
+                        .post(format!("{base_url}/permission/{encoded_request_id}/reply"))
                         .query(&[("directory", directory.as_str())])
                         .json(&payload)
                         .send()
@@ -860,18 +967,50 @@ async fn process_event_stream(
     Ok(EventStreamOutcome::Disconnected)
 }
 
+/// E34-05: enumerate the OpenCode event keys we explicitly understand so
+/// they cannot drift between the dispatch site in `process_event_stream` and
+/// the session-routing logic in `event_matches_session`. Unknown event types
+/// fall through to the `Unknown` variant where we search several pointers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KnownEventKey {
+    MessageUpdated,
+    MessagePartUpdated,
+    PermissionAsked,
+    PermissionReplied,
+    SessionIdle,
+    SessionError,
+    Unknown,
+}
+
+impl KnownEventKey {
+    fn from_str(event_type: &str) -> Self {
+        match event_type {
+            "message.updated" => Self::MessageUpdated,
+            "message.part.updated" => Self::MessagePartUpdated,
+            "permission.asked" => Self::PermissionAsked,
+            "permission.replied" => Self::PermissionReplied,
+            "session.idle" => Self::SessionIdle,
+            "session.error" => Self::SessionError,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 fn event_matches_session(event_type: &str, event: &Value, session_id: &str) -> bool {
-    let extracted = match event_type {
-        "message.updated" => event
+    let extracted = match KnownEventKey::from_str(event_type) {
+        KnownEventKey::MessageUpdated => event
             .pointer("/properties/info/sessionID")
             .and_then(Value::as_str),
-        "message.part.updated" => event
+        KnownEventKey::MessagePartUpdated => event
             .pointer("/properties/part/sessionID")
             .and_then(Value::as_str),
-        "permission.asked" | "permission.replied" | "session.idle" | "session.error" => event
+        KnownEventKey::PermissionAsked
+        | KnownEventKey::PermissionReplied
+        | KnownEventKey::SessionIdle
+        | KnownEventKey::SessionError => event
             .pointer("/properties/sessionID")
             .and_then(Value::as_str),
-        _ => event
+        KnownEventKey::Unknown => event
             .pointer("/properties/sessionID")
             .and_then(Value::as_str)
             .or_else(|| {

@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { sessionsApi } from '@/lib/api';
 import type { CreateFollowUpAttempt } from 'shared/types';
 
@@ -25,6 +26,7 @@ export function useFollowUpSend({
   clearClickedElements,
   onAfterSendCleanup,
 }: Args) {
+  const queryClient = useQueryClient();
   const [isSendingFollowUp, setIsSendingFollowUp] = useState(false);
   const [followUpError, setFollowUpError] = useState<string | null>(null);
 
@@ -51,6 +53,14 @@ export function useFollowUpSend({
         perform_git_reset: null,
       };
       await sessionsApi.followUp(sessionId, body);
+      // Invalidate session messages / execution processes so any
+      // react-query caches pick up the new follow-up attempt.
+      queryClient.invalidateQueries({
+        queryKey: ['sessionMessages', sessionId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['executionProcesses', sessionId],
+      });
       clearComments();
       clearClickedElements?.();
       onAfterSendCleanup();
@@ -73,6 +83,7 @@ export function useFollowUpSend({
     clearComments,
     clearClickedElements,
     onAfterSendCleanup,
+    queryClient,
   ]);
 
   return {

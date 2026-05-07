@@ -285,7 +285,16 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
 
   const handleSaveNative = () => {
     const nativeModel = createNativeModelConfig();
-    onUpdate({ models: [nativeModel, ...config.models] });
+    // E11-11: Dedup by canonical id using a Set so native model cannot be
+    // inserted twice even if another code path already injected it.
+    const seen = new Set<string>();
+    const deduped: ModelConfig[] = [];
+    for (const m of [nativeModel, ...config.models]) {
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      deduped.push(m);
+    }
+    onUpdate({ models: deduped });
     handleCloseDialog();
   };
 

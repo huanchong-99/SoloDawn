@@ -7,11 +7,26 @@
 
 use reqwest::Client;
 use serde_json::json;
+use std::sync::LazyLock;
 use std::time::Duration;
 use uuid::Uuid;
 
-const SERVER_URL: &str = "http://localhost:3001";
-const API_BASE: &str = "http://localhost:3001/api";
+static SERVER_URL_INNER: LazyLock<String> = LazyLock::new(|| {
+    std::env::var("TEST_SERVER_URL")
+        .ok()
+        .unwrap_or_else(|| "http://localhost:23456".to_string())
+});
+static API_BASE_INNER: LazyLock<String> =
+    LazyLock::new(|| format!("{}/api", SERVER_URL_INNER.as_str()));
+
+#[allow(non_snake_case)]
+fn SERVER_URL() -> &'static str {
+    SERVER_URL_INNER.as_str()
+}
+#[allow(non_snake_case)]
+fn API_BASE() -> &'static str {
+    API_BASE_INNER.as_str()
+}
 
 /// HTTP client with timeout
 fn client() -> Client {
@@ -30,7 +45,7 @@ fn test_project_id() -> String {
 async fn ensure_server_running() {
     let client = client();
     let response = client
-        .get(&format!("{}/cli_types", API_BASE))
+        .get(&format!("{}/cli_types", API_BASE()))
         .timeout(Duration::from_secs(5))
         .send()
         .await;
@@ -38,7 +53,7 @@ async fn ensure_server_running() {
     if response.is_err() {
         panic!(
             "Server is not running on {}. Please start the server first.",
-            SERVER_URL
+            SERVER_URL()
         );
     }
 }
@@ -46,7 +61,7 @@ async fn ensure_server_running() {
 /// Helper: Get first CLI type ID from the API
 async fn get_first_cli_type(client: &Client) -> String {
     let cli_response = client
-        .get(&format!("{}/cli_types", API_BASE))
+        .get(&format!("{}/cli_types", API_BASE()))
         .send()
         .await
         .expect("Failed to GET /cli_types - server may not be running");
@@ -77,7 +92,7 @@ async fn get_first_cli_type(client: &Client) -> String {
 /// Helper: Get first model ID for a given CLI type
 async fn get_first_model(client: &Client, cli_type_id: &str) -> String {
     let models_response = client
-        .get(&format!("{}/cli_types/{}/models", API_BASE, cli_type_id))
+        .get(&format!("{}/cli_types/{}/models", API_BASE(), cli_type_id))
         .send()
         .await
         .expect(&format!(
@@ -116,7 +131,7 @@ async fn get_first_model(client: &Client, cli_type_id: &str) -> String {
 /// Helper: Get first slash command preset ID
 async fn get_first_command_preset(client: &Client) -> String {
     let presets_response = client
-        .get(&format!("{}/workflows/presets/commands", API_BASE))
+        .get(&format!("{}/workflows/presets/commands", API_BASE()))
         .send()
         .await
         .expect("Failed to GET /workflows/presets/commands - server may not be running");
@@ -175,7 +190,7 @@ fn build_tasks_payload(cli_type_id: &str, model_id: &str) -> serde_json::Value {
 /// Helper: Create a workflow and return its ID
 async fn create_workflow(client: &Client, payload: serde_json::Value) -> String {
     let create_response = client
-        .post(&format!("{}/workflows", API_BASE))
+        .post(&format!("{}/workflows", API_BASE()))
         .json(&payload)
         .send()
         .await
@@ -212,7 +227,7 @@ async fn set_workflow_status(client: &Client, workflow_id: &str, status: &str) {
     });
 
     let update_response = client
-        .put(&format!("{}/workflows/{}/status", API_BASE, workflow_id))
+        .put(&format!("{}/workflows/{}/status", API_BASE(), workflow_id))
         .json(&update_payload)
         .send()
         .await
@@ -233,7 +248,7 @@ async fn set_workflow_status(client: &Client, workflow_id: &str, status: &str) {
 /// Helper: Get workflow status
 async fn get_workflow_status(client: &Client, workflow_id: &str) -> String {
     let get_response = client
-        .get(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .get(&format!("{}/workflows/{}", API_BASE(), workflow_id))
         .send()
         .await
         .expect(&format!(
@@ -266,7 +281,7 @@ async fn get_workflow_status(client: &Client, workflow_id: &str) -> String {
 /// Helper: Delete a workflow (cleanup - errors logged but don't fail tests)
 async fn delete_workflow(client: &Client, workflow_id: &str) {
     match client
-        .delete(&format!("{}/workflows/{}", API_BASE, workflow_id))
+        .delete(&format!("{}/workflows/{}", API_BASE(), workflow_id))
         .send()
         .await
     {
@@ -475,7 +490,7 @@ async fn test_service_restart_recovery() {
 
     // Call the recovery endpoint to simulate service restart recovery
     let recover_response = client
-        .post(&format!("{}/workflows/recover", API_BASE))
+        .post(&format!("{}/workflows/recover", API_BASE()))
         .send()
         .await
         .expect("Failed to POST /workflows/recover - server may not be running");

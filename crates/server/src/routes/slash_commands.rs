@@ -123,8 +123,9 @@ pub async fn create_command_preset(
     .execute(&deployment.db().pool)
     .await
     .map_err(|e| {
-        // Check for unique constraint violation
-        if e.to_string().contains("UNIQUE constraint failed") {
+        // E31-11: Use structured sqlx error inspection for unique-constraint
+        // detection rather than brittle substring matching on the Display form.
+        if matches!(&e, sqlx::Error::Database(db_err) if db_err.is_unique_violation()) {
             ApiError::Conflict(format!("Command '{}' already exists", preset.command))
         } else {
             ApiError::Internal(format!("Failed to create command preset: {e}"))

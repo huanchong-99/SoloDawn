@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ClickedEntry } from '@/contexts/ClickedElementsProvider';
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Badge } from '../ui/badge';
 import { useClickedElements } from '@/contexts/ClickedElementsProvider';
 
@@ -55,15 +55,17 @@ function getVisibleElements(
 }
 
 export function ClickedElementsBanner() {
-  const [isExpanded] = useState(false);
   const { elements, removeElement } = useClickedElements();
 
   // Early return if no elements
   if (elements.length === 0) return null;
 
+  // Expansion UI is not currently exposed; show the default (non-expanded)
+  // window. Reintroduce state + a toggle handler when the expand control
+  // is added back to the banner.
   const { visible: visibleElements } = getVisibleElements(
     elements,
-    isExpanded ? elements.length : MAX_VISIBLE_ELEMENTS
+    MAX_VISIBLE_ELEMENTS
   );
 
   return (

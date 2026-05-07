@@ -55,7 +55,9 @@ fn is_import_line(line: &str) -> bool {
         || trimmed.starts_with("import ")
         || trimmed.starts_with("from ")
         || trimmed.starts_with("#include ")
-        || trimmed.starts_with("require(")
+        // Use `contains` so that assignment forms like `const x = require(...)`
+        // are still treated as import-like lines (exempt from length checks).
+        || trimmed.contains("require(")
 }
 
 impl CommonRule for LineLengthRule {

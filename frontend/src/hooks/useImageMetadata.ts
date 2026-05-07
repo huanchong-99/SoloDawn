@@ -41,21 +41,32 @@ export function useImageMetadata(
     queryKey: ['imageMetadata', taskAttemptId, taskId, src],
     queryFn: async (): Promise<ImageMetadata | null> => {
       // Pure API logic - no local image handling
-      if (taskAttemptId) {
-        const res = await fetch(
-          `/api/task-attempts/${taskAttemptId}/images/metadata?path=${encodeURIComponent(src)}`
-        );
-        const data = await res.json();
-        return data.data as ImageMetadata | null;
+      try {
+        if (taskAttemptId) {
+          const res = await fetch(
+            `/api/task-attempts/${taskAttemptId}/images/metadata?path=${encodeURIComponent(src)}`
+          );
+          if (!res.ok) {
+            throw new Error(`Failed to fetch image metadata: ${res.status}`);
+          }
+          const data = await res.json();
+          return data.data as ImageMetadata | null;
+        }
+        if (taskId) {
+          const res = await fetch(
+            `/api/images/task/${taskId}/metadata?path=${encodeURIComponent(src)}`
+          );
+          if (!res.ok) {
+            throw new Error(`Failed to fetch image metadata: ${res.status}`);
+          }
+          const data = await res.json();
+          return data.data as ImageMetadata | null;
+        }
+        return null;
+      } catch (err) {
+        console.error('[useImageMetadata] fetch failed:', err);
+        throw err;
       }
-      if (taskId) {
-        const res = await fetch(
-          `/api/images/task/${taskId}/metadata?path=${encodeURIComponent(src)}`
-        );
-        const data = await res.json();
-        return data.data as ImageMetadata | null;
-      }
-      return null;
     },
     enabled: shouldFetch,
     staleTime: Infinity,

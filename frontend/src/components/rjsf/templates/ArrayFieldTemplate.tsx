@@ -14,7 +14,13 @@ export const ArrayFieldTemplate = (props: ArrayFieldTemplateProps) => {
 
   return (
     <div className="space-y-4">
-      <div>{items}</div>
+      <div>
+        {items?.map((item, idx) => {
+          const itemKey =
+            (item as unknown as { key?: string | number }).key ?? idx;
+          return <div key={itemKey}>{item}</div>;
+        })}
+      </div>
 
       {canAdd && (
         <Button

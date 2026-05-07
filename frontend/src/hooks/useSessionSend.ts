@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { BaseCodingAgent } from 'shared/types';
 import { sessionsApi } from '@/lib/api';
 import { useCreateSession } from './useCreateSession';
@@ -46,6 +47,7 @@ export function useSessionSend({
   selectedModelConfigId,
   onSelectSession,
 }: UseSessionSendOptions): UseSessionSendResult {
+  const queryClient = useQueryClient();
   const { mutateAsync: createSession, isPending: isCreatingSession } =
     useCreateSession();
   const [isSendingFollowUp, setIsSendingFollowUp] = useState(false);
@@ -93,6 +95,19 @@ export function useSessionSend({
             force_when_dirty: null,
             perform_git_reset: null,
           });
+          // Invalidate session messages / execution processes so any
+          // react-query caches pick up the new follow-up attempt.
+          queryClient.invalidateQueries({
+            queryKey: ['sessionMessages', sessionId],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ['executionProcesses', sessionId],
+          });
+          if (workspaceId) {
+            queryClient.invalidateQueries({
+              queryKey: ['workspaceSessions', workspaceId],
+            });
+          }
           return true;
         } catch (e: unknown) {
           const err = e as { message?: string };
@@ -111,6 +126,7 @@ export function useSessionSend({
       selectedModelConfigId,
       createSession,
       onSelectSession,
+      queryClient,
     ]
   );
 

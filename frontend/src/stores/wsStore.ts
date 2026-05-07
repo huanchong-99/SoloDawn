@@ -90,6 +90,7 @@ interface WsState {
   connectToWorkflow: (workflowId: string) => void;
   disconnectWorkflow: (workflowId: string) => void;
   disconnect: () => void;
+  reset: () => void;
   send: (message: WsMessage) => boolean;
   sendPromptResponse: (payload: TerminalPromptResponsePayload) => boolean;
   subscribe: (eventType: string, handler: MessageHandler) => () => void;
@@ -242,7 +243,7 @@ function normalizeTerminalCompletedStatus(
       return 'failed';
     case 'cancelled':
     case 'canceled':
-      return 'failed';
+      return 'cancelled';
     case 'checkpoint':
       return 'checkpoint';
     case 'review_pass':
@@ -1393,6 +1394,31 @@ export const useWsStore = create<WsState>((set, get) => ({
     });
   },
 
+  // W2-22-12: Explicit reset() that clears the mutated handler Maps and returns
+  // the store to its initial state. `disconnect()` already performs this
+  // cleanup for connection lifecycle; `reset()` exposes the same teardown for
+  // sign-out and test paths without implying a user-initiated disconnect
+  // (note: _manualDisconnect is left false so a subsequent connect() is
+  // treated as a fresh session rather than a reconnection-after-manual-close).
+  reset: () => {
+    // W2-22-02: Warn if reset() is called while a live connection is open.
+    // `disconnect()` below will tear it down cleanly, but callers generally
+    // should not hit reset() mid-session — it usually indicates a sign-out
+    // race or missed disconnect, and in-flight messages may be dropped.
+    const state = get();
+    const hasLiveConnection =
+      state.connectionStatus === 'connected' ||
+      state.connectionStatus === 'connecting' ||
+      state.connectionStatus === 'reconnecting';
+    if (hasLiveConnection) {
+      console.warn(
+        `[wsStore] reset() called while connectionStatus="${state.connectionStatus}"; forcing disconnect. In-flight messages may be lost.`
+      );
+    }
+    state.disconnect();
+    set({ _manualDisconnect: false });
+  },
+
   send: (message: WsMessage) => {
     const state = get();
     const targetWorkflowId =
@@ -1515,6 +1541,7 @@ export interface GitCommitPayload {
 export type TerminalCompletedStatus =
   | 'completed'
   | 'failed'
+  | 'cancelled'
   | 'checkpoint'
   | 'review_pass'
   | 'review_reject'
@@ -1621,7 +1648,16 @@ export interface TerminalPromptDecisionPayload extends PromptEventContext {
 }
 
 // G08-002: Provider event payload types
-// G08-002: These payload types will be refined once the backend provider event schema stabilizes
+// G08-002: These payload types will be refined once the backend provider event schema stabilizes.
+// W2-20-07: Backend (crates/server/src/routes/workflow_events.rs,
+// BusMessage::ProviderStateChanged) guarantees the following fields:
+//   switched  -> workflowId, fromProvider, toProvider
+//   exhausted -> workflowId, providerCount
+//   recovered -> workflowId, providerName
+// Fields are kept optional here to stay lenient against payload drift and to
+// accommodate alternative field names (e.g. `provider`, `terminalId`, `reason`)
+// that older/other code paths have surfaced. Add required-ness once the
+// backend schema is frozen and all producers have been audited.
 export interface ProviderSwitchedPayload {
   workflowId: string;
   terminalId?: string;
@@ -1634,6 +1670,7 @@ export interface ProviderExhaustedPayload {
   workflowId: string;
   terminalId?: string;
   provider?: string;
+  providerCount?: number;
   error?: string;
 }
 
@@ -1641,6 +1678,7 @@ export interface ProviderRecoveredPayload {
   workflowId: string;
   terminalId?: string;
   provider?: string;
+  providerName?: string;
 }
 
 export type WorkflowEventHandlers = {

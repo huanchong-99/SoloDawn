@@ -143,8 +143,12 @@ impl TsRule for ReactHooksRule {
                 brace_depth -= 1;
             }
 
-            // Detect early returns (return statements not at the end of a function)
-            if return_re.is_match(trimmed) && conditional_depth > 0 {
+            // Detect early returns (return statements anywhere inside a
+            // function scope). Any `return` encountered while we are still
+            // inside the function body implies subsequent hook calls would
+            // only execute on some renders — track it regardless of whether
+            // it is inside a conditional or at the non-conditional level.
+            if return_re.is_match(trimmed) && function_scope_depth.is_some() {
                 had_early_return = true;
             }
 

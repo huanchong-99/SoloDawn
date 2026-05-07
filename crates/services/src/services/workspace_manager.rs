@@ -331,6 +331,11 @@ impl WorkspaceManager {
     }
 
     pub async fn cleanup_orphan_workspaces(db: &Pool<Sqlite>) {
+        // NOTE: `DISABLE_WORKTREE_ORPHAN_CLEANUP` is intentionally a *presence* flag,
+        // not a truthy-string flag. Setting it to any value (including "0" or
+        // "false") disables cleanup; unset means enabled. This matches the
+        // documented operator contract for emergency opt-out — keep it
+        // presence-based rather than moving to the "truthy string" convention.
         if std::env::var("DISABLE_WORKTREE_ORPHAN_CLEANUP").is_ok() {
             debug!(
                 "Orphan workspace cleanup is disabled via DISABLE_WORKTREE_ORPHAN_CLEANUP environment variable"

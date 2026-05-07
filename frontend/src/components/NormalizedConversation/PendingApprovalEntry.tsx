@@ -283,7 +283,7 @@ const PendingApprovalEntry = ({
         setIsResponding(false);
       }
     },
-    [disabled, executionProcessId, pendingStatus.approval_id, clear]
+    [disabled, executionProcessId, pendingStatus, clear]
   );
 
   const handleApprove = useCallback(() => respond(true), [respond]);
@@ -298,10 +298,15 @@ const PendingApprovalEntry = ({
     clear();
   }, [isResponding, clear]);
 
+  const denyReasonRef = useRef(denyReason);
+  useEffect(() => {
+    denyReasonRef.current = denyReason;
+  }, [denyReason]);
+
   const handleSubmitDeny = useCallback(() => {
-    const trimmed = denyReason.trim();
+    const trimmed = denyReasonRef.current.trim();
     respond(false, trimmed || DEFAULT_DENIAL_REASON);
-  }, [denyReason, respond]);
+  }, [respond]);
 
   const triggerDeny = useCallback(
     (event?: KeyboardEvent) => {

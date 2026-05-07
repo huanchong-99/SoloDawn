@@ -77,9 +77,11 @@ export function MemberListItem({
         {canChangeRole && (
           <Select
             value={member.role}
-            onValueChange={(value) =>
-              onRoleChange(member.user_id, value as MemberRole)
-            }
+            onValueChange={(value) => {
+              const validRoles = Object.values(MemberRoleEnum) as string[];
+              if (!validRoles.includes(value)) return;
+              onRoleChange(member.user_id, value as MemberRole);
+            }}
             disabled={isRoleChanging}
           >
             <SelectTrigger className="w-32">

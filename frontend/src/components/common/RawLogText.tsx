@@ -41,8 +41,8 @@ const RawLogText = memo(
       const regex = new RegExp(`(${escapedQuery})`, 'gi');
       const parts = text.split(regex);
 
-      return parts.map((part) => {
-        const partKey = `${key}-${part}`;
+      return parts.map((part, idx) => {
+        const partKey = `${key}-${idx}-${part}`;
         if (part.toLowerCase() === searchQuery.toLowerCase()) {
           return (
             <mark key={partKey} className={highlightClass}>
@@ -62,11 +62,11 @@ const RawLogText = memo(
       const urlRegex = /(https?:\/\/\S+)/g;
       const parts = content.split(urlRegex);
 
-      return parts.map((part) => {
+      return parts.map((part, idx) => {
         if (/^https?:\/\/\S+$/.test(part)) {
           return (
             <a
-              key={`url-${part}`}
+              key={`url-${idx}-${part}`}
               href={part}
               target="_blank"
               rel="noopener noreferrer"
@@ -78,7 +78,7 @@ const RawLogText = memo(
           );
         }
         // For non-URL parts, apply ANSI formatting with highlighting
-        const partKey = `part-${part.slice(0, 20)}`;
+        const partKey = `part-${idx}-${part.slice(0, 20)}`;
         return highlightMatches(part, partKey);
       });
     };

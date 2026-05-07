@@ -80,6 +80,12 @@ impl TsRule for ComplexityRule {
                 let mut complexity: usize = 1;
                 for line_idx in *start_line..=end_line {
                     let line = ctx.lines[line_idx];
+                    // NOTE: each `&&`/`||`/`??` token contributes +1 to
+                    // complexity. Chains on the same line (`a && b && c`)
+                    // therefore over-count relative to strict McCabe (which
+                    // would count a whole chain as a single predicate).
+                    // This is a known, subjective tradeoff — kept simple
+                    // and consistent; revisit if false positives surface.
                     complexity += self.decision_pattern.find_iter(line).count();
                 }
 

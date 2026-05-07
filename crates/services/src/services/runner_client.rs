@@ -96,8 +96,26 @@ impl RunnerClient for LocalRunner {
             .with_args(config.args)
             .with_env(env);
 
-        let cols = u16::try_from(config.cols).unwrap_or(80);
-        let rows = u16::try_from(config.rows).unwrap_or(24);
+        // E28-13: cols/rows come in as wider ints from the client/IPC layer.
+        // Clip to `u16` for the PTY API and warn when the caller-supplied
+        // dimensions exceed the terminal's addressable range so the visible
+        // truncation isn't silent.
+        let cols = u16::try_from(config.cols).unwrap_or_else(|_| {
+            tracing::warn!(
+                terminal_id = %config.terminal_id,
+                cols = config.cols,
+                "terminal cols exceed u16; clipping to 80"
+            );
+            80
+        });
+        let rows = u16::try_from(config.rows).unwrap_or_else(|_| {
+            tracing::warn!(
+                terminal_id = %config.terminal_id,
+                rows = config.rows,
+                "terminal rows exceed u16; clipping to 24"
+            );
+            24
+        });
 
         let handle = self
             .process_manager
@@ -249,7 +267,10 @@ impl RunnerClient for RemoteRunner {
         });
         let response = client.spawn_terminal(request).await?.into_inner();
         if !response.success {
-            bail!("Remote spawn_terminal failed: {}", response.error);
+            bail!(
+                "Remote spawn_terminal failed: {}",
+                response.error.as_deref().unwrap_or("")
+            );
         }
         Ok(SpawnResult { pid: response.pid })
     }

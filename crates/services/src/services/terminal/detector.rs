@@ -78,6 +78,9 @@ impl CliDetector {
             paths.push(format!("{}/bin", home));
         }
 
+        // W2-37-04: `/usr/local/bin` is a Unix-only convention. Gate it so
+        // Windows builds don't pollute PATH with a non-existent path.
+        #[cfg(unix)]
         paths.push("/usr/local/bin".to_string());
 
         paths.join(":")

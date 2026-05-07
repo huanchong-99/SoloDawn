@@ -66,8 +66,8 @@ export function KeyValueField({
 
   return (
     <div className="space-y-3">
-      {entries.map(([key, value]) => (
-        <div key={key} className="flex gap-2 items-center">
+      {entries.map(([key, value], idx) => (
+        <div key={`${idx}-${key}`} className="flex gap-2 items-center">
           <Input
             value={key}
             disabled

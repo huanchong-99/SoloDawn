@@ -49,7 +49,7 @@ impl ConversationPatch {
             value: PatchType::NormalizedEntry(entry),
         };
 
-        from_value(json!([patch_entry])).unwrap()
+        from_value(json!([patch_entry])).expect("patch entry always serializable")
     }
 
     /// Create an ADD patch for a new string at the given index
@@ -60,7 +60,7 @@ impl ConversationPatch {
             value: PatchType::Stdout(entry),
         };
 
-        from_value(json!([patch_entry])).unwrap()
+        from_value(json!([patch_entry])).expect("patch entry always serializable")
     }
 
     /// Create an ADD patch for a new string at the given index
@@ -71,7 +71,7 @@ impl ConversationPatch {
             value: PatchType::Stderr(entry),
         };
 
-        from_value(json!([patch_entry])).unwrap()
+        from_value(json!([patch_entry])).expect("patch entry always serializable")
     }
 
     /// Create an ADD patch for a new diff at the given index
@@ -82,7 +82,7 @@ impl ConversationPatch {
             value: PatchType::Diff(diff),
         };
 
-        from_value(json!([patch_entry])).unwrap()
+        from_value(json!([patch_entry])).expect("patch entry always serializable")
     }
 
     /// Create an ADD patch for a new diff at the given index
@@ -93,7 +93,7 @@ impl ConversationPatch {
             value: PatchType::Diff(diff),
         };
 
-        from_value(json!([patch_entry])).unwrap()
+        from_value(json!([patch_entry])).expect("patch entry always serializable")
     }
 
     /// Create a REMOVE patch for removing a diff
@@ -102,7 +102,7 @@ impl ConversationPatch {
             "op": PatchOperation::Remove,
             "path": format!("/entries/{entry_index}"),
         }]))
-        .unwrap()
+        .expect("patch entry always serializable")
     }
 
     /// Create a REPLACE patch for updating an existing conversation entry at the given index
@@ -113,7 +113,7 @@ impl ConversationPatch {
             value: PatchType::NormalizedEntry(entry),
         };
 
-        from_value(json!([patch_entry])).unwrap()
+        from_value(json!([patch_entry])).expect("patch entry always serializable")
     }
 
     pub fn remove(entry_index: usize) -> Patch {
@@ -121,7 +121,7 @@ impl ConversationPatch {
             "op": PatchOperation::Remove,
             "path": format!("/entries/{entry_index}"),
         }]))
-        .unwrap()
+        .expect("patch entry always serializable")
     }
 }
 

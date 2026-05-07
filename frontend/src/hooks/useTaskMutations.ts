@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigateWithSearch } from '@/hooks';
+import { useAuth } from '@/hooks/auth/useAuth';
 import { tasksApi } from '@/lib/api';
 import { paths } from '@/lib/paths';
 import { taskRelationshipsKeys } from '@/hooks/useTaskRelationships';
@@ -17,8 +18,13 @@ import { taskKeys } from './useTask';
 export function useTaskMutations(projectId?: string) {
   const queryClient = useQueryClient();
   const navigate = useNavigateWithSearch();
+  const { isSignedIn } = useAuth();
 
+  // Guard all cache invalidations by auth state — the sign-out path calls
+  // `removeQueries`, and a late onSuccess from an in-flight mutation
+  // would otherwise repopulate caches we just cleared. [E19-06]
   const invalidateQueries = (taskId?: string) => {
+    if (!isSignedIn) return;
     queryClient.invalidateQueries({ queryKey: taskKeys.all });
     if (taskId) {
       queryClient.invalidateQueries({ queryKey: taskKeys.byId(taskId) });
@@ -26,6 +32,7 @@ export function useTaskMutations(projectId?: string) {
   };
 
   const invalidateTaskAndWorkspaceQueries = (taskId?: string) => {
+    if (!isSignedIn) return;
     invalidateQueries(taskId);
     queryClient.invalidateQueries({ queryKey: workspaceSummaryKeys.all });
   };
@@ -87,6 +94,7 @@ export function useTaskMutations(projectId?: string) {
   const deleteTask = useMutation({
     mutationFn: (taskId: string) => tasksApi.delete(taskId),
     onSuccess: (_: unknown, taskId: string) => {
+      if (!isSignedIn) return;
       invalidateQueries(taskId);
       // Remove single-task cache entry to avoid stale data flashes
       queryClient.removeQueries({

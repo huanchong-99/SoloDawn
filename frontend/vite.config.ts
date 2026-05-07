@@ -56,7 +56,14 @@ function isBenignWsProxyError(error: unknown): boolean {
 
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN?.trim();
 const sentryUploadEnabled = Boolean(sentryAuthToken);
-const buildSourcemap = process.env.SOLODAWN_BUILD_SOURCEMAP !== "0";
+// Default-enabled; align with the codebase "truthy string" convention for
+// explicit opt-out values. When the env var is unset we keep sourcemaps on;
+// when set, only "false" / "0" / "" disable them.
+const sourcemapEnv = process.env.SOLODAWN_BUILD_SOURCEMAP;
+const buildSourcemap =
+  sourcemapEnv === undefined
+    ? true
+    : !["false", "0", ""].includes(sourcemapEnv.trim().toLowerCase());
 
 export default defineConfig({
   plugins: [
@@ -125,7 +132,9 @@ export default defineConfig({
     fs: {
       allow: [path.resolve(__dirname, "."), path.resolve(__dirname, "..")],
     },
-    open: process.env.VITE_OPEN === "true",
+    open: ["true", "1"].includes(
+      (process.env.VITE_OPEN ?? "").trim().toLowerCase(),
+    ),
     allowedHosts: [
       ".trycloudflare.com", // allow all cloudflared tunnels
     ],

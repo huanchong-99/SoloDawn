@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, QueryBuilder, Sqlite, SqlitePool};
 use ts_rs::TS;
 use uuid::Uuid;
 
@@ -182,25 +182,36 @@ impl Image {
 
 impl TaskImage {
     /// Associate multiple images with a task, skipping duplicates.
+    ///
+    /// Uses a single multi-row INSERT with `ON CONFLICT DO NOTHING`, relying on
+    /// the `UNIQUE(task_id, image_id)` constraint on `task_images` to dedup.
+    // NOTE(W2-15-02): Previous N+1 (one INSERT + one SELECT-for-dedup per
+    // image) is replaced by a single multi-row INSERT with
+    // `ON CONFLICT DO NOTHING`. `SQLITE_MAX_VARIABLE_NUMBER` is 32766 in
+    // sqlite 3.32+ (3 binds per image, so effective cap ≈ 10_000). We chunk
+    // to `MAX_IMAGES_PER_BATCH = 500` to stay well below that and keep
+    // statement compile time reasonable. Callers no longer need to chunk.
     pub async fn associate_many_dedup(
         pool: &SqlitePool,
         task_id: Uuid,
         image_ids: &[Uuid],
     ) -> Result<(), sqlx::Error> {
-        for &image_id in image_ids {
-            let id = Uuid::new_v4();
-            sqlx::query!(
-                r#"INSERT INTO task_images (id, task_id, image_id)
-                   SELECT $1, $2, $3
-                   WHERE NOT EXISTS (
-                       SELECT 1 FROM task_images WHERE task_id = $2 AND image_id = $3
-                   )"#,
-                id,
-                task_id,
-                image_id
-            )
-            .execute(pool)
-            .await?;
+        const MAX_IMAGES_PER_BATCH: usize = 500;
+
+        if image_ids.is_empty() {
+            return Ok(());
+        }
+
+        for chunk in image_ids.chunks(MAX_IMAGES_PER_BATCH) {
+            let mut qb: QueryBuilder<Sqlite> =
+                QueryBuilder::new("INSERT INTO task_images (id, task_id, image_id) ");
+            qb.push_values(chunk.iter(), |mut b, image_id| {
+                b.push_bind(Uuid::new_v4())
+                    .push_bind(task_id)
+                    .push_bind(*image_id);
+            });
+            qb.push(" ON CONFLICT(task_id, image_id) DO NOTHING");
+            qb.build().execute(pool).await?;
         }
         Ok(())
     }

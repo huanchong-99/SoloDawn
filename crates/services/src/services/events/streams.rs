@@ -304,14 +304,24 @@ impl EventService {
     ) -> Result<futures::stream::BoxStream<'static, Result<LogMsg, std::io::Error>>, EventError>
     {
         fn build_projects_snapshot(projects: Vec<Project>) -> LogMsg {
-            // Convert projects array to object keyed by project ID
+            // Convert projects array to object keyed by project ID.
+            // E25-04: log (and skip) any project that fails to serialize rather than
+            // panicking via `.unwrap()`.
             let projects_map: serde_json::Map<String, serde_json::Value> = projects
                 .into_iter()
-                .map(|project| {
-                    (
-                        project.id.to_string(),
-                        serde_json::to_value(project).unwrap(),
-                    )
+                .filter_map(|project| {
+                    let id = project.id.to_string();
+                    match serde_json::to_value(&project) {
+                        Ok(v) => Some((id, v)),
+                        Err(e) => {
+                            tracing::warn!(
+                                project_id = %id,
+                                error = %e,
+                                "failed to serialize project for snapshot; skipping"
+                            );
+                            None
+                        }
+                    }
                 })
                 .collect();
 
@@ -323,7 +333,15 @@ impl EventService {
                 }
             ]);
 
-            LogMsg::JsonPatch(serde_json::from_value(patch).unwrap())
+            // E25-04: if patch construction fails, emit an empty patch and log
+            // rather than panicking.
+            match serde_json::from_value(patch) {
+                Ok(p) => LogMsg::JsonPatch(p),
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to build projects snapshot patch; emitting empty patch");
+                    LogMsg::JsonPatch(json_patch::Patch(Vec::new()))
+                }
+            }
         }
 
         // Get initial snapshot of projects

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { create } from 'zustand';
-import type { WorkflowDetailDto, WorkflowTaskDto, TerminalDto } from 'shared/types';
+import type { WorkflowDetailDto, WorkflowTaskDto, TerminalDto, TerminalStatus } from 'shared/types';
 
 /**
  * Workflow state management store
@@ -21,7 +21,7 @@ interface WorkflowState {
   updateWorkflow: (id: string, updates: Partial<WorkflowDetailDto>) => void;
   removeWorkflow: (id: string) => void;
   updateTaskStatus: (workflowId: string, taskId: string, status: string) => void;
-  updateTerminalStatus: (workflowId: string, taskId: string, terminalId: string, status: string) => void;
+  updateTerminalStatus: (workflowId: string, taskId: string, terminalId: string, status: TerminalStatus) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   reset: () => void;

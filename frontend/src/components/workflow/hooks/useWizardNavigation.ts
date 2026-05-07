@@ -6,6 +6,14 @@ const DEFAULT_STEP_ORDER = WIZARD_STEPS.map((step) => step.step);
 export interface UseWizardNavigationOptions {
   initialStep?: WizardStep;
   steps?: WizardStep[];
+  /**
+   * E11-10: Optional predicate used by goToStep to gate forward jumps. A step
+   * is considered reachable only if every step between the current position
+   * and the target (exclusive of the target) reports valid. Backward jumps
+   * are always allowed. When omitted, forward jumps are unrestricted to
+   * preserve legacy behavior for existing callers.
+   */
+  isStepValid?: (step: WizardStep) => boolean;
 }
 
 export interface UseWizardNavigationReturn {
@@ -25,7 +33,7 @@ export interface UseWizardNavigationReturn {
 export function useWizardNavigation(
   options: UseWizardNavigationOptions = {}
 ): UseWizardNavigationReturn {
-  const { initialStep = WizardStep.Project, steps } = options;
+  const { initialStep = WizardStep.Project, steps, isStepValid } = options;
   const stepOrder = useMemo(() => {
     if (steps && steps.length > 0) {
       return [...steps];
@@ -73,11 +81,35 @@ export function useWizardNavigation(
     }
   }, [canGoPrevious, stepIndex, stepOrder]);
 
-  const goToStep = useCallback((step: WizardStep) => {
-    if (stepOrder.includes(step)) {
+  const goToStep = useCallback(
+    (step: WizardStep) => {
+      const targetIndex = stepOrder.indexOf(step);
+      if (targetIndex === -1) {
+        return;
+      }
+
+      // Backward / same-step jumps are always allowed.
+      if (targetIndex <= stepIndex) {
+        setCurrentStep(step);
+        return;
+      }
+
+      // E11-10: For forward jumps, require every intermediate step (from the
+      // current position up to but not including the target) to be valid.
+      // Without a validator provided, preserve legacy permissive behavior.
+      if (isStepValid) {
+        for (let i = stepIndex; i < targetIndex; i++) {
+          const intermediate = stepOrder[i];
+          if (intermediate !== undefined && !isStepValid(intermediate)) {
+            return;
+          }
+        }
+      }
+
       setCurrentStep(step);
-    }
-  }, [stepOrder]);
+    },
+    [stepOrder, stepIndex, isStepValid]
+  );
 
   return {
     currentStep,

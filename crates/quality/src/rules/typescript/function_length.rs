@@ -140,7 +140,7 @@ impl TsRule for FunctionLengthRule {
                     depth += 1;
                     found_open = true;
                 }
-                depth -= closes as i32;
+                depth = depth.saturating_sub(closes as i32);
                 if found_open && depth <= 0 {
                     end_line = Some(i);
                     break;

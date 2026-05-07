@@ -1,9 +1,11 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 SCANNER_VERSION="5.0.1.3006"
 SCANNER_DIR="$(cd "$(dirname "$0")/../../quality/sonar" && pwd)/scanner"
 SCANNER_BIN="$SCANNER_DIR/sonar-scanner-$SCANNER_VERSION-linux/bin/sonar-scanner"
+
+trap 'rm -f "$SCANNER_DIR/sonar-scanner.zip"' EXIT
 
 if [[ ! -f "$SCANNER_BIN" ]]; then
     echo "Downloading SonarScanner..."
