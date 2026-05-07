@@ -93,6 +93,7 @@ fn create_test_workflow(project_id: &str) -> Workflow {
         created_at: Utc::now(),
         updated_at: Utc::now(),
         pause_reason: None,
+        audit_plan: None,
     }
 }
 

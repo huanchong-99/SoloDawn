@@ -471,6 +471,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             pause_reason: None,
+            audit_plan: None,
         };
         Workflow::create(pool, &workflow).await?;
 

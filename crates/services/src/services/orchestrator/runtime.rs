@@ -1371,10 +1371,6 @@ mod tests {
                 merge_terminal_cli_id TEXT NOT NULL,
                 merge_terminal_model_id TEXT NOT NULL,
                 target_branch TEXT NOT NULL,
-                -- git_watcher_enabled: mirrors the production migration
-                -- (20260224000000_add_git_watcher_enabled.sql). Default `1`
-                -- preserves backward compatibility so pre-existing workflows
-                -- keep the watcher active after upgrade.
                 git_watcher_enabled INTEGER NOT NULL DEFAULT 1,
                 orchestrator_state TEXT,
                 ready_at TEXT,
@@ -1382,7 +1378,8 @@ mod tests {
                 completed_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                pause_reason TEXT
+                pause_reason TEXT,
+                audit_plan TEXT
             )
             ",
         )
@@ -1422,6 +1419,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             pause_reason: None,
+            audit_plan: None,
         };
         Workflow::create(&pool, &workflow).await.unwrap();
 
@@ -1588,6 +1586,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             pause_reason: None,
+            audit_plan: None,
         }
     }
 
@@ -2017,10 +2016,6 @@ mod tests {
                 merge_terminal_cli_id TEXT NOT NULL,
                 merge_terminal_model_id TEXT NOT NULL,
                 target_branch TEXT NOT NULL,
-                -- git_watcher_enabled: mirrors the production migration
-                -- (20260224000000_add_git_watcher_enabled.sql). Default `1`
-                -- preserves backward compatibility so pre-existing workflows
-                -- keep the watcher active after upgrade.
                 git_watcher_enabled INTEGER NOT NULL DEFAULT 1,
                 orchestrator_state TEXT,
                 ready_at TEXT,
@@ -2028,7 +2023,8 @@ mod tests {
                 completed_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                pause_reason TEXT
+                pause_reason TEXT,
+                audit_plan TEXT
             )
             ",
         )
@@ -2090,6 +2086,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             pause_reason: None,
+            audit_plan: None,
         };
         Workflow::create(&pool, &workflow).await.unwrap();
 

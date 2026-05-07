@@ -461,6 +461,8 @@ pub struct TerminalCompletionContext {
 pub struct AcceptanceReviewResult {
     pub verdict: AcceptanceVerdict,
     pub fix_instructions: String,
+    /// Numerical score from the scoring-based audit (None for legacy binary reviews).
+    pub score: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -474,6 +476,7 @@ impl AcceptanceReviewResult {
         Self {
             verdict: AcceptanceVerdict::Approved,
             fix_instructions: String::new(),
+            score: None,
         }
     }
 
@@ -481,6 +484,7 @@ impl AcceptanceReviewResult {
         Self {
             verdict: AcceptanceVerdict::Rejected,
             fix_instructions: fix_instructions.into(),
+            score: None,
         }
     }
 
@@ -521,6 +525,7 @@ impl AcceptanceReviewResult {
             Self {
                 verdict,
                 fix_instructions,
+                score: None,
             }
         } else {
             // Fallback: check for REJECTED keyword in raw text
@@ -531,6 +536,260 @@ impl AcceptanceReviewResult {
                     "Acceptance review response was not valid JSON and did not contain an explicit REJECTED verdict.",
                 )
             }
+        }
+    }
+}
+
+// ============================================================================
+// Scoring-Based Audit Types
+// ============================================================================
+
+/// Five-dimension scoring result from the audit LLM
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditScoreResult {
+    pub total_score: f64,
+    pub passed: bool,
+    pub dimensions: AuditDimensions,
+    pub fix_instructions: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditDimensions {
+    pub buildability: DimensionScore,
+    pub functional_completeness: DimensionScore,
+    pub code_quality: CodeQualityScore,
+    pub test_quality: DimensionScore,
+    pub engineering_docs: DimensionScore,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DimensionScore {
+    pub score: f64,
+    pub max_score: f64,
+    pub details: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeQualityScore {
+    pub architecture: DimensionScore,
+    pub standards: DimensionScore,
+    pub security: DimensionScore,
+    pub total: f64,
+    pub max_score: f64,
+}
+
+/// Audit plan stored in DB (generated at confirm time)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditPlan {
+    pub mode: AuditMode,
+    pub dimensions: Vec<AuditDimensionSpec>,
+    pub pass_threshold: f64,
+    pub generated_at: String,
+    /// Complete scoring rubric text for direct inclusion in LLM prompts.
+    /// Mode A: BUILTIN_AUDIT_PRINCIPLES constant.
+    /// Mode B: LLM-merged text (built-in + user doc).
+    /// Mode C: User doc content only.
+    pub raw_principles: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditMode {
+    Builtin,
+    Merged,
+    Custom,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditDimensionSpec {
+    pub name: String,
+    pub name_zh: String,
+    pub max_score: f64,
+    pub criteria: Vec<String>,
+    pub sub_dimensions: Option<Vec<AuditDimensionSpec>>,
+}
+
+impl AuditScoreResult {
+    pub const PASS_THRESHOLD: f64 = 90.0;
+
+    /// Parse an LLM response into an `AuditScoreResult`.
+    ///
+    /// Uses the same JSON extraction pattern as `AcceptanceReviewResult::parse()`:
+    /// find the outermost `{...}` block, deserialize, compute totals, set pass/fail.
+    /// On parse failure: return a failing score with the error in `fix_instructions`.
+    pub fn parse(response: &str) -> Self {
+        let trimmed = response.trim();
+        // Extract JSON block from response
+        let json_str = if let Some(start) = trimmed.find('{') {
+            if let Some(end) = trimmed.rfind('}') {
+                &trimmed[start..=end]
+            } else {
+                trimmed
+            }
+        } else {
+            return Self::parse_failure(
+                "Audit score response did not contain a JSON object.",
+            );
+        };
+
+        let value: serde_json::Value = match serde_json::from_str(json_str) {
+            Ok(v) => v,
+            Err(e) => {
+                return Self::parse_failure(&format!(
+                    "Failed to parse audit score JSON: {e}"
+                ));
+            }
+        };
+
+        // Try to deserialize the dimensions
+        let dimensions = match Self::extract_dimensions(&value) {
+            Ok(d) => d,
+            Err(e) => {
+                return Self::parse_failure(&format!(
+                    "Failed to extract audit dimensions: {e}"
+                ));
+            }
+        };
+
+        let fix_instructions = value
+            .get("fix_instructions")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        // Calculate total score from dimension scores
+        let total_score = dimensions.buildability.score
+            + dimensions.functional_completeness.score
+            + dimensions.code_quality.total
+            + dimensions.test_quality.score
+            + dimensions.engineering_docs.score;
+
+        let passed = total_score >= Self::PASS_THRESHOLD;
+
+        Self {
+            total_score,
+            passed,
+            dimensions,
+            fix_instructions,
+        }
+    }
+
+    /// Convert to `AcceptanceReviewResult` for backward compatibility.
+    pub fn to_acceptance_result(&self) -> AcceptanceReviewResult {
+        if self.passed {
+            let mut r = AcceptanceReviewResult::approved();
+            r.score = Some(self.total_score);
+            r
+        } else {
+            let mut r = AcceptanceReviewResult::rejected(self.format_rejection());
+            r.score = Some(self.total_score);
+            r
+        }
+    }
+
+    fn format_rejection(&self) -> String {
+        let d = &self.dimensions;
+        let cq = &d.code_quality;
+        format!(
+            "Score: {:.0}/100\n\n\
+             Dimension Breakdown:\n  \
+             可构建性:     {:.0}/{:.0} — {}\n  \
+             功能完整性:   {:.0}/{:.0} — {}\n  \
+             代码质量:     {:.0}/{:.0} (架构 {:.0}/{:.0}, 规范 {:.0}/{:.0}, 安全 {:.0}/{:.0})\n  \
+             测试质量:     {:.0}/{:.0} — {}\n  \
+             工程化文档:   {:.0}/{:.0} — {}\n\n\
+             {}",
+            self.total_score,
+            d.buildability.score, d.buildability.max_score, d.buildability.details,
+            d.functional_completeness.score, d.functional_completeness.max_score, d.functional_completeness.details,
+            cq.total, cq.max_score,
+            cq.architecture.score, cq.architecture.max_score,
+            cq.standards.score, cq.standards.max_score,
+            cq.security.score, cq.security.max_score,
+            d.test_quality.score, d.test_quality.max_score, d.test_quality.details,
+            d.engineering_docs.score, d.engineering_docs.max_score, d.engineering_docs.details,
+            self.fix_instructions,
+        )
+    }
+
+    fn extract_dimensions(value: &serde_json::Value) -> Result<AuditDimensions, String> {
+        let dims = value.get("dimensions").ok_or("missing `dimensions` field")?;
+
+        let buildability = Self::extract_dimension_score(dims, "buildability")?;
+        let functional_completeness =
+            Self::extract_dimension_score(dims, "functional_completeness")?;
+        let test_quality = Self::extract_dimension_score(dims, "test_quality")?;
+        let engineering_docs = Self::extract_dimension_score(dims, "engineering_docs")?;
+
+        let cq = dims
+            .get("code_quality")
+            .ok_or("missing `dimensions.code_quality`")?;
+        let architecture = Self::extract_dimension_score(cq, "architecture")?;
+        let standards = Self::extract_dimension_score(cq, "standards")?;
+        let security = Self::extract_dimension_score(cq, "security")?;
+        let cq_total = architecture.score + standards.score + security.score;
+        let cq_max = architecture.max_score + standards.max_score + security.max_score;
+
+        Ok(AuditDimensions {
+            buildability,
+            functional_completeness,
+            code_quality: CodeQualityScore {
+                architecture,
+                standards,
+                security,
+                total: cq_total,
+                max_score: cq_max,
+            },
+            test_quality,
+            engineering_docs,
+        })
+    }
+
+    fn extract_dimension_score(
+        parent: &serde_json::Value,
+        key: &str,
+    ) -> Result<DimensionScore, String> {
+        let obj = parent
+            .get(key)
+            .ok_or_else(|| format!("missing `{key}`"))?;
+        let score = obj
+            .get("score")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| format!("`{key}.score` is missing or not a number"))?;
+        let max_score = obj
+            .get("max_score")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| format!("`{key}.max_score` is missing or not a number"))?;
+        let details = obj
+            .get("details")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        Ok(DimensionScore {
+            score,
+            max_score,
+            details,
+        })
+    }
+
+    fn parse_failure(reason: &str) -> Self {
+        Self {
+            total_score: 0.0,
+            passed: false,
+            dimensions: AuditDimensions {
+                buildability: DimensionScore { score: 0.0, max_score: 20.0, details: String::new() },
+                functional_completeness: DimensionScore { score: 0.0, max_score: 25.0, details: String::new() },
+                code_quality: CodeQualityScore {
+                    architecture: DimensionScore { score: 0.0, max_score: 10.0, details: String::new() },
+                    standards: DimensionScore { score: 0.0, max_score: 10.0, details: String::new() },
+                    security: DimensionScore { score: 0.0, max_score: 10.0, details: String::new() },
+                    total: 0.0,
+                    max_score: 30.0,
+                },
+                test_quality: DimensionScore { score: 0.0, max_score: 15.0, details: String::new() },
+                engineering_docs: DimensionScore { score: 0.0, max_score: 10.0, details: String::new() },
+            },
+            fix_instructions: reason.to_string(),
         }
     }
 }
@@ -651,5 +910,121 @@ mod tests {
 
         assert_eq!(missing.verdict, AcceptanceVerdict::Rejected);
         assert_eq!(unknown.verdict, AcceptanceVerdict::Rejected);
+    }
+
+    // =====================================================================
+    // AuditScoreResult::parse() tests
+    // =====================================================================
+
+    fn make_audit_json(total: f64) -> String {
+        // Distribute scores roughly proportionally to max
+        let buildability = (total * 0.20).min(20.0);
+        let functional = (total * 0.25).min(25.0);
+        let arch = (total * 0.10).min(10.0);
+        let standards = (total * 0.10).min(10.0);
+        let security = (total * 0.10).min(10.0);
+        let test = (total * 0.15).min(15.0);
+        let docs = (total * 0.10).min(10.0);
+        format!(
+            r#"{{
+                "total_score": {total},
+                "dimensions": {{
+                    "buildability": {{"score": {buildability}, "max_score": 20, "details": "ok"}},
+                    "functional_completeness": {{"score": {functional}, "max_score": 25, "details": "ok"}},
+                    "code_quality": {{
+                        "architecture": {{"score": {arch}, "max_score": 10, "details": "ok"}},
+                        "standards": {{"score": {standards}, "max_score": 10, "details": "ok"}},
+                        "security": {{"score": {security}, "max_score": 10, "details": "ok"}}
+                    }},
+                    "test_quality": {{"score": {test}, "max_score": 15, "details": "ok"}},
+                    "engineering_docs": {{"score": {docs}, "max_score": 10, "details": "ok"}}
+                }},
+                "fix_instructions": ""
+            }}"#,
+        )
+    }
+
+    #[test]
+    fn audit_score_parse_passing_score() {
+        let json = make_audit_json(95.0);
+        let result = AuditScoreResult::parse(&json);
+
+        assert!(result.passed, "score 95 should pass (threshold 90)");
+        assert!(result.total_score >= 90.0);
+    }
+
+    #[test]
+    fn audit_score_parse_failing_score() {
+        let json = make_audit_json(75.0);
+        let result = AuditScoreResult::parse(&json);
+
+        assert!(!result.passed, "score 75 should fail (threshold 90)");
+        assert!(result.total_score < 90.0);
+    }
+
+    #[test]
+    fn audit_score_parse_invalid_json_returns_zero() {
+        let result = AuditScoreResult::parse("This is not JSON at all.");
+
+        assert!(!result.passed);
+        assert_eq!(result.total_score, 0.0);
+        assert!(result.fix_instructions.contains("did not contain a JSON object"));
+    }
+
+    #[test]
+    fn audit_score_parse_malformed_json_returns_zero() {
+        let result = AuditScoreResult::parse(r#"{"dimensions": "bad"}"#);
+
+        assert!(!result.passed);
+        assert_eq!(result.total_score, 0.0);
+        assert!(result.fix_instructions.contains("Failed to extract"));
+    }
+
+    #[test]
+    fn audit_score_to_acceptance_result_approved() {
+        let json = make_audit_json(95.0);
+        let result = AuditScoreResult::parse(&json);
+        let acceptance = result.to_acceptance_result();
+
+        assert_eq!(acceptance.verdict, AcceptanceVerdict::Approved);
+        assert!(acceptance.score.is_some());
+        assert!(acceptance.score.unwrap() >= 90.0);
+    }
+
+    #[test]
+    fn audit_score_to_acceptance_result_rejected() {
+        let json = make_audit_json(70.0);
+        let result = AuditScoreResult::parse(&json);
+        let acceptance = result.to_acceptance_result();
+
+        assert_eq!(acceptance.verdict, AcceptanceVerdict::Rejected);
+        assert!(acceptance.score.is_some());
+        assert!(acceptance.score.unwrap() < 90.0);
+        assert!(acceptance.fix_instructions.contains("Score:"));
+    }
+
+    #[test]
+    fn audit_score_format_rejection_includes_dimensions() {
+        let json = make_audit_json(70.0);
+        let result = AuditScoreResult::parse(&json);
+        let rejection = result.format_rejection();
+
+        assert!(rejection.contains("可构建性"));
+        assert!(rejection.contains("功能完整性"));
+        assert!(rejection.contains("代码质量"));
+        assert!(rejection.contains("测试质量"));
+        assert!(rejection.contains("工程化文档"));
+    }
+
+    #[test]
+    fn audit_score_parse_extracts_json_from_surrounding_text() {
+        let response = format!(
+            "Here is my audit review:\n\n{}\n\nEnd of review.",
+            make_audit_json(92.0)
+        );
+        let result = AuditScoreResult::parse(&response);
+
+        assert!(result.passed);
+        assert!(result.total_score >= 90.0);
     }
 }

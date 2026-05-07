@@ -516,6 +516,9 @@ export interface PlanningDraftResponse {
   syncTerminal: boolean;
   syncProgress: boolean;
   notifyOnCompletion: boolean;
+  auditPlan: string | null;
+  auditMode: 'builtin' | 'merged' | 'custom';
+  auditDocPath: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -583,10 +586,10 @@ export const planningDraftsApi = {
     return handleApiResponse<PlanningMessageResponse[]>(response);
   },
 
-  confirm: async (draftId: string): Promise<PlanningDraftResponse> => {
+  confirm: async (draftId: string, retainBuiltin?: boolean): Promise<PlanningDraftResponse> => {
     const response = await makeRequest(
       `/api/planning-drafts/${draftId}/confirm`,
-      { method: 'POST', body: JSON.stringify({}) }
+      { method: 'POST', body: JSON.stringify({ retainBuiltin: retainBuiltin ?? true }) }
     );
     return handleApiResponse<PlanningDraftResponse>(response);
   },
@@ -597,6 +600,28 @@ export const planningDraftsApi = {
       { method: 'POST', body: JSON.stringify({}) }
     );
     return handleApiResponse<MaterializeResponse>(response);
+  },
+
+  uploadAuditDoc: async (draftId: string, file: File): Promise<PlanningDraftResponse> => {
+    const formData = new FormData();
+    formData.append('audit_doc', file);
+
+    // Use fetch directly for multipart/form-data (makeRequest sets JSON content-type)
+    const response = await fetch(`/api/planning-drafts/${draftId}/audit-doc`, {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    });
+
+    return handleApiResponse<PlanningDraftResponse>(response);
+  },
+
+  deleteAuditDoc: async (draftId: string): Promise<PlanningDraftResponse> => {
+    const response = await makeRequest(
+      `/api/planning-drafts/${draftId}/audit-doc`,
+      { method: 'DELETE' }
+    );
+    return handleApiResponse<PlanningDraftResponse>(response);
   },
 
   toggleFeishuSync: async (

@@ -235,6 +235,7 @@ async fn test_workflow_commands_with_presets() {
         created_at: now,
         updated_at: now,
         pause_reason: None,
+        audit_plan: None,
     };
 
     Workflow::create(pool, &workflow)
@@ -422,6 +423,7 @@ async fn test_full_workflow_with_commands_api() {
         created_at: now,
         updated_at: now,
         pause_reason: None,
+        audit_plan: None,
     };
 
     Workflow::create(pool, &workflow)
@@ -492,6 +494,7 @@ async fn test_workflow_without_commands() {
         created_at: now,
         updated_at: now,
         pause_reason: None,
+        audit_plan: None,
     };
 
     Workflow::create(pool, &workflow)

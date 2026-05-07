@@ -125,7 +125,7 @@ export function PlanningChatContainer() {
   const handleConfirm = useCallback(async () => {
     if (!draftId) return;
     try {
-      await confirmMutation.mutateAsync(draftId);
+      await confirmMutation.mutateAsync({ draftId });
     } catch (e) {
       console.error('Failed to confirm draft:', e);
       const err = e as { message?: string };

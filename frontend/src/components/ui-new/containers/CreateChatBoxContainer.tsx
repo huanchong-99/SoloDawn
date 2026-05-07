@@ -27,6 +27,7 @@ import {
   useTogglePlanningFeishuSync,
 } from '@/hooks/usePlanningDraft';
 import { CreateChatBox } from '../primitives/CreateChatBox';
+import { AuditDocPanel } from './AuditDocPanel';
 
 function WorkflowStatusBadge({
   workflowId,
@@ -269,6 +270,7 @@ function usePlanningDraftActions({
   materializeMutation,
   feishuSyncMutation,
   showToast,
+  retainBuiltin,
 }: Readonly<{
   planningDraftId: string | null;
   planningDraft: { feishuSync?: boolean } | null | undefined;
@@ -284,6 +286,7 @@ function usePlanningDraftActions({
   materializeMutation: ReturnType<typeof useMaterializeDraft>;
   feishuSyncMutation: ReturnType<typeof useTogglePlanningFeishuSync>;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  retainBuiltin: boolean;
 }>) {
   const handlePlanningMessage = useCallback(async () => {
     const trimmed = message.trim();
@@ -317,13 +320,16 @@ function usePlanningDraftActions({
   const handleConfirm = useCallback(async () => {
     if (!planningDraftId) return;
     try {
-      await confirmMutation.mutateAsync(planningDraftId);
+      await confirmMutation.mutateAsync({
+        draftId: planningDraftId,
+        retainBuiltin,
+      });
     } catch (e) {
       console.error('Failed to confirm draft:', e);
       const err = e as { message?: string };
       showToast(err.message ?? 'Failed to confirm draft', 'error');
     }
-  }, [planningDraftId, confirmMutation, showToast]);
+  }, [planningDraftId, confirmMutation, showToast, retainBuiltin]);
 
   const handleMaterialize = useCallback(async () => {
     if (!planningDraftId) return;
@@ -415,6 +421,7 @@ export function CreateChatBoxContainer() {
   const [materializedWorkflowId, setMaterializedWorkflowId] = useState<
     string | null
   >(null);
+  const [retainBuiltin, setRetainBuiltin] = useState(true);
 
   const { data: planningDraft } = usePlanningDraft(planningDraftId);
   const { data: serverMessages } = usePlanningDraftMessages(planningDraftId);
@@ -612,6 +619,7 @@ export function CreateChatBoxContainer() {
     materializeMutation,
     feishuSyncMutation,
     showToast,
+    retainBuiltin,
   });
 
   const handleOpenBoard = useCallback(() => {
@@ -674,125 +682,142 @@ export function CreateChatBoxContainer() {
   const isConfirmed = draftStatus === 'confirmed' && !isMaterialized;
 
   return (
-    <div className="relative flex flex-1 flex-col bg-primary h-full overflow-hidden">
-      {/* Planning conversation messages (Phase 2 only) */}
-      {isInPlanningMode && (
-        <>
-          {/* Status badge */}
-          <PlanningStatusBar
-            draftStatus={draftStatus}
-            feishuConnected={feishuConnected}
-            feishuSyncEnabled={planningDraft?.feishuSync ?? false}
-            isSpecReady={isSpecReady}
-            isConfirmed={isConfirmed}
-            isMaterialized={isMaterialized}
-            materializedWorkflowId={materializedWorkflowId}
-            confirmMutation={confirmMutation}
-            materializeMutation={materializeMutation}
-            handleConfirm={handleConfirm}
-            handleMaterialize={handleMaterialize}
-            handleToggleFeishuSync={handleToggleFeishuSync}
-            handleSyncHistory={handleSyncHistory}
-          />
+    <div className="relative flex flex-1 h-full overflow-hidden">
+      {/* Main chat area */}
+      <div className="flex flex-1 flex-col bg-primary h-full overflow-hidden">
+        {/* Planning conversation messages (Phase 2 only) */}
+        {isInPlanningMode && (
+          <>
+            {/* Status badge */}
+            <PlanningStatusBar
+              draftStatus={draftStatus}
+              feishuConnected={feishuConnected}
+              feishuSyncEnabled={planningDraft?.feishuSync ?? false}
+              isSpecReady={isSpecReady}
+              isConfirmed={isConfirmed}
+              isMaterialized={isMaterialized}
+              materializedWorkflowId={materializedWorkflowId}
+              confirmMutation={confirmMutation}
+              materializeMutation={materializeMutation}
+              handleConfirm={handleConfirm}
+              handleMaterialize={handleMaterialize}
+              handleToggleFeishuSync={handleToggleFeishuSync}
+              handleSyncHistory={handleSyncHistory}
+            />
 
-          {/* Scrollable message list */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-double py-base space-y-base">
-            {planningMessages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
+            {/* Scrollable message list */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-double py-base space-y-base">
+              {planningMessages.map((msg) => (
                 <div
-                  className={`max-w-[80%] rounded-lg px-base py-half text-sm whitespace-pre-wrap ${
-                    msg.role === 'user'
-                      ? 'bg-brand/10 text-high'
-                      : 'bg-secondary text-normal'
-                  }`}
+                  key={msg.id}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
-                  {msg.content}
+                  <div
+                    className={`max-w-[80%] rounded-lg px-base py-half text-sm whitespace-pre-wrap ${
+                      msg.role === 'user'
+                        ? 'bg-brand/10 text-high'
+                        : 'bg-secondary text-normal'
+                    }`}
+                  >
+                    {msg.content}
+                  </div>
                 </div>
-              </div>
-            ))}
-            {isThinking && (
-              <div className="flex justify-start">
-                <div className="bg-secondary rounded-lg px-base py-half text-sm text-low animate-pulse">
-                  {tTasks('conversation.planning.thinking')}
+              ))}
+              {isThinking && (
+                <div className="flex justify-start">
+                  <div className="bg-secondary rounded-lg px-base py-half text-sm text-low animate-pulse">
+                    {tTasks('conversation.planning.thinking')}
+                  </div>
                 </div>
-              </div>
-            )}
-            {isMaterialized && materializedWorkflowId && (
-              <WorkflowProgressContainer
-                workflowId={materializedWorkflowId}
-                onOpenBoard={handleOpenBoard}
-              />
-            )}
-          </div>
-        </>
-      )}
+              )}
+              {isMaterialized && materializedWorkflowId && (
+                <WorkflowProgressContainer
+                  workflowId={materializedWorkflowId}
+                  onOpenBoard={handleOpenBoard}
+                />
+              )}
+            </div>
+          </>
+        )}
 
-      {/* Input area — same CreateChatBox for both phases */}
-      <div
-        className={
-          isInPlanningMode
-            ? 'shrink-0 pb-[48px]'
-            : 'flex-1 flex flex-col justify-end'
-        }
-      >
-        <div className="flex justify-center @container">
-          <CreateChatBox
-            editor={{
-              value: message,
-              onChange: setMessage,
-            }}
-            onSend={
-              isInPlanningMode ? handlePlanningMessage : handleInitialSubmit
-            }
-            isSending={isCreatingDraft || isThinking}
-            executor={{
-              selected: effectiveProfile?.executor ?? null,
-              options: Object.keys(profiles || {}) as BaseCodingAgent[],
-              onChange: handleExecutorChange,
-            }}
-            modelConfig={
-              availableModels.length > 0
-                ? {
-                    customModels,
-                    officialModels,
-                    selectedId: selectedModelConfigId,
-                    onChange: setSelectedModelConfigId,
-                  }
-                : undefined
-            }
-            variant={
-              effectiveProfile
-                ? {
-                    selected: effectiveProfile.variant ?? 'DEFAULT',
-                    options: variantOptions,
-                    onChange: handleVariantChange,
-                  }
-                : undefined
-            }
-            saveAsDefault={{
-              checked: saveAsDefault,
-              onChange: setSaveAsDefault,
-              visible: hasChangedFromDefault,
-            }}
-            error={displayError}
-            projectId={projectId}
-            agent={effectiveProfile?.executor ?? null}
-            onPasteFiles={uploadFiles}
-            localImages={localImages}
-            sendLabel={
-              isInPlanningMode ? tTasks('conversation.actions.send') : undefined
-            }
-            sendingLabel={
-              isInPlanningMode
-                ? tTasks('conversation.planning.thinking')
-                : undefined
-            }
-          />
+        {/* Input area — same CreateChatBox for both phases */}
+        <div
+          className={
+            isInPlanningMode
+              ? 'shrink-0 pb-[48px]'
+              : 'flex-1 flex flex-col justify-end'
+          }
+        >
+          <div className="flex justify-center @container">
+            <CreateChatBox
+              editor={{
+                value: message,
+                onChange: setMessage,
+              }}
+              onSend={
+                isInPlanningMode ? handlePlanningMessage : handleInitialSubmit
+              }
+              isSending={isCreatingDraft || isThinking}
+              executor={{
+                selected: effectiveProfile?.executor ?? null,
+                options: Object.keys(profiles || {}) as BaseCodingAgent[],
+                onChange: handleExecutorChange,
+              }}
+              modelConfig={
+                availableModels.length > 0
+                  ? {
+                      customModels,
+                      officialModels,
+                      selectedId: selectedModelConfigId,
+                      onChange: setSelectedModelConfigId,
+                    }
+                  : undefined
+              }
+              variant={
+                effectiveProfile
+                  ? {
+                      selected: effectiveProfile.variant ?? 'DEFAULT',
+                      options: variantOptions,
+                      onChange: handleVariantChange,
+                    }
+                  : undefined
+              }
+              saveAsDefault={{
+                checked: saveAsDefault,
+                onChange: setSaveAsDefault,
+                visible: hasChangedFromDefault,
+              }}
+              error={displayError}
+              projectId={projectId}
+              agent={effectiveProfile?.executor ?? null}
+              onPasteFiles={uploadFiles}
+              localImages={localImages}
+              sendLabel={
+                isInPlanningMode
+                  ? tTasks('conversation.actions.send')
+                  : undefined
+              }
+              sendingLabel={
+                isInPlanningMode
+                  ? tTasks('conversation.planning.thinking')
+                  : undefined
+              }
+            />
+          </div>
         </div>
       </div>
+
+      {/* Audit document panel (right side, planning mode only) */}
+      {isInPlanningMode && (
+        <AuditDocPanel
+          draftId={planningDraftId}
+          draftStatus={planningDraft?.status}
+          auditDocPath={planningDraft?.auditDocPath ?? null}
+          auditMode={planningDraft?.auditMode ?? 'builtin'}
+          onRetainBuiltinChange={setRetainBuiltin}
+          retainBuiltin={retainBuiltin}
+        />
+      )}
     </div>
   );
 }

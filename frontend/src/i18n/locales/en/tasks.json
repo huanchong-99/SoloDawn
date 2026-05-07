@@ -262,6 +262,17 @@
         "cancelled": "Cancelled"
       },
       "needRepo": "Add at least one repository to start planning",
+      "auditDoc": {
+        "panelTitle": "Acceptance Audit Document",
+        "panelTab": "Audit Standards",
+        "uploadHint": "Upload custom audit criteria",
+        "uploadFormats": "Supports .md, .txt, .pdf, .docx",
+        "retainBuiltin": "Retain built-in scoring standards",
+        "retainBuiltinDesc": "Merge your document with built-in scoring standards; yours takes precedence on conflicts",
+        "noRetainBuiltinDesc": "Use only your uploaded audit standards, completely ignore built-in standards",
+        "uploaded": "Uploaded",
+        "remove": "Remove"
+      },
       "progress": {
         "title": "Workflow Execution",
         "openBoard": "Open Board",

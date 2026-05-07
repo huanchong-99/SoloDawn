@@ -887,6 +887,7 @@ mod orchestrator_tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             pause_reason: None,
+            audit_plan: None,
         };
         Workflow::create(&pool, &workflow).await.unwrap();
 

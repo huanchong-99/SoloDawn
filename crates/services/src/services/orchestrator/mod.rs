@@ -4,6 +4,8 @@
 //! 负责协调多个 AI 编码代理完成软件开发任务。
 
 pub mod agent;
+pub mod audit_plan;
+pub mod audit_principles;
 pub mod config;
 pub mod constants;
 pub mod llm;

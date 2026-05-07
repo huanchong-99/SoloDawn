@@ -189,6 +189,9 @@ pub struct Workflow {
 
     /// Reason for pause (e.g., "api_exhausted", "user_requested")
     pub pause_reason: Option<String>,
+
+    /// JSON-serialized AuditPlan copied from planning_draft at materialize time.
+    pub audit_plan: Option<String>,
 }
 
 impl Workflow {
@@ -477,8 +480,9 @@ impl Workflow {
                 orchestrator_api_key, orchestrator_model,
                 error_terminal_enabled, error_terminal_cli_id, error_terminal_model_id,
                 merge_terminal_cli_id, merge_terminal_model_id,
-                target_branch, git_watcher_enabled, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+                target_branch, git_watcher_enabled, created_at, updated_at,
+                audit_plan
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
             RETURNING *
             "
         )
@@ -504,6 +508,7 @@ impl Workflow {
         .bind(workflow.git_watcher_enabled)
         .bind(workflow.created_at)
         .bind(workflow.updated_at)
+        .bind(&workflow.audit_plan)
         .fetch_one(pool)
         .await
     }
@@ -844,8 +849,9 @@ impl Workflow {
                 orchestrator_api_key, orchestrator_model,
                 error_terminal_enabled, error_terminal_cli_id, error_terminal_model_id,
                 merge_terminal_cli_id, merge_terminal_model_id,
-                target_branch, git_watcher_enabled, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+                target_branch, git_watcher_enabled, created_at, updated_at,
+                audit_plan
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
             "
         )
         .bind(&workflow.id)
@@ -870,6 +876,7 @@ impl Workflow {
         .bind(workflow.git_watcher_enabled)
         .bind(workflow.created_at)
         .bind(workflow.updated_at)
+        .bind(&workflow.audit_plan)
         .execute(&mut *tx)
         .await?;
 
@@ -1235,6 +1242,7 @@ mod encryption_tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             pause_reason: None,
+            audit_plan: None,
         }
     }
 

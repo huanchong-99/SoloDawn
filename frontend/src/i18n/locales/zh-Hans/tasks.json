@@ -718,6 +718,17 @@
         "cancelled": "已取消"
       },
       "needRepo": "请至少添加一个仓库以开始规划",
+      "auditDoc": {
+        "panelTitle": "验收评审文档",
+        "panelTab": "审计标准",
+        "uploadHint": "上传自定义评审标准文档",
+        "uploadFormats": "支持 .md, .txt, .pdf, .docx",
+        "retainBuiltin": "同时保留内置评分标准",
+        "retainBuiltinDesc": "将您的文档与系统内置评分标准合并使用，冲突时以您的标准为准",
+        "noRetainBuiltinDesc": "仅使用您上传的评审标准，完全忽略系统内置标准",
+        "uploaded": "已上传",
+        "remove": "移除"
+      },
       "progress": {
         "title": "工作流执行",
         "openBoard": "打开看板",

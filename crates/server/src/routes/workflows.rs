@@ -966,6 +966,7 @@ async fn create_workflow(
         created_at: now,
         updated_at: now,
         pause_reason: None,
+        audit_plan: None,
     };
 
     // Encrypt and store API key if provided
@@ -3996,6 +3997,7 @@ mod workflow_guard_tests {
             created_at: now,
             updated_at: now,
             pause_reason: None,
+            audit_plan: None,
         }
     }
 
@@ -4316,7 +4318,8 @@ mod recovery_response_tests {
                 completed_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                pause_reason TEXT
+                pause_reason TEXT,
+                audit_plan TEXT
             )
             ",
         )
@@ -4354,6 +4357,7 @@ mod recovery_response_tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             pause_reason: None,
+            audit_plan: None,
         };
         Workflow::create(&pool, &workflow).await.unwrap();
 

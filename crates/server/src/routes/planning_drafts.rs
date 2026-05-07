@@ -1,10 +1,11 @@
 //! Planning draft API for orchestrated workspace mode.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use axum::{
     Extension, Json, Router,
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     response::Json as ResponseJson,
     routing::{get, post, put},
 };
@@ -12,7 +13,9 @@ use db::models::planning_draft::{PLANNING_DRAFT_STATUSES, PlanningDraft, Plannin
 use deployment::Deployment;
 use serde::{Deserialize, Serialize};
 use services::services::orchestrator::{
-    LLMMessage, OrchestratorConfig,
+    AuditMode, LLMMessage, OrchestratorConfig,
+    audit_plan::generate_audit_plan,
+    audit_principles::default_audit_plan,
     config::{PromptProfile, system_prompt_for_profile},
     create_claude_code_native_client, create_llm_client,
 };
@@ -63,6 +66,9 @@ pub struct DraftResponse {
     pub sync_terminal: bool,
     pub sync_progress: bool,
     pub notify_on_completion: bool,
+    pub audit_plan: Option<String>,
+    pub audit_mode: String,
+    pub audit_doc_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -83,6 +89,9 @@ impl From<PlanningDraft> for DraftResponse {
             sync_terminal: d.sync_terminal,
             sync_progress: d.sync_progress,
             notify_on_completion: d.notify_on_completion,
+            audit_plan: d.audit_plan,
+            audit_mode: d.audit_mode,
+            audit_doc_path: d.audit_doc_path,
             created_at: d.created_at.to_rfc3339(),
             updated_at: d.updated_at.to_rfc3339(),
         }
@@ -119,6 +128,12 @@ pub fn planning_draft_routes() -> Router<DeploymentImpl> {
         .route("/{draft_id}/confirm", post(confirm_draft))
         .route("/{draft_id}/materialize", post(materialize_draft))
         .route("/{draft_id}/feishu-sync", post(toggle_feishu_sync))
+        .route(
+            "/{draft_id}/audit-doc",
+            post(upload_audit_doc)
+                .delete(delete_audit_doc)
+                .layer(DefaultBodyLimit::max(10 * 1024 * 1024)), // 10 MB limit
+        )
         .route(
             "/{draft_id}/messages",
             get(list_messages).post(send_message),
@@ -249,10 +264,32 @@ async fn update_spec(
     Ok(Json(ApiResponse::success(DraftResponse::from(updated))))
 }
 
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmDraftRequest {
+    #[serde(default = "default_true")]
+    pub retain_builtin: bool,
+}
+
+impl Default for ConfirmDraftRequest {
+    fn default() -> Self {
+        Self {
+            retain_builtin: true,
+        }
+    }
+}
+
 async fn confirm_draft(
     State(deployment): State<DeploymentImpl>,
     Path(draft_id): Path<String>,
+    body: Option<Json<ConfirmDraftRequest>>,
 ) -> Result<ResponseJson<ApiResponse<DraftResponse>>, ApiError> {
+    let req = body.map(|b| b.0).unwrap_or_default();
+
     let draft = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
         .await
         .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
@@ -265,9 +302,84 @@ async fn confirm_draft(
         )));
     }
 
+    // Determine audit mode
+    let has_audit_doc = draft.audit_doc_path.is_some();
+    let audit_mode = if !has_audit_doc {
+        AuditMode::Builtin
+    } else if req.retain_builtin {
+        AuditMode::Merged
+    } else {
+        AuditMode::Custom
+    };
+
+    // Read audit doc content from disk if path exists
+    let audit_doc_content = if let Some(ref doc_path) = draft.audit_doc_path {
+        let full_path = audit_docs_dir().join(doc_path);
+        match tokio::fs::read_to_string(&full_path).await {
+            Ok(content) => Some(content),
+            Err(e) => {
+                tracing::warn!(
+                    draft_id = %draft_id,
+                    path = %full_path.display(),
+                    error = %e,
+                    "Failed to read audit doc from disk; proceeding without it"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Build LLM client and generate audit plan
+    let llm_client = build_llm_client_from_draft(&draft).or_else(|| {
+        tracing::info!(draft_id = %draft_id, "No model configured for audit plan generation, trying Claude Code native");
+        create_claude_code_native_client("claude-sonnet-4-6")
+    });
+
+    let audit_plan = if let Some(client) = llm_client {
+        generate_audit_plan(
+            client.as_ref(),
+            draft.requirement_summary.as_deref().unwrap_or(""),
+            draft.technical_spec.as_deref().unwrap_or(""),
+            audit_doc_content.as_deref(),
+            audit_mode,
+        )
+        .await
+    } else {
+        tracing::info!(draft_id = %draft_id, "No LLM client available for audit plan generation; using default");
+        default_audit_plan()
+    };
+
+    // Serialize and store the audit plan
+    let audit_plan_json = serde_json::to_string(&audit_plan).unwrap_or_default();
+    let mode_str = match audit_plan.mode {
+        AuditMode::Builtin => "builtin",
+        AuditMode::Merged => "merged",
+        AuditMode::Custom => "custom",
+    };
+
+    PlanningDraft::update_audit_plan(
+        &deployment.db().pool,
+        &draft_id,
+        Some(&audit_plan_json),
+        mode_str,
+        draft.audit_doc_path.as_deref(),
+    )
+    .await
+    .map_err(|e| ApiError::Internal(format!("Failed to store audit plan: {e}")))?;
+
+    // Set confirmed
     PlanningDraft::set_confirmed(&deployment.db().pool, &draft_id)
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to confirm draft: {e}")))?;
+
+    tracing::info!(
+        draft_id = %draft_id,
+        audit_mode = mode_str,
+        plan_size = audit_plan_json.len(),
+        "Draft confirmed with audit plan"
+    );
 
     let confirmed = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
         .await
@@ -869,6 +981,7 @@ async fn materialize_draft(
         created_at: now,
         updated_at: now,
         pause_reason: None,
+        audit_plan: draft.audit_plan.clone(),
     };
 
     let decrypted_key = draft
@@ -918,4 +1031,158 @@ async fn materialize_draft(
         workflow_id,
         status: "materialized".to_string(),
     })))
+}
+
+// ============================================================================
+// Audit Document Upload / Delete
+// ============================================================================
+
+/// Accepted file extensions for audit document upload.
+const AUDIT_DOC_ALLOWED_EXTENSIONS: &[&str] = &["md", "txt", "pdf", "docx"];
+
+/// Get the base directory for audit document storage.
+fn audit_docs_dir() -> PathBuf {
+    utils::cache_dir().join("audit_docs")
+}
+
+async fn upload_audit_doc(
+    State(deployment): State<DeploymentImpl>,
+    Path(draft_id): Path<String>,
+    mut multipart: Multipart,
+) -> Result<ResponseJson<ApiResponse<DraftResponse>>, ApiError> {
+    let draft = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("Planning draft {draft_id} not found")))?;
+
+    if draft.status == "confirmed" || draft.status == "materialized" || draft.status == "cancelled"
+    {
+        return Err(ApiError::BadRequest(format!(
+            "Cannot upload audit doc for draft in status '{}'",
+            draft.status
+        )));
+    }
+
+    // Process multipart upload
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        ApiError::BadRequest(format!("Failed to read multipart field: {e}"))
+    })? {
+        // Accept the field named "file" (or fall through to next field)
+        let field_name = field.name().unwrap_or("").to_string();
+        if field_name != "file" {
+            continue;
+        }
+
+        let filename = field
+            .file_name()
+            .map_or_else(|| "audit-doc.md".to_string(), ToString::to_string);
+
+        // Validate extension
+        let ext = std::path::Path::new(&filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+        if !AUDIT_DOC_ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
+            return Err(ApiError::BadRequest(format!(
+                "Unsupported file type '.{ext}'. Accepted: .md, .txt, .pdf, .docx"
+            )));
+        }
+
+        let data = field.bytes().await.map_err(|e| {
+            ApiError::BadRequest(format!("Failed to read file data: {e}"))
+        })?;
+
+        // Store file to disk under audit_docs/{draft_id}/{filename}
+        let dir = audit_docs_dir().join(&draft_id);
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to create audit docs dir: {e}")))?;
+
+        let file_path = dir.join(&filename);
+        tokio::fs::write(&file_path, &data)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to write audit doc: {e}")))?;
+
+        // Store the relative path: "{draft_id}/{filename}"
+        let relative_path = format!("{draft_id}/{filename}");
+
+        PlanningDraft::update_audit_plan(
+            &deployment.db().pool,
+            &draft_id,
+            draft.audit_plan.as_deref(), // preserve existing audit_plan
+            &draft.audit_mode,            // preserve existing mode
+            Some(&relative_path),
+        )
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to update audit doc path: {e}")))?;
+
+        tracing::info!(
+            draft_id = %draft_id,
+            filename = %filename,
+            size = data.len(),
+            "Audit document uploaded"
+        );
+
+        let updated = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+            .ok_or_else(|| ApiError::Internal("Draft disappeared after update".to_string()))?;
+
+        return Ok(Json(ApiResponse::success(DraftResponse::from(updated))));
+    }
+
+    Err(ApiError::BadRequest(
+        "No 'file' field found in multipart upload".to_string(),
+    ))
+}
+
+async fn delete_audit_doc(
+    State(deployment): State<DeploymentImpl>,
+    Path(draft_id): Path<String>,
+) -> Result<ResponseJson<ApiResponse<DraftResponse>>, ApiError> {
+    let draft = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("Planning draft {draft_id} not found")))?;
+
+    if draft.status == "confirmed" || draft.status == "materialized" || draft.status == "cancelled"
+    {
+        return Err(ApiError::BadRequest(format!(
+            "Cannot delete audit doc for draft in status '{}'",
+            draft.status
+        )));
+    }
+
+    // Remove file from disk if it exists
+    if let Some(ref doc_path) = draft.audit_doc_path {
+        let full_path = audit_docs_dir().join(doc_path);
+        if let Err(e) = tokio::fs::remove_file(&full_path).await {
+            // Log but don't fail — the DB state is more important
+            tracing::warn!(
+                draft_id = %draft_id,
+                path = %full_path.display(),
+                error = %e,
+                "Failed to remove audit doc file from disk"
+            );
+        }
+
+        // Try to remove the parent directory if empty
+        let parent_dir = audit_docs_dir().join(&draft_id);
+        let _ = tokio::fs::remove_dir(&parent_dir).await; // ignore errors (may not be empty)
+    }
+
+    // Clear path and reset mode
+    PlanningDraft::delete_audit_doc(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to delete audit doc: {e}")))?;
+
+    tracing::info!(draft_id = %draft_id, "Audit document deleted");
+
+    let updated = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| ApiError::Internal("Draft disappeared after update".to_string()))?;
+
+    Ok(Json(ApiResponse::success(DraftResponse::from(updated))))
 }

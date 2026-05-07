@@ -79,8 +79,52 @@ export function useConfirmDraft() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationFn: async ({
+      draftId,
+      retainBuiltin,
+    }: {
+      draftId: string;
+      retainBuiltin?: boolean;
+    }): Promise<PlanningDraftResponse> => {
+      return planningDraftsApi.confirm(draftId, retainBuiltin);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({
+        queryKey: planningDraftKeys.byId(data.id),
+      });
+    },
+  });
+}
+
+/** Upload an audit document for a planning draft */
+export function useUploadAuditDoc() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      draftId,
+      file,
+    }: {
+      draftId: string;
+      file: File;
+    }): Promise<PlanningDraftResponse> => {
+      return planningDraftsApi.uploadAuditDoc(draftId, file);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({
+        queryKey: planningDraftKeys.byId(data.id),
+      });
+    },
+  });
+}
+
+/** Delete the audit document from a planning draft */
+export function useDeleteAuditDoc() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
     mutationFn: async (draftId: string): Promise<PlanningDraftResponse> => {
-      return planningDraftsApi.confirm(draftId);
+      return planningDraftsApi.deleteAuditDoc(draftId);
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({

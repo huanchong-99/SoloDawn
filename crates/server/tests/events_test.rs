@@ -69,6 +69,7 @@ async fn create_minimal_workflow(deployment: &DeploymentImpl, project_id: Uuid) 
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
         pause_reason: None,
+        audit_plan: None,
     };
 
     Workflow::create(&deployment.db().pool, &workflow)

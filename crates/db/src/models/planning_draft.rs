@@ -33,6 +33,12 @@ pub struct PlanningDraft {
     pub sync_progress: bool,
     /// Send completion report on workflow/task completion.
     pub notify_on_completion: bool,
+    /// JSON-serialized AuditPlan generated at confirm time.
+    pub audit_plan: Option<String>,
+    /// Audit mode: "builtin" | "merged" | "custom"
+    pub audit_mode: String,
+    /// Path to user-uploaded audit document on disk.
+    pub audit_doc_path: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -91,6 +97,9 @@ impl PlanningDraft {
             sync_terminal: false,
             sync_progress: false,
             notify_on_completion: true,
+            audit_plan: None,
+            audit_mode: "builtin".to_string(),
+            audit_doc_path: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -106,8 +115,9 @@ impl PlanningDraft {
                 confirmed_at, materialized_workflow_id,
                 feishu_sync, feishu_chat_id,
                 sync_tools, sync_terminal, sync_progress, notify_on_completion,
+                audit_plan, audit_mode, audit_doc_path,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
             ",
         )
         .bind(&draft.id)
@@ -129,6 +139,9 @@ impl PlanningDraft {
         .bind(draft.sync_terminal)
         .bind(draft.sync_progress)
         .bind(draft.notify_on_completion)
+        .bind(&draft.audit_plan)
+        .bind(&draft.audit_mode)
+        .bind(&draft.audit_doc_path)
         .bind(draft.created_at)
         .bind(draft.updated_at)
         .execute(pool)
@@ -256,6 +269,50 @@ impl PlanningDraft {
         .bind(id)
         .bind(enabled)
         .bind(chat_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update the audit plan, mode, and doc path for a planning draft.
+    pub async fn update_audit_plan(
+        pool: &SqlitePool,
+        id: &str,
+        audit_plan: Option<&str>,
+        audit_mode: &str,
+        audit_doc_path: Option<&str>,
+    ) -> sqlx::Result<()> {
+        sqlx::query(
+            r"
+            UPDATE planning_draft SET
+                audit_plan = ?2,
+                audit_mode = ?3,
+                audit_doc_path = ?4,
+                updated_at = datetime('now')
+            WHERE id = ?1
+            ",
+        )
+        .bind(id)
+        .bind(audit_plan)
+        .bind(audit_mode)
+        .bind(audit_doc_path)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Clear the audit document path and reset audit mode to "builtin".
+    pub async fn delete_audit_doc(pool: &SqlitePool, id: &str) -> sqlx::Result<()> {
+        sqlx::query(
+            r"
+            UPDATE planning_draft SET
+                audit_doc_path = NULL,
+                audit_mode = 'builtin',
+                updated_at = datetime('now')
+            WHERE id = ?1
+            ",
+        )
+        .bind(id)
         .execute(pool)
         .await?;
         Ok(())

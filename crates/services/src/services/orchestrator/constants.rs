@@ -68,6 +68,10 @@ pub const TASK_STATUS_COMPLETED: &str = "completed";
 pub const TASK_STATUS_FAILED: &str = "failed";
 pub const TASK_STATUS_CANCELLED: &str = "cancelled";
 
+// Scoring-based audit constants
+pub const AUDIT_SCORE_PASS_THRESHOLD: f64 = 90.0;
+pub const AUDIT_PLAN_MAX_BYTES: usize = 65_536;
+
 // Phase 28A: Terminal completion context limits
 pub const COMPLETION_CONTEXT_LOG_LINES: usize = 120;
 pub const COMPLETION_CONTEXT_LOG_MAX_CHARS: usize = 6000;

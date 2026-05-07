@@ -495,6 +495,7 @@ async fn execute_create_workflow(
         started_at: None,
         completed_at: None,
         pause_reason: None,
+        audit_plan: None,
         created_at: now,
         updated_at: now,
     };

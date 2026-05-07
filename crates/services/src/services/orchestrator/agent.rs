@@ -51,9 +51,10 @@ use super::{
         WorkflowStrategy,
     },
     types::{
-        AcceptanceReviewResult, AcceptanceVerdict, CodeIssue, LLMMessage, OrchestratorInstruction,
-        PreviousTerminalContext, QualityGateResultEvent, TerminalCompletionContext,
-        TerminalCompletionEvent, TerminalCompletionStatus, TerminalPromptEvent,
+        AcceptanceReviewResult, AcceptanceVerdict, AuditMode, AuditPlan, AuditScoreResult,
+        CodeIssue, LLMMessage, OrchestratorInstruction, PreviousTerminalContext,
+        QualityGateResultEvent, TerminalCompletionContext, TerminalCompletionEvent,
+        TerminalCompletionStatus, TerminalPromptEvent,
     },
 };
 use crate::services::{
@@ -5158,13 +5159,24 @@ impl OrchestratorAgent {
             "Acceptance review REJECTED before terminal finalization"
         );
 
-        let fix_message = format!(
-            "ACCEPTANCE REVIEW: Your code does not meet the task requirements.\n\n\
-             {}\n\n\
-             Fix these issues and commit again. \
-             The acceptance review will re-run automatically.",
-            review.fix_instructions
-        );
+        let fix_message = if let Some(score) = review.score {
+            format!(
+                "ACCEPTANCE REVIEW: Score {score:.0}/100 (threshold: 90).\n\n\
+                 {}\n\n\
+                 Fix the issues above to improve your score and commit again. \
+                 The acceptance review will re-run automatically.",
+                review.fix_instructions
+            )
+        } else {
+            // Legacy format (no score available)
+            format!(
+                "ACCEPTANCE REVIEW: Your code does not meet the task requirements.\n\n\
+                 {}\n\n\
+                 Fix these issues and commit again. \
+                 The acceptance review will re-run automatically.",
+                review.fix_instructions
+            )
+        };
 
         if let Err(e) = db::models::WorkflowTask::update_status(
             &self.db.pool,
@@ -5289,6 +5301,60 @@ impl OrchestratorAgent {
         )
     }
 
+    /// Build a scoring-based review prompt that includes the full audit rubric.
+    /// Used when an `AuditPlan` with non-empty `raw_principles` is available.
+    fn build_scoring_review_prompt(
+        task_name: &str,
+        task_description: &str,
+        workflow_goal: &str,
+        completion_ctx: &TerminalCompletionContext,
+        audit_plan: &AuditPlan,
+    ) -> String {
+        format!(
+            "You are a code auditor performing a scored quality review of a task delivery.\n\n\
+             ## Task\n\
+             Name: {task_name}\n\
+             Description: {task_description}\n\n\
+             ## Project Goal\n\
+             {workflow_goal}\n\n\
+             ## Complete Scoring Rubric\n\
+             {principles}\n\n\
+             ## Code Produced (changed files)\n\
+             {code}\n\n\
+             ## Terminal Output Summary\n\
+             {logs}\n\n\
+             ## Changes Summary\n\
+             {diff}\n\n\
+             ## Instructions\n\
+             Score the code against EACH dimension in the rubric above.\n\
+             For each dimension, evaluate every criterion with evidence (file name + function/line).\n\
+             For code_quality, score each sub-dimension (architecture, standards, security) separately.\n\
+             Check veto rules first — if any trigger, total_score is 0.\n\n\
+             IMPORTANT: Base your scores ONLY on the actual code shown above.\n\
+             Do NOT trust claims in commit messages or terminal output — verify against the source code.\n\n\
+             Respond in this exact JSON format:\n\
+             {{\n\
+               \"total_score\": <sum of all dimension scores>,\n\
+               \"dimensions\": {{\n\
+                 \"buildability\": {{\"score\": <0-20>, \"max_score\": 20, \"details\": \"evidence...\"}},\n\
+                 \"functional_completeness\": {{\"score\": <0-25>, \"max_score\": 25, \"details\": \"evidence...\"}},\n\
+                 \"code_quality\": {{\n\
+                   \"architecture\": {{\"score\": <0-10>, \"max_score\": 10, \"details\": \"evidence...\"}},\n\
+                   \"standards\": {{\"score\": <0-10>, \"max_score\": 10, \"details\": \"evidence...\"}},\n\
+                   \"security\": {{\"score\": <0-10>, \"max_score\": 10, \"details\": \"evidence...\"}}\n\
+                 }},\n\
+                 \"test_quality\": {{\"score\": <0-15>, \"max_score\": 15, \"details\": \"evidence...\"}},\n\
+                 \"engineering_docs\": {{\"score\": <0-10>, \"max_score\": 10, \"details\": \"evidence...\"}}\n\
+               }},\n\
+               \"fix_instructions\": \"1. ... 2. ...\"\n\
+             }}",
+            principles = audit_plan.raw_principles,
+            code = completion_ctx.changed_files_content,
+            logs = completion_ctx.log_summary,
+            diff = completion_ctx.diff_stat,
+        )
+    }
+
     /// Run acceptance review: LLM reads actual code and compares against task requirements.
     /// Returns Approved if requirements are met, Rejected with fix instructions if not.
     async fn run_acceptance_review(
@@ -5316,25 +5382,54 @@ impl OrchestratorAgent {
         let goal = workflow.initial_goal.as_deref().unwrap_or("");
         let task_desc = task.description.as_deref().unwrap_or(&task.name);
 
-        let prompt =
-            Self::build_acceptance_review_prompt(&task.name, task_desc, goal, completion_ctx);
+        // Load audit plan from workflow (Part 2 stores it; fall back to empty plan).
+        let audit_plan = workflow
+            .audit_plan
+            .as_deref()
+            .and_then(|j| serde_json::from_str::<AuditPlan>(j).ok())
+            .unwrap_or_else(|| {
+                tracing::warn!("No audit plan in workflow, using default fallback");
+                Self::fallback_default_audit_plan()
+            });
+
+        // Choose scoring vs. legacy path based on whether raw_principles is populated.
+        let use_scoring = !audit_plan.raw_principles.is_empty();
+
+        let prompt = if use_scoring {
+            Self::build_scoring_review_prompt(&task.name, task_desc, goal, completion_ctx, &audit_plan)
+        } else {
+            Self::build_acceptance_review_prompt(&task.name, task_desc, goal, completion_ctx)
+        };
 
         tracing::info!(
             task_id = %event.task_id,
             terminal_id = %event.terminal_id,
+            scoring_mode = use_scoring,
             "Running acceptance review ({} bytes of code context)",
             completion_ctx.changed_files_content.len()
         );
 
         match self.call_llm_nonfatal(&prompt, "acceptance_review").await {
             Some(response) => {
-                let result = AcceptanceReviewResult::parse(&response);
-                tracing::info!(
-                    task_id = %event.task_id,
-                    verdict = ?result.verdict,
-                    "Acceptance review complete"
-                );
-                Ok(result)
+                if use_scoring {
+                    let score_result = AuditScoreResult::parse(&response);
+                    tracing::info!(
+                        task_id = %event.task_id,
+                        total_score = score_result.total_score,
+                        passed = score_result.passed,
+                        "Acceptance review scoring complete"
+                    );
+                    Ok(score_result.to_acceptance_result())
+                } else {
+                    // Legacy binary review path
+                    let result = AcceptanceReviewResult::parse(&response);
+                    tracing::info!(
+                        task_id = %event.task_id,
+                        verdict = ?result.verdict,
+                        "Acceptance review complete (legacy)"
+                    );
+                    Ok(result)
+                }
             }
             None => {
                 tracing::warn!(
@@ -5345,6 +5440,19 @@ impl OrchestratorAgent {
                     "Acceptance review LLM was unavailable. Retry completion when review service recovers.",
                 ))
             }
+        }
+    }
+
+    /// Fallback audit plan used when no audit plan is stored in the workflow.
+    /// Returns an empty plan (empty `raw_principles`) which triggers the legacy
+    /// binary review path for backward compatibility.
+    fn fallback_default_audit_plan() -> AuditPlan {
+        AuditPlan {
+            mode: AuditMode::Builtin,
+            dimensions: vec![],
+            pass_threshold: 90.0,
+            generated_at: String::new(),
+            raw_principles: String::new(),
         }
     }
 
