@@ -220,9 +220,23 @@ Any CLI that runs in a terminal and supports slash commands can be integrated.
 | Tool | Version | Check |
 |---|---|---|
 | Rust | nightly-2025-12-04 | `rustc --version` |
+| C/C++ toolchain | MSVC Build Tools (Windows) · gcc/clang (Linux/macOS) | — |
+| protoc | 31.1 | `protoc --version` |
+| LLVM / libclang | recent (needed by bindgen) | `clang --version` |
 | Node.js | ≥ 18 (recommend 20) | `node --version` |
 | pnpm | 10.13.1 | `pnpm --version` |
 | Git | Any recent | `git --version` |
+
+> ⚠️ **`protoc` and `LLVM/libclang` are required to build but are NOT installed by `scripts/setup-windows.ps1`** — install them manually:
+>
+> **Windows:** download [`protoc-31.1-win64.zip`](https://github.com/protocolbuffers/protobuf/releases/tag/v31.1), extract it, and add its `bin` to `PATH`; then install LLVM and point `LIBCLANG_PATH` at it:
+> ```powershell
+> winget install LLVM.LLVM
+> [Environment]::SetEnvironmentVariable("PROTOC", "C:\path\to\protoc\bin\protoc.exe", "User")
+> [Environment]::SetEnvironmentVariable("LIBCLANG_PATH", "$env:ProgramFiles\LLVM\bin", "User")
+> ```
+> **Linux (apt):** `sudo apt-get install -y protobuf-compiler clang libclang-dev`
+> **macOS (brew):** `brew install protobuf llvm`
 
 ### Getting Started After Cloning
 
@@ -239,7 +253,9 @@ rustup default nightly-2025-12-04
 
 ```bash
 cargo install cargo-watch
-cargo install sqlx-cli --features sqlite
+# Pin sqlx-cli to 0.8.x — the latest 0.9.0 needs rustc ≥ 1.94, but the pinned
+# nightly-2025-12-04 is rustc 1.93, so an unpinned install fails.
+cargo install sqlx-cli --version 0.8.6 --no-default-features --features rustls,sqlite
 ```
 
 #### 3. Install Node.js Dependencies
@@ -296,6 +312,16 @@ export SOLODAWN_ENCRYPTION_KEY="your-32-character-secret-key-here"
 ```
 
 Production mode serves both frontend and API on a single port: http://localhost:23456
+
+### ⚠️ Common Pitfalls
+
+These trip up first-time setup, especially on Windows:
+
+- **`protoc` and `libclang` are required but are NOT installed by `scripts/setup-windows.ps1`.** Without `protoc`, `crates/services`, `crates/runner`, and `crates/feishu-connector` fail to build (there is no vendored protoc in the lockfile). Without `libclang`, `libsqlite3-sys` fails when bindgen runs (the `sqlite-preupdate-hook` sqlx feature triggers it). Install commands are in [Prerequisites](#prerequisites).
+- **Pin `sqlx-cli` to 0.8.x.** The latest 0.9.0 requires rustc ≥ 1.94, but the pinned `nightly-2025-12-04` is rustc 1.93, so an unpinned `cargo install sqlx-cli` fails.
+- **No database is needed to build.** `.cargo/config.toml` sets `SQLX_OFFLINE=true`, so builds use the committed `crates/db/.sqlx/` query cache. You only need `sqlx-cli` / `pnpm run prepare-db` when you change SQL queries or migrations.
+- **Windows: restart your terminal after installing tools** so it picks up the updated `PATH`, `PROTOC`, and `LIBCLANG_PATH`.
+- **You do NOT need cmake / nasm / perl** for a local build — `libgit2-sys` builds via the `cc` crate, and the dependency tree uses `ring` (not aws-lc).
 
 ### Docker (One-Click Install)
 
