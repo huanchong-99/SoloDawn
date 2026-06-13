@@ -81,3 +81,4 @@ security-framework = "2"
 wiremock = "0.6"
 tokio-test = "0.4"
 rustls = { workspace = true }
+serde_yaml = "0.9"
