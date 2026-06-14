@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { CollapsibleSectionHeader } from '@/components/ui-new/containers/CollapsibleSectionHeader';
@@ -7,7 +6,6 @@ import { ProjectSelectorContainer } from '@/components/ui-new/containers/Project
 import { RecentReposListContainer } from '@/components/ui-new/containers/RecentReposListContainer';
 import { BrowseRepoButtonContainer } from '@/components/ui-new/containers/BrowseRepoButtonContainer';
 import { CreateRepoButtonContainer } from '@/components/ui-new/containers/CreateRepoButtonContainer';
-import { QualityGateRulesDialog } from '@/components/quality/QualityGateRulesDialog';
 import { WarningIcon, LinkSimpleIcon, SlidersHorizontalIcon } from '@phosphor-icons/react';
 import { PERSIST_KEYS } from '@/stores/useUiPreferencesStore';
 import type { Project, GitBranch, Repo } from 'shared/types';
@@ -29,6 +27,7 @@ interface GitPanelCreateProps {
   boundRepoPath: string | null;
   isBinding: boolean;
   onBindRepo: () => void;
+  onOpenQualityGates: () => void;
 }
 
 export function GitPanelCreate({
@@ -48,9 +47,9 @@ export function GitPanelCreate({
   boundRepoPath,
   isBinding,
   onBindRepo,
+  onOpenQualityGates,
 }: Readonly<GitPanelCreateProps>) {
   const { t } = useTranslation(['tasks', 'common']);
-  const [qgOpen, setQgOpen] = useState(false);
   const hasNoRepos = repos.length === 0;
   const firstRepoPath = repos[0]?.path ?? null;
   const isBound = boundRepoPath !== null && boundRepoPath === firstRepoPath;
@@ -78,7 +77,7 @@ export function GitPanelCreate({
         {selectedProjectId && (
           <button
             type="button"
-            onClick={() => setQgOpen(true)}
+            onClick={onOpenQualityGates}
             className={cn(
               'mt-half flex items-center justify-center gap-1.5 w-full px-base py-half',
               'text-xs rounded border bg-brand/10 border-brand/30 text-brand',
@@ -163,14 +162,6 @@ export function GitPanelCreate({
         <BrowseRepoButtonContainer onRepoRegistered={onRepoRegistered} />
         <CreateRepoButtonContainer onRepoCreated={onRepoRegistered} />
       </CollapsibleSectionHeader>
-
-      {selectedProjectId && (
-        <QualityGateRulesDialog
-          open={qgOpen}
-          projectId={selectedProjectId}
-          onClose={() => setQgOpen(false)}
-        />
-      )}
     </div>
   );
 }

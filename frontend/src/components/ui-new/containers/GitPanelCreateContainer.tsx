@@ -6,6 +6,7 @@ import { useProjects } from '@/hooks/useProjects';
 import { useProjectMutations } from '@/hooks/useProjectMutations';
 import { useCreateMode } from '@/contexts/CreateModeContext';
 import { CreateProjectDialog } from '@/components/ui-new/dialogs/CreateProjectDialog';
+import { QualityGateRulesDialog } from '@/components/quality/QualityGateRulesDialog';
 import { repoApi } from '@/lib/api';
 
 interface GitPanelCreateContainerProps {
@@ -29,6 +30,7 @@ export function GitPanelCreateContainer({
   const { updateProject } = useProjectMutations();
   const { showToast } = useToast();
   const [isBinding, setIsBinding] = useState(false);
+  const [qgOpen, setQgOpen] = useState(false);
   const autoLoadedForProject = useRef<string | null>(null);
 
   const repoIds = useMemo(() => repos.map((r) => r.id), [repos]);
@@ -107,26 +109,36 @@ export function GitPanelCreateContainer({
   }, [selectedProjectId, repos, updateProject, showToast]);
 
   return (
-    <GitPanelCreate
-      className={className}
-      repos={repos}
-      projects={projects}
-      selectedProjectId={selectedProjectId}
-      selectedProjectName={selectedProject?.name}
-      onProjectSelect={(p) => {
-        setSelectedProjectId(p.id);
-        autoLoadedForProject.current = null;
-      }}
-      onCreateProject={handleCreateProject}
-      onRepoRemove={removeRepo}
-      branchesByRepo={branchesByRepo}
-      targetBranches={targetBranches}
-      onBranchChange={setTargetBranch}
-      registeredRepoPaths={registeredRepoPaths}
-      onRepoRegistered={addRepo}
-      boundRepoPath={boundRepoPath}
-      isBinding={isBinding}
-      onBindRepo={handleBindRepo}
-    />
+    <>
+      <GitPanelCreate
+        className={className}
+        repos={repos}
+        projects={projects}
+        selectedProjectId={selectedProjectId}
+        selectedProjectName={selectedProject?.name}
+        onProjectSelect={(p) => {
+          setSelectedProjectId(p.id);
+          autoLoadedForProject.current = null;
+        }}
+        onCreateProject={handleCreateProject}
+        onRepoRemove={removeRepo}
+        branchesByRepo={branchesByRepo}
+        targetBranches={targetBranches}
+        onBranchChange={setTargetBranch}
+        registeredRepoPaths={registeredRepoPaths}
+        onRepoRegistered={addRepo}
+        boundRepoPath={boundRepoPath}
+        isBinding={isBinding}
+        onBindRepo={handleBindRepo}
+        onOpenQualityGates={() => setQgOpen(true)}
+      />
+      {selectedProjectId && (
+        <QualityGateRulesDialog
+          open={qgOpen}
+          projectId={selectedProjectId}
+          onClose={() => setQgOpen(false)}
+        />
+      )}
+    </>
   );
 }
