@@ -27,7 +27,7 @@ import {
   useTogglePlanningFeishuSync,
 } from '@/hooks/usePlanningDraft';
 import { CreateChatBox } from '../primitives/CreateChatBox';
-import { WelcomeHero, ExampleChips } from '../primitives/WelcomeHero';
+import { WelcomeHero } from '../primitives/WelcomeHero';
 import { AuditDocPanel } from './AuditDocPanel';
 import { QualityGateConfirmDialog } from '@/components/quality/QualityGateConfirmDialog';
 import { QualityGateRulesDialog } from '@/components/quality/QualityGateRulesDialog';
@@ -788,9 +788,9 @@ export function CreateChatBoxContainer() {
               <button
                 type="button"
                 onClick={() => setRulesDialogOpen(true)}
-                className="inline-flex items-center gap-half rounded-full border border-border px-base py-half font-ibm-plex-sans text-sm text-low transition-colors hover:border-brand/40 hover:text-normal"
+                className="inline-flex items-center gap-half rounded-full border border-brand/40 bg-brand/[0.06] px-double py-half font-ibm-plex-sans text-sm font-medium text-brand shadow-sm transition-colors hover:border-brand hover:bg-brand/[0.12]"
               >
-                <SlidersHorizontal className="size-icon-xs" />
+                <SlidersHorizontal className="size-icon-sm" />
                 {tTasks('conversation.createLanding.qualityGates.button')}
               </button>
               <div className="flex w-full justify-center">
@@ -837,7 +837,6 @@ export function CreateChatBoxContainer() {
                   localImages={localImages}
                 />
               </div>
-              <ExampleChips onPickExample={setMessage} />
             </div>
           </div>
         )}

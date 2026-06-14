@@ -702,21 +702,6 @@
       "headlineAccent": "整个项目交付。",
       "subline": "描述你想要构建的东西，SoloDawn 会自动梳理规格、拆解任务，并独立完成整个项目。",
       "placeholder": "描述你想要构建的内容…",
-      "examplesLabel": "试试这些示例",
-      "examples": {
-        "one": {
-          "label": "实时协作",
-          "prompt": "构建一个支持拖拽、在线光标和离线同步的实时协作看板。"
-        },
-        "two": {
-          "label": "命令行工具",
-          "prompt": "用 Rust 写一个命令行工具，监听文件夹、把新视频转码为网页友好格式，并生成清单文件。"
-        },
-        "three": {
-          "label": "数据看板",
-          "prompt": "做一个可自托管的分析看板，接收 webhook 事件并用可筛选的图表实时展示。"
-        }
-      },
       "qualityGates": {
         "button": "质量门禁规则",
         "needProject": "请先选择一个项目以编辑其质量门禁。",

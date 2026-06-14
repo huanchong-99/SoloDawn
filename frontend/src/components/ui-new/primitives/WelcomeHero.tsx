@@ -1,6 +1,4 @@
 import { useTranslation } from 'react-i18next';
-import { ArrowUpRightIcon } from '@phosphor-icons/react';
-import { cn } from '@/lib/utils';
 
 /**
  * SoloDawn "dawn mark" — a sunrise cresting a horizon line with radiating
@@ -56,11 +54,6 @@ function DawnMark({ className }: Readonly<{ className?: string }>) {
   );
 }
 
-interface ExampleChip {
-  readonly label: string;
-  readonly prompt: string;
-}
-
 export function WelcomeHero() {
   const { t } = useTranslation('tasks');
 
@@ -101,58 +94,6 @@ export function WelcomeHero() {
       >
         {t('conversation.createLanding.subline')}
       </p>
-    </div>
-  );
-}
-
-interface ExampleChipsProps {
-  readonly onPickExample: (prompt: string) => void;
-}
-
-/**
- * Row of SoloDawn-flavored example project ideas. Rendered below the chat box
- * so the input stays the focal point; clicking prefills the editor.
- */
-export function ExampleChips({ onPickExample }: Readonly<ExampleChipsProps>) {
-  const { t } = useTranslation('tasks');
-
-  const examples: ExampleChip[] = (['one', 'two', 'three'] as const).map(
-    (key) => ({
-      label: t(`conversation.createLanding.examples.${key}.label`),
-      prompt: t(`conversation.createLanding.examples.${key}.prompt`),
-    })
-  );
-
-  return (
-    <div
-      className="hero-reveal flex w-chat max-w-full flex-col items-center gap-base px-base"
-      style={{ '--hero-i': 5 } as React.CSSProperties}
-    >
-      <span className="font-ibm-plex-mono text-xs uppercase tracking-[0.2em] text-low">
-        {t('conversation.createLanding.examplesLabel')}
-      </span>
-      <div className="flex flex-wrap justify-center gap-base">
-        {examples.map((ex) => (
-          <button
-            key={ex.label}
-            type="button"
-            onClick={() => onPickExample(ex.prompt)}
-            title={ex.prompt}
-            className={cn(
-              'group flex items-center gap-base rounded-sm border border-border bg-secondary/60 px-base py-half',
-              'text-sm text-normal transition-all duration-200',
-              'hover:border-brand/50 hover:bg-brand/[0.08] hover:text-high',
-              'focus:outline-none focus:ring-1 focus:ring-brand'
-            )}
-          >
-            <span className="font-ibm-plex-sans">{ex.label}</span>
-            <ArrowUpRightIcon
-              className="size-icon-xs text-low transition-colors group-hover:text-brand"
-              weight="bold"
-            />
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

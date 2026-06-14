@@ -249,21 +249,6 @@
       "headlineAccent": "A whole project out.",
       "subline": "Describe what you want to build. SoloDawn plans the spec, breaks down the work, and ships the entire project on its own.",
       "placeholder": "Describe what you want to build…",
-      "examplesLabel": "Try one of these",
-      "examples": {
-        "one": {
-          "label": "Realtime collaboration",
-          "prompt": "Build a realtime collaborative kanban board with drag-and-drop, presence cursors, and offline sync."
-        },
-        "two": {
-          "label": "CLI tool",
-          "prompt": "Create a Rust CLI that watches a folder, transcodes new videos to web-friendly formats, and writes a manifest."
-        },
-        "three": {
-          "label": "Data dashboard",
-          "prompt": "Ship a self-hosted analytics dashboard that ingests webhook events and renders live charts with filters."
-        }
-      },
       "qualityGates": {
         "button": "Quality gate rules",
         "needProject": "Select a project to edit its quality gates.",
