@@ -14,12 +14,10 @@ import { useNavigate } from 'react-router-dom';
 import { ViewProcessesDialog } from '@/components/dialogs/tasks/ViewProcessesDialog';
 import { CreateAttemptDialog } from '@/components/dialogs/tasks/CreateAttemptDialog';
 import { GitActionsDialog } from '@/components/dialogs/tasks/GitActionsDialog';
-import { useOpenInEditor } from '@/hooks/useOpenInEditor';
 import { useDiffSummary } from '@/hooks/useDiffSummary';
 import { useDevServer } from '@/hooks/useDevServer';
 import { useHasDevServerScript } from '@/hooks/useHasDevServerScript';
 import { Button } from '@/components/ui/button';
-import { IdeIcon, getIdeName } from '@/components/ide/IdeIcon';
 import { useUserSystem } from '@/components/ConfigProvider';
 import { useProject } from '@/contexts/ProjectContext';
 import { useQuery } from '@tanstack/react-query';
@@ -27,7 +25,6 @@ import { attemptsApi } from '@/lib/api';
 import {
   BaseAgentCapability,
   type BaseCodingAgent,
-  type EditorType,
   type ExecutionProcess,
   type TaskWithAttemptStatus,
 } from 'shared/types';
@@ -129,12 +126,9 @@ function FileActionToolbar({
   copied,
   handleCopy,
   handleOpenDiffs,
-  handleOpenInEditor,
   handleViewLogs,
   handleGitActions,
   attemptId,
-  editorName,
-  editorType,
   hasRunningDevServer,
   projectHasDevScript,
   isStarting,
@@ -148,12 +142,9 @@ function FileActionToolbar({
   copied: boolean;
   handleCopy: () => void;
   handleOpenDiffs: () => void;
-  handleOpenInEditor: () => void;
   handleViewLogs: () => void;
   handleGitActions: () => void;
   attemptId?: string;
-  editorName: string;
-  editorType?: EditorType | null;
   hasRunningDevServer: boolean;
   projectHasDevScript: boolean;
   isStarting: boolean;
@@ -184,15 +175,6 @@ function FileActionToolbar({
           <TooltipContent>{copied ? t('attempt.copied') : t('attempt.clickToCopy')}</TooltipContent>
         </Tooltip>
       )}
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleOpenInEditor} disabled={!attemptId} aria-label={t('attempt.openInEditor', { editor: editorName })}>
-            <IdeIcon editorType={editorType} className="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t('attempt.openInEditor', { editor: editorName })}</TooltipContent>
-      </Tooltip>
 
       <Tooltip>
         <TooltipTrigger asChild>
@@ -245,7 +227,6 @@ export function NextActionCard({
   needsSetup,
 }: Readonly<NextActionCardProps>) {
   const { t } = useTranslation('tasks');
-  const { config } = useUserSystem();
   const { projectId } = useProject();
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
@@ -266,7 +247,6 @@ export function NextActionCard({
   });
   const { capabilities } = useUserSystem();
 
-  const openInEditor = useOpenInEditor(attemptId);
   const { fileCount, added, deleted, error } = useDiffSummary(
     attemptId ?? null
   );
@@ -301,10 +281,6 @@ export function NextActionCard({
       console.warn('Copy to clipboard failed:', err);
     }
   }, [containerRef]);
-
-  const handleOpenInEditor = useCallback(() => {
-    openInEditor();
-  }, [openInEditor]);
 
   const handleViewLogs = useCallback(() => {
     if (sessionId) {
@@ -358,8 +334,6 @@ export function NextActionCard({
   const setupHelpText = canAutoSetup
     ? t('attempt.setupHelpText', { agent: attempt?.session?.executor })
     : null;
-
-  const editorName = getIdeName(config?.editor?.editorType);
 
   const shouldHide =
     (!failed || (execution_processes > 2 && !needsSetup)) && fileCount === 0;
@@ -419,12 +393,9 @@ export function NextActionCard({
               copied={copied}
               handleCopy={handleCopy}
               handleOpenDiffs={handleOpenDiffs}
-              handleOpenInEditor={handleOpenInEditor}
               handleViewLogs={handleViewLogs}
               handleGitActions={handleGitActions}
               attemptId={attemptId}
-              editorName={editorName}
-              editorType={config?.editor?.editorType}
               hasRunningDevServer={hasRunningDevServer}
               projectHasDevScript={projectHasDevScript}
               isStarting={isStarting}

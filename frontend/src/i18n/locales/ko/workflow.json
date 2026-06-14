@@ -111,10 +111,7 @@
     "taskCountOption_one": "{{count}} task",
     "taskCountOption_other": "{{count}} tasks",
     "customCountLabel": "Custom",
-    "customCountPlaceholder": "5-10",
-    "importLabel": "Task source",
-    "importNew": "Create new tasks",
-    "importKanban": "Import from kanban (pick existing cards)"
+    "customCountPlaceholder": "5-10"
   },
   "step2": {
     "header": "Configure {{count}} parallel tasks",
@@ -403,8 +400,7 @@
     "hint": "Click on a terminal to view details",
     "orchestrator": {
       "statusLabel": "Status:",
-      "modelLabel": "Model:",
-      "tokensUsedLabel": "Tokens Used"
+      "modelLabel": "Model:"
     }
   },
   "terminalCard": {

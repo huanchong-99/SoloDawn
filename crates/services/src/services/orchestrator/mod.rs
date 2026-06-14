@@ -12,6 +12,7 @@ pub mod llm;
 pub mod message_bus;
 pub mod persistence;
 pub mod prompt_handler;
+pub mod quality_policy;
 pub mod resilient_llm;
 pub mod runtime;
 pub mod runtime_actions;

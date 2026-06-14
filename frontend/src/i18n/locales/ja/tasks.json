@@ -27,7 +27,6 @@
     "duplicate": "Duplicate",
     "editBranchName": "ブランチ名を編集",
     "gitActions": "Gitアクション",
-    "openInIde": "Open attempt in IDE",
     "task": "Task",
     "viewProcesses": "View processes",
     "viewRelatedTasks": "View related tasks",
@@ -55,7 +54,6 @@
   },
   "attempt": {
     "actions": {
-      "openInIde": "IDEで開く",
       "openMenu": "メニューを開く",
       "startDevServer": "開発サーバーを開始",
       "stopDevServer": "開発サーバーを停止"
@@ -74,7 +72,6 @@
       "summaryAndActions": "概要とアクション"
     },
     "newAttempt": "New Attempt",
-    "openInEditor": "Open in {{editor}}",
     "path": "Path",
     "pauseDev": "Dev を一時停止",
     "preview": "Preview",

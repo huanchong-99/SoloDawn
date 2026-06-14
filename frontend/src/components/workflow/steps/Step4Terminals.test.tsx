@@ -24,7 +24,6 @@ describe('Step4Terminals', () => {
     basic: {
       name: 'Test Workflow',
       taskCount: 2,
-      importFromKanban: false,
     },
     tasks: [
       {
@@ -127,12 +126,12 @@ describe('Step4Terminals', () => {
   it('should show CLI installation status', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockFetch.mockResolvedValueOnce(
-      createFetchResponse({
-        'claude-code': true,
-        'gemini-cli': false,
-        codex: false,
-        'cursor-agent': false,
-      })
+      createFetchResponse([
+        { cliTypeId: 'cli-claude-code', name: 'claude-code', displayName: 'Claude Code', installed: true, version: null, executablePath: null, installGuideUrl: null },
+        { cliTypeId: 'cli-gemini-cli', name: 'gemini-cli', displayName: 'Gemini CLI', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/gemini-cli' },
+        { cliTypeId: 'cli-codex', name: 'codex', displayName: 'Codex', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/codex' },
+        { cliTypeId: 'cli-cursor-agent', name: 'cursor-agent', displayName: 'Cursor Agent', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/cursor-agent' },
+      ])
     );
 
     renderWithI18n(
@@ -155,12 +154,12 @@ describe('Step4Terminals', () => {
 
   it('should show install guide links for uninstalled CLIs', async () => {
     mockFetch.mockResolvedValueOnce(
-      createFetchResponse({
-        'claude-code': true,
-        'gemini-cli': false,
-        codex: false,
-        'cursor-agent': false,
-      })
+      createFetchResponse([
+        { cliTypeId: 'cli-claude-code', name: 'claude-code', displayName: 'Claude Code', installed: true, version: null, executablePath: null, installGuideUrl: null },
+        { cliTypeId: 'cli-gemini-cli', name: 'gemini-cli', displayName: 'Gemini CLI', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/gemini-cli' },
+        { cliTypeId: 'cli-codex', name: 'codex', displayName: 'Codex', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/codex' },
+        { cliTypeId: 'cli-cursor-agent', name: 'cursor-agent', displayName: 'Cursor Agent', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/cursor-agent' },
+      ])
     );
 
     renderWithI18n(
@@ -216,12 +215,12 @@ describe('Step4Terminals', () => {
     };
 
     mockFetch.mockResolvedValueOnce(
-      createFetchResponse({
-        'claude-code': true,
-        'gemini-cli': false,
-        codex: false,
-        'cursor-agent': false,
-      })
+      createFetchResponse([
+        { cliTypeId: 'cli-claude-code', name: 'claude-code', displayName: 'Claude Code', installed: true, version: null, executablePath: null, installGuideUrl: null },
+        { cliTypeId: 'cli-gemini-cli', name: 'gemini-cli', displayName: 'Gemini CLI', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/gemini-cli' },
+        { cliTypeId: 'cli-codex', name: 'codex', displayName: 'Codex', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/codex' },
+        { cliTypeId: 'cli-cursor-agent', name: 'cursor-agent', displayName: 'Cursor Agent', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/cursor-agent' },
+      ])
     );
 
     renderWithI18n(
@@ -261,9 +260,9 @@ describe('Step4Terminals', () => {
     };
 
     mockFetch.mockResolvedValueOnce(
-      createFetchResponse({
-        'claude-code': true,
-      })
+      createFetchResponse([
+        { cliTypeId: 'cli-claude-code', name: 'claude-code', displayName: 'Claude Code', installed: true, version: null, executablePath: null, installGuideUrl: null },
+      ])
     );
 
     renderWithI18n(
@@ -295,7 +294,7 @@ describe('Step4Terminals', () => {
           id: 'terminal-task-1-0',
           taskId: 'task-1',
           orderIndex: 0,
-          cliTypeId: 'claude-code',
+          cliTypeId: 'cli-claude-code',
           modelConfigId: '',
           role: '',
         },
@@ -303,12 +302,12 @@ describe('Step4Terminals', () => {
     };
 
     mockFetch.mockResolvedValueOnce(
-      createFetchResponse({
-        'claude-code': true,
-        'gemini-cli': false,
-        codex: false,
-        'cursor-agent': false,
-      })
+      createFetchResponse([
+        { cliTypeId: 'cli-claude-code', name: 'claude-code', displayName: 'Claude Code', installed: true, version: null, executablePath: null, installGuideUrl: null },
+        { cliTypeId: 'cli-gemini-cli', name: 'gemini-cli', displayName: 'Gemini CLI', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/gemini-cli' },
+        { cliTypeId: 'cli-codex', name: 'codex', displayName: 'Codex', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/codex' },
+        { cliTypeId: 'cli-cursor-agent', name: 'cursor-agent', displayName: 'Cursor Agent', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/cursor-agent' },
+      ])
     );
 
     renderWithI18n(
@@ -335,7 +334,7 @@ describe('Step4Terminals', () => {
           id: 'terminal-task-1-0',
           taskId: 'task-1',
           orderIndex: 0,
-          cliTypeId: 'claude-code',
+          cliTypeId: 'cli-claude-code',
           modelConfigId: 'model-1',
           role: '',
         },
@@ -343,12 +342,12 @@ describe('Step4Terminals', () => {
     };
 
     mockFetch.mockResolvedValueOnce(
-      createFetchResponse({
-        'claude-code': true,
-        'gemini-cli': false,
-        codex: false,
-        'cursor-agent': false,
-      })
+      createFetchResponse([
+        { cliTypeId: 'cli-claude-code', name: 'claude-code', displayName: 'Claude Code', installed: true, version: null, executablePath: null, installGuideUrl: null },
+        { cliTypeId: 'cli-gemini-cli', name: 'gemini-cli', displayName: 'Gemini CLI', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/gemini-cli' },
+        { cliTypeId: 'cli-codex', name: 'codex', displayName: 'Codex', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/codex' },
+        { cliTypeId: 'cli-cursor-agent', name: 'cursor-agent', displayName: 'Cursor Agent', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/cursor-agent' },
+      ])
     );
 
     renderWithI18n(
@@ -388,12 +387,12 @@ describe('Step4Terminals', () => {
     };
 
     mockFetch.mockResolvedValueOnce(
-      createFetchResponse({
-        'claude-code': true,
-        'gemini-cli': false,
-        codex: false,
-        'cursor-agent': false,
-      })
+      createFetchResponse([
+        { cliTypeId: 'cli-claude-code', name: 'claude-code', displayName: 'Claude Code', installed: true, version: null, executablePath: null, installGuideUrl: null },
+        { cliTypeId: 'cli-gemini-cli', name: 'gemini-cli', displayName: 'Gemini CLI', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/gemini-cli' },
+        { cliTypeId: 'cli-codex', name: 'codex', displayName: 'Codex', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/codex' },
+        { cliTypeId: 'cli-cursor-agent', name: 'cursor-agent', displayName: 'Cursor Agent', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/cursor-agent' },
+      ])
     );
 
     renderWithI18n(
@@ -438,12 +437,12 @@ describe('Step4Terminals', () => {
     };
 
     mockFetch.mockResolvedValueOnce(
-      createFetchResponse({
-        'claude-code': true,
-        'gemini-cli': false,
-        codex: false,
-        'cursor-agent': false,
-      })
+      createFetchResponse([
+        { cliTypeId: 'cli-claude-code', name: 'claude-code', displayName: 'Claude Code', installed: true, version: null, executablePath: null, installGuideUrl: null },
+        { cliTypeId: 'cli-gemini-cli', name: 'gemini-cli', displayName: 'Gemini CLI', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/gemini-cli' },
+        { cliTypeId: 'cli-codex', name: 'codex', displayName: 'Codex', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/codex' },
+        { cliTypeId: 'cli-cursor-agent', name: 'cursor-agent', displayName: 'Cursor Agent', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/cursor-agent' },
+      ])
     );
 
     renderWithI18n(
@@ -478,7 +477,7 @@ describe('Step4Terminals', () => {
           id: 'terminal-task-1-1',
           taskId: 'task-1',
           orderIndex: 1,
-          cliTypeId: 'claude-code',
+          cliTypeId: 'cli-claude-code',
           modelConfigId: 'model-1',
           role: 'Second terminal',
         },
@@ -486,7 +485,7 @@ describe('Step4Terminals', () => {
           id: 'terminal-task-1-0',
           taskId: 'task-1',
           orderIndex: 0,
-          cliTypeId: 'gemini-cli',
+          cliTypeId: 'cli-gemini-cli',
           modelConfigId: 'model-1',
           role: 'First terminal',
         },
@@ -494,12 +493,12 @@ describe('Step4Terminals', () => {
     };
 
     mockFetch.mockResolvedValueOnce(
-      createFetchResponse({
-        'claude-code': true,
-        'gemini-cli': true,
-        codex: false,
-        'cursor-agent': false,
-      })
+      createFetchResponse([
+        { cliTypeId: 'cli-claude-code', name: 'claude-code', displayName: 'Claude Code', installed: true, version: null, executablePath: null, installGuideUrl: null },
+        { cliTypeId: 'cli-gemini-cli', name: 'gemini-cli', displayName: 'Gemini CLI', installed: true, version: null, executablePath: null, installGuideUrl: null },
+        { cliTypeId: 'cli-codex', name: 'codex', displayName: 'Codex', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/codex' },
+        { cliTypeId: 'cli-cursor-agent', name: 'cursor-agent', displayName: 'Cursor Agent', installed: false, version: null, executablePath: null, installGuideUrl: 'https://example.com/install/cursor-agent' },
+      ])
     );
 
     renderWithI18n(

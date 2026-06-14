@@ -10,7 +10,6 @@ import {
   type RepoWithTargetBranch,
 } from 'shared/types';
 import type { WorkspaceWithSession } from '@/types/attempt';
-import { DiffLineType, parseInstance } from '@git-diff-view/react';
 import {
   usePersistedExpanded,
   type PersistKey,
@@ -31,13 +30,16 @@ import {
   ChatFileEntry,
   ChatApprovalCard,
   ChatUserMessage,
-  ChatAssistantMessage,
+  ChatMarkdown,
   ChatSystemMessage,
   ChatThinkingMessage,
   ChatErrorMessage,
   ChatScriptEntry,
 } from '../primitives/conversation';
-import type { DiffInput } from '../primitives/conversation/DiffViewCard';
+import {
+  parseDiffStats,
+  type DiffInput,
+} from '../primitives/conversation/DiffViewCard';
 
 type Props = Readonly<{
   entry: NormalizedEntry;
@@ -48,51 +50,6 @@ type Props = Readonly<{
 }>;
 
 type FileEditAction = Extract<ActionType, { action: 'file_edit' }>;
-
-/**
- * Parse unified diff to extract addition/deletion counts
- */
-function parseParsedDiffStats(unifiedDiff: string): {
-  additions: number;
-  deletions: number;
-} {
-  let additions = 0;
-  let deletions = 0;
-  const parsed = parseInstance.parse(unifiedDiff);
-  for (const h of parsed.hunks) {
-    for (const line of h.lines) {
-      if (line.type === DiffLineType.Add) additions++;
-      else if (line.type === DiffLineType.Delete) deletions++;
-    }
-  }
-  return { additions, deletions };
-}
-
-function parseFallbackDiffStats(unifiedDiff: string): {
-  additions: number;
-  deletions: number;
-} {
-  let additions = 0;
-  let deletions = 0;
-  const lines = unifiedDiff.split('\n');
-  for (const line of lines) {
-    if (line.startsWith('+') && !line.startsWith('+++')) additions++;
-    else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
-  }
-  return { additions, deletions };
-}
-
-function parseDiffStats(unifiedDiff: string): {
-  additions: number;
-  deletions: number;
-} {
-  try {
-    return parseParsedDiffStats(unifiedDiff);
-  } catch {
-    // Fallback: count lines starting with + or -
-    return parseFallbackDiffStats(unifiedDiff);
-  }
-}
 
 /**
  * Generate tool summary text from action type
@@ -567,7 +524,7 @@ function AssistantMessageEntry({
   content: string;
   workspaceId?: string;
 }>) {
-  return <ChatAssistantMessage content={content} workspaceId={workspaceId} />;
+  return <ChatMarkdown content={content} workspaceId={workspaceId} />;
 }
 
 /**

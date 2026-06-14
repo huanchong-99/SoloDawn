@@ -42,7 +42,6 @@ export function StatusBar({ workflowId }: Readonly<StatusBarProps>) {
         {t('statusBar.orchestrator')} {orchestratorStatus}
       </span>
       <span className="ml-4">{t('statusBar.terminalsRunning', { count: runningTerminalsCount })}</span>
-      <span className="ml-4">{t('statusBar.tokensNA')}</span>
       <span className="ml-4">{t('statusBar.git')} {gitStatusText[connectionStatus]}</span>
     </div>
   );

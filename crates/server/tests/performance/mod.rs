@@ -8,4 +8,3 @@
 
 pub mod terminal_perf_test;
 pub mod websocket_perf_test;
-pub mod database_perf_test;

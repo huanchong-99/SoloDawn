@@ -100,28 +100,6 @@ pub trait ContainerService {
 
     async fn delete(&self, workspace: &Workspace) -> Result<(), ContainerError>;
 
-    /// Check if a task has any running execution processes
-    async fn has_running_processes(&self, task_id: Uuid) -> Result<bool, ContainerError> {
-        let workspaces = Workspace::fetch_all(&self.db().pool, Some(task_id)).await?;
-
-        for workspace in workspaces {
-            let sessions = Session::find_by_workspace_id(&self.db().pool, workspace.id).await?;
-            for session in sessions {
-                if let Ok(processes) =
-                    ExecutionProcess::find_by_session_id(&self.db().pool, session.id, false).await
-                {
-                    for process in processes {
-                        if process.status == ExecutionProcessStatus::Running {
-                            return Ok(true);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(false)
-    }
-
     /// A context is finalized when
     /// - Always when the execution process has failed or been killed
     /// - Never when the run reason is DevServer
@@ -243,6 +221,12 @@ pub trait ContainerService {
                     );
                     return;
                 }
+                // G3 (P3 §2.9 Site 3): advisory/shadow workspace gate. Only
+                // workspace_id + task_id are in scope here; project_id is not
+                // trivially reachable (would need workspace→workflow→project
+                // lookups), so we keep the filesystem from_project path. The two
+                // enforcing gates (terminal + branch/repo in agent.rs) already
+                // apply the DB priority-0 policy via resolve_quality_config.
                 match quality::engine::QualityEngine::from_project(path) {
                     Ok(engine) => {
                         match engine

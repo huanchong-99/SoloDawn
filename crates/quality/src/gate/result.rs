@@ -98,20 +98,6 @@ impl EvaluationResult {
         }
     }
 
-    /// 创建 WARN 结果
-    pub fn warn(
-        metric: MetricKey,
-        value: Option<MeasureValue>,
-        message: impl Into<String>,
-    ) -> Self {
-        Self {
-            level: Level::Warn,
-            metric,
-            value,
-            message: Some(message.into()),
-        }
-    }
-
     /// 创建 ERROR 结果
     pub fn error(metric: MetricKey, value: Option<MeasureValue>) -> Self {
         Self {

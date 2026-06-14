@@ -7,3 +7,4 @@ export { McpSettingsNew } from './McpSettingsNew';
 export { FeishuSettingsNew } from './FeishuSettingsNew';
 export { OrganizationSettingsNew } from './OrganizationSettingsNew';
 export { RuntimeSettingsNew } from './RuntimeSettingsNew';
+export { QualityGateSettingsNew } from './QualityGateSettingsNew';

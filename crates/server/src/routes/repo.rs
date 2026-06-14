@@ -1,5 +1,3 @@
-use std::path::{Component, PathBuf};
-
 use axum::{
     Router,
     extract::{Path, Query, State},
@@ -17,11 +15,7 @@ use ts_rs::TS;
 use utils::response::ApiResponse;
 use uuid::Uuid;
 
-use crate::{
-    DeploymentImpl,
-    error::ApiError,
-    routes::projects::{OpenEditorRequest, OpenEditorResponse},
-};
+use crate::{DeploymentImpl, error::ApiError};
 
 fn map_search_repo_lookup_error(err: services::services::repo::RepoError) -> ApiError {
     match err {
@@ -50,85 +44,6 @@ pub struct InitRepoRequest {
 #[ts(export)]
 pub struct BatchRepoRequest {
     pub ids: Vec<Uuid>,
-}
-
-fn resolve_repo_file_path_for_editor(
-    repo_path: &std::path::Path,
-    file_path: &str,
-) -> Result<PathBuf, ApiError> {
-    let trimmed_file_path = file_path.trim();
-    if trimmed_file_path.is_empty() {
-        return Ok(repo_path.to_path_buf());
-    }
-
-    let relative_path = PathBuf::from(trimmed_file_path);
-    if relative_path.is_absolute() {
-        return Err(ApiError::BadRequest(
-            "file_path must be relative to the repository root".to_string(),
-        ));
-    }
-
-    if relative_path.components().any(|component| {
-        matches!(
-            component,
-            Component::ParentDir | Component::Prefix(_) | Component::RootDir
-        )
-    }) {
-        return Err(ApiError::BadRequest(
-            "file_path must stay within the selected repository".to_string(),
-        ));
-    }
-
-    Ok(repo_path.join(relative_path))
-}
-
-fn resolve_editor_target_file_hint(
-    path: &std::path::Path,
-    fallback_is_file: bool,
-) -> Result<bool, ApiError> {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => Ok(true),
-        Ok(metadata) if metadata.is_dir() => Ok(false),
-        Ok(_) => Err(ApiError::BadRequest(
-            "open-editor target must be a file or directory".to_string(),
-        )),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(fallback_is_file),
-        Err(err) => Err(ApiError::Io(err)),
-    }
-}
-
-#[cfg(test)]
-mod open_editor_path_tests {
-    use std::path::Path;
-
-    use tempfile::tempdir;
-
-    use super::{resolve_editor_target_file_hint, resolve_repo_file_path_for_editor};
-
-    #[test]
-    fn rejects_parent_dir_file_path_for_repo_open_editor() {
-        let result = resolve_repo_file_path_for_editor(Path::new("/repo"), "../outside");
-        assert!(result.is_err(), "parent traversal must be rejected");
-    }
-
-    #[test]
-    fn resolves_directory_hint_for_existing_directory() {
-        let temp = tempdir().expect("temp dir");
-
-        let is_file = resolve_editor_target_file_hint(temp.path(), true).expect("hint");
-
-        assert!(!is_file, "existing directory must not be treated as file");
-    }
-
-    #[test]
-    fn keeps_file_hint_for_non_existing_target() {
-        let temp = tempdir().expect("temp dir");
-        let missing_path = temp.path().join("missing.ts");
-
-        let is_file = resolve_editor_target_file_hint(missing_path.as_path(), true).expect("hint");
-
-        assert!(is_file, "missing file should keep fallback file hint");
-    }
 }
 
 pub async fn register_repo(
@@ -212,71 +127,6 @@ pub async fn update_repo(
     Ok(ResponseJson(ApiResponse::success(repo)))
 }
 
-pub async fn open_repo_in_editor(
-    State(deployment): State<DeploymentImpl>,
-    Path(repo_id): Path<Uuid>,
-    ResponseJson(payload): ResponseJson<Option<OpenEditorRequest>>,
-) -> Result<ResponseJson<ApiResponse<OpenEditorResponse>>, ApiError> {
-    let repo = deployment
-        .repo()
-        .get_by_id(&deployment.db().pool, repo_id)
-        .await?;
-
-    let editor_config = {
-        let config = deployment.config().read().await;
-        let editor_type_str = payload.as_ref().and_then(|req| req.editor_type.as_deref());
-        config.editor.with_override(editor_type_str)
-    };
-
-    let file_path = payload
-        .as_ref()
-        .and_then(|request| request.file_path.as_deref())
-        .filter(|value| !value.trim().is_empty());
-
-    let (path, is_file_hint) = if let Some(file_path) = file_path {
-        let path = resolve_repo_file_path_for_editor(repo.path.as_path(), file_path)?;
-        let is_file_hint = resolve_editor_target_file_hint(path.as_path(), true)?;
-        (path, is_file_hint)
-    } else {
-        let path = repo.path.clone();
-        let is_file_hint = resolve_editor_target_file_hint(path.as_path(), false)?;
-        (path, is_file_hint)
-    };
-
-    match editor_config
-        .open_file_with_hint(path.as_path(), Some(is_file_hint))
-        .await
-    {
-        Ok(url) => {
-            tracing::info!(
-                "Opened editor for repo {} at path: {}{}",
-                repo_id,
-                path.to_string_lossy(),
-                if url.is_some() { " (remote mode)" } else { "" }
-            );
-
-            deployment
-                .track_if_analytics_allowed(
-                    "repo_editor_opened",
-                    serde_json::json!({
-                        "repo_id": repo_id.to_string(),
-                        "editor_type": payload.as_ref().and_then(|req| req.editor_type.as_ref()),
-                        "remote_mode": url.is_some(),
-                    }),
-                )
-                .await;
-
-            Ok(ResponseJson(ApiResponse::success(OpenEditorResponse {
-                url,
-            })))
-        }
-        Err(e) => {
-            tracing::error!("Failed to open editor for repo {}: {:?}", repo_id, e);
-            Err(ApiError::EditorOpen(e))
-        }
-    }
-}
-
 pub async fn search_repo(
     State(deployment): State<DeploymentImpl>,
     Path(repo_id): Path<Uuid>,
@@ -351,5 +201,4 @@ pub fn router() -> Router<DeploymentImpl> {
         .route("/repos/{repo_id}", get(get_repo).put(update_repo))
         .route("/repos/{repo_id}/branches", get(get_repo_branches))
         .route("/repos/{repo_id}/search", get(search_repo))
-        .route("/repos/{repo_id}/open-editor", post(open_repo_in_editor))
 }

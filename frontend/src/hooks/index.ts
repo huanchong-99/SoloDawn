@@ -1,7 +1,6 @@
 export { useBranchStatus } from './useBranchStatus';
 export { useAttemptExecution } from './useAttemptExecution';
-export { useOpenInEditor } from './useOpenInEditor';
-export { useTaskAttempt, useTaskAttemptWithSession } from './useTaskAttempt';
+export { useTaskAttemptWithSession } from './useTaskAttempt';
 export { useTaskImages } from './useTaskImages';
 export { useImageUpload } from './useImageUpload';
 export { useTaskMutations } from './useTaskMutations';

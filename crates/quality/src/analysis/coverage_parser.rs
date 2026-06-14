@@ -1,6 +1,6 @@
 //! Coverage report parser for lcov and Cobertura XML formats.
 
-use std::path::Path;
+use std::{path::Path, sync::OnceLock};
 
 use anyhow::{self, Context};
 use regex::Regex;
@@ -107,11 +107,16 @@ pub fn parse_lcov(content: &str) -> anyhow::Result<CoverageReport> {
 ///
 /// Line and branch counts are extracted from `lines-covered`, `lines-valid`,
 /// `branches-covered`, and `branches-valid` attributes when present.
+fn coverage_tag_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?s)<coverage\b([^>]*)>").expect("coverage tag regex must compile")
+    })
+}
+
 pub fn parse_cobertura(content: &str) -> anyhow::Result<CoverageReport> {
     // Extract the <coverage ...> opening tag (may span multiple lines).
-    let coverage_re =
-        Regex::new(r"(?s)<coverage\b([^>]*)>").context("failed to compile coverage regex")?;
-    let caps = coverage_re
+    let caps = coverage_tag_re()
         .captures(content)
         .context("no <coverage> element found in Cobertura XML")?;
     let attrs = &caps[1];

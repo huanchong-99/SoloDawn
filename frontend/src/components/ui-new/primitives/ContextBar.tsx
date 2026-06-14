@@ -1,9 +1,7 @@
 import type { RefObject } from 'react';
 import type { Icon } from '@phosphor-icons/react';
-import type { EditorType } from 'shared/types';
 import { cn } from '@/lib/utils';
 import { Tooltip } from './Tooltip';
-import { IdeIcon } from '@/components/ide/IdeIcon';
 import { useContextBarPosition } from '@/hooks/useContextBarPosition';
 import {
   type ActionDefinition,
@@ -105,8 +103,6 @@ export interface ContextBarProps {
   readonly actionContext: ActionVisibilityContext;
   // Handler to execute an action
   readonly onExecuteAction: (action: ActionDefinition) => void;
-  // IDE editor type for rendering IdeIcon
-  readonly editorType?: EditorType | null;
 }
 
 /**
@@ -141,7 +137,6 @@ export function ContextBar({
   secondaryItems = [],
   actionContext,
   onExecuteAction,
-  editorType,
 }: Readonly<ContextBarProps>) {
   const { style, isDragging, dragHandlers } =
     useContextBarPosition(containerRef);
@@ -160,25 +155,6 @@ export function ContextBar({
 
     // Handle special icon types
     if (isSpecialIcon(iconType)) {
-      if (iconType === 'ide-icon') {
-        // Render IDE icon
-        return (
-          <Tooltip key={key} content={tooltip} side="left">
-            <button
-              className="flex items-center justify-center transition-colors drop-shadow-[2px_2px_4px_rgba(121,121,121,0.25)]"
-              aria-label={tooltip}
-              onClick={() => onExecuteAction(action)}
-              disabled={!enabled}
-            >
-              <IdeIcon
-                editorType={editorType}
-                className="size-icon-xs opacity-50 group-hover:opacity-80 transition-opacity"
-              />
-            </button>
-          </Tooltip>
-        );
-      }
-
       if (iconType === 'copy-icon') {
         // Render copy button with self-contained feedback state
         return (

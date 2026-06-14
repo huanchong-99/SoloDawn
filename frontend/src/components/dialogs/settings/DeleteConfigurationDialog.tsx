@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -8,8 +7,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2 } from 'lucide-react';
 import NiceModal, { useModal } from '@ebay/nice-modal-react';
 import { defineModal } from '@/lib/modals';
 
@@ -24,22 +21,10 @@ const DeleteConfigurationDialogImpl =
   NiceModal.create<DeleteConfigurationDialogProps>(
     ({ configName, executorType }) => {
       const modal = useModal();
-      const [isDeleting, setIsDeleting] = useState(false);
-      const [error, setError] = useState<string | null>(null);
 
-      const handleDelete = async () => {
-        setIsDeleting(true);
-        setError(null);
-
-        try {
-          // Resolve with 'deleted' to let parent handle the deletion
-          modal.resolve('deleted' as DeleteConfigurationResult);
-          modal.hide();
-        } catch (error) {
-          console.error('Failed to delete configuration', error);
-          setError('Failed to delete configuration. Please try again.');
-          setIsDeleting(false);
-        }
+      const handleDelete = () => {
+        modal.resolve('deleted' as DeleteConfigurationResult);
+        modal.hide();
       };
 
       const handleCancel = () => {
@@ -64,28 +49,17 @@ const DeleteConfigurationDialogImpl =
               </DialogDescription>
             </DialogHeader>
 
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
             <DialogFooter>
               <Button
                 variant="outline"
                 onClick={handleCancel}
-                disabled={isDeleting}
               >
                 Cancel
               </Button>
               <Button
                 variant="destructive"
                 onClick={handleDelete}
-                disabled={isDeleting}
               >
-                {isDeleting && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
                 Delete
               </Button>
             </DialogFooter>

@@ -12,16 +12,12 @@ import {
 import type { ActionDefinition, ActionIcon } from '../actions';
 import { isSpecialIcon } from '../actions';
 import type { ResolvedGroup, ResolvedGroupItem } from '../actions/pages';
-import { IdeIcon } from '@/components/ide/IdeIcon';
 
 /**
  * Render an action icon, handling special icon types
  */
 function ActionItemIcon({ icon }: Readonly<{ icon: ActionIcon }>) {
   if (isSpecialIcon(icon)) {
-    if (icon === 'ide-icon') {
-      return <IdeIcon className="h-4 w-4" />;
-    }
     if (icon === 'copy-icon') {
       return <CopyIcon className="h-4 w-4" weight="regular" />;
     }

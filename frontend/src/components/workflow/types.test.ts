@@ -47,7 +47,6 @@ describe('Workflow Types', () => {
     it('should set default basic config with 1 task', () => {
       const config = getDefaultWizardConfig();
       expect(config.basic.taskCount).toBe(1);
-      expect(config.basic.importFromKanban).toBe(false);
     });
 
     it('should set default target branch to main', () => {

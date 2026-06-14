@@ -105,8 +105,6 @@ export interface BasicConfig {
   executionMode: WorkflowExecutionMode;
   initialGoal?: string;
   taskCount: number;
-  importFromKanban: boolean;
-  kanbanTaskIds?: string[];
 }
 
 /** Task config (Step 2) */
@@ -224,7 +222,6 @@ export function getDefaultWizardConfig(): WizardConfig {
       executionMode: 'diy',
       initialGoal: '',
       taskCount: 1,
-      importFromKanban: false,
     },
     tasks: [],
     models: [],

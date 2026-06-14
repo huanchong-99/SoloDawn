@@ -1,5 +1,3 @@
-use std::path::{Component, Path as FsPath, PathBuf};
-
 use anyhow;
 use axum::{
     Extension, Json, Router,
@@ -23,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use services::services::{file_search::SearchQuery, project::ProjectServiceError};
 use ts_rs::TS;
 use utils::{
-    api::projects::{RemoteProject, RemoteProjectMembersResponse},
+    api::projects::RemoteProjectMembersResponse,
     response::ApiResponse,
 };
 use uuid::Uuid;
@@ -186,15 +184,6 @@ pub async fn unlink_project(
         .await?;
 
     Ok(ResponseJson(ApiResponse::success(updated_project)))
-}
-
-pub async fn get_remote_project_by_id(
-    State(_deployment): State<DeploymentImpl>,
-    Path(_remote_project_id): Path<Uuid>,
-) -> Result<ResponseJson<ApiResponse<RemoteProject>>, ApiError> {
-    Err(ApiError::BadRequest(
-        "Remote project features are not supported in this version.".to_string(),
-    ))
 }
 
 pub async fn get_project_remote_members(
@@ -371,166 +360,6 @@ pub async fn delete_project(
         Err(e) => {
             tracing::error!("Failed to delete project: {}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-    }
-}
-
-#[derive(serde::Deserialize)]
-pub struct OpenEditorRequest {
-    #[serde(default)]
-    pub editor_type: Option<String>,
-    #[serde(default)]
-    pub file_path: Option<String>,
-    #[serde(default)]
-    pub git_repo_path: Option<String>,
-}
-
-#[derive(Debug, serde::Serialize, ts_rs::TS)]
-pub struct OpenEditorResponse {
-    pub url: Option<String>,
-}
-
-fn normalize_editor_repo_path(path: &str) -> String {
-    path.replace('\\', "/").trim_end_matches('/').to_string()
-}
-
-fn resolve_project_repo_for_editor<'a>(
-    repositories: &'a [Repo],
-    requested_repo_path: Option<&str>,
-) -> Result<&'a Repo, ApiError> {
-    let default_repo = repositories
-        .first()
-        .ok_or_else(|| ApiError::BadRequest("Project has no repositories".to_string()))?;
-
-    let Some(requested_repo_path) = requested_repo_path else {
-        return Ok(default_repo);
-    };
-
-    let requested_repo_path = normalize_editor_repo_path(requested_repo_path);
-    repositories
-        .iter()
-        .find(|repo| {
-            normalize_editor_repo_path(&repo.path.to_string_lossy()) == requested_repo_path
-                || repo.name == requested_repo_path
-        })
-        .ok_or_else(|| {
-            ApiError::BadRequest("Requested repository is not part of this project".to_string())
-        })
-}
-
-fn resolve_repo_file_path_for_editor(
-    repo_path: &FsPath,
-    file_path: &str,
-) -> Result<PathBuf, ApiError> {
-    let trimmed_file_path = file_path.trim();
-    if trimmed_file_path.is_empty() {
-        return Ok(repo_path.to_path_buf());
-    }
-
-    let relative_path = PathBuf::from(trimmed_file_path);
-    if relative_path.is_absolute() {
-        return Err(ApiError::BadRequest(
-            "file_path must be relative to the repository root".to_string(),
-        ));
-    }
-
-    if relative_path.components().any(|component| {
-        matches!(
-            component,
-            Component::ParentDir | Component::Prefix(_) | Component::RootDir
-        )
-    }) {
-        return Err(ApiError::BadRequest(
-            "file_path must stay within the selected repository".to_string(),
-        ));
-    }
-
-    Ok(repo_path.join(relative_path))
-}
-
-fn resolve_editor_target_file_hint(
-    path: &FsPath,
-    fallback_is_file: bool,
-) -> Result<bool, ApiError> {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => Ok(true),
-        Ok(metadata) if metadata.is_dir() => Ok(false),
-        Ok(_) => Err(ApiError::BadRequest(
-            "open-editor target must be a file or directory".to_string(),
-        )),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(fallback_is_file),
-        Err(err) => Err(ApiError::Io(err)),
-    }
-}
-
-pub async fn open_project_in_editor(
-    Extension(project): Extension<Project>,
-    State(deployment): State<DeploymentImpl>,
-    Json(payload): Json<Option<OpenEditorRequest>>,
-) -> Result<ResponseJson<ApiResponse<OpenEditorResponse>>, ApiError> {
-    let repositories = deployment
-        .project()
-        .get_repositories(&deployment.db().pool, project.id)
-        .await?;
-
-    let selected_repo = resolve_project_repo_for_editor(
-        &repositories,
-        payload
-            .as_ref()
-            .and_then(|request| request.git_repo_path.as_deref()),
-    )?;
-
-    let file_path = payload
-        .as_ref()
-        .and_then(|request| request.file_path.as_deref())
-        .filter(|value| !value.trim().is_empty());
-
-    let (path, is_file_hint) = if let Some(file_path) = file_path {
-        let path = resolve_repo_file_path_for_editor(selected_repo.path.as_path(), file_path)?;
-        let is_file_hint = resolve_editor_target_file_hint(path.as_path(), true)?;
-        (path, is_file_hint)
-    } else {
-        let path = selected_repo.path.clone();
-        let is_file_hint = resolve_editor_target_file_hint(path.as_path(), false)?;
-        (path, is_file_hint)
-    };
-
-    let editor_config = {
-        let config = deployment.config().read().await;
-        let editor_type_str = payload.as_ref().and_then(|req| req.editor_type.as_deref());
-        config.editor.with_override(editor_type_str)
-    };
-
-    match editor_config
-        .open_file_with_hint(&path, Some(is_file_hint))
-        .await
-    {
-        Ok(url) => {
-            tracing::info!(
-                "Opened editor for project {} at path: {}{}",
-                project.id,
-                path.to_string_lossy(),
-                if url.is_some() { " (remote mode)" } else { "" }
-            );
-
-            deployment
-                .track_if_analytics_allowed(
-                    "project_editor_opened",
-                    serde_json::json!({
-                        "project_id": project.id.to_string(),
-                        "editor_type": payload.as_ref().and_then(|req| req.editor_type.as_ref()),
-                        "remote_mode": url.is_some(),
-                    }),
-                )
-                .await;
-
-            Ok(ResponseJson(ApiResponse::success(OpenEditorResponse {
-                url,
-            })))
-        }
-        Err(e) => {
-            tracing::error!("Failed to open editor for project {}: {:?}", project.id, e);
-            Err(ApiError::EditorOpen(e))
         }
     }
 }
@@ -731,7 +560,6 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         )
         .route("/remote/members", get(get_project_remote_members))
         .route("/search", get(search_project_files))
-        .route("/open-editor", post(open_project_in_editor))
         .route(
             "/link",
             post(link_project_to_existing_remote).delete(unlink_project),
@@ -756,85 +584,5 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         .route("/stream/ws", get(stream_projects_ws))
         .nest("/{id}", project_id_router);
 
-    Router::new().nest("/projects", projects_router).route(
-        "/remote-projects/{remote_project_id}",
-        get(get_remote_project_by_id),
-    )
-}
-
-#[cfg(test)]
-mod open_editor_path_tests {
-    use std::path::Path;
-
-    use db::models::repo::Repo;
-    use tempfile::tempdir;
-    use uuid::Uuid;
-
-    use super::{
-        normalize_editor_repo_path, resolve_editor_target_file_hint,
-        resolve_project_repo_for_editor, resolve_repo_file_path_for_editor,
-    };
-
-    fn repo(path: &str, name: &str) -> Repo {
-        Repo {
-            id: Uuid::nil(),
-            path: path.into(),
-            name: name.to_string(),
-            display_name: name.to_string(),
-            setup_script: None,
-            cleanup_script: None,
-            copy_files: None,
-            parallel_setup_script: false,
-            dev_server_script: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        }
-    }
-
-    #[test]
-    fn resolves_project_repo_by_normalized_git_repo_path() {
-        let repositories = vec![repo(r"C:\work\repo-a", "repo-a")];
-
-        let resolved = resolve_project_repo_for_editor(&repositories, Some("C:/work/repo-a/"))
-            .expect("repo should resolve");
-
-        assert_eq!(resolved.name, "repo-a");
-    }
-
-    #[test]
-    fn rejects_parent_dir_file_path_for_project_open_editor() {
-        let result = resolve_repo_file_path_for_editor(Path::new("/repo"), "../outside");
-        assert!(result.is_err(), "parent traversal must be rejected");
-    }
-
-    #[test]
-    fn normalizes_repo_path_slashes_and_trailing_separator() {
-        let normalized = normalize_editor_repo_path(r"C:\work\repo-a\");
-        assert_eq!(normalized, "C:/work/repo-a");
-    }
-
-    #[test]
-    fn resolves_directory_hint_from_existing_directory_path() {
-        let temp = tempdir().expect("temp dir");
-
-        let is_file = resolve_editor_target_file_hint(temp.path(), true).expect("hint");
-
-        assert!(
-            !is_file,
-            "existing directories must not be treated as files"
-        );
-    }
-
-    #[test]
-    fn falls_back_to_file_hint_for_non_existing_path() {
-        let temp = tempdir().expect("temp dir");
-        let missing_path = temp.path().join("missing-file.ts");
-
-        let is_file = resolve_editor_target_file_hint(missing_path.as_path(), true).expect("hint");
-
-        assert!(
-            is_file,
-            "missing targets should keep fallback file hint for remote semantics"
-        );
-    }
+    Router::new().nest("/projects", projects_router)
 }

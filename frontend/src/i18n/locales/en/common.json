@@ -218,7 +218,6 @@
     "viewInChangesPanel": "View in changes panel",
     "copyPath": "Copy path",
     "copyWorktreePath": "Copy worktree path",
-    "openInIde": "Open in IDE",
     "repoSettings": "Repository settings",
     "cancel": "Cancel",
     "saveChanges": "Save Changes",
@@ -331,14 +330,7 @@
     "description": "Let's set up your coding preferences. You can always change these later in Settings.",
     "chooseAgent": "Choose Your Coding Agent",
     "defaultAgent": "Default Agent",
-    "selectAgentPlaceholder": "Select your preferred coding agent",
-    "chooseEditor": "Choose Your Code Editor",
-    "preferredEditor": "Preferred Editor",
-    "selectEditorPlaceholder": "Select your preferred editor",
-    "editorDescription": "This editor will be used to open task attempts and project files.",
-    "customCommand": "Custom Command",
-    "customCommandPlaceholder": "e.g., code, subl, vim",
-    "customCommandDescription": "Enter the command to run your custom editor. Use spaces for arguments (e.g., \"code --wait\")."
+    "selectAgentPlaceholder": "Select your preferred coding agent"
   },
   "releaseNotes": {
     "title": "We've updated SoloDawn! Check out what's new...",
@@ -353,7 +345,6 @@
   "navbarActions": {
     "archive-workspace": "Archive",
     "unarchive-workspace": "Unarchive",
-    "open-in-old-ui": "Open in Old UI",
     "toggle-diff-view-mode-inline": "Inline view",
     "toggle-diff-view-mode-split": "Side-by-side view",
     "toggle-all-diffs-collapse": "Collapse all diffs",
@@ -443,7 +434,6 @@
     "active": "Active",
     "inactive": "Inactive",
     "terminalsRunning": "{{count}} Terminals Running",
-    "tokensNA": "Tokens: N/A",
     "git": "Git:",
     "gitListening": "Listening",
     "gitConnecting": "Connecting...",

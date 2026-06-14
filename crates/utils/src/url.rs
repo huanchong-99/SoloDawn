@@ -82,29 +82,6 @@ pub fn resolve_endpoint(api_type: &str, raw_url: &str) -> ResolvedEndpoint {
     ResolvedEndpoint { url, api_format }
 }
 
-/// Normalize a base URL for LLM API providers.
-///
-/// # Deprecation
-/// Prefer [`resolve_endpoint`] which implements Full URL Endpoint Mode —
-/// the URL is used as-is without appending `/v1`.
-#[deprecated(
-    since = "0.0.154",
-    note = "Use `resolve_endpoint` instead. Full URL Endpoint Mode means no path manipulation."
-)]
-pub fn normalize_base_url(api_type: &str, raw_url: &str) -> String {
-    let trimmed = raw_url.trim_end_matches('/');
-    match api_type {
-        "openai" | "anthropic" | "anthropic-compatible" => {
-            if trimmed.ends_with("/v1") {
-                trimmed.to_string()
-            } else {
-                format!("{trimmed}/v1")
-            }
-        }
-        _ => trimmed.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,94 +135,5 @@ mod tests {
         let ep = resolve_endpoint("openai-compatible", "https://open.bigmodel.cn/api/paas/v4");
         assert_eq!(ep.url, "https://open.bigmodel.cn/api/paas/v4");
         assert_eq!(ep.api_format, ApiFormat::OpenAIChat);
-    }
-
-    // ---- Legacy normalize_base_url tests (deprecated) ----
-
-    #[allow(deprecated)]
-    #[test]
-    fn legacy_official_openai_gets_v1() {
-        assert_eq!(
-            normalize_base_url("openai", "https://api.openai.com"),
-            "https://api.openai.com/v1"
-        );
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn legacy_compatible_no_v1_appended() {
-        assert_eq!(
-            normalize_base_url("openai-compatible", "https://open.bigmodel.cn/api/paas/v4"),
-            "https://open.bigmodel.cn/api/paas/v4"
-        );
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn legacy_already_has_v1_not_doubled() {
-        assert_eq!(
-            normalize_base_url("openai", "https://api.openai.com/v1"),
-            "https://api.openai.com/v1"
-        );
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn legacy_trailing_slash_stripped() {
-        assert_eq!(
-            normalize_base_url("openai-compatible", "https://example.com/api/"),
-            "https://example.com/api"
-        );
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn legacy_anthropic_official_gets_v1() {
-        assert_eq!(
-            normalize_base_url("anthropic", "https://api.anthropic.com"),
-            "https://api.anthropic.com/v1"
-        );
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn legacy_anthropic_compatible_gets_v1() {
-        assert_eq!(
-            normalize_base_url(
-                "anthropic-compatible",
-                "https://open.bigmodel.cn/api/anthropic"
-            ),
-            "https://open.bigmodel.cn/api/anthropic/v1"
-        );
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn legacy_anthropic_compatible_already_has_v1() {
-        assert_eq!(
-            normalize_base_url(
-                "anthropic-compatible",
-                "https://open.bigmodel.cn/api/anthropic/v1"
-            ),
-            "https://open.bigmodel.cn/api/anthropic/v1"
-        );
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn legacy_empty_api_type_no_v1() {
-        assert_eq!(
-            normalize_base_url("", "https://example.com/api"),
-            "https://example.com/api"
-        );
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn legacy_google_type_no_v1() {
-        assert_eq!(
-            normalize_base_url("google", "https://generativelanguage.googleapis.com"),
-            "https://generativelanguage.googleapis.com"
-        );
     }
 }

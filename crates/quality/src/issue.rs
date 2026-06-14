@@ -143,12 +143,6 @@ impl QualityIssue {
         self
     }
 
-    /// 设置为历史债务问题
-    pub fn as_legacy(mut self) -> Self {
-        self.is_new = false;
-        self
-    }
-
     /// 设置上下文
     pub fn with_context(mut self, context: impl Into<String>) -> Self {
         self.context = Some(context.into());
@@ -158,15 +152,6 @@ impl QualityIssue {
     /// 是否为阻断级别问题
     pub fn is_blocking(&self) -> bool {
         self.severity.is_blocking()
-    }
-
-    /// 生成格式化的位置字符串（file:line）
-    pub fn location_string(&self) -> String {
-        match (&self.file_path, self.line) {
-            (Some(path), Some(line)) => format!("{}:{}", path, line),
-            (Some(path), None) => path.clone(),
-            _ => "unknown".to_string(),
-        }
     }
 
     /// 生成终端回流用的结构化修复描述

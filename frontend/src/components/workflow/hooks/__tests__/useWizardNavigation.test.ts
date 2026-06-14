@@ -44,14 +44,6 @@ describe('useWizardNavigation', () => {
     expect(result.current.currentStep).toBe(WizardStep.Project);
   });
 
-  it('jumps to a specific step', () => {
-    const { result } = renderHook(() => useWizardNavigation());
-    act(() => {
-      result.current.goToStep(WizardStep.Terminals);
-    });
-    expect(result.current.currentStep).toBe(WizardStep.Terminals);
-  });
-
   it('reports when it cannot go next', () => {
     const { result } = renderHook(() =>
       useWizardNavigation({ initialStep: WizardStep.Advanced })

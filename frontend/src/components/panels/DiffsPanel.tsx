@@ -169,14 +169,12 @@ function DiffListContent({
   diffs,
   collapsedIds,
   toggle,
-  selectedAttempt,
   t,
 }: Readonly<{
   loading: boolean;
   diffs: Diff[];
   collapsedIds: Set<string>;
   toggle: (id: string) => void;
-  selectedAttempt: Workspace | null;
   t: (key: string, params?: Record<string, unknown>) => string;
 }>) {
   if (loading) {
@@ -205,7 +203,6 @@ function DiffListContent({
             diff={diff}
             expanded={!collapsedIds.has(id)}
             onToggle={() => toggle(id)}
-            selectedAttempt={selectedAttempt}
           />
         );
       })}
@@ -287,7 +284,6 @@ function DiffsPanelContent({
           diffs={diffs}
           collapsedIds={collapsedIds}
           toggle={toggle}
-          selectedAttempt={selectedAttempt}
           t={t}
         />
       </div>

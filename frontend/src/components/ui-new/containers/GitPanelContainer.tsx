@@ -1,12 +1,10 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { useToast } from '@/components/ui/toast';
 import { useActions } from '@/contexts/ActionsContext';
 import { usePush } from '@/hooks/usePush';
 import { useRenameBranch } from '@/hooks/useRenameBranch';
 import { useBranchStatus } from '@/hooks/useBranchStatus';
-import { repoApi } from '@/lib/api';
 import { ConfirmDialog } from '@/components/ui-new/dialogs/ConfirmDialog';
 import { ForcePushDialog } from '@/components/dialogs/git/ForcePushDialog';
 import { GitPanel, type RepoInfo } from '@/components/ui-new/views/GitPanel';
@@ -27,6 +25,11 @@ export interface GitPanelContainerProps {
 
 type PushState = 'idle' | 'pending' | 'success' | 'error';
 
+// Internal RepoInfo enriched with the backend-sourced remote_commits_ahead value.
+// This field is consumed only inside the container (to drive push-button
+// visibility) and is intentionally NOT part of the public RepoInfo view interface.
+type RepoInfoInternal = RepoInfo & { remoteCommitsAhead?: number };
+
 export function GitPanelContainer({
   selectedWorkspace,
   repos,
@@ -34,7 +37,6 @@ export function GitPanelContainer({
 }: Readonly<GitPanelContainerProps>) {
   const { executeAction } = useActions();
   const navigate = useNavigate();
-  const { showToast } = useToast();
   const { t } = useTranslation(['tasks', 'common']);
 
   // Hooks for branch management (moved from WorkspacesLayout)
@@ -49,7 +51,7 @@ export function GitPanelContainer({
   );
 
   // Transform repos to RepoInfo format (moved from WorkspacesLayout)
-  const repoInfos: RepoInfo[] = useMemo(
+  const repoInfos: RepoInfoInternal[] = useMemo(
     () =>
       repos.map((repo) => {
         const repoStatus = branchStatus?.find((s) => s.repo_id === repo.id);
@@ -179,15 +181,16 @@ export function GitPanelContainer({
   // Compute repoInfos with push button state
   const repoInfosWithPushButton = useMemo(
     () =>
-      repoInfos.map((repo) => {
+      repoInfos.map((repo): RepoInfo => {
+        const { remoteCommitsAhead, ...repoInfo } = repo;
         const state = pushStates[repo.id] ?? 'idle';
         const hasUnpushedCommits =
-          repo.prStatus === 'open' && (repo.remoteCommitsAhead ?? 0) > 0;
+          repo.prStatus === 'open' && (remoteCommitsAhead ?? 0) > 0;
         // Show push button if there are unpushed commits OR if we're in a push flow
         // (pending/success/error states keep the button visible for feedback)
         const isInPushFlow = state !== 'idle';
         return {
-          ...repo,
+          ...repoInfo,
           showPushButton: hasUnpushedCommits || isInPushFlow,
           isPushPending: state === 'pending',
           isPushSuccess: state === 'success',
@@ -207,26 +210,6 @@ export function GitPanelContainer({
     },
     [repos]
   );
-
-  // Handle opening repo in editor
-  const handleOpenInEditor = useCallback(async (repoId: string) => {
-    try {
-      const response = await repoApi.openEditor(repoId, {
-        editor_type: null,
-        file_path: null,
-        git_repo_path: undefined,
-      });
-
-      // If a URL is returned (remote mode), open it in a new tab
-      if (response.url) {
-        globalThis.window.open(response.url, '_blank', 'noopener,noreferrer');
-      }
-    } catch (err) {
-      console.error('Failed to open repo in editor:', err);
-      const error = err as { message?: string };
-      showToast(error.message ?? 'Failed to open in editor', 'error');
-    }
-  }, [showToast]);
 
   // Handle GitPanel actions using the action system
   const handleActionsClick = useCallback(
@@ -286,7 +269,6 @@ export function GitPanelContainer({
       onWorkingBranchNameChange={handleBranchNameChange}
       onActionsClick={handleActionsClick}
       onPushClick={handlePushClick}
-      onOpenInEditor={handleOpenInEditor}
       onCopyPath={handleCopyPath}
       onOpenSettings={handleOpenSettings}
     />

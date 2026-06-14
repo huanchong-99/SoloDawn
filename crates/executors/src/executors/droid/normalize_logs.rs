@@ -786,8 +786,6 @@ pub enum ToolResultPayload {
     Error { error: ToolError },
 }
 
-pub struct EditToolResult {}
-
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DroidJson {

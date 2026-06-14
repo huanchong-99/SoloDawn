@@ -183,7 +183,6 @@
     "viewInChangesPanel": "변경사항 패널에서 보기",
     "copyPath": "워크트리 경로 복사",
     "copyWorktreePath": "워크트리 경로 복사",
-    "openInIde": "IDE에서 열기",
     "repoSettings": "저장소 설정",
     "cancel": "취소",
     "saveChanges": "변경사항 저장",
@@ -287,7 +286,6 @@
   "navbarActions": {
     "archive-workspace": "보관",
     "unarchive-workspace": "보관 해제",
-    "open-in-old-ui": "이전 UI에서 열기",
     "toggle-diff-view-mode-inline": "인라인 보기",
     "toggle-diff-view-mode-split": "나란히 보기",
     "toggle-all-diffs-collapse": "모든 변경사항 접기",

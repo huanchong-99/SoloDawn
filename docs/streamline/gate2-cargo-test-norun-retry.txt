@@ -1,0 +1,707 @@
+crates\services\src\services\terminal\prompt_watcher.rs:758:8: warning: method `mark_pending_handoff_submit` is never used
+crates\services\src\services\orchestrator\agent.rs:73:5: warning: field `error_handler` is never read
+warning: `services` (lib) generated 2 warnings
+   Compiling server v0.0.153 (E:\SoloDawn\crates\server)
+warning: `services` (lib test) generated 1 warning (1 duplicate)
+crates\server\src\bin\generate_types.rs:4:5: error[E0786]: found invalid metadata files for crate `server`
+crates\server\tests\terminal_logs_api_test.rs:8:5: error[E0463]: can't find crate for `server`: can't find crate
+crates\server\src\bin\generate_types.rs:149:9: error[E0463]: can't find crate for `services`: can't find crate
+crates\server\src\bin\mcp_task_server.rs:4:5: error[E0463]: can't find crate for `utils`: can't find crate
+crates\server\src\bin\mcp_task_server.rs:2:5: error[E0786]: found invalid metadata files for crate `server`
+memory allocation of 393264 bytes failed
+stack backtrace:
+   0:     0x7ffa28219832 - <unknown>
+crates\server\src\bin\generate_types.rs:149:9: error[E0786]: found invalid metadata files for crate `services`
+crates\server\tests\terminal_logs_api_test.rs:14:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\cli_types_detect_test.rs:9:5: error[E0463]: can't find crate for `server`: can't find crate
+crates\server\src\bin\mcp_task_server.rs:11:5: error[E0460]: found possibly newer version of crate `ring` which `rustls` depends on
+crates\server\src\main.rs:23:5: error[E0786]: found invalid metadata files for crate `services`
+crates\server\src\main.rs:28:5: error[E0786]: found invalid metadata files for crate `utils`
+crates\server\src\main.rs:430:9: error[E0786]: found invalid metadata files for crate `feishu_connector`
+memory allocation of 135184 bytes failed
+memory allocation of 114688 bytes failed
+stack backtrace:
+stack backtrace:
+   0:     0x7ffa28219832 - <unknown>
+memory allocation of 24576 bytes failed
+memory allocation of 34240 bytes failed
+stack backtrace:
+   0:     0x7ffa28219832 - <unknown>
+memory allocation of 393216 bytes failed
+memory allocation of 266256 bytes failed
+stack backtrace:
+stack backtrace:
+   1:     0x7ffa28241ae1 - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+stack backtrace:
+   0:     0x7ffa28219832 - <unknown>
+   0:     0x7ffa28219832 - <unknown>
+   0:     0x7ffa28219832 - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+memory allocation of 16656 bytes failed
+stack backtrace:
+   3:     0x7ffa2820ccdf - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+   0:     0x7ffa28219832 - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+   9:     0x7ffa2822ffa5 - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+memory allocation of 786432 bytes failed
+   7:     0x7ffa281f4448 - <unknown>
+stack backtrace:
+   8:     0x7ffa2c2e1146 - <unknown>
+   0:     0x7ffa28219832 - <unknown>
+memory allocation of 397328 bytes failed
+   9:     0x7ffa2c2e1160 - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+   9:     0x7ffa2b6fc3e6 - <unknown>
+stack backtrace:
+   0:     0x7ffa28219832 - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+  10:     0x7ffa2920831a - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+memory allocation of 16384 bytes failed
+  11:     0x7ffa292fd143 - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+stack backtrace:
+  10:     0x7ffa2c17468f - <unknown>
+   0:     0x7ffa28219832 - <unknown>
+  12:     0x7ffa2927d55b - <unknown>
+memory allocation of 98304 bytes failed
+stack backtrace:
+   3:     0x7ffa2820ccdf - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+  10:     0x7ffa29069852 - <unknown>
+  13:     0x7ffa292fb4b5 - <unknown>
+  14:     0x7ffa2927d55b - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+  15:     0x7ffa292fb4b5 - <unknown>
+  16:     0x7ffa2927d55b - <unknown>
+  17:     0x7ffa292fb4b5 - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+   0:     0x7ffa28219832 - <unknown>
+  18:     0x7ffa2927d55b - <unknown>
+  19:     0x7ffa292fb4b5 - <unknown>
+  20:     0x7ffa2927d55b - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+  21:     0x7ffa292fb4b5 - <unknown>
+  22:     0x7ffa2927d55b - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+  23:     0x7ffa292fb4b5 - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+  11:     0x7ffa27c77085 - <unknown>
+  24:     0x7ffa2927d55b - <unknown>
+  25:     0x7ffa292fb4b5 - <unknown>
+  26:     0x7ffa2927d55b - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+  27:     0x7ffa292fb4b5 - <unknown>
+  28:     0x7ffa2927d55b - <unknown>
+  11:     0x7ffa2bfd43c7 - <unknown>
+  29:     0x7ffa292fb4b5 - <unknown>
+  30:     0x7ffa2927d55b - <unknown>
+  31:     0x7ffa292fb4b5 - <unknown>
+  32:     0x7ffa2927d55b - <unknown>
+  33:     0x7ffa292fb4b5 - <unknown>
+  34:     0x7ffa2927d55b - <unknown>
+  35:     0x7ffa292fb4b5 - <unknown>
+  36:     0x7ffa2927d55b - <unknown>
+  37:     0x7ffa292fb4b5 - <unknown>
+  38:     0x7ffa2927d55b - <unknown>
+  39:     0x7ffa292fb4b5 - <unknown>
+  40:     0x7ffa2927d55b - <unknown>
+  41:     0x7ffa292fb4b5 - <unknown>
+  12:     0x7ffa27db5bf6 - <unknown>
+  42:     0x7ffa2927d55b - <unknown>
+  13:     0x7ffa2903bb60 - <unknown>
+  43:     0x7ffa292fb4b5 - <unknown>
+  44:     0x7ffa2927d55b - <unknown>
+  45:     0x7ffa292fb4b5 - <unknown>
+  46:     0x7ffa2927d55b - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+  47:     0x7ffa292fb4b5 - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+  48:     0x7ffa2927d55b - <unknown>
+  49:     0x7ffa292fb4b5 - <unknown>
+  14:     0x7ffa2903bad1 - <unknown>
+  50:     0x7ffa2927d55b - <unknown>
+  15:     0x7ffa2903b871 - <unknown>
+  51:     0x7ffa292fb4b5 - <unknown>
+  16:     0x7ffa27c80da3 - <unknown>
+  52:     0x7ffa2927d55b - <unknown>
+  53:     0x7ffa292fb4b5 - <unknown>
+  54:     0x7ffa292f3e8f - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+  17:     0x7ffa27d4d6a5 - <unknown>
+  55:     0x7ffa28b19a91 - <unknown>
+  56:     0x7ffa29055a3e - <unknown>
+  18:     0x7ffa28599350 - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+   9:     0x7ffa2c2e1160 - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+  57:     0x7ffa290b550d - <unknown>
+  12:     0x7ffa2c2dfed7 - <unknown>
+  19:     0x7ffa28273dd5 - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+  20:     0x7ffa27c8058a - <unknown>
+  21:     0x7ffa27c8b706 - <unknown>
+  22:     0x7ffa27d68edc - <unknown>
+  58:     0x7ffa29128393 - <unknown>
+  59:     0x7ffa29374145 - <unknown>
+  23:     0x7ffa257a9eb7 - <unknown>
+  24:     0x7ffa257a508f - <unknown>
+  25:     0x7ffa257b07f9 - <unknown>
+  26:     0x7ffa28216e48 - <unknown>
+memory allocation of 540688 bytes failed
+stack backtrace:
+  60:     0x7ffa291f1bac - <unknown>
+  27:     0x7ffac08c7374 - <unknown>
+  28:     0x7ffac28dcc91 - <unknown>
+  61:     0x7ffa28456873 - <unknown>
+memory allocation of 98352 bytes failed
+stack backtrace:
+   4:     0x7ffa281f351c - <unknown>
+  13:     0x7ffa280af24c - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+   0:     0x7ffa28219832 - <unknown>
+  62:     0x7ffa2843cb29 - <unknown>
+  10:     0x7ffa29969ed5 - <unknown>
+  63:     0x7ffa28456d45 - <unknown>
+  64:     0x7ffa2843cb29 - <unknown>
+  65:     0x7ffa284419dd - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+  66:     0x7ffa2843d3e9 - <unknown>
+   0:     0x7ffa28219832 - <unknown>
+  14:     0x7ffa280af6fb - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+   9:     0x7ffa2822ffa5 - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+  67:     0x7ffa2841ed47 - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+   0:     0x7ffa28219832 - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+  68:     0x7ffa2843cddb - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+  15:     0x7ffa280b5fcd - <unknown>
+  10:     0x7ffa292089d4 - <unknown>
+  69:     0x7ffa284b6c81 - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+  70:     0x7ffa284b9567 - <unknown>
+  11:     0x7ffa298254f4 - <unknown>
+  71:     0x7ffa2843cd31 - <unknown>
+  72:     0x7ffa2843dc94 - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+  73:     0x7ffa284b9803 - <unknown>
+  16:     0x7ffa280c5f1f - <unknown>
+  74:     0x7ffa2843cd31 - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+  75:     0x7ffa28539df2 - <unknown>
+  11:     0x7ffa292836f7 - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+   9:     0x7ffa2c2e1160 - <unknown>
+  76:     0x7ffa2846f5a7 - <unknown>
+  12:     0x7ffa292fb43b - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+  17:     0x7ffa280ae468 - <unknown>
+  12:     0x7ffa298e3105 - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+   9:     0x7ffa2c2e1160 - <unknown>
+  77:     0x7ffa2843daa8 - <unknown>
+  13:     0x7ffa2927d55b - <unknown>
+  78:     0x7ffa28539df2 - <unknown>
+  79:     0x7ffa283ce5dd - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+  18:     0x7ffa25766d16 - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+  10:     0x7ffa29969ed5 - <unknown>
+  14:     0x7ffa292fb4b5 - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+  19:     0x7ffa280bc23d - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+  80:     0x7ffa283e0ac0 - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+  11:     0x7ffa298254f4 - <unknown>
+  15:     0x7ffa2927d55b - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+  10:     0x7ffa27b78c6a - <unknown>
+  81:     0x7ffa29056dab - <unknown>
+  82:     0x7ffa290fbc94 - <unknown>
+  16:     0x7ffa292fb4b5 - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+  20:     0x7ffa280b931a - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+  12:     0x7ffa29421edf - <unknown>
+  17:     0x7ffa2927d55b - <unknown>
+  11:     0x7ffa29562c77 - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+   9:     0x7ffa2904ac26 - <unknown>
+  83:     0x7ffa2b754db6 - <unknown>
+  18:     0x7ffa292fb4b5 - <unknown>
+  84:     0x7ffa27db5ca6 - <unknown>
+  85:     0x7ffa2903bb60 - <unknown>
+  86:     0x7ffa2903bad1 - <unknown>
+  87:     0x7ffa2903bad1 - <unknown>
+  88:     0x7ffa2903bad1 - <unknown>
+  89:     0x7ffa2903bad1 - <unknown>
+   9:     0x7ffa2c2e1160 - <unknown>
+  21:     0x7ffa2bff6461 - <unknown>
+  90:     0x7ffa2903bad1 - <unknown>
+  13:     0x7ffa2935ffdd - <unknown>
+  91:     0x7ffa2903bad1 - <unknown>
+   9:     0x7ffa2c2e1160 - <unknown>
+  19:     0x7ffa2927d55b - <unknown>
+  92:     0x7ffa2903bad1 - <unknown>
+  93:     0x7ffa2903bad1 - <unknown>
+  94:     0x7ffa2903b871 - <unknown>
+  10:     0x7ffa290df73f - <unknown>
+  95:     0x7ffa27c80da3 - <unknown>
+  96:     0x7ffa27d4d6a5 - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+  97:     0x7ffa28599350 - <unknown>
+  12:     0x7ffa27f7eb14 - <unknown>
+  10:     0x7ffa2987813f - <unknown>
+  98:     0x7ffa28273dd5 - <unknown>
+  20:     0x7ffa292fb4b5 - <unknown>
+  99:     0x7ffa27c8058a - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+ 100:     0x7ffa27c8b706 - <unknown>
+ 101:     0x7ffa27d68edc - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+ 102:     0x7ffa257a9eb7 - <unknown>
+  14:     0x7ffa2935fbd9 - <unknown>
+ 103:     0x7ffa257a508f - <unknown>
+  11:     0x7ffa2912cba4 - <unknown>
+ 104:     0x7ffa257b07f9 - <unknown>
+  21:     0x7ffa2927d55b - <unknown>
+ 105:     0x7ffa28216e48 - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+  22:     0x7ffa27efb7d5 - <unknown>
+ 106:     0x7ffac08c7374 - <unknown>
+ 107:     0x7ffac28dcc91 - <unknown>
+  13:     0x7ffa2826dd59 - <unknown>
+  11:     0x7ffa27c7c811 - <unknown>
+  15:     0x7ffa283af675 - <unknown>
+  12:     0x7ffa29877a4c - <unknown>
+  22:     0x7ffa292fb4b5 - <unknown>
+  23:     0x7ffa27efd10b - <unknown>
+  10:     0x7ffa29969ed5 - <unknown>
+  14:     0x7ffa25819940 - <unknown>
+  23:     0x7ffa2927d55b - <unknown>
+  12:     0x7ffa29082e77 - <unknown>
+  16:     0x7ffa2850d80a - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+  24:     0x7ffa28dd5040 - <unknown>
+  24:     0x7ffa292fb4b5 - <unknown>
+memory allocation of 18960 bytes failed
+stack backtrace:
+  13:     0x7ffa27c78286 - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+  17:     0x7ffa285203b3 - <unknown>
+  25:     0x7ffa2927d55b - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+   0:     0x7ffa28219832 - <unknown>
+  25:     0x7ffa28dc87dd - <unknown>
+  11:     0x7ffa298254f4 - <unknown>
+  26:     0x7ffa292fb4b5 - <unknown>
+  18:     0x7ffa284f433e - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+   9:     0x7ffa2c2e1160 - <unknown>
+   9:     0x7ffa2822ffa5 - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+  10:     0x7ffa280ca1a0 - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+  10:     0x7ffa2920831a - <unknown>
+  11:     0x7ffa280c9e86 - <unknown>
+   9:     0x7ffa2822ffa5 - <unknown>
+  12:     0x7ffa280d6815 - <unknown>
+  12:     0x7ffa298169d2 - <unknown>
+  14:     0x7ffa2b851316 - <unknown>
+   1:     0x7ffa28241ae1 - <unknown>
+  11:     0x7ffa292fd143 - <unknown>
+  27:     0x7ffa292f3e8f - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+  19:     0x7ffa283f9fd2 - <unknown>
+  26:     0x7ffa28d590e0 - <unknown>
+   2:     0x7ffa282299e4 - <unknown>
+  13:     0x7ffa280ca2ed - <unknown>
+  10:     0x7ffa29794461 - <unknown>
+  15:     0x7ffa2903bb60 - <unknown>
+  13:     0x7ffa29816f47 - <unknown>
+  12:     0x7ffa2927d55b - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+  14:     0x7ffa2981652f - <unknown>
+  11:     0x7ffa2988dbc5 - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+   3:     0x7ffa2820ccdf - <unknown>
+  28:     0x7ffa28b19a91 - <unknown>
+  14:     0x7ffa280b2117 - <unknown>
+  15:     0x7ffa2848ba1c - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+  20:     0x7ffa2843c385 - <unknown>
+  16:     0x7ffa2903bad1 - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+  15:     0x7ffa280c4e73 - <unknown>
+  27:     0x7ffa27bc3b76 - <unknown>
+  12:     0x7ffa29824f4b - <unknown>
+   4:     0x7ffa281f351c - <unknown>
+  29:     0x7ffa29055a3e - <unknown>
+  16:     0x7ffa283f908c - <unknown>
+  21:     0x7ffa28448e8b - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+  13:     0x7ffa298e3105 - <unknown>
+  16:     0x7ffa280b63fd - <unknown>
+  17:     0x7ffa2903bad1 - <unknown>
+  17:     0x7ffa2843c385 - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+  17:     0x7ffa280c5f1f - <unknown>
+   9:     0x7ffa2c2e1160 - <unknown>
+  18:     0x7ffa28448e8b - <unknown>
+   5:     0x7ffa281f0b4f - <unknown>
+  22:     0x7ffa2843cb29 - <unknown>
+  30:     0x7ffa290b550d - <unknown>
+  28:     0x7ffa2826e246 - <unknown>
+  18:     0x7ffa290b5ef3 - <unknown>
+  18:     0x7ffa280ae468 - <unknown>
+  19:     0x7ffa2843cb29 - <unknown>
+  10:     0x7ffa2987813f - <unknown>
+  19:     0x7ffa25766d16 - <unknown>
+  20:     0x7ffa284b9803 - <unknown>
+  11:     0x7ffa27c7c811 - <unknown>
+   6:     0x7ffa2820cd9b - <unknown>
+  23:     0x7ffa28404ebc - <unknown>
+  31:     0x7ffa29128393 - <unknown>
+  21:     0x7ffa2843cd31 - <unknown>
+  19:     0x7ffa29128393 - <unknown>
+  29:     0x7ffa25819940 - <unknown>
+  20:     0x7ffa280bc23d - <unknown>
+  22:     0x7ffa284419dd - <unknown>
+  12:     0x7ffa29082e77 - <unknown>
+  21:     0x7ffa280b931a - <unknown>
+   7:     0x7ffa281f4448 - <unknown>
+  23:     0x7ffa2843d3e9 - <unknown>
+  32:     0x7ffa29374145 - <unknown>
+  20:     0x7ffa2936025b - <unknown>
+  30:     0x7ffa27c7f8c3 - <unknown>
+  13:     0x7ffa27c78286 - <unknown>
+  24:     0x7ffa2843da44 - <unknown>
+  22:     0x7ffa2bff6461 - <unknown>
+  24:     0x7ffa284ba4a1 - <unknown>
+   8:     0x7ffa2c2e1146 - <unknown>
+  31:     0x7ffa27dca51d - <unknown>
+  21:     0x7ffa2935fbd9 - <unknown>
+  33:     0x7ffa291f1bac - <unknown>
+  25:     0x7ffa28456d45 - <unknown>
+  22:     0x7ffa2852758b - <unknown>
+  32:     0x7ffa27c8d77d - <unknown>
+   9:     0x7ffa29045458 - <unknown>
+  26:     0x7ffa2843cb29 - <unknown>
+  34:     0x7ffa28456873 - <unknown>
+  25:     0x7ffa27934e4e - <unknown>
+  33:     0x7ffa27d62183 - <unknown>
+  27:     0x7ffa28456d45 - <unknown>
+  10:     0x7ffa29069717 - <unknown>
+  35:     0x7ffa2843cb29 - <unknown>
+  26:     0x7ffa2843db2b - <unknown>
+  23:     0x7ffa283e145f - <unknown>
+  34:     0x7ffa28042755 - <unknown>
+  27:     0x7ffa28441d0d - <unknown>
+  23:     0x7ffa2b45d8e1 - <unknown>
+  11:     0x7ffa27c77085 - <unknown>
+  36:     0x7ffa28456d45 - <unknown>
+  28:     0x7ffa2843cb29 - <unknown>
+  28:     0x7ffa2843d3e9 - <unknown>
+  24:     0x7ffa283e0b5a - <unknown>
+  35:     0x7ffa257a9df8 - <unknown>
+  29:     0x7ffa2841ed47 - <unknown>
+  24:     0x7ffa28d63c07 - <unknown>
+  37:     0x7ffa2843cb29 - <unknown>
+  30:     0x7ffa2843cddb - <unknown>
+  29:     0x7ffa284b6c81 - <unknown>
+  12:     0x7ffa27db3d86 - <unknown>
+  25:     0x7ffa2843d2b1 - <unknown>
+  36:     0x7ffa257a508f - <unknown>
+  25:     0x7ffa27bc3b76 - <unknown>
+  31:     0x7ffa284b6c81 - <unknown>
+  26:     0x7ffa2826e246 - <unknown>
+  38:     0x7ffa284419dd - <unknown>
+  32:     0x7ffa284b9567 - <unknown>
+  13:     0x7ffa2903bb60 - <unknown>
+  30:     0x7ffa284b9567 - <unknown>
+  26:     0x7ffa284046bb - <unknown>
+  37:     0x7ffa257b07f9 - <unknown>
+  27:     0x7ffa25819940 - <unknown>
+  33:     0x7ffa2843cd31 - <unknown>
+  39:     0x7ffa2843d3e9 - <unknown>
+  28:     0x7ffa27c7f8c3 - <unknown>
+  34:     0x7ffa28539df2 - <unknown>
+  31:     0x7ffa2843cd31 - <unknown>
+  14:     0x7ffa290683e1 - <unknown>
+  27:     0x7ffa2843d495 - <unknown>
+  29:     0x7ffa27dca51d - <unknown>
+  38:     0x7ffa28216e48 - <unknown>
+  40:     0x7ffa2841ed47 - <unknown>
+  35:     0x7ffa2846f5a7 - <unknown>
+  30:     0x7ffa27c8d77d - <unknown>
+  36:     0x7ffa2843daa8 - <unknown>
+  32:     0x7ffa28539df2 - <unknown>
+  31:     0x7ffa27d62183 - <unknown>
+  28:     0x7ffa283f37ac - <unknown>
+  37:     0x7ffa284b6c81 - <unknown>
+  41:     0x7ffa2843cddb - <unknown>
+  39:     0x7ffac08c7374 - <unknown>
+  15:     0x7ffa291230fa - <unknown>
+  33:     0x7ffa283ce5dd - <unknown>
+  32:     0x7ffa28042755 - <unknown>
+  38:     0x7ffa284b9567 - <unknown>
+  33:     0x7ffa257a9df8 - <unknown>
+  29:     0x7ffa2843d52e - <unknown>
+  40:     0x7ffac28dcc91 - <unknown>
+  42:     0x7ffa284b6c81 - <unknown>
+  39:     0x7ffa2843cd31 - <unknown>
+  34:     0x7ffa283e0ac0 - <unknown>
+  34:     0x7ffa257a508f - <unknown>
+  16:     0x7ffa2938cdad - <unknown>
+  35:     0x7ffa257b07f9 - <unknown>
+  30:     0x7ffa284b9803 - <unknown>
+  43:     0x7ffa284b9567 - <unknown>
+  40:     0x7ffa28539df2 - <unknown>
+  35:     0x7ffa29056dab - <unknown>
+  36:     0x7ffa28216e48 - <unknown>
+  41:     0x7ffa283ce5dd - <unknown>
+  37:     0x7ffac08c7374 - <unknown>
+  36:     0x7ffa290fbc94 - <unknown>
+  31:     0x7ffa2843cd31 - <unknown>
+  44:     0x7ffa2843cd31 - <unknown>
+  17:     0x7ffa2936fb74 - <unknown>
+  42:     0x7ffa283e0ac0 - <unknown>
+  38:     0x7ffac28dcc91 - <unknown>
+  37:     0x7ffa2912ebe2 - <unknown>
+  32:     0x7ffa28441d0d - <unknown>
+  43:     0x7ffa29056dab - <unknown>
+  18:     0x7ffa291f1bac - <unknown>
+  45:     0x7ffa28539df2 - <unknown>
+  44:     0x7ffa290fbc94 - <unknown>
+  38:     0x7ffa28599c5d - <unknown>
+  33:     0x7ffa2843d3e9 - <unknown>
+  46:     0x7ffa2846f5a7 - <unknown>
+  19:     0x7ffa283f9c2d - <unknown>
+  45:     0x7ffa2912ebe2 - <unknown>
+  46:     0x7ffa28599c5d - <unknown>
+  39:     0x7ffa28273dd5 - <unknown>
+  34:     0x7ffa284b947d - <unknown>
+  47:     0x7ffa2843daa8 - <unknown>
+  20:     0x7ffa2843c385 - <unknown>
+  47:     0x7ffa28273dd5 - <unknown>
+  40:     0x7ffa27c8058a - <unknown>
+  35:     0x7ffa2843cd31 - <unknown>
+  48:     0x7ffa27c8058a - <unknown>
+  48:     0x7ffa284b6c81 - <unknown>
+  21:     0x7ffa28448e8b - <unknown>
+  49:     0x7ffa27c8b706 - <unknown>
+  41:     0x7ffa27c8b706 - <unknown>
+  36:     0x7ffa28539df2 - <unknown>
+  22:     0x7ffa2843cb29 - <unknown>
+  49:     0x7ffa284b9567 - <unknown>
+  50:     0x7ffa27d68edc - <unknown>
+  51:     0x7ffa257a9eb7 - <unknown>
+  42:     0x7ffa27d68edc - <unknown>
+  23:     0x7ffa28404ebc - <unknown>
+  37:     0x7ffa2846f5a7 - <unknown>
+  50:     0x7ffa2843cd31 - <unknown>
+  52:     0x7ffa257a508f - <unknown>
+  43:     0x7ffa257a9eb7 - <unknown>
+  53:     0x7ffa257b07f9 - <unknown>
+  38:     0x7ffa2843daa8 - <unknown>
+  24:     0x7ffa2843da44 - <unknown>
+  51:     0x7ffa28539df2 - <unknown>
+  54:     0x7ffa28216e48 - <unknown>
+  44:     0x7ffa257a508f - <unknown>
+  55:     0x7ffac08c7374 - <unknown>
+  39:     0x7ffa284b6c81 - <unknown>
+  52:     0x7ffa283ce5dd - <unknown>
+  25:     0x7ffa28456d45 - <unknown>
+  45:     0x7ffa257b07f9 - <unknown>
+  56:     0x7ffac28dcc91 - <unknown>
+  40:     0x7ffa284b9567 - <unknown>
+  26:     0x7ffa2843cb29 - <unknown>
+  46:     0x7ffa28216e48 - <unknown>
+  53:     0x7ffa283e0ac0 - <unknown>
+  41:     0x7ffa2843cd31 - <unknown>
+  27:     0x7ffa28456d45 - <unknown>
+  54:     0x7ffa29056dab - <unknown>
+  47:     0x7ffac08c7374 - <unknown>
+  42:     0x7ffa28539df2 - <unknown>
+  28:     0x7ffa2843cb29 - <unknown>
+  55:     0x7ffa290fbc94 - <unknown>
+  48:     0x7ffac28dcc91 - <unknown>
+  43:     0x7ffa283ce5dd - <unknown>
+  29:     0x7ffa284b6c81 - <unknown>
+  56:     0x7ffa2912ebe2 - <unknown>
+  30:     0x7ffa284b9567 - <unknown>
+  44:     0x7ffa283e0ac0 - <unknown>
+  57:     0x7ffa28599c5d - <unknown>
+  31:     0x7ffa2843cd31 - <unknown>
+  45:     0x7ffa29056dab - <unknown>
+  58:     0x7ffa28273dd5 - <unknown>
+  32:     0x7ffa28539df2 - <unknown>
+  46:     0x7ffa290fbc94 - <unknown>
+  59:     0x7ffa27c8058a - <unknown>
+  33:     0x7ffa283ce5dd - <unknown>
+  47:     0x7ffa2912ebe2 - <unknown>
+  60:     0x7ffa27c8b706 - <unknown>
+  48:     0x7ffa28599c5d - <unknown>
+  34:     0x7ffa283e0ac0 - <unknown>
+  61:     0x7ffa27d68edc - <unknown>
+  35:     0x7ffa29056dab - <unknown>
+  49:     0x7ffa28273dd5 - <unknown>
+  62:     0x7ffa257a9eb7 - <unknown>
+  36:     0x7ffa290fbc94 - <unknown>
+  50:     0x7ffa27c8058a - <unknown>
+  63:     0x7ffa257a508f - <unknown>
+  37:     0x7ffa2912ebe2 - <unknown>
+  51:     0x7ffa27c8b706 - <unknown>
+  38:     0x7ffa28599c5d - <unknown>
+  64:     0x7ffa257b07f9 - <unknown>
+  52:     0x7ffa27d68edc - <unknown>
+  39:     0x7ffa28273dd5 - <unknown>
+  65:     0x7ffa28216e48 - <unknown>
+  53:     0x7ffa257a9eb7 - <unknown>
+  66:     0x7ffac08c7374 - <unknown>
+  40:     0x7ffa27c8058a - <unknown>
+  54:     0x7ffa257a508f - <unknown>
+  41:     0x7ffa27c8b706 - <unknown>
+  67:     0x7ffac28dcc91 - <unknown>
+  55:     0x7ffa257b07f9 - <unknown>
+  42:     0x7ffa27d68edc - <unknown>
+  56:     0x7ffa28216e48 - <unknown>
+  43:     0x7ffa257a9eb7 - <unknown>
+  57:     0x7ffac08c7374 - <unknown>
+  44:     0x7ffa257a508f - <unknown>
+  58:     0x7ffac28dcc91 - <unknown>
+  45:     0x7ffa257b07f9 - <unknown>
+  46:     0x7ffa28216e48 - <unknown>
+  47:     0x7ffac08c7374 - <unknown>
+  48:     0x7ffac28dcc91 - <unknown>
+error: could not compile `server` (test "workflow_api_test")
+
+Caused by:
+  process didn't exit successfully: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name workflow_api_test --edition=2024 'crates\server\tests\workflow_api_test.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=0d2cd0a137642bc8 -C extra-filename=-4a20fd958a3f234f --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `server` (bin "mcp_task_server") due to 3 previous errors
+
+Caused by:
+  process didn't exit successfully: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name mcp_task_server --edition=2024 'crates\server\src\bin\mcp_task_server.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --crate-type bin --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=8edb37ea07fa6942 --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (test "security_test")
+
+Caused by:
+  process didn't exit successfully: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name security_test --edition=2024 'crates\server\tests\security_test.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=6d99d17e6ff796e4 -C extra-filename=-3bc9ecd53ac295fa --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (bin "server")
+
+Caused by:
+  配额不足，无法完成请求的服务。 (os error 1453)
+
+Caused by:
+  failed to parse process output: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name server --edition=2024 'crates\server\src\main.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --crate-type bin --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=e14cf7d6e26afe05 --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (bin "generate_types") due to 2 previous errors
+
+Caused by:
+  process didn't exit successfully: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name generate_types --edition=2024 'crates\server\src\bin\generate_types.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --crate-type bin --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=d8d42da7f231125e --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (bin "generate_types" test) due to 1 previous error
+
+Caused by:
+  process didn't exit successfully: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name generate_types --edition=2024 'crates\server\src\bin\generate_types.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=a7a68fab0ed73a11 -C extra-filename=-387297c554784d29 --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (test "auth_test")
+
+Caused by:
+  配额不足，无法完成请求的服务。 (os error 1453)
+
+Caused by:
+  failed to parse process output: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name auth_test --edition=2024 'crates\server\tests\auth_test.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=8c1ae436e520b0b6 -C extra-filename=-8aaeb3ee73e8b0c0 --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (test "slash_commands_test")
+
+Caused by:
+  配额不足，无法完成请求的服务。 (os error 1453)
+
+Caused by:
+  failed to parse process output: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name slash_commands_test --edition=2024 'crates\server\tests\slash_commands_test.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=b3759fc27eb4f763 -C extra-filename=-4c650bc194b87894 --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (test "cli_types_detect_test") due to 1 previous error
+
+Caused by:
+  process didn't exit successfully: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name cli_types_detect_test --edition=2024 'crates\server\tests\cli_types_detect_test.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=8f83b446a8cfb6d8 -C extra-filename=-553bdfac1d4138c4 --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (test "terminal_stop_test")
+
+Caused by:
+  process didn't exit successfully: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name terminal_stop_test --edition=2024 'crates\server\tests\terminal_stop_test.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=8c787cbe0a51024d -C extra-filename=-a769f7edd0a1cee9 --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (bin "server" test) due to 3 previous errors
+
+Caused by:
+  process didn't exit successfully: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name server --edition=2024 'crates\server\src\main.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=8021b1c9c9bf1608 -C extra-filename=-c8c52df251984d61 --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (test "terminal_logs_api_test") due to 2 previous errors
+
+Caused by:
+  process didn't exit successfully: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name terminal_logs_api_test --edition=2024 'crates\server\tests\terminal_logs_api_test.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=c83b9a0588935247 -C extra-filename=-62e14bd5564c09f1 --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (test "slash_commands_integration_test")
+
+Caused by:
+  配额不足，无法完成请求的服务。 (os error 1453)
+
+Caused by:
+  failed to parse process output: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name slash_commands_integration_test --edition=2024 'crates\server\tests\slash_commands_integration_test.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=d8a995c196121c1c -C extra-filename=-ce2514f8e67d46a9 --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (test "terminal_ws_test")
+
+Caused by:
+  配额不足，无法完成请求的服务。 (os error 1453)
+
+Caused by:
+  failed to parse process output: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name terminal_ws_test --edition=2024 'crates\server\tests\terminal_ws_test.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=a827dfbdb9de785c -C extra-filename=-042b899f8a342eb8 --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
+error: could not compile `server` (test "deployment_process_manager_test")
+
+Caused by:
+  配额不足，无法完成请求的服务。 (os error 1453)
+
+Caused by:
+  failed to parse process output: `C:\Users\Administrator\.rustup\toolchains\nightly-2025-12-04-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name deployment_process_manager_test --edition=2024 'crates\server\tests\deployment_process_manager_test.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat,diagnostic-short --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 '--allow=clippy::uninlined-format-args' --test --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "qa-mode"))' -C metadata=e394337b25cf6005 -C extra-filename=-9184288054f3b7cc --out-dir 'E:\SoloDawn\target\debug\deps' -C 'incremental=E:\SoloDawn\target\debug\incremental' -L 'dependency=E:\SoloDawn\target\debug\deps' --extern 'aes_gcm=E:\SoloDawn\target\debug\deps\libaes_gcm-f2931fe8a4c3e1f3.rlib' --extern 'anyhow=E:\SoloDawn\target\debug\deps\libanyhow-93a127f8a091e433.rlib' --extern 'axum=E:\SoloDawn\target\debug\deps\libaxum-c1efe44779bbb83b.rlib' --extern 'base64=E:\SoloDawn\target\debug\deps\libbase64-48f72369d6aa63ce.rlib' --extern 'chrono=E:\SoloDawn\target\debug\deps\libchrono-3c65eae9964ba4d3.rlib' --extern 'clap=E:\SoloDawn\target\debug\deps\libclap-ad7381df736ef240.rlib' --extern 'db=E:\SoloDawn\target\debug\deps\libdb-ba98662e12c94063.rlib' --extern 'deployment=E:\SoloDawn\target\debug\deps\libdeployment-bf2aa012c57aedc7.rlib' --extern 'dirs=E:\SoloDawn\target\debug\deps\libdirs-69ec7be42e7fe0ee.rlib' --extern 'dotenv=E:\SoloDawn\target\debug\deps\libdotenv-dcaf33b7a83a7309.rlib' --extern 'dunce=E:\SoloDawn\target\debug\deps\libdunce-33055eb199327a46.rlib' --extern 'executors=E:\SoloDawn\target\debug\deps\libexecutors-3e25b7abaad71e0c.rlib' --extern 'feishu_connector=E:\SoloDawn\target\debug\deps\libfeishu_connector-e15a596acbdeaf76.rlib' --extern 'futures_util=E:\SoloDawn\target\debug\deps\libfutures_util-61c8f07f55254afe.rlib' --extern 'git2=E:\SoloDawn\target\debug\deps\libgit2-b9358fec5289c869.rlib' --extern 'http_body_util=E:\SoloDawn\target\debug\deps\libhttp_body_util-4a82659ad393056d.rlib' --extern 'hyper=E:\SoloDawn\target\debug\deps\libhyper-ec0fbead98cebb13.rlib' --extern 'ignore=E:\SoloDawn\target\debug\deps\libignore-f1d71a4ec8ec99c1.rlib' --extern 'local_deployment=E:\SoloDawn\target\debug\deps\liblocal_deployment-69079d49a2ebae1a.rlib' --extern 'mime_guess=E:\SoloDawn\target\debug\deps\libmime_guess-b85c639285708090.rlib' --extern 'nix=E:\SoloDawn\target\debug\deps\libnix-9f883c1af9dbfa66.rlib' --extern 'once_cell=E:\SoloDawn\target\debug\deps\libonce_cell-b60f61ddc8a0b74a.rlib' --extern 'os_info=E:\SoloDawn\target\debug\deps\libos_info-384a51220ef57a2f.rlib' --extern 'rand=E:\SoloDawn\target\debug\deps\librand-738b183acb738493.rlib' --extern 'raw_window_handle=E:\SoloDawn\target\debug\deps\libraw_window_handle-2ee3b398ee26a56b.rlib' --extern 'regex=E:\SoloDawn\target\debug\deps\libregex-3efb820ce39517f7.rlib' --extern 'reqwest=E:\SoloDawn\target\debug\deps\libreqwest-4cb0b357720ff8f6.rlib' --extern 'rfd=E:\SoloDawn\target\debug\deps\librfd-79c62a59eb4a18ac.rlib' --extern 'rmcp=E:\SoloDawn\target\debug\deps\librmcp-99a6710400fcdc87.rlib' --extern 'rust_embed=E:\SoloDawn\target\debug\deps\librust_embed-dfc57f66a43655d2.rlib' --extern 'rustls=E:\SoloDawn\target\debug\deps\librustls-89ec34c0613cf07b.rlib' --extern 'schemars=E:\SoloDawn\target\debug\deps\libschemars-5609c3a60cfee7b0.rlib' --extern 'secrecy=E:\SoloDawn\target\debug\deps\libsecrecy-b3d8263980a84f74.rlib' --extern 'sentry=E:\SoloDawn\target\debug\deps\libsentry-3b634b901a49356c.rlib' --extern 'serde=E:\SoloDawn\target\debug\deps\libserde-7112530625d0d39d.rlib' --extern 'serde_json=E:\SoloDawn\target\debug\deps\libserde_json-6a2d812290bfd6e6.rlib' --extern 'serial_test=E:\SoloDawn\target\debug\deps\libserial_test-773a22d0b48f327c.rlib' --extern 'server=E:\SoloDawn\target\debug\deps\libserver-90fdec5085eda25b.rlib' --extern 'services=E:\SoloDawn\target\debug\deps\libservices-28be9b874606bdcb.rlib' --extern 'sha2=E:\SoloDawn\target\debug\deps\libsha2-928cd6934ee404f1.rlib' --extern 'shlex=E:\SoloDawn\target\debug\deps\libshlex-59ea92e6d214cfbf.rlib' --extern 'sqlx=E:\SoloDawn\target\debug\deps\libsqlx-fd4d649d87625eec.rlib' --extern 'strip_ansi_escapes=E:\SoloDawn\target\debug\deps\libstrip_ansi_escapes-49072b60ad396fac.rlib' --extern 'strum=E:\SoloDawn\target\debug\deps\libstrum-d0eafe290f733bb1.rlib' --extern 'tempfile=E:\SoloDawn\target\debug\deps\libtempfile-133d366ec70b6285.rlib' --extern 'thiserror=E:\SoloDawn\target\debug\deps\libthiserror-9c9d284417db7acd.rlib' --extern 'tokio=E:\SoloDawn\target\debug\deps\libtokio-9186002ef0fac044.rlib' --extern 'tokio_stream=E:\SoloDawn\target\debug\deps\libtokio_stream-b972c0b5c9a4f8b4.rlib' --extern 'tokio_tungstenite=E:\SoloDawn\target\debug\deps\libtokio_tungstenite-5be35ecd5de9d4e0.rlib' --extern 'tokio_util=E:\SoloDawn\target\debug\deps\libtokio_util-9e483fff929363b8.rlib' --extern 'tower=E:\SoloDawn\target\debug\deps\libtower-c7e8ae83ef553535.rlib' --extern 'tower_http=E:\SoloDawn\target\debug\deps\libtower_http-c97495e3882e9437.rlib' --extern 'tracing=E:\SoloDawn\target\debug\deps\libtracing-f58a1702efdfdd9e.rlib' --extern 'tracing_subscriber=E:\SoloDawn\target\debug\deps\libtracing_subscriber-dd45fe5c2c240ae3.rlib' --extern 'ts_rs=E:\SoloDawn\target\debug\deps\libts_rs-be5853ed5b8e5883.rlib' --extern 'url=E:\SoloDawn\target\debug\deps\liburl-33e54c6da0530ed2.rlib' --extern 'utils=E:\SoloDawn\target\debug\deps\libutils-37d6a8793f4ccf8e.rlib' --extern 'uuid=E:\SoloDawn\target\debug\deps\libuuid-a55ae6f03abd7677.rlib' --extern 'windows_sys=E:\SoloDawn\target\debug\deps\libwindows_sys-307eeb4a3d9bb411.rlib' --extern 'wiremock=E:\SoloDawn\target\debug\deps\libwiremock-d1474b0f23eefb77.rlib' -C link-arg=/DEBUG -L 'native=E:\SoloDawn\target\debug\build\ring-72409b6c6074bba0\out' -L 'native=E:\SoloDawn\target\debug\build\libgit2-sys-6a7825b166ba61ec\out\build' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libz-sys-b99e4e0004c8a95f\out\lib' -L 'native=E:\SoloDawn\target\debug\build\libsqlite3-sys-2696866ce83f89e0\out' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.48.5\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.52.6\lib' -L 'native=C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows_x86_64_msvc-0.53.1\lib'` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)

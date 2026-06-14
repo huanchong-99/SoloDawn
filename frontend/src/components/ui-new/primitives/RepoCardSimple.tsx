@@ -25,7 +25,7 @@ export function RepoCardSimple({
 }: Readonly<RepoCardSimpleProps>) {
   return (
     <div
-      className={cn('flex flex-col gap-half bg-tertiary rounded-sm', className)}
+      className={cn('flex flex-col gap-half bg-secondary rounded-sm', className)}
     >
       <div className="flex items-center gap-base text-normal ">
         <div className="flex-1 flex items-center gap-half">

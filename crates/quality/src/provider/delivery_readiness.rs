@@ -146,14 +146,10 @@ impl QualityProvider for DeliveryReadinessProvider {
     ) -> anyhow::Result<ProviderReport> {
         let start = Instant::now();
         let scoped_files = files_for_scope(project_root, changed_files);
-        let all_files = analysis::collect_files(project_root, relevant_file);
         let mut issues = Vec::new();
 
         detect_mock_only_express_tests(project_root, &scoped_files, &mut issues);
-        detect_wrong_package_load_test_coverage(project_root, &all_files, &mut issues);
         detect_esm_require(project_root, &scoped_files, &mut issues);
-        detect_i18n_namespace_mismatch(project_root, &all_files, &mut issues);
-        detect_duplicate_load_testing_implementation(project_root, &all_files, &mut issues);
         detect_sqlx_query_builder_push(project_root, &scoped_files, &mut issues);
         detect_redis_keys(project_root, &scoped_files, &mut issues);
         detect_csrf_undefined_res(project_root, &scoped_files, &mut issues);
@@ -220,37 +216,6 @@ fn detect_mock_only_express_tests(
     }
 }
 
-fn detect_wrong_package_load_test_coverage(
-    project_root: &Path,
-    files: &[PathBuf],
-    issues: &mut Vec<QualityIssue>,
-) {
-    let has_common_load_testing = project_root
-        .join("packages")
-        .join("hoppscotch-common")
-        .join("src")
-        .join("load-testing")
-        .is_dir();
-    if !has_common_load_testing {
-        return;
-    }
-
-    for file in files {
-        let rel = rel_path(project_root, file);
-        if rel.contains("packages/hoppscotch-app/src/load-testing") && rel.contains("__tests__") {
-            issues.push(issue(
-                Bucket::TestAuthenticity,
-                "wrong-package-load-testing-tests",
-                "Load-testing tests live under hoppscotch-app while the real implementation is under hoppscotch-common.",
-                project_root,
-                file,
-                1,
-            ));
-            return;
-        }
-    }
-}
-
 fn detect_esm_require(project_root: &Path, files: &[PathBuf], issues: &mut Vec<QualityIssue>) {
     for file in files {
         if !is_js_like(file) {
@@ -272,77 +237,6 @@ fn detect_esm_require(project_root: &Path, files: &[PathBuf], issues: &mut Vec<Q
                 line_number(&content, "require("),
             ));
         }
-    }
-}
-
-fn detect_i18n_namespace_mismatch(
-    project_root: &Path,
-    files: &[PathBuf],
-    issues: &mut Vec<QualityIssue>,
-) {
-    let source_with_load_test = files.iter().find_map(|file| {
-        let content = read_to_string(file)?;
-        if content.contains("load_test.") {
-            Some((file, content))
-        } else {
-            None
-        }
-    });
-    if source_with_load_test.is_none() {
-        return;
-    }
-
-    let has_load_testing_locale = files.iter().any(|file| {
-        rel_path(project_root, file).contains("locales/")
-            && read_to_string(file).is_some_and(|content| content.contains("load_testing"))
-    });
-    if !has_load_testing_locale {
-        return;
-    }
-
-    let (file, content) = source_with_load_test.expect("checked above");
-    issues.push(issue(
-        Bucket::ProjectConvention,
-        "i18n-namespace-mismatch",
-        "UI uses load_test.* translation keys while locale files define load_testing.* keys.",
-        project_root,
-        file,
-        line_number(&content, "load_test."),
-    ));
-}
-
-fn detect_duplicate_load_testing_implementation(
-    project_root: &Path,
-    files: &[PathBuf],
-    issues: &mut Vec<QualityIssue>,
-) {
-    let has_common = project_root
-        .join("packages/hoppscotch-common/src/load-testing")
-        .is_dir();
-    let has_app = project_root
-        .join("packages/hoppscotch-app/src/load-testing")
-        .is_dir();
-    if !has_common || !has_app {
-        return;
-    }
-
-    let duplicate = files.iter().find(|file| {
-        let rel = rel_path(project_root, file);
-        rel.contains("packages/hoppscotch-app/src/load-testing")
-            && matches!(
-                file.file_name().and_then(|name| name.to_str()),
-                Some("engine.ts" | "store.ts" | "types.ts")
-            )
-    });
-    if let Some(file) = duplicate {
-        issues.push(issue(
-            Bucket::ProjectConvention,
-            "duplicate-load-testing-implementation",
-            "Load-testing engine/store/types are duplicated across hoppscotch-app and hoppscotch-common instead of reusing the package implementation.",
-            project_root,
-            file,
-            1,
-        ));
     }
 }
 
@@ -579,26 +473,6 @@ mod tests {
                 .iter()
                 .any(|issue| issue.rule_id.contains("csrf-undefined-res"))
         );
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn detects_hoppscotch_load_testing_mismatch() {
-        let root = temp_repo("hoppscotch");
-        write(
-            &root,
-            "packages/hoppscotch-common/src/load-testing/engine.ts",
-            "export const real = true;\n",
-        );
-        let test = write(
-            &root,
-            "packages/hoppscotch-app/src/load-testing/__tests__/engine.test.ts",
-            "test('x', () => {});\n",
-        );
-        let mut issues = Vec::new();
-        detect_wrong_package_load_test_coverage(&root, &[test], &mut issues);
-        assert_eq!(issues.len(), 1);
-        assert!(issues[0].rule_id.contains("wrong-package"));
         fs::remove_dir_all(root).ok();
     }
 }

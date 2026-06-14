@@ -8,7 +8,7 @@ pub mod workspace_summary;
 
 use std::{
     collections::{HashMap, HashSet},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 use axum::{
@@ -790,161 +790,6 @@ pub enum PushError {
     ForcePushRequired,
 }
 
-#[derive(serde::Deserialize, TS)]
-pub struct OpenEditorRequest {
-    #[serde(default)]
-    pub editor_type: Option<String>,
-    #[serde(default)]
-    pub file_path: Option<String>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub git_repo_path: Option<String>,
-}
-
-#[derive(Debug, Serialize, TS)]
-pub struct OpenEditorResponse {
-    pub url: Option<String>,
-}
-
-fn normalize_editor_repo_path(path: &str) -> String {
-    path.replace('\\', "/").trim_end_matches('/').to_string()
-}
-
-fn resolve_workspace_repo_for_editor<'a>(
-    repositories: &'a [Repo],
-    requested_repo_path: Option<&str>,
-) -> Result<Option<&'a Repo>, ApiError> {
-    if let Some(requested_repo_path) = requested_repo_path {
-        let requested_repo_path = requested_repo_path.trim();
-        if !requested_repo_path.is_empty() {
-            let requested_repo_path = normalize_editor_repo_path(requested_repo_path);
-            return repositories
-                .iter()
-                .find(|repo| {
-                    normalize_editor_repo_path(&repo.path.to_string_lossy()) == requested_repo_path
-                        || repo.name == requested_repo_path
-                })
-                .map(Some)
-                .ok_or_else(|| {
-                    ApiError::BadRequest(
-                        "Requested repository is not part of this task attempt".to_string(),
-                    )
-                });
-        }
-    }
-
-    Ok(repositories.first().filter(|_| repositories.len() == 1))
-}
-
-fn resolve_workspace_file_open_root(
-    workspace_path: &Path,
-    selected_repo: Option<&Repo>,
-) -> PathBuf {
-    if let Some(selected_repo) = selected_repo {
-        return workspace_path.join(&selected_repo.name);
-    }
-
-    workspace_path.to_path_buf()
-}
-
-fn resolve_workspace_file_path_for_editor(
-    base_path: &Path,
-    file_path: &str,
-    selected_repo_name: Option<&str>,
-) -> Result<PathBuf, ApiError> {
-    let trimmed_file_path = file_path.trim();
-    if trimmed_file_path.is_empty() {
-        return Ok(base_path.to_path_buf());
-    }
-
-    let mut relative_path = PathBuf::from(trimmed_file_path);
-    if relative_path.is_absolute() {
-        return Err(ApiError::BadRequest(
-            "file_path must be relative to the selected root".to_string(),
-        ));
-    }
-
-    if relative_path.components().any(|component| {
-        matches!(
-            component,
-            Component::ParentDir | Component::Prefix(_) | Component::RootDir
-        )
-    }) {
-        return Err(ApiError::BadRequest(
-            "file_path must stay within the selected root".to_string(),
-        ));
-    }
-
-    if let Some(repo_name) = selected_repo_name
-        && let Ok(stripped) = relative_path.strip_prefix(repo_name)
-    {
-        if stripped.as_os_str().is_empty() {
-            return Ok(base_path.to_path_buf());
-        }
-        relative_path = stripped.to_path_buf();
-    }
-
-    Ok(base_path.join(relative_path))
-}
-
-#[cfg(test)]
-mod open_editor_path_tests {
-    use std::path::{Path, PathBuf};
-
-    use super::{normalize_editor_repo_path, resolve_workspace_file_path_for_editor};
-
-    #[test]
-    fn strips_repo_prefix_for_single_repo_workspace_file_path() {
-        let resolved = resolve_workspace_file_path_for_editor(
-            Path::new("/workspace/repo-a"),
-            "repo-a/src/main.rs",
-            Some("repo-a"),
-        )
-        .expect("path should resolve");
-
-        assert_eq!(
-            resolved,
-            Path::new("/workspace/repo-a").join("src").join("main.rs")
-        );
-    }
-
-    #[test]
-    fn rejects_parent_dir_traversal_in_file_path() {
-        let result =
-            resolve_workspace_file_path_for_editor(Path::new("/workspace"), "../outside.txt", None);
-
-        assert!(result.is_err(), "path traversal must be rejected");
-    }
-
-    #[test]
-    fn normalizes_repo_path_slashes_and_trailing_separator() {
-        let normalized = normalize_editor_repo_path(r"C:\work\repo-a\");
-        assert_eq!(normalized, "C:/work/repo-a");
-    }
-
-    #[test]
-    fn file_open_root_prefers_selected_repo() {
-        let selected_repo = db::models::repo::Repo {
-            id: uuid::Uuid::nil(),
-            path: "/workspace/repo-a".into(),
-            name: "repo-a".to_string(),
-            display_name: "repo-a".to_string(),
-            setup_script: None,
-            cleanup_script: None,
-            copy_files: None,
-            parallel_setup_script: false,
-            dev_server_script: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        };
-
-        let root =
-            super::resolve_workspace_file_open_root(Path::new("/workspace"), Some(&selected_repo));
-
-        assert_eq!(root, PathBuf::from("/workspace").join("repo-a"));
-    }
-}
-
 #[cfg(test)]
 mod status_semantics_tests {
     use super::*;
@@ -959,87 +804,6 @@ mod status_semantics_tests {
     fn rebase_conflict_response_uses_conflict_status() {
         let (status, _payload) = rebase_conflict_response(GitOperationError::RebaseInProgress);
         assert_eq!(status, StatusCode::CONFLICT);
-    }
-}
-
-pub async fn open_task_attempt_in_editor(
-    Extension(workspace): Extension<Workspace>,
-    State(deployment): State<DeploymentImpl>,
-    Json(payload): Json<OpenEditorRequest>,
-) -> Result<ResponseJson<ApiResponse<OpenEditorResponse>>, ApiError> {
-    let container_ref = deployment
-        .container()
-        .ensure_container_exists(&workspace)
-        .await?;
-
-    Workspace::touch(&deployment.db().pool, workspace.id).await?;
-
-    let workspace_path = Path::new(&container_ref);
-
-    // Resolve repo context when explicitly selected or when single-repo.
-    let workspace_repos =
-        WorkspaceRepo::find_repos_for_workspace(&deployment.db().pool, workspace.id).await?;
-    let selected_repo =
-        resolve_workspace_repo_for_editor(&workspace_repos, payload.git_repo_path.as_deref())?;
-
-    let file_path = payload
-        .file_path
-        .as_deref()
-        .filter(|value| !value.trim().is_empty());
-
-    let base_path = resolve_workspace_file_open_root(workspace_path, selected_repo);
-
-    let path = if let Some(file_path) = file_path {
-        resolve_workspace_file_path_for_editor(
-            &base_path,
-            file_path,
-            selected_repo.map(|repo| repo.name.as_str()),
-        )?
-    } else {
-        base_path
-    };
-
-    let editor_config = {
-        let config = deployment.config().read().await;
-        let editor_type_str = payload.editor_type.as_deref();
-        config.editor.with_override(editor_type_str)
-    };
-
-    match editor_config
-        .open_file_with_hint(path.as_path(), Some(file_path.is_some()))
-        .await
-    {
-        Ok(url) => {
-            tracing::info!(
-                "Opened editor for task attempt {} at path: {}{}",
-                workspace.id,
-                path.display(),
-                if url.is_some() { " (remote mode)" } else { "" }
-            );
-
-            deployment
-                .track_if_analytics_allowed(
-                    "task_attempt_editor_opened",
-                    serde_json::json!({
-                        "workspace_id": workspace.id.to_string(),
-                        "editor_type": payload.editor_type.as_ref(),
-                        "remote_mode": url.is_some(),
-                    }),
-                )
-                .await;
-
-            Ok(ResponseJson(ApiResponse::success(OpenEditorResponse {
-                url,
-            })))
-        }
-        Err(e) => {
-            tracing::error!(
-                "Failed to open editor for attempt {}: {:?}",
-                workspace.id,
-                e
-            );
-            Err(ApiError::EditorOpen(e))
-        }
     }
 }
 
@@ -2140,7 +1904,6 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         .route("/pr", post(pr::create_pr))
         .route("/pr/attach", post(pr::attach_existing_pr))
         .route("/pr/comments", get(pr::get_pr_comments))
-        .route("/open-editor", post(open_task_attempt_in_editor))
         .route("/children", get(get_task_attempt_children))
         .route("/stop", post(stop_task_attempt_execution))
         .route("/change-target-branch", post(change_target_branch))

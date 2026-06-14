@@ -12,7 +12,6 @@ describe('Step1Basic', () => {
     executionMode: 'diy',
     initialGoal: '',
     taskCount: 1,
-    importFromKanban: false,
   };
 
   beforeEach(() => {
@@ -33,7 +32,7 @@ describe('Step1Basic', () => {
     expect(screen.getByText(i18n.t('workflow:step1.taskCountLabel'))).toBeInTheDocument();
   });
 
-  it('should always show task count and import controls', () => {
+  it('should always show task count controls', () => {
     renderWithI18n(
       <Step1Basic
         config={defaultConfig}
@@ -43,7 +42,6 @@ describe('Step1Basic', () => {
     );
 
     expect(screen.getByText(i18n.t('workflow:step1.taskCountLabel'))).toBeInTheDocument();
-    expect(screen.getByText(i18n.t('workflow:step1.importLabel'))).toBeInTheDocument();
   });
 
   it('should display error when name is empty', () => {
@@ -76,23 +74,6 @@ describe('Step1Basic', () => {
 
     expect(mockOnChange).toHaveBeenCalledWith(
       expect.objectContaining({ taskCount: 2 })
-    );
-  });
-
-  it('should allow switching between import modes', () => {
-    renderWithI18n(
-      <Step1Basic
-        config={defaultConfig}
-        onChange={mockOnChange}
-        errors={{}}
-      />
-    );
-
-    const importRadio = screen.getByText(i18n.t('workflow:step1.importKanban'));
-    fireEvent.click(importRadio);
-
-    expect(mockOnChange).toHaveBeenCalledWith(
-      expect.objectContaining({ importFromKanban: true })
     );
   });
 

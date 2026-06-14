@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import { SerializedLexicalNode, Spread } from 'lexical';
 import { HelpCircle, Loader2 } from 'lucide-react';
 import {
   useTaskAttemptId,
@@ -12,21 +11,12 @@ import { formatFileSize } from '@/lib/utils';
 import {
   createDecoratorNode,
   type DecoratorNodeConfig,
-  type GeneratedDecoratorNode,
 } from '../lib/create-decorator-node';
 
 export interface ImageData {
   src: string;
   altText: string;
 }
-
-export type SerializedImageNode = Spread<
-  {
-    src: string;
-    altText: string;
-  },
-  SerializedLexicalNode
->;
 
 function truncatePath(path: string, maxLength = 24): string {
   const filename = path.split('/').pop() || path;
@@ -213,7 +203,6 @@ const config: DecoratorNodeConfig<ImageData> = {
 const result = createDecoratorNode(config);
 
 export const ImageNode = result.Node;
-export type ImageNodeInstance = GeneratedDecoratorNode<ImageData>;
 export const $createImageNode = (src: string, altText: string) =>
   result.createNode({ src, altText });
 export const $isImageNode = result.isNode;

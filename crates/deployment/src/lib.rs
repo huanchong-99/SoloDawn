@@ -52,10 +52,6 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use utils::sentry as sentry_utils;
 
-#[derive(Debug, Clone, Copy, Error)]
-#[error("Remote client not configured")]
-pub struct RemoteClientNotConfigured;
-
 #[derive(Debug, Error)]
 pub enum DeploymentError {
     #[error(transparent)]

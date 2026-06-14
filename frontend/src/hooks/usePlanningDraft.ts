@@ -5,6 +5,7 @@ import {
   type PlanningDraftResponse,
   type PlanningMessageResponse,
 } from '@/lib/api';
+import type { QualityGateConfig } from 'shared/types';
 import { workflowKeys } from '@/hooks/useWorkflows';
 
 export const planningDraftKeys = {
@@ -149,6 +150,18 @@ export function useMaterializeDraft() {
       queryClient.invalidateQueries({
         queryKey: workflowKeys.all,
       });
+    },
+  });
+}
+
+/** Confirm quality gates for a planning draft (G2); optionally inline-upsert a DIY config */
+export function useConfirmGates() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ draftId, config }: { draftId: string; config?: QualityGateConfig }) =>
+      planningDraftsApi.confirmGates(draftId, config),
+    onSuccess: (_d, { draftId }) => {
+      qc.invalidateQueries({ queryKey: planningDraftKeys.byId(draftId) });
     },
   });
 }

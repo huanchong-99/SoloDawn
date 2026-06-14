@@ -743,7 +743,6 @@ function TerminalQualityBadgeInline({ terminalId, className }: Readonly<{ termin
   return (
     <QualityBadge
       gateStatus={data.gateStatus as GateStatus}
-      totalIssues={data.totalIssues}
       blockingIssues={data.blockingIssues}
       className={className}
     />

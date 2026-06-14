@@ -1,32 +1,13 @@
 use axum::{
     Router,
-    extract::{Json, Query, State},
-    http::{Response, StatusCode},
+    extract::State,
+    http::StatusCode,
     response::Json as ResponseJson,
     routing::{get, post},
 };
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use utils::{api::oauth::StatusResponse, response::ApiResponse};
-use uuid::Uuid;
 
 use crate::{DeploymentImpl, error::ApiError};
-
-/// Response from GET /api/auth/token - returns the current access token
-#[derive(Debug, Serialize, TS)]
-#[ts(export)]
-pub struct TokenResponse {
-    pub access_token: String,
-    pub expires_at: Option<DateTime<Utc>>,
-}
-
-/// Response from GET /api/auth/user - returns the current user ID
-#[derive(Debug, Serialize, TS)]
-#[ts(export)]
-pub struct CurrentUserResponse {
-    pub user_id: String,
-}
 
 // NOTE(W2-34-03): If/when OAuth is re-enabled in this deployment, the
 // pre-authentication endpoints below (`/auth/handoff/init`,
@@ -40,53 +21,8 @@ pub struct CurrentUserResponse {
 // together with the real OAuth implementation.
 pub fn router() -> Router<DeploymentImpl> {
     Router::new()
-        .route("/auth/handoff/init", post(handoff_init))
-        .route("/auth/handoff/complete", get(handoff_complete))
         .route("/auth/logout", post(logout))
         .route("/auth/status", get(status))
-        .route("/auth/token", get(get_token))
-        .route("/auth/user", get(get_current_user))
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct HandoffInitPayload {
-    provider: String,
-    return_to: String,
-}
-
-#[derive(Debug, Serialize)]
-struct HandoffInitResponseBody {
-    handoff_id: Uuid,
-    authorize_url: String,
-}
-
-async fn handoff_init(
-    State(_deployment): State<DeploymentImpl>,
-    Json(_payload): Json<HandoffInitPayload>,
-) -> Result<ResponseJson<ApiResponse<HandoffInitResponseBody>>, ApiError> {
-    Err(ApiError::BadRequest(
-        "OAuth authentication is not supported in this version.".to_string(),
-    ))
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct HandoffCompleteQuery {
-    handoff_id: Uuid,
-    #[serde(default)]
-    app_code: Option<String>,
-    #[serde(default)]
-    error: Option<String>,
-}
-
-async fn handoff_complete(
-    State(_deployment): State<DeploymentImpl>,
-    Query(_query): Query<HandoffCompleteQuery>,
-) -> Result<Response<String>, ApiError> {
-    Err(ApiError::BadRequest(
-        "OAuth authentication is not supported in this version.".to_string(),
-    ))
 }
 
 async fn logout(State(_deployment): State<DeploymentImpl>) -> Result<StatusCode, ApiError> {
@@ -116,19 +52,3 @@ async fn status(
     }
 }
 
-/// Returns the current access token (auto-refreshes if needed)
-async fn get_token(
-    State(_deployment): State<DeploymentImpl>,
-) -> Result<ResponseJson<ApiResponse<TokenResponse>>, ApiError> {
-    Err(ApiError::BadRequest(
-        "OAuth authentication is not supported in this version.".to_string(),
-    ))
-}
-
-async fn get_current_user(
-    State(_deployment): State<DeploymentImpl>,
-) -> Result<ResponseJson<ApiResponse<CurrentUserResponse>>, ApiError> {
-    Err(ApiError::BadRequest(
-        "OAuth authentication is not supported in this version.".to_string(),
-    ))
-}

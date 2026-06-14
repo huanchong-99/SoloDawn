@@ -44,8 +44,6 @@ impl RustRule for ErrorHandlingRule {
         let mut visitor = ErrorHandlingVisitor {
             issues: Vec::new(),
             file_path: ctx.file_path.to_string(),
-            in_test: false,
-            content: ctx.content,
         };
         visitor.visit_file(ctx.syntax);
         visitor.issues
@@ -58,15 +56,12 @@ const UNSAFE_MACROS: &[&str] = &["panic", "unreachable", "unimplemented", "todo"
 /// Method calls considered unsafe for production code.
 const UNSAFE_METHODS: &[&str] = &["unwrap", "expect"];
 
-struct ErrorHandlingVisitor<'a> {
+struct ErrorHandlingVisitor {
     issues: Vec<QualityIssue>,
     file_path: String,
-    in_test: bool,
-    #[allow(dead_code)]
-    content: &'a str,
 }
 
-impl<'a> ErrorHandlingVisitor<'a> {
+impl ErrorHandlingVisitor {
     /// Check whether an attribute list contains `#[test]`.
     fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
         attrs.iter().any(|attr| attr.path().is_ident("test"))
@@ -107,9 +102,9 @@ impl<'a> ErrorHandlingVisitor<'a> {
     }
 }
 
-impl<'ast> Visit<'ast> for ErrorHandlingVisitor<'_> {
+impl<'ast> Visit<'ast> for ErrorHandlingVisitor {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        if self.in_test || Self::has_test_attr(&node.attrs) {
+        if Self::has_test_attr(&node.attrs) {
             // Skip test functions entirely.
             return;
         }
@@ -117,7 +112,7 @@ impl<'ast> Visit<'ast> for ErrorHandlingVisitor<'_> {
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        if self.in_test || Self::has_test_attr(&node.attrs) {
+        if Self::has_test_attr(&node.attrs) {
             return;
         }
         syn::visit::visit_impl_item_fn(self, node);
@@ -132,27 +127,23 @@ impl<'ast> Visit<'ast> for ErrorHandlingVisitor<'_> {
     }
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
-        if !self.in_test {
-            let method_name = node.method.to_string();
-            for &m in UNSAFE_METHODS {
-                if method_name == m {
-                    self.report(&format!(".{}()", m), node.method.span());
-                    break;
-                }
+        let method_name = node.method.to_string();
+        for &m in UNSAFE_METHODS {
+            if method_name == m {
+                self.report(&format!(".{}()", m), node.method.span());
+                break;
             }
         }
         syn::visit::visit_expr_method_call(self, node);
     }
 
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
-        if !self.in_test {
-            if let Some(ident) = node.path.get_ident() {
-                let name = ident.to_string();
-                for &m in UNSAFE_MACROS {
-                    if name == m {
-                        self.report(&format!("{}!", m), ident.span());
-                        break;
-                    }
+        if let Some(ident) = node.path.get_ident() {
+            let name = ident.to_string();
+            for &m in UNSAFE_MACROS {
+                if name == m {
+                    self.report(&format!("{}!", m), ident.span());
+                    break;
                 }
             }
         }

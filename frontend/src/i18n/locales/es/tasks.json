@@ -27,7 +27,6 @@
     "duplicate": "Duplicate",
     "editBranchName": "Editar nombre de rama",
     "gitActions": "Acciones de Git",
-    "openInIde": "Open attempt in IDE",
     "task": "Task",
     "viewProcesses": "View processes",
     "viewRelatedTasks": "View related tasks",
@@ -55,7 +54,6 @@
   },
   "attempt": {
     "actions": {
-      "openInIde": "Abrir en IDE",
       "openMenu": "Abrir menú",
       "startDevServer": "Iniciar servidor de desarrollo",
       "stopDevServer": "Detener servidor de desarrollo"
@@ -74,7 +72,6 @@
       "summaryAndActions": "Resumen y Acciones"
     },
     "newAttempt": "New Attempt",
-    "openInEditor": "Open in {{editor}}",
     "path": "Path",
     "pauseDev": "Pausar Dev",
     "preview": "Preview",

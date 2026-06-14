@@ -30,7 +30,6 @@ const workflowWizardMock = vi.hoisted(() => ({
       name: 'Wizard Created Workflow',
       description: 'created by mocked wizard',
       taskCount: 1,
-      importFromKanban: false,
     },
     tasks: [
       {

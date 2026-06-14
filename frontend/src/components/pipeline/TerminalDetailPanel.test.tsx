@@ -1,6 +1,18 @@
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { TerminalDetailPanel } from './TerminalDetailPanel';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string) => {
+      const translations: Record<string, string> = {
+        'pipeline.orchestrator.statusLabel': 'Status:',
+        'pipeline.orchestrator.modelLabel': 'Model:',
+      };
+      return translations[key] ?? key;
+    },
+  }),
+}));
 
 describe('TerminalDetailPanel', () => {
   it('renders terminal details', () => {

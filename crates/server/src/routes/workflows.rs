@@ -59,29 +59,12 @@ use crate::{
 // Request/Response Types
 // ============================================================================
 
-/// Workflow Detail Response
-#[derive(Debug, Serialize)]
-pub struct WorkflowDetailResponse {
-    #[serde(flatten)]
-    pub workflow: Workflow,
-    pub tasks: Vec<WorkflowTaskDetailResponse>,
-    pub commands: Vec<WorkflowCommandWithPreset>,
-}
-
 /// Workflow Task Detail Response
 #[derive(Debug, Serialize)]
 pub struct WorkflowTaskDetailResponse {
     #[serde(flatten)]
     pub task: WorkflowTask,
     pub terminals: Vec<Terminal>,
-}
-
-/// Workflow Command with Preset
-#[derive(Debug, Serialize)]
-pub struct WorkflowCommandWithPreset {
-    #[serde(flatten)]
-    pub command: WorkflowCommand,
-    pub preset: SlashCommandPreset,
 }
 
 /// Update Workflow Status Request
@@ -3616,8 +3599,8 @@ async fn list_orchestrator_messages(
     Ok(ResponseJson(ApiResponse::success(response)))
 }
 
-/// POST /api/workflows/:workflow_id/merge
-/// Execute merge terminal for workflow
+/// GET /api/workflows/:workflow_id/events
+/// Retrieve workflow events
 async fn get_workflow_events(
     State(deployment): State<DeploymentImpl>,
     Path(workflow_id): Path<Uuid>,
@@ -3628,7 +3611,7 @@ async fn get_workflow_events(
     )
     .await
     .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
-    Ok(Json(ApiResponse::success(events)))
+    Ok(ResponseJson(ApiResponse::success(events)))
 }
 
 async fn merge_workflow(
@@ -3661,7 +3644,7 @@ async fn merge_workflow(
     // G06-002: acquire the per-workflow merge lock BEFORE the CAS so that
     // auto-merge (orchestrator) and manual merge (this endpoint) cannot both
     // pass the CAS check concurrently.
-    let _merge_guard =
+    let merge_guard =
         services::services::merge_coordinator::acquire_workflow_merge_lock(&workflow_id).await;
 
     // G06-001: CAS — atomically transition completed → merging to prevent concurrent merges.
@@ -3869,6 +3852,11 @@ async fn merge_workflow(
             );
         }
     }
+
+    // RB-59: release the merge lock guard before pruning so the registry's Arc
+    // strong count can drop to 1, allowing the now-idle map entry to be reclaimed.
+    drop(merge_guard);
+    services::services::merge_coordinator::prune_workflow_merge_lock(&workflow_id);
 
     // Return success response
     let result = json!({

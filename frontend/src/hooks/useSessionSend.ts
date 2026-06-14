@@ -34,7 +34,7 @@ interface UseSessionSendResult {
  * Hook for sending messages in SessionChatBoxContainer.
  * Handles both new session creation and existing session follow-up.
  *
- * Unlike useFollowUpSend, this hook:
+ * This hook:
  * - Takes message/variant as parameters to send() (not captured in closure)
  * - Returns boolean for success/failure (caller handles cleanup)
  * - Has no prompt composition (no conflict/review/clicked markdown)

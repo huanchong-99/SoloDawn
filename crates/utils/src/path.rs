@@ -124,12 +124,6 @@ pub fn get_solodawn_temp_dir() -> std::path::PathBuf {
     }
 }
 
-/// Backward-compatible alias for `get_solodawn_temp_dir`.
-#[deprecated(note = "Use get_solodawn_temp_dir instead")]
-pub fn get_gitcortex_temp_dir() -> std::path::PathBuf {
-    get_solodawn_temp_dir()
-}
-
 /// Expand leading ~ to user's home directory.
 pub fn expand_tilde(path_str: &str) -> std::path::PathBuf {
     shellexpand::tilde(path_str).as_ref().into()

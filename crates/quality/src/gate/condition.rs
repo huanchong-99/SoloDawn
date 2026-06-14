@@ -4,6 +4,7 @@
 //! 当度量值触发阈值时，条件状态为 ERROR。
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::metrics::MetricKey;
 
@@ -12,7 +13,8 @@ use crate::metrics::MetricKey;
 /// 移植自 SonarQube `Condition.Operator`:
 /// - `GREATER_THAN` ("GT") — 度量值大于阈值时触发
 /// - `LESS_THAN` ("LT") — 度量值小于阈值时触发
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub enum Operator {
     /// 大于 — 度量值 > 阈值时条件失败。用于 "错误数不得超过 N"
     #[serde(rename = "GT")]
@@ -29,14 +31,6 @@ impl Operator {
             "GT" => Ok(Self::GreaterThan),
             "LT" => Ok(Self::LessThan),
             _ => anyhow::bail!("Unsupported operator value: '{}'", s),
-        }
-    }
-
-    /// 转为数据库字符串值
-    pub fn to_db_value(&self) -> &'static str {
-        match self {
-            Self::GreaterThan => "GT",
-            Self::LessThan => "LT",
         }
     }
 
@@ -92,38 +86,6 @@ impl Condition {
             use_variation: metric_key_str.starts_with("new_"),
         }
     }
-
-    /// 解析阈值为 f64
-    pub fn parse_threshold_f64(&self) -> anyhow::Result<f64> {
-        self.error_threshold.parse::<f64>().map_err(|e| {
-            anyhow::anyhow!(
-                "Quality Gate: Unable to parse threshold '{}' for metric {}: {}",
-                self.error_threshold,
-                self.metric,
-                e
-            )
-        })
-    }
-
-    /// 解析阈值为 i64
-    pub fn parse_threshold_i64(&self) -> anyhow::Result<i64> {
-        // 参考 SonarQube: 含小数点时截断
-        if self.error_threshold.contains('.') {
-            let dot_pos = self.error_threshold.find('.').unwrap();
-            self.error_threshold[..dot_pos]
-                .parse::<i64>()
-                .map_err(|e| anyhow::anyhow!("Failed to parse threshold: {}", e))
-        } else {
-            self.error_threshold
-                .parse::<i64>()
-                .map_err(|e| anyhow::anyhow!("Failed to parse threshold: {}", e))
-        }
-    }
-
-    /// 生成人类可读的描述
-    pub fn description(&self) -> String {
-        format!("{} {} {}", self.metric, self.operator, self.error_threshold)
-    }
 }
 
 impl PartialEq for Condition {
@@ -161,13 +123,6 @@ mod tests {
         let c1 = Condition::new(MetricKey::ClippyWarnings, Operator::GreaterThan, "0");
         let c2 = Condition::new(MetricKey::ClippyWarnings, Operator::LessThan, "10");
         assert_eq!(c1, c2); // 同 metric 视为相同条件
-    }
-
-    #[test]
-    fn test_threshold_parsing() {
-        let c = Condition::new(MetricKey::TestCoverage, Operator::LessThan, "80.5");
-        assert!((c.parse_threshold_f64().unwrap() - 80.5).abs() < f64::EPSILON);
-        assert_eq!(c.parse_threshold_i64().unwrap(), 80);
     }
 
     #[test]

@@ -216,37 +216,6 @@ impl MergeCoordinator {
         Ok(())
     }
 
-    /// Completes a merge after conflict resolution.
-    ///
-    /// Called when conflicts have been manually resolved and the merge
-    /// should be completed.
-    ///
-    /// # Arguments
-    /// * `workflow_id` - The ID of the workflow
-    /// * `task_id` - The ID of the task
-    /// * `commit_sha` - The commit SHA of the resolved merge
-    pub async fn resolve_and_complete_merge(
-        &self,
-        workflow_id: &str,
-        task_id: &str,
-        commit_sha: &str,
-    ) -> Result<()> {
-        tracing::info!(
-            "Completing resolved merge for workflow {} task {}: {}",
-            workflow_id,
-            task_id,
-            commit_sha
-        );
-
-        // Broadcast merge completion
-        self.broadcast_merge_success(workflow_id, task_id, commit_sha, true)
-            .await?;
-
-        tracing::info!("Successfully completed resolved merge for task {}", task_id);
-
-        Ok(())
-    }
-
     /// Broadcasts a merge success event.
     ///
     /// # Arguments
@@ -319,11 +288,96 @@ impl MergeCoordinator {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_merge_coordinator_creation() {
-        // This is a placeholder test to verify the module compiles
-        // Real tests are in merge_coordinator_test.rs
+/// Prunes the per-workflow merge lock entry when it is no longer needed.
+///
+/// Removes the map entry only when the `Arc` strong count drops to 1 (i.e., only
+/// the registry itself holds a reference, meaning no merge is in progress and no
+/// caller holds a clone of the lock).
+///
+/// Call this at natural cleanup points — after auto-merge completion or manual-merge
+/// completion — to prevent unbounded growth of the lock map over a long-running
+/// process.
+///
+/// G06-002: safe to call concurrently; the outer `std::sync::Mutex` is held only
+/// briefly for the map lookup and optional remove.
+pub fn prune_workflow_merge_lock(workflow_id: &str) {
+    let mut map = merge_locks().lock().expect("merge lock map poisoned");
+    if let Some(lock_arc) = map.get(workflow_id) {
+        // strong_count == 1 means only the map itself holds the Arc.
+        if Arc::strong_count(lock_arc) == 1 {
+            map.remove(workflow_id);
+        }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prune_workflow_merge_lock_removes_idle_entry() {
+        let workflow_id = "prune-test-workflow-unique-7f3a";
+
+        // Insert an entry by acquiring then releasing a guard.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            let _guard = acquire_workflow_merge_lock(workflow_id).await;
+            // Guard is dropped here — strong_count returns to 1 (map-only).
+        });
+
+        // Entry should still be in the map before pruning.
+        {
+            let map = merge_locks().lock().unwrap();
+            assert!(map.contains_key(workflow_id), "entry should exist before pruning");
+        }
+
+        // Pruning should remove the idle entry.
+        prune_workflow_merge_lock(workflow_id);
+
+        {
+            let map = merge_locks().lock().unwrap();
+            assert!(
+                !map.contains_key(workflow_id),
+                "entry should be removed after pruning"
+            );
+        }
+    }
+
+    #[test]
+    fn prune_workflow_merge_lock_keeps_active_entry() {
+        let workflow_id = "prune-test-active-workflow-9b2c";
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            let _guard = acquire_workflow_merge_lock(workflow_id).await;
+
+            // Clone the Arc so strong_count > 1 to simulate an active merge.
+            let extra_arc = {
+                let map = merge_locks().lock().unwrap();
+                map.get(workflow_id).unwrap().clone()
+            };
+
+            // Pruning should NOT remove the entry while the extra Arc is alive.
+            prune_workflow_merge_lock(workflow_id);
+
+            {
+                let map = merge_locks().lock().unwrap();
+                assert!(
+                    map.contains_key(workflow_id),
+                    "active entry should be kept"
+                );
+            }
+
+            drop(extra_arc);
+        });
+    }
+}
+

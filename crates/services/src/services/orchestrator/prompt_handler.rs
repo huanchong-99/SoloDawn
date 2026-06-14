@@ -168,42 +168,6 @@ fn should_require_user_confirmation(prompt: &DetectedPrompt) -> bool {
 }
 
 // ============================================================================
-// LLM Prompt Decision Request/Response
-// ============================================================================
-
-/// Request for LLM to make a prompt decision
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct LLMPromptDecisionRequest {
-    /// The detected prompt
-    pub prompt_kind: String,
-    /// Raw prompt text
-    pub prompt_text: String,
-    /// Available options (for ArrowSelect/Choice)
-    pub options: Option<Vec<String>>,
-    /// Current selected index (for ArrowSelect)
-    pub current_index: Option<usize>,
-    /// Whether dangerous keywords were detected
-    pub has_dangerous_keywords: bool,
-    /// Task context (what the terminal is doing)
-    pub task_context: Option<String>,
-}
-
-/// Response from LLM for prompt decision
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct LLMPromptDecisionResponse {
-    /// The decision action
-    pub action: String,
-    /// Response to send (for auto/llm decisions)
-    pub response: Option<String>,
-    /// Target index (for ArrowSelect)
-    pub target_index: Option<usize>,
-    /// Reasoning for the decision
-    pub reasoning: String,
-    /// Whether to ask user instead
-    pub ask_user: Option<bool>,
-}
-
-// ============================================================================
 // Prompt Handler
 // ============================================================================
 
@@ -213,8 +177,6 @@ pub struct PromptHandler {
     message_bus: SharedMessageBus,
     /// Per-terminal state machines
     state_machines: Arc<RwLock<HashMap<String, TerminalPromptStateMachine>>>,
-    /// Task context cache (terminal_id -> context)
-    task_contexts: Arc<RwLock<HashMap<String, String>>>,
     /// Optional LLM callback for generating free-form input responses
     llm_callback: Option<LLMPromptCallback>,
 }
@@ -237,7 +199,6 @@ impl PromptHandler {
         Self {
             message_bus,
             state_machines: Arc::new(RwLock::new(HashMap::new())),
-            task_contexts: Arc::new(RwLock::new(HashMap::new())),
             llm_callback: None,
         }
     }
@@ -247,21 +208,8 @@ impl PromptHandler {
         Self {
             message_bus,
             state_machines: Arc::new(RwLock::new(HashMap::new())),
-            task_contexts: Arc::new(RwLock::new(HashMap::new())),
             llm_callback: Some(llm_callback),
         }
-    }
-
-    /// Set task context for a terminal (used for LLM decisions)
-    pub async fn set_task_context(&self, terminal_id: &str, context: &str) {
-        let mut contexts = self.task_contexts.write().await;
-        contexts.insert(terminal_id.to_string(), context.to_string());
-    }
-
-    /// Clear task context for a terminal
-    pub async fn clear_task_context(&self, terminal_id: &str) {
-        let mut contexts = self.task_contexts.write().await;
-        contexts.remove(terminal_id);
     }
 
     /// Handle a terminal prompt event
@@ -500,13 +448,8 @@ impl PromptHandler {
                 }
 
                 if let Some(ref callback) = self.llm_callback {
-                    let task_ctx = {
-                        let contexts = self.task_contexts.read().await;
-                        contexts.values().next().cloned().unwrap_or_default()
-                    };
                     let llm_prompt = format!(
                         "A terminal is asking for free-form input. Provide ONLY the text to type, nothing else.\n\n\
-                         Task context: {task_ctx}\n\n\
                          Prompt shown: {raw}\n\n\
                          Respond with ONLY the input text.",
                         raw = prompt.raw_text,
@@ -573,14 +516,6 @@ impl PromptHandler {
                 .as_ref()
                 .map(|opts| opts.iter().map(|o| o.label.clone()).collect()),
             _ => None,
-        }
-    }
-
-    /// Reset state for a terminal
-    pub async fn reset_terminal_state(&self, terminal_id: &str) {
-        let mut state_machines = self.state_machines.write().await;
-        if let Some(sm) = state_machines.get_mut(terminal_id) {
-            sm.reset();
         }
     }
 
@@ -667,76 +602,6 @@ impl PromptHandler {
 
         handled
     }
-
-    /// Backward-compatible alias for `handle_user_prompt_response`.
-    pub async fn handle_user_approval(
-        &self,
-        terminal_id: &str,
-        session_id: &str,
-        workflow_id: &str,
-        user_response: &str,
-    ) -> bool {
-        self.handle_user_prompt_response(terminal_id, session_id, workflow_id, user_response)
-            .await
-    }
-}
-
-// ============================================================================
-// LLM Prompt Template
-// ============================================================================
-
-/// Build LLM prompt for making a decision about a terminal prompt
-pub fn build_llm_decision_prompt(request: &LLMPromptDecisionRequest) -> String {
-    let mut prompt = format!(
-        r"You are an AI assistant helping to respond to an interactive terminal prompt.
-
-## Prompt Information
-- Type: {}
-- Text: {}
-- Has dangerous keywords: {}
-",
-        request.prompt_kind, request.prompt_text, request.has_dangerous_keywords
-    );
-
-    if let Some(ref options) = request.options {
-        prompt.push_str("\n## Available Options\n");
-        for (i, opt) in options.iter().enumerate() {
-            prompt.push_str(&format!("{i}. {opt}\n"));
-        }
-    }
-
-    if let Some(idx) = request.current_index {
-        prompt.push_str(&format!("\nCurrently selected: option {idx}\n"));
-    }
-
-    if let Some(ref context) = request.task_context {
-        prompt.push_str(&format!("\n## Task Context\n{context}\n"));
-    }
-
-    prompt.push_str(
-        r#"
-## Instructions
-Analyze the prompt and decide how to respond. Return a JSON object with:
-- "action": "confirm" | "select" | "input" | "ask_user"
-- "response": the text to send (if action is not "ask_user")
-- "target_index": the option index to select (for ArrowSelect prompts)
-- "reasoning": brief explanation of your decision
-- "ask_user": true if human intervention is needed
-
-## Response Format
-```json
-{
-  "action": "...",
-  "response": "...",
-  "target_index": null,
-  "reasoning": "...",
-  "ask_user": false
-}
-```
-"#,
-    );
-
-    prompt
 }
 
 // ============================================================================
@@ -1424,25 +1289,6 @@ mod tests {
             no_follow_up.is_err(),
             "non-waiting approval should not publish terminal input"
         );
-    }
-
-    #[test]
-    fn test_build_llm_decision_prompt() {
-        let request = LLMPromptDecisionRequest {
-            prompt_kind: "YesNo".to_string(),
-            prompt_text: "Continue? [y/n]".to_string(),
-            options: None,
-            current_index: None,
-            has_dangerous_keywords: false,
-            task_context: Some("Installing dependencies".to_string()),
-        };
-
-        let prompt = build_llm_decision_prompt(&request);
-
-        assert!(prompt.contains("YesNo"));
-        assert!(prompt.contains("Continue? [y/n]"));
-        assert!(prompt.contains("Installing dependencies"));
-        assert!(prompt.contains("JSON"));
     }
 
     #[tokio::test]

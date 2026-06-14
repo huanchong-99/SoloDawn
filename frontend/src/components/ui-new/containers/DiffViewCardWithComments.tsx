@@ -28,8 +28,6 @@ import { ReviewCommentRenderer } from './ReviewCommentRenderer';
 import { GitHubCommentRenderer } from './GitHubCommentRenderer';
 import type { ToolStatus, DiffChangeKind } from 'shared/types';
 import { ToolStatusDot } from '../primitives/conversation/ToolStatusDot';
-import { OpenInIdeButton } from '@/components/ide/OpenInIdeButton';
-import { useOpenInEditor } from '@/hooks/useOpenInEditor';
 import '@/styles/diff-style-overrides.css';
 import { DisplayTruncatedPath } from '@/utils/TruncatePath';
 
@@ -175,7 +173,6 @@ export function DiffViewCardWithComments({
   status,
   className,
   projectId,
-  attemptId,
 }: Readonly<DiffViewCardWithCommentsProps>) {
   const { theme } = useTheme();
   const actualTheme = getActualTheme(theme);
@@ -188,13 +185,6 @@ export function DiffViewCardWithComments({
   const { comments, drafts, setDraft } = useReview();
   const { showGitHubComments, getGitHubCommentsForFile } =
     useWorkspaceContext();
-
-  // Open in IDE functionality
-  const openInEditor = useOpenInEditor(attemptId);
-
-  const handleOpenInIde = useCallback(() => {
-    openInEditor({ filePath });
-  }, [openInEditor, filePath]);
 
   const handleHeaderClick = useCallback(
     (event: MouseEvent<HTMLElement>) => {
@@ -428,14 +418,6 @@ export function DiffViewCardWithComments({
               </span>
             )}
             <div className="flex items-center gap-1 shrink-0">
-              {attemptId && (
-                <div data-prevent-header-toggle="true">
-                  <OpenInIdeButton
-                    onClick={handleOpenInIde}
-                    className="size-icon-xs p-0"
-                  />
-                </div>
-              )}
               {onToggle && (
                 <CaretDownIcon
                   className={cn(

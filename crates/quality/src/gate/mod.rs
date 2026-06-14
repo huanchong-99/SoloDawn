@@ -42,26 +42,11 @@ impl QualityGate {
         }
     }
 
-    /// 从配置创建，使用指定 ID
-    pub fn with_id(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        conditions: Vec<Condition>,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            name: name.into(),
-            conditions,
-        }
-    }
-
     /// 评估所有条件，返回聚合状态与详细结果
     pub fn evaluate(&self, results: &[EvaluationResult]) -> QualityGateDecision {
         // 参考 SonarQube: 任一条件为 ERROR 则整体为 ERROR
         let overall_status = if results.iter().any(|r| r.level == status::Level::Error) {
             QualityGateStatus::Error
-        } else if results.iter().any(|r| r.level == status::Level::Warn) {
-            QualityGateStatus::Warn
         } else {
             QualityGateStatus::Ok
         };
@@ -94,19 +79,6 @@ impl QualityGateDecision {
     /// because quality was not actually verified.
     pub fn is_passed(&self) -> bool {
         self.status == QualityGateStatus::Ok
-    }
-
-    /// 是否被阻断
-    pub fn is_blocked(&self) -> bool {
-        self.status == QualityGateStatus::Error
-    }
-
-    /// 获取所有失败的条件结果
-    pub fn failed_conditions(&self) -> Vec<&EvaluationResult> {
-        self.condition_results
-            .iter()
-            .filter(|r| r.level == status::Level::Error)
-            .collect()
     }
 }
 
@@ -181,7 +153,14 @@ mod tests {
         )];
 
         let decision = gate.evaluate(&results);
-        assert!(decision.is_blocked());
-        assert_eq!(decision.failed_conditions().len(), 1);
+        assert_eq!(decision.status, QualityGateStatus::Error);
+        assert_eq!(
+            decision
+                .condition_results
+                .iter()
+                .filter(|r| r.level == status::Level::Error)
+                .count(),
+            1
+        );
     }
 }

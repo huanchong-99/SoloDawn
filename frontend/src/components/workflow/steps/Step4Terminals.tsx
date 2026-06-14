@@ -54,37 +54,6 @@ const isCliDetectResponseArray = (value: unknown): value is CliDetectResponse[] 
   );
 };
 
-const isLegacyCliDetectMap = (value: unknown): value is Record<string, boolean> => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  return Object.values(value).every((item) => typeof item === 'boolean');
-};
-
-const LEGACY_CLI_DISPLAY_NAMES: Record<string, string> = {
-  'claude-code': 'Claude Code',
-  'gemini-cli': 'Gemini CLI',
-  codex: 'Codex',
-  'cursor-agent': 'Cursor Agent',
-  amp: 'Amp',
-  'qwen-code': 'Qwen Code',
-  copilot: 'Copilot',
-  droid: 'Droid',
-  opencode: 'Opencode',
-};
-
-const LEGACY_CLI_ID_ALIASES: Record<string, string> = {
-  'claude-code': 'cli-claude-code',
-  'gemini-cli': 'cli-gemini-cli',
-  codex: 'cli-codex',
-  'cursor-agent': 'cli-cursor-agent',
-  amp: 'cli-amp',
-  'qwen-code': 'cli-qwen-code',
-  copilot: 'cli-copilot',
-  droid: 'cli-droid',
-  opencode: 'cli-opencode',
-};
-
 const parseJson = async (response: Response): Promise<unknown> => {
   try {
     return (await response.json()) as unknown;
@@ -232,17 +201,6 @@ export const Step4Terminals: React.FC<Step4TerminalsProps> = ({
             displayName: item.displayName,
             installed: item.installed,
             installGuideUrl: item.installGuideUrl,
-          }));
-          setCliTypes(cliList);
-        } else if (isLegacyCliDetectMap(data)) {
-          const cliList: CliType[] = Object.entries(data).map(([name, installed]) => ({
-            id: LEGACY_CLI_ID_ALIASES[name] ?? name,
-            name,
-            displayName: LEGACY_CLI_DISPLAY_NAMES[name] ?? name,
-            installed,
-            installGuideUrl: installed
-              ? null
-              : `https://example.com/install/${encodeURIComponent(name)}`,
           }));
           setCliTypes(cliList);
         }

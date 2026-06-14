@@ -16,12 +16,9 @@ import {
   PencilLine,
   Copy,
   Key,
-  ExternalLink,
   MessageSquare,
 } from 'lucide-react';
 import '@/styles/diff-style-overrides.css';
-import { attemptsApi } from '@/lib/api';
-import type { Workspace } from 'shared/types';
 import {
   useReview,
   type ReviewDraft,
@@ -40,7 +37,6 @@ type Props = Readonly<{
   diff: Diff;
   expanded: boolean;
   onToggle: () => void;
-  selectedAttempt: Workspace | null;
 }>;
 
 function labelAndIcon(diff: Diff) {
@@ -98,7 +94,6 @@ export default function DiffCard({
   diff,
   expanded,
   onToggle,
-  selectedAttempt,
 }: Props) {
   const { config } = useUserSystem();
   const theme = getActualTheme(config?.theme);
@@ -264,24 +259,6 @@ export default function DiffCard({
     </p>
   );
 
-  const handleOpenInIDE = async () => {
-    if (!selectedAttempt?.id) return;
-    try {
-      const openPath = newName || oldName;
-      const response = await attemptsApi.openEditor(selectedAttempt.id, {
-        editor_type: null,
-        file_path: openPath ?? null,
-      });
-
-      // If a URL is returned, open it in a new window/tab
-      if (response.url) {
-        globalThis.window.open(response.url, '_blank', 'noopener,noreferrer');
-      }
-    } catch (err) {
-      console.error('Failed to open file in IDE:', err);
-    }
-  };
-
   const expandable = true;
 
   return (
@@ -304,19 +281,6 @@ export default function DiffCard({
           </Button>
         )}
         {title}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleOpenInIDE();
-          }}
-          className="h-6 w-6 p-0 ml-2"
-          title="Open in IDE"
-          disabled={diff.change === 'deleted'}
-        >
-          <ExternalLink className="h-3 w-3" aria-hidden />
-        </Button>
       </div>
 
       {expanded && diffFile && (

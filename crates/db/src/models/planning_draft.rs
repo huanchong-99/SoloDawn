@@ -22,6 +22,7 @@ pub struct PlanningDraft {
     #[serde(skip_serializing)]
     pub planner_api_key: Option<String>,
     pub confirmed_at: Option<DateTime<Utc>>,
+    pub gates_confirmed_at: Option<DateTime<Utc>>,
     pub materialized_workflow_id: Option<String>,
     pub feishu_sync: bool,
     pub feishu_chat_id: Option<String>,
@@ -90,6 +91,7 @@ impl PlanningDraft {
             planner_base_url: None,
             planner_api_key: None,
             confirmed_at: None,
+            gates_confirmed_at: None,
             materialized_workflow_id: None,
             feishu_sync: false,
             feishu_chat_id: None,
@@ -112,12 +114,12 @@ impl PlanningDraft {
                 id, project_id, name, status,
                 requirement_summary, technical_spec, workflow_seed,
                 planner_model_id, planner_api_type, planner_base_url, planner_api_key,
-                confirmed_at, materialized_workflow_id,
+                confirmed_at, gates_confirmed_at, materialized_workflow_id,
                 feishu_sync, feishu_chat_id,
                 sync_tools, sync_terminal, sync_progress, notify_on_completion,
                 audit_plan, audit_mode, audit_doc_path,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
             ",
         )
         .bind(&draft.id)
@@ -132,6 +134,7 @@ impl PlanningDraft {
         .bind(&draft.planner_base_url)
         .bind(&draft.planner_api_key)
         .bind(draft.confirmed_at)
+        .bind(draft.gates_confirmed_at)
         .bind(&draft.materialized_workflow_id)
         .bind(draft.feishu_sync)
         .bind(&draft.feishu_chat_id)
@@ -226,6 +229,26 @@ impl PlanningDraft {
             UPDATE planning_draft SET
                 status = 'confirmed',
                 confirmed_at = datetime('now'),
+                updated_at = datetime('now')
+            WHERE id = ?1
+            ",
+        )
+        .bind(id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Stamp the quality-gate confirmation timestamp.
+    ///
+    /// Distinct from `set_confirmed`: this updates ONLY `gates_confirmed_at`
+    /// (System-A quality-gate confirm) and never touches `confirmed_at`
+    /// (System-B audit confirm) or `status`.
+    pub async fn set_gates_confirmed(pool: &SqlitePool, id: &str) -> sqlx::Result<()> {
+        sqlx::query(
+            r"
+            UPDATE planning_draft SET
+                gates_confirmed_at = datetime('now'),
                 updated_at = datetime('now')
             WHERE id = ?1
             ",

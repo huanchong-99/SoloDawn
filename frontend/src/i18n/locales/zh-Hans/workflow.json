@@ -110,10 +110,7 @@
     "taskCountOption_one": "{{count}} 个任务",
     "taskCountOption_other": "{{count}} 个任务",
     "customCountLabel": "自定义",
-    "customCountPlaceholder": "5-10",
-    "importLabel": "任务来源",
-    "importNew": "创建新任务",
-    "importKanban": "从看板导入（选择已有卡片）"
+    "customCountPlaceholder": "5-10"
   },
   "step2": {
     "header": "配置 {{count}} 个并行任务",
@@ -406,8 +403,7 @@
     "hint": "点击终端查看详情",
     "orchestrator": {
       "statusLabel": "状态：",
-      "modelLabel": "模型：",
-      "tokensUsedLabel": "已用 Token"
+      "modelLabel": "模型："
     }
   },
   "terminalCard": {

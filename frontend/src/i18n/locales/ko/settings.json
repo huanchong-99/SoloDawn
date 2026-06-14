@@ -53,30 +53,6 @@
         "defaultLabel": "기본"
       },
       "editor": {
-        "title": "에디터",
-        "description": "코드 편집 환경을 구성하세요.",
-        "type": {
-          "label": "에디터 유형",
-          "placeholder": "에디터 선택",
-          "helper": "선호하는 코드 에디터 인터페이스를 선택하세요."
-        },
-        "customCommand": {
-          "label": "사용자 정의 에디터 명령",
-          "placeholder": "예: code, subl, vim",
-          "helper": "사용자 정의 에디터를 실행하는 명령을 입력하세요. 파일을 여는 데 사용됩니다."
-        },
-        "remoteSsh": {
-          "host": {
-            "label": "원격 SSH 호스트 (선택사항)",
-            "placeholder": "예: 호스트 이름 또는 IP 주소",
-            "helper": "SoloDawn이 원격 서버에서 실행 중인 경우 설정하세요. 설정하면 \"에디터에서 열기\"를 클릭할 때 로컬 명령을 실행하는 대신 SSH를 통해 에디터를 여는 URL이 생성됩니다."
-          },
-          "user": {
-            "label": "원격 SSH 사용자 (선택사항)",
-            "placeholder": "예: 사용자 이름",
-            "helper": "원격 연결을 위한 SSH 사용자 이름입니다. 설정하지 않으면 VS Code가 SSH 설정을 사용하거나 입력을 요청합니다."
-          }
-        },
         "availability": {
           "checking": "사용 가능 여부 확인 중...",
           "available": "사용 가능",
@@ -455,6 +431,7 @@
       "models": "모델",
       "mcp": "MCP 서버",
       "feishu": "Feishu",
+      "qualityGates": "Quality Gates",
       "organizations": "조직"
     },
     "common": {

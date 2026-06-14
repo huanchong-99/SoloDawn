@@ -21,6 +21,7 @@ import {
   OrganizationSettingsNew,
   RuntimeSettingsNew,
 } from '@/pages/ui-new/settings';
+import { QualityGateSettingsNew } from '@/pages/ui-new/settings/QualityGateSettingsNew';
 import { UserSystemProvider, useUserSystem } from '@/components/ConfigProvider';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { SearchProvider } from '@/contexts/SearchContext';
@@ -49,7 +50,6 @@ import { Workflows } from '@/pages/Workflows';
 // New design pages
 import { Assistant } from '@/pages/ui-new/Assistant';
 import { Workspaces } from '@/pages/ui-new/Workspaces';
-import { WorkspacesLanding } from '@/pages/ui-new/WorkspacesLanding';
 
 const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 
@@ -130,7 +130,7 @@ function AppContent() {
 
               {/* Orchestrated Workspace mode */}
               <Route path="assistant" element={<Assistant />} />
-              <Route path="workspaces" element={<WorkspacesLanding />} />
+              <Route path="workspaces" element={<Navigate to="/workspaces/create" replace />} />
               <Route path="workspaces/create" element={<Workspaces />} />
               <Route path="workspaces/:workspaceId" element={<Workspaces />} />
             </Route>
@@ -174,6 +174,10 @@ function AppContent() {
               <Route path="feishu" element={<FeishuSettingsNew />} />
               <Route path="organizations" element={<OrganizationSettingsNew />} />
               <Route path="runtime" element={<RuntimeSettingsNew />} />
+              <Route
+                path="quality-gates"
+                element={<QualityGateSettingsNew />}
+              />
             </Route>
 
             {/* ========== LEGACY DESIGN ROUTES ========== */}

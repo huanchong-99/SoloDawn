@@ -18,8 +18,7 @@
 
 use std::{path::Path, sync::Arc};
 
-use async_trait::async_trait;
-use cc_switch::{CliType as CcCliType, ModelSwitcher, SwitchConfig, read_claude_config};
+use cc_switch::{CliType as CcCliType, read_claude_config};
 use db::{
     DBService,
     models::{CliType, ModelConfig, Terminal, Workflow},
@@ -457,17 +456,9 @@ fn create_isolated_home(terminal_id: &str, prefix: &str) -> anyhow::Result<std::
     Ok(home)
 }
 
-/// CC-Switch trait for dependency injection and testing
-#[async_trait]
-pub trait CCSwitch: Send + Sync {
-    /// Switch model configuration for a terminal
-    async fn switch_for_terminal(&self, terminal: &Terminal) -> anyhow::Result<()>;
-}
-
 /// CC-Switch 服务
 pub struct CCSwitchService {
     db: Arc<DBService>,
-    switcher: ModelSwitcher,
 }
 
 impl CCSwitchService {
@@ -479,10 +470,7 @@ impl CCSwitchService {
     const DEFAULT_CLAUDE_FALLBACK_MODEL: &'static str = "claude-sonnet-4-6";
 
     pub fn new(db: Arc<DBService>) -> Self {
-        Self {
-            db,
-            switcher: ModelSwitcher::new(),
-        }
+        Self { db }
     }
 
     fn resolve_model_name(model_config: &ModelConfig) -> String {
@@ -583,97 +571,6 @@ impl CCSwitchService {
         };
 
         Ok((workflow.orchestrator_base_url.clone(), api_key))
-    }
-}
-
-#[async_trait]
-impl CCSwitch for CCSwitchService {
-    /// 为终端切换模型
-    ///
-    /// 根据终端配置切换对应 CLI 的模型。
-    ///
-    /// # Deprecated
-    ///
-    /// This method modifies global configuration files. Use `build_launch_config` instead
-    /// for process-level isolation.
-    ///
-    /// [G22-002] WARNING: This method writes to global config files and is NOT safe for
-    /// concurrent use across multiple terminals/workflows. It is kept only for backward
-    /// compatibility. All new code paths MUST use `build_launch_config` which provides
-    /// per-process environment variable isolation. TODO: Add a compile-time gate
-    /// (e.g., `#[cfg(feature = "legacy-global-switch")]`) to prevent accidental use.
-    #[allow(deprecated)]
-    async fn switch_for_terminal(&self, terminal: &Terminal) -> anyhow::Result<()> {
-        // 获取 CLI 类型信息
-        let cli_type = CliType::find_by_id(&self.db.pool, &terminal.cli_type_id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("CLI type not found: {}", terminal.cli_type_id))?;
-
-        // 获取模型配置
-        let model_config = ModelConfig::find_by_id(&self.db.pool, &terminal.model_config_id)
-            .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!("Model config not found: {}", terminal.model_config_id)
-            })?;
-
-        // 解析 CLI 类型
-        let cli = CcCliType::parse(&cli_type.name)
-            .ok_or_else(|| anyhow::anyhow!("Unsupported CLI: {}", cli_type.name))?;
-
-        // Resolve API key based on CLI type
-        let api_key = match cli {
-            CcCliType::ClaudeCode => {
-                // For Claude Code: try custom_api_key first, then read from existing config
-                if let Some(custom) = terminal.get_custom_api_key()? {
-                    custom
-                } else {
-                    // Try to read from existing Claude config
-                    let config = match read_claude_config().await {
-                        Ok(cfg) => cfg,
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to read Claude config file: {}. Will check for auth token anyway.",
-                                e
-                            );
-                            Default::default()
-                        }
-                    };
-                    config.env.auth_token
-                        .or(config.env.api_key)
-                        .ok_or_else(|| anyhow::anyhow!(
-                            "Claude Code auth token not configured. Please login via CLI (claude login) or set terminal custom_api_key"
-                        ))?
-                }
-            }
-            _ => {
-                // For other CLIs: require custom_api_key
-                terminal
-                    .get_custom_api_key()?
-                    .ok_or_else(|| anyhow::anyhow!("API key not configured for terminal"))?
-            }
-        };
-
-        // 构建切换配置
-        let config = SwitchConfig {
-            base_url: terminal.custom_base_url.clone(),
-            api_key,
-            model: model_config
-                .api_model_id
-                .clone()
-                .unwrap_or_else(|| model_config.name.clone()),
-        };
-
-        // 执行切换
-        self.switcher.switch(cli, &config).await?;
-
-        tracing::info!(
-            "Switched model for terminal {}: cli={}, model={}",
-            terminal.id,
-            cli_type.display_name,
-            model_config.display_name
-        );
-
-        Ok(())
     }
 }
 
@@ -797,13 +694,11 @@ impl CCSwitchService {
                 let claude_home = create_isolated_home(&terminal.id, "claude")?;
 
                 // Set CLAUDE_HOME to isolated directory
-                // [G19-006] TODO: CLAUDE_HOME directories are cleaned up only for Codex
-                // (via CodexHomeGuard in process.rs). Claude and Gemini isolated home dirs
-                // are not cleaned up on terminal lifecycle end, causing disk leakage and
-                // potential API key residue. Add similar cleanup logic for CLAUDE_HOME and
-                // GEMINI_HOME in ProcessManager::finalize_terminated_process().
-                // [G22-005] TODO: Register all temp isolation dirs (CLAUDE_HOME, GEMINI_HOME,
-                // CODEX_HOME) for cleanup on process exit. Consider a unified TempDirGuard.
+                // [RB-37] CLAUDE_HOME (and CODEX_HOME / GEMINI_HOME) isolated temp dirs
+                // — which hold secret files (settings.json, .credentials.json) — are now
+                // captured by ProcessManager::spawn_pty_with_config and removed when the
+                // terminal ends, on both the normal finalize path and the panic/abort
+                // safety-net (IsolatedHomesGuard + TrackedProcess Drop in process.rs).
                 // [G22-006] TODO: On Windows, temp dir permissions cannot be set via Unix
                 // chmod. Investigate Windows ACL APIs for restricting access to isolated dirs.
                 env.set.insert(
@@ -1237,21 +1132,6 @@ impl CCSwitchService {
         })
     }
 
-    /// Batch switch models for workflow startup
-    ///
-    /// Switches model configuration for all terminals in sequence.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use build_launch_config instead to avoid modifying global config"
-    )]
-    pub async fn switch_for_terminals(&self, terminals: &[Terminal]) -> anyhow::Result<()> {
-        for terminal in terminals {
-            #[allow(deprecated)]
-            self.switch_for_terminal(terminal).await?;
-        }
-        Ok(())
-    }
-
     /// Detect CLI installation status
     pub async fn detect_cli(&self, cli_name: &str) -> anyhow::Result<bool> {
         use tokio::process::Command;
@@ -1311,17 +1191,6 @@ mod tests {
             .unwrap();
 
         Arc::new(DBService { pool })
-    }
-
-    #[tokio::test]
-    async fn test_switch_for_terminals_method_exists() {
-        let db = setup_test_db().await;
-        let service = CCSwitchService::new(db);
-
-        // Verify method exists (compile-time check)
-        let terminals: Vec<db::models::Terminal> = vec![];
-        #[allow(deprecated)]
-        let _ = service.switch_for_terminals(&terminals).await;
     }
 
     #[tokio::test]

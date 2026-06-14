@@ -1,11 +1,10 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { WizardConfig } from '../types';
 import { WizardStep } from '../types';
 import { validateWizardStep } from '../validators';
 
 export interface UseWizardValidationReturn {
   errors: Record<string, string>;
-  hasErrors: boolean;
   validate: (config: WizardConfig) => Record<string, string>;
   setErrors: (errors: Record<string, string>) => void;
   clearErrors: () => void;
@@ -30,11 +29,8 @@ export function useWizardValidation(currentStep: WizardStep): UseWizardValidatio
     setErrors({});
   }, []);
 
-  const hasErrors = useMemo(() => Object.keys(errors).length > 0, [errors]);
-
   return {
     errors,
-    hasErrors,
     validate,
     setErrors,
     clearErrors,

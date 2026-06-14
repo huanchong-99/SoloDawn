@@ -45,7 +45,7 @@ function useRuntimeStatus() {
     queryKey: ['runtime', 'status'],
     queryFn: async () => {
       // Fetch CLI detection status and compose runtime info
-      const response = await fetch('/api/cli-types/detect');
+      const response = await fetch('/api/cli_types/detect');
       const data = await handleApiResponse<Record<string, unknown>[]>(response);
 
       const cliStatuses: CliStatus[] = (data || []).map(

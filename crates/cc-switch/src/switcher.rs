@@ -76,54 +76,20 @@ pub async fn switch_model(cli_type: CliType, config: &SwitchConfig) -> Result<()
     }
 }
 
-/// 批量切换模型（用于工作流启动时）
-///
-/// 按顺序切换多个终端的模型配置。
-/// 注意：由于 cc-switch 修改全局环境变量，必须串行执行。
-pub async fn switch_models_sequential(
-    configs: Vec<(CliType, SwitchConfig)>,
-) -> Result<Vec<Result<()>>> {
-    let mut results = Vec::new();
-
-    for (cli_type, config) in configs {
-        let result = switch_model(cli_type, &config).await;
-        results.push(result);
-    }
-
-    Ok(results)
-}
-
 /// 模型切换服务
 ///
 /// 提供更高级的模型切换功能，包括：
-/// - 配置备份和恢复
 /// - 切换前验证
 /// - 切换后验证
-pub struct ModelSwitcher {
-    /// 是否在切换前备份配置
-    backup_before_switch: bool,
-}
+pub struct ModelSwitcher;
 
 impl ModelSwitcher {
     pub fn new() -> Self {
-        Self {
-            backup_before_switch: true,
-        }
-    }
-
-    /// 设置是否在切换前备份
-    #[must_use]
-    pub fn with_backup(mut self, backup: bool) -> Self {
-        self.backup_before_switch = backup;
-        self
+        Self
     }
 
     /// 切换模型
     pub async fn switch(&self, cli_type: CliType, config: &SwitchConfig) -> Result<()> {
-        if self.backup_before_switch {
-            tracing::debug!("Backing up config before switch (not yet implemented)");
-        }
-
         switch_model(cli_type, config).await
     }
 }
@@ -140,19 +106,11 @@ mod tests {
 
     #[test]
     fn test_model_switcher_creation() {
-        let switcher = ModelSwitcher::new();
-        assert!(switcher.backup_before_switch);
-    }
-
-    #[test]
-    fn test_model_switcher_with_backup() {
-        let switcher = ModelSwitcher::new().with_backup(false);
-        assert!(!switcher.backup_before_switch);
+        let _switcher = ModelSwitcher::new();
     }
 
     #[test]
     fn test_model_switcher_default() {
-        let switcher = ModelSwitcher::default();
-        assert!(switcher.backup_before_switch);
+        let _switcher = ModelSwitcher::default();
     }
 }

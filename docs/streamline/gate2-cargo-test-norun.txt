@@ -1,0 +1,94 @@
+crates\services\src\services\terminal\prompt_watcher.rs:758:8: warning: method `mark_pending_handoff_submit` is never used
+crates\services\src\services\orchestrator\agent.rs:73:5: warning: field `error_handler` is never read
+warning: `services` (lib) generated 2 warnings
+   Compiling server v0.0.153 (E:\SoloDawn\crates\server)
+warning: `services` (lib test) generated 1 warning (1 duplicate)
+crates\server\tests\deployment_process_manager_test.rs:10:5: error[E0786]: found invalid metadata files for crate `local_deployment`
+crates\server\tests\terminal_logs_api_test.rs:8:5: error[E0463]: can't find crate for `server`: can't find crate
+crates\server\tests\auth_test.rs:18:5: error[E0463]: can't find crate for `server`: can't find crate
+crates\server\tests\auth_test.rs:23:5: error[E0463]: can't find crate for `services`: can't find crate
+crates\server\tests\slash_commands_test.rs:14:5: error[E0463]: can't find crate for `server`: can't find crate
+crates\server\tests\terminal_ws_test.rs:6:5: error[E0463]: can't find crate for `server`: can't find crate
+crates\server\tests\terminal_logs_api_test.rs:14:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\deployment_process_manager_test.rs:15:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_test.rs:41:5: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\terminal_ws_test.rs:11:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\terminal_stop_test.rs:6:5: error[E0463]: can't find crate for `server`: can't find crate
+crates\server\src\bin\mcp_task_server.rs:4:5: error[E0463]: can't find crate for `utils`: can't find crate
+crates\server\src\bin\mcp_task_server.rs:2:5: error[E0463]: can't find crate for `server`: can't find crate
+crates\server\tests\deployment_process_manager_test.rs:32:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:108:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\terminal_stop_test.rs:12:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:121:20: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:144:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:157:20: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\terminal_stop_test.rs:35:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:180:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:193:20: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:217:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:230:20: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:254:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:267:20: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:291:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:304:20: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:328:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\auth_test.rs:342:24: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_integration_test.rs:18:38: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_integration_test.rs:25:5: error[E0282]: type annotations needed: cannot infer type
+crates\server\src\bin\generate_types.rs:4:5: error[E0463]: can't find crate for `server`: can't find crate
+crates\server\tests\slash_commands_integration_test.rs:33:5: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_integration_test.rs:46:5: error[E0282]: type annotations needed: cannot infer type
+crates\server\src\bin\mcp_task_server.rs:65:27: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\workflow_api_test.rs:14:5: error[E0463]: can't find crate for `server`: can't find crate
+crates\server\tests\workflow_api_test.rs:15:5: error[E0463]: can't find crate for `services`: can't find crate
+crates\server\tests\slash_commands_test.rs:71:20: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\workflow_api_test.rs:42:22: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_test.rs:121:20: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_test.rs:174:20: error[E0282]: type annotations needed: cannot infer type
+error: could not compile `server` (test "terminal_ws_test") due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `server` (bin "mcp_task_server") due to 4 previous errors
+error: could not compile `server` (test "terminal_logs_api_test") due to 2 previous errors
+error: could not compile `server` (test "auth_test") due to 16 previous errors
+error: could not compile `server` (test "terminal_stop_test") due to 3 previous errors
+error: could not compile `server` (test "deployment_process_manager_test") due to 3 previous errors
+crates\server\tests\slash_commands_test.rs:198:9: error[E0282]: type annotations needed
+crates\server\tests\slash_commands_test.rs:220:21: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_test.rs:243:21: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_test.rs:282:20: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_test.rs:299:9: error[E0282]: type annotations needed
+crates\server\tests\slash_commands_test.rs:322:27: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_test.rs:352:27: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_test.rs:379:9: error[E0282]: type annotations needed
+crates\server\tests\slash_commands_test.rs:401:27: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_test.rs:426:27: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_test.rs:448:25: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\workflow_api_test.rs:52:5: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\workflow_api_test.rs:57:5: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\workflow_api_test.rs:71:5: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_integration_test.rs:75:9: error[E0282]: type annotations needed for `(_, _)`
+crates\server\tests\slash_commands_integration_test.rs:128:9: error[E0282]: type annotations needed for `(_, _)`
+crates\server\tests\slash_commands_integration_test.rs:160:9: error[E0282]: type annotations needed for `(_, _)`
+crates\server\tests\workflow_api_test.rs:180:20: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\workflow_api_test.rs:271:20: error[E0282]: type annotations needed: cannot infer type
+error: could not compile `server` (test "workflow_api_test") due to 8 previous errors
+crates\server\src\bin\generate_types.rs:149:9: error[E0463]: can't find crate for `services`: can't find crate
+crates\server\tests\slash_commands_integration_test.rs:187:9: error[E0282]: type annotations needed for `(_, _)`
+error: could not compile `server` (test "slash_commands_test") due to 16 previous errors
+crates\server\tests\slash_commands_integration_test.rs:187:22: error[E0277]: the size for values of type `str` cannot be known at compilation time: doesn't have a size known at compile-time
+crates\server\tests\slash_commands_integration_test.rs:341:9: error[E0282]: type annotations needed for `(_, _)`
+crates\server\tests\slash_commands_integration_test.rs:341:9: error[E0282]: type annotations needed for `({type error}, _)`
+crates\server\src\main.rs:184:9: error[E0282]: type annotations needed
+crates\server\src\main.rs:186:5: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_integration_test.rs:463:9: error[E0282]: type annotations needed for `(_, _)`
+crates\server\tests\slash_commands_integration_test.rs:463:22: error[E0277]: the size for values of type `str` cannot be known at compilation time: doesn't have a size known at compile-time
+crates\server\src\main.rs:191:5: error[E0282]: type annotations needed: cannot infer type
+crates\server\src\main.rs:196:5: error[E0282]: type annotations needed: cannot infer type
+crates\server\tests\slash_commands_integration_test.rs:514:9: error[E0282]: type annotations needed for `(_, _)`
+crates\server\tests\slash_commands_integration_test.rs:519:5: error[E0282]: type annotations needed: cannot infer type
+error: could not compile `server` (bin "generate_types") due to 2 previous errors
+error: could not compile `server` (test "slash_commands_integration_test") due to 15 previous errors
+crates\server\src\main.rs:433:9: error[E0282]: type annotations needed for `Option<_>`
+error: could not compile `server` (bin "server" test) due to 5 previous errors
+error: crate `windows_sys` required to be available in rlib format, but was not found in this form
+error: could not compile `server` (bin "server") due to 1 previous error

@@ -205,7 +205,6 @@
     "viewInChangesPanel": "在更改面板中查看",
     "copyPath": "复制路径",
     "copyWorktreePath": "复制工作树路径",
-    "openInIde": "在IDE中打开",
     "repoSettings": "仓库设置",
     "cancel": "取消",
     "saveChanges": "保存更改",
@@ -318,14 +317,7 @@
     "description": "让我们设置您的编码偏好。您可以随时在设置中更改这些选项。",
     "chooseAgent": "选择您的编码代理",
     "defaultAgent": "默认代理",
-    "selectAgentPlaceholder": "选择您偏好的编码代理",
-    "chooseEditor": "选择您的代码编辑器",
-    "preferredEditor": "首选编辑器",
-    "selectEditorPlaceholder": "选择您偏好的编辑器",
-    "editorDescription": "此编辑器将用于打开任务尝试和项目文件。",
-    "customCommand": "自定义命令",
-    "customCommandPlaceholder": "例如：code, subl, vim",
-    "customCommandDescription": "输入运行自定义编辑器的命令。使用空格分隔参数（例如：\"code --wait\"）。"
+    "selectAgentPlaceholder": "选择您偏好的编码代理"
   },
   "releaseNotes": {
     "title": "SoloDawn 已更新！查看新功能...",
@@ -340,7 +332,6 @@
   "navbarActions": {
     "archive-workspace": "归档",
     "unarchive-workspace": "取消归档",
-    "open-in-old-ui": "在旧界面中打开",
     "toggle-diff-view-mode-inline": "内联视图",
     "toggle-diff-view-mode-split": "并排视图",
     "toggle-all-diffs-collapse": "折叠所有差异",
@@ -430,7 +421,6 @@
     "active": "活跃",
     "inactive": "未激活",
     "terminalsRunning": "{{count}} 个终端运行中",
-    "tokensNA": "令牌：N/A",
     "git": "Git：",
     "gitListening": "监听中",
     "gitConnecting": "连接中...",

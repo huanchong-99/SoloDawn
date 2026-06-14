@@ -75,10 +75,10 @@ impl QualityEngine {
         Self { config, providers }
     }
 
-    /// 从项目目录自动创建引擎
-    pub fn from_project(project_root: &Path) -> anyhow::Result<Self> {
-        let config = QualityGateConfig::load_from_project(project_root)?;
-
+    /// Build the enabled provider set from a config. Single source of truth for
+    /// the toggle block (was inlined in `from_project`); shared by both
+    /// constructors.
+    fn build_providers(config: &QualityGateConfig) -> Vec<Arc<dyn QualityProvider>> {
         // 根据配置创建启用的 providers
         let mut providers: Vec<Arc<dyn QualityProvider>> = Vec::new();
 
@@ -137,7 +137,24 @@ impl QualityEngine {
             ));
         }
 
+        providers
+    }
+
+    /// Pure constructor: caller supplies the resolved config (DB-first resolution
+    /// happens in the services layer). `project_root` is reserved for future
+    /// per-root provider tuning; unused today.
+    pub fn from_config(config: QualityGateConfig, _project_root: &Path) -> anyhow::Result<Self> {
+        let providers = Self::build_providers(&config);
         Ok(Self::new(config, providers))
+    }
+
+    /// 从项目目录自动创建引擎
+    ///
+    /// Filesystem fallback constructor (unchanged behavior for all
+    /// non-orchestrator callers/tests).
+    pub fn from_project(project_root: &Path) -> anyhow::Result<Self> {
+        let config = QualityGateConfig::load_from_project(project_root)?;
+        Self::from_config(config, project_root)
     }
 
     /// 执行质量门分析

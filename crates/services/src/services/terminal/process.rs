@@ -233,8 +233,12 @@ struct TrackedProcess {
     /// `get_handle` cannot race on check-and-init. The first caller to reach
     /// `get_or_try_init` wins; all others observe the initialized value.
     shared_writer: OnceCell<Arc<Mutex<PtyWriter>>>,
-    /// Isolated CODEX_HOME path (for Codex terminals, cleaned up on exit)
-    codex_home: Option<PathBuf>,
+    /// RB-37 (P0 SECURITY): Isolated AI-CLI home directories created under the
+    /// system temp dir (CODEX_HOME / CLAUDE_HOME / GEMINI_HOME). These contain
+    /// secret files (auth.json, settings.json, .credentials.json, .env) and MUST
+    /// be removed when the terminal ends — both on the normal finalize path and
+    /// via the `Drop` safety-net below (panic/abort) — so API keys never leak to disk.
+    isolated_homes: Vec<PathBuf>,
     /// Output fanout hub (single reader -> multi-subscriber)
     output_fanout: Arc<OutputFanout>,
     /// Background PTY reader task
@@ -266,39 +270,52 @@ impl Drop for TrackedProcess {
         if let Some(handle) = self.logger_task.take() {
             handle.abort();
         }
+        // RB-37 (P0 SECURITY): safety-net removal of the isolated AI-CLI home
+        // directories (and the secret files they contain) for the panic/abort path
+        // that bypasses `finalize_terminated_process`. `cleanup_isolated_home` only
+        // performs synchronous `std::fs::remove_dir_all` under the solodawn temp dir,
+        // which is safe inside a synchronous destructor.
+        for home in self.isolated_homes.drain(..) {
+            ProcessManager::cleanup_isolated_home(&self.session_id, &home);
+        }
     }
 }
 
 // ============================================================================
-// CODEX_HOME Cleanup Guard (RAII)
+// Isolated Home Cleanup Guard (RAII)
 // ============================================================================
 
-/// Guard that ensures CODEX_HOME directories are cleaned up on early spawn failures.
-/// Uses RAII pattern to guarantee cleanup even if spawn_pty_with_config returns early.
-struct CodexHomeGuard {
+/// RB-37 (P0 SECURITY): Guard that ensures isolated AI-CLI home directories
+/// (CODEX_HOME / CLAUDE_HOME / GEMINI_HOME — each holding secret files) are
+/// cleaned up on early spawn failures. Uses the RAII pattern to guarantee
+/// cleanup even if `spawn_pty_with_config` returns early before the process is
+/// tracked. On success the guard is disarmed and ownership of cleanup passes to
+/// `TrackedProcess` (normal path: `finalize_terminated_process`; panic path:
+/// `TrackedProcess::drop`).
+struct IsolatedHomesGuard {
     terminal_id: String,
-    path: Option<PathBuf>,
+    paths: Vec<PathBuf>,
 }
 
-impl CodexHomeGuard {
-    fn new(terminal_id: &str, path: Option<PathBuf>) -> Self {
+impl IsolatedHomesGuard {
+    fn new(terminal_id: &str, paths: Vec<PathBuf>) -> Self {
         Self {
             terminal_id: terminal_id.to_string(),
-            path,
+            paths,
         }
     }
 
     /// Disarm the guard after successful process tracking.
-    /// The CODEX_HOME will be cleaned up by TrackedProcess instead.
+    /// The isolated homes will be cleaned up by TrackedProcess instead.
     fn disarm(&mut self) {
-        self.path = None;
+        self.paths.clear();
     }
 }
 
-impl Drop for CodexHomeGuard {
+impl Drop for IsolatedHomesGuard {
     fn drop(&mut self) {
-        if let Some(path) = self.path.take() {
-            ProcessManager::cleanup_codex_home(&self.terminal_id, &path);
+        for path in self.paths.drain(..) {
+            ProcessManager::cleanup_isolated_home(&self.terminal_id, &path);
         }
     }
 }
@@ -312,7 +329,8 @@ impl Drop for CodexHomeGuard {
 /// [G21-006] No `Drop` implementation: process cleanup is handled by the runtime
 /// shutdown sequence which calls `kill_terminal` / `finalize_terminated_process`
 /// for each tracked process. Implementing `Drop` would require blocking I/O
-/// (task joins, CODEX_HOME cleanup) which is not safe in a synchronous destructor.
+/// (task joins) which is not safe in a synchronous destructor. (Synchronous
+/// isolated-home secret cleanup is instead handled by `TrackedProcess::drop`.)
 pub struct ProcessManager {
     processes: Arc<RwLock<HashMap<String, TrackedProcess>>>,
 }
@@ -325,47 +343,51 @@ impl ProcessManager {
         }
     }
 
-    /// Cleans up CODEX_HOME temporary directory for a terminated Codex terminal.
+    /// RB-37 (P0 SECURITY): Cleans up an isolated AI-CLI home temporary directory
+    /// (CODEX_HOME / CLAUDE_HOME / GEMINI_HOME) for a terminated terminal. These
+    /// directories contain secret files (auth.json, settings.json,
+    /// .credentials.json, .env), so they must be removed on terminal end to avoid
+    /// leaking API keys to disk.
     ///
     /// Safety: Only removes directories under the solodawn temp directory to prevent
     /// accidental deletion of user data.
-    fn cleanup_codex_home(terminal_id: &str, codex_home: &Path) {
-        if codex_home.as_os_str().is_empty() {
+    fn cleanup_isolated_home(terminal_id: &str, home: &Path) {
+        if home.as_os_str().is_empty() {
             return;
         }
 
         // Safety check: only clean up directories under our temp directory
         let base_dir = std::env::temp_dir().join("solodawn");
-        if !codex_home.starts_with(&base_dir) {
+        if !home.starts_with(&base_dir) {
             tracing::warn!(
                 terminal_id = %terminal_id,
-                codex_home = %codex_home.display(),
-                "Skipping CODEX_HOME cleanup: path is outside temp directory"
+                home = %home.display(),
+                "Skipping isolated home cleanup: path is outside temp directory"
             );
             return;
         }
 
-        match std::fs::remove_dir_all(codex_home) {
+        match std::fs::remove_dir_all(home) {
             Ok(()) => {
                 tracing::info!(
                     terminal_id = %terminal_id,
-                    codex_home = %codex_home.display(),
-                    "Cleaned up CODEX_HOME directory"
+                    home = %home.display(),
+                    "Cleaned up isolated AI-CLI home directory"
                 );
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 tracing::debug!(
                     terminal_id = %terminal_id,
-                    codex_home = %codex_home.display(),
-                    "CODEX_HOME directory already removed"
+                    home = %home.display(),
+                    "Isolated AI-CLI home directory already removed"
                 );
             }
             Err(e) => {
                 tracing::warn!(
                     terminal_id = %terminal_id,
-                    codex_home = %codex_home.display(),
+                    home = %home.display(),
                     error = %e,
-                    "Failed to clean up CODEX_HOME directory"
+                    "Failed to clean up isolated AI-CLI home directory"
                 );
             }
         }
@@ -451,8 +473,10 @@ impl ProcessManager {
         )
         .await;
 
-        if let Some(codex_home) = tracked.codex_home.take() {
-            Self::cleanup_codex_home(terminal_id, &codex_home);
+        // RB-37 (P0 SECURITY): remove all isolated AI-CLI home directories (and the
+        // secret files they contain) on the normal terminal-end path.
+        for home in std::mem::take(&mut tracked.isolated_homes) {
+            Self::cleanup_isolated_home(terminal_id, &home);
         }
     }
 
@@ -623,16 +647,26 @@ impl ProcessManager {
     ) -> anyhow::Result<ProcessHandle> {
         self.evict_existing_terminal(terminal_id).await?;
 
-        // Capture CODEX_HOME for cleanup on process exit (and on early failures via guard)
-        let codex_home = config.env.set.get("CODEX_HOME").and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(trimmed))
-            }
-        });
-        let mut codex_home_guard = CodexHomeGuard::new(terminal_id, codex_home.clone());
+        // RB-37 (P0 SECURITY): capture every isolated AI-CLI home (CODEX_HOME /
+        // CLAUDE_HOME / GEMINI_HOME) for cleanup on process exit (and on early
+        // failures via the guard). Each of these temp directories holds secret
+        // files (auth.json, settings.json, .credentials.json, .env) that must not
+        // leak to disk after the terminal ends.
+        let isolated_homes: Vec<PathBuf> = ["CODEX_HOME", "CLAUDE_HOME", "GEMINI_HOME"]
+            .iter()
+            .filter_map(|key| {
+                config.env.set.get(*key).and_then(|value| {
+                    let trimmed = value.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(trimmed))
+                    }
+                })
+            })
+            .collect();
+        let mut isolated_homes_guard =
+            IsolatedHomesGuard::new(terminal_id, isolated_homes.clone());
 
         // Create PTY system
         let pty_system = native_pty_system();
@@ -714,8 +748,8 @@ impl ProcessManager {
             }
         }
 
-        // [G21-001] CODEX_HOME was already captured above (line ~558) and stored in
-        // `codex_home_guard`. The duplicate parsing here previously overwrote the
+        // [G21-001] Isolated AI-CLI homes were already captured above and stored in
+        // `isolated_homes_guard`. The duplicate parsing here previously overwrote the
         // guard-protected value. Removed to use the single source of truth.
 
         // Spawn child process on slave PTY
@@ -808,7 +842,7 @@ impl ProcessManager {
                 child,
                 master: Mutex::new(pair.master),
                 shared_writer: OnceCell::new(),
-                codex_home,
+                isolated_homes,
                 output_fanout,
                 reader_task,
                 logger_task: None,
@@ -817,8 +851,8 @@ impl ProcessManager {
             },
         );
 
-        // Disarm the guard - CODEX_HOME cleanup is now managed by TrackedProcess
-        codex_home_guard.disarm();
+        // Disarm the guard - isolated home cleanup is now managed by TrackedProcess
+        isolated_homes_guard.disarm();
 
         tracing::info!(
             terminal_id = %terminal_id,
@@ -841,34 +875,6 @@ impl ProcessManager {
 
     /// Spawns a new terminal process with PTY.
     ///
-    /// [G21-008] Delegates to `spawn_pty_with_config` using a default `SpawnCommand`
-    /// to eliminate code duplication. The legacy signature is preserved for callers
-    /// (tests, timeout tests) that use the simpler (shell, working_dir) form.
-    ///
-    /// # Arguments
-    ///
-    /// * `terminal_id` - Unique identifier for this terminal session
-    /// * `shell` - The shell command to spawn (e.g., "powershell", "bash")
-    /// * `working_dir` - Directory where the process will run
-    /// * `cols` - Initial terminal width in columns
-    /// * `rows` - Initial terminal height in rows
-    ///
-    /// # Returns
-    ///
-    /// Returns a `ProcessHandle` containing the PID and session ID.
-    pub async fn spawn_pty(
-        &self,
-        terminal_id: &str,
-        shell: &str,
-        working_dir: &Path,
-        cols: u16,
-        rows: u16,
-    ) -> anyhow::Result<ProcessHandle> {
-        let config = SpawnCommand::new(shell, working_dir);
-        self.spawn_pty_with_config(terminal_id, &config, cols, rows)
-            .await
-    }
-
     /// Resize terminal PTY
     ///
     /// # Arguments
@@ -1353,9 +1359,11 @@ impl Default for ProcessManager {
 
 /// [G21-006] Best-effort cleanup of all tracked child processes on drop.
 ///
-/// We cannot perform async operations (task joins, CODEX_HOME cleanup) here, so we
-/// only send termination signals. Structured shutdown should call `kill_terminal` for
-/// each process before dropping the manager; this `Drop` impl is the last-resort guard.
+/// We cannot perform async operations (task joins) here, so we only send termination
+/// signals. Structured shutdown should call `kill_terminal` for each process before
+/// dropping the manager; this `Drop` impl is the last-resort guard. (Isolated-home
+/// secret cleanup runs synchronously via `TrackedProcess::drop` once the processes
+/// map is dropped.)
 impl Drop for ProcessManager {
     fn drop(&mut self) {
         // Try to get a synchronous snapshot of tracked processes.

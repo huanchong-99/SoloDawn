@@ -28,6 +28,7 @@ import {
 } from '@/hooks/usePlanningDraft';
 import { CreateChatBox } from '../primitives/CreateChatBox';
 import { AuditDocPanel } from './AuditDocPanel';
+import { QualityGateConfirmDialog } from '@/components/quality/QualityGateConfirmDialog';
 
 function WorkflowStatusBadge({
   workflowId,
@@ -257,9 +258,11 @@ function PlanningStatusBar({
   );
 }
 
-function usePlanningDraftActions({
+export function usePlanningDraftActions({
   planningDraftId,
   planningDraft,
+  gatesConfirmedAt,
+  setGatesDialogOpen,
   message,
   setMessage,
   setIsThinking,
@@ -274,6 +277,8 @@ function usePlanningDraftActions({
 }: Readonly<{
   planningDraftId: string | null;
   planningDraft: { feishuSync?: boolean } | null | undefined;
+  gatesConfirmedAt: string | null | undefined;
+  setGatesDialogOpen: (v: boolean) => void;
   message: string;
   setMessage: (v: string) => void;
   setIsThinking: (v: boolean) => void;
@@ -331,7 +336,8 @@ function usePlanningDraftActions({
     }
   }, [planningDraftId, confirmMutation, showToast, retainBuiltin]);
 
-  const handleMaterialize = useCallback(async () => {
+  // Raw materialize — only call once quality gates are confirmed.
+  const proceedMaterialize = useCallback(async () => {
     if (!planningDraftId) return;
     try {
       const result = await materializeMutation.mutateAsync(planningDraftId);
@@ -347,6 +353,19 @@ function usePlanningDraftActions({
     setMaterializedWorkflowId,
     showToast,
   ]);
+
+  // G2 interception: block materialization until quality gates are confirmed.
+  // When gatesConfirmedAt is null, open QualityGateConfirmDialog instead of
+  // materializing; the dialog confirms gates + refetches the draft, then the
+  // parent calls proceedMaterialize via the dialog's onConfirmed callback.
+  const handleMaterialize = useCallback(() => {
+    if (!planningDraftId) return;
+    if (gatesConfirmedAt == null) {
+      setGatesDialogOpen(true);
+      return;
+    }
+    void proceedMaterialize();
+  }, [planningDraftId, gatesConfirmedAt, setGatesDialogOpen, proceedMaterialize]);
 
   const handleToggleFeishuSync = useCallback(() => {
     if (!planningDraftId || !planningDraft) return;
@@ -371,6 +390,7 @@ function usePlanningDraftActions({
     handlePlanningMessage,
     handleConfirm,
     handleMaterialize,
+    proceedMaterialize,
     handleToggleFeishuSync,
   };
 }
@@ -422,6 +442,7 @@ export function CreateChatBoxContainer() {
     string | null
   >(null);
   const [retainBuiltin, setRetainBuiltin] = useState(true);
+  const [gatesDialogOpen, setGatesDialogOpen] = useState(false);
 
   const { data: planningDraft } = usePlanningDraft(planningDraftId);
   const { data: serverMessages } = usePlanningDraftMessages(planningDraftId);
@@ -605,10 +626,13 @@ export function CreateChatBoxContainer() {
     handlePlanningMessage,
     handleConfirm,
     handleMaterialize,
+    proceedMaterialize,
     handleToggleFeishuSync,
   } = usePlanningDraftActions({
     planningDraftId,
     planningDraft,
+    gatesConfirmedAt: planningDraft?.gatesConfirmedAt,
+    setGatesDialogOpen,
     message,
     setMessage,
     setIsThinking,
@@ -816,6 +840,20 @@ export function CreateChatBoxContainer() {
           auditMode={planningDraft?.auditMode ?? 'builtin'}
           onRetainBuiltinChange={setRetainBuiltin}
           retainBuiltin={retainBuiltin}
+        />
+      )}
+
+      {/* G2 quality-gate confirmation — gates must be confirmed before materialize */}
+      {isInPlanningMode && planningDraftId && projectId && (
+        <QualityGateConfirmDialog
+          open={gatesDialogOpen}
+          projectId={projectId}
+          draftId={planningDraftId}
+          onConfirmed={() => {
+            setGatesDialogOpen(false);
+            void proceedMaterialize();
+          }}
+          onClose={() => setGatesDialogOpen(false)}
         />
       )}
     </div>

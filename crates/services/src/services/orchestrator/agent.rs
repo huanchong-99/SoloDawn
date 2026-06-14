@@ -59,7 +59,6 @@ use super::{
 };
 use crate::services::{
     concierge::{ConciergeBroadcaster, ConciergeEvent},
-    error_handler::ErrorHandler,
     template_renderer::{TemplateRenderer, WorkflowContext},
 };
 
@@ -70,7 +69,6 @@ pub struct OrchestratorAgent {
     message_bus: SharedMessageBus,
     llm_client: Box<dyn LLMClient>,
     db: Arc<DBService>,
-    error_handler: ErrorHandler,
     prompt_handler: PromptHandler,
     runtime_actions: Option<Arc<RuntimeActionService>>,
     persistence: Option<Arc<StatePersistence>>,
@@ -204,7 +202,6 @@ impl OrchestratorAgent {
                 ))
         })?;
         let state = Arc::new(RwLock::new(OrchestratorState::new(workflow_id)));
-        let error_handler = ErrorHandler::new(db.clone(), message_bus.clone());
 
         // Build LLM callback for prompt input generation (separate client instance)
         let prompt_handler = match create_llm_client(&config) {
@@ -237,7 +234,6 @@ impl OrchestratorAgent {
             message_bus,
             llm_client,
             db,
-            error_handler,
             prompt_handler,
             runtime_actions: None,
             persistence: None,
@@ -258,7 +254,6 @@ impl OrchestratorAgent {
         llm_client: Box<dyn LLMClient>,
     ) -> anyhow::Result<Self> {
         let state = Arc::new(RwLock::new(OrchestratorState::new(workflow_id)));
-        let error_handler = ErrorHandler::new(db.clone(), message_bus.clone());
         let prompt_handler = PromptHandler::new(message_bus.clone());
 
         Ok(Self {
@@ -267,7 +262,6 @@ impl OrchestratorAgent {
             message_bus,
             llm_client,
             db,
-            error_handler,
             prompt_handler,
             runtime_actions: None,
             persistence: None,
@@ -662,65 +656,49 @@ impl OrchestratorAgent {
                 }
                 // Continue with the retry tasks for terminal dispatch check below
                 let tasks_after = tasks_retry;
-                let mut any_without_terminals = false;
-                for task in &tasks_after {
-                    let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id)
-                        .await
-                        .unwrap_or_default();
-                    if terminals.is_empty() {
-                        any_without_terminals = true;
-                        break;
-                    }
-                }
-                if any_without_terminals {
-                    tracing::info!(
-                        "Retry planning created tasks without terminals, re-prompting LLM for terminal dispatch"
-                    );
-                    let task_names: Vec<String> = tasks_after
-                        .iter()
-                        .map(|t| format!("- {} (id: {}, branch: {})", t.name, t.id, &t.branch))
-                        .collect();
-                    let follow_up = format!(
-                        "The following tasks have been created but have NO terminals yet:\n{}\n\nFor each task, create at least one terminal using create_terminal (with cli_type_id and model_config_id from the available pool) and then start it with start_terminal. Return raw JSON instructions only, no markdown.",
-                        task_names.join("\n")
-                    );
-                    if let Ok(resp2) = self.call_llm(&follow_up).await {
-                        let _ = self.execute_instruction(&resp2).await;
-                    }
-                }
+                self.dispatch_terminals_for_pending_tasks(&tasks_after).await;
                 return Ok(());
             }
         }
 
         if !tasks_after.is_empty() {
-            let mut any_without_terminals = false;
-            for task in &tasks_after {
-                let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id)
-                    .await
-                    .unwrap_or_default();
-                if terminals.is_empty() {
-                    any_without_terminals = true;
-                    break;
-                }
-            }
-            if any_without_terminals {
-                tracing::info!(
-                    "Initial planning created tasks without terminals, re-prompting LLM for terminal dispatch"
-                );
-                let task_names: Vec<String> = tasks_after
-                    .iter()
-                    .map(|t| format!("- {} (id: {}, branch: {})", t.name, t.id, &t.branch))
-                    .collect();
-                let follow_up = format!(
-                    "The following tasks have been created but have NO terminals yet:\n{}\n\nFor each task, create at least one terminal using create_terminal (with cli_type_id and model_config_id from the available pool) and then start it with start_terminal. Return raw JSON instructions only.",
-                    task_names.join("\n")
-                );
-                if let Ok(resp2) = self.call_llm(&follow_up).await {
-                    let _ = self.execute_instruction(&resp2).await;
-                }
-            }
+            self.dispatch_terminals_for_pending_tasks(&tasks_after).await;
         }
         Ok(())
+    }
+
+    /// If any of `tasks` has no terminals yet, re-prompt the LLM to create and
+    /// dispatch terminals for the pending tasks. Extracted from the two
+    /// near-identical follow-up dispatch blocks in
+    /// `run_initial_agent_planning_if_needed` (RB-48).
+    async fn dispatch_terminals_for_pending_tasks(&self, tasks: &[db::models::WorkflowTask]) {
+        let mut any_without_terminals = false;
+        for task in tasks {
+            let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id)
+                .await
+                .unwrap_or_default();
+            if terminals.is_empty() {
+                any_without_terminals = true;
+                break;
+            }
+        }
+        if !any_without_terminals {
+            return;
+        }
+        tracing::info!(
+            "Planning created tasks without terminals, re-prompting LLM for terminal dispatch"
+        );
+        let task_names: Vec<String> = tasks
+            .iter()
+            .map(|t| format!("- {} (id: {}, branch: {})", t.name, t.id, &t.branch))
+            .collect();
+        let follow_up = format!(
+            "The following tasks have been created but have NO terminals yet:\n{}\n\nFor each task, create at least one terminal using create_terminal (with cli_type_id and model_config_id from the available pool) and then start it with start_terminal. Return raw JSON instructions only, no markdown.",
+            task_names.join("\n")
+        );
+        if let Ok(resp2) = self.call_llm(&follow_up).await {
+            let _ = self.execute_instruction(&resp2).await;
+        }
     }
 
     async fn build_initial_planning_prompt(
@@ -2745,6 +2723,15 @@ impl OrchestratorAgent {
                 }
             };
 
+            // G3 (P3 §2.9 Site 1): resolve the workflow's project_id so the gate
+            // can apply the DB priority-0 quality policy. The working_dir block
+            // above only fetches the Workflow on the no-worktree fallback path,
+            // so fetch it here unconditionally over the moved db.pool.
+            let project_id = match db::models::Workflow::find_by_id(&db.pool, &workflow_id).await {
+                Ok(Some(wf)) => Some(wf.project_id),
+                _ => None,
+            };
+
             // G31-003: wrap engine run in timeout.
             let engine_future = async {
                 if let Some(ref wd) = working_dir {
@@ -2812,7 +2799,21 @@ impl OrchestratorAgent {
                     // blockers, now classified as infra (R4 Fix E/B).
                     ensure_js_deps_installed_for_gate(wd).await;
 
-                    match quality::engine::QualityEngine::from_project(wd) {
+                    // G3 (P3 §2.9 Site 1): build the engine from the DB-resolved
+                    // policy when project_id is known; otherwise fall back to the
+                    // filesystem chain (from_project) so behavior is unchanged.
+                    let engine_result = match project_id {
+                        Some(pid) => {
+                            let resolved_cfg =
+                                crate::services::orchestrator::quality_policy::resolve_quality_config(
+                                    &db.pool, pid, wd,
+                                )
+                                .await;
+                            quality::engine::QualityEngine::from_config(resolved_cfg, wd)
+                        }
+                        None => quality::engine::QualityEngine::from_project(wd),
+                    };
+                    match engine_result {
                         Ok(engine) => {
                             match engine
                                 .run_with_scope(
@@ -2915,7 +2916,7 @@ impl OrchestratorAgent {
                         }
                         Err(e) => skipped_outcome(
                             &run_id,
-                            &format!("QualityEngine::from_project failed: {e}"),
+                            &format!("QualityEngine construction failed: {e}"),
                             &run_id,
                         ),
                     }
@@ -4411,14 +4412,6 @@ impl OrchestratorAgent {
         self.maybe_save_state().await;
 
         Ok(())
-    }
-
-    #[allow(dead_code)]
-    fn should_skip_completed_handoff(next_action: &str) -> bool {
-        matches!(
-            next_action.trim().to_ascii_lowercase().as_str(),
-            "continue" | "retry"
-        )
     }
 
     /// Handle git event without METADATA - wake up orchestrator for decision.
@@ -7877,7 +7870,27 @@ impl OrchestratorAgent {
 
         ensure_js_deps_installed_for_gate(project_root).await;
 
-        let report = match quality::engine::QualityEngine::from_project(project_root) {
+        // G3 (P3 §2.9 Site 2): build the engine from the DB-resolved policy when
+        // the workflow's project_id is known; otherwise fall back to the
+        // filesystem chain (from_project) so behavior is unchanged.
+        let project_id = match db::models::Workflow::find_by_id(&self.db.pool, workflow_id).await {
+            Ok(Some(wf)) => Some(wf.project_id),
+            _ => None,
+        };
+        let engine_result = match project_id {
+            Some(pid) => {
+                let resolved_cfg = crate::services::orchestrator::quality_policy::resolve_quality_config(
+                    &self.db.pool,
+                    pid,
+                    project_root,
+                )
+                .await;
+                quality::engine::QualityEngine::from_config(resolved_cfg, project_root)
+            }
+            None => quality::engine::QualityEngine::from_project(project_root),
+        };
+
+        let report = match engine_result {
             Ok(engine) => match engine.run_with_scope(project_root, level, scope).await {
                 Ok(report) => report,
                 Err(error) => {
@@ -9002,6 +9015,10 @@ impl OrchestratorAgent {
             .publish_workflow_event(&workflow_id, message)
             .await?;
 
+        // RB-59: reclaim the per-workflow merge lock map entry now that the
+        // auto-merge has completed for all task branches.
+        crate::services::merge_coordinator::prune_workflow_merge_lock(&workflow_id);
+
         Ok(())
     }
 
@@ -9098,29 +9115,9 @@ impl OrchestratorAgent {
         }
     }
 
-    /// Handle terminal failure
-    ///
-    /// Wrapper around ErrorHandler::handle_terminal_failure that uses
-    /// the agent's workflow_id, message_bus, and db.
-    pub async fn handle_terminal_failure(
-        &self,
-        task_id: &str,
-        terminal_id: &str,
-        error_message: &str,
-    ) -> anyhow::Result<()> {
-        let workflow_id = {
-            let state = self.state.read().await;
-            state.workflow_id.clone()
-        };
-
-        self.error_handler
-            .handle_terminal_failure(&workflow_id, task_id, terminal_id, error_message)
-            .await
-    }
-
     /// Handle user response for an interactive terminal prompt.
     ///
-    /// Wrapper around PromptHandler::handle_user_approval that resolves
+    /// Wrapper around PromptHandler::handle_user_prompt_response that resolves
     /// workflow_id and terminal session_id from the agent/database context.
     pub async fn handle_user_prompt_response(
         &self,
@@ -10784,17 +10781,6 @@ mod tests {
 
         assert_eq!(result.chars().count(), 203);
         assert!(result.ends_with("..."));
-    }
-
-    #[test]
-    fn should_skip_completed_handoff_for_continue_and_retry() {
-        assert!(OrchestratorAgent::should_skip_completed_handoff("continue"));
-        assert!(OrchestratorAgent::should_skip_completed_handoff("retry"));
-        assert!(OrchestratorAgent::should_skip_completed_handoff(
-            " Continue "
-        ));
-        assert!(!OrchestratorAgent::should_skip_completed_handoff("handoff"));
-        assert!(!OrchestratorAgent::should_skip_completed_handoff(""));
     }
 
     async fn setup_stalled_recovery_fixture() -> (

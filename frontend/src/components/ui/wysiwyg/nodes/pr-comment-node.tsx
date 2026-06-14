@@ -1,10 +1,8 @@
 import { useCallback } from 'react';
-import { SerializedLexicalNode, Spread } from 'lexical';
 import { PrCommentCard } from '@/components/ui/pr-comment-card';
 import {
   createDecoratorNode,
   type DecoratorNodeConfig,
-  type GeneratedDecoratorNode,
 } from '../lib/create-decorator-node';
 
 /**
@@ -23,11 +21,6 @@ export interface NormalizedComment {
   line?: number | null;
   diff_hunk?: string | null;
 }
-
-export type SerializedPrCommentNode = Spread<
-  NormalizedComment,
-  SerializedLexicalNode
->;
 
 function PrCommentComponent({
   data,
@@ -87,7 +80,6 @@ const config: DecoratorNodeConfig<NormalizedComment> = {
 const result = createDecoratorNode(config);
 
 export const PrCommentNode = result.Node;
-export type PrCommentNodeInstance = GeneratedDecoratorNode<NormalizedComment>;
 export const $createPrCommentNode = result.createNode;
 export const $isPrCommentNode = result.isNode;
 export const [PR_COMMENT_EXPORT_TRANSFORMER, PR_COMMENT_TRANSFORMER] =

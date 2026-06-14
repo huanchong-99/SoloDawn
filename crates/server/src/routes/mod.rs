@@ -82,7 +82,6 @@ pub mod health;
 pub mod images;
 pub mod models;
 pub mod oauth;
-pub mod organizations;
 pub mod planning_drafts;
 pub mod projects;
 pub mod provider_health;
@@ -148,7 +147,6 @@ pub fn build_router(
         .merge(execution_processes::router(&deployment))
         .merge(tags::router(&deployment))
         .merge(oauth::router())
-        .merge(organizations::router())
         .merge(filesystem::router())
         .merge(repo::router())
         .merge(events::router(&deployment))
@@ -169,6 +167,8 @@ pub fn build_router(
         .nest("/workflows", provider_health::provider_health_routes())
         .nest("/workflows", quality::quality_workflow_routes())
         .nest("/quality", quality::quality_routes())
+        .nest("/quality", quality::quality_policy_routes())
+        .nest("/projects", quality::quality_policy_project_routes())
         .nest("/concierge", concierge::concierge_routes())
         .nest("/terminal", terminal_ws::terminal_ws_routes())
         .nest("/terminals", terminals::terminal_routes())

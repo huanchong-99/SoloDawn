@@ -20,7 +20,7 @@ use db::{
 };
 use services::services::{
     cc_switch::CCSwitchService,
-    terminal::{ProcessManager, TerminalLauncher},
+    terminal::{process::SpawnCommand, ProcessManager, TerminalLauncher},
 };
 use uuid::Uuid;
 
@@ -322,7 +322,7 @@ async fn test_terminal_lifecycle_cleanup() {
 
     let terminal_id = "test-cleanup-terminal";
     let handle = process_manager
-        .spawn_pty(terminal_id, shell, temp_dir.path(), 80, 24)
+        .spawn_pty_with_config(terminal_id, &SpawnCommand::new(shell, temp_dir.path()), 80, 24)
         .await
         .unwrap();
 

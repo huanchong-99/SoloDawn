@@ -183,7 +183,6 @@
     "viewInChangesPanel": "Ver en panel de cambios",
     "copyPath": "Copiar ruta",
     "copyWorktreePath": "Copiar ruta del worktree",
-    "openInIde": "Abrir en IDE",
     "repoSettings": "Configuración del repositorio",
     "cancel": "Cancelar",
     "saveChanges": "Guardar cambios",
@@ -287,7 +286,6 @@
   "navbarActions": {
     "archive-workspace": "Archivar",
     "unarchive-workspace": "Desarchivar",
-    "open-in-old-ui": "Abrir en interfaz antigua",
     "toggle-diff-view-mode-inline": "Vista en línea",
     "toggle-diff-view-mode-split": "Vista lado a lado",
     "toggle-all-diffs-collapse": "Colapsar todas las diferencias",

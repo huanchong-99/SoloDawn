@@ -391,12 +391,6 @@ impl LocalDeployment {
         Ok(())
     }
 
-    pub fn remote_client(&self) -> Result<(), DeploymentError> {
-        Err(DeploymentError::Other(anyhow::anyhow!(
-            "Remote client not configured"
-        )))
-    }
-
     pub async fn get_login_status(&self) -> LoginStatus {
         if self.auth_context.get_credentials().await.is_none() {
             self.auth_context.clear_profile().await;

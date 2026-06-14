@@ -81,31 +81,6 @@ impl std::ops::Deref for WorkspaceWithStatus {
     }
 }
 
-/// GitHub PR creation parameters
-pub struct CreatePrParams<'a> {
-    pub workspace_id: Uuid,
-    pub task_id: Uuid,
-    pub project_id: Uuid,
-    pub github_token: &'a str,
-    pub title: &'a str,
-    pub body: Option<&'a str>,
-    pub base_branch: Option<&'a str>,
-}
-
-#[derive(Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateFollowUpAttempt {
-    pub prompt: String,
-}
-
-/// Context data for resume operations (simplified)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AttemptResumeContext {
-    pub execution_history: String,
-    pub cumulative_diffs: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceContext {

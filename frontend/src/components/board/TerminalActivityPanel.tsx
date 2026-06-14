@@ -19,7 +19,7 @@ interface ActivityItem {
 }
 
 /** Status values that indicate active terminals */
-const ACTIVE_STATUSES = new Set(['working', 'waiting', 'running', 'starting']);
+const ACTIVE_STATUSES = new Set(['working', 'waiting', 'starting']);
 
 /**
  * Single terminal activity item with recent output preview
@@ -66,7 +66,7 @@ function StatusIndicator({ status }: Readonly<{ status: string }>) {
       className={cn(
         'inline-block w-2 h-2 rounded-full',
         (() => {
-          if (status === 'working' || status === 'running') return 'bg-green-500 animate-pulse';
+          if (status === 'working') return 'bg-green-500 animate-pulse';
           if (status === 'waiting') return 'bg-blue-500';
           if (status === 'starting') return 'bg-yellow-500';
           return 'bg-gray-400';

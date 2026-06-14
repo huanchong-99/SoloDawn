@@ -29,13 +29,6 @@ pub fn get_claude_settings_path() -> Result<PathBuf> {
     Ok(get_claude_config_dir()?.join("settings.json"))
 }
 
-/// 获取 Claude MCP 配置路径
-///
-/// 路径: ~/.claude.json (注意：不是 ~/.claude/claude.json)
-pub fn get_claude_mcp_path() -> Result<PathBuf> {
-    Ok(get_home_dir()?.join(".claude.json"))
-}
-
 // ============================================================================
 // Codex 配置路径
 // ============================================================================
@@ -77,13 +70,6 @@ pub fn get_gemini_config_dir() -> Result<PathBuf> {
 /// 路径: ~/.gemini/.env
 pub fn get_gemini_env_path() -> Result<PathBuf> {
     Ok(get_gemini_config_dir()?.join(".env"))
-}
-
-/// 获取 Gemini settings.json 路径
-///
-/// 路径: ~/.gemini/settings.json
-pub fn get_gemini_settings_path() -> Result<PathBuf> {
-    Ok(get_gemini_config_dir()?.join("settings.json"))
 }
 
 // ============================================================================

@@ -10,10 +10,6 @@ import { useMemo } from 'react';
 import { Badge } from '../ui/badge';
 import { useClickedElements } from '@/contexts/ClickedElementsProvider';
 
-export type Props = Readonly<{
-  isEditable: boolean;
-  appendInstructions?: (text: string) => void;
-}>;
 
 const MAX_VISIBLE_ELEMENTS = 5;
 const MAX_BADGES = 6;

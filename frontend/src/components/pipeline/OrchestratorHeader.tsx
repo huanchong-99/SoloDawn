@@ -4,25 +4,9 @@ interface OrchestratorHeaderProps {
   name: string;
   status: string;
   model: string | null;
-  tokensUsed?: number | null;
 }
 
-/**
- * Format token count for display
- * e.g., 12500 -> "12.5k", 1500000 -> "1.5M"
- */
-function formatTokens(tokens: number | null | undefined): string {
-  if (tokens == null) return 'N/A';
-  if (tokens >= 1_000_000) {
-    return `${(tokens / 1_000_000).toFixed(1)}M`;
-  }
-  if (tokens >= 1_000) {
-    return `${(tokens / 1_000).toFixed(1)}k`;
-  }
-  return tokens.toString();
-}
-
-export function OrchestratorHeader({ name, status, model, tokensUsed }: Readonly<OrchestratorHeaderProps>) {
+export function OrchestratorHeader({ name, status, model }: Readonly<OrchestratorHeaderProps>) {
   const { t } = useTranslation('workflow');
   return (
     <div className="h-16 bg-panel border-b border-border px-6 flex items-center">
@@ -31,10 +15,6 @@ export function OrchestratorHeader({ name, status, model, tokensUsed }: Readonly
         <div className="text-xs text-low">
           {t('pipeline.orchestrator.statusLabel')} {status} | {t('pipeline.orchestrator.modelLabel')} {model ?? 'n/a'}
         </div>
-      </div>
-      <div className="text-right text-xs">
-        <div>{t('pipeline.orchestrator.tokensUsedLabel')}</div>
-        <div className="text-sm font-semibold">{formatTokens(tokensUsed)}</div>
       </div>
     </div>
   );

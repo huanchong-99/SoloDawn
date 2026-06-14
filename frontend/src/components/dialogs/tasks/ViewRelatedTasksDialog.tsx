@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { PlusIcon } from 'lucide-react';
-import { openTaskForm } from '@/lib/openTaskForm';
+import { TaskFormDialog } from '@/components/dialogs/tasks/TaskFormDialog';
 import { useTaskRelationships } from '@/hooks/useTaskRelationships';
 import { DataTable, type ColumnDef } from '@/components/ui/table/data-table';
 import type { Task, Workspace } from 'shared/types';
@@ -91,7 +91,7 @@ const ViewRelatedTasksDialogImpl =
           // Yield one microtask for smooth modal transition
           await Promise.resolve();
 
-          await openTaskForm({
+          await TaskFormDialog.show({
             mode: 'subtask',
             projectId,
             parentTaskAttemptId: attempt.id,

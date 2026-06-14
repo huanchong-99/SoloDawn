@@ -60,33 +60,6 @@ fn extract_host(url_lower: &str) -> Option<String> {
     }
 }
 
-/// Detect the git hosting provider from a PR URL.
-///
-/// Supports:
-/// - GitHub: `https://github.com/owner/repo/pull/123`
-/// - GitHub Enterprise: `https://github.company.com/owner/repo/pull/123`
-/// - Azure DevOps: `https://dev.azure.com/org/project/_git/repo/pullrequest/123`
-#[cfg(test)]
-fn detect_provider_from_pr_url(pr_url: &str) -> ProviderKind {
-    let url_lower = pr_url.to_lowercase();
-
-    // GitHub pattern: contains /pull/ in the path
-    if url_lower.contains("/pull/") {
-        // Could be github.com or GHE
-        if url_lower.contains("github.com") || url_lower.contains("github.") {
-            return ProviderKind::GitHub;
-        }
-    }
-
-    // Azure DevOps pattern: contains /pullrequest/ in the path
-    if url_lower.contains("/pullrequest/") {
-        return ProviderKind::AzureDevOps;
-    }
-
-    // Fall back to general URL detection
-    detect_provider_from_url(pr_url)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,31 +145,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_pr_url_github() {
-        assert_eq!(
-            detect_provider_from_pr_url("https://github.com/owner/repo/pull/123"),
-            ProviderKind::GitHub
-        );
-        assert_eq!(
-            detect_provider_from_pr_url("https://github.company.com/owner/repo/pull/456"),
-            ProviderKind::GitHub
-        );
-    }
-
-    #[test]
-    fn test_pr_url_azure() {
-        assert_eq!(
-            detect_provider_from_pr_url(
-                "https://dev.azure.com/org/project/_git/repo/pullrequest/123"
-            ),
-            ProviderKind::AzureDevOps
-        );
-        assert_eq!(
-            detect_provider_from_pr_url(
-                "https://org.visualstudio.com/project/_git/repo/pullrequest/456"
-            ),
-            ProviderKind::AzureDevOps
-        );
-    }
 }

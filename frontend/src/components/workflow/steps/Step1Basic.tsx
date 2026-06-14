@@ -126,31 +126,6 @@ export const Step1Basic: React.FC<Step1BasicProps> = ({
             {errors.taskCount && <FieldError>{t(errors.taskCount)}</FieldError>}
           </Field>
 
-          <Field>
-            <FieldLabel>{t('step1.importLabel')}</FieldLabel>
-            <div className="flex flex-col gap-base">
-              <label className="flex items-center gap-base cursor-pointer">
-                <input
-                  type="radio"
-                  name="importMode"
-                  checked={!config.importFromKanban}
-                  onChange={() => onChange({ importFromKanban: false })}
-                  className="size-icon-sm accent-brand"
-                />
-                <span className="text-base text-normal">{t('step1.importNew')}</span>
-              </label>
-              <label className="flex items-center gap-base cursor-pointer">
-                <input
-                  type="radio"
-                  name="importMode"
-                  checked={config.importFromKanban}
-                  onChange={() => onChange({ importFromKanban: true })}
-                  className="size-icon-sm accent-brand"
-                />
-                <span className="text-base text-normal">{t('step1.importKanban')}</span>
-              </label>
-            </div>
-          </Field>
         </>
       )}
     </div>

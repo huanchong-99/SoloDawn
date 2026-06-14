@@ -55,30 +55,6 @@
         "defaultLabel": "默认"
       },
       "editor": {
-        "title": "编辑器",
-        "description": "配置您的代码编辑体验。",
-        "type": {
-          "label": "编辑器类型",
-          "placeholder": "选择编辑器",
-          "helper": "选择您喜欢的代码编辑器界面。"
-        },
-        "customCommand": {
-          "label": "自定义编辑器命令",
-          "placeholder": "例如：code、subl、vim",
-          "helper": "输入启动自定义编辑器的命令。这将用于打开文件。"
-        },
-        "remoteSsh": {
-          "host": {
-            "label": "远程 SSH 主机（可选）",
-            "placeholder": "例如：主机名或 IP 地址",
-            "helper": "如果 SoloDawn 在远程服务器上运行，请设置此项。设置后，点击在编辑器中打开将生成 URL 以通过 SSH 打开编辑器，而不是执行本地命令。"
-          },
-          "user": {
-            "label": "远程 SSH 用户（可选）",
-            "placeholder": "例如：用户名",
-            "helper": "远程连接的 SSH 用户名。如果未设置，VS Code 将使用您的 SSH 配置或提示您输入。"
-          }
-        },
         "availability": {
           "checking": "检查可用性...",
           "available": "可用",
@@ -540,6 +516,7 @@
       "mcp": "MCP 服务器",
       "feishu": "飞书",
       "runtime": "运行环境",
+      "qualityGates": "质量门禁",
       "organizations": "组织"
     },
     "common": {

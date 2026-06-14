@@ -755,7 +755,8 @@ impl TerminalWatchState {
         self.handoff_stall_context.clear();
     }
 
-    #[allow(dead_code)]
+    // used only in tests
+    #[cfg_attr(not(test), allow(dead_code))]
     fn mark_pending_handoff_submit(&mut self) {
         self.pending_handoff_submit_at = Some(Instant::now());
     }

@@ -27,7 +27,6 @@ describe('Step6Advanced', () => {
     basic: {
       name: 'Test Workflow',
       taskCount: 1,
-      importFromKanban: false,
     },
     tasks: [],
     models: [],

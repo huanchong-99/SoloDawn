@@ -72,7 +72,6 @@ function TerminalQualityIndicator({ terminalId }: Readonly<{ terminalId: string 
     <div className="mt-1">
       <QualityBadge
         gateStatus={data.gateStatus as GateStatus}
-        totalIssues={data.totalIssues}
         blockingIssues={data.blockingIssues}
       />
     </div>

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { ConflictBanner } from '@/components/tasks/ConflictBanner';
-import { useOpenInEditor } from '@/hooks/useOpenInEditor';
 import { useAttemptConflicts } from '@/hooks/useAttemptConflicts';
 import type { RepoBranchStatus } from 'shared/types';
 
@@ -27,7 +26,6 @@ export function FollowUpConflictSection({
     (r) => r.is_rebase_in_progress || (r.conflicted_files?.length ?? 0) > 0
   );
   const op = repoWithConflicts?.conflict_op ?? null;
-  const openInEditor = useOpenInEditor(workspaceId);
   const repoId = repoWithConflicts?.repo_id;
   const { abortConflicts } = useAttemptConflicts(workspaceId, repoId);
 
@@ -52,11 +50,7 @@ export function FollowUpConflictSection({
         op={op}
         onResolve={onResolve}
         enableResolve={enableResolve && !aborting}
-        onOpenEditor={() => {
-          if (!workspaceId) return;
-          const first = repoWithConflicts.conflicted_files?.[0];
-          openInEditor(first ? { filePath: first } : undefined);
-        }}
+        onOpenEditor={() => {}}
         onAbort={async () => {
           if (!workspaceId) return;
           if (!enableAbort || abortingRef.current) return;

@@ -20,6 +20,7 @@ thiserror = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 async-trait = { workspace = true }
+ts-rs = { workspace = true }
 futures = "0.3"
 regex = "1"
 reqwest = { workspace = true, features = ["multipart"] }

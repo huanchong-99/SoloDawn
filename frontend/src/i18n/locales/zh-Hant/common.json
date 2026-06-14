@@ -183,7 +183,6 @@
     "viewInChangesPanel": "在變更面板中檢視",
     "copyPath": "複製路徑",
     "copyWorktreePath": "複製工作樹路徑",
-    "openInIde": "在IDE中開啟",
     "repoSettings": "儲存庫設定",
     "cancel": "取消",
     "saveChanges": "儲存變更",
@@ -287,7 +286,6 @@
   "navbarActions": {
     "archive-workspace": "封存",
     "unarchive-workspace": "取消封存",
-    "open-in-old-ui": "在舊介面中開啟",
     "toggle-diff-view-mode-inline": "內嵌檢視",
     "toggle-diff-view-mode-split": "並排檢視",
     "toggle-all-diffs-collapse": "摺疊所有差異",

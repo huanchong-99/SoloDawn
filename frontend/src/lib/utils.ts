@@ -4,7 +4,7 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
 }
 
-export function formatBytes(bytes: bigint | null | undefined): string {
+function formatBytes(bytes: bigint | null | undefined): string {
   if (bytes === null || bytes === undefined) return '';
   const num = Number(bytes);
   if (num < 1024) return `${num} B`;

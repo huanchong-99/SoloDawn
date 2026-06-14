@@ -30,8 +30,6 @@ const TOOLTIP_I18N_MAP: Record<string, string> = {
   // Archive action
   'Archive': 'archive-workspace',
   'Unarchive': 'unarchive-workspace',
-  // Old UI
-  'Open in Old UI': 'open-in-old-ui',
   // Diff view mode
   'Inline view': 'toggle-diff-view-mode-inline',
   'Side-by-side view': 'toggle-diff-view-mode-split',

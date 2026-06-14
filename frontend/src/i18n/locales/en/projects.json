@@ -54,6 +54,5 @@
   "unlinkFromOrganization": "Unlink from Remote Project",
   "projectNotFound": "The project you're looking for doesn't exist or has been deleted.",
   "viewProject": "View Project",
-  "openInIDE": "Open in IDE",
   "createdDate": "Created {{date}}"
 }

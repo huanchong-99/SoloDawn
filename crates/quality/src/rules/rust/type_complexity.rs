@@ -199,11 +199,6 @@ impl<'ast> Visit<'ast> for TypeCollector {
     }
 
     fn visit_local(&mut self, node: &'ast syn::Local) {
-        if let Some(ref init) = node.init {
-            // Check for type ascription via let pat: Type = expr;
-            // The type annotation is on the pattern, not the init
-            let _ = init; // init is used for visiting below
-        }
         // Visit the pattern for typed bindings (let x: Type = ...)
         if let syn::Pat::Type(pat_type) = &node.pat {
             let line = pat_type.colon_token.span.start().line as u32;

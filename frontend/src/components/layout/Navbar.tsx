@@ -22,11 +22,8 @@ import {
 import { Logo } from '@/components/Logo';
 import { SearchBar } from '@/components/SearchBar';
 import { useSearch } from '@/contexts/SearchContext';
-import { openTaskForm } from '@/lib/openTaskForm';
+import { TaskFormDialog } from '@/components/dialogs/tasks/TaskFormDialog';
 import { useProject } from '@/contexts/ProjectContext';
-import { useOpenProjectInEditor } from '@/hooks/useOpenProjectInEditor';
-import { OpenInIdeButton } from '@/components/ide/OpenInIdeButton';
-import { useProjectRepos } from '@/hooks';
 import { useTranslation } from 'react-i18next';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -76,11 +73,7 @@ export function Navbar() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { projectId, project } = useProject();
   const { query, setQuery, active, registerInputRef } = useSearch();
-  const handleOpenInEditor = useOpenProjectInEditor(project || null);
   const { loginStatus, reloadSystem, remoteFeaturesEnabled } = useUserSystem();
-
-  const { data: repos } = useProjectRepos(projectId);
-  const isSingleRepoProject = repos?.length === 1;
 
   const setSearchBarRef = useCallback(
     (node: HTMLInputElement | null) => {
@@ -113,12 +106,8 @@ export function Navbar() {
 
   const handleCreateTask = () => {
     if (projectId) {
-      openTaskForm({ mode: 'create', projectId });
+      TaskFormDialog.show({ mode: 'create', projectId });
     }
-  };
-
-  const handleOpenInIDE = () => {
-    handleOpenInEditor();
   };
 
   const handleOpenOAuth = async () => {
@@ -188,12 +177,6 @@ export function Navbar() {
             {projectId ? (
               <>
                 <div className="flex items-center gap-1">
-                  {isSingleRepoProject && (
-                    <OpenInIdeButton
-                      onClick={handleOpenInIDE}
-                      className="h-9 w-9"
-                    />
-                  )}
                   <Button
                     variant="ghost"
                     size="icon"

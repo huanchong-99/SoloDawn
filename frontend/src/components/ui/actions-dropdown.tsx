@@ -10,7 +10,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { MoreHorizontal } from 'lucide-react';
 import type { TaskWithAttemptStatus } from 'shared/types';
-import { useOpenInEditor } from '@/hooks/useOpenInEditor';
 import { DeleteTaskConfirmationDialog } from '@/components/dialogs/tasks/DeleteTaskConfirmationDialog';
 import { ViewProcessesDialog } from '@/components/dialogs/tasks/ViewProcessesDialog';
 import { ViewRelatedTasksDialog } from '@/components/dialogs/tasks/ViewRelatedTasksDialog';
@@ -42,7 +41,6 @@ export function ActionsDropdown({
 }: Readonly<ActionsDropdownProps>) {
   const { t } = useTranslation('tasks');
   const { projectId } = useProject();
-  const openInEditor = useOpenInEditor(attempt?.id);
   const navigate = useNavigate();
   const { userId, isSignedIn } = useAuth();
   const { remoteFeaturesEnabled } = useUserSystem();
@@ -77,12 +75,6 @@ export function ActionsDropdown({
     } catch {
       // User cancelled or error occurred
     }
-  };
-
-  const handleOpenInEditor = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!attempt?.id) return;
-    openInEditor();
   };
 
   const handleViewProcesses = (e: React.MouseEvent) => {
@@ -189,12 +181,6 @@ export function ActionsDropdown({
         {hasAttemptActions && (
           <>
             <DropdownMenuLabel>{t('actionsMenu.attempt')}</DropdownMenuLabel>
-            <DropdownMenuItem
-              disabled={!attempt?.id}
-              onClick={handleOpenInEditor}
-            >
-              {t('actionsMenu.openInIde')}
-            </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!attempt?.id}
               onClick={handleViewProcesses}

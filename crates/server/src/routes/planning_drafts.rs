@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use axum::{
     Extension, Json, Router,
@@ -9,8 +10,10 @@ use axum::{
     response::Json as ResponseJson,
     routing::{get, post, put},
 };
+use db::models::ProjectQualityPolicy;
 use db::models::planning_draft::{PLANNING_DRAFT_STATUSES, PlanningDraft, PlanningDraftMessage};
 use deployment::Deployment;
+use quality::config::QualityGateConfig;
 use serde::{Deserialize, Serialize};
 use services::services::orchestrator::{
     AuditMode, LLMMessage, OrchestratorConfig,
@@ -21,6 +24,8 @@ use services::services::orchestrator::{
 };
 use utils::response::ApiResponse;
 use uuid::Uuid;
+
+use feishu_connector::messages::FeishuMessenger;
 
 use crate::{DeploymentImpl, error::ApiError, feishu_handle::SharedFeishuHandle};
 
@@ -69,6 +74,7 @@ pub struct DraftResponse {
     pub audit_plan: Option<String>,
     pub audit_mode: String,
     pub audit_doc_path: Option<String>,
+    pub gates_confirmed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -92,6 +98,7 @@ impl From<PlanningDraft> for DraftResponse {
             audit_plan: d.audit_plan,
             audit_mode: d.audit_mode,
             audit_doc_path: d.audit_doc_path,
+            gates_confirmed_at: d.gates_confirmed_at.map(|t| t.to_rfc3339()),
             created_at: d.created_at.to_rfc3339(),
             updated_at: d.updated_at.to_rfc3339(),
         }
@@ -120,12 +127,39 @@ impl From<PlanningDraftMessage> for MessageResponse {
     }
 }
 
+/// Push a list of `(role, content)` message pairs to Feishu, truncating each
+/// message to 4 000 bytes on a valid UTF-8 boundary.
+async fn push_messages_to_feishu(
+    messenger: Arc<FeishuMessenger>,
+    chat_id: &str,
+    messages: Vec<(String, String)>,
+) {
+    for (role, content) in messages {
+        let prefix = if role == "user" { "[User]" } else { "[Assistant]" };
+        let text = format!("{prefix} {content}");
+        let truncated = if text.len() > 4000 {
+            // SAFETY: `text` is constructed from Rust `String`s via `format!`,
+            // so it is guaranteed valid UTF-8. `floor_char_boundary` always
+            // returns a valid boundary in-bounds.
+            let boundary = text.floor_char_boundary(4000);
+            format!("{}...(truncated)", &text[..boundary])
+        } else {
+            text
+        };
+        if let Err(e) = messenger.send_text(chat_id, &truncated).await {
+            tracing::warn!("Failed to push planning message to Feishu: {e}");
+            break;
+        }
+    }
+}
+
 pub fn planning_draft_routes() -> Router<DeploymentImpl> {
     Router::new()
         .route("/", post(create_draft).get(list_drafts))
         .route("/{draft_id}", get(get_draft))
         .route("/{draft_id}/spec", put(update_spec))
         .route("/{draft_id}/confirm", post(confirm_draft))
+        .route("/{draft_id}/confirm-gates", post(confirm_gates))
         .route("/{draft_id}/materialize", post(materialize_draft))
         .route("/{draft_id}/feishu-sync", post(toggle_feishu_sync))
         .route(
@@ -389,6 +423,56 @@ async fn confirm_draft(
     Ok(Json(ApiResponse::success(DraftResponse::from(confirmed))))
 }
 
+/// Confirm the quality gates for a draft (G2 gate).
+///
+/// Optionally accepts a DIY `QualityGateConfig` body. When supplied, the config
+/// is validated and upserted as the project-level quality policy before the
+/// draft's `gates_confirmed_at` timestamp is stamped. This is the only way to
+/// satisfy the materialization hard-block in `materialize_draft`.
+async fn confirm_gates(
+    State(deployment): State<DeploymentImpl>,
+    Path(draft_id): Path<String>,
+    // Optional DIY edit body: if absent, the existing/effective policy is kept.
+    body: Option<Json<QualityGateConfig>>,
+) -> Result<ResponseJson<ApiResponse<DraftResponse>>, ApiError> {
+    let draft = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("Planning draft {draft_id} not found")))?;
+
+    // If a DIY config was supplied, validate + upsert it as the project policy first.
+    if let Some(Json(cfg)) = body {
+        let errs = cfg.validate();
+        if !errs.is_empty() {
+            return Err(ApiError::BadRequest(format!(
+                "Invalid quality policy: {}",
+                errs.join("; ")
+            )));
+        }
+        let yaml = serde_yaml::to_string(&cfg)
+            .map_err(|e| ApiError::Internal(format!("serialize policy: {e}")))?;
+        // `QualityGateMode` serializes (serde rename_all = "lowercase") to a bare
+        // YAML scalar (`off|shadow|warn|enforce`) with a trailing newline; trim it.
+        let mode_str = serde_yaml::to_string(&cfg.mode)
+            .map_err(|e| ApiError::Internal(format!("serialize mode: {e}")))?;
+        let mode_str = mode_str.trim();
+        ProjectQualityPolicy::upsert(&deployment.db().pool, draft.project_id, &yaml, mode_str)
+            .await
+            .map_err(|e| ApiError::Internal(format!("upsert policy: {e}")))?;
+    }
+
+    PlanningDraft::set_gates_confirmed(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("set gates_confirmed: {e}")))?;
+
+    let updated = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| ApiError::Internal("Draft disappeared".into()))?;
+
+    Ok(Json(ApiResponse::success(DraftResponse::from(updated))))
+}
+
 async fn send_message(
     State(deployment): State<DeploymentImpl>,
     Extension(feishu_handle): Extension<SharedFeishuHandle>,
@@ -621,28 +705,7 @@ async fn send_message(
                         .collect();
                     drop(handle_guard);
                     tokio::spawn(async move {
-                        for (role, content) in messages_to_push {
-                            let prefix = if role == "user" {
-                                "[User]"
-                            } else {
-                                "[Assistant]"
-                            };
-                            let text = format!("{prefix} {content}");
-                            let truncated = if text.len() > 4000 {
-                                // SAFETY: `text` is constructed from Rust `String`s via
-                                // `format!`, so it is guaranteed valid UTF-8. Therefore
-                                // `floor_char_boundary` always returns a valid boundary
-                                // in-bounds (floor_char_boundary clamps to len internally).
-                                let boundary = text.floor_char_boundary(4000);
-                                format!("{}...(truncated)", &text[..boundary])
-                            } else {
-                                text
-                            };
-                            if let Err(e) = messenger.send_text(&chat_id, &truncated).await {
-                                tracing::warn!("Failed to push planning message to Feishu: {e}");
-                                break;
-                            }
-                        }
+                        push_messages_to_feishu(messenger, &chat_id, messages_to_push).await;
                     });
                 }
             }
@@ -859,28 +922,11 @@ async fn toggle_feishu_sync(
                     tracing::warn!("Failed to send Feishu history header: {e}");
                     return;
                 }
-                for msg in &messages {
-                    let prefix = if msg.role == "user" {
-                        "[User]"
-                    } else {
-                        "[Assistant]"
-                    };
-                    let text = format!("{prefix} {}", msg.content);
-                    // Truncate very long messages for Feishu
-                    let truncated = if text.len() > 4000 {
-                        // SAFETY: `text` is built via `format!` from Rust `String`s,
-                        // so it is guaranteed valid UTF-8 and `floor_char_boundary`
-                        // is safe to slice with.
-                        let boundary = text.floor_char_boundary(4000);
-                        format!("{}...(truncated)", &text[..boundary])
-                    } else {
-                        text
-                    };
-                    if let Err(e) = messenger.send_text(&chat_id_clone, &truncated).await {
-                        tracing::warn!("Failed to push planning message to Feishu: {e}");
-                        break;
-                    }
-                }
+                let pairs: Vec<_> = messages
+                    .iter()
+                    .map(|m| (m.role.clone(), m.content.clone()))
+                    .collect();
+                push_messages_to_feishu(messenger, &chat_id_clone, pairs).await;
             });
         }
     }
@@ -917,6 +963,18 @@ async fn materialize_draft(
             "Only confirmed drafts can be materialized, current status is '{}'",
             draft.status
         )));
+    }
+
+    // G2 hard-block: quality gates must be confirmed before materialization.
+    // This guard runs BEFORE Workflow::create and the auto-start spawn below,
+    // so a direct API call that skips the confirm-gates step is also rejected
+    // and no workflow is created / no code-writing begins.
+    if draft.gates_confirmed_at.is_none() {
+        return Err(ApiError::BadRequest(
+            "Quality gates must be confirmed before materialization. \
+             Call POST /planning-drafts/{id}/confirm-gates first."
+                .to_string(),
+        ));
     }
 
     let now = chrono::Utc::now();

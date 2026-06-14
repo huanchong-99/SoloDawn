@@ -538,23 +538,6 @@ impl MessageBus {
         }
     }
 
-    /// Publish a message and require at least one subscriber.
-    pub async fn publish_required(
-        &self,
-        topic: &str,
-        message: BusMessage,
-    ) -> anyhow::Result<usize> {
-        match self {
-            Self::InMemory(inner) => inner.publish_inner(topic, message, true).await,
-            Self::Redis(_) => {
-                self.publish_to_topic(topic, message).await?;
-                // Redis PubSub doesn't return subscriber count to the publisher in a
-                // useful way, so we optimistically return 1.
-                Ok(1)
-            }
-        }
-    }
-
     /// Publish a message to all subscribers of a topic.
     pub async fn publish(&self, topic: &str, message: BusMessage) -> anyhow::Result<()> {
         self.publish_to_topic(topic, message).await

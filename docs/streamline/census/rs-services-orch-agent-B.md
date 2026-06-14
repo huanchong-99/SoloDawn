@@ -1,0 +1,67 @@
+# Census: rs-services-orch-agent-B
+
+Scope: `crates/services/src/services/orchestrator/agent.rs` lines **4100–8200** only.
+This is the middle slice of the 12,172-line `OrchestratorAgent` impl. All items below are `impl OrchestratorAgent` methods (private unless marked `pub`). Free functions referenced (`fetch_previous_terminal_context`, `current_git_head`, `same_commit_ref`, `compute_merge_base`, `workflow_has_unresolved_enforce_blockers`, `ensure_js_deps_installed_for_gate`, `build_terminal_completion_prompt`, `fetch_terminal_completion_context`) are defined elsewhere in the same file / module (out of this slice).
+
+Tooling note: fast-context MCP returned `resource_exhausted` on the first call and was unavailable; all cross-file checks below used Grep fallback.
+
+| Region (lines) | Purpose | Public surface / key fns | Relations | Notes |
+|---|---|---|---|---|
+| 4084–4189 | Drain `queued_terminal_dispatches` and dispatch/re-queue based on terminal+workflow status | `dispatch_queued_terminals` (private; tail of fn starts before 4100) | `dispatch_terminal`, `runtime_actions().try_start_terminal`, `StartTerminalOutcome` | State-machine over `TERMINAL_STATUS_*`; re-queues on STARTING/Queued |
+| 4191–4310 | Dispatch the next terminal in a task sequence with retry-wait for readiness | `dispatch_next_terminal` | `fetch_previous_terminal_context`, `build_foundation_context`, `build_task_instruction`, `dispatch_terminal_when_ready_or_queue`, `WorkflowStrategy::should_pass_*` | Uses `NEXT_TERMINAL_WAIT_RETRY_*` consts |
+| 4316–4414 | Entry point for GitWatcher events; idempotent; routes METADATA commits vs no-metadata | **`pub async fn handle_git_event`** | `git_watcher::parse_commit_metadata`, `handle_git_review_pass/reject`, `handle_git_terminal_completed`, `handle_git_event_no_metadata`, `push_concierge_terminal_bridge` | Single metadata parse (G10-002). Records processed_commits. Wired from git_watcher. |
+| 4416–4422 | Helper: should a "completed" handoff be skipped for continue/retry | `should_skip_completed_handoff` `#[allow(dead_code)]` | none in production | **CANDIDATE (dead):** only caller is its own test (10790–10797). R5 inventory says KEEP/investigate. |
+| 4424–4554 | Handle no-metadata commit: infer task/terminal, align state, complete | `handle_git_event_no_metadata` | `infer_no_metadata_completion`, `align_task_state_for_no_metadata_completion`, `handle_git_terminal_completed`, `GitEvent::update_status` | Updates git_event row lifecycle pending→processing→processed/failed |
+| 4556–4569 | Commit-message parsing helpers | `extract_task_hint_from_commit_message`, `looks_like_noop_handoff_commit` | `TASK_HINT_FROM_COMMIT_RE` | used by inference below |
+| 4571–4718 | Infer which task/terminal a no-metadata commit belongs to (multi-stage disambiguation) | `infer_no_metadata_completion` → `InferredNoMetadataCompletion` | `terminal_recent_logs_contain_commit_hash`, branch/hint/log-hash heuristics | G04-001 deterministic fallback to avoid stalls |
+| 4720–4760 | Check terminal recent logs for a commit hash (disambiguation) | `terminal_recent_logs_contain_commit_hash` | `TerminalLog::find_by_terminal` | reads up to 240 logs |
+| 4762–4798 | Sync in-memory task cursor for inferred completion | `align_task_state_for_no_metadata_completion` | `state.sync_task_terminals`, `task_states` | |
+| 4800–4860 | Handle metadata "completed" commit → TerminalCompletionEvent | `handle_git_terminal_completed` | `handle_terminal_completed`, `Terminal::update_last_commit` | G10-011 duplicate-processing guard (status != working) |
+| 4862–4899 | Handle git `review_pass` metadata | `handle_git_review_pass` | `Terminal::update_status`, `auto_sync_workflow_completion`, bus `TerminalStatusUpdate` | Wired from handle_git_event review_pass branch |
+| 4901–4960 | Handle git `review_reject` metadata → auto-create fixer | `handle_git_review_reject` | `execute_single_instruction(FixIssues)` | **Only production producer of `FixIssues`** |
+| 4962–4985 | Resolve project working dir (default_agent_working_dir / first repo) | `resolve_project_working_dir` | `Project::find_by_id`, `ProjectRepo::find_repos_for_project` | widely used in this slice |
+| 4987–5078 | Build LLM prompt for a terminal-completion decision | `build_completion_prompt` | `build_terminal_completion_prompt`, `fetch_terminal_completion_context`, `build_agent_planned_context`, foundation_phase_only branch | Injects goal + foundation-phase instructions |
+| 5080–5145 | **System B gate:** run acceptance review at completion, lock commit, re-validate HEAD | `run_acceptance_review_gate` | `run_acceptance_review`, `handle_acceptance_review_result`, `resolve_task_quality_root`, `current_git_head`, `same_commit_ref` | Called from terminal-completion path (line 2245). In-flight item (d). |
+| 5147–5256 | Handle a REJECTED acceptance review: feedback to terminal / relaunch | `handle_acceptance_review_result` | `publish_terminal_input_checked`, `relaunch_terminal_clean_context`, `dispatch_terminal_when_ready_or_queue` | Marks task `review_pending`; scoring vs legacy message |
+| 5258–5302 | Build legacy binary acceptance-review prompt | `build_acceptance_review_prompt` | `TerminalCompletionContext` | Legacy path; reachable when audit_plan.raw_principles empty (`fallback_default_audit_plan`) |
+| 5304–5356 | Build scoring-based audit-review prompt (full rubric) | `build_scoring_review_prompt` | `AuditPlan.raw_principles` | System B scoring path (recent commit 11ac066d2) |
+| 5358–5444 | Run acceptance review (scoring or legacy) via LLM | `run_acceptance_review` → `AcceptanceReviewResult` | `AuditScoreResult::parse`, `AcceptanceReviewResult::parse`, `call_llm_nonfatal`, `AuditPlan` from `workflow.audit_plan` | Fail-closed: empty changed files / LLM-down → rejected |
+| 5446–5457 | Fallback empty audit plan (triggers legacy binary path) | `fallback_default_audit_plan` → `AuditPlan` | `AuditMode::Builtin` | Backward-compat shim |
+| 5459–5545 | Strip code fences / extract balanced JSON from mixed LLM text | `normalize_instruction_payload`, `extract_json_from_mixed_response` | used by `parse_instructions` | Depth-aware bracket matcher |
+| 5547–5650 | Parse LLM response into `Vec<OrchestratorInstruction>` (multi-strategy) | `parse_instructions`, `parse_instructions_individually` | serde_json, the extractors above | Element-by-element partial recovery |
+| 5652–5700 | Instruction type-name + whitelist validation | `instruction_type_name`, `is_instruction_whitelisted`, `validate_instruction_whitelist` | `OrchestratorInstruction` enum | Whitelist currently matches ALL 13 variants — see candidate |
+| 5702–5764 | LLM call wrappers | `call_llm`, `call_llm_nonfatal` | `llm_client.chat`, `publish_provider_events`, conversation_history | nonfatal resets error_count |
+| 5766–5844 | LLM call wrapper that fails open and tracks consecutive failures | `call_llm_safe` | `mark_workflow_failed`, `MAX_CONSECUTIVE_LLM_FAILURES` | G24-009 marks workflow failed on exhaustion |
+| 5846–5879 | Execute a parsed batch of instructions | **`pub async fn execute_instruction`** | `parse_instructions`, `remap_instruction_ids`, `execute_single_instruction` (60s timeout each) | |
+| 5881–5939 | Remap non-UUID LLM ids → real UUIDs within a batch | `remap_instruction_ids` | uuid | |
+| 5941–6626 | **Dispatcher for every `OrchestratorInstruction` variant** | `execute_single_instruction` | runtime_actions, sync_task_state, dispatch, trigger_merge, run_final_readiness_gates, execute_auto_merge | CreateTask/Terminal, Start*, Close, CompleteTask, SetWorkflowPlanningComplete, SendToTerminal, **ReviewCode**, **FixIssues**, MergeBranch, CompleteWorkflow, FailWorkflow |
+| 6197–6338 | CompleteWorkflow branch with multiple guards (incomplete tasks, foundation-only, goal-coverage, enforce blockers, final gates, auto-merge) | (within `execute_single_instruction`) | `run_final_readiness_gates`, `ensure_final_repair_task`, `execute_auto_merge`, `workflow_has_unresolved_enforce_blockers` | R8-B3 guard |
+| 6425–6507 | ReviewCode handler: create reviewer terminal, dispatch review instruction | (within `execute_single_instruction`) | `fetch_diff_for_review`, `runtime_actions().create_terminal` | **CANDIDATE (dubious/dead feature):** no production emitter; not in system prompt action list |
+| 6508–6587 | FixIssues handler: create fixer terminal | (within `execute_single_instruction`) | `runtime_actions().create_terminal`, `dispatch_terminal_when_ready_or_queue` | Reachable from `handle_git_review_reject` only |
+| 6628–7003 | Core terminal dispatch: CAS waiting→working, double re-verify (E21-06), PTY send, submit keystrokes | `dispatch_terminal` | `update_status_cas`, `task_and_workflow_allow_dispatch`, `abort_dispatch_after_cas`, `publish_terminal_input_checked`, quality-contract suffix | Appends `QUALITY_REQUIREMENTS_*_SUFFIX` (System A contract). G16-001 |
+| 7005–7111 | Shutdown a terminal on completion (Ctrl-C, Shutdown, kill process, clear bindings) | `enforce_terminal_completion_shutdown` | `force_terminate_terminal_process`, bus Shutdown/TerminalInput | |
+| 7113–7169 | Cross-platform force-kill a PID (SIGTERM/SIGKILL on unix, taskkill on win) | `force_terminate_terminal_process` | nix / taskkill; strips PORT env (R6) | |
+| 7171–7211 | CLI-specific submit-keystroke heuristics | `needs_explicit_submit`, `is_claude_code_cli`, `submit_keystroke_schedule_ms`, `stall_recovery_submit_keystroke_schedule_ms` | `STALL_RECOVERY_CLAUDE_SUBMIT_DELAY_MS` | Codex needs explicit Enter; claude-code one delayed Enter on cold start |
+| 7213–7230 | Load task branch + workflow target_branch for review | `load_branch_info_for_review` | `WorkflowTask`/`Workflow::find_by_id` | |
+| 7232–7293 | Build foundation-task file-tree context for follow-up tasks | `build_foundation_context` | `git ls-tree`; strips PORT env | greenfield/hybrid only |
+| 7295–7431 | Build the full task-start instruction string | `build_task_instruction`, `truncate_instruction_text` | `WorkflowStrategy`, `GIT_COMMIT_METADATA_SEPARATOR` | Embeds commit-metadata template + completion contract |
+| 7433–7619 | Auto-dispatch the first terminal of each task at workflow start (2-phase, throttled) | `auto_dispatch_initial_tasks` | `build_foundation_context`, `build_task_instruction`, `dispatch_terminal_when_ready_or_queue` | G03-005 |
+| 7621–7650 | Publish provider state-change events from last LLM call | `publish_provider_events` | `llm_client.take_provider_events`, bus `ProviderStateChanged` | |
+| 7652–7758 | Broadcast workflow/terminal/task status to DB + bus | **`pub` `broadcast_workflow_status`, `broadcast_terminal_status`, `broadcast_task_status`** | `*::update_status`, message_bus, `persist_event` | public API surface |
+| 7760–7831 | **System A final readiness gates** (artifact + per-branch + repo quality gates) | `run_final_readiness_gates` | `artifact_readiness_issues`, `run_final_quality_gate`, `resolve_task_quality_root`, `compute_merge_base`, `quality::engine::QualityScope` | gated by `quality_gate_mode` |
+| 7833–7846 | Resolve quality-check root (managed worktree or project dir) | `resolve_task_quality_root` | `WorktreeManager::get_worktree_base_dir` | |
+| 7848–8005 | Run one quality gate, persist `QualityRun`, records, decide pass/block | `run_final_quality_gate` | `quality::engine::QualityEngine`, `QualityRun`, `QualityIssueRecord`, `publish_final_gate_blocked`, `ensure_final_repair_task` | enforce vs warn/off semantics |
+| 8007–8035 | Map QualityReport issues → DB records | `quality_issue_records_from_report` | `QualityIssueRecord::new` | |
+| 8037–8067 | Publish "final gate blocked" bus event | `publish_final_gate_blocked` | bus `Error` | |
+| 8069–8197 | Ensure a Final Integration Repair task exists (enforce mode), with round/escalation/fingerprint logic | `ensure_final_repair_task`, `ensure_final_repair_task_inner` | `is_final_repair_task`, `final_repair_fingerprint/marker`, `final_repair_reason_with_escalation`, `ensure_final_repair_terminal`, `FINAL_REPAIR_*` consts | begins at 8199: `ensure_final_repair_terminal` (out of slice) |
+
+## In-flight-work relevance
+- **(c) Quality Gate System A:** `run_final_readiness_gates` / `run_final_quality_gate` / `publish_final_gate_blocked` / `quality_issue_records_from_report` (7760–8035) implement the three-level (terminal/branch/repo) gate, driven by `config.quality_gate_mode` and `quality::gate::QualityGateLevel`. `dispatch_terminal` appends the `QUALITY_REQUIREMENTS_*_SUFFIX` contract.
+- **(d) AuditPlan System B + confirm→materialize:** `run_acceptance_review_gate` / `run_acceptance_review` / `build_scoring_review_prompt` / `build_acceptance_review_prompt` / `fallback_default_audit_plan` (5080–5457) implement the scored audit review using `workflow.audit_plan` JSON. Recent commit 11ac066d2 replaced the binary review with scoring; the binary path survives only as the empty-plan fallback.
+- **(a) external IDE/editor & (b) VS Code webview bridge:** none present in this slice.
+
+## Invisible features in this slice
+- Auto-merge on completion (`execute_auto_merge` out of slice, invoked at 6305 & 8716) — config-gated by `auto_merge_on_completion`.
+- `ReviewCode`/`FixIssues` reviewer-terminal flow — background capability not surfaced in the LLM action menu.
+- No-metadata commit inference (`infer_no_metadata_completion`) — heuristic recovery when a commit lacks the METADATA block.
+- Final Integration Repair loop (`ensure_final_repair_task*`) — auto-creates repair tasks/terminals when enforce-mode gates fail.

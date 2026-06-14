@@ -11,8 +11,6 @@ use governor::{
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use twox_hash::XxHash64;
-#[allow(deprecated, unused_imports)]
-use utils::url::normalize_base_url;
 use utils::url::{ApiFormat, resolve_endpoint};
 
 use super::{
@@ -1146,26 +1144,6 @@ mod anthropic_protocol_tests {
         };
         let endpoint = resolve_endpoint(&config.api_type, &config.base_url);
         assert_eq!(endpoint.api_format, ApiFormat::OpenAIChat);
-    }
-}
-
-#[cfg(test)]
-mod url_normalization_tests {
-    #[allow(deprecated, unused_imports)]
-    use utils::url::normalize_base_url;
-
-    #[allow(deprecated)]
-    #[test]
-    fn test_openai_official_gets_v1() {
-        let url = normalize_base_url("openai", "https://api.openai.com");
-        assert_eq!(url, "https://api.openai.com/v1");
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn test_openai_compatible_no_v1_append() {
-        let url = normalize_base_url("openai-compatible", "https://open.bigmodel.cn/api/paas/v4");
-        assert_eq!(url, "https://open.bigmodel.cn/api/paas/v4");
     }
 }
 

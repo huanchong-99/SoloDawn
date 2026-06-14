@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use services::services::terminal::process::ProcessManager;
+use services::services::terminal::process::{ProcessManager, SpawnCommand};
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -21,7 +21,7 @@ mod tests {
 
         // Spawn a process, kill by PID, then verify cleanup removes dead tracking.
         let handle = manager
-            .spawn_pty("test-terminal", shell, temp_dir.path(), 80, 24)
+            .spawn_pty_with_config("test-terminal", &SpawnCommand::new(shell, temp_dir.path()), 80, 24)
             .await
             .expect("Spawn should succeed");
 
@@ -57,7 +57,7 @@ mod tests {
 
         // Spawn process
         let _handle = manager
-            .spawn_pty("long-running", shell, temp_dir.path(), 80, 24)
+            .spawn_pty_with_config("long-running", &SpawnCommand::new(shell, temp_dir.path()), 80, 24)
             .await;
 
         // Should be running
@@ -91,7 +91,7 @@ mod tests {
         // Spawn multiple processes
         for i in 0..3 {
             let handle = manager
-                .spawn_pty(&format!("terminal-{}", i), shell, temp_dir.path(), 80, 24)
+                .spawn_pty_with_config(&format!("terminal-{}", i), &SpawnCommand::new(shell, temp_dir.path()), 80, 24)
                 .await;
             assert!(handle.is_ok(), "Spawn {} should succeed", i);
             pids.push(handle.unwrap().pid);

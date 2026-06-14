@@ -1,6 +1,5 @@
 import { useMemo, useCallback, type RefObject } from 'react';
 import { useActions } from '@/contexts/ActionsContext';
-import { useUserSystem } from '@/components/ConfigProvider';
 import { ContextBar } from '../primitives/ContextBar';
 import {
   ContextBarActionGroups,
@@ -17,8 +16,6 @@ export function ContextBarContainer({
   containerRef,
 }: Readonly<ContextBarContainerProps>) {
   const { executorContext } = useActions();
-  const { config } = useUserSystem();
-  const editorType = config?.editor?.editorType ?? null;
 
   // Get visibility context (now includes dev server state)
   const actionCtx = useActionVisibilityContext();
@@ -51,7 +48,6 @@ export function ContextBarContainer({
       secondaryItems={secondaryItems}
       actionContext={actionCtx}
       onExecuteAction={handleExecuteAction}
-      editorType={editorType}
     />
   );
 }

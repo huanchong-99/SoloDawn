@@ -275,53 +275,6 @@ impl StatePersistence {
         Ok(state)
     }
 
-    /// Clear persisted state
-    ///
-    /// Removes the persisted state for a workflow (e.g., after completion).
-    pub async fn clear_state(&self, workflow_id: &str) -> Result<()> {
-        debug!("Clearing state for workflow {}", workflow_id);
-
-        let query = r"
-            UPDATE workflow
-            SET orchestrator_state = NULL, updated_at = ?1
-            WHERE id = ?2
-        ";
-
-        let now = Utc::now();
-        sqlx::query(query)
-            .bind(now)
-            .bind(workflow_id)
-            .execute(&self.db.pool)
-            .await
-            .map_err(|e| anyhow!("Failed to clear state from database: {e}"))?;
-
-        debug!("State cleared successfully for workflow {}", workflow_id);
-
-        Ok(())
-    }
-
-    /// Restore conversation history
-    ///
-    /// Loads conversation history for a workflow.
-    pub async fn restore_conversation_history(&self, workflow_id: &str) -> Result<Vec<LLMMessage>> {
-        debug!(
-            "Restoring conversation history for workflow {}",
-            workflow_id
-        );
-
-        let state = self.load_state(workflow_id).await?;
-
-        if let Some(state) = state {
-            debug!(
-                "Restored {} messages from history",
-                state.conversation_history.len()
-            );
-            Ok(state.conversation_history)
-        } else {
-            debug!("No conversation history found for workflow {}", workflow_id);
-            Ok(Vec::new())
-        }
-    }
 }
 
 #[cfg(test)]

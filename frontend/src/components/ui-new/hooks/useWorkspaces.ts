@@ -75,10 +75,6 @@ function toSidebarWorkspace(
   };
 }
 
-export const workspaceKeys = {
-  all: ['workspaces'] as const,
-};
-
 // Query key factory for workspace summaries
 export const workspaceSummaryKeys = {
   all: ['workspace-summaries'] as const,

@@ -4,11 +4,13 @@
 //! 参考 SonarQube `ScannerMetrics.java` 和 `SoftwareQualitiesMetrics.java`
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// 度量指标 Key
 ///
 /// SoloDawn 的度量指标体系，结合 SonarQube 模式和项目实际分析工具
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub enum MetricKey {
     // ── Rust 分析器指标 ──
     /// Cargo check 错误数
@@ -165,6 +167,7 @@ pub enum MetricKey {
     /// 强制模式下，仓库已发现 target 但没有任何 provider 能评估任一 gate condition
     /// 的兜底信号。等同于"安检员手里没拿到清单"，必须 fail-closed。
     #[serde(rename = "quality_gate_empty_scan")]
+    #[ts(skip)]
     QualityGateEmptyScan,
 }
 

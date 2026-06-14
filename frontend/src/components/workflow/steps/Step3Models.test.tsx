@@ -36,7 +36,6 @@ describe('Step3Models', () => {
     basic: {
       name: 'Test Workflow',
       taskCount: 1,
-      importFromKanban: false,
     },
     tasks: [],
     models: [],

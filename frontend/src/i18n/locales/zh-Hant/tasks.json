@@ -248,7 +248,6 @@
   },
   "attempt": {
     "actions": {
-      "openInIde": "在 IDE 中開啟",
       "openMenu": "開啟選單",
       "startDevServer": "啟動開發伺服器",
       "stopDevServer": "停止開發伺服器"
@@ -262,7 +261,6 @@
     },
     "agent": "代理",
     "path": "路徑",
-    "openInEditor": "在 {{editor}} 中查看變更",
     "copied": "已複製！",
     "clickToCopy": "複製工作樹路徑",
     "stopDev": "停止開發",
@@ -404,7 +402,6 @@
   },
   "actionsMenu": {
     "attempt": "嘗試",
-    "openInIde": "在 IDE 中開啟嘗試",
     "viewProcesses": "查看程序",
     "viewRelatedTasks": "查看相關任務",
     "createNewAttempt": "建立新嘗試",

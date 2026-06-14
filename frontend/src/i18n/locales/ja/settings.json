@@ -53,30 +53,6 @@
         "defaultLabel": "デフォルト"
       },
       "editor": {
-        "title": "エディター",
-        "description": "コード編集体験を設定します。",
-        "type": {
-          "label": "エディタータイプ",
-          "placeholder": "エディターを選択",
-          "helper": "お好みのコードエディターインターフェースを選択してください。"
-        },
-        "customCommand": {
-          "label": "カスタムエディターコマンド",
-          "placeholder": "例: code, subl, vim",
-          "helper": "カスタムエディターを起動するコマンドを入力してください。ファイルを開くために使用されます。"
-        },
-        "remoteSsh": {
-          "host": {
-            "label": "リモートSSHホスト（オプション）",
-            "placeholder": "例: ホスト名またはIPアドレス",
-            "helper": "SoloDawnがリモートサーバーで実行されている場合に設定してください。設定すると、「エディターで開く」をクリックしたときに、ローカルコマンドを実行する代わりにSSH経由でエディターを開くURLが生成されます。"
-          },
-          "user": {
-            "label": "リモートSSHユーザー（オプション）",
-            "placeholder": "例: ユーザー名",
-            "helper": "リモート接続のSSHユーザー名。設定されていない場合、VS CodeはSSH設定を使用するか、入力を求めます。"
-          }
-        },
         "availability": {
           "checking": "利用可能性を確認中...",
           "available": "利用可能",
@@ -455,6 +431,7 @@
       "models": "モデル",
       "mcp": "MCPサーバー",
       "feishu": "Feishu",
+      "qualityGates": "Quality Gates",
       "organizations": "組織"
     },
     "common": {

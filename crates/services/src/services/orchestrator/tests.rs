@@ -675,24 +675,6 @@ mod orchestrator_tests {
     // =========================================================================
 
     #[test]
-    fn test_instruction_parsing() {
-        let json = r#"{"type":"send_to_terminal","terminal_id":"t1","message":"Do something"}"#;
-
-        let instruction: OrchestratorInstruction = serde_json::from_str(json).unwrap();
-
-        match instruction {
-            OrchestratorInstruction::SendToTerminal {
-                terminal_id,
-                message,
-            } => {
-                assert_eq!(terminal_id, "t1");
-                assert_eq!(message, "Do something");
-            }
-            _ => panic!("Wrong instruction type"),
-        }
-    }
-
-    #[test]
     fn test_all_instruction_parsing() {
         let test_cases = vec![
             (

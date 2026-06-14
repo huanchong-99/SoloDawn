@@ -29,42 +29,7 @@ use tokio::sync::broadcast;
 
 use crate::{DeploymentImpl, error::ApiError};
 
-// ---------------------------------------------------------------------------
-// Placeholder types for models/services not yet available from other agents
-// ---------------------------------------------------------------------------
-
-// TODO: Import from crates/db when available
-// use db::models::cli_install_history::{CliInstallHistory, CliDetectionCache};
-
-/// Placeholder for CliInstallHistory (created by DB agent).
-/// Represents a single install/uninstall job record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CliInstallHistory {
-    pub id: String,
-    pub cli_type_id: String,
-    pub action: String, // "install" | "uninstall"
-    pub status: String, // "running" | "completed" | "failed"
-    pub exit_code: Option<i32>,
-    pub output: Option<String>,
-    pub error: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-/// Placeholder for CliDetectionCache (created by DB agent).
-/// Cached detection result for a single CLI type.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CliDetectionCache {
-    pub cli_type_id: String,
-    pub name: String,
-    pub display_name: String,
-    pub installed: bool,
-    pub version: Option<String>,
-    pub executable_path: Option<String>,
-    pub cached_at: DateTime<Utc>,
-}
+use db::models::cli_install_history::{CliDetectionCache, CliInstallHistory};
 
 /// A single line of install output streamed over WebSocket.
 #[derive(Debug, Clone, Serialize, Deserialize)]

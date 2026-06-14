@@ -16,7 +16,6 @@ export interface RepoInfo {
   name: string;
   targetBranch: string;
   commitsAhead: number;
-  remoteCommitsAhead?: number;
   filesChanged: number;
   linesAdded: number;
   linesRemoved: number;
@@ -35,7 +34,6 @@ interface GitPanelProps {
   onWorkingBranchNameChange: (name: string) => void;
   onActionsClick?: (repoId: string, action: RepoAction) => void;
   onPushClick?: (repoId: string) => void;
-  onOpenInEditor?: (repoId: string) => void;
   onCopyPath?: (repoId: string) => void;
   onOpenSettings?: (repoId: string) => void;
   className?: string;
@@ -48,7 +46,6 @@ export function GitPanel({
   onWorkingBranchNameChange,
   onActionsClick,
   onPushClick,
-  onOpenInEditor,
   onCopyPath,
   onOpenSettings,
   className,
@@ -91,7 +88,6 @@ export function GitPanel({
               onRebase={() => onActionsClick?.(repo.id, 'rebase')}
               onActionsClick={(action) => onActionsClick?.(repo.id, action)}
               onPushClick={() => onPushClick?.(repo.id)}
-              onOpenInEditor={() => onOpenInEditor?.(repo.id)}
               onCopyPath={() => onCopyPath?.(repo.id)}
               onOpenSettings={() => onOpenSettings?.(repo.id)}
             />

@@ -1,0 +1,803 @@
+[
+  {
+    "id": "RB-D18",
+    "cluster": "CL-REMOTE",
+    "files": "crates/runner (gRPC, BACKLOG-002) + crates/server/.../bin/mcp_task_server.rs",
+    "kind": "dubious-feature",
+    "confidence": "low",
+    "evidence": "runner not started in default local deploy; mcp bin not in default_mcp.json. fast-context UNAVAIL.",
+    "blastRadius": "HIGH — RunnerClientImpl/Deployment reference runner_client; npm wrapper may shell into mcp bin."
+  },
+  {
+    "id": "RB-08",
+    "cluster": "",
+    "files": "crates/services/.../prompt_handler.rs:255-265 (set/clear_task_context + field)",
+    "kind": "investigate",
+    "confidence": "medium",
+    "evidence": "Zero writers; Input path reads task_contexts.values().next() → silently empty. Latent integration bug.",
+    "blastRadius": "Verify no planned agent.rs caller first."
+  },
+  {
+    "id": "RB-11",
+    "cluster": "",
+    "files": "crates/services/.../git_host/detection.rs:69-88 (detect_provider_from_pr_url)",
+    "kind": "investigate",
+    "confidence": "high",
+    "evidence": "cfg(test)-only; overlaps detect_provider_from_url.",
+    "blastRadius": "Zero prod; tests reference it."
+  },
+  {
+    "id": "RB-14",
+    "cluster": "",
+    "files": "crates/utils/.../api/oauth.rs:5-46 (HandoffInit*/Redeem*/TokenRefresh*)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "6 shared types, zero imports, not in generate_types; server uses local structs. KEEP Status/Profile/Provider/LoginStatus.",
+    "blastRadius": "None to compiled output."
+  },
+  {
+    "id": "RB-15",
+    "cluster": "",
+    "files": "crates/utils/src/jwt.rs:1-189",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "No use outside file; all calls in own cfg(test).",
+    "blastRadius": "Safe delete if confirmed; check git/issue tracker."
+  },
+  {
+    "id": "RB-20",
+    "cluster": "",
+    "files": "crates/services/.../concierge/{notifications.rs:160-205,sync.rs:69-77/151-155,agent.rs:56-68}",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "All exported, zero external callers. remove_session/cancel_watchers never called → DashMap + watcher-token LEAK.",
+    "blastRadius": "Wire cleanup into DELETE /concierge/sessions/{id}."
+  },
+  {
+    "id": "RB-24",
+    "cluster": "CL-REMOTE",
+    "files": "crates/server/.../cli_types.rs:37-67,497-575",
+    "kind": "redundant",
+    "confidence": "high",
+    "evidence": "Local placeholder dups real db models; 3 handlers NotImplemented; cli_detection_cache table absent.",
+    "blastRadius": "Wire to DB models or remove routes."
+  },
+  {
+    "id": "RB-25",
+    "cluster": "",
+    "files": "crates/server/.../workflows.rs:63-85 (WorkflowDetailResponse family)",
+    "kind": "redundant",
+    "confidence": "low",
+    "evidence": "Never constructed after def; superseded by WorkflowDetailDto. fast-context UNAVAIL to confirm.",
+    "blastRadius": "Confirm no external/integration-test import."
+  },
+  {
+    "id": "RB-28",
+    "cluster": "CL-REMOTE",
+    "files": "crates/local-deployment/.../lib.rs:394-397 + deployment/.../lib.rs:57 (remote_client + RemoteClientNotConfigured)",
+    "kind": "stub",
+    "confidence": "medium",
+    "evidence": "remote_client() always Err; not in Deployment trait; no callers.",
+    "blastRadius": "Remove together."
+  },
+  {
+    "id": "RB-29b",
+    "cluster": "",
+    "files": "crates/services/.../persistence.rs:278-301 (clear_state)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero callers; never called on completion → possible stale-state bug.",
+    "blastRadius": "Decide if completion should call it."
+  },
+  {
+    "id": "RB-30",
+    "cluster": "",
+    "files": "crates/services/.../message_bus.rs:542-556 (publish_required)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero callers anywhere.",
+    "blastRadius": "None at runtime."
+  },
+  {
+    "id": "RB-31b",
+    "cluster": "",
+    "files": "crates/db/.../workspace.rs:95-99 (CreateFollowUpAttempt)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Zero callers but has #[derive(TS)].",
+    "blastRadius": "Check generate_types/frontend before delete."
+  },
+  {
+    "id": "RB-32",
+    "cluster": "",
+    "files": "crates/db/.../quality_run.rs:246-291 (backfill/cleanup/count_runs)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero callers; never wired to startup/cron/HTTP.",
+    "blastRadius": "Add caller first if retention needed."
+  },
+  {
+    "id": "RB-33",
+    "cluster": "",
+    "files": "crates/services/.../container.rs:104-123 (has_running_processes)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Trait default, 0 external callers; could be dyn-dispatched (none found).",
+    "blastRadius": "Remove default method."
+  },
+  {
+    "id": "RB-34",
+    "cluster": "",
+    "files": "crates/services/.../merge_coordinator.rs:228-248 (resolve_and_complete_merge)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Public, 0 callers; manual-merge REST route never invokes.",
+    "blastRadius": "Possibly unwired manual-conflict flow."
+  },
+  {
+    "id": "RB-35",
+    "cluster": "",
+    "files": "crates/services/.../agent.rs:9101-9119 (handle_terminal_failure)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Pub fn, ZERO callers (unlike sibling pub methods wrapped by runtime.rs).",
+    "blastRadius": "Could be intended-but-unwired API."
+  },
+  {
+    "id": "RB-36",
+    "cluster": "",
+    "files": "crates/services/.../agent.rs:4416-4422 (should_skip_completed_handoff)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "#[allow(dead_code)]; only own test L10791. R5 flags KEEP/investigate.",
+    "blastRadius": "Delete fn + companion test."
+  },
+  {
+    "id": "RB-44",
+    "cluster": "",
+    "files": "crates/db/.../workflow.rs:297-322 (WorkflowCommand.preset_id FK no ON DELETE)",
+    "kind": "bug",
+    "confidence": "high",
+    "evidence": "FK to slash_command_preset.id no CASCADE/SET NULL; delete preset → FK violation.",
+    "blastRadius": "New migration only."
+  },
+  {
+    "id": "RB-45",
+    "cluster": "",
+    "files": "crates/db/migrations/{20260119000000_encrypt_api_keys,20260224001000_backfill...}.sql",
+    "kind": "legacy",
+    "confidence": "medium",
+    "evidence": "Plaintext key DROP commented out; encrypted col added twice; 2 mirror triggers. Plaintext may persist.",
+    "blastRadius": "NEW migration to DROP after verifying model reads only *_encrypted."
+  },
+  {
+    "id": "RB-47",
+    "cluster": "",
+    "files": "crates/services/.../prompt_handler.rs:671-681 (handle_user_approval alias)",
+    "kind": "redundant",
+    "confidence": "medium",
+    "evidence": "Backward-compat alias; only own tests use it.",
+    "blastRadius": "Delete alias + retarget 2 tests, or keep."
+  },
+  {
+    "id": "RB-55",
+    "cluster": "",
+    "files": "crates/server/.../workflows.rs:2317-2319 (auto_prepare 2s sleep)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "Unconditional 2s sleep; resume_workflow already polls readiness (better).",
+    "blastRadius": "Replace with polling; removing alone races readiness."
+  },
+  {
+    "id": "RB-59",
+    "cluster": "",
+    "files": "crates/services/.../merge_coordinator.rs (WorkflowMergeLocks never pruned)",
+    "kind": "dubious-feature",
+    "confidence": "low",
+    "evidence": "Completed-workflow entries accumulate. Low concern.",
+    "blastRadius": "Add pruning on completion."
+  },
+  {
+    "id": "RB-D01",
+    "cluster": "",
+    "files": "crates/server/.../workflows.rs:2107-2287 (DIY quiet-window monitor)",
+    "kind": "dubious-feature",
+    "confidence": "low",
+    "evidence": "60s-silence=done heuristic; can misfire on slow-active terminals. Only DIY completion path.",
+    "blastRadius": "Tune threshold, do NOT delete (DIY workflows stuck)."
+  },
+  {
+    "id": "RB-D02",
+    "cluster": "",
+    "files": "crates/server/.../planning_drafts.rs:1041,1080-1090 (AUDIT_DOC pdf/docx)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "confirm_draft reads via read_to_string → binary pdf/docx = mojibake to LLM.",
+    "blastRadius": "Trim to md/txt or add parser."
+  },
+  {
+    "id": "RB-D03",
+    "cluster": "",
+    "files": "crates/services/.../concierge/agent.rs:206-222 (looks_incomplete)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "Trailing :/.../… → loop continues, can burn tokens on legit responses. No tests.",
+    "blastRadius": "Removing = truncated outputs saved (better UX); low risk."
+  },
+  {
+    "id": "RB-D04",
+    "cluster": "",
+    "files": "crates/services/.../concierge/tools.rs:496-499 (audit_plan:None)",
+    "kind": "legacy",
+    "confidence": "medium",
+    "evidence": "Concierge workflows bypass AuditPlan System B (hardcoded None).",
+    "blastRadius": "Update tool chain if AuditPlan required before start."
+  },
+  {
+    "id": "RB-D05",
+    "cluster": "",
+    "files": "crates/executors/.../claude.rs:43-53 (claude-code-router proxy)",
+    "kind": "legacy",
+    "confidence": "low",
+    "evidence": "@musistudio/claude-code-router opt-in supply-chain risk; no first-party caller.",
+    "blastRadius": "Removing breaks users who set router=true."
+  },
+  {
+    "id": "RB-D06",
+    "cluster": "",
+    "files": "crates/executors/.../copilot.rs:256-306 (watch_session_id polling)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "200ms fs poll, 600s timeout, regex on debug log; fragile across versions.",
+    "blastRadius": "Follow-up runs only."
+  },
+  {
+    "id": "RB-D07",
+    "cluster": "",
+    "files": "crates/executors/.../cursor/mcp.rs:1-178 (MCP auto-trust)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "Writes host ~/.cursor on every spawn; swallows errors with warn!. No tests.",
+    "blastRadius": "Removing breaks automated MCP integration."
+  },
+  {
+    "id": "RB-D08",
+    "cluster": "",
+    "files": "crates/executors/.../cursor.rs:1207-1223 (CursorStrReplace replace_all)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Deserialized never read → cursor-agent replaceAll=true silently ignored.",
+    "blastRadius": "Changes Cursor JSONL model; no breakage."
+  },
+  {
+    "id": "RB-D09",
+    "cluster": "",
+    "files": "crates/executors/.../droid/normalize_logs.rs:460-630 (ToolResult empty-pop)",
+    "kind": "dubious-feature",
+    "confidence": "low",
+    "evidence": "ToolResult w/o ToolCall silently dropped; UI stuck in 'Created'.",
+    "blastRadius": "Add warn log; deeper fix = correlate by ID."
+  },
+  {
+    "id": "RB-D10",
+    "cluster": "",
+    "files": "crates/server/.../workflows.rs:1899-1955 (self-heal re-prepare recursion)",
+    "kind": "dubious-feature",
+    "confidence": "low",
+    "evidence": "start_workflow recursively calls prepare_workflow; fragile, re-prepare loops.",
+    "blastRadius": "Refactor preserving behavior (restart-recovery depends)."
+  },
+  {
+    "id": "RB-D11",
+    "cluster": "",
+    "files": "crates/services/.../agent.rs:6425-6507,5672-5700 (ReviewCode + whitelist no-op)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "ReviewCode no prod emitter; whitelist matches all 13 variants (always-true).",
+    "blastRadius": "Investigate before removing; whitelist is extension point."
+  },
+  {
+    "id": "RB-D12",
+    "cluster": "",
+    "files": "crates/services/.../agent.rs:3540-3581,2603-2630 (skip_quiet_window + PendingGuard Drop)",
+    "kind": "dubious-feature",
+    "confidence": "low",
+    "evidence": "skip delegates to full pipeline (not skip); Drop can't clean on panic → stranded gate.",
+    "blastRadius": "Single caller; moderate correctness."
+  },
+  {
+    "id": "RB-D15",
+    "cluster": "",
+    "files": "crates/server/.../filesystem.rs:143-148 (non-Windows pick_folder stub)",
+    "kind": "stub",
+    "confidence": "low",
+    "evidence": "Returns 500 off-Windows; no FE caller. May be called by Windows tray app.",
+    "blastRadius": "If removed: tray app could break."
+  },
+  {
+    "id": "RB-D16",
+    "cluster": "",
+    "files": "crates/server/.../ci_webhook.rs (receive-and-discard)",
+    "kind": "dubious-feature",
+    "confidence": "low",
+    "evidence": "Validates HMAC, logs, returns 202; no DB/downstream. ci-notify.yml posts to it.",
+    "blastRadius": "Unclear if downstream expected."
+  },
+  {
+    "id": "RB-D17",
+    "cluster": "",
+    "files": "crates/server/.../chat_integrations.rs (CHAT_REPLAY_CACHE)",
+    "kind": "dubious-feature",
+    "confidence": "low",
+    "evidence": "Process-local replay cache; no cross-replica protection if scaled.",
+    "blastRadius": "Security concern only if multi-replica."
+  },
+  {
+    "id": "RQ-13",
+    "cluster": "",
+    "files": "crates/quality/.../provider/sonar.rs:62-100 (import_sarif_results)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Pub, 0 callers; analyze() calls CLI directly. Orphaned. fast-context partial.",
+    "blastRadius": "Removing breaks only unseen external consumers (none found)."
+  },
+  {
+    "id": "RQ-14",
+    "cluster": "",
+    "files": "crates/quality/.../provider/sonar.rs:1-297 (whole Sonar provider)",
+    "kind": "dubious-feature",
+    "confidence": "low",
+    "evidence": "Needs SonarQube + CLI + SONAR_TOKEN; fails closed in CI. Gated by config.providers.sonar (default unverified).",
+    "blastRadius": "If deleted: drop engine.rs L101-110 + config field."
+  },
+  {
+    "id": "RQ-16",
+    "cluster": "",
+    "files": "crates/quality/.../gate/result.rs:101-113 (EvaluationResult::warn)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "0 callers; sole producer of Level::Warn. Warn aggregation never exercised (shadow done at orch level).",
+    "blastRadius": "Deleting makes Level/Status::Warn unreachable. Confirm streamline isn't folding shadow into gate."
+  },
+  {
+    "id": "RQ-17",
+    "cluster": "",
+    "files": "crates/quality/.../gate/condition.rs:97-121 (parse_threshold_f64/_i64)",
+    "kind": "redundant",
+    "confidence": "medium",
+    "evidence": "No prod callers; only own tests. Evaluator uses private parse_threshold.",
+    "blastRadius": "Delete with test. Check no future config-validation path."
+  },
+  {
+    "id": "RQ-18",
+    "cluster": "",
+    "files": "crates/quality/src/metrics.rs:55-68 (MetricKey Bugs/CodeSmells/Vulnerabilities/etc.)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Never emitted by any provider, never in any gate; only condition/evaluator tests.",
+    "blastRadius": "Serde rename; removing breaks deserialization of external yaml. Keep if Sonar fwd-compat."
+  },
+  {
+    "id": "RQ-20",
+    "cluster": "",
+    "files": "crates/quality/src/config.rs:219-311 (default_config)",
+    "kind": "redundant",
+    "confidence": "low",
+    "evidence": "Reachable only if BUNDLED_CENTRAL_POLICY fails parse; test+build.rs guarantee valid → unreachable in prod.",
+    "blastRadius": "Keep crash-safety; consider fail-closed vs lenient Shadow."
+  },
+  {
+    "id": "RQ-22",
+    "cluster": "",
+    "files": "crates/quality/.../gate/mod.rs:100-110 (is_blocked/failed_conditions)",
+    "kind": "dead",
+    "confidence": "low",
+    "evidence": "Only own tests; prod uses is_passed()+status string.",
+    "blastRadius": "Cheap accessors maybe wanted by reporting UI."
+  },
+  {
+    "id": "RQ-23",
+    "cluster": "",
+    "files": "crates/quality/src/issue.rs:147-150 (as_legacy)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "0 callers outside file; new-vs-legacy distinction unused. fast-context partial.",
+    "blastRadius": "pub on shared crate; downstream consumer possible."
+  },
+  {
+    "id": "RQ-24",
+    "cluster": "",
+    "files": "crates/quality/src/issue.rs:227-241,163-170 (one_line_summary, location_string)",
+    "kind": "dead",
+    "confidence": "low",
+    "evidence": "0 callers; leftover formatters.",
+    "blastRadius": "Public API; possible out-of-tree/future logging."
+  },
+  {
+    "id": "RQ-25",
+    "cluster": "",
+    "files": "crates/server/src/self_test/tests.rs:29,62 (TestContext::org_id)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Declared+init None; no test reads. Scaffolded for never-written org tests.",
+    "blastRadius": "Remove field; harmless scaffolding."
+  },
+  {
+    "id": "RQ-26",
+    "cluster": "",
+    "files": "crates/server/benches/performance.rs",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "Self-documented: no real SQLite/HTTP; measures allocator/tokio bookkeeping. No signal.",
+    "blastRadius": "Confirm CI-gating before delete."
+  },
+  {
+    "id": "FE-08",
+    "cluster": "CL-VSCODE",
+    "files": "frontend/src/vscode/bridge.ts:36-128,143-462,486-487 (iframe surface)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "iframe protocol strings only in this file; no in-repo webview host. Cannot disprove out-of-repo host.",
+    "blastRadius": "Clipboard helpers L464-484 LIVE via wysiwyg — KEEP/re-home. Confirm intent."
+  },
+  {
+    "id": "FE-47",
+    "cluster": "CL-VSCODE",
+    "files": "frontend/src/utils/StyleOverride.tsx",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Only own file; never mounted; VITE_PARENT_ORIGIN not in .env. iframe Vibe-host bridge.",
+    "blastRadius": "If Vibe embedding planned, removing breaks it."
+  },
+  {
+    "id": "FE-09",
+    "cluster": "CL-IDE",
+    "files": "frontend/src/hooks/{useOpenInEditor,useOpenProjectInEditor,useEditorAvailability}.ts",
+    "kind": "deprecated",
+    "confidence": "medium",
+    "evidence": "G1 family. useOpenInEditor in 14 files; useEditorAvailability in indicator+dialog.",
+    "blastRadius": "Coordinated multi-file."
+  },
+  {
+    "id": "FE-10",
+    "cluster": "CL-IDE",
+    "files": "frontend/src/lib/api.ts (openEditor×3 + checkEditorAvailability + OpenEditorApiRequest)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "LIVE callers: 3 hooks + DiffCard + ui-new/actions + GitPanelContainer.",
+    "blastRadius": "Backend routes orphaned on removal."
+  },
+  {
+    "id": "FE-11",
+    "cluster": "CL-IDE",
+    "files": "frontend/src/components/ide/{IdeIcon,OpenInIdeButton}.tsx",
+    "kind": "dubious-feature",
+    "confidence": "high",
+    "evidence": "G1 UI leaves; cascading consumers per R1.",
+    "blastRadius": "Large cascade: ide-icon branches, Actions.OpenInIDE, api.ts, routes, EditorType, i18n."
+  },
+  {
+    "id": "FE-26",
+    "cluster": "CL-IDE",
+    "files": "frontend/.../ui-new/actions/index.ts:640-665 (Actions.OpenInIDE)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "icon 'ide-icon' needs bespoke branches; parallel impls Navbar/DiffCard.",
+    "blastRadius": "Remove ide-icon branches + SpecialIconType."
+  },
+  {
+    "id": "FE-28",
+    "cluster": "CL-IDE",
+    "files": "frontend/.../NormalizedConversation/NextActionCard.tsx:127-235,269-307 (FileActionToolbar IDE button)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "open-in-IDE on every completed attempt w/ changed files.",
+    "blastRadius": "Self-contained; useOpenInEditor stays (4 callers)."
+  },
+  {
+    "id": "FE-29",
+    "cluster": "CL-IDE",
+    "files": "frontend/.../ui/actions-dropdown.tsx:82-86,193-198 (Open in IDE item)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "1 of 5 G1 sites.",
+    "blastRadius": "Coordinated G1."
+  },
+  {
+    "id": "FE-30",
+    "cluster": "CL-IDE",
+    "files": "frontend/.../dialogs/projects/ProjectEditorSelectionDialog.tsx + EditorAvailabilityIndicator.tsx",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "Picker = fallback for useOpenProjectInEditor. EditorAvailabilityIndicator LIVE in GeneralSettingsNew+OnboardingDialog.",
+    "blastRadius": "EditorAvailabilityIndicator NOT deletable until G1 proceeds."
+  },
+  {
+    "id": "FE-12",
+    "cluster": "CL-LEGACYPANELS",
+    "files": "frontend/.../tasks/TaskDetails/preview/{DevServerLogsView,NoServerContent,PreviewToolbar,ReadyContent}.tsx",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Zero external importers; superseded by ui-new PreviewBrowser.",
+    "blastRadius": "Verify no dynamic/lazy import."
+  },
+  {
+    "id": "FE-22",
+    "cluster": "CL-SHARED",
+    "files": "frontend/.../hooks/{useProjectTasks branch,useAutoLinkSharedTasks} + electric/ + useAssigneeUserName",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "VITE_ENABLE_SHARED_TASKS not in any .env; remote shared-task APIs disabled server-side. Electric branch unreachable.",
+    "blastRadius": "None rendered when flag false."
+  },
+  {
+    "id": "FE-33",
+    "cluster": "",
+    "files": "frontend/src/hooks/{useTaskAttempt,useAttempt}.ts",
+    "kind": "duplicate",
+    "confidence": "medium",
+    "evidence": "Both call attemptsApi.get; diff queryKeys → double-cache+stale.",
+    "blastRadius": "Consolidation updates TaskPanel, GitActionsDialog + cache keys."
+  },
+  {
+    "id": "FE-35",
+    "cluster": "CL-CONVDUP",
+    "files": "frontend/src/hooks/useFollowUpSend.ts",
+    "kind": "redundant",
+    "confidence": "low",
+    "evidence": "Superseded by useSessionSend; both call sessionsApi.followUp. Callers NOT verified.",
+    "blastRadius": "Unknown until callers checked."
+  },
+  {
+    "id": "FE-38",
+    "cluster": "",
+    "files": "frontend/.../workflow/hooks/{useWizardNavigation(isStepValid,goToStep),useWizardValidation(hasErrors)}",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "WorkflowWizard never passes/calls/reads them (tests only). StepIndicator click-to-jump unwired.",
+    "blastRadius": "goToStep removal breaks tests not prod."
+  },
+  {
+    "id": "FE-39",
+    "cluster": "",
+    "files": "frontend/.../workflow/{Step1Basic.tsx:129-153 importFromKanban,types.ts:109 kanbanTaskIds}",
+    "kind": "dubious-feature",
+    "confidence": "high",
+    "evidence": "importFromKanban radio renders but never populated/read/transmitted; no backend field. No-op.",
+    "blastRadius": "Hide/remove = zero regression."
+  },
+  {
+    "id": "FE-40",
+    "cluster": "",
+    "files": "frontend/.../quality/QualityTimeline.tsx + test",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero importers outside own test; never mounted; fully built+tested.",
+    "blastRadius": "May be G3 rules-editor scaffolding — confirm intent."
+  },
+  {
+    "id": "FE-59",
+    "cluster": "CL-I18N",
+    "files": "frontend/.../pipeline/{OrchestratorHeader tokensUsed,TerminalDetailPanel i18n,MergeTerminalNode merge-status}",
+    "kind": "stub",
+    "confidence": "high",
+    "evidence": "tokensUsed never passed (no DTO field); 2 hardcoded English labels; MergeTerminalNode deferred E10-09.",
+    "blastRadius": "tokensUsed removal: test only."
+  },
+  {
+    "id": "FE-60",
+    "cluster": "",
+    "files": "frontend/.../board/StatusBar.tsx:45 (Tokens: N/A)",
+    "kind": "stub",
+    "confidence": "medium",
+    "evidence": "Always N/A; no token hook/store/API. MVP placeholder.",
+    "blastRadius": "Zero to remove; moderate to wire (needs backend)."
+  },
+  {
+    "id": "FE-61",
+    "cluster": "",
+    "files": "frontend/.../workflow/steps/Step4Terminals.tsx:64-86 (LEGACY_CLI_DISPLAY_NAMES/ALIASES)",
+    "kind": "legacy",
+    "confidence": "medium",
+    "evidence": "Compat shim for old cli_types map format; new array checked first.",
+    "blastRadius": "If removed and old backend returns map, CLI list silently empty. Verify version compat."
+  },
+  {
+    "id": "FE-63",
+    "cluster": "",
+    "files": "frontend/src/hooks/useModelVerification.ts",
+    "kind": "dubious-feature",
+    "confidence": "low",
+    "evidence": "1 caller; DEFAULT_MODELS hardcodes stale models (claude-3-5-sonnet, gpt-4o).",
+    "blastRadius": "SetupWizardStep2ModelContainer only."
+  },
+  {
+    "id": "FE-65",
+    "cluster": "",
+    "files": "frontend/src/lib/openTaskForm.ts",
+    "kind": "stub",
+    "confidence": "low",
+    "evidence": "3-line wrapper; 3 callers could call direct. Unclear if circular-import barrier.",
+    "blastRadius": "Trivial migration if vestigial."
+  },
+  {
+    "id": "FE-67",
+    "cluster": "",
+    "files": "frontend/src/contexts/TabNavigationContext.tsx",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Provider never mounted; PendingApprovalEntry uses raw context w/ null-fallback → tab-awareness no-op.",
+    "blastRadius": "Remove Provider+useTabNavigation; PendingApprovalEntry null-guards."
+  },
+  {
+    "id": "FE-68",
+    "cluster": "CL-LEGACYPANELS",
+    "files": "frontend/src/contexts/ProcessSelectionContext.tsx",
+    "kind": "legacy",
+    "confidence": "low",
+    "evidence": "2 callers, both legacy task-detail path. No ui-new usage.",
+    "blastRadius": "Goes with legacy task-detail removal."
+  },
+  {
+    "id": "FE-73",
+    "cluster": "",
+    "files": "frontend/.../ui-new/views/ConciergeChatView.tsx:218-289 (WorkflowProgressPanel)",
+    "kind": "duplicate",
+    "confidence": "medium",
+    "evidence": "Private panel overlaps exported WorkflowProgressView (same DTOs).",
+    "blastRadius": "Risk: intentional density difference."
+  },
+  {
+    "id": "FE-74",
+    "cluster": "CL-OLDUI",
+    "files": "frontend/.../ui-new/views/Navbar.tsx:34 + actions/index.ts:579-608 (Actions.OpenInOldUI)",
+    "kind": "legacy",
+    "confidence": "medium",
+    "evidence": "Open in Old UI escape hatch → legacy routes; branch may remove old UI. 6 i18n keys.",
+    "blastRadius": "Verify old routes gone first."
+  },
+  {
+    "id": "FE-76",
+    "cluster": "CL-OLDUI",
+    "files": "frontend/.../legacy-design/LegacyDesignScope.tsx",
+    "kind": "legacy",
+    "confidence": "medium",
+    "evidence": "Backs only /commands + 2 redirects; loads legacy/index.css.",
+    "blastRadius": "Premature removal breaks /commands styling + Toast/NiceModal portal."
+  },
+  {
+    "id": "FE-77",
+    "cluster": "CL-OLDUI",
+    "files": "frontend/src/pages/SlashCommands.tsx",
+    "kind": "legacy",
+    "confidence": "medium",
+    "evidence": "Only workflow-domain page still on legacy design; uses old ui/Card.",
+    "blastRadius": "UI-only migration; visual regression risk."
+  },
+  {
+    "id": "FE-80",
+    "cluster": "",
+    "files": "frontend/.../ui/wysiwyg/nodes/{image-node,pr-comment-node}.tsx (4 type exports)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Type-only exports, zero external imports. fast-context down — dynamic/cross-repo unconfirmed.",
+    "blastRadius": "Zero runtime (tree-shaken)."
+  },
+  {
+    "id": "FE-81",
+    "cluster": "CL-LEGACYPANELS",
+    "files": "frontend/.../hooks/useSessionQueueInteraction.ts vs TaskFollowUpSection.tsx:438-487 inline",
+    "kind": "redundant",
+    "confidence": "medium",
+    "evidence": "Hook LIVE; reimplemented inline in old-design TaskFollowUpSection.",
+    "blastRadius": "Hook stays; inline is double-dead if orphaned."
+  },
+  {
+    "id": "FE-82",
+    "cluster": "CL-LEGACYPANELS",
+    "files": "frontend/.../dialogs/tasks/RebaseDialog.tsx (legacy)",
+    "kind": "duplicate",
+    "confidence": "medium",
+    "evidence": "Newer ui-new/dialogs/RebaseDialog used by ui-new/actions; old only by GitOperations.tsx.",
+    "blastRadius": "Dead when legacy toolbar retired."
+  },
+  {
+    "id": "FE-87",
+    "cluster": "CL-LEGACYPANELS",
+    "files": "frontend/.../ui/{card.tsx(CardFooter,CardDescription),toggle-group,multi-file-search-textarea}",
+    "kind": "redundant",
+    "confidence": "medium",
+    "evidence": "CardFooter/Description 0 imports; toggle-group 1 caller; multi-file 426L 1 caller.",
+    "blastRadius": "Migrate to ui-new when pages stable."
+  },
+  {
+    "id": "FE-90",
+    "cluster": "",
+    "files": "frontend/src/components/SearchBar.tsx:17-19",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "Returns null when disabled → vanishes vs greying; breaks layout reservation.",
+    "blastRadius": "Navbar only; layout shift."
+  },
+  {
+    "id": "FE-84",
+    "cluster": "",
+    "files": "frontend/.../dialogs/tasks/PrCommentsDialog.tsx:262-277 (local getErrorMessage)",
+    "kind": "dubious-feature",
+    "confidence": "low",
+    "evidence": "Shadows exported @/lib/modals getErrorMessage; divergence risk.",
+    "blastRadius": "Limited to PrCommentsDialog."
+  },
+  {
+    "id": "FE-23",
+    "cluster": "CL-CONVDUP",
+    "files": "frontend/.../ui-new/primitives/conversation/ChatAssistantMessage.tsx",
+    "kind": "redundant",
+    "confidence": "low",
+    "evidence": "Pure passthrough to ChatMarkdown; 1 caller.",
+    "blastRadius": "May be intentional naming symmetry."
+  },
+  {
+    "id": "FE-34",
+    "cluster": "",
+    "files": "frontend/src/hooks/useAttemptBranch.ts",
+    "kind": "redundant",
+    "confidence": "medium",
+    "evidence": "Fetches full Workspace to return .branch; no net optimization; 1 caller.",
+    "blastRadius": "Replace w/ useAttempt."
+  },
+  {
+    "id": "FE-50",
+    "cluster": "CL-CONVDUP",
+    "files": "frontend/.../DiffViewCard useDiffData + NewDisplayConversationEntry parsers + ChatFileEntry DiffStats",
+    "kind": "duplicate",
+    "confidence": "medium",
+    "evidence": "useDiffData defined twice; DiffStats dup'd; parseDiffStats re-implements.",
+    "blastRadius": "Unify into shared hook; preserve DiffViewCardWithComments omission."
+  },
+  {
+    "id": "T06",
+    "cluster": "",
+    "files": "frontend/.../tasks/TaskCard.test.tsx + TaskCard.tsx:1-109",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "grep yields only test; prod TaskCard is board/TaskCard. Orphan.",
+    "blastRadius": "Risk: dynamic/string import."
+  },
+  {
+    "id": "T12",
+    "cluster": "",
+    "files": "crates/server/tests/performance/database_perf_test.rs:105-110,157,169,189,531",
+    "kind": "bug",
+    "confidence": "high",
+    "evidence": "SQL refs plural tables (cli_types/workflow_terminals/workflow_tasks); migration is singular. Runtime sqlx error.",
+    "blastRadius": "Fix 3-4 table refs; #[ignore] so no CI impact."
+  },
+  {
+    "id": "T18",
+    "cluster": "",
+    "files": "crates/services/tests/phase18_git_watcher.rs:1-250",
+    "kind": "legacy",
+    "confidence": "low",
+    "evidence": "phase18_ prefix; functional but overlaps git_watcher_integration_test.rs.",
+    "blastRadius": "git-CLI-spawning path loses coverage if removed."
+  },
+  {
+    "id": "T17",
+    "cluster": "",
+    "files": "crates/services/tests/phase18_scenarios.rs:1-600+",
+    "kind": "legacy",
+    "confidence": "low",
+    "evidence": "phase18_ prefix; full migration chain + OrchestratorRuntime concurrent scenarios. Rename, don't delete.",
+    "blastRadius": "Removing leaves concurrent-path gap."
+  },
+  {
+    "id": "T19",
+    "cluster": "",
+    "files": "crates/services/.../orchestrator/tests.rs:1-3516 (quality_gate_mode coverage)",
+    "kind": "dubious-feature",
+    "confidence": "medium",
+    "evidence": "All 33 occurrences set 'off'; shadow/warn/enforce never exercised. Quality Gate System A untested at this layer.",
+    "blastRadius": "Additive coverage gap."
+  }
+]

@@ -18,7 +18,7 @@ use db::models::concierge::{ConciergeMessage, ConciergeSession, ConciergeSession
 use deployment::Deployment;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use services::services::concierge::ConciergeAgent;
+use services::services::concierge::{ConciergeAgent, ConciergeBroadcaster};
 use utils::response::ApiResponse;
 
 use crate::{DeploymentImpl, error::ApiError, feishu_handle::SharedFeishuHandle};
@@ -218,11 +218,20 @@ async fn list_sessions(
 
 async fn delete_session(
     State(deployment): State<DeploymentImpl>,
+    Extension(concierge): Extension<SharedConciergeAgent>,
+    Extension(broadcaster): Extension<Arc<ConciergeBroadcaster>>,
     Path(id): Path<String>,
 ) -> Result<ResponseJson<ApiResponse<()>>, ApiError> {
     ConciergeSession::delete(&deployment.db().pool, &id)
         .await
         .map_err(|e| ApiError::Internal(format!("{e}")))?;
+
+    // Leak fix (RB-20): tear down in-memory state bound to this session so
+    // background notification watchers and broadcast channels do not outlive
+    // the deleted session.
+    concierge.cancel_watchers_for_session(&id).await;
+    broadcaster.remove_session(&id);
+
     Ok(ResponseJson(ApiResponse::success(())))
 }
 

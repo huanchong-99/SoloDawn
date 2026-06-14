@@ -62,17 +62,4 @@ describe('useWizardValidation', () => {
     expect(result.current.errors).toEqual({});
   });
 
-  it('tracks hasErrors state', () => {
-    const { result } = renderHook(() =>
-      useWizardValidation(WizardStep.Project)
-    );
-
-    expect(result.current.hasErrors).toBe(false);
-
-    act(() => {
-      result.current.setErrors({ field: 'error' });
-    });
-
-    expect(result.current.hasErrors).toBe(true);
-  });
 });

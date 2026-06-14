@@ -5,7 +5,7 @@ use std::sync::Arc;
 use db::DBService;
 use services::services::{
     cc_switch::CCSwitchService,
-    terminal::{CliDetector, ProcessManager, TerminalLauncher},
+    terminal::{process::SpawnCommand, CliDetector, ProcessManager, TerminalLauncher},
 };
 use uuid::Uuid;
 
@@ -165,7 +165,7 @@ async fn test_process_manager_cleanup() {
     for i in 0..3 {
         let terminal_id = format!("test-{}", i);
         let _ = manager
-            .spawn_pty(&terminal_id, shell, temp_dir.path(), 80, 24)
+            .spawn_pty_with_config(&terminal_id, &SpawnCommand::new(shell, temp_dir.path()), 80, 24)
             .await;
     }
 

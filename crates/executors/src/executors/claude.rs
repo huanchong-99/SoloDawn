@@ -89,7 +89,7 @@ pub struct ClaudeCode {
 }
 
 impl ClaudeCode {
-    fn build_command_builder(&self) -> CommandBuilder {
+    fn build_command_builder(&self) -> Result<CommandBuilder, ExecutorError> {
         // If base_command_override is provided and claude_code_router is also set, log a warning
         if self.cmd.base_command_override.is_some() && self.claude_code_router.is_some() {
             tracing::warn!(
@@ -104,13 +104,10 @@ impl ClaudeCode {
         let plan = self.plan.unwrap_or(false);
         let approvals = self.approvals.unwrap_or(false);
         if plan && approvals {
-            // [G19-007] When both plan and approvals are enabled, plan mode takes precedence.
-            // In plan mode, tools auto-approve except ExitPlanMode (which triggers approval).
-            // After ExitPlanMode, permission mode switches to BypassPermissions.
-            // The approvals hooks are NOT applied because get_hooks() checks plan first.
-            // TODO: Add validation at construction time to reject this combination, or
-            // document the precedence behavior clearly in the API/UI.
-            tracing::warn!("Both plan and approvals are enabled. Plan will take precedence.");
+            return Err(ExecutorError::Io(std::io::Error::other(
+                "Invalid configuration: `plan` and `approvals` cannot both be enabled. \
+                 Enable one or the other.",
+            )));
         }
         if plan || approvals {
             // Enable bypass at startup, otherwise we cannot change to it after exiting plan mode
@@ -136,7 +133,7 @@ impl ClaudeCode {
             builder = builder.extend_params(["--disallowedTools=AskUserQuestion"]);
         }
 
-        apply_overrides(builder, &self.cmd)
+        Ok(apply_overrides(builder, &self.cmd))
     }
 
     pub fn permission_mode(&self) -> PermissionMode {
@@ -194,7 +191,7 @@ impl StandardCodingAgentExecutor for ClaudeCode {
         prompt: &str,
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
-        let command_builder = self.build_command_builder();
+        let command_builder = self.build_command_builder()?;
         let command_parts = command_builder.build_initial()?;
         self.spawn_internal(current_dir, prompt, command_parts, env)
             .await
@@ -207,7 +204,7 @@ impl StandardCodingAgentExecutor for ClaudeCode {
         session_id: &str,
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
-        let command_builder = self.build_command_builder();
+        let command_builder = self.build_command_builder()?;
         // [G19-005] TODO: `--fork-session` and `--resume` may be mutually exclusive
         // in future Claude CLI versions. `--fork-session` creates a new session branching
         // from the given one, while `--resume` continues the same session. Verify

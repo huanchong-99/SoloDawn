@@ -6,8 +6,7 @@ use std::{path::Path, time::Duration};
 
 use async_trait::async_trait;
 use backon::{ExponentialBuilder, Retryable};
-pub use cli::AzCli;
-use cli::{AzCliError, AzureRepoInfo};
+use cli::{AzCli, AzCliError, AzureRepoInfo};
 use db::models::merge::PullRequestInfo;
 use tokio::task;
 use tracing::info;

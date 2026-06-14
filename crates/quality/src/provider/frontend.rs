@@ -706,7 +706,12 @@ fn parse_eslint_output(output: &str) -> (i64, i64, Vec<QualityIssue>) {
 }
 
 fn parse_eslint_summary(line: &str) -> Option<(i64, i64)> {
-    let re = regex::Regex::new(r"(\d+)\s+errors?,\s+(\d+)\s+warnings?").ok()?;
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"(\d+)\s+errors?,\s+(\d+)\s+warnings?")
+            .expect("eslint summary regex must compile")
+    });
     let caps = re.captures(line)?;
     let errors = caps.get(1)?.as_str().parse().ok()?;
     let warnings = caps.get(2)?.as_str().parse().ok()?;

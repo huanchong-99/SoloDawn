@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{
     gate::{
@@ -17,7 +18,8 @@ use crate::{
 /// 质量门配置文件结构
 ///
 /// 对应 `quality/quality-gate.yaml`
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct QualityGateConfig {
     /// 质量门模式
     pub mode: QualityGateMode,
@@ -38,7 +40,8 @@ pub struct QualityGateConfig {
 /// 质量门运行模式
 ///
 /// 参考 TODO.md D8: feature flag `QUALITY_GATE_MODE`
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum QualityGateMode {
     /// 关闭 — 走旧流程，质量门完全不参与
@@ -53,7 +56,8 @@ pub enum QualityGateMode {
 }
 
 /// 单个质量门定义
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct GateDefinition {
     /// 门禁名称
     pub name: String,
@@ -62,7 +66,8 @@ pub struct GateDefinition {
 }
 
 /// 条件配置（YAML 友好格式）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ConditionConfig {
     /// 度量指标
     pub metric: MetricKey,
@@ -81,7 +86,8 @@ impl ConditionConfig {
 }
 
 /// Provider 配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
+#[ts(export)]
 pub struct ProvidersConfig {
     #[serde(default = "default_true")]
     pub rust: bool,
@@ -118,7 +124,8 @@ fn default_true() -> bool {
 }
 
 /// SonarQube 配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct SonarConfig {
     /// SonarQube 服务地址
     #[serde(default = "default_sonar_host")]
@@ -335,6 +342,32 @@ impl QualityGateConfig {
     /// 是否为强制模式（阻断）
     pub fn is_enforcing(&self) -> bool {
         self.mode == QualityGateMode::Enforce
+    }
+
+    /// Validate every gate condition: operator parses (GT|LT) and threshold is well-formed.
+    /// Returns one human-readable string per offending condition; empty Vec = valid.
+    ///
+    /// NOTE: the gate accessors on this struct are the flat fields
+    /// `terminal_gate` / `branch_gate` / `repo_gate` (not a `gates` map), so the
+    /// loop reads those directly. `MetricKey` is enforced by serde at deserialize
+    /// time, so any non-enum metric already 400s before `validate()` runs.
+    pub fn validate(&self) -> Vec<String> {
+        let mut errs = Vec::new();
+        for (gate_name, gate) in [
+            ("terminal", &self.terminal_gate),
+            ("branch", &self.branch_gate),
+            ("repo", &self.repo_gate),
+        ] {
+            for (i, cond) in gate.conditions.iter().enumerate() {
+                if let Err(e) = cond.to_condition() {
+                    errs.push(format!(
+                        "{gate_name}.conditions[{i}] ({}): {e}",
+                        cond.metric.as_str()
+                    ));
+                }
+            }
+        }
+        errs
     }
 }
 

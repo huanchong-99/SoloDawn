@@ -115,9 +115,9 @@ async fn broadcast_terminal_status(
 }
 
 /// Terminal state machine: statuses that can directly transition to starting.
-/// For waiting/working, we check if process is actually running first.
-const STARTABLE_TERMINAL_STATUSES: [&str; 5] =
-    ["not_started", "failed", "cancelled", "waiting", "working"];
+/// For waiting, we check if process is actually running first.
+const STARTABLE_TERMINAL_STATUSES: [&str; 4] =
+    ["not_started", "failed", "cancelled", "waiting"];
 const CLOSABLE_TERMINAL_STATUSES: [&str; 3] = ["completed", "failed", "cancelled"];
 
 /// Query parameters for terminal logs retrieval

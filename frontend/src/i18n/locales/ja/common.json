@@ -183,7 +183,6 @@
     "viewInChangesPanel": "変更パネルで表示",
     "copyPath": "パスをコピー",
     "copyWorktreePath": "ワークツリーパスをコピー",
-    "openInIde": "IDEで開く",
     "repoSettings": "リポジトリ設定",
     "cancel": "キャンセル",
     "saveChanges": "変更を保存",
@@ -287,7 +286,6 @@
   "navbarActions": {
     "archive-workspace": "アーカイブ",
     "unarchive-workspace": "アーカイブ解除",
-    "open-in-old-ui": "旧UIで開く",
     "toggle-diff-view-mode-inline": "インライン表示",
     "toggle-diff-view-mode-split": "サイドバイサイド表示",
     "toggle-all-diffs-collapse": "すべての差分を折りたたむ",

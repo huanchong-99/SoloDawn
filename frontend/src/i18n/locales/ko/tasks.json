@@ -27,7 +27,6 @@
     "duplicate": "Duplicate",
     "editBranchName": "브랜치 이름 편집",
     "gitActions": "Git 작업",
-    "openInIde": "Open attempt in IDE",
     "task": "Task",
     "viewProcesses": "View processes",
     "viewRelatedTasks": "View related tasks",
@@ -55,7 +54,6 @@
   },
   "attempt": {
     "actions": {
-      "openInIde": "IDE에서 열기",
       "openMenu": "메뉴 열기",
       "startDevServer": "개발 서버 시작",
       "stopDevServer": "개발 서버 중지"
@@ -74,7 +72,6 @@
       "summaryAndActions": "요약 및 작업"
     },
     "newAttempt": "New Attempt",
-    "openInEditor": "Open in {{editor}}",
     "path": "Path",
     "pauseDev": "Dev 일시정지",
     "preview": "Preview",

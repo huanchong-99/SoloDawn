@@ -349,7 +349,6 @@
   },
   "attempt": {
     "actions": {
-      "openInIde": "Open in IDE",
       "openMenu": "Open menu",
       "startDevServer": "Start dev server",
       "stopDevServer": "Stop dev server"
@@ -363,7 +362,6 @@
     },
     "agent": "Agent",
     "path": "Path",
-    "openInEditor": "See changes in {{editor}}",
     "copied": "Copied!",
     "clickToCopy": "Copy worktree path",
     "stopDev": "Stop Dev",
@@ -518,7 +516,6 @@
   },
   "actionsMenu": {
     "attempt": "Attempt",
-    "openInIde": "Open attempt in IDE",
     "viewProcesses": "View processes",
     "viewRelatedTasks": "View related tasks",
     "createNewAttempt": "Create new attempt",

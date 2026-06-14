@@ -16,7 +16,6 @@ use crate::DeploymentImpl;
 /// A running test server instance.
 pub struct TestServer {
     pub base_url: String,
-    pub port: u16,
     temp_dir: TempDir,
     shutdown_tx: Option<oneshot::Sender<()>>,
 }
@@ -128,7 +127,6 @@ impl TestServer {
 
         Ok(TestServer {
             base_url,
-            port,
             temp_dir,
             shutdown_tx: Some(shutdown_tx),
         })

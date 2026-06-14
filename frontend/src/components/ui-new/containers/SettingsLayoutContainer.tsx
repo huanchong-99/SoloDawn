@@ -11,6 +11,7 @@ import {
   ChatTeardropDotsIcon,
   BuildingsIcon,
   HardDrivesIcon,
+  ShieldCheckIcon,
 } from '@phosphor-icons/react';
 import { useUserSystem } from '@/components/ConfigProvider';
 import { SettingsLayout, type SettingsNavItem } from '../views/SettingsLayout';
@@ -62,6 +63,11 @@ export function SettingsLayoutContainer() {
         path: 'runtime',
         label: t('settings:newDesign.nav.runtime', 'Runtime'),
         icon: HardDrivesIcon,
+      },
+      {
+        path: 'quality-gates',
+        label: t('settings:newDesign.nav.qualityGates'),
+        icon: ShieldCheckIcon,
       },
       {
         path: 'organizations',

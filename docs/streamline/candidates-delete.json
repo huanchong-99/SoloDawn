@@ -1,0 +1,578 @@
+[
+  {
+    "id": "RB-01",
+    "cluster": "",
+    "files": "`crates/services/.../orchestrator/runtime_test.rs:1-605`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "No `mod runtime_test;`; never compiled; omits `audit_plan` so wouldn't compile.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RB-02",
+    "cluster": "",
+    "files": "`crates/services/test_edge_cases.rs:1-46`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Not in Cargo.toml; never compiled.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RB-03",
+    "cluster": "",
+    "files": "`crates/services/.../services/share.rs:1-51`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Not in services mod.rs; submodules with no files; never compiled.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RB-04",
+    "cluster": "",
+    "files": "`crates/db/benches/workflow_bench.rs:231-342` (`_unused_keep_old_find_by_id_setup`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "`#[allow(dead_code)]`, not in `criterion_group!`, zero callers.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RB-05",
+    "cluster": "",
+    "files": "`crates/db/.../execution_process.rs:101-108` (`UpdateExecutionProcess`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "`#[allow(dead_code)]`; only its own def; update path is `update_completion`.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RB-06",
+    "cluster": "",
+    "files": "`crates/services/.../prompt_handler.rs:174-204,688-740` (`LLMPromptDecisionRequest/Response`, `build_llm_decision_prompt`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Only own test L1429; prod uses inline `format!` L507-513.",
+    "blastRadius": "~75 lines + 1 test. No TS export."
+  },
+  {
+    "id": "RB-07",
+    "cluster": "",
+    "files": "`crates/services/.../prompt_handler.rs:579-585` (`reset_terminal_state`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero callers; resets call `sm.reset()` directly.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RB-09",
+    "cluster": "",
+    "files": "`crates/executors/.../droid/normalize_logs.rs:789` (`EditToolResult`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Empty struct, zero usages.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RB-10",
+    "cluster": "",
+    "files": "`crates/server/.../event_bridge.rs:85` (`SharedEventBridge`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "`pub type`, zero uses; main.rs spawns `EventBridge` directly.",
+    "blastRadius": "1 line."
+  },
+  {
+    "id": "RB-12",
+    "cluster": "",
+    "files": "`crates/utils/src/path.rs:127-131` (`get_gitcortex_temp_dir`)",
+    "kind": "deprecated",
+    "confidence": "high",
+    "evidence": "`#[deprecated]`; 0 external callers; alias to `get_solodawn_temp_dir`.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RB-13",
+    "cluster": "",
+    "files": "`crates/utils/src/url.rs:85-106` (`normalize_base_url`)",
+    "kind": "deprecated",
+    "confidence": "high",
+    "evidence": "`#[deprecated]`; only used in own cfg(test) via llm.rs allow(deprecated).",
+    "blastRadius": "fn + llm.rs import L14-15 + url.rs test 1153-1169."
+  },
+  {
+    "id": "RB-16",
+    "cluster": "",
+    "files": "`crates/services/.../chat_connector.rs:38-137` (`TelegramConnector`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Never imported; `from_env` uncalled; DB binds 'telegram'.",
+    "blastRadius": "This file only; trait + FeishuConnector unaffected."
+  },
+  {
+    "id": "RB-17",
+    "cluster": "",
+    "files": "`crates/services/.../cc_switch.rs:596-678,1247-1253,462-465` (`switch_for_terminal(s)` + `CCSwitch` trait)",
+    "kind": "deprecated",
+    "confidence": "high",
+    "evidence": "`#[deprecated]`; only test caller; superseded by `build_launch_config`.",
+    "blastRadius": "trait+impl+re-export; breaks 1 test."
+  },
+  {
+    "id": "RB-18",
+    "cluster": "",
+    "files": "`crates/services/.../git.rs:1082-1108,236-253` (`get_commit_subject`, `ahead_behind_commits_by_oid`, `ensure_main_branch_exists`)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Only defs repo-wide; no callers.",
+    "blastRadius": "Zero callers."
+  },
+  {
+    "id": "RB-19",
+    "cluster": "",
+    "files": "`crates/services/.../merge_coordinator.rs:322-328` (`test_merge_coordinator_creation`)",
+    "kind": "stub",
+    "confidence": "high",
+    "evidence": "Placeholder test, no assertions.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RB-21",
+    "cluster": "",
+    "files": "`crates/server/.../oauth.rs:64-128` (`handoff_init/complete`, `get_token`, `get_current_user`)",
+    "kind": "stub",
+    "confidence": "high",
+    "evidence": "4/6 handlers permanently return BadRequest; DTOs `allow(dead_code)`. KEEP `status()`+`logout()`.",
+    "blastRadius": "FE handoff/token/user callers already always fail."
+  },
+  {
+    "id": "RB-22",
+    "cluster": "CL-REMOTE",
+    "files": "`crates/server/.../organizations.rs:1-188`",
+    "kind": "stub",
+    "confidence": "high",
+    "evidence": "Every handler returns 501; no FE callers; 15 dead routes.",
+    "blastRadius": "Remove `.merge(...)` + `pub mod`."
+  },
+  {
+    "id": "RB-23",
+    "cluster": "CL-REMOTE",
+    "files": "`crates/server/.../projects.rs:158-207` (link/create-and-link/get-remote-*)",
+    "kind": "stub",
+    "confidence": "high",
+    "evidence": "All return 501; FE shows error states.",
+    "blastRadius": "Routes removed; FE handles errors."
+  },
+  {
+    "id": "RB-26",
+    "cluster": "",
+    "files": "`crates/cc-switch/src/{switcher.rs:83-94,config_path.rs:35-37/85-87}`",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "All pub, zero callers repo-wide.",
+    "blastRadius": "API cleanup; nothing outside monorepo consumes."
+  },
+  {
+    "id": "RB-29",
+    "cluster": "",
+    "files": "`crates/services/.../persistence.rs:303-324` (`restore_conversation_history`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero callers; superseded by `load_state`. (`clear_state` → investigate, RB-29b)",
+    "blastRadius": "Safe."
+  },
+  {
+    "id": "RB-31",
+    "cluster": "",
+    "files": "`crates/db/.../workspace.rs:84-93,101-107` (`CreatePrParams`, `AttemptResumeContext`)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "Zero callers. (`CreateFollowUpAttempt` → investigate, has `#[derive(TS)]`)",
+    "blastRadius": "Safe."
+  },
+  {
+    "id": "RB-50",
+    "cluster": "CL-IDE",
+    "files": "`crates/services/.../{repo.rs:55-98,projects.rs:421-464,task_attempts.rs:809-811}` (3-way path-helper dup)",
+    "kind": "duplicate",
+    "confidence": "high",
+    "evidence": "Byte-for-byte security-sensitive path helpers; vanish with CL-IDE deletion.",
+    "blastRadius": "If CL-IDE proceeds all copies vanish."
+  },
+  {
+    "id": "RB-61",
+    "cluster": "CL-IDE",
+    "files": "`crates/server/.../task_attempts.rs:793-807,809-888,890-946,965-1044,2143` (`open_task_attempt_in_editor`+helpers+test+route)",
+    "kind": "deprecated",
+    "confidence": "high",
+    "evidence": "R1 §5 G1 target. PRESERVE adjacent `status_semantics_tests` 949-963.",
+    "blastRadius": "FE + ApiError::EditorOpen + generate_types."
+  },
+  {
+    "id": "RB-62",
+    "cluster": "CL-IDE",
+    "files": "`crates/server/.../projects.rs:393-464,466-536,765-840` (`open_project_in_editor`+helpers+test)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "R1 lists `/projects/{id}/open-editor`.",
+    "blastRadius": "FE project editor surface."
+  },
+  {
+    "id": "RB-63",
+    "cluster": "CL-IDE",
+    "files": "`crates/server/.../repo.rs:215-278,55-132` (`open_repo_in_editor`+helpers+test)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "R1 lists `/repos/{id}/open-editor`; helpers dupe projects.rs.",
+    "blastRadius": "FE repoApi.openEditor."
+  },
+  {
+    "id": "RB-65",
+    "cluster": "CL-IDE",
+    "files": "`crates/server/.../projects.rs:378-391` (`OpenEditorRequest/Response`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Shared by projects.rs + repo.rs; **delete LAST** (types must outlive both handlers).",
+    "blastRadius": "generate_types.rs TS emission."
+  },
+  {
+    "id": "RQ-01",
+    "cluster": "",
+    "files": "`crates/quality/src/gate/mod.rs:46-56` (`QualityGate::with_id`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "0 callers; prod uses `QualityGate::new`.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RQ-02",
+    "cluster": "",
+    "files": "`crates/quality/src/gate/condition.rs:36-41` (`Operator::to_db_value`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "0 callers; only `from_db_value` used.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RQ-03",
+    "cluster": "",
+    "files": "`crates/quality/src/gate/condition.rs:124-126` (`Condition::description`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "0 callers; evaluator builds messages inline.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "RQ-04",
+    "cluster": "",
+    "files": "`crates/server/src/self_test/runner.rs:19,131` (`TestServer::port`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Set, never read; WS test recovers port via base_url split.",
+    "blastRadius": "Remove field+assignment."
+  },
+  {
+    "id": "FE-02",
+    "cluster": "CL-WIZARDDUP",
+    "files": "`frontend/src/components/wizard/` (10 files)",
+    "kind": "duplicate",
+    "confidence": "high",
+    "evidence": "0 prod imports; live wizard is components/workflow. Stub steps.",
+    "blastRadius": "Dir + 5 tests. Live wizard untouched."
+  },
+  {
+    "id": "FE-03",
+    "cluster": "CL-LEGACYPANELS",
+    "files": "`frontend/.../panels/{DiffsPanel,TaskAttemptPanel,TaskPanel}.tsx + DiffCard.tsx + diff/{CommentWidgetLine,ReviewCommentRenderer}.tsx + logs/VirtualizedList.tsx`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero prod importers; transitive dead cluster; superseded by ui-new.",
+    "blastRadius": "Atomic group. DiffCard has IDE button (CL-IDE). Keep DisplayConversationEntry."
+  },
+  {
+    "id": "FE-04",
+    "cluster": "",
+    "files": "`frontend/src/hooks/useVideoProgress.ts`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "0 callers, not in index.ts, no test.",
+    "blastRadius": "Zero."
+  },
+  {
+    "id": "FE-05",
+    "cluster": "CL-LEGACYPANELS",
+    "files": "`frontend/.../tasks/{TaskCard,TaskCard.test,TaskCardHeader}.tsx`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Only own test imports; board/TaskCard is replacement.",
+    "blastRadius": "Co-delete test; unlocks kanban delete (FE-51)."
+  },
+  {
+    "id": "FE-06",
+    "cluster": "",
+    "files": "`frontend/.../debug/{TerminalDebugView,TerminalSidebar}.{tsx,test}`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "No prod importer; live /debug uses terminal/TerminalDebugView.",
+    "blastRadius": "Component+test pairs."
+  },
+  {
+    "id": "FE-07",
+    "cluster": "CL-VSCODE",
+    "files": "`frontend/src/vscode/ContextMenu.tsx`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "`WebviewContextMenu`: only self + R1 doc. Never mounted.",
+    "blastRadius": "None. bridge.ts unaffected."
+  },
+  {
+    "id": "FE-13",
+    "cluster": "CL-CONVDUP",
+    "files": "`frontend/.../conversation/DiffViewCard.tsx:164-244` (full card export)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Exported, zero render sites; superseded by DiffViewCardWithComments.",
+    "blastRadius": "Remove card export + barrel line; KEEP DiffViewBody/useDiffData/DiffInput."
+  },
+  {
+    "id": "FE-14",
+    "cluster": "CL-IDE",
+    "files": "`frontend/.../dialogs/tasks/EditorSelectionDialog.tsx`",
+    "kind": "deprecated",
+    "confidence": "high",
+    "evidence": "G1 target; 2 error-fallback callers only.",
+    "blastRadius": "2 catch-blocks."
+  },
+  {
+    "id": "FE-15",
+    "cluster": "CL-OLDUI",
+    "files": "`frontend/.../dialogs/global/OnboardingDialog.tsx`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "`show()` called 0×; replaced by /setup wizard.",
+    "blastRadius": "Remove exports + ModalArgs entry."
+  },
+  {
+    "id": "FE-16",
+    "cluster": "",
+    "files": "`frontend/.../dialogs/projects/ProjectFormDialog.tsx`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "`show()` never invoked outside file; RepoPickerDialog used directly.",
+    "blastRadius": "3 exports from dialogs/index.ts."
+  },
+  {
+    "id": "FE-17",
+    "cluster": "CL-WIZARDDUP",
+    "files": "`frontend/src/stores/{wizardStore,workflowStore}.ts`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "0 imports outside index.ts barrel; prod uses local state + RQ.",
+    "blastRadius": "Remove re-exports."
+  },
+  {
+    "id": "FE-18",
+    "cluster": "",
+    "files": "`frontend/src/{pages/settings,stores,rjsf}/index.ts` barrels",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "0 consumers (direct paths used everywhere).",
+    "blastRadius": "Confirm tsconfig aliases don't resolve barrels."
+  },
+  {
+    "id": "FE-19",
+    "cluster": "",
+    "files": "`frontend/src/lib/types.ts:12-22` (`ConversationEntryDisplayType`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero imports outside def. AttemptData stays.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "FE-20",
+    "cluster": "",
+    "files": "`frontend/src/components/ui/tabs.tsx`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero imports; TabNavigationContext imports Radix directly.",
+    "blastRadius": "Zero."
+  },
+  {
+    "id": "FE-21",
+    "cluster": "",
+    "files": "`frontend/.../ui-new/primitives/Card.tsx`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero importers; settings use bespoke SettingsCard.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "FE-36",
+    "cluster": "",
+    "files": "`frontend/.../workflow/constants.ts:79-88` (`GIT_COMMIT_TYPES`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Exported, zero imports.",
+    "blastRadius": "10-line const."
+  },
+  {
+    "id": "FE-37",
+    "cluster": "",
+    "files": "`frontend/.../workflow/QualityBadge.tsx:9,11,50` (`totalIssues`, `mode` props)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Destructured/declared, never used.",
+    "blastRadius": "Remove props + caller pass-throughs."
+  },
+  {
+    "id": "FE-41",
+    "cluster": "",
+    "files": "`frontend/.../ui-new/utils/workflowStatus.ts:239-251` (`getWorkflowStatusMeta`,`getTerminalStatusMeta`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero callers; comments are docs not usages.",
+    "blastRadius": "2 unused exports."
+  },
+  {
+    "id": "FE-42",
+    "cluster": "",
+    "files": "`frontend/.../ui-new/actions/useActionVisibility.ts:137-164` (`filterVisibleActionItems`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero callers; bars filter inline via `isActionVisible`.",
+    "blastRadius": "Zero."
+  },
+  {
+    "id": "FE-43",
+    "cluster": "",
+    "files": "`frontend/.../ui-new/hooks/useWorkspaces.ts:78-80` (`workspaceKeys`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero external imports; `workspaceSummaryKeys` is the live one.",
+    "blastRadius": "Remove export."
+  },
+  {
+    "id": "FE-46",
+    "cluster": "",
+    "files": "`frontend/src/utils/statusLabels.ts`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Only own def; TaskStatus labels via i18n/inline.",
+    "blastRadius": "None."
+  },
+  {
+    "id": "FE-48",
+    "cluster": "",
+    "files": "`frontend/src/types/modal-args.d.ts`",
+    "kind": "duplicate",
+    "confidence": "high",
+    "evidence": "Stale ambient re-decl conflicting with modals.ts; transfer-shared-task never invoked.",
+    "blastRadius": "No runtime effect."
+  },
+  {
+    "id": "FE-69",
+    "cluster": "",
+    "files": "`frontend/.../ui-new/views/GitPanel.tsx:20` (`RepoInfo.remoteCommitsAhead`)",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Declared+populated but never forwarded; container uses own copy L185.",
+    "blastRadius": "Remove field; one-line container change."
+  },
+  {
+    "id": "FE-91",
+    "cluster": "",
+    "files": "`frontend/.../ui-new/containers/PlanningChatContainer.tsx + primitives/PlanningChat`",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "NO prod importer; superseded by CreateChatBoxContainer.",
+    "blastRadius": "Delete both. No unique export."
+  },
+  {
+    "id": "FE-31",
+    "cluster": "CL-IDE",
+    "files": "i18n: `projects.openInIDE`(6 locales), `tasks.attempt.actions.{openInIde,openMenu,stopDevServer}`, onboarding/settings editor keys",
+    "kind": "dead",
+    "confidence": "high",
+    "evidence": "Zero `t()` callers (only `startDevServer` live).",
+    "blastRadius": "Prune from 6 locale files."
+  },
+  {
+    "id": "T01",
+    "cluster": "CL-STUB",
+    "files": "`crates/server/tests/cli_detection_test.rs:1-38`",
+    "kind": "stub",
+    "confidence": "high",
+    "evidence": "Both tests TODO-only bodies; false green.",
+    "blastRadius": "2 no-op tests."
+  },
+  {
+    "id": "T04",
+    "cluster": "CL-DUP-LOC",
+    "files": "`frontend/src/hooks/useQualityGate.test.tsx:1-268`",
+    "kind": "duplicate",
+    "confidence": "high",
+    "evidence": "Dup of `__tests__/useQualityGate.test.ts`; double-runs.",
+    "blastRadius": "MERGE qualityKeys + happy-path into canonical first."
+  },
+  {
+    "id": "T05",
+    "cluster": "CL-DUP-LOC",
+    "files": "`frontend/src/pages/WorkflowDebugPage.test.tsx:1-102`",
+    "kind": "duplicate",
+    "confidence": "high",
+    "evidence": "Dup of `pages/__tests__/...`; inner subsumes.",
+    "blastRadius": "Verify outer's unique case present in inner."
+  },
+  {
+    "id": "FE-79",
+    "cluster": "CL-DUP-LOC",
+    "files": "`frontend/src/pages/__tests__/WorkflowDebugPage.test.tsx`",
+    "kind": "duplicate",
+    "confidence": "high",
+    "evidence": "WRONG route `/workflow/:id/debug` vs actual `/debug/:id`; never matches → false confidence.",
+    "blastRadius": "Only this test lost."
+  },
+  {
+    "id": "T07",
+    "cluster": "",
+    "files": "`crates/services/.../orchestrator/tests.rs:678-693` (`test_instruction_parsing`)",
+    "kind": "duplicate",
+    "confidence": "high",
+    "evidence": "Round-trips only SendToTerminal; subsumed by L28 + L695.",
+    "blastRadius": "One test fn."
+  },
+  {
+    "id": "T02",
+    "cluster": "",
+    "files": "`crates/server/tests/slash_commands_pool_test.rs:1-42`",
+    "kind": "redundant",
+    "confidence": "medium",
+    "evidence": "Only checks pool accessible; same pattern in 2 other tests.",
+    "blastRadius": "No unique coverage."
+  },
+  {
+    "id": "T20",
+    "cluster": "",
+    "files": "`frontend/src/test/canvas-mock.test.ts:1-11`",
+    "kind": "redundant",
+    "confidence": "medium",
+    "evidence": "Meta-test of setup.ts mock; tests test-infra.",
+    "blastRadius": "Zero prod coverage."
+  },
+  {
+    "id": "FE-78",
+    "cluster": "",
+    "files": "`frontend/src/pages/ui-new/WorkspacesLanding.tsx`",
+    "kind": "redundant",
+    "confidence": "low",
+    "evidence": "5-line `<Navigate>` only; inline-able into App.tsx.",
+    "blastRadius": "One-line App.tsx change."
+  },
+  {
+    "id": "FE-86",
+    "cluster": "",
+    "files": "`frontend/.../ui-new/primitives/Field.tsx` (FieldSet/Legend/Content/Title/Description/Separator)",
+    "kind": "dead",
+    "confidence": "medium",
+    "evidence": "6 sub-components zero external callers (only Field/FieldLabel/FieldError used).",
+    "blastRadius": "Field safe; Dropdown subs → investigate (future submenus)."
+  }
+]

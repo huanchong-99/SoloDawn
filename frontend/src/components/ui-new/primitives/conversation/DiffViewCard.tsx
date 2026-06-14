@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CaretDownIcon } from '@phosphor-icons/react';
 import {
   DiffView,
   DiffModeEnum,
@@ -8,14 +7,8 @@ import {
   parseInstance,
 } from '@git-diff-view/react';
 import { generateDiffFile, type DiffFile } from '@git-diff-view/file';
-import { cn } from '@/lib/utils';
-import { getFileIcon } from '@/utils/fileTypeIcon';
 import { getHighLightLanguageFromPath } from '@/utils/extToLanguage';
-import { useTheme } from '@/components/ThemeProvider';
-import { getActualTheme } from '@/utils/theme';
 import { useDiffViewMode } from '@/stores/useDiffViewStore';
-import { ToolStatus } from 'shared/types';
-import { ToolStatusDot } from './ToolStatusDot';
 import '@/styles/diff-style-overrides.css';
 
 // Discriminated union for input format flexibility
@@ -33,19 +26,6 @@ export type DiffInput =
       unifiedDiff: string;
       hasLineNumbers?: boolean;
     };
-
-interface DiffViewCardProps {
-  /** Diff data - either raw content or unified diff string */
-  readonly input: DiffInput;
-  /** Expansion state */
-  readonly expanded?: boolean;
-  /** Toggle expansion callback */
-  readonly onToggle?: () => void;
-  /** Optional status indicator */
-  readonly status?: ToolStatus;
-  /** Additional className */
-  readonly className?: string;
-}
 
 interface DiffData {
   diffFile: DiffFile | null;
@@ -70,6 +50,49 @@ const EMPTY_DIFF: DiffData = {
   isValid: false,
   hideLineNumbers: false,
 };
+
+interface DiffStatCounts {
+  additions: number;
+  deletions: number;
+}
+
+function parseParsedDiffStats(unifiedDiff: string): DiffStatCounts {
+  let additions = 0;
+  let deletions = 0;
+  const parsed = parseInstance.parse(unifiedDiff);
+  for (const hunk of parsed.hunks) {
+    for (const line of hunk.lines) {
+      if (line.type === DiffLineType.Add) additions++;
+      else if (line.type === DiffLineType.Delete) deletions++;
+    }
+  }
+  return { additions, deletions };
+}
+
+function parseFallbackDiffStats(unifiedDiff: string): DiffStatCounts {
+  let additions = 0;
+  let deletions = 0;
+  const lines = unifiedDiff.split('\n');
+  for (const line of lines) {
+    if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+    else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+  }
+  return { additions, deletions };
+}
+
+/**
+ * Parse a unified diff to extract addition/deletion counts.
+ * Uses the diff-view parser, falling back to a line-prefix count on parse failure.
+ * Shared by ChatFileEntry stats (via NewDisplayConversationEntry) and processUnifiedDiff.
+ */
+export function parseDiffStats(unifiedDiff: string): DiffStatCounts {
+  try {
+    return parseParsedDiffStats(unifiedDiff);
+  } catch {
+    // Fallback: count lines starting with + or -
+    return parseFallbackDiffStats(unifiedDiff);
+  }
+}
 
 function processContentDiff(input: Extract<DiffInput, { type: 'content' }>): DiffData {
   const filePath = input.newPath || input.oldPath || 'unknown';
@@ -104,19 +127,11 @@ function processContentDiff(input: Extract<DiffInput, { type: 'content' }>): Dif
 function processUnifiedDiff(input: Extract<DiffInput, { type: 'unified' }>): DiffData {
   const { path, unifiedDiff, hasLineNumbers = true } = input;
   const lang = getHighLightLanguageFromPath(path) || 'plaintext';
-  let additions = 0;
-  let deletions = 0;
+  const { additions, deletions } = parseDiffStats(unifiedDiff);
   let isValid = false;
 
   try {
-    const parsed = parseInstance.parse(unifiedDiff);
-    for (const hunk of parsed.hunks) {
-      for (const line of hunk.lines) {
-        if (line.type === DiffLineType.Add) additions++;
-        else if (line.type === DiffLineType.Delete) deletions++;
-      }
-    }
-    isValid = parsed.hunks.length > 0;
+    isValid = parseInstance.parse(unifiedDiff).hunks.length > 0;
   } catch (e) {
     console.error('Failed to parse unified diff:', e);
   }
@@ -144,103 +159,6 @@ function useDiffData(input: DiffInput): DiffData {
     }
     return processUnifiedDiff(input);
   }, [input]);
-}
-
-
-// Helper component for diff stats
-function DiffStats({ additions, deletions }: Readonly<{ additions: number; deletions: number }>) {
-  const hasStats = additions > 0 || deletions > 0;
-  if (!hasStats) return null;
-
-  return (
-    <span className="text-sm shrink-0">
-      {additions > 0 && <span className="text-success">+{additions}</span>}
-      {additions > 0 && deletions > 0 && ' '}
-      {deletions > 0 && <span className="text-error">-{deletions}</span>}
-    </span>
-  );
-}
-
-export function DiffViewCard({
-  input,
-  expanded = false,
-  onToggle,
-  status,
-  className,
-}: Readonly<DiffViewCardProps>) {
-  const { theme } = useTheme();
-  const actualTheme = getActualTheme(theme);
-  const {
-    diffFile,
-    diffData,
-    additions,
-    deletions,
-    filePath,
-    isValid,
-    hideLineNumbers,
-  } = useDiffData(input);
-
-  const FileIcon = getFileIcon(filePath, actualTheme);
-
-  const headerContent = (
-    <>
-      <div className="flex-1 flex items-center gap-base min-w-0">
-        <span className="relative shrink-0">
-          <FileIcon className="size-icon-base" />
-          {status && (
-            <ToolStatusDot
-              status={status}
-              className="absolute -bottom-0.5 -right-0.5"
-            />
-          )}
-        </span>
-        <span className="text-sm text-normal truncate font-ibm-plex-mono">
-          {filePath}
-        </span>
-        <DiffStats additions={additions} deletions={deletions} />
-      </div>
-      {onToggle && (
-        <CaretDownIcon
-          className={cn(
-            'size-icon-xs shrink-0 text-low transition-transform',
-            !expanded && '-rotate-90'
-          )}
-        />
-      )}
-    </>
-  );
-
-  return (
-    <div className={cn('rounded-sm border overflow-hidden', className)}>
-      {/* Header */}
-      {onToggle ? (
-        <button
-          type="button"
-          className={cn(
-            'flex items-center bg-panel p-base w-full cursor-pointer'
-          )}
-          onClick={onToggle}
-        >
-          {headerContent}
-        </button>
-      ) : (
-        <div className="flex items-center bg-panel p-base w-full">
-          {headerContent}
-        </div>
-      )}
-
-      {/* Diff body - shown when expanded */}
-      {expanded && (
-        <DiffViewBody
-          diffFile={diffFile}
-          diffData={diffData}
-          isValid={isValid}
-          hideLineNumbers={hideLineNumbers}
-          theme={actualTheme}
-        />
-      )}
-    </div>
-  );
 }
 
 /**

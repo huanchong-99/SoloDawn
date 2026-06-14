@@ -44,9 +44,6 @@ export function useRenameBranch(
         queryClient.invalidateQueries({ queryKey: ['taskAttempt', attemptId] });
         queryClient.invalidateQueries({ queryKey: ['attempt', attemptId] });
         queryClient.invalidateQueries({
-          queryKey: ['attemptBranch', attemptId],
-        });
-        queryClient.invalidateQueries({
           queryKey: ['branchStatus', attemptId],
         });
         queryClient.invalidateQueries({ queryKey: ['taskAttempts'] });

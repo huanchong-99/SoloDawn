@@ -19,7 +19,6 @@ import {
   ChatsTeardropIcon,
   GitDiffIcon,
   TerminalIcon,
-  SignOutIcon,
   CaretDoubleUpIcon,
   CaretDoubleDownIcon,
   PlayIcon,
@@ -53,8 +52,6 @@ import { RebaseDialog } from '@/components/ui-new/dialogs/RebaseDialog';
 import { ResolveConflictsDialog } from '@/components/ui-new/dialogs/ResolveConflictsDialog';
 import { RenameWorkspaceDialog } from '@/components/ui-new/dialogs/RenameWorkspaceDialog';
 import { CreatePRDialog } from '@/components/dialogs/tasks/CreatePRDialog';
-import { getIdeName } from '@/components/ide/IdeIcon';
-import { EditorSelectionDialog } from '@/components/dialogs/tasks/EditorSelectionDialog';
 import { StartReviewDialog } from '@/components/dialogs/tasks/StartReviewDialog';
 import posthog from 'posthog-js';
 import { WorkspacesGuideDialog } from '@/components/ui-new/dialogs/WorkspacesGuideDialog';
@@ -71,7 +68,7 @@ const RightSidebarIcon: Icon = forwardRef<SVGSVGElement, IconProps>(
 RightSidebarIcon.displayName = 'RightSidebarIcon';
 
 // Special icon types for ContextBar
-export type SpecialIconType = 'ide-icon' | 'copy-icon';
+export type SpecialIconType = 'copy-icon';
 export type ActionIcon = Icon | SpecialIconType;
 
 // Workspace type for sidebar (minimal subset needed for workspace selection)
@@ -575,38 +572,6 @@ export const Actions = {
     },
   },
 
-  // === Navigation Actions ===
-  OpenInOldUI: {
-    id: 'open-in-old-ui',
-    label: 'Open in Old UI',
-    icon: SignOutIcon,
-    requiresTarget: false,
-    execute: async (ctx) => {
-      // If no workspace is selected, navigate to root
-      if (!ctx.currentWorkspaceId) {
-        ctx.navigate('/');
-        return;
-      }
-
-      const workspace = await getWorkspace(
-        ctx.queryClient,
-        ctx.currentWorkspaceId
-      );
-      if (!workspace?.taskId) {
-        ctx.navigate('/');
-        return;
-      }
-
-      // Fetch task lazily to get projectId
-      const task = await tasksApi.getById(workspace.taskId);
-      if (task?.projectId) {
-        ctx.navigate(`/projects/${task.projectId}/tasks/${workspace.taskId}`);
-      } else {
-        ctx.navigate('/');
-      }
-    },
-  },
-
   // === Diff Actions for Navbar ===
   ToggleAllDiffs: {
     id: 'toggle-all-diffs',
@@ -637,33 +602,6 @@ export const Actions = {
   },
 
   // === ContextBar Actions ===
-  OpenInIDE: {
-    id: 'open-in-ide',
-    label: 'Open in IDE',
-    icon: 'ide-icon' as const,
-    requiresTarget: false,
-    isVisible: (ctx) => ctx.hasWorkspace,
-    getTooltip: (ctx) => `Open in ${getIdeName(ctx.editorType)}`,
-    execute: async (ctx) => {
-      if (!ctx.currentWorkspaceId) return;
-      try {
-        const response = await attemptsApi.openEditor(ctx.currentWorkspaceId, {
-          editor_type: null,
-          file_path: null,
-          git_repo_path: undefined,
-        });
-        if (response.url) {
-          globalThis.window.open(response.url, '_blank', 'noopener,noreferrer');
-        }
-      } catch {
-        // Show editor selection dialog on failure
-        EditorSelectionDialog.show({
-          selectedAttemptId: ctx.currentWorkspaceId,
-        });
-      }
-    },
-  },
-
   CopyPath: {
     id: 'copy-path',
     label: 'Copy path',
@@ -979,7 +917,7 @@ export type NavbarItem = ActionDefinition | typeof NavbarDivider;
 
 // Navbar action groups define which actions appear in each section
 export const NavbarActionGroups = {
-  left: [Actions.ArchiveWorkspace, Actions.OpenInOldUI] as ActionDefinition[],
+  left: [Actions.ArchiveWorkspace] as ActionDefinition[],
   right: [
     Actions.ToggleDiffViewMode,
     Actions.ToggleAllDiffs,
@@ -1005,7 +943,7 @@ export type ContextBarItem = ActionDefinition | typeof ContextBarDivider;
 
 // ContextBar action groups define which actions appear in each section
 export const ContextBarActionGroups = {
-  primary: [Actions.OpenInIDE, Actions.CopyPath] as ActionDefinition[],
+  primary: [Actions.CopyPath] as ActionDefinition[],
   secondary: [
     Actions.ToggleDevServer,
     Actions.TogglePreviewMode,
@@ -1015,5 +953,5 @@ export const ContextBarActionGroups = {
 
 // Helper to check if an icon is a special type
 export function isSpecialIcon(icon: ActionIcon): icon is SpecialIconType {
-  return icon === 'ide-icon' || icon === 'copy-icon';
+  return icon === 'copy-icon';
 }

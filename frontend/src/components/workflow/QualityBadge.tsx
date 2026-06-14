@@ -6,9 +6,7 @@ export type GateStatus = 'pending' | 'running' | 'ok' | 'warn' | 'error' | 'skip
 
 interface QualityBadgeProps {
   readonly gateStatus: GateStatus;
-  readonly totalIssues?: number;
   readonly blockingIssues?: number;
-  readonly mode?: string;
   readonly className?: string;
 }
 

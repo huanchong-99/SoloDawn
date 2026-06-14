@@ -15,8 +15,6 @@ import type {
   ActionDefinition,
   ActionIcon,
   DevServerState,
-  NavbarItem,
-  ContextBarItem,
 } from './index';
 import { resolveLabel } from './index';
 import type { CommandBarPage } from './pages';
@@ -120,47 +118,6 @@ export function isActionVisible(
   ctx: ActionVisibilityContext
 ): boolean {
   return action.isVisible?.(ctx) ?? true;
-}
-
-function isDividerItem(
-  item: NavbarItem | ContextBarItem
-): item is { readonly type: 'divider' } {
-  return 'type' in item && item.type === 'divider';
-}
-
-/**
- * Filter action items by visibility while normalizing divider placement:
- * - keeps dividers in the middle
- * - removes leading/trailing dividers
- * - removes consecutive dividers
- */
-export function filterVisibleActionItems<T extends NavbarItem | ContextBarItem>(
-  items: readonly T[],
-  ctx: ActionVisibilityContext
-): T[] {
-  const filtered = items.filter((item) => {
-    if (isDividerItem(item)) return true;
-    return isActionVisible(item, ctx);
-  });
-
-  const result: T[] = [];
-  for (const item of filtered) {
-    if (isDividerItem(item)) {
-      const lastItem = result.at(-1);
-      if (result.length > 0 && lastItem && !isDividerItem(lastItem)) {
-        result.push(item);
-      }
-    } else {
-      result.push(item);
-    }
-  }
-
-  const lastItem = result.at(-1);
-  if (result.length > 0 && lastItem && isDividerItem(lastItem)) {
-    result.pop();
-  }
-
-  return result;
 }
 
 /**

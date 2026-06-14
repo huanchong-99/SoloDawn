@@ -7,7 +7,6 @@ import {
   ArrowUpIcon,
   CrosshairIcon,
   ArrowRightIcon,
-  CodeIcon,
   ArrowSquareOutIcon,
   CopyIcon,
   GitMergeIcon,
@@ -65,7 +64,6 @@ interface RepoCardProps {
   onRebase?: () => void;
   onActionsClick?: (action: RepoAction) => void;
   onPushClick?: () => void;
-  onOpenInEditor?: () => void;
   onCopyPath?: () => void;
   onOpenSettings?: () => void;
 }
@@ -90,7 +88,6 @@ export function RepoCard({
   onRebase,
   onActionsClick,
   onPushClick,
-  onOpenInEditor,
   onCopyPath,
   onOpenSettings,
 }: Readonly<RepoCardProps>) {
@@ -244,9 +241,6 @@ export function RepoCard({
             <DropdownMenuContent>
               <DropdownMenuItem icon={CopyIcon} onClick={onCopyPath}>
                 {tCommon('actions.copyPath')}
-              </DropdownMenuItem>
-              <DropdownMenuItem icon={CodeIcon} onClick={onOpenInEditor}>
-                {tCommon('actions.openInIde')}
               </DropdownMenuItem>
               <DropdownMenuItem icon={GearIcon} onClick={onOpenSettings}>
                 {tCommon('actions.repoSettings')}

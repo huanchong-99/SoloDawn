@@ -14,6 +14,7 @@ local-deployment = { path = "../local-deployment" }
 utils = { path = "../utils" }
 db = { path = "../db" }
 services = { path = "../services" }
+quality = { path = "../quality" }
 tokio = { workspace = true }
 shlex = "1.3.0"
 tokio-util = { version = "0.7", features = ["io"] }
@@ -21,6 +22,7 @@ tokio-stream = "0.1"
 axum = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -75,12 +77,6 @@ wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }
 hyper = "1.0"
 http-body-util = "0.1"
-criterion = { version = "0.5", features = ["async_tokio"] }
-sysinfo = "0.33"
-
-[[bench]]
-name = "performance"
-harness = false
 
 [features]
 default = []

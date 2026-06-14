@@ -1,0 +1,6 @@
+crates\services\src\services\terminal\prompt_watcher.rs:758:8: warning: method `mark_pending_handoff_submit` is never used
+crates\services\src\services\orchestrator\agent.rs:73:5: warning: field `error_handler` is never read
+warning: `services` (lib) generated 2 warnings
+    Checking server v0.0.153 (E:\SoloDawn\crates\server)
+warning: `services` (lib test) generated 1 warning (1 duplicate)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.83s

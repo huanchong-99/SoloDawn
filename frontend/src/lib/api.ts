@@ -70,16 +70,12 @@ import {
   Invitation,
   RemoteProject,
   ListInvitationsResponse,
-  OpenEditorResponse,
-  OpenEditorRequest,
   PrError,
   Scratch,
   ScratchType,
   CreateScratch,
   UpdateScratch,
   PushError,
-  TokenResponse,
-  CurrentUserResponse,
   SharedTaskResponse,
   SharedTaskDetails,
   QueueStatus,
@@ -92,13 +88,14 @@ import {
   Workspace,
   StartReviewRequest,
   ReviewError,
+  QualityGateConfig,
+  QualityPolicyResponse,
+  MetricCatalogResponse,
 } from 'shared/types';
+// Re-export MetricKey so hook/component consumers can import the picker type from this module.
+export type { MetricKey } from 'shared/types';
 import type { WorkspaceWithSession } from '@/types/attempt';
 import { createWorkspaceWithSession } from '@/types/attempt';
-
-type OpenEditorApiRequest = OpenEditorRequest & {
-  git_repo_path?: string | null;
-};
 
 export class ApiError<E = unknown> extends Error {
   public status?: number;
@@ -326,17 +323,6 @@ export const projectsApi = {
     return handleApiResponse<void>(response);
   },
 
-  openEditor: async (
-    id: string,
-    data: OpenEditorApiRequest
-  ): Promise<OpenEditorResponse> => {
-    const response = await makeRequest(`/api/projects/${id}/open-editor`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-    return handleApiResponse<OpenEditorResponse>(response);
-  },
-
   searchFiles: async (
     id: string,
     query: string,
@@ -519,6 +505,7 @@ export interface PlanningDraftResponse {
   auditPlan: string | null;
   auditMode: 'builtin' | 'merged' | 'custom';
   auditDocPath: string | null;
+  gatesConfirmedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -604,7 +591,7 @@ export const planningDraftsApi = {
 
   uploadAuditDoc: async (draftId: string, file: File): Promise<PlanningDraftResponse> => {
     const formData = new FormData();
-    formData.append('audit_doc', file);
+    formData.append('file', file);
 
     // Use fetch directly for multipart/form-data (makeRequest sets JSON content-type)
     const response = await fetch(`/api/planning-drafts/${draftId}/audit-doc`, {
@@ -636,6 +623,48 @@ export const planningDraftsApi = {
       }
     );
     return handleApiResponse<PlanningDraftResponse>(response);
+  },
+
+  confirmGates: async (draftId: string, config?: QualityGateConfig): Promise<PlanningDraftResponse> => {
+    const response = await fetch(`/api/planning-drafts/${draftId}/confirm-gates`, {
+      method: 'POST',
+      headers: config ? { 'Content-Type': 'application/json' } : undefined,
+      body: config ? JSON.stringify(config) : undefined,
+    });
+    return handleApiResponse<PlanningDraftResponse>(response);
+  },
+};
+
+// Quality Policy API (G3: per-project quality-gate rules CRUD + default/metrics catalog)
+export const qualityPolicyApi = {
+  getDefault: async (): Promise<QualityPolicyResponse> => {
+    const response = await makeRequest('/api/quality/policy/default');
+    return handleApiResponse<QualityPolicyResponse>(response);
+  },
+
+  getMetrics: async (): Promise<MetricCatalogResponse> => {
+    const response = await makeRequest('/api/quality/policy/metrics');
+    return handleApiResponse<MetricCatalogResponse>(response);
+  },
+
+  getProject: async (projectId: string): Promise<QualityPolicyResponse> => {
+    const response = await makeRequest(`/api/projects/${projectId}/quality-policy`);
+    return handleApiResponse<QualityPolicyResponse>(response);
+  },
+
+  putProject: async (projectId: string, config: QualityGateConfig): Promise<QualityPolicyResponse> => {
+    const response = await makeRequest(`/api/projects/${projectId}/quality-policy`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    });
+    return handleApiResponse<QualityPolicyResponse>(response);
+  },
+
+  deleteProject: async (projectId: string): Promise<void> => {
+    const response = await makeRequest(`/api/projects/${projectId}/quality-policy`, {
+      method: 'DELETE',
+    });
+    return handleApiResponse<void>(response);
   },
 };
 
@@ -786,20 +815,6 @@ export const attemptsApi = {
       }
     );
     return handleApiResponse<RunAgentSetupResponse>(response);
-  },
-
-  openEditor: async (
-    attemptId: string,
-    data: OpenEditorApiRequest
-  ): Promise<OpenEditorResponse> => {
-    const response = await makeRequest(
-      `/api/task-attempts/${attemptId}/open-editor`,
-      {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }
-    );
-    return handleApiResponse<OpenEditorResponse>(response);
   },
 
   getBranchStatus: async (attemptId: string): Promise<RepoBranchStatus[]> => {
@@ -1110,17 +1125,6 @@ export const repoApi = {
     return handleApiResponse<Repo[]>(response);
   },
 
-  openEditor: async (
-    repoId: string,
-    data: OpenEditorApiRequest
-  ): Promise<OpenEditorResponse> => {
-    const response = await makeRequest(`/api/repos/${repoId}/open-editor`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-    return handleApiResponse<OpenEditorResponse>(response);
-  },
-
   searchFiles: async (
     repoId: string,
     query: string,
@@ -1384,16 +1388,22 @@ export const oauthApi = {
   },
 
   /** Returns the current access token for the remote server (auto-refreshes if needed) */
-  getToken: async (): Promise<TokenResponse | null> => {
+  getToken: async (): Promise<{
+    access_token: string;
+    expires_at: string | null;
+  } | null> => {
     const response = await makeRequest('/api/auth/token');
     if (!response.ok) return null;
-    return handleApiResponse<TokenResponse>(response);
+    return handleApiResponse<{
+      access_token: string;
+      expires_at: string | null;
+    }>(response);
   },
 
   /** Returns the user ID of the currently authenticated user */
-  getCurrentUser: async (): Promise<CurrentUserResponse> => {
+  getCurrentUser: async (): Promise<{ user_id: string }> => {
     const response = await makeRequest('/api/auth/user');
-    return handleApiResponse<CurrentUserResponse>(response);
+    return handleApiResponse<{ user_id: string }>(response);
   },
 };
 

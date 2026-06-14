@@ -1,9 +1,5 @@
 // Global app dialogs
 export { DisclaimerDialog } from './global/DisclaimerDialog';
-export {
-  OnboardingDialog,
-  type OnboardingResult,
-} from './global/OnboardingDialog';
 export { ReleaseNotesDialog } from './global/ReleaseNotesDialog';
 export { OAuthDialog } from './global/OAuthDialog';
 
@@ -19,15 +15,6 @@ export {
 
 // Project-related dialogs
 export {
-  ProjectFormDialog,
-  type ProjectFormDialogProps,
-  type ProjectFormDialogResult,
-} from './projects/ProjectFormDialog';
-export {
-  ProjectEditorSelectionDialog,
-  type ProjectEditorSelectionDialogProps,
-} from './projects/ProjectEditorSelectionDialog';
-export {
   LinkProjectDialog,
   type LinkProjectResult,
 } from './projects/LinkProjectDialog';
@@ -39,10 +26,6 @@ export {
 } from './tasks/TaskFormDialog';
 
 export { CreatePRDialog } from './tasks/CreatePRDialog';
-export {
-  EditorSelectionDialog,
-  type EditorSelectionDialogProps,
-} from './tasks/EditorSelectionDialog';
 export {
   DeleteTaskConfirmationDialog,
   type DeleteTaskConfirmationDialogProps,

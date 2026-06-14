@@ -3,49 +3,6 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone, TS)]
-#[ts(export)]
-pub struct HandoffInitRequest {
-    pub provider: String,
-    pub return_to: String,
-    pub app_challenge: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, TS)]
-#[ts(export)]
-pub struct HandoffInitResponse {
-    pub handoff_id: Uuid,
-    pub authorize_url: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, TS)]
-#[ts(export)]
-pub struct HandoffRedeemRequest {
-    pub handoff_id: Uuid,
-    pub app_code: String,
-    pub app_verifier: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, TS)]
-#[ts(export)]
-pub struct HandoffRedeemResponse {
-    pub access_token: String,
-    pub refresh_token: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, TS)]
-#[ts(export)]
-pub struct TokenRefreshRequest {
-    pub refresh_token: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, TS)]
-#[ts(export)]
-pub struct TokenRefreshResponse {
-    pub access_token: String,
-    pub refresh_token: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, TS)]
 pub struct ProviderProfile {
     pub provider: String,
     pub username: Option<String>,

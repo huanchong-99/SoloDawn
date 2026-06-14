@@ -3,8 +3,6 @@
 //! Listens to MessageBus broadcast channel and routes events to the
 //! appropriate workflow WebSocket channels.
 
-use std::sync::Arc;
-
 use services::services::orchestrator::SharedMessageBus;
 use tokio::{sync::broadcast, task::JoinHandle};
 use tracing::{debug, info, warn};
@@ -80,9 +78,6 @@ impl EventBridge {
         info!("EventBridge stopped");
     }
 }
-
-/// Shared event bridge type alias.
-pub type SharedEventBridge = Arc<EventBridge>;
 
 // ============================================================================
 // Tests

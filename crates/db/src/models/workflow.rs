@@ -294,10 +294,11 @@ pub struct SlashCommandPreset {
 ///
 /// Corresponds to database table: workflow_command
 ///
-/// [G15-010] TODO: The `preset_id` column references `slash_command_preset.id`
-/// but the FK has no ON DELETE CASCADE. Deleting a preset while workflow_command
-/// rows reference it will cause a foreign-key violation. A future migration
-/// should add `ON DELETE CASCADE` or `ON DELETE SET NULL` to this FK.
+/// [G15-010] The `preset_id` column references `slash_command_preset.id` with
+/// `ON DELETE CASCADE` (added in migration
+/// `20260418000000_cascade_workflow_command_preset_fk.sql`). Because `preset_id`
+/// is NOT NULL, CASCADE is used so deleting a preset removes its associated
+/// `workflow_command` rows rather than triggering a foreign-key violation.
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]

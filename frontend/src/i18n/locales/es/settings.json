@@ -53,30 +53,6 @@
         "defaultLabel": "Predeterminado"
       },
       "editor": {
-        "title": "Editor",
-        "description": "Configura cómo quieres editar tu código.",
-        "type": {
-          "label": "Tipo de Editor",
-          "placeholder": "Seleccionar editor",
-          "helper": "Elige tu editor de código preferido."
-        },
-        "customCommand": {
-          "label": "Comando de Editor Personalizado",
-          "placeholder": "ej., code, subl, vim",
-          "helper": "Ingresa el comando para lanzar tu editor personalizado. Se utilizará para abrir archivos."
-        },
-        "remoteSsh": {
-          "host": {
-            "label": "Host SSH Remoto (Opcional)",
-            "placeholder": "ej., nombre de host o dirección IP",
-            "helper": "Configura esto si SoloDawn se ejecuta en un servidor remoto. Cuando se establece, al hacer clic en \"Abrir en Editor\" se generará una URL para abrir tu editor a través de SSH en lugar de ejecutar un comando local."
-          },
-          "user": {
-            "label": "Usuario SSH Remoto (Opcional)",
-            "placeholder": "ej., nombre de usuario",
-            "helper": "Nombre de usuario SSH para la conexión remota. Si no se establece, VS Code usará tu configuración SSH o te lo pedirá."
-          }
-        },
         "availability": {
           "checking": "Verificando disponibilidad...",
           "available": "Disponible",
@@ -455,6 +431,7 @@
       "models": "Modelos",
       "mcp": "Servidores MCP",
       "feishu": "Feishu",
+      "qualityGates": "Quality Gates",
       "organizations": "Organizaciones"
     },
     "common": {
