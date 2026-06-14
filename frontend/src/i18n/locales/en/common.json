@@ -102,7 +102,6 @@
     "currentBadge": " (current)"
   },
   "navbar": {
-    "tryNewUI": "try the new UI",
     "workspaces": "Workspaces",
     "createTaskAria": "Create new task",
     "settingsAria": "Settings",
@@ -249,26 +248,6 @@
     "createNew": "Create new project",
     "noProjectsFound": "No projects found"
   },
-  "betaWorkspaces": {
-    "title": "Try the new UI",
-    "intro": "We've rebuilt SoloDawn's UI from the ground up, and you've been invited to try it.",
-    "newUiDescription": "The new UI is optimised for day-to-day work: juggling agents, previewing changes, and reviewing code. It also unlocks features that aren't available in the old UI:",
-    "newFeatures": {
-      "multiRepo": "Edit multiple repositories at the same time",
-      "multiAgent": "Run multiple agent conversations (even across different agents) in a single workspace",
-      "commandBar": "Faster navigation with the command bar"
-    },
-    "oldUiDescription": "For now, a few things still live in the current UI:",
-    "oldFeatures": {
-      "kanban": "Managing tasks on the kanban board",
-      "settings": "Changing settings",
-      "projects": "Managing projects"
-    },
-    "transition": "During the transition over the next few weeks, you'll move between both.",
-    "optOutNote": "Want to opt out? You can switch back to the current UI at any time in Settings.",
-    "joinBeta": "Join Beta",
-    "maybeLater": "Maybe Later"
-  },
   "workspacesGuide": {
     "welcome": {
       "title": "Welcome",
@@ -351,9 +330,6 @@
     "toggle-all-diffs-expand": "Expand all diffs",
     "toggle-left-sidebar-hide": "Hide Left Sidebar",
     "toggle-left-sidebar-show": "Show Left Sidebar",
-    "toggle-left-main-panel": "Toggle Chat Panel",
-    "hide-chat-panel": "Hide Chat Panel",
-    "show-chat-panel": "Show Chat Panel",
     "toggle-changes-mode": "Toggle Changes Panel",
     "hide-changes-panel": "Hide Changes Panel",
     "show-changes-panel": "Show Changes Panel",
@@ -367,7 +343,6 @@
     "toggle-right-sidebar-show": "Show Right Sidebar",
     "new-workspace": "New Workspace",
     "open-command-bar": "Open Command Bar",
-    "feedback": "Give Feedback",
     "workspaces-guide": "Workspaces Guide",
     "settings": "Settings",
     "start-review": "Ask the agent to review your changes"

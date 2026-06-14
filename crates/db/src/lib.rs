@@ -488,6 +488,10 @@ mod tests {
             completed_at: None,
             created_at: now,
             updated_at: now,
+            acceptance_score: None,
+            acceptance_dimensions_json: None,
+            acceptance_verdict: None,
+            acceptance_reviewed_at: None,
         };
         WorkflowTask::create(pool, &workflow_task).await?;
 

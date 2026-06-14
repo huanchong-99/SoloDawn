@@ -182,6 +182,10 @@ async fn test_terminal_status_broadcast() {
         completed_at: None,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        acceptance_score: None,
+        acceptance_dimensions_json: None,
+        acceptance_verdict: None,
+        acceptance_reviewed_at: None,
     };
     WorkflowTask::create(&deployment.db().pool, &task)
         .await
@@ -280,6 +284,10 @@ async fn test_task_status_broadcast() {
         completed_at: None,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        acceptance_score: None,
+        acceptance_dimensions_json: None,
+        acceptance_verdict: None,
+        acceptance_reviewed_at: None,
     };
     WorkflowTask::create(&deployment.db().pool, &task)
         .await

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, useCallback, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Group, Layout, Panel, Separator } from 'react-resizable-panels';
 import { useWorkspaceContext } from '@/contexts/WorkspaceContext';
@@ -7,6 +7,7 @@ import { CreateModeProvider } from '@/contexts/CreateModeContext';
 import { ReviewProvider } from '@/contexts/ReviewProvider';
 import { LogsPanelProvider } from '@/contexts/LogsPanelContext';
 import { ChangesViewProvider } from '@/contexts/ChangesViewContext';
+import { OrchestrationDiffProvider } from '@/contexts/OrchestrationDiffContext';
 import { WorkspacesSidebarContainer } from '@/components/ui-new/containers/WorkspacesSidebarContainer';
 import { LogsContentContainer } from '@/components/ui-new/containers/LogsContentContainer';
 import { WorkspacesMainContainer } from '@/components/ui-new/containers/WorkspacesMainContainer';
@@ -16,8 +17,6 @@ import { CreateChatBoxContainer } from '@/components/ui-new/containers/CreateCha
 import { ConciergeChatContainer } from '@/components/ui-new/containers/ConciergeChatContainer';
 import { NavbarContainer } from '@/components/ui-new/containers/NavbarContainer';
 import { PreviewBrowserContainer } from '@/components/ui-new/containers/PreviewBrowserContainer';
-import { WorkspacesGuideDialog } from '@/components/ui-new/dialogs/WorkspacesGuideDialog';
-import { useUserSystem } from '@/components/ConfigProvider';
 
 import {
   PERSIST_KEYS,
@@ -28,9 +27,13 @@ import {
 
 import { useConciergeSession } from '@/hooks/useConcierge';
 import { useWorkflow } from '@/hooks/useWorkflows';
-import { useCommandBarShortcut } from '@/hooks/useCommandBarShortcut';
-
-const WORKSPACES_GUIDE_ID = 'workspaces-guide';
+import {
+  useWorkflowEvents,
+  type TerminalCompletedPayload,
+  type AcceptanceReviewPayload,
+  type QualityGateResultPayload,
+} from '@/stores/wsStore';
+import type { OrchestrationDiffTarget } from '@/contexts/OrchestrationDiffContext';
 
 interface ModeProviderProps {
   isCreateMode: boolean;
@@ -76,22 +79,6 @@ export function WorkspacesLayout() {
     startNewSession,
   } = useWorkspaceContext();
 
-  // Use workspace-specific panel state (pass undefined when in create mode)
-  const {
-    isLeftSidebarVisible,
-    isLeftMainPanelVisible,
-    isRightSidebarVisible,
-    rightMainPanelMode,
-    setLeftSidebarVisible,
-    setLeftMainPanelVisible,
-  } = useWorkspacePanelState(isCreateMode ? undefined : workspaceId);
-
-  const {
-    config,
-    updateAndSaveConfig,
-    loading: configLoading,
-  } = useUserSystem();
-
   const [searchParams] = useSearchParams();
   const conciergeSessionId = searchParams.get('conciergeId');
   const isConciergeMode = Boolean(conciergeSessionId);
@@ -100,24 +87,87 @@ export function WorkspacesLayout() {
   const conciergeWorkflowId = conciergeSession?.activeWorkflowId ?? null;
   const { data: conciergeWorkflow } = useWorkflow(conciergeWorkflowId ?? '');
 
-  useCommandBarShortcut(() => {
-    void import('@/components/ui-new/dialogs/CommandBarDialog').then(
-      ({ CommandBarDialog }) => {
-        CommandBarDialog.show();
+  // FE-2: In concierge mode there is no `:workspaceId`, so the workspace-scoped
+  // panel state (`setRightMainPanelMode` early-returns on a falsy key) cannot be
+  // driven and the panel default stays `null` (closed). Derive a stable synthetic
+  // key from the active concierge workflow so auto-open actually takes effect.
+  const panelStateKey = (() => {
+    if (isCreateMode) return undefined;
+    if (isConciergeMode) {
+      return conciergeWorkflowId
+        ? `concierge:${conciergeWorkflowId}`
+        : `concierge:${conciergeSessionId}`;
+    }
+    return workspaceId;
+  })();
+
+  // Use workspace-specific panel state (pass undefined when in create mode)
+  const {
+    isLeftSidebarVisible,
+    isLeftMainPanelVisible,
+    isRightSidebarVisible,
+    rightMainPanelMode,
+    setRightMainPanelMode,
+    setLeftSidebarVisible,
+    setLeftMainPanelVisible,
+  } = useWorkspacePanelState(panelStateKey);
+
+  // FE-2 (Phase C step 13): auto-surface the per-task Changes/Audit panel in the
+  // orchestration workspace. Mirrors the legacy `useWorkflowEvents` wiring on
+  // Board/Workflows pages, but instead of only badging it (a) records the task
+  // as the active diff target and (b) calls `setRightMainPanelMode(CHANGES)` to
+  // AUTO-OPEN — without this the produced changes stay invisible (Q2 Break 6).
+  const [orchestrationDiffTarget, setOrchestrationDiffTarget] =
+    useState<OrchestrationDiffTarget | null>(null);
+
+  const openTaskChanges = useCallback(
+    (wfId: string, taskId: string) => {
+      setOrchestrationDiffTarget({ workflowId: wfId, taskId });
+      setRightMainPanelMode(RIGHT_MAIN_PANEL_MODES.CHANGES);
+    },
+    [setRightMainPanelMode]
+  );
+
+  const handleTerminalCompleted = useCallback(
+    (payload: TerminalCompletedPayload) => {
+      if (conciergeWorkflowId && payload.taskId) {
+        openTaskChanges(conciergeWorkflowId, payload.taskId);
       }
-    );
+    },
+    [conciergeWorkflowId, openTaskChanges]
+  );
+
+  const handleAcceptanceReview = useCallback(
+    (payload: AcceptanceReviewPayload) => {
+      if (conciergeWorkflowId && payload.taskId) {
+        openTaskChanges(conciergeWorkflowId, payload.taskId);
+      }
+    },
+    [conciergeWorkflowId, openTaskChanges]
+  );
+
+  const handleQualityGateResult = useCallback(
+    (payload: QualityGateResultPayload) => {
+      if (conciergeWorkflowId && payload.taskId) {
+        openTaskChanges(conciergeWorkflowId, payload.taskId);
+      }
+    },
+    [conciergeWorkflowId, openTaskChanges]
+  );
+
+  useWorkflowEvents(isConciergeMode ? conciergeWorkflowId : null, {
+    onTerminalCompleted: handleTerminalCompleted,
+    onAcceptanceReviewResult: handleAcceptanceReview,
+    onQualityGateResult: handleQualityGateResult,
   });
 
-  // Auto-show Workspaces Guide on first visit
-  useEffect(() => {
-    const seenFeatures = config?.showcases?.seen_features ?? [];
-    if (configLoading || seenFeatures.includes(WORKSPACES_GUIDE_ID)) return;
-
-    updateAndSaveConfig({
-      showcases: { seen_features: [...seenFeatures, WORKSPACES_GUIDE_ID] },
-    });
-    WorkspacesGuideDialog.show().finally(() => WorkspacesGuideDialog.hide());
-  }, [configLoading, config?.showcases?.seen_features, updateAndSaveConfig]);
+  const taskDiffSource =
+    isConciergeMode && orchestrationDiffTarget
+      ? {
+          workflowId: orchestrationDiffTarget.workflowId,
+          taskId: orchestrationDiffTarget.taskId,
+        }
+      : undefined;
 
   // Ensure left panels visible when right main panel hidden
   useEffect(() => {
@@ -172,6 +222,11 @@ export function WorkspacesLayout() {
             <ReviewProvider attemptId={selectedWorkspace?.id}>
               <LogsPanelProvider>
                 <ChangesViewProvider>
+                 <OrchestrationDiffProvider
+                  isOrchestration={isConciergeMode}
+                  diffTarget={orchestrationDiffTarget}
+                  openTaskChanges={openTaskChanges}
+                 >
                   <div className="flex h-full">
                     <Group
                       orientation="horizontal"
@@ -229,6 +284,7 @@ export function WorkspacesLayout() {
                             RIGHT_MAIN_PANEL_MODES.CHANGES && (
                             <ChangesPanelContainer
                               attemptId={selectedWorkspace?.id}
+                              taskDiffSource={taskDiffSource}
                             />
                           )}
                           {rightMainPanelMode ===
@@ -258,6 +314,7 @@ export function WorkspacesLayout() {
                       </div>
                     )}
                   </div>
+                 </OrchestrationDiffProvider>
                 </ChangesViewProvider>
               </LogsPanelProvider>
             </ReviewProvider>

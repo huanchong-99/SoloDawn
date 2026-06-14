@@ -51,10 +51,10 @@ use super::{
         WorkflowStrategy,
     },
     types::{
-        AcceptanceReviewResult, AcceptanceVerdict, AuditMode, AuditPlan, AuditScoreResult,
-        CodeIssue, LLMMessage, OrchestratorInstruction, PreviousTerminalContext,
-        QualityGateResultEvent, TerminalCompletionContext, TerminalCompletionEvent,
-        TerminalCompletionStatus, TerminalPromptEvent,
+        AcceptanceReviewResult, AcceptanceReviewResultEvent, AcceptanceVerdict, AuditMode,
+        AuditPlan, AuditScoreResult, CodeIssue, LLMMessage, OrchestratorInstruction,
+        PreviousTerminalContext, QualityGateResultEvent, TerminalCompletionContext,
+        TerminalCompletionEvent, TerminalCompletionStatus, TerminalPromptEvent,
     },
 };
 use crate::services::{
@@ -1089,6 +1089,7 @@ impl OrchestratorAgent {
             | BusMessage::TerminalMessage { .. }
             | BusMessage::TerminalInput { .. }
             | BusMessage::TerminalPromptDecision { .. }
+            | BusMessage::TerminalAcceptanceReview(..)
             | BusMessage::ProviderStateChanged { .. }) => {
                 let variant = match &msg {
                     BusMessage::Instruction(..) => "Instruction",
@@ -1099,6 +1100,7 @@ impl OrchestratorAgent {
                     BusMessage::TerminalMessage { .. } => "TerminalMessage",
                     BusMessage::TerminalInput { .. } => "TerminalInput",
                     BusMessage::TerminalPromptDecision { .. } => "TerminalPromptDecision",
+                    BusMessage::TerminalAcceptanceReview(..) => "TerminalAcceptanceReview",
                     BusMessage::ProviderStateChanged { .. } => "ProviderStateChanged",
                     _ => "unknown",
                 };
@@ -5142,7 +5144,49 @@ impl OrchestratorAgent {
         event: &TerminalCompletionEvent,
         review: AcceptanceReviewResult,
     ) -> anyhow::Result<bool> {
-        if review.verdict == AcceptanceVerdict::Approved {
+        // Phase B3/B4: persist + emit the acceptance score on BOTH approve and
+        // reject paths so the orchestration UI can surface/audit it per task.
+        let passed = review.verdict == AcceptanceVerdict::Approved;
+        let verdict_str = if passed { "approved" } else { "rejected" };
+        let dimensions_json = review
+            .dimensions
+            .as_ref()
+            .map(|d| serde_json::to_string(d).unwrap_or_default());
+
+        // Persist the score row (unconditional overwrite). Only write when we
+        // have a numeric score — legacy binary reviews have none.
+        if let Some(score) = review.score {
+            if let Err(e) = db::models::WorkflowTask::set_acceptance_review(
+                &self.db.pool,
+                &event.task_id,
+                score,
+                dimensions_json.as_deref().unwrap_or("null"),
+                verdict_str,
+            )
+            .await
+            {
+                tracing::warn!(
+                    task_id = %event.task_id,
+                    error = %e,
+                    "Failed to persist acceptance review score (non-fatal)"
+                );
+            }
+        }
+
+        // Publish the score-bearing WS event (mirrors quality.gate_result).
+        self.message_bus
+            .publish_acceptance_review_result(AcceptanceReviewResultEvent {
+                workflow_id: event.workflow_id.clone(),
+                task_id: event.task_id.clone(),
+                terminal_id: event.terminal_id.clone(),
+                total_score: review.score,
+                dimensions: review.dimensions.clone(),
+                verdict: verdict_str.to_string(),
+                passed,
+            })
+            .await;
+
+        if passed {
             return Ok(true);
         }
 
@@ -10509,6 +10553,10 @@ mod tests {
             completed_at: None,
             created_at: now,
             updated_at: now,
+            acceptance_score: None,
+            acceptance_dimensions_json: None,
+            acceptance_verdict: None,
+            acceptance_reviewed_at: None,
         }
     }
 

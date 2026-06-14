@@ -258,6 +258,22 @@ pub struct WorkflowTask {
 
     /// Updated timestamp
     pub updated_at: DateTime<Utc>,
+
+    /// Acceptance review total score (0-100), set by the acceptance review.
+    ///
+    /// Phase B2: persisted by [`WorkflowTask::set_acceptance_review`] so the
+    /// 5-dimension acceptance score can be surfaced/audited per task. `None`
+    /// until a review has run.
+    pub acceptance_score: Option<f64>,
+
+    /// JSON-serialized acceptance review dimensions (per-dimension breakdown).
+    pub acceptance_dimensions_json: Option<String>,
+
+    /// Acceptance review verdict (e.g. "approved", "rejected").
+    pub acceptance_verdict: Option<String>,
+
+    /// Timestamp of the most recent acceptance review.
+    pub acceptance_reviewed_at: Option<DateTime<Utc>>,
 }
 
 /// Slash Command Preset
@@ -1067,6 +1083,46 @@ impl WorkflowTask {
         .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Persist the acceptance review result for a task (Phase B2).
+    ///
+    /// Records the 5-dimension acceptance review so it can be surfaced and
+    /// audited per task. `dimensions_json` is the JSON-serialized per-dimension
+    /// breakdown; `verdict` is the review outcome (e.g. "approved"/"rejected").
+    /// `acceptance_reviewed_at` is stamped with the current time.
+    ///
+    /// Unlike status updates, this is an unconditional write: it overwrites any
+    /// prior review so re-reviews (e.g. after a fix loop) reflect the latest
+    /// score.
+    pub async fn set_acceptance_review(
+        pool: &SqlitePool,
+        task_id: &str,
+        score: f64,
+        dimensions_json: &str,
+        verdict: &str,
+    ) -> sqlx::Result<()> {
+        let now = Utc::now();
+        sqlx::query(
+            r"
+            UPDATE workflow_task
+            SET acceptance_score = ?,
+                acceptance_dimensions_json = ?,
+                acceptance_verdict = ?,
+                acceptance_reviewed_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            ",
+        )
+        .bind(score)
+        .bind(dimensions_json)
+        .bind(verdict)
+        .bind(now)
+        .bind(now)
+        .bind(task_id)
+        .execute(pool)
+        .await?;
+        Ok(())
     }
 }
 

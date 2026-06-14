@@ -201,6 +201,10 @@ pub fn workflows_routes() -> Router<DeploymentImpl> {
             "/{workflow_id}/tasks/{task_id}/terminals",
             get(list_task_terminals).post(create_runtime_terminal),
         )
+        .route(
+            "/{workflow_id}/tasks/{task_id}/diff",
+            get(get_workflow_task_diff),
+        )
 }
 
 fn is_known_workflow_status(status: &str) -> bool {
@@ -1071,6 +1075,10 @@ async fn create_workflow(
             completed_at: None,
             created_at: now,
             updated_at: now,
+            acceptance_score: None,
+            acceptance_dimensions_json: None,
+            acceptance_verdict: None,
+            acceptance_reviewed_at: None,
         };
 
         let mut terminals: Vec<Terminal> = Vec::new();
@@ -2747,6 +2755,10 @@ async fn create_runtime_task(
         completed_at: None,
         created_at: now,
         updated_at: now,
+        acceptance_score: None,
+        acceptance_dimensions_json: None,
+        acceptance_verdict: None,
+        acceptance_reviewed_at: None,
     };
 
     let created_task = WorkflowTask::create(&deployment.db().pool, &task)
@@ -3147,6 +3159,147 @@ async fn list_task_terminals(
     let terminals_dto: Vec<TerminalDto> =
         terminals.iter().map(TerminalDto::from_terminal).collect();
     Ok(ResponseJson(ApiResponse::success(terminals_dto)))
+}
+
+/// GET /api/workflows/:workflow_id/tasks/:task_id/diff
+///
+/// Per-task branch diff for the orchestration workspace. Diffs the task's branch
+/// (`task.branch`) against the workflow's `target_branch` using the existing
+/// branch-diff primitive `GitService::get_diffs(DiffTarget::Branch { .. })`,
+/// returning the same `Vec<Diff>` shape the frontend `ChangesPanel` already
+/// renders. This deliberately does NOT reuse the `Workspace`/`WorkspaceRepo`
+/// worktree diff stream (path-layout collision trap — see Q2 spec Break 4): the
+/// branch-vs-branch tree diff needs no worktree of its own and survives
+/// post-merge worktree cleanup as long as the branch ref exists.
+///
+/// `repo_path` resolution mirrors the quality-gate working-dir logic in
+/// `orchestrator/agent.rs`:
+///   1. the managed worktree `WorktreeManager::get_worktree_base_dir().join(&task.branch)`
+///      if it exists (the orchestrator commits there);
+///   2. otherwise the project's `default_agent_working_dir`, else its first repo
+///      path (no-worktree fallback to the shared repo).
+///
+/// If the task branch ref is gone (merged + deleted), fall back to a commit-range
+/// diff (`DiffTarget::Commit`) using the task's latest terminal `last_commit_hash`
+/// so the review still surfaces after cleanup.
+async fn get_workflow_task_diff(
+    State(deployment): State<DeploymentImpl>,
+    Path((workflow_id, task_id)): Path<(Uuid, String)>,
+) -> Result<ResponseJson<ApiResponse<Vec<utils::diff::Diff>>>, ApiError> {
+    let workflow_id = workflow_id.to_string();
+
+    let workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Workflow not found".to_string()))?;
+
+    let task = WorkflowTask::find_by_id(&deployment.db().pool, &task_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Task not found".to_string()))?;
+
+    validate_task_workflow_scope(&task, &workflow_id)?;
+
+    // Resolve repo_path: managed worktree first (where the orchestrator commits),
+    // else the project's default working dir / first repo (no-worktree fallback).
+    // Mirrors orchestrator/agent.rs quality-gate working_dir resolution.
+    let repo_path: PathBuf = {
+        let managed = services::services::worktree_manager::WorktreeManager::get_worktree_base_dir()
+            .join(&task.branch);
+        if managed.exists() {
+            managed
+        } else {
+            let project = Project::find_by_id(&deployment.db().pool, workflow.project_id)
+                .await?
+                .ok_or_else(|| ApiError::NotFound("Project not found".to_string()))?;
+
+            let from_default = project
+                .default_agent_working_dir
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(PathBuf::from);
+
+            match from_default {
+                Some(path) => path,
+                None => {
+                    db::models::project_repo::ProjectRepo::find_repos_for_project(
+                        &deployment.db().pool,
+                        project.id,
+                    )
+                    .await?
+                    .into_iter()
+                    .map(|r| r.path)
+                    .find(|p| !p.as_os_str().is_empty())
+                    .ok_or_else(|| {
+                        ApiError::NotFound(
+                            "No repository path resolved for workflow task diff".to_string(),
+                        )
+                    })?
+                }
+            }
+        }
+    };
+
+    // If the task branch ref is gone (merged + deleted), fall back to a
+    // commit-range diff using the latest terminal commit hash.
+    let branch_exists = {
+        let git_service = services::services::git::GitService::new();
+        let repo_path_owned = repo_path.clone();
+        let branch_owned = task.branch.clone();
+        tokio::task::spawn_blocking(move || {
+            git_service.check_branch_exists(&repo_path_owned, &branch_owned)
+        })
+        .await
+        .map_err(|e| ApiError::Internal(format!("branch-exists check panicked: {e}")))?
+        .unwrap_or(false)
+    };
+
+    let branch_name = task.branch.clone();
+    let base_branch = workflow.target_branch.clone();
+
+    let diffs = if branch_exists {
+        let repo_path_owned = repo_path.clone();
+        tokio::task::spawn_blocking(move || {
+            services::services::git::GitService::new().get_diffs(
+                services::services::git::DiffTarget::Branch {
+                    repo_path: &repo_path_owned,
+                    branch_name: &branch_name,
+                    base_branch: &base_branch,
+                },
+                None,
+            )
+        })
+        .await
+        .map_err(|e| ApiError::Internal(format!("branch diff panicked: {e}")))??
+    } else {
+        // Merged + deleted branch fallback: diff the latest terminal's commit
+        // against its parent (DiffTarget::Commit) so the review survives cleanup.
+        let commit_sha = Terminal::find_by_task(&deployment.db().pool, &task_id)
+            .await?
+            .into_iter()
+            .rev()
+            .find_map(|t| t.last_commit_hash)
+            .ok_or_else(|| {
+                ApiError::NotFound(format!(
+                    "Task branch '{}' not found and no commit hash recorded for fallback diff",
+                    task.branch
+                ))
+            })?;
+
+        let repo_path_owned = repo_path.clone();
+        tokio::task::spawn_blocking(move || {
+            services::services::git::GitService::new().get_diffs(
+                services::services::git::DiffTarget::Commit {
+                    repo_path: &repo_path_owned,
+                    commit_sha: &commit_sha,
+                },
+                None,
+            )
+        })
+        .await
+        .map_err(|e| ApiError::Internal(format!("commit diff panicked: {e}")))??
+    };
+
+    Ok(ResponseJson(ApiResponse::success(diffs)))
 }
 
 /// POST /api/workflows/:workflow_id/prompts/respond
@@ -3949,6 +4102,10 @@ mod workflow_guard_tests {
             completed_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            acceptance_score: None,
+            acceptance_dimensions_json: None,
+            acceptance_verdict: None,
+            acceptance_reviewed_at: None,
         }
     }
 

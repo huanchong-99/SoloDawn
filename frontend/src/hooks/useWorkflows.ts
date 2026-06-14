@@ -8,6 +8,7 @@ import { handleApiResponse, logApiError, makeRequest, ApiError } from '@/lib/api
 import { getErrorMessage } from '@/lib/modals';
 import { useToast } from '@/components/ui/toast';
 import type {
+  Diff,
   WorkflowDetailDto,
   WorkflowListItemDto,
   WorkflowTaskDto,
@@ -298,6 +299,8 @@ export const workflowKeys = {
   forProject: (projectId: string) =>
     ['workflows', 'project', projectId] as const,
   byId: (workflowId: string) => ['workflows', 'detail', workflowId] as const,
+  taskDiff: (workflowId: string, taskId: string) =>
+    ['workflows', 'detail', workflowId, 'task', taskId, 'diff'] as const,
 };
 
 interface UseWorkflowOptions {
@@ -513,6 +516,23 @@ const workflowsApi = {
     );
     return handleApiResponse<WorkflowTaskDto>(response);
   },
+
+  /**
+   * Phase A / FE-2: Per-task branch diff for the orchestration workspace.
+   * Diffs `task.branch` vs `workflow.target_branch` via the backend
+   * `GitService::get_diffs(DiffTarget::Branch { .. })` primitive (no worktree),
+   * returning the same `Diff[]` shape `ChangesPanel` already renders.
+   * Endpoint: `GET /api/workflows/:workflow_id/tasks/:task_id/diff`.
+   */
+  getTaskDiff: async (
+    workflowId: string,
+    taskId: string
+  ): Promise<Diff[]> => {
+    const response = await makeRequest(
+      `/api/workflows/${encodeURIComponent(workflowId)}/tasks/${encodeURIComponent(taskId)}/diff`
+    );
+    return handleApiResponse<Diff[]>(response);
+  },
 };
 
 // ============================================================================
@@ -560,6 +580,32 @@ export function useWorkflow(
       }
       return query.state.error ? false : options.refetchInterval;
     },
+  });
+}
+
+interface UseWorkflowTaskDiffOptions {
+  enabled?: boolean;
+  staleTime?: number;
+}
+
+/**
+ * FE-2 (Phase C step 10): Fetch the per-task branch diff for the orchestration
+ * workspace. Returns the `Diff[]` shape `ChangesPanel`/`ChangesPanelContainer`
+ * consume (via the `taskDiffSource` prop), so orchestration tasks become
+ * auditable without a `Workspace`/worktree (see Q2 spec Break 4).
+ */
+export function useWorkflowTaskDiff(
+  workflowId: string | null | undefined,
+  taskId: string | null | undefined,
+  options?: UseWorkflowTaskDiffOptions
+): UseQueryResult<Diff[], Error> {
+  return useQuery({
+    queryKey: workflowKeys.taskDiff(workflowId ?? '', taskId ?? ''),
+    queryFn: () => workflowsApi.getTaskDiff(workflowId ?? '', taskId ?? ''),
+    enabled:
+      Boolean(workflowId) && Boolean(taskId) && (options?.enabled ?? true),
+    staleTime: options?.staleTime ?? 0,
+    retry: shouldRetryOnServerError,
   });
 }
 

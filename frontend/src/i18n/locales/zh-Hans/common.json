@@ -91,7 +91,6 @@
     "currentBadge": "（当前）"
   },
   "navbar": {
-    "tryNewUI": "试用新界面",
     "workspaces": "工作区",
     "createTaskAria": "创建新任务",
     "settingsAria": "设置",
@@ -236,26 +235,6 @@
     "createNew": "创建新项目",
     "noProjectsFound": "未找到项目"
   },
-  "betaWorkspaces": {
-    "title": "试用新界面",
-    "intro": "我们从头重建了 SoloDawn 的界面，您已被邀请试用。",
-    "newUiDescription": "新界面针对日常工作进行了优化：管理代理、预览更改和审查代码。它还解锁了旧界面中不可用的功能：",
-    "newFeatures": {
-      "multiRepo": "同时编辑多个仓库",
-      "multiAgent": "在单个工作区中运行多个代理对话（甚至跨不同代理）",
-      "commandBar": "使用命令栏更快地导航"
-    },
-    "oldUiDescription": "目前，一些功能仍保留在当前界面中：",
-    "oldFeatures": {
-      "kanban": "在看板上管理任务",
-      "settings": "更改设置",
-      "projects": "管理项目"
-    },
-    "transition": "在接下来几周的过渡期间，您将在两者之间切换。",
-    "optOutNote": "想要退出？您可以随时在设置中切换回当前界面。",
-    "joinBeta": "加入 Beta",
-    "maybeLater": "稍后再说"
-  },
   "workspacesGuide": {
     "welcome": {
       "title": "欢迎",
@@ -338,9 +317,6 @@
     "toggle-all-diffs-expand": "展开所有差异",
     "toggle-left-sidebar-hide": "隐藏左侧边栏",
     "toggle-left-sidebar-show": "显示左侧边栏",
-    "toggle-left-main-panel": "切换聊天面板",
-    "hide-chat-panel": "隐藏聊天面板",
-    "show-chat-panel": "显示聊天面板",
     "toggle-changes-mode": "切换更改面板",
     "hide-changes-panel": "隐藏更改面板",
     "show-changes-panel": "显示更改面板",
@@ -354,7 +330,6 @@
     "toggle-right-sidebar-show": "显示右侧边栏",
     "new-workspace": "新建工作区",
     "open-command-bar": "打开命令栏",
-    "feedback": "提供反馈",
     "workspaces-guide": "工作区指南",
     "settings": "设置",
     "start-review": "让代理审查您的更改"

@@ -7,8 +7,18 @@ import { GitPanelContainer } from '@/components/ui-new/containers/GitPanelContai
 import { useChangesView } from '@/contexts/ChangesViewContext';
 import { useLogsPanel } from '@/contexts/LogsPanelContext';
 import { useWorkspaceContext } from '@/contexts/WorkspaceContext';
-import type { Workspace, RepoWithTargetBranch, WorkflowDetailDto } from 'shared/types';
-import { ArrowSquareOutIcon, GitBranchIcon } from '@phosphor-icons/react';
+import { useOrchestrationDiff } from '@/contexts/OrchestrationDiffContext';
+import type {
+  Workspace,
+  RepoWithTargetBranch,
+  WorkflowDetailDto,
+  WorkflowTaskDto,
+} from 'shared/types';
+import {
+  ArrowSquareOutIcon,
+  GitBranchIcon,
+  GitDiffIcon,
+} from '@phosphor-icons/react';
 import {
   RIGHT_MAIN_PANEL_MODES,
   type RightMainPanelMode,
@@ -36,6 +46,78 @@ function terminalStatusDotClass(status: string): string {
   return 'bg-tertiary';
 }
 
+// FE-2: per-task acceptance-score badge color (0-100). Mirrors the audit
+// scoring buckets used elsewhere; null until a review has run.
+function scoreBadgeClass(score: number): string {
+  if (score >= 80) return 'bg-success/20 text-success';
+  if (score >= 60) return 'bg-brand/20 text-brand';
+  return 'bg-error/20 text-error';
+}
+
+interface ConciergeTaskCardProps {
+  readonly task: WorkflowTaskDto;
+  readonly workflowId: string;
+  readonly onViewChanges: (workflowId: string, taskId: string) => void;
+}
+
+// FE-2 (Phase C step 12): per-task card with a score badge + a "View Changes"
+// affordance that sets the diff target and auto-opens the CHANGES panel, so the
+// orchestration output is auditable per task (Q2 Break 5/6).
+function ConciergeTaskCard({
+  task,
+  workflowId,
+  onViewChanges,
+}: ConciergeTaskCardProps) {
+  const score = task.acceptanceScore;
+  return (
+    <div className="rounded border bg-primary/50 px-half py-half">
+      <div className="flex items-center gap-half">
+        <span
+          className={`inline-block size-2 shrink-0 rounded-full ${taskStatusDotClass(task.status)}`}
+        />
+        <span className="text-xs text-normal truncate">{task.name}</span>
+        {typeof score === 'number' && (
+          <span
+            title={
+              task.acceptanceVerdict
+                ? `Acceptance: ${task.acceptanceVerdict} (${score}/100)`
+                : `Acceptance score ${score}/100`
+            }
+            className={`ml-auto shrink-0 rounded-full px-1.5 py-px text-xs ${scoreBadgeClass(score)}`}
+          >
+            {Math.round(score)}
+          </span>
+        )}
+      </div>
+      {task.branch && (
+        <div className="mt-px flex items-center gap-1 text-xs text-low">
+          <GitBranchIcon className="size-icon-xs shrink-0" />
+          <span className="truncate">{task.branch}</span>
+        </div>
+      )}
+      {(task.terminals ?? []).length > 0 && (
+        <div className="mt-px flex gap-1">
+          {(task.terminals ?? []).map((term) => (
+            <span
+              key={term.id}
+              title={`${term.role ?? 'T' + String(term.orderIndex + 1)}: ${term.status}`}
+              className={`inline-block size-1.5 rounded-full ${terminalStatusDotClass(term.status)}`}
+            />
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => onViewChanges(workflowId, task.id)}
+        className="mt-half flex w-full items-center justify-center gap-1 rounded bg-secondary px-half py-px text-xs text-low hover:text-normal transition-colors"
+      >
+        <GitDiffIcon className="size-icon-xs" />
+        View Changes
+      </button>
+    </div>
+  );
+}
+
 export interface RightSidebarProps {
   readonly isCreateMode: boolean;
   readonly isConciergeMode?: boolean;
@@ -57,6 +139,7 @@ export function RightSidebar({
   const { viewProcessInPanel } = useLogsPanel();
   const { diffs } = useWorkspaceContext();
   const { setExpanded } = useExpandedAll();
+  const { openTaskChanges } = useOrchestrationDiff();
 
   if (isConciergeMode) {
     if (!conciergeWorkflow) {
@@ -93,30 +176,13 @@ export function RightSidebar({
         <div className="flex-1 overflow-y-auto p-base">
           <span className="text-xs font-medium text-low">Tasks ({tasks.length})</span>
           <div className="mt-half flex flex-col gap-half">
-            {tasks.map(task => (
-              <div key={task.id} className="rounded border bg-primary/50 px-half py-half">
-                <div className="flex items-center gap-half">
-                  <span className={`inline-block size-2 shrink-0 rounded-full ${taskStatusDotClass(task.status)}`} />
-                  <span className="text-xs text-normal truncate">{task.name}</span>
-                </div>
-                {task.branch && (
-                  <div className="mt-px flex items-center gap-1 text-xs text-low">
-                    <GitBranchIcon className="size-icon-xs shrink-0" />
-                    <span className="truncate">{task.branch}</span>
-                  </div>
-                )}
-                {(task.terminals ?? []).length > 0 && (
-                  <div className="mt-px flex gap-1">
-                    {(task.terminals ?? []).map(term => (
-                      <span
-                        key={term.id}
-                        title={`${term.role ?? 'T' + String(term.orderIndex + 1)}: ${term.status}`}
-                        className={`inline-block size-1.5 rounded-full ${terminalStatusDotClass(term.status)}`}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
+            {tasks.map((task) => (
+              <ConciergeTaskCard
+                key={task.id}
+                task={task}
+                workflowId={conciergeWorkflow.id}
+                onViewChanges={openTaskChanges}
+              />
             ))}
           </div>
         </div>

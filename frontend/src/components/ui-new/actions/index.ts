@@ -16,7 +16,6 @@ import {
   TextAlignLeftIcon,
   EyeSlashIcon,
   SidebarSimpleIcon,
-  ChatsTeardropIcon,
   GitDiffIcon,
   TerminalIcon,
   CaretDoubleUpIcon,
@@ -32,9 +31,6 @@ import {
   PencilSimpleIcon,
   ArrowUpIcon,
   HighlighterIcon,
-  ListIcon,
-  MegaphoneIcon,
-  QuestionIcon,
 } from '@phosphor-icons/react';
 import { useDiffViewStore } from '@/stores/useDiffViewStore';
 import {
@@ -53,8 +49,6 @@ import { ResolveConflictsDialog } from '@/components/ui-new/dialogs/ResolveConfl
 import { RenameWorkspaceDialog } from '@/components/ui-new/dialogs/RenameWorkspaceDialog';
 import { CreatePRDialog } from '@/components/dialogs/tasks/CreatePRDialog';
 import { StartReviewDialog } from '@/components/dialogs/tasks/StartReviewDialog';
-import posthog from 'posthog-js';
-import { WorkspacesGuideDialog } from '@/components/ui-new/dialogs/WorkspacesGuideDialog';
 
 // Mirrored sidebar icon for right sidebar toggle
 const RightSidebarIcon: Icon = forwardRef<SVGSVGElement, IconProps>(
@@ -372,40 +366,6 @@ export const Actions = {
     },
   },
 
-  Feedback: {
-    id: 'feedback',
-    label: 'Give Feedback',
-    icon: MegaphoneIcon,
-    requiresTarget: false,
-    execute: () => {
-      posthog.displaySurvey('019bb6e8-3d36-0000-1806-7330cd3c727e');
-    },
-  },
-
-  WorkspacesGuide: {
-    id: 'workspaces-guide',
-    label: 'Workspaces Guide',
-    icon: QuestionIcon,
-    requiresTarget: false,
-    execute: async () => {
-      await WorkspacesGuideDialog.show();
-    },
-  },
-
-  OpenCommandBar: {
-    id: 'open-command-bar',
-    label: 'Open Command Bar',
-    icon: ListIcon,
-    requiresTarget: false,
-    execute: async () => {
-      // Dynamic import to avoid circular dependency (pages.ts imports Actions)
-      const { CommandBarDialog } = await import(
-        '@/components/ui-new/dialogs/CommandBarDialog'
-      );
-      CommandBarDialog.show();
-    },
-  },
-
   // === Diff View Actions ===
   ToggleDiffViewMode: {
     id: 'toggle-diff-view-mode',
@@ -470,23 +430,6 @@ export const Actions = {
     isActive: (ctx) => ctx.isLeftSidebarVisible,
     execute: () => {
       useUiPreferencesStore.getState().toggleLeftSidebar();
-    },
-  },
-
-  ToggleLeftMainPanel: {
-    id: 'toggle-left-main-panel',
-    label: 'Toggle Chat Panel',
-    icon: ChatsTeardropIcon,
-    requiresTarget: false,
-    isActive: (ctx) => ctx.isLeftMainPanelVisible,
-    isEnabled: (ctx) =>
-      !(ctx.isLeftMainPanelVisible && ctx.rightMainPanelMode === null),
-    getLabel: (ctx) =>
-      ctx.isLeftMainPanelVisible ? 'Hide Chat Panel' : 'Show Chat Panel',
-    execute: (ctx) => {
-      useUiPreferencesStore
-        .getState()
-        .toggleLeftMainPanel(ctx.currentWorkspaceId ?? undefined);
     },
   },
 
@@ -923,16 +866,12 @@ export const NavbarActionGroups = {
     Actions.ToggleAllDiffs,
     NavbarDivider,
     Actions.ToggleLeftSidebar,
-    Actions.ToggleLeftMainPanel,
     Actions.ToggleChangesMode,
     Actions.ToggleLogsMode,
     Actions.TogglePreviewMode,
     Actions.ToggleRightSidebar,
     NavbarDivider,
     Actions.NewWorkspace,
-    Actions.OpenCommandBar,
-    Actions.Feedback,
-    Actions.WorkspacesGuide,
     Actions.Settings,
   ] as NavbarItem[],
 };

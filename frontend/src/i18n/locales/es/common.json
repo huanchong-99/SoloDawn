@@ -87,9 +87,7 @@
     "selectPlaceholder": "Seleccionar una organización",
     "currentBadge": " (actual)"
   },
-  "navbar": {
-    "tryNewUI": "prueba la nueva interfaz"
-  },
+  "navbar": {},
   "signOut": "Cerrar sesión",
   "devMode": {
     "banner": "Modo de Desarrollo - Esta es una compilación de desarrollo"
@@ -214,26 +212,6 @@
     "createNew": "Crear nuevo proyecto",
     "noProjectsFound": "No se encontraron proyectos"
   },
-  "betaWorkspaces": {
-    "title": "Prueba la nueva interfaz",
-    "intro": "Hemos reconstruido la interfaz de SoloDawn desde cero, y has sido invitado a probarla.",
-    "newUiDescription": "La nueva interfaz está optimizada para el trabajo diario: gestionar agentes, previsualizar cambios y revisar código. También desbloquea funciones que no están disponibles en la interfaz anterior:",
-    "newFeatures": {
-      "multiRepo": "Edita múltiples repositorios al mismo tiempo",
-      "multiAgent": "Ejecuta múltiples conversaciones de agentes (incluso entre diferentes agentes) en un solo espacio de trabajo",
-      "commandBar": "Navegación más rápida con la barra de comandos"
-    },
-    "oldUiDescription": "Por ahora, algunas cosas todavía permanecen en la interfaz actual:",
-    "oldFeatures": {
-      "kanban": "Gestión de tareas en el tablero kanban",
-      "settings": "Cambiar configuración",
-      "projects": "Gestión de proyectos"
-    },
-    "transition": "Durante la transición en las próximas semanas, te moverás entre ambas.",
-    "optOutNote": "¿Quieres salir? Puedes volver a la interfaz actual en cualquier momento en Configuración.",
-    "joinBeta": "Unirse a Beta",
-    "maybeLater": "Quizás más tarde"
-  },
   "workspacesGuide": {
     "welcome": {
       "title": "Bienvenido",
@@ -292,9 +270,6 @@
     "toggle-all-diffs-expand": "Expandir todas las diferencias",
     "toggle-left-sidebar-hide": "Ocultar barra lateral izquierda",
     "toggle-left-sidebar-show": "Mostrar barra lateral izquierda",
-    "toggle-left-main-panel": "Alternar panel de chat",
-    "hide-chat-panel": "Ocultar panel de chat",
-    "show-chat-panel": "Mostrar panel de chat",
     "toggle-changes-mode": "Alternar panel de cambios",
     "hide-changes-panel": "Ocultar panel de cambios",
     "show-changes-panel": "Mostrar panel de cambios",
@@ -308,7 +283,6 @@
     "toggle-right-sidebar-show": "Mostrar barra lateral derecha",
     "new-workspace": "Nuevo espacio de trabajo",
     "open-command-bar": "Abrir barra de comandos",
-    "feedback": "Enviar comentarios",
     "workspaces-guide": "Guía de espacios de trabajo",
     "settings": "Configuración",
     "start-review": "Pedir al agente que revise tus cambios"

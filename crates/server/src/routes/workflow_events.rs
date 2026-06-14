@@ -97,6 +97,10 @@ pub enum WsEventType {
     /// Quality gate result for a terminal checkpoint
     #[serde(rename = "quality.gate_result")]
     QualityGateResult,
+
+    /// Acceptance review result (5-dimension score) for a terminal completion
+    #[serde(rename = "acceptance.review_result")]
+    AcceptanceReviewResult,
 }
 
 // ============================================================================
@@ -451,6 +455,29 @@ impl WsEvent {
                 Some((
                     workflow_id,
                     Self::new(WsEventType::QualityGateResult, payload),
+                ))
+            }
+
+            // Acceptance review result event (5-dimension score)
+            BusMessage::TerminalAcceptanceReview(event) => {
+                let workflow_id = event.workflow_id.clone();
+                let payload = json!({
+                    "workflowId": &event.workflow_id,
+                    "taskId": &event.task_id,
+                    "terminalId": &event.terminal_id,
+                    "totalScore": event.total_score,
+                    "dimensions": &event.dimensions,
+                    "verdict": &event.verdict,
+                    "passed": event.passed,
+                    // snake_case duplicates for legacy compat
+                    "workflow_id": &event.workflow_id,
+                    "task_id": &event.task_id,
+                    "terminal_id": &event.terminal_id,
+                    "total_score": event.total_score
+                });
+                Some((
+                    workflow_id,
+                    Self::new(WsEventType::AcceptanceReviewResult, payload),
                 ))
             }
 

@@ -62,18 +62,6 @@ export function WorkspaceSummary({
   const isFailed =
     latestProcessStatus === 'failed' || latestProcessStatus === 'killed';
 
-  const handleOpenCommandBar = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    void import('@/components/ui-new/dialogs/CommandBarDialog').then(
-      ({ CommandBarDialog }) => {
-        CommandBarDialog.show({
-          page: 'workspaceActions',
-          workspaceId,
-        });
-      }
-    );
-  };
-
   return (
     <div
       className={cn(
@@ -211,17 +199,17 @@ export function WorkspaceSummary({
       </button>
 
       {/* Right-side hover action - more options only */}
-      {workspaceId && (
+      {workspaceId && onDelete && (
         <div className="absolute right-0 top-0 bottom-0 flex items-center opacity-0 group-hover:opacity-100">
           {/* Gradient fade from transparent to background */}
           <div className="h-full w-6 pointer-events-none bg-gradient-to-r from-transparent to-secondary" />
           {/* Single action button */}
           <div className="flex items-center pr-base h-full bg-secondary">
             <button
-              onClick={onDelete ?? handleOpenCommandBar}
+              onClick={onDelete}
               onPointerDown={(e) => e.stopPropagation()}
               className="p-1.5 rounded-sm text-low hover:text-normal hover:bg-tertiary"
-              title={onDelete ? t('workspaces.delete', { defaultValue: 'Delete' }) : t('workspaces.more')}
+              title={t('workspaces.delete', { defaultValue: 'Delete' })}
             >
               <DotsThreeIcon className="size-5" weight="bold" />
             </button>

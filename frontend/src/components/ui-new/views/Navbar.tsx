@@ -175,7 +175,7 @@ export function Navbar({
         className
       )}
     >
-      {/* Left - Archive & Old UI Link */}
+      {/* Left - Archive */}
       <div className="flex-1 flex items-center gap-base">
         {leftItems.map((item, index) =>
           renderItem(

@@ -490,4 +490,83 @@
   }
 }
 
+/* ── Create-mode welcome hero ──────────────────────────────────────────── */
+@layer components {
+  /* Staggered entrance: each .hero-reveal child sets --hero-i for delay. */
+  .new-design .hero-reveal {
+    opacity: 0;
+    transform: translateY(10px);
+    animation: hero-rise 0.62s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation-delay: calc(var(--hero-i, 0) * 90ms);
+  }
+
+  /* The dawn mark scales up from the horizon as it fades in. */
+  .new-design .hero-mark {
+    opacity: 0;
+    transform: translateY(14px) scale(0.92);
+    animation: hero-mark-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  /* Slow sunrise pulse on the mark's halo + rays. */
+  .new-design .hero-mark-halo {
+    transform-origin: 50% 64%;
+    animation: hero-halo 5.5s ease-in-out infinite;
+  }
+
+  .new-design .hero-mark-rays {
+    transform-origin: 50% 64%;
+    animation: hero-rays 5.5s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .new-design .hero-reveal,
+    .new-design .hero-mark {
+      animation-duration: 0.01ms;
+      animation-delay: 0ms;
+      opacity: 1;
+      transform: none;
+    }
+    .new-design .hero-mark-halo,
+    .new-design .hero-mark-rays {
+      animation: none;
+    }
+  }
+}
+
+@keyframes hero-rise {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hero-mark-in {
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes hero-halo {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes hero-rays {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 @config '../../../tailwind.new.config.js';

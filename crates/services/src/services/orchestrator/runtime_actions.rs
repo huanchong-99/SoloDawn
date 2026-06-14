@@ -334,6 +334,10 @@ impl RuntimeActionService {
             completed_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            acceptance_score: None,
+            acceptance_dimensions_json: None,
+            acceptance_verdict: None,
+            acceptance_reviewed_at: None,
         };
 
         let task = WorkflowTask::create(&self.db.pool, &task).await?;

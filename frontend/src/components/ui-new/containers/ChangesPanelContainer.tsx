@@ -11,7 +11,18 @@ import { sortDiffs } from '@/utils/fileTreeUtils';
 import { useChangesView } from '@/contexts/ChangesViewContext';
 import { useWorkspaceContext } from '@/contexts/WorkspaceContext';
 import { useTask } from '@/hooks/useTask';
+import { useWorkflow, useWorkflowTaskDiff } from '@/hooks/useWorkflows';
 import type { Diff, DiffChangeKind } from 'shared/types';
+
+/**
+ * FE-2 (Phase C step 11): alternate, orchestration-mode diff source. When set,
+ * `ChangesPanelContainer` renders the per-task branch diff (via the Phase-A
+ * endpoint) instead of the `Workspace`/worktree-scoped `useWorkspaceContext().diffs`.
+ * Either pass `diffs` pre-fetched, or `{ workflowId, taskId }` to fetch lazily.
+ */
+export type TaskDiffSource =
+  | { readonly workflowId: string; readonly taskId: string; readonly diffs?: undefined }
+  | { readonly diffs: Diff[]; readonly workflowId?: undefined; readonly taskId?: undefined };
 
 // Auto-collapse defaults based on change type (matches DiffsPanel behavior)
 const COLLAPSE_BY_CHANGE_TYPE: Record<DiffChangeKind, boolean> = {
@@ -137,16 +148,48 @@ interface ChangesPanelContainerProps {
   className?: string;
   /** Attempt ID for opening files in IDE */
   attemptId?: string;
+  /**
+   * FE-2: orchestration-mode diff source. When provided, the panel renders
+   * these per-task branch diffs instead of `useWorkspaceContext().diffs`.
+   */
+  taskDiffSource?: TaskDiffSource;
 }
 
 export function ChangesPanelContainer({
   className,
   attemptId,
+  taskDiffSource,
 }: Readonly<ChangesPanelContainerProps>) {
-  const { diffs, workspace } = useWorkspaceContext();
+  const { diffs: workspaceDiffs, workspace } = useWorkspaceContext();
   const { data: task } = useTask(workspace?.taskId, {
     enabled: !!workspace?.taskId,
   });
+
+  // FE-2: when a task diff source is supplied (orchestration mode), fetch the
+  // per-task branch diff (unless pre-fetched diffs were passed) and use it +
+  // the workflow's projectId for @-mentions instead of the workspace-scoped data.
+  const isOrchestrationSource = !!taskDiffSource;
+  const sourceWorkflowId = taskDiffSource?.workflowId;
+  const sourceTaskId = taskDiffSource?.taskId;
+  const { data: fetchedTaskDiffs } = useWorkflowTaskDiff(
+    sourceWorkflowId ?? null,
+    sourceTaskId ?? null,
+    { enabled: !!sourceWorkflowId && !!sourceTaskId && !taskDiffSource?.diffs }
+  );
+  const { data: sourceWorkflow } = useWorkflow(sourceWorkflowId ?? '', {
+    retry: false,
+  });
+
+  const diffs = useMemo(
+    () =>
+      isOrchestrationSource
+        ? (taskDiffSource?.diffs ?? fetchedTaskDiffs ?? [])
+        : workspaceDiffs,
+    [isOrchestrationSource, taskDiffSource?.diffs, fetchedTaskDiffs, workspaceDiffs]
+  );
+  const projectId = isOrchestrationSource
+    ? sourceWorkflow?.projectId
+    : task?.projectId;
   const { selectedFilePath, setFileInView } = useChangesView();
   const diffRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -210,7 +253,7 @@ export function ChangesPanelContainer({
       className={className}
       diffItems={diffItems}
       onDiffRef={handleDiffRef}
-      projectId={task?.projectId}
+      projectId={projectId}
       attemptId={attemptId}
     />
   );

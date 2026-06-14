@@ -15,7 +15,22 @@ mergeTerminalCliId: string | null,
  */
 mergeTerminalModelId: string | null, targetBranch: string, gitWatcherEnabled: boolean, readyAt: string | null, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, tasks: Array<WorkflowTaskDto>, commands: Array<WorkflowCommandDto>, };
 
-export type WorkflowTaskDto = { id: string, workflowId: string, vkTaskId: string | null, name: string, description: string | null, branch: string, status: string, orderIndex: number, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, terminals: Array<TerminalDto>, };
+export type WorkflowTaskDto = { id: string, workflowId: string, vkTaskId: string | null, name: string, description: string | null, branch: string, status: string, orderIndex: number, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, 
+/**
+ * Acceptance review total score (0-100). `None` until a review has run
+ * (Phase B4: surfaced so the orchestration UI can audit it per task).
+ */
+acceptanceScore: number | null, 
+/**
+ * Acceptance review verdict ("approved" | "rejected"). `None` until a
+ * review has run.
+ */
+acceptanceVerdict: string | null, 
+/**
+ * JSON-serialized per-dimension acceptance breakdown (`AuditDimensions`).
+ * `None` until a review has run.
+ */
+acceptanceDimensionsJson: string | null, terminals: Array<TerminalDto>, };
 
 export type TerminalDto = { id: string, workflowTaskId: string, cliTypeId: string, modelConfigId: string, customBaseUrl: string | null, customApiKey?: string, role: string | null, roleDescription: string | null, orderIndex: number, status: TerminalStatus, autoConfirm: boolean, lastCommitHash: string | null, lastCommitMessage: string | null, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, };
 
@@ -671,7 +686,7 @@ timestamp: string,
  */
 id: string, };
 
-export type WsEventType = "workflow.status_changed" | "terminal.status_changed" | "task.status_changed" | "terminal.completed" | "git.commit_detected" | "orchestrator.awakened" | "orchestrator.decision" | "system.heartbeat" | "system.lagged" | "system.error" | "terminal.prompt_detected" | "terminal.prompt_decision" | "provider.switched" | "provider.exhausted" | "provider.recovered" | "quality.gate_result";
+export type WsEventType = "workflow.status_changed" | "terminal.status_changed" | "task.status_changed" | "terminal.completed" | "git.commit_detected" | "orchestrator.awakened" | "orchestrator.decision" | "system.heartbeat" | "system.lagged" | "system.error" | "terminal.prompt_detected" | "terminal.prompt_decision" | "provider.switched" | "provider.exhausted" | "provider.recovered" | "quality.gate_result" | "acceptance.review_result";
 
 export type WorkflowStatus = "created" | "starting" | "ready" | "running" | "paused" | "merging" | "completed" | "failed" | "cancelled";
 

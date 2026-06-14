@@ -44,6 +44,8 @@ interface CreateChatBoxProps {
   readonly editor: EditorProps;
   readonly onSend: () => void;
   readonly isSending: boolean;
+  /** Editor placeholder (defaults to a SoloDawn-flavored prompt). */
+  readonly placeholder?: string;
   readonly executor: ExecutorProps;
   readonly modelConfig?: ModelConfigProps;
   readonly variant?: VariantProps;
@@ -67,6 +69,7 @@ export function CreateChatBox({
   editor,
   onSend,
   isSending,
+  placeholder,
   executor,
   modelConfig,
   variant,
@@ -110,7 +113,9 @@ export function CreateChatBox({
   return (
     <ChatBoxBase
       editor={editor}
-      placeholder="Describe the task..."
+      placeholder={
+        placeholder ?? t('conversation.createLanding.placeholder')
+      }
       onCmdEnter={handleCmdEnter}
       disabled={isSending}
       projectId={projectId}

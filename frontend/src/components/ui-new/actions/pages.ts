@@ -86,8 +86,6 @@ export const Pages: Record<StaticPageId, CommandBarPage> = {
         type: 'group',
         label: 'General',
         items: [
-          { type: 'action', action: Actions.Feedback },
-          { type: 'action', action: Actions.WorkspacesGuide },
           { type: 'action', action: Actions.Settings },
         ],
       },
@@ -156,7 +154,6 @@ export const Pages: Record<StaticPageId, CommandBarPage> = {
         label: 'Panels',
         items: [
           { type: 'action', action: Actions.ToggleLeftSidebar },
-          { type: 'action', action: Actions.ToggleLeftMainPanel },
           { type: 'action', action: Actions.ToggleRightSidebar },
           { type: 'action', action: Actions.ToggleChangesMode },
           { type: 'action', action: Actions.ToggleLogsMode },

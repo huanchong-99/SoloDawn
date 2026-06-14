@@ -1,6 +1,7 @@
 //! Orchestrator 类型定义
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 // ============================================================================
 // Prompt Types (re-exported from terminal module for convenience)
@@ -463,6 +464,9 @@ pub struct AcceptanceReviewResult {
     pub fix_instructions: String,
     /// Numerical score from the scoring-based audit (None for legacy binary reviews).
     pub score: Option<f64>,
+    /// Per-dimension breakdown from the scoring-based audit (None for legacy
+    /// binary reviews). Carried through so Phase B can persist + emit it.
+    pub dimensions: Option<AuditDimensions>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -477,6 +481,7 @@ impl AcceptanceReviewResult {
             verdict: AcceptanceVerdict::Approved,
             fix_instructions: String::new(),
             score: None,
+            dimensions: None,
         }
     }
 
@@ -485,6 +490,7 @@ impl AcceptanceReviewResult {
             verdict: AcceptanceVerdict::Rejected,
             fix_instructions: fix_instructions.into(),
             score: None,
+            dimensions: None,
         }
     }
 
@@ -526,6 +532,7 @@ impl AcceptanceReviewResult {
                 verdict,
                 fix_instructions,
                 score: None,
+                dimensions: None,
             }
         } else {
             // Fallback: check for REJECTED keyword in raw text
@@ -545,7 +552,8 @@ impl AcceptanceReviewResult {
 // ============================================================================
 
 /// Five-dimension scoring result from the audit LLM
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct AuditScoreResult {
     pub total_score: f64,
     pub passed: bool,
@@ -553,7 +561,8 @@ pub struct AuditScoreResult {
     pub fix_instructions: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct AuditDimensions {
     pub buildability: DimensionScore,
     pub functional_completeness: DimensionScore,
@@ -562,14 +571,16 @@ pub struct AuditDimensions {
     pub engineering_docs: DimensionScore,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct DimensionScore {
     pub score: f64,
     pub max_score: f64,
     pub details: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct CodeQualityScore {
     pub architecture: DimensionScore,
     pub standards: DimensionScore,
@@ -679,10 +690,12 @@ impl AuditScoreResult {
         if self.passed {
             let mut r = AcceptanceReviewResult::approved();
             r.score = Some(self.total_score);
+            r.dimensions = Some(self.dimensions.clone());
             r
         } else {
             let mut r = AcceptanceReviewResult::rejected(self.format_rejection());
             r.score = Some(self.total_score);
+            r.dimensions = Some(self.dimensions.clone());
             r
         }
     }
@@ -815,6 +828,29 @@ pub struct QualityGateResultEvent {
     pub summary: String,
     /// Fix instructions for terminals that failed quality gate
     pub fix_instructions: Option<String>,
+}
+
+/// Result of a 5-dimension acceptance review for a terminal completion.
+///
+/// Phase B3: published on the workflow bus (`BusMessage::TerminalAcceptanceReview`)
+/// and forwarded to WS clients as `acceptance.review_result`, mirroring
+/// [`QualityGateResultEvent`] / `quality.gate_result`. Carries the acceptance
+/// SCORE (which the quality gate event does not), so the orchestration UI can
+/// surface + audit it per task.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcceptanceReviewResultEvent {
+    pub workflow_id: String,
+    pub task_id: String,
+    pub terminal_id: String,
+    /// Acceptance total score (0-100). `None` for legacy binary reviews that
+    /// produced no numeric score.
+    pub total_score: Option<f64>,
+    /// Per-dimension breakdown (`None` for legacy binary reviews).
+    pub dimensions: Option<AuditDimensions>,
+    /// Review verdict: "approved" | "rejected".
+    pub verdict: String,
+    /// Whether the review passed (verdict == approved).
+    pub passed: bool,
 }
 
 #[cfg(test)]

@@ -70,6 +70,15 @@ pub struct WorkflowTaskDto {
     pub completed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Acceptance review total score (0-100). `None` until a review has run
+    /// (Phase B4: surfaced so the orchestration UI can audit it per task).
+    pub acceptance_score: Option<f64>,
+    /// Acceptance review verdict ("approved" | "rejected"). `None` until a
+    /// review has run.
+    pub acceptance_verdict: Option<String>,
+    /// JSON-serialized per-dimension acceptance breakdown (`AuditDimensions`).
+    /// `None` until a review has run.
+    pub acceptance_dimensions_json: Option<String>,
     pub terminals: Vec<TerminalDto>,
 }
 
@@ -263,6 +272,9 @@ impl WorkflowTaskDto {
             completed_at: task.completed_at.map(|dt| dt.to_rfc3339()),
             created_at: task.created_at.to_rfc3339(),
             updated_at: task.updated_at.to_rfc3339(),
+            acceptance_score: task.acceptance_score,
+            acceptance_verdict: task.acceptance_verdict.clone(),
+            acceptance_dimensions_json: task.acceptance_dimensions_json.clone(),
             terminals: terminals_dto,
         }
     }
@@ -453,6 +465,9 @@ mod tests {
                 completed_at: None,
                 created_at: "2026-01-24T10:00:00Z".to_string(),
                 updated_at: "2026-01-24T10:00:00Z".to_string(),
+                acceptance_score: None,
+                acceptance_verdict: None,
+                acceptance_dimensions_json: None,
                 terminals: vec![],
             };
 

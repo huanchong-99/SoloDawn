@@ -27,6 +27,7 @@ import {
   useTogglePlanningFeishuSync,
 } from '@/hooks/usePlanningDraft';
 import { CreateChatBox } from '../primitives/CreateChatBox';
+import { WelcomeHero, ExampleChips } from '../primitives/WelcomeHero';
 import { AuditDocPanel } from './AuditDocPanel';
 import { QualityGateConfirmDialog } from '@/components/quality/QualityGateConfirmDialog';
 
@@ -686,12 +687,15 @@ export function CreateChatBoxContainer() {
 
   if (!projectId) {
     return (
-      <div className="flex h-full w-full items-center justify-center">
-        <div className="text-center max-w-sm">
-          <h2 className="text-lg font-medium text-high mb-2">
+      <div className="flex flex-1 h-full flex-col items-center justify-center gap-double overflow-y-auto px-base py-double @container">
+        <WelcomeHero />
+        <div className="flex w-chat max-w-full flex-col items-center gap-half rounded-md border border-brand/20 bg-secondary/40 px-double py-base text-center">
+          <h2 className="font-space-grotesk text-lg font-semibold text-high">
             {t('workspace.selectProjectTitle')}
           </h2>
-          <p className="text-sm text-low">{t('workspace.selectProjectHint')}</p>
+          <p className="font-ibm-plex-sans text-sm text-low">
+            {t('workspace.selectProjectHint')}
+          </p>
         </div>
       </div>
     );
@@ -764,23 +768,70 @@ export function CreateChatBoxContainer() {
           </>
         )}
 
-        {/* Input area — same CreateChatBox for both phases */}
-        <div
-          className={
-            isInPlanningMode
-              ? 'shrink-0 pb-[48px]'
-              : 'flex-1 flex flex-col justify-end'
-          }
-        >
+        {/* Empty-state welcome hero (create mode, no draft yet) */}
+        {!isInPlanningMode && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-double overflow-y-auto px-base pt-double @container">
+            <WelcomeHero />
+            <div className="flex w-full flex-col items-center gap-double">
+              <div className="flex w-full justify-center">
+                <CreateChatBox
+                  editor={{
+                    value: message,
+                    onChange: setMessage,
+                  }}
+                  onSend={handleInitialSubmit}
+                  isSending={isCreatingDraft || isThinking}
+                  executor={{
+                    selected: effectiveProfile?.executor ?? null,
+                    options: Object.keys(profiles || {}) as BaseCodingAgent[],
+                    onChange: handleExecutorChange,
+                  }}
+                  modelConfig={
+                    availableModels.length > 0
+                      ? {
+                          customModels,
+                          officialModels,
+                          selectedId: selectedModelConfigId,
+                          onChange: setSelectedModelConfigId,
+                        }
+                      : undefined
+                  }
+                  variant={
+                    effectiveProfile
+                      ? {
+                          selected: effectiveProfile.variant ?? 'DEFAULT',
+                          options: variantOptions,
+                          onChange: handleVariantChange,
+                        }
+                      : undefined
+                  }
+                  saveAsDefault={{
+                    checked: saveAsDefault,
+                    onChange: setSaveAsDefault,
+                    visible: hasChangedFromDefault,
+                  }}
+                  error={displayError}
+                  projectId={projectId}
+                  agent={effectiveProfile?.executor ?? null}
+                  onPasteFiles={uploadFiles}
+                  localImages={localImages}
+                />
+              </div>
+              <ExampleChips onPickExample={setMessage} />
+            </div>
+          </div>
+        )}
+
+        {/* Input area — planning conversation phase (pinned to bottom) */}
+        {isInPlanningMode && (
+        <div className="shrink-0 pb-[48px]">
           <div className="flex justify-center @container">
             <CreateChatBox
               editor={{
                 value: message,
                 onChange: setMessage,
               }}
-              onSend={
-                isInPlanningMode ? handlePlanningMessage : handleInitialSubmit
-              }
+              onSend={handlePlanningMessage}
               isSending={isCreatingDraft || isThinking}
               executor={{
                 selected: effectiveProfile?.executor ?? null,
@@ -816,19 +867,12 @@ export function CreateChatBoxContainer() {
               agent={effectiveProfile?.executor ?? null}
               onPasteFiles={uploadFiles}
               localImages={localImages}
-              sendLabel={
-                isInPlanningMode
-                  ? tTasks('conversation.actions.send')
-                  : undefined
-              }
-              sendingLabel={
-                isInPlanningMode
-                  ? tTasks('conversation.planning.thinking')
-                  : undefined
-              }
+              sendLabel={tTasks('conversation.actions.send')}
+              sendingLabel={tTasks('conversation.planning.thinking')}
             />
           </div>
         </div>
+        )}
       </div>
 
       {/* Audit document panel (right side, planning mode only) */}

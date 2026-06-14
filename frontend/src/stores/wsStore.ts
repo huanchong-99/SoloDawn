@@ -29,6 +29,7 @@ export type WsEventType =
   | 'terminal.prompt_detected'
   | 'terminal.prompt_decision'
   | 'quality.gate_result'
+  | 'acceptance.review_result'
   | 'provider.switched'
   | 'provider.exhausted'
   | 'provider.recovered';
@@ -591,6 +592,36 @@ function normalizeTerminalPromptDecisionPayload(payload: unknown): unknown {
   );
 }
 
+function normalizeAcceptanceReviewPayload(payload: unknown): unknown {
+  if (!isJsonRecord(payload)) {
+    return payload;
+  }
+
+  const workflowId = getStringField(payload, 'workflowId', 'workflow_id');
+  const taskId = getStringField(payload, 'taskId', 'task_id');
+  const terminalId = getStringField(payload, 'terminalId', 'terminal_id');
+
+  if (!workflowId || !taskId || !terminalId) {
+    return payload;
+  }
+
+  const totalScore = getNumberField(payload, 'totalScore', 'total_score') ?? 0;
+  const verdict = getStringField(payload, 'verdict') ?? '';
+  const passed = getBooleanField(payload, 'passed') ?? false;
+
+  const normalizedPayload: AcceptanceReviewPayload = {
+    workflowId,
+    taskId,
+    terminalId,
+    totalScore,
+    dimensions: payload.dimensions ?? payload.dimensions_json,
+    verdict,
+    passed,
+  };
+
+  return normalizedPayload;
+}
+
 function normalizeWorkflowEventPayload(
   eventType: string,
   payload: unknown
@@ -602,6 +633,8 @@ function normalizeWorkflowEventPayload(
       return normalizeTerminalPromptDetectedPayload(payload);
     case 'terminal.prompt_decision':
       return normalizeTerminalPromptDecisionPayload(payload);
+    case 'acceptance.review_result':
+      return normalizeAcceptanceReviewPayload(payload);
     case 'provider.switched':
       console.warn('[wsStore] Provider switched:', payload);
       return payload;
@@ -1584,6 +1617,16 @@ export interface QualityGateResultPayload {
   commitHash?: string;
 }
 
+export interface AcceptanceReviewPayload {
+  workflowId: string;
+  taskId: string;
+  terminalId: string;
+  totalScore: number;
+  dimensions?: unknown;
+  verdict: string;
+  passed: boolean;
+}
+
 export type TerminalPromptKind =
   | 'enter_confirm'
   | 'yes_no'
@@ -1690,6 +1733,7 @@ export type WorkflowEventHandlers = {
   onTerminalPromptDecision?: (payload: TerminalPromptDecisionPayload) => void;
   onGitCommitDetected?: (payload: GitCommitPayload) => void;
   onQualityGateResult?: (payload: QualityGateResultPayload) => void;
+  onAcceptanceReviewResult?: (payload: AcceptanceReviewPayload) => void;
   onSystemError?: (payload: SystemErrorPayload) => void;
   onSystemLagged?: (payload: SystemLaggedPayload) => void;
   // G08-002 / G08-008: Provider failover event handlers
@@ -1752,6 +1796,7 @@ export function useWorkflowEvents(
       ['onTerminalPromptDecision', 'terminal.prompt_decision'],
       ['onGitCommitDetected', 'git.commit_detected'],
       ['onQualityGateResult', 'quality.gate_result'],
+      ['onAcceptanceReviewResult', 'acceptance.review_result'],
       ['onSystemError', 'system.error'],
       ['onSystemLagged', 'system.lagged'],
       // G08-008 / G17-002: Provider failover events

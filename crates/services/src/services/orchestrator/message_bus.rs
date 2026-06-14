@@ -10,8 +10,8 @@ use super::{
     constants::WORKFLOW_TOPIC_PREFIX,
     resilient_llm::ProviderEvent,
     types::{
-        OrchestratorInstruction, PromptDecision, QualityGateResultEvent, TerminalCompletionEvent,
-        TerminalPromptEvent,
+        AcceptanceReviewResultEvent, OrchestratorInstruction, PromptDecision,
+        QualityGateResultEvent, TerminalCompletionEvent, TerminalPromptEvent,
     },
 };
 
@@ -75,6 +75,8 @@ pub enum BusMessage {
     },
     /// Quality gate result for a terminal checkpoint
     TerminalQualityGateResult(QualityGateResultEvent),
+    /// Acceptance review result (5-dimension score) for a terminal completion
+    TerminalAcceptanceReview(AcceptanceReviewResultEvent),
     Shutdown,
 }
 
@@ -818,6 +820,21 @@ impl MessageBus {
                 workflow_id = %workflow_id,
                 error = %e,
                 "Failed to publish quality gate result event (non-fatal)"
+            );
+        }
+    }
+
+    /// Publishes an acceptance review result event (5-dimension score).
+    pub async fn publish_acceptance_review_result(&self, event: AcceptanceReviewResultEvent) {
+        let workflow_id = event.workflow_id.clone();
+        if let Err(e) = self
+            .publish_workflow_event(&workflow_id, BusMessage::TerminalAcceptanceReview(event))
+            .await
+        {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                error = %e,
+                "Failed to publish acceptance review result event (non-fatal)"
             );
         }
     }

@@ -8,11 +8,20 @@ import {
   ChatCircleIcon,
   ArrowSquareOutIcon,
   GearIcon,
+  GitDiffIcon,
 } from '@phosphor-icons/react';
 import type { ConciergeMessage, ConciergeSession } from '@/lib/conciergeApi';
 import type { WorkflowDetailDto } from 'shared/types';
 import { useTranslation } from 'react-i18next';
 import { getWorkflowDisplayStatus } from '@/utils/workflowDisplayStatus';
+import { useOrchestrationDiff } from '@/contexts/OrchestrationDiffContext';
+
+// FE-2: per-task acceptance-score badge color (0-100); null until reviewed.
+function scoreBadgeClass(score: number): string {
+  if (score >= 80) return 'bg-success/20 text-success';
+  if (score >= 60) return 'bg-brand/20 text-brand';
+  return 'bg-error/20 text-error';
+}
 
 function workflowStatusClass(status: string): string {
   if (status === 'running' || status === 'completed')
@@ -221,6 +230,7 @@ function WorkflowProgressPanel({
   readonly workflow: WorkflowDetailDto;
 }) {
   const { t } = useTranslation('common');
+  const { openTaskChanges } = useOrchestrationDiff();
   const displayStatus = getWorkflowDisplayStatus(workflow);
   const tasks = workflow.tasks ?? [];
   const completedTasks = tasks.filter((t) => t.status === 'completed').length;
@@ -262,8 +272,32 @@ function WorkflowProgressPanel({
                 className={`inline-block size-1.5 rounded-full ${taskDotClass(task.status)}`}
               />
               <span className="truncate text-normal">{task.name}</span>
+              {typeof task.acceptanceScore === 'number' && (
+                <span
+                  title={
+                    task.acceptanceVerdict
+                      ? `${task.acceptanceVerdict} (${task.acceptanceScore}/100)`
+                      : `${task.acceptanceScore}/100`
+                  }
+                  className={`shrink-0 rounded-full px-1 py-px ${scoreBadgeClass(task.acceptanceScore)}`}
+                >
+                  {Math.round(task.acceptanceScore)}
+                </span>
+              )}
+              {/* FE-2 (Phase C step 14): explicit per-task affordance to open the
+                  Changes/Audit panel even if the auto-open was dismissed. */}
+              <button
+                type="button"
+                onClick={() => openTaskChanges(workflow.id, task.id)}
+                title={t('concierge.viewCodeAudit', {
+                  defaultValue: 'View Code / Audit',
+                })}
+                className="ml-auto flex shrink-0 items-center gap-px rounded bg-secondary px-1 py-px text-low hover:text-normal transition-colors"
+              >
+                <GitDiffIcon className="size-icon-xs" />
+              </button>
               {(task.terminals ?? []).length > 0 && (
-                <div className="ml-auto flex gap-px">
+                <div className="flex gap-px">
                   {(task.terminals ?? []).map((term) => (
                     <span
                       key={term.id}

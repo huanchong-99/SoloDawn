@@ -201,13 +201,19 @@ export function ContextBar({
     });
   };
 
-  // Filter visible items for rendering
+  // Filter visible items for rendering. Treat a divider as "visible" only when
+  // it sits alongside a real action, so a lone divider never counts as content.
   const visiblePrimaryItems = primaryItems.filter(
-    (item) => isDivider(item) || isActionVisible(item, actionContext)
+    (item) => !isDivider(item) && isActionVisible(item, actionContext)
   );
   const visibleSecondaryItems = secondaryItems.filter(
-    (item) => isDivider(item) || isActionVisible(item, actionContext)
+    (item) => !isDivider(item) && isActionVisible(item, actionContext)
   );
+
+  // Don't render an empty floating pill (e.g. create mode hides all actions).
+  if (visiblePrimaryItems.length === 0 && visibleSecondaryItems.length === 0) {
+    return null;
+  }
 
   return (
     <div
