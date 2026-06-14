@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { CollapsibleSectionHeader } from '@/components/ui-new/containers/CollapsibleSectionHeader';
@@ -6,7 +7,8 @@ import { ProjectSelectorContainer } from '@/components/ui-new/containers/Project
 import { RecentReposListContainer } from '@/components/ui-new/containers/RecentReposListContainer';
 import { BrowseRepoButtonContainer } from '@/components/ui-new/containers/BrowseRepoButtonContainer';
 import { CreateRepoButtonContainer } from '@/components/ui-new/containers/CreateRepoButtonContainer';
-import { WarningIcon, LinkSimpleIcon } from '@phosphor-icons/react';
+import { QualityGateRulesDialog } from '@/components/quality/QualityGateRulesDialog';
+import { WarningIcon, LinkSimpleIcon, SlidersHorizontalIcon } from '@phosphor-icons/react';
 import { PERSIST_KEYS } from '@/stores/useUiPreferencesStore';
 import type { Project, GitBranch, Repo } from 'shared/types';
 
@@ -48,6 +50,7 @@ export function GitPanelCreate({
   onBindRepo,
 }: Readonly<GitPanelCreateProps>) {
   const { t } = useTranslation(['tasks', 'common']);
+  const [qgOpen, setQgOpen] = useState(false);
   const hasNoRepos = repos.length === 0;
   const firstRepoPath = repos[0]?.path ?? null;
   const isBound = boundRepoPath !== null && boundRepoPath === firstRepoPath;
@@ -72,6 +75,20 @@ export function GitPanelCreate({
           onProjectSelect={onProjectSelect}
           onCreateProject={onCreateProject}
         />
+        {selectedProjectId && (
+          <button
+            type="button"
+            onClick={() => setQgOpen(true)}
+            className={cn(
+              'mt-half flex items-center justify-center gap-1.5 w-full px-base py-half',
+              'text-xs rounded border bg-brand/10 border-brand/30 text-brand',
+              'hover:bg-brand/20 transition-colors'
+            )}
+          >
+            <SlidersHorizontalIcon className="h-3 w-3 shrink-0" />
+            {t('conversation.createLanding.qualityGates.button')}
+          </button>
+        )}
       </CollapsibleSectionHeader>
 
       <CollapsibleSectionHeader
@@ -146,6 +163,14 @@ export function GitPanelCreate({
         <BrowseRepoButtonContainer onRepoRegistered={onRepoRegistered} />
         <CreateRepoButtonContainer onRepoCreated={onRepoRegistered} />
       </CollapsibleSectionHeader>
+
+      {selectedProjectId && (
+        <QualityGateRulesDialog
+          open={qgOpen}
+          projectId={selectedProjectId}
+          onClose={() => setQgOpen(false)}
+        />
+      )}
     </div>
   );
 }

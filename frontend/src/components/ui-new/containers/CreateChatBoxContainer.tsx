@@ -30,8 +30,6 @@ import { CreateChatBox } from '../primitives/CreateChatBox';
 import { WelcomeHero } from '../primitives/WelcomeHero';
 import { AuditDocPanel } from './AuditDocPanel';
 import { QualityGateConfirmDialog } from '@/components/quality/QualityGateConfirmDialog';
-import { QualityGateRulesDialog } from '@/components/quality/QualityGateRulesDialog';
-import { SlidersHorizontal } from 'lucide-react';
 
 function WorkflowStatusBadge({
   workflowId,
@@ -446,7 +444,6 @@ export function CreateChatBoxContainer() {
   >(null);
   const [retainBuiltin, setRetainBuiltin] = useState(true);
   const [gatesDialogOpen, setGatesDialogOpen] = useState(false);
-  const [rulesDialogOpen, setRulesDialogOpen] = useState(false);
 
   const { data: planningDraft } = usePlanningDraft(planningDraftId);
   const { data: serverMessages } = usePlanningDraftMessages(planningDraftId);
@@ -699,15 +696,6 @@ export function CreateChatBoxContainer() {
           <p className="font-ibm-plex-sans text-sm text-low">
             {t('workspace.selectProjectHint')}
           </p>
-          <button
-            type="button"
-            disabled
-            title={tTasks('conversation.createLanding.qualityGates.needProject')}
-            className="mt-half inline-flex items-center gap-half rounded-full border border-border px-base py-half font-ibm-plex-sans text-sm text-low opacity-60 cursor-not-allowed"
-          >
-            <SlidersHorizontal className="size-icon-xs" />
-            {tTasks('conversation.createLanding.qualityGates.button')}
-          </button>
         </div>
       </div>
     );
@@ -782,17 +770,11 @@ export function CreateChatBoxContainer() {
 
         {/* Empty-state welcome hero (create mode, no draft yet) */}
         {!isInPlanningMode && (
-          <div className="flex flex-1 flex-col items-center justify-center gap-double overflow-y-auto px-base pt-double @container">
-            <WelcomeHero />
-            <div className="flex w-full flex-col items-center gap-double">
-              <button
-                type="button"
-                onClick={() => setRulesDialogOpen(true)}
-                className="inline-flex items-center gap-half rounded-full border border-brand/40 bg-brand/[0.06] px-double py-half font-ibm-plex-sans text-sm font-medium text-brand shadow-sm transition-colors hover:border-brand hover:bg-brand/[0.12]"
-              >
-                <SlidersHorizontal className="size-icon-sm" />
-                {tTasks('conversation.createLanding.qualityGates.button')}
-              </button>
+          <div className="flex flex-1 flex-col overflow-y-auto px-base pt-double @container">
+            <div className="flex flex-1 flex-col items-center justify-center pb-double">
+              <WelcomeHero />
+            </div>
+            <div className="flex w-full shrink-0 flex-col items-center pb-base">
               <div className="flex w-full justify-center">
                 <CreateChatBox
                   editor={{
@@ -917,15 +899,6 @@ export function CreateChatBoxContainer() {
             void proceedMaterialize();
           }}
           onClose={() => setGatesDialogOpen(false)}
-        />
-      )}
-
-      {/* Standalone quality-gate rules editor (manage mode, no draft required) */}
-      {projectId && (
-        <QualityGateRulesDialog
-          open={rulesDialogOpen}
-          projectId={projectId}
-          onClose={() => setRulesDialogOpen(false)}
         />
       )}
     </div>
