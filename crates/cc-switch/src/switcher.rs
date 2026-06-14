@@ -110,6 +110,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::default_constructed_unit_structs)] // intentionally exercises the Default impl
     fn test_model_switcher_default() {
         let _switcher = ModelSwitcher::default();
     }

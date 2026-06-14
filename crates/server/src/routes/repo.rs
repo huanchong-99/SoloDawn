@@ -166,6 +166,16 @@ pub async fn search_repo(
     }
 }
 
+pub fn router() -> Router<DeploymentImpl> {
+    Router::new()
+        .route("/repos", get(get_repos).post(register_repo))
+        .route("/repos/init", post(init_repo))
+        .route("/repos/batch", post(get_repos_batch))
+        .route("/repos/{repo_id}", get(get_repo).put(update_repo))
+        .route("/repos/{repo_id}/branches", get(get_repo_branches))
+        .route("/repos/{repo_id}/search", get(search_repo))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -191,14 +201,4 @@ mod tests {
         assert!(matches!(error, ApiError::BadRequest(_)));
         assert_eq!(error.into_response().status(), StatusCode::BAD_REQUEST);
     }
-}
-
-pub fn router() -> Router<DeploymentImpl> {
-    Router::new()
-        .route("/repos", get(get_repos).post(register_repo))
-        .route("/repos/init", post(init_repo))
-        .route("/repos/batch", post(get_repos_batch))
-        .route("/repos/{repo_id}", get(get_repo).put(update_repo))
-        .route("/repos/{repo_id}/branches", get(get_repo_branches))
-        .route("/repos/{repo_id}/search", get(search_repo))
 }
