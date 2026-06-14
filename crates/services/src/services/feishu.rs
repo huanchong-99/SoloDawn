@@ -47,11 +47,8 @@ pub struct FeishuService {
 impl FeishuService {
     /// Build a new service from a [`FeishuConfig`].
     pub fn new(config: FeishuConfig, pool: SqlitePool, bus: SharedMessageBus) -> Self {
-        let (client, event_rx) = FeishuClient::new(config.clone());
-        let messenger = Arc::new(FeishuMessenger::new(
-            client.auth().clone(),
-            config.base_url.clone(),
-        ));
+        let (client, event_rx) = FeishuClient::new(config);
+        let messenger = Arc::new(FeishuMessenger::new(client.sdk_config()));
         Self {
             client,
             event_rx,

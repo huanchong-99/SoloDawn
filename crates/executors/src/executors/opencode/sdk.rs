@@ -26,7 +26,7 @@ use crate::{
 fn ensure_rustls_crypto_provider() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        if let Err(err) = rustls::crypto::ring::default_provider().install_default() {
+        if let Err(err) = rustls::crypto::aws_lc_rs::default_provider().install_default() {
             tracing::debug!("rustls crypto provider install failed: {err:?}");
         }
     });

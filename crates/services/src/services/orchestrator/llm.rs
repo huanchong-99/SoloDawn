@@ -1274,7 +1274,7 @@ mod full_chain_tests {
     /// reqwest uses `rustls-tls-webpki-roots-no-provider`.
     #[tokio::test]
     async fn test_build_single_client_all_provider_types() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let cases = vec![
             ("openai", "https://api.openai.com"),
@@ -1308,7 +1308,7 @@ mod full_chain_tests {
     /// original 401 bug.
     #[tokio::test]
     async fn test_create_llm_client_zhipuai_e2e() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let config = OrchestratorConfig {
             api_type: "openai-compatible".to_string(),

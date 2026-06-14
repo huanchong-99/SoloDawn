@@ -28,7 +28,7 @@ impl TestServer {
         let temp_path = temp_dir.path().to_path_buf();
 
         // Install rustls crypto provider before any TLS operations
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         // Set environment for isolated testing
         unsafe {

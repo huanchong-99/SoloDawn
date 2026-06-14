@@ -9,23 +9,8 @@ pub struct FeishuConfig {
     pub base_url: String,
 }
 
-/// WebSocket endpoint response from Feishu
-#[derive(Debug, Deserialize)]
-pub struct WsEndpointResponse {
-    pub code: i32,
-    pub msg: String,
-    pub data: Option<WsEndpointData>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct WsEndpointData {
-    #[serde(rename = "URL", default)]
-    pub url: String,
-    #[serde(rename = "ClientConfig")]
-    pub client_config: Option<ClientConfig>,
-}
-
-/// Client configuration received from Feishu (via endpoint or pong frames)
+/// Client configuration (reconnect/ping cadence). Retained for the outer
+/// `ReconnectPolicy`; the SDK owns the actual WebSocket handshake.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ClientConfig {
     #[serde(rename = "ReconnectCount", default)]
@@ -55,11 +40,4 @@ impl Default for ClientConfig {
             ping_interval: 120,
         }
     }
-}
-
-/// Cached tenant access token
-#[derive(Debug, Clone)]
-pub struct CachedToken {
-    pub token: String,
-    pub expires_at: std::time::Instant,
 }

@@ -1861,7 +1861,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_recover_running_workflows_resumes_when_persisted_state_exists() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let (runtime, workflow_id) = setup_runtime_with_ready_workflow().await;
 

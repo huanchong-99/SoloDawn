@@ -102,7 +102,7 @@ fn create_test_agent(
     message_bus: Arc<MessageBus>,
     deployment: &DeploymentImpl,
 ) -> OrchestratorAgent {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     OrchestratorAgent::new(
         test_agent_config(),
