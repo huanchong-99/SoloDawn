@@ -263,6 +263,23 @@
           "label": "Data dashboard",
           "prompt": "Ship a self-hosted analytics dashboard that ingests webhook events and renders live charts with filters."
         }
+      },
+      "qualityGates": {
+        "button": "Quality gate rules",
+        "needProject": "Select a project to edit its quality gates.",
+        "title": "Quality gate rules",
+        "description": "Review and edit the quality-gate rules enforced for this project before you start a task.",
+        "save": "Save",
+        "reset": "Reset to default",
+        "resetTitle": "Delete this project override and fall back to the default.",
+        "cancel": "Cancel",
+        "sourceProject": "Project override",
+        "sourceFile": "Repo file",
+        "sourceBundled": "Bundled default",
+        "loading": "Loading...",
+        "saveError": "Failed to save quality policy.",
+        "resetError": "Failed to reset quality policy.",
+        "loadError": "Failed to load quality policy."
       }
     },
     "planning": {

@@ -665,6 +665,25 @@
     "customModels": "Modelos personalizados",
     "officialModels": "Modelos oficiales",
     "selectModel": "Seleccionar modelo",
+    "createLanding": {
+      "qualityGates": {
+        "button": "Reglas de control de calidad",
+        "needProject": "Selecciona un proyecto para editar sus controles de calidad.",
+        "title": "Reglas de control de calidad",
+        "description": "Revisa y edita las reglas de control de calidad aplicadas a este proyecto antes de iniciar una tarea.",
+        "save": "Guardar",
+        "reset": "Restablecer a predeterminado",
+        "resetTitle": "Elimina la anulación de este proyecto y vuelve al valor predeterminado.",
+        "cancel": "Cancelar",
+        "sourceProject": "Anulación del proyecto",
+        "sourceFile": "Archivo del repositorio",
+        "sourceBundled": "Predeterminado integrado",
+        "loading": "Cargando…",
+        "saveError": "No se pudo guardar la política de calidad.",
+        "resetError": "No se pudo restablecer la política de calidad.",
+        "loadError": "No se pudo cargar la política de calidad."
+      }
+    },
     "planning": {
       "title": "Planificador de Espacios",
       "initialPlaceholder": "Describe lo que quieres construir...",

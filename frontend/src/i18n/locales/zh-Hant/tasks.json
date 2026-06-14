@@ -665,6 +665,25 @@
     "customModels": "自訂模型",
     "officialModels": "官方模型",
     "selectModel": "選擇模型",
+    "createLanding": {
+      "qualityGates": {
+        "button": "品質門禁規則",
+        "needProject": "請先選擇一個專案以編輯其品質門禁。",
+        "title": "品質門禁規則",
+        "description": "在開始任務前，檢視並編輯此專案所執行的品質門禁規則。",
+        "save": "儲存",
+        "reset": "還原預設",
+        "resetTitle": "刪除此專案的覆寫設定並回退至預設值。",
+        "cancel": "取消",
+        "sourceProject": "專案覆寫",
+        "sourceFile": "儲存庫檔案",
+        "sourceBundled": "內建預設",
+        "loading": "載入中…",
+        "saveError": "儲存品質策略失敗。",
+        "resetError": "重設品質策略失敗。",
+        "loadError": "載入品質策略失敗。"
+      }
+    },
     "planning": {
       "title": "工作區規劃師",
       "initialPlaceholder": "描述你想要構建的內容...",

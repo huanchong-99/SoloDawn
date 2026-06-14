@@ -1300,8 +1300,17 @@ if (-not $SkipProjectSetup) {
         Write-Info (T "PHASE_PROJECT")
         Write-Host ("-" * 50) -ForegroundColor DarkGray
 
-        # 1. Generate encryption key and set as persistent env var
-        if (-not $env:SOLODAWN_ENCRYPTION_KEY) {
+        # 1. Generate encryption key and set as persistent env var.
+        #    Prefer an already-persisted User-env key over any transient value
+        #    in the current session so an ephemeral per-session key cannot
+        #    shadow the stable one (which would make existing encrypted blobs
+        #    undecryptable on the next run).
+        $persistedKey = [System.Environment]::GetEnvironmentVariable("SOLODAWN_ENCRYPTION_KEY", "User")
+        if ($persistedKey -and $persistedKey.Length -eq 32) {
+            # Reuse the stable key: pull it back into the current session scope.
+            $env:SOLODAWN_ENCRYPTION_KEY = $persistedKey
+            Write-Ok (T "KEY_GENERATED")
+        } else {
             $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
             $key = -join (1..32 | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
             $env:SOLODAWN_ENCRYPTION_KEY = $key

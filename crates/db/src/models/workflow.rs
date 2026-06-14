@@ -1381,20 +1381,32 @@ mod encryption_tests {
 
     #[test]
     #[serial]
-    fn test_api_key_encryption_missing_env_key() {
-        with_var("SOLODAWN_ENCRYPTION_KEY", Option::<&str>::None, || {
-            let mut workflow = test_workflow("test-workflow");
+    fn test_api_key_encryption_self_provisions_without_env_key() {
+        // With no env key set, encryption now self-provisions a stable
+        // per-machine key file (set-once-persists). Point that file at a temp
+        // path so the test stays hermetic and does not touch the real data dir.
+        let key_file = std::env::temp_dir().join(format!(
+            "solodawn-test-enckey-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let key_file_str = key_file.to_string_lossy().to_string();
+        temp_env::with_vars(
+            [
+                ("SOLODAWN_ENCRYPTION_KEY", None::<&str>),
+                ("GITCORTEX_ENCRYPTION_KEY", None::<&str>),
+                ("SOLODAWN_ENC_KEY_FILE", Some(key_file_str.as_str())),
+            ],
+            || {
+                let mut workflow = test_workflow("test-workflow");
 
-            // Should fail without encryption key
-            let result = workflow.set_api_key("sk-test");
-            assert!(result.is_err());
-            assert!(
-                result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("SOLODAWN_ENCRYPTION_KEY")
-            );
-        });
+                // Should succeed via the self-provisioned file key.
+                workflow.set_api_key("sk-test").expect("encryption should succeed");
+                let decrypted = workflow.get_api_key().unwrap().unwrap();
+                assert_eq!(decrypted, "sk-test");
+                assert!(key_file.exists(), "key file should have been generated");
+            },
+        );
+        let _ = std::fs::remove_file(&key_file);
     }
 
     #[test]

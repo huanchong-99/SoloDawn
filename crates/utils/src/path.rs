@@ -1,7 +1,43 @@
 use std::path::{Path, PathBuf};
 
+use directories::ProjectDirs;
+
 /// Directory name for storing images in worktrees
 pub const VIBE_IMAGES_DIR: &str = ".vibe-images";
+
+/// Resolve the path to the persistent per-machine encryption-key file.
+///
+/// This is the stable, self-provisioning fallback used by
+/// `db::encryption::get_encryption_key` when neither `SOLODAWN_ENCRYPTION_KEY`
+/// nor the legacy `GITCORTEX_ENCRYPTION_KEY` env var is set. Storing the key
+/// in a fixed location under the user's data directory (rather than relying on
+/// an ephemeral process-env value) is what makes "set the API key once and it
+/// persists across runs" hold outside the installer path.
+///
+/// An explicit `SOLODAWN_ENC_KEY_FILE` env override (full path to the file)
+/// takes precedence; this is used for test isolation and unusual deployments.
+///
+/// Otherwise the layout mirrors `crate::cache_dir`'s `bloop` / `bloop-dev`
+/// convention:
+/// - Windows → `%APPDATA%\bloop\solodawn\data\.enckey`
+/// - macOS   → `~/Library/Application Support/ai.bloop.solodawn/.enckey`
+/// - Linux   → `~/.local/share/solodawn/.enckey` (respects `XDG_DATA_HOME`)
+///
+/// Returns `None` only if the OS does not provide a home directory and no
+/// override is set.
+pub fn enc_key_file_path() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("SOLODAWN_ENC_KEY_FILE")
+        && !p.is_empty()
+    {
+        return Some(PathBuf::from(p));
+    }
+    let proj = if cfg!(debug_assertions) {
+        ProjectDirs::from("ai", "bloop-dev", "solodawn")?
+    } else {
+        ProjectDirs::from("ai", "bloop", "solodawn")?
+    };
+    Some(proj.data_dir().join(".enckey"))
+}
 
 /// Convert absolute paths to relative paths based on worktree path
 /// This is a robust implementation that handles symlinks and edge cases

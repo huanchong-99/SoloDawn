@@ -716,6 +716,23 @@
           "label": "数据看板",
           "prompt": "做一个可自托管的分析看板，接收 webhook 事件并用可筛选的图表实时展示。"
         }
+      },
+      "qualityGates": {
+        "button": "质量门禁规则",
+        "needProject": "请先选择一个项目以编辑其质量门禁。",
+        "title": "质量门禁规则",
+        "description": "在开始任务前，查看并编辑此项目所执行的质量门禁规则。",
+        "save": "保存",
+        "reset": "恢复默认",
+        "resetTitle": "删除此项目的覆盖配置并回退到默认值。",
+        "cancel": "取消",
+        "sourceProject": "项目覆盖",
+        "sourceFile": "仓库文件",
+        "sourceBundled": "内置默认",
+        "loading": "加载中…",
+        "saveError": "保存质量策略失败。",
+        "resetError": "重置质量策略失败。",
+        "loadError": "加载质量策略失败。"
       }
     },
     "planning": {

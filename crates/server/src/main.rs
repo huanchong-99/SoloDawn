@@ -55,8 +55,6 @@ enum Commands {
     },
 }
 
-const DEV_DEFAULT_ENCRYPTION_KEY: &str = "12345678901234567890123456789012";
-
 fn ensure_api_token_in_release() {
     if !cfg!(debug_assertions) {
         // SEC-002: In release mode, require SOLODAWN_API_TOKEN — fail closed
@@ -78,50 +76,57 @@ fn ensure_api_token_in_release() {
 }
 
 fn ensure_dev_encryption_key() {
-    if !cfg!(debug_assertions) {
-        // G18-003: In release mode, require a valid encryption key — do not silently proceed
-        match utils::env_compat::var_with_compat(
-            "SOLODAWN_ENCRYPTION_KEY",
-            "GITCORTEX_ENCRYPTION_KEY",
-        ) {
-            Ok(value) if value.len() == 32 => {}
-            Ok(value) => {
-                panic!(
-                    "SOLODAWN_ENCRYPTION_KEY has invalid length {} (expected 32 bytes). \
-                     Set a valid 32-byte key before starting in release mode.",
-                    value.len()
-                );
-            }
-            Err(std::env::VarError::NotPresent) => {
-                panic!(
-                    "SOLODAWN_ENCRYPTION_KEY is not set. \
-                     A 32-byte encryption key is required in release mode."
-                );
-            }
-            Err(e) => {
-                panic!(
-                    "SOLODAWN_ENCRYPTION_KEY is not valid: {e}. \
-                     A 32-byte encryption key is required in release mode."
-                );
-            }
-        }
-        return;
-    }
-
+    // Highest precedence: an explicitly configured env key (installer-written
+    // .env or tray-propagated). It must keep winning so existing encrypted
+    // blobs stay decryptable — never override it.
     match utils::env_compat::var_with_compat("SOLODAWN_ENCRYPTION_KEY", "GITCORTEX_ENCRYPTION_KEY")
     {
-        Ok(value) if value.len() == 32 => {}
+        Ok(value) if value.len() == 32 => return,
         Ok(value) => {
-            tracing::warn!(
-                provided_length = value.len(),
-                "SOLODAWN_ENCRYPTION_KEY is set but length is invalid; workflow start may fail"
+            // A present-but-invalid key is always a hard error: silently
+            // provisioning a different key would make existing blobs
+            // permanently undecryptable.
+            if cfg!(debug_assertions) {
+                tracing::warn!(
+                    provided_length = value.len(),
+                    "SOLODAWN_ENCRYPTION_KEY is set but length is invalid; workflow start may fail"
+                );
+                return;
+            }
+            panic!(
+                "SOLODAWN_ENCRYPTION_KEY has invalid length {} (expected 32 bytes). \
+                 Set a valid 32-byte key before starting in release mode.",
+                value.len()
             );
         }
-        Err(_) => {
-            unsafe {
-                std::env::set_var("SOLODAWN_ENCRYPTION_KEY", DEV_DEFAULT_ENCRYPTION_KEY);
+        Err(_) => {}
+    }
+
+    // No env key configured. Fall back to the persistent per-machine key file
+    // so debug and release share ONE stable key source instead of a rotating
+    // hardcoded dev default. This is what makes "set the API key once and it
+    // persists across runs" hold even when the env var is absent.
+    match db::encryption::get_or_create_file_key() {
+        Ok(_) => {
+            // Loud one-time WARN so a genuinely misconfigured real deployment
+            // (env var dropped) is visible rather than silently masked.
+            tracing::warn!(
+                "SOLODAWN_ENCRYPTION_KEY not set in the environment; using the persistent \
+                 per-machine encryption key file. For multi-host or container deployments, \
+                 set SOLODAWN_ENCRYPTION_KEY explicitly."
+            );
+        }
+        Err(e) => {
+            if cfg!(debug_assertions) {
+                tracing::error!("Failed to provision persistent encryption key file: {e}");
+            } else {
+                // Release with neither env nor a provisionable file key: stay
+                // fail-closed with a clear message.
+                panic!(
+                    "SOLODAWN_ENCRYPTION_KEY is not set and no persistent encryption key file \
+                     could be provisioned: {e}. A 32-byte encryption key is required in release mode."
+                );
             }
-            tracing::warn!("SOLODAWN_ENCRYPTION_KEY not set; using development fallback key");
         }
     }
 }

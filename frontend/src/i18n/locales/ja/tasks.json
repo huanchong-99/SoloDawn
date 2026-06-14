@@ -665,6 +665,25 @@
     "customModels": "カスタムモデル",
     "officialModels": "公式モデル",
     "selectModel": "モデルを選択",
+    "createLanding": {
+      "qualityGates": {
+        "button": "品質ゲートのルール",
+        "needProject": "品質ゲートを編集するにはプロジェクトを選択してください。",
+        "title": "品質ゲートのルール",
+        "description": "タスクを開始する前に、このプロジェクトに適用される品質ゲートのルールを確認・編集します。",
+        "save": "保存",
+        "reset": "デフォルトに戻す",
+        "resetTitle": "このプロジェクトの上書き設定を削除し、デフォルトに戻します。",
+        "cancel": "キャンセル",
+        "sourceProject": "プロジェクトの上書き",
+        "sourceFile": "リポジトリファイル",
+        "sourceBundled": "組み込みデフォルト",
+        "loading": "読み込み中…",
+        "saveError": "品質ポリシーの保存に失敗しました。",
+        "resetError": "品質ポリシーのリセットに失敗しました。",
+        "loadError": "品質ポリシーの読み込みに失敗しました。"
+      }
+    },
     "planning": {
       "title": "ワークスペースプランナー",
       "initialPlaceholder": "構築したいものを説明してください...",

@@ -873,43 +873,55 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_custom_api_key_encryption_missing_env_key() {
-        with_var("SOLODAWN_ENCRYPTION_KEY", Option::<&str>::None, || {
-            let mut terminal = Terminal {
-                id: Uuid::new_v4().to_string(),
-                workflow_task_id: "task-1".to_string(),
-                cli_type_id: "cli-1".to_string(),
-                model_config_id: "model-1".to_string(),
-                custom_base_url: None,
-                custom_api_key: None,
-                role: None,
-                role_description: None,
-                order_index: 0,
-                status: "not_started".to_string(),
-                process_id: None,
-                pty_session_id: None,
-                session_id: None,
-                execution_process_id: None,
-                vk_session_id: None,
-                auto_confirm: false,
-                last_commit_hash: None,
-                last_commit_message: None,
-                started_at: None,
-                completed_at: None,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            };
+    fn test_custom_api_key_encryption_self_provisions_without_env_key() {
+        // With no env key set, encryption now self-provisions a stable
+        // per-machine key file (set-once-persists). Point that file at a temp
+        // path so the test stays hermetic and does not touch the real data dir.
+        let key_file =
+            std::env::temp_dir().join(format!("solodawn-test-enckey-{}", Uuid::new_v4()));
+        let key_file_str = key_file.to_string_lossy().to_string();
+        temp_env::with_vars(
+            [
+                ("SOLODAWN_ENCRYPTION_KEY", None::<&str>),
+                ("GITCORTEX_ENCRYPTION_KEY", None::<&str>),
+                ("SOLODAWN_ENC_KEY_FILE", Some(key_file_str.as_str())),
+            ],
+            || {
+                let mut terminal = Terminal {
+                    id: Uuid::new_v4().to_string(),
+                    workflow_task_id: "task-1".to_string(),
+                    cli_type_id: "cli-1".to_string(),
+                    model_config_id: "model-1".to_string(),
+                    custom_base_url: None,
+                    custom_api_key: None,
+                    role: None,
+                    role_description: None,
+                    order_index: 0,
+                    status: "not_started".to_string(),
+                    process_id: None,
+                    pty_session_id: None,
+                    session_id: None,
+                    execution_process_id: None,
+                    vk_session_id: None,
+                    auto_confirm: false,
+                    last_commit_hash: None,
+                    last_commit_message: None,
+                    started_at: None,
+                    completed_at: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                };
 
-            // Should fail without encryption key
-            let result = terminal.set_custom_api_key("sk-test");
-            assert!(result.is_err());
-            assert!(
-                result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("SOLODAWN_ENCRYPTION_KEY")
-            );
-        });
+                // Should succeed via the self-provisioned file key.
+                terminal
+                    .set_custom_api_key("sk-test")
+                    .expect("encryption should succeed");
+                let decrypted = terminal.get_custom_api_key().unwrap().unwrap();
+                assert_eq!(decrypted, "sk-test");
+                assert!(key_file.exists(), "key file should have been generated");
+            },
+        );
+        let _ = std::fs::remove_file(&key_file);
     }
 
     #[test]
