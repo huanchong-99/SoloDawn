@@ -159,6 +159,29 @@ impl CodingAgentTurn {
         Ok(())
     }
 
+    /// Distinct non-null `agent_session_id`s for all coding-agent turns under a
+    /// workspace. Used at workspace (logical-session) teardown to locate any
+    /// interactive-transport CLAUDE homes keyed on these session UUIDs for
+    /// deferred RB-37 cleanup. (`-p` session ids simply won't have a matching
+    /// interactive home dir, so passing them to cleanup is a harmless no-op.)
+    pub async fn agent_session_ids_for_workspace(
+        pool: &SqlitePool,
+        workspace_id: Uuid,
+    ) -> Result<Vec<String>, sqlx::Error> {
+        let rows = sqlx::query_scalar!(
+            r#"SELECT DISTINCT cat.agent_session_id as "agent_session_id!: String"
+               FROM coding_agent_turns cat
+               JOIN execution_processes ep ON cat.execution_process_id = ep.id
+               JOIN sessions s ON ep.session_id = s.id
+               WHERE s.workspace_id = $1 AND cat.agent_session_id IS NOT NULL"#,
+            workspace_id
+        )
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows)
+    }
+
     /// Mark all coding agent turns for a workspace as seen
     pub async fn mark_seen_by_workspace_id(
         pool: &SqlitePool,

@@ -47,6 +47,20 @@
         "null"
       ]
     },
+    "interactive": {
+      "description": "When true, select the no-`-p` interactive transport (genuine `claude`\nbinary, on-disk transcript capture) instead of the `-p` stream-json\ncontrol-protocol path. Only native-OAuth (subscription) users set this;\nAPI-key/relay users keep the `-p` path so they stay pool-exempt. See\n`docs/developed/plans/2026-06-15-no-p-interactive-transport.md`.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "interactive_session_id": {
+      "description": "Pre-generated session UUID for the interactive transport, threaded as\n`--session-id <uuid>` at first launch (and `--resume <uuid>` on\nfollow-ups). Generated once per logical session by cc_switch; the\ntranscript path is derived from it. Ignored on the `-p` path.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "base_command_override": {
       "title": "Base Command Override",
       "description": "Override the base command with a custom command",

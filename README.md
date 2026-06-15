@@ -155,6 +155,35 @@ When a quality gate fails, structured fix instructions are automatically sent ba
 
 Any CLI that runs in a terminal and supports slash commands can be integrated.
 
+### Claude Code: No-`-p` Interactive Transport & Billing Guarantee
+
+Every Claude Code run in SoloDawn — initial requests, follow-ups, **and** reviews —
+goes through **interactive Claude Code (no `-p`/`--print`)**, the same way you run
+`claude` by hand in a terminal. The transport tails the on-disk session transcript
+JSONL instead of consuming a `--print` stream. This exists for one reason: **billing
+correctness.**
+
+| Auth mode | How it's detected | What it bills | How it's wired |
+|---|---|---|---|
+| **Native (subscription)** | no stored API key | **only** your Pro/Max plan quota — never the Agent SDK credit | OAuth `~/.claude/.credentials.json` copied into an isolated home; billing env vars scrubbed |
+| **Official key** | API key, no custom base URL | the key's pay-as-you-go account | `ANTHROPIC_API_KEY` |
+| **Relay** | API key **and** custom base URL | the relay endpoint | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` |
+
+- **Subscription users consume ONLY their plan quota (Pro/Max) and NEVER the Agent
+  SDK pay-as-you-go credit.** The interactive transport is the only thing that makes
+  this guarantee hold; `-p` would draw from the SDK credit pool.
+- The credential precedence mirrors the legacy `-p` path exactly — *which* credential
+  you get is unchanged; only the transport changes.
+- **`-p` is a dormant fallback.** Set `SOLODAWN_NO_POOL=1` to opt back into the proven
+  `-p` path (e.g. for debugging); it accepts the pool draw and is off by default.
+- **Tier-2 interactive approvals** (auto-answering Claude's per-tool permission dialog
+  over the PTY) are **off by default** and gated behind
+  `SOLODAWN_INTERACTIVE_APPROVALS_TIER2=1`. Unset, the default tier-1 path is untouched.
+
+> Note: native subscription and official-key modes are covered by unit/argv-env tests
+> plus a live re-probe at startup. Full live end-to-end coverage for **relay** and
+> **api-key** modes requires real credentials and is a manual check.
+
 ---
 
 ## Features

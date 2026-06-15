@@ -20,6 +20,8 @@ use tokio::{
     time::Instant,
 };
 
+use utils::approvals::ApprovalStatus;
+
 use crate::services::{
     orchestrator::{
         message_bus::SharedMessageBus,
@@ -407,6 +409,100 @@ fn has_any_claude_bypass_marker(lower: &str) -> bool {
         || has_claude_bypass_no_exit_text(lower)
         || has_claude_bypass_yes_accept_text(lower)
         || has_claude_bypass_confirm_hint_text(lower)
+}
+
+// ============================================================================
+// S7 — Interactive approvals tier-2 (FEATURE-FLAGGED, OFF BY DEFAULT)
+// ============================================================================
+//
+// CONTEXT (no-`-p` interactive transport, plan 2026-06-15):
+//   The default interactive path launches `claude` with
+//   `--dangerously-skip-permissions` (tier-1). With tier-1 active, claude
+//   NEVER renders a per-tool permission dialog, so everything below is inert
+//   on the default path. The synchronous `can_use_tool` control-protocol gate
+//   that previously enforced approvals existed ONLY in the `-p` transport,
+//   which is now dormant behind `SOLODAWN_NO_POOL`. Interactive mode has no
+//   equivalent synchronous gate.
+//
+// WHAT THIS IS:
+//   A best-effort, OPT-IN tier-2 fallback. When (and only when) a deployment
+//   both (a) drops `--dangerously-skip-permissions` so claude renders its
+//   per-tool permission dialog AND (b) sets the env flag below, the watcher
+//   detects that dialog and bridges an `ExecutorApprovalService` decision into
+//   a PTY keystroke (allow=Enter, deny=Esc).
+//
+// WHAT THIS IS NOT — HONEST LIMITATION (do not treat as a real gate):
+//   This is NOT a true synchronous approval gate. The keystroke is injected
+//   AFTER the dialog is observed in PTY output; there is an unavoidable race
+//   between claude rendering the dialog and us reacting, and the menu item
+//   order is assumed (allow is the highlighted default => Enter). A determined
+//   tool can also proceed before our keystroke lands. Use the `-p` transport
+//   (`SOLODAWN_NO_POOL=1`) if a genuine synchronous gate is required.
+//
+// OFF BY DEFAULT: gated on `SOLODAWN_INTERACTIVE_APPROVALS_TIER2`. When unset
+// (the default) `tier2_approvals_enabled()` returns false and none of the
+// tier-2 code runs, so the default tier-1 path is completely unaffected.
+
+/// Env var that opts INTO the best-effort tier-2 interactive approval bridge.
+/// Unset/empty/`0`/`false` => disabled (default). Mirrors the `SOLODAWN_NO_POOL`
+/// kill-switch convention so it can be toggled per-deploy without a rebuild.
+const INTERACTIVE_APPROVALS_TIER2_ENV: &str = "SOLODAWN_INTERACTIVE_APPROVALS_TIER2";
+
+/// PTY keystroke that ALLOWS the highlighted (default) menu option in claude's
+/// per-tool permission dialog. The "allow once" / "yes" option is the default
+/// selection, so a bare Enter accepts it.
+const TIER2_APPROVE_KEYSTROKE: &str = "\r";
+
+/// PTY keystroke that DENIES / dismisses claude's per-tool permission dialog.
+/// Esc cancels the dialog (equivalent to "no, and tell Claude what to do
+/// differently" being declined / the menu being aborted).
+const TIER2_DENY_KEYSTROKE: &str = "\u{1b}";
+
+/// Returns true iff the opt-in tier-2 interactive approval bridge is enabled.
+///
+/// OFF BY DEFAULT. Only `1` / `true` / `yes` / `on` (case-insensitive) enable
+/// it; anything else (including unset) keeps the default tier-1 path intact.
+fn tier2_approvals_enabled() -> bool {
+    std::env::var(INTERACTIVE_APPROVALS_TIER2_ENV)
+        .ok()
+        .map(|v| {
+            let v = v.trim().to_ascii_lowercase();
+            matches!(v.as_str(), "1" | "true" | "yes" | "on")
+        })
+        .unwrap_or(false)
+}
+
+/// Best-effort detector for claude's per-tool permission dialog (the prompt
+/// rendered when `--dangerously-skip-permissions` is NOT in effect).
+///
+/// This is intentionally distinct from `is_claude_bypass_accept_prompt` (the
+/// one-time "Bypass Permissions mode" startup acknowledgement). The per-tool
+/// dialog is the recurring "Do you want to proceed?" menu shown for each
+/// individual tool call (Bash/Edit/Write/...). Detection is heuristic and
+/// best-effort — see the module header for the honest limitation.
+fn is_claude_tool_approval_dialog(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+
+    // The dialog asks for explicit per-tool permission. claude wording across
+    // 2.1.x: "Do you want to proceed?" / "Do you want to make this edit to" /
+    // "Allow this tool call?" etc. We require both a permission-question marker
+    // AND a yes/allow option so generic prose does not false-positive.
+    let has_permission_question = lower.contains("do you want to proceed")
+        || lower.contains("do you want to make this edit")
+        || lower.contains("do you want to create")
+        || lower.contains("allow this tool")
+        || lower.contains("requesting permission")
+        || (lower.contains("permission") && lower.contains('?'));
+
+    let has_allow_option = lower.contains("yes, allow")
+        || lower.contains("1. yes")
+        || lower.contains("❯ 1.")
+        || lower.contains("allow once")
+        || lower.contains("yes, and");
+
+    // Guard: the one-time bypass-mode acknowledgement is handled elsewhere; do
+    // not also treat it as a per-tool dialog.
+    has_permission_question && has_allow_option && !has_claude_bypass_mode_text(&lower)
 }
 
 // ============================================================================
@@ -2464,6 +2560,89 @@ next_action: handoff\n"
         // Terminal is truly registered only if both state and active subscription exist
         terminals.contains_key(terminal_id) && subscriptions.contains_key(terminal_id)
     }
+
+    // ========================================================================
+    // S7 — interactive approvals tier-2 bridge (OPT-IN, best-effort)
+    // ========================================================================
+
+    /// Returns true iff the opt-in tier-2 interactive approval bridge is
+    /// enabled for this process. OFF BY DEFAULT (see
+    /// [`INTERACTIVE_APPROVALS_TIER2_ENV`]). Exposed so callers/tests can short
+    /// circuit before constructing approval requests.
+    pub fn tier2_approvals_enabled() -> bool {
+        tier2_approvals_enabled()
+    }
+
+    /// Best-effort: report whether `text` (a chunk of PTY output) looks like
+    /// claude's per-tool permission dialog. Always returns false when tier-2 is
+    /// disabled, so the default tier-1 path can call this unconditionally
+    /// without behavior change. See the module header for the honest
+    /// limitation (this is heuristic detection, not a synchronous gate).
+    pub fn detect_pending_tool_approval(text: &str) -> bool {
+        tier2_approvals_enabled() && is_claude_tool_approval_dialog(text)
+    }
+
+    /// Best-effort bridge from an [`ApprovalStatus`] decision to a PTY
+    /// keystroke for claude's per-tool permission dialog:
+    /// `Approved` => Enter (accept highlighted/default "allow" option);
+    /// `Denied`/`TimedOut`/`Pending` => Esc (dismiss the dialog).
+    ///
+    /// HONEST LIMITATION: this is NOT a true synchronous `can_use_tool` gate
+    /// (that exists only in the dormant `-p` transport). The keystroke is sent
+    /// after the dialog is observed, so there is an inherent race, and the
+    /// "allow" option is assumed to be the highlighted default. Use
+    /// `SOLODAWN_NO_POOL=1` (the `-p` transport) when a genuine gate is needed.
+    ///
+    /// Returns `true` if a keystroke was written to the PTY, `false` otherwise
+    /// (tier-2 disabled, terminal not registered, session mismatch, or write
+    /// failure). Never panics; failures are logged and surfaced via the bool.
+    ///
+    /// TODO(S7): parse the rendered menu to locate the "allow" item index
+    /// dynamically instead of assuming it is the highlighted default, and
+    /// confirm the keystroke landed (re-read PTY) before reporting success.
+    pub async fn bridge_tool_approval_decision(
+        &self,
+        terminal_id: &str,
+        session_id: &str,
+        status: &ApprovalStatus,
+    ) -> bool {
+        if !tier2_approvals_enabled() {
+            tracing::trace!(
+                terminal_id = %terminal_id,
+                "tier-2 interactive approval bridge disabled; skipping keystroke injection"
+            );
+            return false;
+        }
+
+        let (keystroke, action): (&str, &str) = match status {
+            ApprovalStatus::Approved => (TIER2_APPROVE_KEYSTROKE, "approve (Enter)"),
+            ApprovalStatus::Denied { .. }
+            | ApprovalStatus::TimedOut
+            | ApprovalStatus::Pending => (TIER2_DENY_KEYSTROKE, "deny/dismiss (Esc)"),
+        };
+
+        tracing::warn!(
+            terminal_id = %terminal_id,
+            session_id = %session_id,
+            action,
+            "S7 tier-2 (best-effort, NOT a synchronous gate): injecting approval keystroke for \
+             claude per-tool permission dialog"
+        );
+
+        let sent = self
+            .try_direct_terminal_input(terminal_id, session_id, keystroke)
+            .await;
+        if !sent {
+            tracing::warn!(
+                terminal_id = %terminal_id,
+                session_id = %session_id,
+                action,
+                "S7 tier-2 keystroke injection failed (terminal not registered, session \
+                 mismatch, or PTY write error)"
+            );
+        }
+        sent
+    }
 }
 
 // ============================================================================
@@ -4416,5 +4595,118 @@ WARNING: Claude Code running in Bypass Permissions mode
 
         // Reset on unregistered terminal should not panic
         watcher.reset_state("term-1").await;
+    }
+
+    // ========================================================================
+    // S7 — interactive approvals tier-2 (OPT-IN, best-effort) tests
+    // ========================================================================
+
+    /// Serializes the env-var-mutating tier-2 tests so parallel `cargo test`
+    /// runs cannot observe each other's `SOLODAWN_INTERACTIVE_APPROVALS_TIER2`
+    /// writes. Poisoning is recovered (we only need exclusivity, not state).
+    static TIER2_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn tier2_env_guard() -> std::sync::MutexGuard<'static, ()> {
+        TIER2_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    #[test]
+    fn test_tier2_disabled_by_default() {
+        let _guard = tier2_env_guard();
+        unsafe {
+            std::env::remove_var(INTERACTIVE_APPROVALS_TIER2_ENV);
+        }
+        assert!(
+            !tier2_approvals_enabled(),
+            "tier-2 must be OFF by default when env var is unset"
+        );
+        assert!(!PromptWatcher::tier2_approvals_enabled());
+    }
+
+    #[test]
+    fn test_tier2_detector_inert_when_disabled() {
+        let _guard = tier2_env_guard();
+        unsafe {
+            std::env::remove_var(INTERACTIVE_APPROVALS_TIER2_ENV);
+        }
+        // Even a textbook per-tool dialog must NOT be detected while disabled,
+        // so the default tier-1 path is completely unaffected.
+        let dialog = "Bash command\nDo you want to proceed?\n❯ 1. Yes, allow once\n  2. No";
+        assert!(!PromptWatcher::detect_pending_tool_approval(dialog));
+    }
+
+    #[test]
+    fn test_tier2_dialog_pattern_recognition() {
+        // Pure pattern check (independent of the env flag).
+        let dialog = "Bash command\nDo you want to proceed?\n❯ 1. Yes, allow once\n  2. No, and tell Claude";
+        assert!(is_claude_tool_approval_dialog(dialog));
+
+        let edit_dialog = "Do you want to make this edit to file.rs?\n1. Yes\n2. No";
+        assert!(is_claude_tool_approval_dialog(edit_dialog));
+
+        // The one-time bypass-mode acknowledgement must NOT be treated as a
+        // per-tool dialog (it is handled by the existing bypass-accept path).
+        let bypass = "Bypass Permissions mode\nNo, exit\nYes, I accept\nEnter to confirm";
+        assert!(!is_claude_tool_approval_dialog(bypass));
+
+        // Generic prose must not false-positive.
+        let prose = "I will now proceed to implement the feature and commit it.";
+        assert!(!is_claude_tool_approval_dialog(prose));
+    }
+
+    // The std Mutex guard is intentionally held across `.await` to serialize
+    // env-var access; `#[tokio::test]` runs on a current-thread runtime so the
+    // future never crosses threads.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn test_tier2_bridge_noop_when_disabled() {
+        let _guard = tier2_env_guard();
+        unsafe {
+            std::env::remove_var(INTERACTIVE_APPROVALS_TIER2_ENV);
+        }
+        let watcher = create_test_watcher();
+        // Disabled => bridge must be a no-op returning false, even for a
+        // would-be Approved decision, and must never panic.
+        let sent = watcher
+            .bridge_tool_approval_decision("term-1", "session-1", &ApprovalStatus::Approved)
+            .await;
+        assert!(!sent, "bridge must be inert (false) while tier-2 disabled");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn test_tier2_bridge_enabled_unregistered_terminal_returns_false() {
+        // Enable the flag, but the terminal is not registered in ProcessManager,
+        // so the keystroke write fails gracefully => false (no panic, no leak to
+        // the default path). Restore the env var afterwards.
+        let _guard = tier2_env_guard();
+        unsafe {
+            std::env::set_var(INTERACTIVE_APPROVALS_TIER2_ENV, "1");
+        }
+        assert!(tier2_approvals_enabled());
+
+        let watcher = create_test_watcher();
+        let sent = watcher
+            .bridge_tool_approval_decision(
+                "term-unknown",
+                "session-x",
+                &ApprovalStatus::Denied { reason: None },
+            )
+            .await;
+        assert!(
+            !sent,
+            "bridge must return false when the terminal/PTY is unavailable"
+        );
+
+        unsafe {
+            std::env::remove_var(INTERACTIVE_APPROVALS_TIER2_ENV);
+        }
+    }
+
+    #[test]
+    fn test_tier2_keystroke_mapping_constants() {
+        // Contract: allow=Enter, deny=Esc (per S7 spec).
+        assert_eq!(TIER2_APPROVE_KEYSTROKE, "\r");
+        assert_eq!(TIER2_DENY_KEYSTROKE, "\u{1b}");
     }
 }

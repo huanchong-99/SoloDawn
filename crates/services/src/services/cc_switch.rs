@@ -456,6 +456,386 @@ fn create_isolated_home(terminal_id: &str, prefix: &str) -> anyhow::Result<std::
     Ok(home)
 }
 
+// ============================================================================
+// S3 — Interactive transport: per-logical-session CLAUDE_HOME + transcript path
+// ============================================================================
+//
+// The no-`-p` interactive transport (see
+// docs/developed/plans/2026-06-15-no-p-interactive-transport.md) keeps
+// native-OAuth (subscription) users off the Agent SDK credit pool by driving
+// the genuine `claude` binary interactively and tailing its on-disk session
+// transcript JSONL instead of `-p` stream-json on stdout.
+//
+// Unlike the metered `-p` path (whose isolated home is keyed on `terminal.id`
+// and deleted on terminal-end), the interactive home is keyed on a STABLE
+// LOGICAL-SESSION id (the interactive session UUID) so that follow-ups
+// (`--resume <uuid>`) find the same transcript file across terminal restarts.
+//
+// PROBE CORRECTION (claude 2.1.177, live-verified): the redirect env var is
+// `CLAUDE_CONFIG_DIR`, NOT `CLAUDE_HOME` (the latter is a no-op in 2.1.177 —
+// it redirects neither the transcript nor credential loading). The interactive
+// launch therefore sets BOTH to the same isolated dir: `CLAUDE_CONFIG_DIR` for
+// the real redirect, and `CLAUDE_HOME` so the existing RB-37 secret-cleanup
+// path (which scans `CLAUDE_HOME`) still finds and removes the dir.
+
+/// Prefix used for interactive-transport isolated homes so they are
+/// distinguishable from the per-terminal `-p` homes (prefix `"claude"`).
+pub const INTERACTIVE_CLAUDE_HOME_PREFIX: &str = "claude-isession";
+
+/// Slugify a working directory the way claude 2.1.177 names its transcript
+/// project folder.
+///
+/// PROBE-VERIFIED behavior (the empirical output is authoritative over the
+/// contract's looser "drive-colon dropped" wording): every non-alphanumeric
+/// path character — including the drive `:` AND the separator `\`/`/` — is
+/// mapped to `-`. The drive colon is therefore NOT removed; it becomes a dash,
+/// which (adjacent to the separator dash) yields the doubled `--`:
+///   `C:\Users\Administrator\scratch-probe\work`
+///     -> `C--Users-Administrator-scratch-probe-work`
+///   `E:\SoloDawn` -> `E--SoloDawn`
+pub fn slug_working_dir(working_dir: &Path) -> String {
+    let mut slug = String::new();
+    for c in working_dir.to_string_lossy().chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else {
+            // ':', '\\', '/', and any other separator/punctuation -> '-'
+            slug.push('-');
+        }
+    }
+    slug
+}
+
+/// Compute the on-disk transcript path for an interactive session:
+/// `<claude_config_dir>/projects/<slug(working_dir)>/<uuid>.jsonl`.
+///
+/// `claude_config_dir` must be the directory pointed to by `CLAUDE_CONFIG_DIR`
+/// (the isolated home returned by [`create_interactive_isolated_home`]).
+pub fn interactive_transcript_path(
+    claude_config_dir: &Path,
+    working_dir: &Path,
+    session_uuid: &str,
+) -> std::path::PathBuf {
+    claude_config_dir
+        .join("projects")
+        .join(slug_working_dir(working_dir))
+        .join(format!("{session_uuid}.jsonl"))
+}
+
+/// Result of provisioning a per-logical-session interactive home: the isolated
+/// directory (used as BOTH `CLAUDE_CONFIG_DIR` and `CLAUDE_HOME`), the generated
+/// (or supplied) session UUID, and the computed transcript path.
+#[derive(Debug, Clone)]
+pub struct InteractiveHome {
+    /// Isolated dir to set as CLAUDE_CONFIG_DIR (redirect) and CLAUDE_HOME (cleanup).
+    pub home_dir: std::path::PathBuf,
+    /// Stable logical-session UUID (`--session-id` / `--resume`).
+    pub session_uuid: String,
+    /// `<home_dir>/projects/<slug>/<uuid>.jsonl` — what S5 tails.
+    pub transcript_path: std::path::PathBuf,
+}
+
+/// Provision (or re-open) the per-logical-session interactive CLAUDE home.
+///
+/// Keyed on `session_uuid` (NOT terminal.id) so follow-ups reuse the same dir
+/// and transcript file. Pass `None` to mint a fresh session UUID at first
+/// launch; pass `Some(uuid)` on follow-up to resume the same logical session.
+/// Idempotent: re-provisioning an existing session is a no-op create.
+pub fn create_interactive_isolated_home(
+    session_uuid: Option<&str>,
+    working_dir: &Path,
+) -> anyhow::Result<InteractiveHome> {
+    let session_uuid = session_uuid
+        .map(ToString::to_string)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    // Key the home on the stable logical-session UUID, not terminal.id.
+    let home_dir = create_isolated_home(&session_uuid, INTERACTIVE_CLAUDE_HOME_PREFIX)?;
+    let transcript_path = interactive_transcript_path(&home_dir, working_dir, &session_uuid);
+    Ok(InteractiveHome {
+        home_dir,
+        session_uuid,
+        transcript_path,
+    })
+}
+
+/// Reconstruct the interactive-home directory path for a given logical-session
+/// UUID WITHOUT creating it. Used at logical-session teardown to locate the dir
+/// for `ProcessManager::cleanup_logical_session_home` (RB-37 deferred cleanup).
+///
+/// Must mirror [`create_interactive_isolated_home`]'s naming exactly:
+/// `<temp>/solodawn/claude-isession-<sanitized_session_uuid>`.
+pub fn interactive_isolated_home_path(session_uuid: &str) -> std::path::PathBuf {
+    let safe_id = sanitize_terminal_id(session_uuid);
+    std::env::temp_dir()
+        .join("solodawn")
+        .join(format!("{INTERACTIVE_CLAUDE_HOME_PREFIX}-{safe_id}"))
+}
+
+/// The interactive auth mode resolved for a single ClaudeCode run.
+///
+/// Mirrors `build_launch_config`'s `-p` branch selection, but expressed as a
+/// single discriminant so the unified interactive auth setup (one transport for
+/// all three modes) can scrub the *other* modes' env vars without re-deriving
+/// the choice from `(api_key, base_url)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InteractiveAuthMode {
+    /// No api-key, no base_url: subscription OAuth. Copy `~/.claude/.credentials.json`
+    /// into the home; authenticate via that file. No key env. Billing: subscription plan.
+    #[default]
+    NativeOauth,
+    /// api-key, no base_url: official Anthropic API. `ANTHROPIC_API_KEY` env +
+    /// settings.json. Billing: pay-as-you-go.
+    OfficialKey,
+    /// api-key + base_url: relay / third-party proxy. `ANTHROPIC_AUTH_TOKEN` +
+    /// `ANTHROPIC_BASE_URL` env, `ANTHROPIC_API_KEY` unset. Billing: relay endpoint.
+    Relay,
+}
+
+impl InteractiveAuthMode {
+    /// Resolve the mode from the same `(api_key, base_url)` pair the `-p` path
+    /// resolves (do NOT change WHICH credential a user gets — only the transport).
+    pub fn resolve(api_key: Option<&str>, base_url: Option<&str>) -> Self {
+        match (api_key, base_url) {
+            (Some(_), Some(_)) => InteractiveAuthMode::Relay,
+            (Some(_), None) => InteractiveAuthMode::OfficialKey,
+            (None, _) => InteractiveAuthMode::NativeOauth,
+        }
+    }
+}
+
+/// Env setup for an interactive ClaudeCode run, returned by
+/// [`setup_interactive_auth`].
+///
+/// `set` / `unset` are applied verbatim by the launcher (see
+/// `LocalContainerService::spawn_interactive_claude`, which does
+/// `env_remove(unset)` then `env(set)`). `settings_arg` (when present) must be
+/// appended to the argv as `--settings <path>` for the non-native modes (native
+/// OAuth deliberately omits `--settings`, mirroring the `-p` path).
+#[derive(Debug, Clone, Default)]
+pub struct InteractiveAuthEnv {
+    /// Env vars to SET for the interactive `claude` child.
+    pub set: std::collections::HashMap<String, String>,
+    /// Env vars to UNSET (scrub) so a stray ambient var cannot redirect billing.
+    pub unset: Vec<String>,
+    /// Path to a written `settings.json` to pass as `--settings <path>`, if any.
+    pub settings_arg: Option<std::path::PathBuf>,
+    /// The resolved auth mode (for logging/diagnostics).
+    pub mode: InteractiveAuthMode,
+}
+
+/// Unified 3-mode auth setup for the no-`-p` interactive transport.
+///
+/// Reuses the SAME credential constructions as the `-p` `build_launch_config`
+/// path ([`create_claude_config`] / [`create_claude_settings`] + the
+/// native-credentials copy) so a user gets the IDENTICAL credential they get
+/// today — only the transport (`-p` -> interactive) changes. Given the resolved
+/// `(api_key, base_url)` for the run plus the interactive [`InteractiveHome`],
+/// it writes the per-mode files into `home.home_dir` and returns the env
+/// set/unset map (+ optional `--settings` path).
+///
+/// Per-mode behavior (see [`InteractiveAuthMode`]):
+/// - **native** (no api_key): copy `~/.claude/.credentials.json` (+ optional
+///   `settings.json`) into the home; NO key env. Scrubs
+///   `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_BASE_URL`/`CLAUDE_CODE_OAUTH_TOKEN`.
+/// - **official key** (api_key, no base_url): `create_claude_config` +
+///   `create_claude_settings`; SET `ANTHROPIC_API_KEY`. Scrubs
+///   `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_BASE_URL`/`CLAUDE_CODE_OAUTH_TOKEN`.
+/// - **relay** (api_key + base_url): `create_claude_config` +
+///   `create_claude_settings`; SET `ANTHROPIC_AUTH_TOKEN`+`ANTHROPIC_BASE_URL`,
+///   UNSET `ANTHROPIC_API_KEY`. Scrubs `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`.
+///
+/// ALWAYS sets `CLAUDE_CONFIG_DIR`+`CLAUDE_HOME` to `home.home_dir` (the former
+/// is the real redirect in 2.1.177; the latter keeps RB-37 cleanup finding the
+/// dir) and `CLAUDE_CODE_MAX_RETRIES=2` (without it, relay/network errors retry
+/// for 30s+ and look like a hang before a terminator).
+///
+/// `model` is the resolved launch model (threaded into `create_claude_settings`
+/// the same way the `-p` path does). `native_credentials_src` is the source
+/// `~/.claude` directory for the native copy (pass `dirs::home_dir().join(".claude")`);
+/// only read in native mode.
+///
+/// Billing-routing env keys stripped from a native-copied `settings.json` `env`
+/// block (see [`copy_native_settings_scrubbing_billing_env`]). claude honors
+/// settings.json `env`, so any of these baked into the user's global settings
+/// would override the native OAuth credential and silently redirect billing.
+const BILLING_ENV_KEYS: [&str; 4] = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+];
+
+/// Copy a native `settings.json` into the isolated interactive home, removing any
+/// billing-routing keys from its `env` block first.
+///
+/// The process-level scrub in the launcher (`command.env_remove`) only strips the
+/// inherited PROCESS environment; it cannot reach a value persisted inside
+/// `settings.json` on disk. claude DOES read `settings.json` `env`, so a verbatim
+/// copy of a user's global settings.json that pins e.g. `ANTHROPIC_BASE_URL` would
+/// re-introduce a relay endpoint inside the native (subscription) home and defeat
+/// the scrub. Sanitizing the `env` block here keeps native OAuth on the
+/// subscription plan. If the file is not valid JSON it is copied verbatim (best
+/// effort — a non-JSON settings.json has no `env` block to leak through).
+fn copy_native_settings_scrubbing_billing_env(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let content = std::fs::read_to_string(src)?;
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        // Not JSON — nothing parseable to leak; copy verbatim.
+        std::fs::copy(src, dst)?;
+        return Ok(());
+    };
+    let mut stripped: Vec<&str> = Vec::new();
+    if let Some(env_obj) = value
+        .get_mut("env")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for key in BILLING_ENV_KEYS {
+            if env_obj.remove(key).is_some() {
+                stripped.push(key);
+            }
+        }
+    }
+    if !stripped.is_empty() {
+        tracing::info!(
+            stripped = ?stripped,
+            "Scrubbed billing-routing env keys from native settings.json copy"
+        );
+    }
+    let out = serde_json::to_string_pretty(&value).map_err(std::io::Error::other)?;
+    std::fs::write(dst, out)
+}
+
+pub fn setup_interactive_auth(
+    home: &InteractiveHome,
+    api_key: Option<&str>,
+    base_url: Option<&str>,
+    model: &str,
+    native_credentials_src: &Path,
+) -> anyhow::Result<InteractiveAuthEnv> {
+    let mode = InteractiveAuthMode::resolve(api_key, base_url);
+    let home_dir = &home.home_dir;
+    let home_str = home_dir.to_string_lossy().to_string();
+
+    let mut set: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut unset: Vec<String> = Vec::new();
+    let mut settings_arg: Option<std::path::PathBuf> = None;
+
+    // ALWAYS: redirect home + cap retries (PROBE: CLAUDE_CONFIG_DIR is the real
+    // redirect in 2.1.177; CLAUDE_HOME kept for RB-37 cleanup scan).
+    set.insert("CLAUDE_CONFIG_DIR".to_string(), home_str.clone());
+    set.insert("CLAUDE_HOME".to_string(), home_str);
+    set.insert("CLAUDE_CODE_MAX_RETRIES".to_string(), "2".to_string());
+
+    match mode {
+        InteractiveAuthMode::NativeOauth => {
+            // Copy the genuine OAuth credentials into the isolated home so the
+            // unmodified `claude` binary authenticates against the subscription
+            // plan (no key extracted into SoloDawn's own auth path). Mirrors the
+            // `-p` native-auth copy.
+            let global_creds = native_credentials_src.join(".credentials.json");
+            let isolated_creds = home_dir.join(".credentials.json");
+            if global_creds.exists() {
+                if let Err(e) = std::fs::copy(&global_creds, &isolated_creds) {
+                    tracing::warn!(
+                        error = %e,
+                        "Failed to copy native credentials into interactive home"
+                    );
+                }
+            } else {
+                tracing::warn!(
+                    creds = %global_creds.display(),
+                    "Native interactive auth selected but ~/.claude/.credentials.json is missing"
+                );
+            }
+            // Copy settings.json for user preferences if present (do not clobber).
+            // SANITIZE the copy: the user's global settings.json `env` block may
+            // contain a billing-routing var (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN
+            // / ANTHROPIC_BASE_URL / CLAUDE_CODE_OAUTH_TOKEN). claude honors
+            // settings.json `env`, so copying it verbatim would re-introduce a
+            // key/relay endpoint inside the isolated home and defeat the
+            // process-level scrub (env_remove only strips the inherited PROCESS
+            // env — it cannot reach a value baked into settings.json on disk).
+            // Strip those keys so native OAuth stays on the subscription plan.
+            let global_settings = native_credentials_src.join("settings.json");
+            let isolated_settings = home_dir.join("settings.json");
+            if global_settings.exists() && !isolated_settings.exists() {
+                if let Err(e) =
+                    copy_native_settings_scrubbing_billing_env(&global_settings, &isolated_settings)
+                {
+                    tracing::warn!(
+                        error = %e,
+                        "Failed to copy/sanitize native settings.json into interactive home"
+                    );
+                }
+            }
+            // No key env. Scrub anything that could redirect billing off the
+            // subscription plan.
+            unset.push("ANTHROPIC_API_KEY".to_string());
+            unset.push("ANTHROPIC_AUTH_TOKEN".to_string());
+            unset.push("ANTHROPIC_BASE_URL".to_string());
+            unset.push("CLAUDE_CODE_OAUTH_TOKEN".to_string());
+        }
+        InteractiveAuthMode::OfficialKey => {
+            let key = api_key.unwrap_or_default();
+            create_claude_config(home_dir, key, None)?;
+            let settings_path = create_claude_settings(home_dir, key, None, model)?;
+            settings_arg = Some(settings_path);
+            set.insert("ANTHROPIC_API_KEY".to_string(), key.to_string());
+            // Scrub relay/native auth so an ambient var cannot redirect billing.
+            unset.push("ANTHROPIC_AUTH_TOKEN".to_string());
+            unset.push("ANTHROPIC_BASE_URL".to_string());
+            unset.push("CLAUDE_CODE_OAUTH_TOKEN".to_string());
+        }
+        InteractiveAuthMode::Relay => {
+            let key = api_key.unwrap_or_default();
+            create_claude_config(home_dir, key, base_url)?;
+            let settings_path = create_claude_settings(home_dir, key, base_url, model)?;
+            settings_arg = Some(settings_path);
+            // Relay routes auth via ANTHROPIC_AUTH_TOKEN (raw Bearer) to avoid
+            // the "custom API key" TUI; ANTHROPIC_API_KEY must NOT be set.
+            set.insert("ANTHROPIC_AUTH_TOKEN".to_string(), key.to_string());
+            if let Some(url) = base_url {
+                // Match create_claude_settings: strip trailing "/v1" so the SDK's
+                // appended "/v1/messages" does not double-path.
+                let url_for_cli = url.trim_end_matches('/');
+                let url_for_cli = url_for_cli.strip_suffix("/v1").unwrap_or(url_for_cli);
+                set.insert("ANTHROPIC_BASE_URL".to_string(), url_for_cli.to_string());
+            }
+            unset.push("ANTHROPIC_API_KEY".to_string());
+            unset.push("CLAUDE_CODE_OAUTH_TOKEN".to_string());
+        }
+    }
+
+    // Set the model env across tiers (mirrors the `-p` path so the interactive
+    // run targets the same model regardless of auth mode).
+    set.insert("ANTHROPIC_MODEL".to_string(), model.to_string());
+    set.insert(
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+        model.to_string(),
+    );
+    set.insert(
+        "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+        model.to_string(),
+    );
+    set.insert(
+        "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
+        model.to_string(),
+    );
+
+    tracing::info!(
+        mode = ?mode,
+        home = %home_dir.display(),
+        has_base_url = base_url.is_some(),
+        "Set up interactive ClaudeCode auth (no-`-p` transport)"
+    );
+
+    Ok(InteractiveAuthEnv {
+        set,
+        unset,
+        settings_arg,
+        mode,
+    })
+}
+
 /// CC-Switch 服务
 pub struct CCSwitchService {
     db: Arc<DBService>,
@@ -1203,6 +1583,59 @@ mod tests {
     }
 
     #[test]
+    fn test_copy_native_settings_strips_billing_env_keeps_other_fields() {
+        let dir = tempdir().expect("temp dir");
+        let src = dir.path().join("global-settings.json");
+        let dst = dir.path().join("isolated-settings.json");
+        // A realistic user global settings.json that pins a relay endpoint + key
+        // in its env block, plus non-billing preferences that must survive.
+        std::fs::write(
+            &src,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "env": {
+                    "ANTHROPIC_API_KEY": "sk-leak",
+                    "ANTHROPIC_AUTH_TOKEN": "tok-leak",
+                    "ANTHROPIC_BASE_URL": "https://relay.example/v1",
+                    "CLAUDE_CODE_OAUTH_TOKEN": "oauth-leak",
+                    "EDITOR": "vim"
+                },
+                "hasCompletedOnboarding": true,
+                "theme": "dark"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        copy_native_settings_scrubbing_billing_env(&src, &dst).expect("copy+scrub");
+
+        let out: Value =
+            serde_json::from_str(&std::fs::read_to_string(&dst).unwrap()).expect("valid json");
+        let env = out.get("env").and_then(Value::as_object).expect("env block");
+        // Every billing-routing var stripped so native OAuth stays on the plan.
+        for key in BILLING_ENV_KEYS {
+            assert!(!env.contains_key(key), "{key} must be stripped from native settings.json");
+        }
+        // Non-billing env + top-level preferences preserved.
+        assert_eq!(env.get("EDITOR").and_then(Value::as_str), Some("vim"));
+        assert_eq!(out.get("theme").and_then(Value::as_str), Some("dark"));
+        assert_eq!(
+            out.get("hasCompletedOnboarding").and_then(Value::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_copy_native_settings_no_env_block_is_passthrough() {
+        let dir = tempdir().expect("temp dir");
+        let src = dir.path().join("g.json");
+        let dst = dir.path().join("i.json");
+        std::fs::write(&src, r#"{"theme":"light"}"#).unwrap();
+        copy_native_settings_scrubbing_billing_env(&src, &dst).expect("copy");
+        let out: Value = serde_json::from_str(&std::fs::read_to_string(&dst).unwrap()).unwrap();
+        assert_eq!(out.get("theme").and_then(Value::as_str), Some("light"));
+    }
+
+    #[test]
     fn test_create_claude_config_updates_primary_api_key_and_preserves_other_fields() {
         let dir = tempdir().expect("failed to create temp dir");
         let claude_home = dir.path();
@@ -1550,5 +1983,186 @@ mod tests {
             .expect("resolve_claude_launch_model should succeed");
 
         assert_eq!(resolved, "glm-5");
+    }
+
+    // ------------------------------------------------------------------------
+    // S3 — interactive transport helpers
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_slug_working_dir_matches_probe_verified_facts() {
+        // PROBE-verified live against claude 2.1.177.
+        assert_eq!(
+            slug_working_dir(std::path::Path::new(r"E:\SoloDawn")),
+            "E--SoloDawn"
+        );
+        assert_eq!(
+            slug_working_dir(std::path::Path::new(
+                r"C:\Users\Administrator\scratch-probe\work"
+            )),
+            "C--Users-Administrator-scratch-probe-work"
+        );
+    }
+
+    #[test]
+    fn test_interactive_transcript_path_layout() {
+        let home = std::path::Path::new("/tmp/solodawn/claude-isession-abc");
+        let wd = std::path::Path::new("/repo/proj");
+        let path = interactive_transcript_path(home, wd, "the-uuid");
+        assert_eq!(
+            path,
+            home.join("projects").join("-repo-proj").join("the-uuid.jsonl")
+        );
+    }
+
+    #[test]
+    fn test_create_interactive_isolated_home_keyed_on_session_uuid() {
+        let wd = std::path::Path::new(r"E:\SoloDawn");
+
+        // Supplied UUID -> stable home keyed on it, reused across follow-ups.
+        let h1 = create_interactive_isolated_home(Some("fixed-session-uuid"), wd)
+            .expect("provision interactive home");
+        assert_eq!(h1.session_uuid, "fixed-session-uuid");
+        assert!(
+            h1.home_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("claude-isession-")),
+            "interactive home must carry the exempt prefix: {:?}",
+            h1.home_dir
+        );
+        assert!(h1.transcript_path.ends_with("fixed-session-uuid.jsonl"));
+
+        // Re-provisioning the same logical session returns the same dir + path.
+        let h2 = create_interactive_isolated_home(Some("fixed-session-uuid"), wd)
+            .expect("re-provision interactive home");
+        assert_eq!(h1.home_dir, h2.home_dir);
+        assert_eq!(h1.transcript_path, h2.transcript_path);
+
+        // None -> mints a fresh UUID.
+        let h3 = create_interactive_isolated_home(None, wd).expect("mint fresh interactive home");
+        assert_ne!(h3.session_uuid, "fixed-session-uuid");
+
+        // Cleanup the temp dirs created by this test.
+        let _ = std::fs::remove_dir_all(&h1.home_dir);
+        let _ = std::fs::remove_dir_all(&h3.home_dir);
+    }
+
+    #[test]
+    fn test_interactive_auth_mode_resolution() {
+        assert_eq!(
+            InteractiveAuthMode::resolve(None, None),
+            InteractiveAuthMode::NativeOauth
+        );
+        assert_eq!(
+            InteractiveAuthMode::resolve(None, Some("https://x")),
+            InteractiveAuthMode::NativeOauth
+        );
+        assert_eq!(
+            InteractiveAuthMode::resolve(Some("k"), None),
+            InteractiveAuthMode::OfficialKey
+        );
+        assert_eq!(
+            InteractiveAuthMode::resolve(Some("k"), Some("https://x")),
+            InteractiveAuthMode::Relay
+        );
+    }
+
+    #[test]
+    fn test_setup_interactive_auth_official_key() {
+        let wd = std::path::Path::new(r"E:\SoloDawn");
+        let home = create_interactive_isolated_home(Some("auth-official-uuid"), wd).unwrap();
+        let env = setup_interactive_auth(
+            &home,
+            Some("sk-ant-official"),
+            None,
+            "claude-sonnet-4-6",
+            std::path::Path::new("/nonexistent/.claude"),
+        )
+        .unwrap();
+        assert_eq!(env.mode, InteractiveAuthMode::OfficialKey);
+        assert_eq!(
+            env.set.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some("sk-ant-official")
+        );
+        // Always-set redirect + retry cap.
+        assert!(env.set.contains_key("CLAUDE_CONFIG_DIR"));
+        assert!(env.set.contains_key("CLAUDE_HOME"));
+        assert_eq!(
+            env.set.get("CLAUDE_CODE_MAX_RETRIES").map(String::as_str),
+            Some("2")
+        );
+        // Scrub relay/native vars.
+        assert!(env.unset.iter().any(|k| k == "ANTHROPIC_AUTH_TOKEN"));
+        assert!(env.unset.iter().any(|k| k == "ANTHROPIC_BASE_URL"));
+        assert!(env.unset.iter().any(|k| k == "CLAUDE_CODE_OAUTH_TOKEN"));
+        // Official key writes settings.json -> --settings path returned.
+        assert!(env.settings_arg.is_some());
+
+        let _ = std::fs::remove_dir_all(&home.home_dir);
+    }
+
+    #[test]
+    fn test_setup_interactive_auth_relay() {
+        let wd = std::path::Path::new(r"E:\SoloDawn");
+        let home = create_interactive_isolated_home(Some("auth-relay-uuid"), wd).unwrap();
+        let env = setup_interactive_auth(
+            &home,
+            Some("relay-token"),
+            Some("https://relay.example.com/v1"),
+            "claude-sonnet-4-6",
+            std::path::Path::new("/nonexistent/.claude"),
+        )
+        .unwrap();
+        assert_eq!(env.mode, InteractiveAuthMode::Relay);
+        // Relay routes via AUTH_TOKEN; API_KEY must be scrubbed, not set.
+        assert_eq!(
+            env.set.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("relay-token")
+        );
+        assert!(!env.set.contains_key("ANTHROPIC_API_KEY"));
+        assert!(env.unset.iter().any(|k| k == "ANTHROPIC_API_KEY"));
+        // base_url stripped of trailing /v1 to avoid double-pathing.
+        assert_eq!(
+            env.set.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://relay.example.com")
+        );
+        assert!(env.settings_arg.is_some());
+
+        let _ = std::fs::remove_dir_all(&home.home_dir);
+    }
+
+    #[test]
+    fn test_setup_interactive_auth_native_scrubs_all_keys() {
+        let wd = std::path::Path::new(r"E:\SoloDawn");
+        let home = create_interactive_isolated_home(Some("auth-native-uuid"), wd).unwrap();
+        let env = setup_interactive_auth(
+            &home,
+            None,
+            None,
+            "claude-sonnet-4-6",
+            std::path::Path::new("/nonexistent/.claude"),
+        )
+        .unwrap();
+        assert_eq!(env.mode, InteractiveAuthMode::NativeOauth);
+        // Native: no key env at all; everything that could redirect billing is scrubbed.
+        assert!(!env.set.contains_key("ANTHROPIC_API_KEY"));
+        assert!(!env.set.contains_key("ANTHROPIC_AUTH_TOKEN"));
+        assert!(!env.set.contains_key("ANTHROPIC_BASE_URL"));
+        for key in [
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ] {
+            assert!(
+                env.unset.iter().any(|k| k == key),
+                "native mode must scrub {key}"
+            );
+        }
+        // Native omits --settings (mirrors the -p native path).
+        assert!(env.settings_arg.is_none());
+
+        let _ = std::fs::remove_dir_all(&home.home_dir);
     }
 }

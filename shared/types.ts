@@ -499,7 +499,22 @@ export type ExecutorConfigs = { executors: { [key in BaseCodingAgent]?: Executor
 
 export enum BaseAgentCapability { SESSION_FORK = "SESSION_FORK", SETUP_HELPER = "SETUP_HELPER" }
 
-export type ClaudeCode = { append_prompt: AppendPrompt, claude_code_router?: boolean | null, plan?: boolean | null, approvals?: boolean | null, model?: string | null, dangerously_skip_permissions?: boolean | null, disable_api_key?: boolean | null, base_command_override?: string | null, additional_params?: Array<string> | null, env?: { [key in string]?: string } | null, };
+export type ClaudeCode = { append_prompt: AppendPrompt, claude_code_router?: boolean | null, plan?: boolean | null, approvals?: boolean | null, model?: string | null, dangerously_skip_permissions?: boolean | null, disable_api_key?: boolean | null, 
+/**
+ * When true, select the no-`-p` interactive transport (genuine `claude`
+ * binary, on-disk transcript capture) instead of the `-p` stream-json
+ * control-protocol path. Only native-OAuth (subscription) users set this;
+ * API-key/relay users keep the `-p` path so they stay pool-exempt. See
+ * `docs/developed/plans/2026-06-15-no-p-interactive-transport.md`.
+ */
+interactive?: boolean | null, 
+/**
+ * Pre-generated session UUID for the interactive transport, threaded as
+ * `--session-id <uuid>` at first launch (and `--resume <uuid>` on
+ * follow-ups). Generated once per logical session by cc_switch; the
+ * transcript path is derived from it. Ignored on the `-p` path.
+ */
+interactive_session_id?: string | null, base_command_override?: string | null, additional_params?: Array<string> | null, env?: { [key in string]?: string } | null, };
 
 export type Gemini = { append_prompt: AppendPrompt, model?: string | null, yolo?: boolean | null, base_command_override?: string | null, additional_params?: Array<string> | null, env?: { [key in string]?: string } | null, };
 

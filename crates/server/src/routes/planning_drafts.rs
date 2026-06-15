@@ -20,7 +20,7 @@ use services::services::orchestrator::{
     audit_plan::generate_audit_plan,
     audit_principles::default_audit_plan,
     config::{PromptProfile, system_prompt_for_profile},
-    create_claude_code_native_client, create_llm_client,
+    create_interactive_claude_client, create_llm_client,
 };
 use utils::response::ApiResponse;
 use uuid::Uuid;
@@ -368,7 +368,7 @@ async fn confirm_draft(
     // Build LLM client and generate audit plan
     let llm_client = build_llm_client_from_draft(&draft).or_else(|| {
         tracing::info!(draft_id = %draft_id, "No model configured for audit plan generation, trying Claude Code native");
-        create_claude_code_native_client("claude-sonnet-4-6")
+        create_interactive_claude_client("claude-sonnet-4-6")
     });
 
     let audit_plan = if let Some(client) = llm_client {
@@ -580,7 +580,7 @@ async fn send_message(
     // `test_probe_subscription_model_acceptance` for upstream confirmation.
     let llm_client = build_llm_client_from_draft(&draft).or_else(|| {
         tracing::info!(draft_id = %draft_id, "No model configured, trying Claude Code native credentials");
-        create_claude_code_native_client("claude-sonnet-4-6")
+        create_interactive_claude_client("claude-sonnet-4-6")
     });
     if let Some(llm_client) = llm_client {
         let all_messages = PlanningDraftMessage::list_by_draft(&deployment.db().pool, &draft_id)

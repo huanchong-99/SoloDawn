@@ -37,7 +37,7 @@ use super::{
         WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_RUNNING, WORKFLOW_TOPIC_PREFIX,
     },
     llm::{
-        LLMClient, build_terminal_completion_prompt, create_claude_code_native_client,
+        LLMClient, build_terminal_completion_prompt, create_interactive_claude_client,
         create_llm_client,
     },
     message_bus::{BusMessage, SharedMessageBus},
@@ -196,7 +196,7 @@ impl OrchestratorAgent {
             } else {
                 "claude-sonnet-4-6"
             };
-            create_claude_code_native_client(model)
+            create_interactive_claude_client(model)
                 .ok_or_else(|| anyhow::anyhow!(
                     "No LLM available: configured client failed ({e}) and Claude Code native credentials not found"
                 ))
@@ -745,7 +745,7 @@ impl OrchestratorAgent {
         let mut model_configs =
             db::models::ModelConfig::find_user_configured(&self.db.pool).await?;
         if model_configs.is_empty()
-            && create_claude_code_native_client("claude-sonnet-4-6").is_some()
+            && create_interactive_claude_client("claude-sonnet-4-6").is_some()
         {
             model_configs.push(db::models::ModelConfig {
                 id: "model-claude-sonnet".to_string(),
