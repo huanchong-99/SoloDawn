@@ -24,7 +24,7 @@ RUN set -eux; \
     apt-get update && apt-get install -y --no-install-recommends \
         git pkg-config libsqlite3-dev libgit2-dev zlib1g-dev \
         cmake make ninja-build clang libclang-dev perl nasm libssl-dev \
-        protobuf-compiler \
+        protobuf-compiler libprotobuf-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
