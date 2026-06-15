@@ -71,6 +71,19 @@ pub struct ClaudeCode {
     pub dangerously_skip_permissions: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_api_key: Option<bool>,
+    /// When true, select the no-`-p` interactive transport (genuine `claude`
+    /// binary, on-disk transcript capture) instead of the `-p` stream-json
+    /// control-protocol path. Only native-OAuth (subscription) users set this;
+    /// API-key/relay users keep the `-p` path so they stay pool-exempt. See
+    /// `docs/developed/plans/2026-06-15-no-p-interactive-transport.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interactive: Option<bool>,
+    /// Pre-generated session UUID for the interactive transport, threaded as
+    /// `--session-id <uuid>` at first launch (and `--resume <uuid>` on
+    /// follow-ups). Generated once per logical session by cc_switch; the
+    /// transcript path is derived from it. Ignored on the `-p` path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interactive_session_id: Option<String>,
     #[serde(flatten)]
     pub cmd: CmdOverrides,
 
@@ -95,6 +108,18 @@ impl ClaudeCode {
             tracing::warn!(
                 "base_command_override is set, this will override the claude_code_router setting"
             );
+        }
+
+        // Interactive (no-`-p`) transport: native-OAuth subscription users run the
+        // genuine `claude` binary without the `-p` / stream-json control protocol so
+        // they stay on subscription metering and off the Agent SDK credit pool.
+        // The actual PTY spawn lives in `services` per the probe seam (executors must
+        // not depend on services); this method only constructs the argv. Interactive
+        // launches do NOT go through `spawn_internal` (which is `-p`/ProtocolPeer-only)
+        // — services obtains the argv via `build_interactive_command_parts` /
+        // `build_interactive_follow_up_command_parts` and drives the PTY itself.
+        if self.interactive == Some(true) {
+            return Ok(self.build_interactive_command_builder());
         }
 
         let mut builder =
@@ -134,6 +159,77 @@ impl ClaudeCode {
         }
 
         Ok(apply_overrides(builder, &self.cmd))
+    }
+
+    /// Build the argv for the no-`-p` interactive transport.
+    ///
+    /// Deliberately omits everything that requires `-p`: no `--output-format`/
+    /// `--input-format=stream-json`, no `--include-partial-messages`, no
+    /// `--permission-prompt-tool`, no `--permission-mode`, no
+    /// `--disallowedTools`. Structured output is captured by tailing the on-disk
+    /// session transcript (see S5), not from stdout.
+    ///
+    /// Adds `--dangerously-skip-permissions` (tier-1 approvals) and `--model`
+    /// when set; `apply_overrides` is preserved for base/param overrides.
+    ///
+    /// Deliberately does NOT add the session flags. `--session-id` and
+    /// `--resume` are MUTUALLY EXCLUSIVE on the same invocation in claude
+    /// 2.1.177 ("--session-id can only be used with --continue or --resume if
+    /// --fork-session is also specified"). The initial path appends
+    /// `--session-id <uuid>` and the follow-up path appends only
+    /// `--resume <uuid>` — see `build_interactive_command_parts` /
+    /// `build_interactive_follow_up_command_parts`.
+    fn build_interactive_command_builder(&self) -> CommandBuilder {
+        let mut builder =
+            CommandBuilder::new(base_command(self.claude_code_router.unwrap_or(false)));
+
+        // Tier-1 approvals for native OAuth: skip permission prompts. (No `--bare`
+        // — it's stripped for native OAuth and breaks token loading; see contract.)
+        builder = builder.extend_params(["--dangerously-skip-permissions"]);
+        if let Some(model) = &self.model {
+            builder = builder.extend_params(["--model", model]);
+        }
+
+        apply_overrides(builder, &self.cmd)
+    }
+
+    /// Public seam for `services`: build the initial interactive launch argv
+    /// (program + args) for the PTY spawner. `services` cannot depend on the
+    /// `-p` `spawn_internal`/`ProtocolPeer` path, so it drives the PTY itself
+    /// using these resolved command parts. The supplied prompt is appended by
+    /// the caller (passed positionally to the interactive `claude` invocation).
+    ///
+    /// The INITIAL launch adds `--session-id <uuid>` (registers the session so
+    /// follow-ups can `--resume` it). It must NOT also pass `--resume`.
+    pub fn build_interactive_command_parts(&self) -> Result<CommandParts, ExecutorError> {
+        let builder = self.build_interactive_command_builder();
+        match &self.interactive_session_id {
+            Some(session_id) => Ok(builder.build_follow_up(&[
+                "--session-id".to_string(),
+                session_id.clone(),
+            ])?),
+            None => Ok(builder.build_initial()?),
+        }
+    }
+
+    /// Public seam for `services`: build the follow-up interactive launch argv.
+    /// Follow-ups use `--resume <uuid>` ONLY — WITHOUT `--session-id` and
+    /// WITHOUT `--fork-session` (proven to append to the same transcript file;
+    /// claude 2.1.177 rejects `--session-id` alongside `--resume` unless
+    /// `--fork-session` is also set, and forking would write a new transcript).
+    /// Prefers the explicit `interactive_session_id`, falling back to the
+    /// provided `session_id`.
+    pub fn build_interactive_follow_up_command_parts(
+        &self,
+        session_id: &str,
+    ) -> Result<CommandParts, ExecutorError> {
+        let resume_id = self
+            .interactive_session_id
+            .as_deref()
+            .unwrap_or(session_id);
+        Ok(self
+            .build_interactive_command_builder()
+            .build_follow_up(&["--resume".to_string(), resume_id.to_string()])?)
     }
 
     pub fn permission_mode(&self) -> PermissionMode {
@@ -191,6 +287,17 @@ impl StandardCodingAgentExecutor for ClaudeCode {
         prompt: &str,
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
+        // The interactive transport must NOT go through `spawn_internal`, which is
+        // `-p`/ProtocolPeer-only and would push subscription users onto the metered
+        // Agent SDK credit pool. `services` drives the interactive PTY directly via
+        // `build_interactive_command_parts`; reaching here with `interactive` set is
+        // a wiring bug, so fail loudly rather than silently metering the user.
+        if self.interactive == Some(true) {
+            return Err(ExecutorError::Io(std::io::Error::other(
+                "interactive ClaudeCode must be spawned via the services PTY transport \
+                 (build_interactive_command_parts), not the -p spawn path",
+            )));
+        }
         let command_builder = self.build_command_builder()?;
         let command_parts = command_builder.build_initial()?;
         self.spawn_internal(current_dir, prompt, command_parts, env)
@@ -204,6 +311,14 @@ impl StandardCodingAgentExecutor for ClaudeCode {
         session_id: &str,
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
+        // See `spawn`: interactive follow-ups are driven by `services` via
+        // `build_interactive_follow_up_command_parts`, not this `-p` path.
+        if self.interactive == Some(true) {
+            return Err(ExecutorError::Io(std::io::Error::other(
+                "interactive ClaudeCode follow-up must be spawned via the services PTY transport \
+                 (build_interactive_follow_up_command_parts), not the -p spawn path",
+            )));
+        }
         let command_builder = self.build_command_builder()?;
         // [G19-005] TODO: `--fork-session` and `--resume` may be mutually exclusive
         // in future Claude CLI versions. `--fork-session` creates a new session branching
@@ -1501,6 +1616,7 @@ impl StreamingContentState {
 pub enum ClaudeJson {
     System {
         subtype: Option<String>,
+        #[serde(alias = "sessionId")]
         session_id: Option<String>,
         cwd: Option<String>,
         tools: Option<Vec<serde_json::Value>>,
@@ -1510,10 +1626,12 @@ pub enum ClaudeJson {
     },
     Assistant {
         message: ClaudeMessage,
+        #[serde(alias = "sessionId")]
         session_id: Option<String>,
     },
     User {
         message: ClaudeMessage,
+        #[serde(alias = "sessionId")]
         session_id: Option<String>,
     },
     ToolUse {
@@ -2077,6 +2195,8 @@ mod tests {
             },
             approvals_service: None,
             disable_api_key: None,
+            interactive: None,
+            interactive_session_id: None,
             allow_user_questions: false,
         };
         let msg_store = Arc::new(MsgStore::new());
@@ -2105,6 +2225,93 @@ mod tests {
             patch_count > 0,
             "Expected JsonPatch messages to be generated from streaming processing"
         );
+    }
+
+    fn interactive_executor(session_id: Option<&str>) -> ClaudeCode {
+        ClaudeCode {
+            claude_code_router: Some(false),
+            plan: None,
+            approvals: None,
+            model: Some("claude-sonnet-4-6".to_string()),
+            append_prompt: AppendPrompt::default(),
+            dangerously_skip_permissions: None,
+            cmd: crate::command::CmdOverrides {
+                base_command_override: None,
+                additional_params: None,
+                env: None,
+            },
+            approvals_service: None,
+            disable_api_key: None,
+            interactive: Some(true),
+            interactive_session_id: session_id.map(ToString::to_string),
+            allow_user_questions: false,
+        }
+    }
+
+    #[test]
+    fn test_interactive_initial_has_session_id_no_resume() {
+        // INITIAL launch: must carry `--session-id <uuid>` and NOT `--resume`
+        // (claude 2.1.177 rejects `--session-id` + `--resume` without
+        // `--fork-session`).
+        let exec = interactive_executor(Some("sess-uuid-1"));
+        let parts = exec.build_interactive_command_parts().unwrap();
+        let i = parts
+            .args()
+            .iter()
+            .position(|a| a == "--session-id")
+            .expect("--session-id must be present on initial launch");
+        assert_eq!(parts.args()[i + 1], "sess-uuid-1");
+        assert!(
+            !parts.args().iter().any(|a| a == "--resume"),
+            "initial launch must NOT pass --resume: {:?}",
+            parts.args()
+        );
+        assert!(
+            !parts.args().iter().any(|a| a == "--fork-session"),
+            "initial launch must NOT pass --fork-session: {:?}",
+            parts.args()
+        );
+        assert!(
+            parts.args().iter().any(|a| a == "--dangerously-skip-permissions"),
+            "tier-1 approvals flag must be present"
+        );
+    }
+
+    #[test]
+    fn test_interactive_follow_up_has_resume_only() {
+        // FOLLOW-UP: must carry ONLY `--resume <uuid>` — NO `--session-id`, NO
+        // `--fork-session` (the production bug fix).
+        let exec = interactive_executor(Some("sess-uuid-2"));
+        let parts = exec
+            .build_interactive_follow_up_command_parts("sess-uuid-2")
+            .unwrap();
+        let i = parts
+            .args()
+            .iter()
+            .position(|a| a == "--resume")
+            .expect("--resume must be present on follow-up");
+        assert_eq!(parts.args()[i + 1], "sess-uuid-2");
+        assert!(
+            !parts.args().iter().any(|a| a == "--session-id"),
+            "follow-up must NOT pass --session-id (rejected by claude 2.1.177): {:?}",
+            parts.args()
+        );
+        assert!(
+            !parts.args().iter().any(|a| a == "--fork-session"),
+            "follow-up must NOT pass --fork-session: {:?}",
+            parts.args()
+        );
+    }
+
+    #[test]
+    fn test_interactive_follow_up_prefers_explicit_session_id() {
+        // When interactive_session_id is set, it overrides the passed id.
+        let exec = interactive_executor(Some("explicit-uuid"));
+        let parts = exec
+            .build_interactive_follow_up_command_parts("ignored-uuid")
+            .unwrap();
+        let i = parts.args().iter().position(|a| a == "--resume").unwrap();
+        assert_eq!(parts.args()[i + 1], "explicit-uuid");
     }
 
     #[test]
@@ -2398,5 +2605,219 @@ mod tests {
         assert_eq!(entries[1].content, "I'll help you with that");
 
         // ToolResult entry is ignored - no third entry
+    }
+
+    // ---------------------------------------------------------------------
+    // S8 — interactive transcript schema-drift guard (no-`-p` transport).
+    //
+    // The no-`-p` interactive transport (see
+    // docs/developed/plans/2026-06-15-no-p-interactive-transport.md) does NOT
+    // get a stdout `--output-format stream-json` stream; instead it tails the
+    // on-disk session transcript JSONL and feeds each line through this same
+    // `ClaudeJson`/`ClaudeContentItem` parser. That on-disk envelope is
+    // camelCase (`sessionId`) and carries kebab-case top-level record types
+    // (`file-history-snapshot`, `ai-title`, ...) that the `-p` stream never
+    // emits. The lines below are REAL records captured from a live
+    // claude 2.1.177 transcript (`~/.claude/projects/E--SoloDawn/*.jsonl`),
+    // trimmed only to drop oversized blobs (key names preserved verbatim).
+    //
+    // This is a contract test: it pins the interactive transcript schema
+    // against the parser so a CLI schema change is caught here instead of
+    // silently degrading captured output. RERUN AND REFRESH THE FIXTURE LINES
+    // ON EACH `@anthropic-ai/claude-code` (the `claude` CLI) version bump.
+    #[test]
+    fn test_interactive_transcript_schema_contract() {
+        // (1) assistant line: camelCase `sessionId` envelope + nested
+        //     `message.content` snake_case text block.
+        let assistant_text = r#"{"parentUuid":"p-1","isSidechain":false,"message":{"model":"claude-opus-4-8","id":"msg_01P8Va8zDDhaWNf2qaTPLsHj","type":"message","role":"assistant","content":[{"type":"text","text":"I'll scout the repo briefly."}],"stop_reason":"tool_use","stop_sequence":null},"requestId":"req_1","type":"assistant","uuid":"u-1","timestamp":"2026-06-15T11:03:00.000Z","userType":"external","entrypoint":"cli","cwd":"E:\\SoloDawn","sessionId":"sess-camel-123","version":"2.1.177","gitBranch":"feat/no-p-interactive-transport"}"#;
+        let parsed: ClaudeJson = serde_json::from_str(assistant_text)
+            .expect("assistant transcript line must parse into ClaudeJson");
+        // session_id binds through #[serde(alias = "sessionId")].
+        assert_eq!(
+            ClaudeLogProcessor::extract_session_id(&parsed),
+            Some("sess-camel-123".to_string()),
+            "assistant sessionId must bind through the serde alias"
+        );
+        match &parsed {
+            ClaudeJson::Assistant { message, .. } => {
+                assert_eq!(message.role, "assistant");
+                assert_eq!(message.content.len(), 1);
+                match &message.content[0] {
+                    ClaudeContentItem::Text { text } => {
+                        assert_eq!(text, "I'll scout the repo briefly.");
+                    }
+                    other => panic!("expected nested Text content item, got {other:?}"),
+                }
+            }
+            other => panic!("expected ClaudeJson::Assistant, got {other:?}"),
+        }
+
+        // (1b) the camelCase `sessionId` alias is ADDITIVE, not a replacement:
+        //      the same envelope carrying the `-p` stream's snake_case
+        //      `session_id` (and no `sessionId`) must still bind. This pins the
+        //      alias so a future rename can't silently break either transport.
+        let assistant_snake_session = r#"{"type":"assistant","message":{"type":"message","role":"assistant","content":[{"type":"text","text":"ok"}]},"session_id":"sess-snake-456"}"#;
+        let parsed_snake: ClaudeJson = serde_json::from_str(assistant_snake_session)
+            .expect("assistant line with snake_case session_id must parse");
+        assert_eq!(
+            ClaudeLogProcessor::extract_session_id(&parsed_snake),
+            Some("sess-snake-456".to_string()),
+            "snake_case session_id must still bind alongside the camelCase alias"
+        );
+
+        // (1c) serde round-trips the camelCase envelope without dropping the
+        //      pinned fields (session_id re-serializes as snake_case, content
+        //      block keeps its nested snake_case `text`). This guards the
+        //      tailer's re-emit path, not just the read path.
+        let reserialized = serde_json::to_value(&parsed).expect("assistant ClaudeJson must serialize");
+        assert_eq!(
+            reserialized["type"], "assistant",
+            "round-trip must preserve the top-level tag"
+        );
+        assert_eq!(
+            reserialized["session_id"], "sess-camel-123",
+            "round-trip must preserve the bound session id"
+        );
+        assert_eq!(
+            reserialized["message"]["content"][0]["type"], "text",
+            "round-trip must preserve the nested snake_case content block type"
+        );
+
+        // (2) assistant line with a nested snake_case tool_use block (real
+        //     2.1.177 carries extra block keys like `caller` — must be ignored).
+        let assistant_tool_use = r#"{"parentUuid":"p-2","isSidechain":false,"message":{"model":"claude-opus-4-8","id":"msg_2","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01WaqFFTUGUVmD5uryLgDL1J","name":"Grep","input":{"pattern":"claude(-code)?\\s+(-p|--print)","output_mode":"files_with_matches"},"caller":{"type":"direct"}}],"stop_reason":"tool_use","stop_sequence":null},"type":"assistant","uuid":"u-2","timestamp":"2026-06-15T11:03:01.000Z","cwd":"E:\\SoloDawn","sessionId":"sess-camel-123","version":"2.1.177"}"#;
+        let parsed: ClaudeJson = serde_json::from_str(assistant_tool_use)
+            .expect("assistant+tool_use transcript line must parse");
+        match &parsed {
+            ClaudeJson::Assistant { message, .. } => match &message.content[0] {
+                ClaudeContentItem::ToolUse { id, tool_data } => {
+                    assert_eq!(id, "toolu_01WaqFFTUGUVmD5uryLgDL1J");
+                    match tool_data {
+                        ClaudeToolData::Grep { pattern, .. } => {
+                            assert_eq!(pattern, "claude(-code)?\\s+(-p|--print)");
+                        }
+                        other => panic!("expected Grep tool_data, got {other:?}"),
+                    }
+                }
+                other => panic!("expected nested ToolUse content item, got {other:?}"),
+            },
+            other => panic!("expected ClaudeJson::Assistant, got {other:?}"),
+        }
+
+        // (3) user line: camelCase `sessionId` + nested tool_result block, plus
+        //     the supplementary top-level `toolUseResult` sideband (ignored).
+        let user_tool_result = r#"{"parentUuid":"u-2","isSidechain":false,"promptId":"prompt-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01WaqFFTUGUVmD5uryLgDL1J","type":"tool_result","content":"Found 4 files\ncrates\\executors\\src\\command.rs","is_error":false}]},"uuid":"u-3","timestamp":"2026-06-15T11:03:02.000Z","toolUseResult":{"stdout":"Found 4 files"},"sourceToolAssistantUUID":"u-2","userType":"external","cwd":"E:\\SoloDawn","sessionId":"sess-camel-123","version":"2.1.177"}"#;
+        let parsed: ClaudeJson = serde_json::from_str(user_tool_result)
+            .expect("user transcript line must parse into ClaudeJson");
+        assert_eq!(
+            ClaudeLogProcessor::extract_session_id(&parsed),
+            Some("sess-camel-123".to_string()),
+            "user sessionId must bind through the serde alias"
+        );
+        match &parsed {
+            ClaudeJson::User { message, .. } => {
+                assert_eq!(message.role, "user");
+                match &message.content[0] {
+                    ClaudeContentItem::ToolResult {
+                        tool_use_id,
+                        content,
+                        is_error,
+                    } => {
+                        assert_eq!(tool_use_id, "toolu_01WaqFFTUGUVmD5uryLgDL1J");
+                        assert_eq!(is_error, &Some(false));
+                        assert!(
+                            content
+                                .as_str()
+                                .is_some_and(|s| s.contains("Found 4 files")),
+                            "tool_result content text must extract"
+                        );
+                    }
+                    other => panic!("expected nested ToolResult content item, got {other:?}"),
+                }
+            }
+            other => panic!("expected ClaudeJson::User, got {other:?}"),
+        }
+
+        // (3b) assistant line with MULTIPLE nested snake_case content blocks in
+        //      order (thinking then text) — the interactive transcript inlines a
+        //      reasoning block ahead of the visible reply. Pin both the variant
+        //      mapping and the ordering so a block-shape change is caught here.
+        let assistant_mixed = r#"{"type":"assistant","message":{"type":"message","role":"assistant","content":[{"type":"thinking","thinking":"Plan: read then edit."},{"type":"text","text":"On it."}],"stop_reason":"end_turn"},"sessionId":"sess-camel-123"}"#;
+        let parsed: ClaudeJson = serde_json::from_str(assistant_mixed)
+            .expect("assistant line with thinking+text blocks must parse");
+        match &parsed {
+            ClaudeJson::Assistant { message, .. } => {
+                assert_eq!(
+                    message.content.len(),
+                    2,
+                    "both nested content blocks must survive parsing"
+                );
+                assert!(
+                    matches!(
+                        &message.content[0],
+                        ClaudeContentItem::Thinking { thinking } if thinking == "Plan: read then edit."
+                    ),
+                    "first block must be the snake_case thinking block, in order"
+                );
+                assert!(
+                    matches!(
+                        &message.content[1],
+                        ClaudeContentItem::Text { text } if text == "On it."
+                    ),
+                    "second block must be the snake_case text block, in order"
+                );
+            }
+            other => panic!("expected ClaudeJson::Assistant, got {other:?}"),
+        }
+
+        // (4) kebab-case / camelCase-only top-level record types that the
+        //     interactive transcript emits but the `-p` stream never does.
+        //     Every one MUST land in the `Unknown` catch-all (no panic, no
+        //     deserialization error) so the tailer can skip it cleanly.
+        let kebab_lines = [
+            r#"{"type":"file-history-snapshot","messageId":"m-1","snapshot":{"trackedFileBackups":{}},"isSnapshotUpdate":false}"#,
+            r#"{"type":"ai-title","aiTitle":"Migrate connector","sessionId":"sess-camel-123"}"#,
+            r#"{"type":"last-prompt","lastPrompt":"do the thing","leafUuid":"u-3","sessionId":"sess-camel-123"}"#,
+            r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-06-15T11:03:03.000Z","sessionId":"sess-camel-123","content":"queued"}"#,
+            r#"{"parentUuid":"u-1","isSidechain":false,"attachment":{"type":"file"},"type":"attachment","uuid":"u-4","timestamp":"2026-06-15T11:03:04.000Z","cwd":"E:\\SoloDawn","sessionId":"sess-camel-123","version":"2.1.177"}"#,
+            // `summary` records carry their session id ONLY as camelCase — a
+            // top-level type with no snake_case form, exercised end to end.
+            r#"{"type":"summary","summary":"Migrated connector","leafUuid":"u-3","sessionId":"sess-camel-123"}"#,
+            // a hypothetical future top-level type must also degrade gracefully.
+            r#"{"type":"some-future-record","brandNewField":42}"#,
+        ];
+        for line in kebab_lines {
+            let parsed: ClaudeJson = serde_json::from_str(line)
+                .unwrap_or_else(|e| panic!("kebab/unknown line must parse without error: {line}\n{e}"));
+            assert!(
+                matches!(parsed, ClaudeJson::Unknown { .. }),
+                "unknown top-level type must deserialize to ClaudeJson::Unknown, got {parsed:?} for {line}"
+            );
+            // The Unknown catch-all has no session_id field, so extraction must
+            // yield None even when the record carries a camelCase sessionId —
+            // the tailer relies on real envelopes (assistant/user) for the id.
+            assert_eq!(
+                ClaudeLogProcessor::extract_session_id(&parsed),
+                None,
+                "unknown top-level record must not surface a session id: {line}"
+            );
+            // Unknown records are surfaced as a single SystemMessage ("Unrecognized
+            // JSON message: ...") and warn-logged (claude.rs:1321) — never panic
+            // and never an error. Pin that so the catch-all path stays observable.
+            let entries = normalize(&parsed, "");
+            assert_eq!(
+                entries.len(),
+                1,
+                "unknown top-level record must normalize to exactly one entry: {line}"
+            );
+            assert!(
+                matches!(entries[0].entry_type, NormalizedEntryType::SystemMessage),
+                "unknown top-level record entry must be a SystemMessage: {line}"
+            );
+            assert!(
+                entries[0].content.starts_with("Unrecognized JSON message:"),
+                "unknown top-level record content must flag it as unrecognized: {line}"
+            );
+        }
     }
 }

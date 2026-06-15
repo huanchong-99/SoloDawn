@@ -36,6 +36,12 @@ impl CommandParts {
             .ok_or(ExecutorError::ExecutableNotFound { program })?;
         Ok((executable, args))
     }
+
+    /// Read-only view of the resolved argv (excluding the program). Used by
+    /// callers/tests that need to inspect flags before spawning.
+    pub fn args(&self) -> &[String] {
+        &self.args
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, JsonSchema, Default)]

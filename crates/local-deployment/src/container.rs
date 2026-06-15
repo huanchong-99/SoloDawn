@@ -34,9 +34,11 @@ use executors::{
     },
     approvals::{ExecutorApprovalService, NoopExecutorApprovalService},
     env::ExecutionEnv,
-    executors::{BaseCodingAgent, ExecutorExitResult, ExecutorExitSignal, InterruptSender},
+    executors::{
+        BaseCodingAgent, CodingAgent, ExecutorExitResult, ExecutorExitSignal, InterruptSender,
+    },
     logs::{NormalizedEntryType, utils::patch::extract_normalized_entry_from_patch},
-    profile::ExecutorProfileId,
+    profile::{ExecutorConfigs, ExecutorProfileId},
 };
 use futures::{FutureExt, TryStreamExt, stream::select};
 use serde_json::json;
@@ -62,6 +64,27 @@ use utils::{
 use uuid::Uuid;
 
 use crate::{command, copy};
+
+// ============================================================================
+// S5 — Interactive transcript tailer tuning
+// ============================================================================
+
+/// Poll cadence for tailing the interactive session transcript JSONL.
+/// Matches the 250ms cadence already used by `wait_for_exit_status`.
+const TRANSCRIPT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Idle ticks (each = `TRANSCRIPT_POLL_INTERVAL`) of no new transcript bytes
+/// required AFTER the `turn_duration` marker before pushing `Finished`
+/// (short debounce: 4 * 250ms = 1s).
+const TRANSCRIPT_MARKER_DEBOUNCE_TICKS: u32 = 4;
+
+/// Idle ticks with no new bytes that force `Finished` as a LAST-RESORT safety
+/// net only. S6 drives `Finished` off the genuine `claude` child exit (see
+/// `spawn_interactive_completion_watcher`), so this fallback exists purely to
+/// reap an orphaned tailer if the child-exit signal is ever lost. PROBE found a
+/// 10s idle can fire mid-long-tool, so it is set deliberately long (480 *
+/// 250ms = 120s of total silence) to never pre-empt a still-running turn.
+const TRANSCRIPT_IDLE_TIMEOUT_TICKS: u32 = 480;
 
 #[derive(Clone)]
 pub struct LocalContainerService {
@@ -168,6 +191,32 @@ impl LocalContainerService {
                         e
                     );
                 });
+        }
+
+        // S4/S6 — logical-session teardown for the no-`-p` interactive transport.
+        // Interactive CLAUDE homes (`claude-isession-<session_uuid>`) are EXEMPT
+        // from terminal-end delete so follow-ups can `--resume` the same
+        // transcript; their RB-37 secret cleanup is deferred to here (workspace
+        // teardown). Delete each one keyed on the workspace's agent session ids.
+        // (`-p` session ids won't have a matching dir → harmless no-op.)
+        match CodingAgentTurn::agent_session_ids_for_workspace(&db.pool, workspace.id).await {
+            Ok(session_ids) => {
+                for session_id in session_ids {
+                    let home = services::services::cc_switch::interactive_isolated_home_path(
+                        &session_id,
+                    );
+                    if home.exists() {
+                        services::terminal::ProcessManager::cleanup_logical_session_home(&home);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    workspace_id = %workspace.id,
+                    error = %e,
+                    "failed to enumerate interactive session ids for teardown"
+                );
+            }
         }
 
         // Clear container_ref so this workspace won't be picked up again
@@ -637,6 +686,314 @@ impl LocalContainerService {
         Ok(())
     }
 
+    /// S5 (no-`-p` interactive transport): spawn a transcript tailer that feeds
+    /// the genuine `claude` interactive session's on-disk JSONL into a fresh
+    /// per-execution `MsgStore`, then runs the EXISTING `ClaudeLogProcessor`
+    /// pipeline over it unchanged.
+    ///
+    /// Contract (see docs/developed/plans/2026-06-15-no-p-interactive-transport.md):
+    /// - push `LogMsg::SessionId(uuid)` immediately (known a priori),
+    /// - tail the JSONL and push each COMPLETE (newline-terminated) line as
+    ///   `LogMsg::Stdout` — byte-identical to how `track_child_msgs_in_store`
+    ///   maps child stdout, so `ClaudeLogProcessor` parses it with zero changes,
+    /// - push `LogMsg::Finished` when a `type=system,subtype=turn_duration` line
+    ///   is seen AND a short idle debounce elapses; the PROBE found that marker
+    ///   may not appear in 2.1.177, so an idle-timeout fallback also drives
+    ///   `Finished` (NOT `type=result` — it never appears).
+    ///
+    /// Returns the registered `MsgStore` so callers can subscribe to normalized
+    /// entries exactly as for the `-p` path.
+    ///
+    /// NOTE: normalization (`ClaudeLogProcessor::process_logs`) is intentionally
+    /// NOT run here. The interactive store is registered under `exec_id` in the
+    /// shared `msg_stores` map, and the services-layer `start_execution` runs the
+    /// SINGLE normalization pass over it (`executor.normalize_logs`, identical to
+    /// the `-p` path). Running it here too would double-process the transcript
+    /// and emit duplicate `/entries/N` patches. The tailer only ever pushes raw
+    /// `Stdout`/`SessionId`/`Finished`, which is exactly what that single pass —
+    /// and `spawn_stream_raw_logs_to_db` — consume.
+    pub async fn spawn_interactive_transcript_tailer(
+        &self,
+        exec_id: Uuid,
+        transcript_path: PathBuf,
+        session_uuid: String,
+    ) -> Result<Arc<MsgStore>, ContainerError> {
+        let store = Arc::new(MsgStore::new());
+
+        // Known a priori — emit before any transcript bytes (mirrors -p SessionId).
+        store.push_session_id(session_uuid);
+
+        // Tail the JSONL into the store on a background task.
+        Self::spawn_transcript_tail_task(store.clone(), transcript_path);
+
+        let mut map = self.msg_stores().write().await;
+        map.insert(exec_id, store.clone());
+        Ok(store)
+    }
+
+    /// Background poll-tailer for an interactive session transcript JSONL.
+    ///
+    /// Polls every [`TRANSCRIPT_POLL_INTERVAL`], reads any newly-appended bytes
+    /// (tracking a byte offset), and pushes each complete newline-terminated line
+    /// as `LogMsg::Stdout`. Drives `LogMsg::Finished` on the `turn_duration`
+    /// completion marker + idle debounce, or — as the PROBE-verified fallback —
+    /// on an idle timeout with no new bytes.
+    fn spawn_transcript_tail_task(store: Arc<MsgStore>, transcript_path: PathBuf) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut offset: usize = 0;
+            let mut pending = String::new();
+            let mut saw_turn_duration = false;
+            // Ticks with no new bytes since the last data; resets on any new bytes.
+            let mut idle_ticks: u32 = 0;
+
+            loop {
+                let mut got_new_bytes = false;
+
+                match tokio::fs::read(&transcript_path).await {
+                    Ok(bytes) => {
+                        let total = bytes.len();
+                        if total > offset {
+                            // Only decode the freshly-appended tail.
+                            let fresh = &bytes[offset..];
+                            offset = total;
+                            got_new_bytes = true;
+                            pending.push_str(&String::from_utf8_lossy(fresh));
+
+                            // Emit every complete (newline-terminated) line.
+                            while let Some(nl) = pending.find('\n') {
+                                let line: String = pending.drain(..=nl).collect();
+                                let trimmed = line.trim_end_matches(['\n', '\r']);
+                                if trimmed.is_empty() {
+                                    continue;
+                                }
+                                if Self::is_turn_duration_marker(trimmed) {
+                                    saw_turn_duration = true;
+                                }
+                                store.push_stdout(line);
+                            }
+                        } else if total < offset {
+                            // File truncated/rotated (e.g. resume rewrote it) — restart.
+                            offset = 0;
+                            pending.clear();
+                            got_new_bytes = true;
+                        }
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                        // Transcript not created yet — keep waiting (claude writes it
+                        // a moment after launch). Counts as idle.
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            transcript = %transcript_path.display(),
+                            error = %e,
+                            "interactive transcript tail read failed; will retry"
+                        );
+                    }
+                }
+
+                if got_new_bytes {
+                    idle_ticks = 0;
+                } else {
+                    idle_ticks = idle_ticks.saturating_add(1);
+                }
+
+                // Completion: marker seen + short idle debounce, OR a longer idle
+                // timeout with no activity (PROBE: marker may be absent in 2.1.177).
+                let marker_done = saw_turn_duration && idle_ticks >= TRANSCRIPT_MARKER_DEBOUNCE_TICKS;
+                let idle_done = idle_ticks >= TRANSCRIPT_IDLE_TIMEOUT_TICKS;
+                if marker_done || idle_done {
+                    // Flush any trailing line that never got a newline.
+                    let tail = pending.trim_end_matches(['\n', '\r']);
+                    if !tail.is_empty() {
+                        store.push_stdout(std::mem::take(&mut pending));
+                    }
+                    store.push_finished();
+                    tracing::debug!(
+                        transcript = %transcript_path.display(),
+                        marker_done,
+                        idle_done,
+                        "interactive transcript tail complete"
+                    );
+                    break;
+                }
+
+                tokio::time::sleep(TRANSCRIPT_POLL_INTERVAL).await;
+            }
+        })
+    }
+
+    /// True if a transcript line is the `type=system,subtype=turn_duration`
+    /// completion marker. Parses leniently (the line is a full camelCase envelope;
+    /// only the two top-level fields matter here).
+    fn is_turn_duration_marker(line: &str) -> bool {
+        serde_json::from_str::<serde_json::Value>(line)
+            .ok()
+            .is_some_and(|v| {
+                v.get("type").and_then(|t| t.as_str()) == Some("system")
+                    && v.get("subtype").and_then(|s| s.as_str()) == Some("turn_duration")
+            })
+    }
+
+    /// Guarded entry for the no-`-p` interactive transport (native-OAuth only).
+    ///
+    /// Spawns the GENUINE `claude` binary interactively per the PROBE mechanics:
+    /// a PIPED one-shot (NO PTY needed for a single turn) with stdin closed, which
+    /// makes claude run exactly ONE turn and exit cleanly (RC=0) after writing the
+    /// transcript. NO `-p`, NO stream-json, NO control protocol — this path never
+    /// touches `ProtocolPeer` and so never draws on the Agent SDK credit pool.
+    ///
+    /// `command_parts` come from `ClaudeCode::build_interactive_command_parts()`
+    /// (initial) or `build_interactive_follow_up_command_parts()` (follow-up,
+    /// `--resume` WITHOUT `--fork-session`). `env` MUST include the isolated home
+    /// vars (`CLAUDE_CONFIG_DIR` + `CLAUDE_HOME`) from cc_switch's interactive
+    /// home so the transcript + credentials are redirected (PROBE: `CLAUDE_HOME`
+    /// alone is a no-op in 2.1.177; `CLAUDE_CONFIG_DIR` is the real redirect).
+    /// `transcript_path` + `session_uuid` come from
+    /// `cc_switch::InteractiveHome` and drive the S5 tailer.
+    ///
+    /// Selection wiring (choosing this path for native-OAuth users) is deferred to
+    /// S6; this function is the exposed building block and is NOT yet on any
+    /// default code path.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_interactive_claude(
+        &self,
+        exec_id: Uuid,
+        command_parts: (PathBuf, Vec<String>),
+        prompt: String,
+        working_dir: PathBuf,
+        env: HashMap<String, String>,
+        env_unset: Vec<String>,
+        transcript_path: PathBuf,
+        session_uuid: String,
+    ) -> Result<(Arc<MsgStore>, AsyncGroupChild), ContainerError> {
+        use std::process::Stdio;
+
+        use command_group::AsyncCommandGroup;
+
+        let (program, mut args) = command_parts;
+        // The prompt is passed positionally to interactive `claude` (PROBE: the
+        // bare positional argument is the single-turn prompt).
+        args.push(prompt);
+
+        let mut command = tokio::process::Command::new(&program);
+        command
+            .kill_on_drop(true)
+            // Closed/empty stdin => non-TTY one-turn-then-exit (PROBE-verified).
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .current_dir(&working_dir)
+            .args(&args);
+
+        for key in &env_unset {
+            command.env_remove(key);
+        }
+        for (key, value) in &env {
+            command.env(key, value);
+        }
+
+        let child = command
+            .group_spawn()
+            .map_err(|e| ContainerError::Other(anyhow!("failed to spawn interactive claude: {e}")))?;
+
+        // Wire the transcript tailer to feed the per-execution MsgStore. The
+        // genuine `claude` writes structured output to the on-disk JSONL (not
+        // stdout), so the tailer — not the child's stdout — is the log source.
+        let _ = working_dir; // working_dir no longer needed by the tailer (single normalization pass lives in the services layer)
+        let store = self
+            .spawn_interactive_transcript_tailer(exec_id, transcript_path.clone(), session_uuid)
+            .await?;
+
+        // S6 completion-on-exit: the genuine `claude` piped one-shot emits NO
+        // `type=result`/`turn_duration` in 2.1.177, and a short transcript idle
+        // can fire mid-long-tool. Drive `Finished` off the child's ACTUAL exit:
+        // when the child is reaped, do a final transcript flush/read and push
+        // `Finished` promptly. The tailer's idle timeout remains only as a long
+        // (~120s) safety net should this signal ever be lost.
+        self.spawn_interactive_completion_watcher(exec_id, transcript_path, store.clone());
+
+        Ok((store, child))
+    }
+
+    /// S6 completion-on-exit: push `LogMsg::Finished` as soon as the interactive
+    /// `claude` child process exits (the reliable completion signal for the piped
+    /// one-shot — `type=result`/`turn_duration` never appear in 2.1.177).
+    ///
+    /// Polls `child_store` for `exec_id` (mirrors `spawn_os_exit_watcher`'s
+    /// pattern) and observes the cached exit status via `try_wait`, so it does
+    /// NOT race the exit monitor's own `try_wait` (command-group caches the
+    /// status; both pollers converge on `Some`). On exit it does one last
+    /// transcript read so any final lines the tailer's poll loop missed are
+    /// flushed before `Finished`, then idempotently pushes `Finished` (the
+    /// tailer's debounce/safety-net may also push it; `MsgStore` tolerates a
+    /// duplicate `Finished` — the normalizer stops at the first one).
+    fn spawn_interactive_completion_watcher(
+        &self,
+        exec_id: Uuid,
+        transcript_path: PathBuf,
+        store: Arc<MsgStore>,
+    ) -> JoinHandle<()> {
+        let child_store = self.child_store.clone();
+        tokio::spawn(async move {
+            // Wait for the child to be registered (the caller adds it to
+            // child_store immediately after spawn_interactive_claude returns),
+            // then poll for its exit. Bail out if it never appears.
+            let mut waited_for_registration: u32 = 0;
+            loop {
+                let child_lock = {
+                    let map = child_store.read().await;
+                    map.get(&exec_id).cloned()
+                };
+                if let Some(child_lock) = child_lock {
+                    let exited = {
+                        let mut child = child_lock.write().await;
+                        matches!(child.try_wait(), Ok(Some(_)) | Err(_))
+                    };
+                    if exited {
+                        break;
+                    }
+                } else {
+                    // Not yet registered (or already cleaned up). Give the
+                    // caller a brief grace window, then give up so the tailer
+                    // safety-net handles completion.
+                    waited_for_registration = waited_for_registration.saturating_add(1);
+                    if waited_for_registration > 40 {
+                        tracing::debug!(
+                            exec_id = %exec_id,
+                            "interactive completion watcher: child never registered; \
+                             deferring to tailer idle safety-net"
+                        );
+                        return;
+                    }
+                }
+                tokio::time::sleep(TRANSCRIPT_POLL_INTERVAL).await;
+            }
+
+            // Final flush: the tailer's poll loop only emits COMPLETE (newline-
+            // terminated) lines. If the process exited having written a final
+            // line WITHOUT a trailing newline, the tailer never pushed it. Push
+            // ONLY that unterminated tail (guarded on `!ends_with('\n')`) so we
+            // do not duplicate a line the tailer already emitted (the normalizer
+            // assigns a fresh entry index per Stdout line and does not dedup).
+            if let Ok(bytes) = tokio::fs::read(&transcript_path).await {
+                let text = String::from_utf8_lossy(&bytes);
+                if !text.is_empty()
+                    && !text.ends_with('\n')
+                    && let Some(last) = text.lines().last()
+                    && !last.trim().is_empty()
+                {
+                    store.push_stdout(format!("{last}\n"));
+                }
+            }
+
+            store.push_finished();
+            tracing::debug!(
+                exec_id = %exec_id,
+                "interactive transport: pushed Finished on child exit"
+            );
+        })
+    }
+
     /// Create a live diff log stream for ongoing attempts for WebSocket
     /// Returns a stream that owns the filesystem watcher - when dropped, watcher is cleaned up
     fn create_live_diff_stream(
@@ -893,6 +1250,246 @@ fn failure_exit_status() -> std::process::ExitStatus {
 }
 
 impl LocalContainerService {
+    /// Interactive transport router (ALL ClaudeCode modes: native-OAuth,
+    /// official-key, AND relay).
+    ///
+    /// Returns `Ok(true)` when the run was spawned via the no-`-p` interactive
+    /// transport (caller must `return` — execution is fully wired). Returns
+    /// `Ok(false)` to fall through to the existing `-p` path UNCHANGED.
+    ///
+    /// Selection criteria (all must hold):
+    /// - `SOLODAWN_NO_POOL` is NOT set (kill-switch keeps the `-p` path),
+    /// - the action is a ClaudeCode coding-agent request (initial or follow-up).
+    ///
+    /// Unlike the original S6 gate, this NO LONGER restricts to native OAuth.
+    /// The resolved `(api_key, base_url)` (from the SAME `ModelConfig` resolution
+    /// the `-p` path uses — WHICH credential a user gets is unchanged) selects the
+    /// per-mode auth setup in `cc_switch::setup_interactive_auth`:
+    /// native (no key) -> subscription plan; key (no base_url) -> pay-as-you-go;
+    /// key+base_url -> relay endpoint. Only `SOLODAWN_NO_POOL` (and non-ClaudeCode
+    /// executors) falls through to the unchanged `-p` path.
+    ///
+    /// See docs/developed/plans/2026-06-15-no-p-interactive-transport.md.
+    async fn try_spawn_interactive_native_oauth(
+        &self,
+        exec_id: Uuid,
+        current_dir: &Path,
+        executor_action: &ExecutorAction,
+        model_config_id: Option<&str>,
+    ) -> Result<bool, ContainerError> {
+        // Kill-switch: keep the proven `-p` path (accepts pool draw).
+        if std::env::var_os("SOLODAWN_NO_POOL").is_some() {
+            return Ok(false);
+        }
+
+        // Only ClaudeCode coding-agent requests are eligible. Extract the
+        // prompt, optional working-dir, optional resume session-id, and profile.
+        let (prompt, working_dir_rel, follow_up_session_id, profile_id) = match executor_action
+            .typ()
+        {
+            ExecutorActionType::CodingAgentInitialRequest(req) => (
+                req.prompt.clone(),
+                req.working_dir.clone(),
+                None,
+                req.executor_profile_id.clone(),
+            ),
+            ExecutorActionType::CodingAgentFollowUpRequest(req) => (
+                req.prompt.clone(),
+                req.working_dir.clone(),
+                Some(req.session_id.clone()),
+                req.executor_profile_id.clone(),
+            ),
+            // Review runs are ALSO a ClaudeCode execution entry point. The
+            // acceptance criterion requires EVERY entry point (initial,
+            // follow-up, AND review) to use the no-`-p` interactive transport —
+            // a review left on `-p` would leak a subscription user to the Agent
+            // SDK credit. A review with a `session_id` resumes that session
+            // (`--resume`); without one it starts fresh (`--session-id`),
+            // mirroring `ReviewRequest`'s own spawn dispatch.
+            ExecutorActionType::ReviewRequest(req) => (
+                req.prompt.clone(),
+                req.working_dir.clone(),
+                req.session_id.clone(),
+                req.executor_profile_id.clone(),
+            ),
+            ExecutorActionType::ScriptRequest(_) => return Ok(false),
+        };
+        if profile_id.executor != BaseCodingAgent::ClaudeCode {
+            return Ok(false);
+        }
+
+        // Resolve the SAME `(api_key, base_url)` the `-p` path resolves so the
+        // user gets the IDENTICAL credential — only the transport changes. The
+        // `ModelConfig` query has no dir side effects (unlike
+        // resolve_executor_env_vars). `model_for_settings` mirrors the model the
+        // executor profile passes via `--model`, falling back to the model_config.
+        let model_config = db::models::ModelConfig::resolve_preferred_or_default(
+            &self.db.pool,
+            model_config_id,
+            "cli-claude-code",
+        )
+        .await
+        .ok()
+        .flatten();
+
+        // Native-credential signal: the `.credentials.json` file is the correct
+        // native marker (both `build_launch_config` and `setup_interactive_auth`
+        // key on it), NOT `config.json`. Resolve it up front because it gates the
+        // credential-precedence decision below.
+        let native_claude_dir = dirs::home_dir().map(|h| h.join(".claude"));
+        let has_native_creds = native_claude_dir
+            .as_ref()
+            .is_some_and(|d| d.join(".credentials.json").exists());
+
+        // CREDENTIAL PRECEDENCE (must mirror the `-p` paths so WHICH credential a
+        // user gets is unchanged — HARD RULE 5). The `-p` workspace path
+        // (`resolve_executor_env_vars`) and the canonical `build_launch_config`
+        // both prefer global/native auth and use a stored model_config key ONLY as
+        // a fallback. `resolve_preferred_or_default` with `config_id = None` falls
+        // THROUGH to `find_with_credentials_for_cli`, which returns ANY config
+        // with a non-null key (e.g. a saved-but-unselected api-key/relay config) —
+        // so a subscription user with native creds plus any saved key would be
+        // wrongly routed to OfficialKey/Relay (pay-as-you-go / relay) instead of
+        // their subscription plan. To match the `-p` precedence, treat a stored
+        // key as authoritative ONLY when the config was EXPLICITLY selected
+        // (`model_config_id.is_some()`). On a fallthrough (`None`), prefer native
+        // whenever native creds exist and ignore the fallen-through key.
+        let key_is_authoritative = model_config_id.is_some() || !has_native_creds;
+        let resolved_api_key = if key_is_authoritative {
+            model_config
+                .as_ref()
+                .and_then(|m| m.get_api_key().ok().flatten())
+        } else {
+            None
+        };
+        let resolved_base_url = if key_is_authoritative {
+            model_config.as_ref().and_then(|m| m.base_url.clone())
+        } else {
+            None
+        };
+
+        // Native mode requires the genuine OAuth credentials file to exist; if a
+        // user has neither an api-key nor native creds, there is nothing to
+        // authenticate with via the interactive transport -> fall back to `-p`
+        // (which has its own fallback chain). api-key / relay modes do not need
+        // the native creds file.
+        if resolved_api_key.is_none() && !has_native_creds {
+            return Ok(false);
+        }
+
+        // Resolve the effective working directory (validates path traversal).
+        let working_dir = executors::actions::validate_working_dir(current_dir, &working_dir_rel)
+            .map_err(|e| ContainerError::Other(anyhow!("invalid working_dir: {e}")))?;
+
+        // Fetch the ClaudeCode executor config (model, router, cmd overrides).
+        let Some(CodingAgent::ClaudeCode(claude_cfg)) =
+            ExecutorConfigs::get_cached().get_coding_agent(&profile_id)
+        else {
+            return Ok(false);
+        };
+
+        // Model for settings.json (non-native modes): prefer the executor
+        // profile's model (== `--model`), else the model_config's api_model_id /
+        // name. (Native mode ignores `model` for auth but it is still threaded.)
+        let model_for_settings = claude_cfg
+            .model
+            .clone()
+            .or_else(|| model_config.as_ref().and_then(|m| m.api_model_id.clone()))
+            .or_else(|| model_config.as_ref().map(|m| m.name.clone()))
+            .unwrap_or_default();
+
+        // Provision (or re-open) the per-logical-session interactive home. On a
+        // follow-up, reuse the same session UUID so `--resume` appends to the
+        // same transcript; on initial, mint a fresh one.
+        let home = services::services::cc_switch::create_interactive_isolated_home(
+            follow_up_session_id.as_deref(),
+            &working_dir,
+        )
+        .map_err(|e| ContainerError::Other(anyhow!("create interactive home failed: {e}")))?;
+
+        // Unified 3-mode auth setup: writes per-mode files into the home (native
+        // creds copy / config.json + settings.json) and returns the env set/unset
+        // map + optional `--settings` path. Reuses the SAME cc_switch credential
+        // constructions as the `-p` path; scrubs the other modes' auth vars so a
+        // stray ambient var cannot redirect billing.
+        let native_src = native_claude_dir.unwrap_or_else(|| std::path::PathBuf::from(".claude"));
+        let auth = services::services::cc_switch::setup_interactive_auth(
+            &home,
+            resolved_api_key.as_deref(),
+            resolved_base_url.as_deref(),
+            &model_for_settings,
+            &native_src,
+        )
+        .map_err(|e| ContainerError::Other(anyhow!("interactive auth setup failed: {e}")))?;
+        let env: HashMap<String, String> = auth.set;
+        let env_unset: Vec<String> = auth.unset;
+
+        // Build the interactive argv. Force interactive mode + the session UUID;
+        // preserve the user's model and cmd overrides from the resolved config.
+        // (Mutate a clone — `ClaudeCode` has private fields, so struct-update
+        // syntax from outside its module is not possible; the interactive fields
+        // are `pub` so direct assignment works.)
+        let mut interactive_cfg = claude_cfg;
+        interactive_cfg.interactive = Some(true);
+        interactive_cfg.interactive_session_id = Some(home.session_uuid.clone());
+        let command_parts = if follow_up_session_id.is_some() {
+            interactive_cfg
+                .build_interactive_follow_up_command_parts(&home.session_uuid)
+                .map_err(|e| {
+                    ContainerError::Other(anyhow!("build interactive follow-up argv failed: {e}"))
+                })?
+        } else {
+            interactive_cfg
+                .build_interactive_command_parts()
+                .map_err(|e| ContainerError::Other(anyhow!("build interactive argv failed: {e}")))?
+        };
+        let (program, mut args) = command_parts
+            .into_resolved()
+            .await
+            .map_err(ContainerError::ExecutorError)?;
+        // Non-native modes pass `--settings <path>` (native OAuth omits it,
+        // mirroring the `-p` path — `--settings`/key env are not used for native).
+        if let Some(settings_path) = auth.settings_arg.as_ref() {
+            args.push("--settings".to_string());
+            args.push(settings_path.to_string_lossy().to_string());
+        }
+        let resolved = (program, args);
+
+        tracing::info!(
+            exec_id = %exec_id,
+            session_uuid = %home.session_uuid,
+            transcript = %home.transcript_path.display(),
+            is_follow_up = follow_up_session_id.is_some(),
+            auth_mode = ?auth.mode,
+            "routing ClaudeCode run through interactive (no-`-p`) transport"
+        );
+
+        // Spawn the interactive child; this registers the per-execution MsgStore
+        // (tailer pushes SessionId/Stdout/Finished) and wires completion-on-exit.
+        let (_store, child) = self
+            .spawn_interactive_claude(
+                exec_id,
+                resolved,
+                prompt,
+                working_dir,
+                env,
+                env_unset,
+                home.transcript_path,
+                home.session_uuid,
+            )
+            .await?;
+
+        // Register the child + exit monitor exactly like the `-p` path so the
+        // execution lifecycle (completion status, next-action chaining) is
+        // unchanged. The SessionId pushed by the tailer is persisted to
+        // coding_agent_turn.agent_session_id by the services-layer consumer, so
+        // follow-ups resume the same logical session.
+        self.add_child_to_store(exec_id, child).await;
+        let _hn = self.spawn_exit_monitor(&exec_id, None);
+
+        Ok(true)
+    }
+
     /// Resolve executor-specific environment variables for workspace mode.
     ///
     /// In workflow mode, `CCSwitchService` handles this via isolated CODEX_HOME/auth setup.
@@ -1380,6 +1977,25 @@ impl ContainerService for LocalContainerService {
             )
             .await;
             env.merge(&profile_vars);
+        }
+
+        // S6 — no-`-p` interactive transport selection. For native-OAuth
+        // (subscription) ClaudeCode coding-agent runs, route through the genuine
+        // `claude` interactive binary (transcript-tailing) instead of the metered
+        // `-p` stream-json path, UNLESS `SOLODAWN_NO_POOL` is set (kill-switch:
+        // accept pool draw, keep proven `-p` path). API-key/relay users and all
+        // other executors keep the `-p` path unchanged — it is byte-for-byte
+        // identical below.
+        if self
+            .try_spawn_interactive_native_oauth(
+                execution_process.id,
+                &current_dir,
+                executor_action,
+                model_config_id,
+            )
+            .await?
+        {
+            return Ok(());
         }
 
         // Create the child and stream, add to execution tracker with timeout

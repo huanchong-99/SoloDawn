@@ -10,7 +10,6 @@ use governor::{
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use twox_hash::XxHash64;
 use utils::url::{ApiFormat, resolve_endpoint};
 
 use super::{
@@ -587,358 +586,290 @@ impl LLMClient for AnthropicCompatibleClient {
 }
 
 // ============================================================================
-// Claude Code Native Client (OAuth-based, for Max/Pro subscribers)
+// Interactive Claude single-turn client (no-`-p`, transcript-read, ToS-clean)
 // ============================================================================
+//
+// Replaces the removed `ClaudeCodeNativeClient` impersonation client (which
+// extracted the OAuth token and POSTed to api.anthropic.com with a spoofed
+// `cch` hash + "You are Claude Code" identity — a live ToS violation). Instead
+// this drives the GENUINE `claude` binary as a single-turn interactive run on
+// the user's own machine and reads the answer back from the on-disk transcript
+// JSONL, exactly like the no-`-p` coding-agent transport (see
+// docs/developed/plans/2026-06-15-no-p-interactive-transport.md). No extra API
+// key is required and subscription users stay off the Agent SDK credit pool.
 
-/// Credentials read from `~/.claude/.credentials.json`.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ClaudeCredentials {
-    #[serde(rename = "claudeAiOauth")]
-    claude_ai_oauth: Option<ClaudeOAuth>,
+use executors::executors::claude::{ClaudeCode, ClaudeContentItem, ClaudeJson};
+
+/// Returns `true` when native Claude Code subscription OAuth credentials are
+/// present locally (`~/.claude/.credentials.json`). Used to decide whether the
+/// interactive single-turn transport is available as a planning fallback.
+fn native_claude_credentials_present() -> bool {
+    dirs::home_dir()
+        .map(|h| h.join(".claude").join(".credentials.json"))
+        .is_some_and(|p| p.exists())
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ClaudeOAuth {
-    access_token: String,
-}
-
-/// Anthropic Messages API request body used by the native client.
-/// Uses structured system content (array of text blocks) unlike the
-/// third-party `AnthropicRequest` which uses a plain string.
-#[derive(Debug, Serialize)]
-struct NativeAnthropicRequest {
-    model: String,
-    messages: Vec<AnthropicMessage>,
-    max_tokens: i32,
-    system: Vec<SystemTextBlock>,
-    stream: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct SystemTextBlock {
-    r#type: String,
-    text: String,
-}
-
-/// LLM client that calls `api.anthropic.com/v1/messages` using the locally
-/// authenticated Claude Code CLI credentials (OAuth token from Max/Pro
-/// subscription). The request format mirrors what Claude Code CLI sends so
-/// the billing header routes through the user's existing subscription.
+/// Single-turn LLM client that drives the genuine `claude` binary interactively
+/// (no `-p`, no stream-json control protocol) and reads the assistant answer
+/// from the on-disk session transcript JSONL.
 ///
-/// ## Security
-/// - OAuth token is read from disk on each `chat()` call (never cached long-term)
-/// - Token is never logged, stored in DB, or included in tracing output
-pub struct ClaudeCodeNativeClient {
-    client: Client,
+/// On each `chat()` it: provisions a per-call isolated CLAUDE home via
+/// `cc_switch::create_interactive_isolated_home`, copies the user's native
+/// `~/.claude/.credentials.json` (+ `settings.json`) into it, builds the
+/// interactive argv via `ClaudeCode::build_interactive_command_parts`, spawns a
+/// piped one-shot (stdin closed → one turn then exit), then parses the final
+/// `assistant` message text out of the transcript. The home is removed after.
+///
+/// ## ToS / billing
+/// - Drives the UNMODIFIED genuine binary; we never extract the OAuth token into
+///   SoloDawn's own auth path (cc_switch only copies the creds file for the
+///   binary to consume), so this is the subscription/interactive surface, not
+///   the metered Agent SDK / `-p` surface.
+pub struct InteractiveClaudeClient {
     model: String,
-    org_id: String,
-    cc_version: String,
 }
 
-impl ClaudeCodeNativeClient {
-    /// Attempt to create a native client by reading `~/.claude/.credentials.json`.
-    /// Returns `None` if credentials are missing or unreadable.
-    pub fn try_new(model: &str) -> Option<Self> {
-        let home = dirs::home_dir()?;
-        let creds_path = home.join(".claude").join(".credentials.json");
-        let creds_str = std::fs::read_to_string(&creds_path)
-            .inspect_err(|e| {
-                tracing::warn!(error = %e, path = %creds_path.display(), "Failed to read Claude credentials file");
-            })
-            .ok()?;
-        let creds: ClaudeCredentials = serde_json::from_str(&creds_str)
-            .inspect_err(|e| {
-                tracing::warn!(error = %e, "Failed to parse Claude credentials JSON");
-            })
-            .ok()?;
-        let oauth = creds.claude_ai_oauth?;
-        if oauth.access_token.is_empty() {
-            return None;
-        }
+impl InteractiveClaudeClient {
+    /// Maximum wall-clock for a single interactive planning turn.
+    const TURN_TIMEOUT: Duration = Duration::from_secs(300);
+    /// How long to wait for the transcript file to materialize after exit.
+    const TRANSCRIPT_SETTLE: Duration = Duration::from_millis(500);
 
-        // Detect Claude Code CLI version
-        let cc_version = detect_cc_version().unwrap_or_else(|| "2.1.92".to_string());
-
-        let client = Client::builder()
-            .connect_timeout(Duration::from_secs(30))
-            .timeout(Duration::from_secs(300))
-            .build()
-            .ok()?;
-
-        tracing::info!(
-            cc_version = %cc_version,
-            "Claude Code native client initialized (OAuth credentials found)"
-        );
-
-        Some(Self {
-            client,
+    pub fn new(model: &str) -> Self {
+        Self {
             model: model.to_string(),
-            org_id: "51e1b9ba-604d-4b8b-bdd6-719dddbc7e65".to_string(),
-            cc_version,
-        })
+        }
     }
 
-    /// Read OAuth access token from credentials file.
-    /// Called per-request to pick up token refreshes.
-    fn read_access_token() -> anyhow::Result<String> {
-        let home =
-            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-        let creds_path = home.join(".claude").join(".credentials.json");
-        let creds_str = std::fs::read_to_string(&creds_path)
-            .map_err(|e| anyhow::anyhow!("Cannot read Claude credentials: {e}"))?;
-        let creds: ClaudeCredentials = serde_json::from_str(&creds_str)
-            .map_err(|e| anyhow::anyhow!("Cannot parse Claude credentials: {e}"))?;
-        let token = creds
-            .claude_ai_oauth
-            .and_then(|o| {
-                if o.access_token.is_empty() {
-                    None
-                } else {
-                    Some(o.access_token)
-                }
-            })
-            .ok_or_else(|| anyhow::anyhow!("Claude OAuth token not found in credentials"))?;
-        Ok(token)
-    }
-
-    /// Compute the Claude Code integrity hash (cch).
-    ///
-    /// Algorithm: xxhash64(body_with_cch=00000, seed=0x6E52736AC806831E) & 0xFFFFF
-    /// Result is a 5-character lowercase hex string.
-    fn compute_cch(body_with_placeholder: &str) -> String {
-        const CCH_SEED: u64 = 0x6E52_736A_C806_831E;
-        let hash = XxHash64::oneshot(CCH_SEED, body_with_placeholder.as_bytes());
-        let masked = hash & 0xFFFFF;
-        format!("{masked:05x}")
-    }
-
-    /// Build the request body with correct cch hash.
-    fn build_body(&self, messages: Vec<LLMMessage>) -> anyhow::Result<String> {
-        // Separate system messages from conversation
-        let mut user_system_prompt = String::new();
-        let mut api_messages = Vec::new();
-        for m in &messages {
+    /// Flatten orchestrator messages into a single prompt string (system blocks
+    /// first, then the conversation), matching how the removed native client
+    /// collapsed system + user content into one request.
+    fn flatten_prompt(messages: &[LLMMessage]) -> String {
+        let mut system = String::new();
+        let mut convo = String::new();
+        for m in messages {
             if m.role == "system" {
-                if !user_system_prompt.is_empty() {
-                    user_system_prompt.push('\n');
+                if !system.is_empty() {
+                    system.push('\n');
                 }
-                user_system_prompt.push_str(&m.content);
+                system.push_str(&m.content);
             } else {
-                api_messages.push(AnthropicMessage {
-                    role: m.role.clone(),
-                    content: m.content.clone(),
-                });
+                if !convo.is_empty() {
+                    convo.push_str("\n\n");
+                }
+                convo.push_str(&m.content);
             }
         }
-
-        // Build system blocks: billing header + Claude Code identity + user system prompt
-        let billing_text = format!(
-            "x-anthropic-billing-header: cc_version={}; cc_entrypoint=cli; cch=00000;",
-            self.cc_version
-        );
-
-        let mut system_blocks = vec![
-            SystemTextBlock {
-                r#type: "text".to_string(),
-                text: billing_text,
-            },
-            SystemTextBlock {
-                r#type: "text".to_string(),
-                text: "You are Claude Code, Anthropic's official CLI for Claude.".to_string(),
-            },
-        ];
-
-        // Append user's system prompt as a third block if present
-        if !user_system_prompt.is_empty() {
-            system_blocks.push(SystemTextBlock {
-                r#type: "text".to_string(),
-                text: user_system_prompt,
-            });
+        if system.is_empty() {
+            convo
+        } else if convo.is_empty() {
+            system
+        } else {
+            format!("{system}\n\n{convo}")
         }
-
-        let request = NativeAnthropicRequest {
-            model: self.model.clone(),
-            messages: api_messages,
-            max_tokens: 16384,
-            system: system_blocks,
-            stream: false,
-        };
-
-        // Serialize with placeholder cch=00000
-        let body_placeholder = serde_json::to_string(&request)
-            .map_err(|e| anyhow::anyhow!("Failed to serialize request: {e}"))?;
-
-        // Compute actual cch and replace placeholder
-        let cch = Self::compute_cch(&body_placeholder);
-        let body = body_placeholder.replacen("cch=00000", &format!("cch={cch}"), 1);
-
-        Ok(body)
     }
 
-    /// Parse SSE stream response (same format as AnthropicCompatibleClient).
-    fn parse_sse_response(body: &str) -> anyhow::Result<LLMResponse> {
-        let mut content = String::new();
-        let mut input_tokens: i32 = 0;
-        let mut output_tokens: i32 = 0;
-
-        for line in body.lines() {
-            let line = line.trim();
-            if let Some(data) = line.strip_prefix("data: ") {
-                if data == "[DONE]" {
-                    break;
-                }
-                if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
-                    match event.get("type").and_then(|t| t.as_str()) {
-                        Some("content_block_delta") => {
-                            if let Some(text) =
-                                event.pointer("/delta/text").and_then(|t| t.as_str())
-                            {
-                                content.push_str(text);
-                            }
-                        }
-                        Some("message_start") => {
-                            if let Some(u) = event
-                                .pointer("/message/usage/input_tokens")
-                                .and_then(serde_json::Value::as_i64)
-                            {
-                                input_tokens = u as i32;
-                            }
-                        }
-                        Some("message_delta") => {
-                            if let Some(u) = event
-                                .pointer("/usage/output_tokens")
-                                .and_then(serde_json::Value::as_i64)
-                            {
-                                output_tokens = u as i32;
-                            }
-                        }
-                        _ => {}
+    /// Parse the on-disk transcript JSONL and return the FINAL assistant
+    /// message's joined text blocks. Reuses the executor's public
+    /// `ClaudeJson` / `ClaudeContentItem` envelope types (the transcript bodies
+    /// are byte-identical to what `ClaudeLogProcessor` parses).
+    fn extract_final_assistant_text(transcript: &str) -> Option<String> {
+        let mut last: Option<String> = None;
+        for line in transcript.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(ClaudeJson::Assistant { message, .. }) =
+                serde_json::from_str::<ClaudeJson>(trimmed)
+            else {
+                continue;
+            };
+            let mut text = String::new();
+            for item in &message.content {
+                if let ClaudeContentItem::Text { text: t } = item {
+                    if !text.is_empty() {
+                        text.push('\n');
                     }
+                    text.push_str(t);
                 }
             }
-        }
-
-        // Fallback: non-streaming JSON response
-        if content.is_empty() {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
-                if let Some(blocks) = json.get("content").and_then(|c| c.as_array()) {
-                    for block in blocks {
-                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                                content.push_str(text);
-                            }
-                        }
-                    }
-                }
-                if let Some(u) = json
-                    .pointer("/usage/input_tokens")
-                    .and_then(serde_json::Value::as_i64)
-                {
-                    input_tokens = u as i32;
-                }
-                if let Some(u) = json
-                    .pointer("/usage/output_tokens")
-                    .and_then(serde_json::Value::as_i64)
-                {
-                    output_tokens = u as i32;
-                }
+            if !text.is_empty() {
+                last = Some(text);
             }
         }
-
-        if content.is_empty() {
-            return Err(anyhow::anyhow!(
-                "Claude Code native API returned empty content"
-            ));
-        }
-
-        let usage = if input_tokens > 0 || output_tokens > 0 {
-            Some(LLMUsage {
-                prompt_tokens: input_tokens,
-                completion_tokens: output_tokens,
-                total_tokens: input_tokens + output_tokens,
-            })
-        } else {
-            None
-        };
-
-        Ok(LLMResponse { content, usage })
+        last
     }
 }
 
 #[async_trait]
-impl LLMClient for ClaudeCodeNativeClient {
+impl LLMClient for InteractiveClaudeClient {
     async fn chat(&self, messages: Vec<LLMMessage>) -> anyhow::Result<LLMResponse> {
-        let token = Self::read_access_token()?;
-        let body = self.build_body(messages)?;
+        use std::process::Stdio;
+
+        // Scratch working dir for the single-turn run. The transcript slug is
+        // derived from this dir (see cc_switch::slug_working_dir); a stable
+        // scratch dir keeps the path deterministic and avoids polluting any
+        // real project's transcript folder.
+        let working_dir = std::env::temp_dir().join("solodawn").join("planning-scratch");
+        std::fs::create_dir_all(&working_dir)
+            .map_err(|e| anyhow::anyhow!("Failed to create planning scratch dir: {e}"))?;
+
+        // Provision a fresh isolated CLAUDE home for this turn.
+        let home =
+            crate::services::cc_switch::create_interactive_isolated_home(None, &working_dir)?;
+
+        // Copy native credentials (+ settings) into the isolated home so the
+        // genuine binary authenticates in the sandbox. We do NOT read the token
+        // ourselves — the binary consumes the copied file.
+        if let Some(user_home) = dirs::home_dir() {
+            let src_creds = user_home.join(".claude").join(".credentials.json");
+            let dst_creds = home.home_dir.join(".credentials.json");
+            if let Err(e) = std::fs::copy(&src_creds, &dst_creds) {
+                // Cleanup before bailing.
+                crate::services::terminal::process::ProcessManager::cleanup_logical_session_home(
+                    &home.home_dir,
+                );
+                return Err(anyhow::anyhow!(
+                    "Failed to copy native Claude credentials into isolated home: {e}"
+                ));
+            }
+            let src_settings = user_home.join(".claude").join("settings.json");
+            if src_settings.exists() {
+                let dst_settings = home.home_dir.join("settings.json");
+                if !dst_settings.exists() {
+                    let _ = std::fs::copy(&src_settings, &dst_settings);
+                }
+            }
+        } else {
+            crate::services::terminal::process::ProcessManager::cleanup_logical_session_home(
+                &home.home_dir,
+            );
+            return Err(anyhow::anyhow!("Cannot determine home directory"));
+        }
+
+        // Build the interactive argv. `ClaudeCode` has private fields, so
+        // construct via serde (the public interactive fields carry `#[serde]`
+        // attributes) rather than struct literal.
+        let claude: ClaudeCode = serde_json::from_value(serde_json::json!({
+            "interactive": true,
+            "interactive_session_id": home.session_uuid,
+            "model": self.model,
+        }))
+        .map_err(|e| anyhow::anyhow!("Failed to build interactive ClaudeCode config: {e}"))?;
+
+        let (program, mut args) = claude
+            .build_interactive_command_parts()
+            .map_err(|e| anyhow::anyhow!("Failed to build interactive argv: {e}"))?
+            .into_resolved()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to resolve claude executable: {e}"))?;
+
+        // Prompt is passed positionally to interactive `claude` (single turn).
+        let prompt = Self::flatten_prompt(&messages);
+        args.push(prompt);
+
+        let home_dir_str = home.home_dir.to_string_lossy().to_string();
+        let mut command = tokio::process::Command::new(&program);
+        command
+            .kill_on_drop(true)
+            // Closed stdin => non-TTY one-turn-then-exit.
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .current_dir(&working_dir)
+            .args(&args)
+            // Isolated home as BOTH CLAUDE_CONFIG_DIR (real redirect in 2.1.177)
+            // and CLAUDE_HOME (so RB-37 cleanup still recognizes the dir).
+            .env("CLAUDE_CONFIG_DIR", &home_dir_str)
+            .env("CLAUDE_HOME", &home_dir_str)
+            // Never let an inherited api-key force pay-as-you-go billing on a
+            // subscription user; the genuine binary uses the copied OAuth creds.
+            .env_remove("ANTHROPIC_API_KEY")
+            // R6 port-leak hygiene: strip SoloDawn dev ports from the child.
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT");
 
         tracing::debug!(
             model = %self.model,
-            body_len = body.len(),
-            "Claude Code native API request"
+            session_uuid = %home.session_uuid,
+            transcript = %home.transcript_path.display(),
+            "InteractiveClaudeClient single-turn planning run starting"
         );
 
-        let response = self
-            .client
-            .post("https://api.anthropic.com/v1/messages")
-            .header("x-api-key", &token)
-            .header("anthropic-version", "2023-06-01")
-            .header("anthropic-beta", "interleaved-thinking-2025-05-14")
-            .header("anthropic-organization", &self.org_id)
-            .header("Content-Type", "application/json")
-            .body(body)
-            .send()
-            .await?;
+        let run = async {
+            let output = command
+                .output()
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to spawn interactive claude: {e}"))?;
+            Ok::<_, anyhow::Error>(output)
+        };
 
-        let status = response.status();
-        if !status.is_success() {
-            let err_body = response.text().await.unwrap_or_default();
-            // Never log the token — only log status and truncated error body
-            tracing::warn!(
-                status = %status,
-                err_preview = %err_body.chars().take(200).collect::<String>(),
-                "Claude Code native API error"
-            );
-            return Err(anyhow::anyhow!("Claude Code native API error: {status}"));
-        }
+        let result = match tokio::time::timeout(Self::TURN_TIMEOUT, run).await {
+            Ok(inner) => inner,
+            Err(_) => Err(anyhow::anyhow!(
+                "Interactive claude single-turn run timed out after {}s",
+                Self::TURN_TIMEOUT.as_secs()
+            )),
+        };
 
-        let resp_body = response.text().await?;
-        Self::parse_sse_response(&resp_body)
+        let chat_result = match result {
+            Ok(output) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    Err(anyhow::anyhow!(
+                        "Interactive claude exited with {}: {}",
+                        output.status,
+                        stderr.chars().take(300).collect::<String>()
+                    ))
+                } else {
+                    // Give the transcript a brief moment to flush, then read it.
+                    tokio::time::sleep(Self::TRANSCRIPT_SETTLE).await;
+                    match tokio::fs::read_to_string(&home.transcript_path).await {
+                        Ok(transcript) => {
+                            match Self::extract_final_assistant_text(&transcript) {
+                                Some(content) => Ok(LLMResponse {
+                                    content,
+                                    usage: None,
+                                }),
+                                None => Err(anyhow::anyhow!(
+                                    "Interactive claude transcript had no assistant text"
+                                )),
+                            }
+                        }
+                        Err(e) => Err(anyhow::anyhow!(
+                            "Failed to read interactive claude transcript {}: {e}",
+                            home.transcript_path.display()
+                        )),
+                    }
+                }
+            }
+            Err(e) => Err(e),
+        };
+
+        // Always clean up the isolated home (RB-37 secret cleanup) afterwards.
+        crate::services::terminal::process::ProcessManager::cleanup_logical_session_home(
+            &home.home_dir,
+        );
+
+        chat_result
     }
 }
 
-/// Detect Claude Code CLI version from `claude --version`.
-fn detect_cc_version() -> Option<String> {
-    let output = std::process::Command::new("claude")
-        .arg("--version")
-        // R6 port-leak hygiene: strip SoloDawn dev ports consistently across
-        // every subprocess spawn. `claude --version` doesn't consume these,
-        // but keeping the strip uniform prevents future drift.
-        .env_remove("PORT")
-        .env_remove("BACKEND_PORT")
-        .env_remove("FRONTEND_PORT")
-        .output()
-        .ok()?;
-    let version_str = String::from_utf8_lossy(&output.stdout);
-    // Output format: "claude v2.1.92" or similar
-    let version = version_str.trim();
-    version
-        .strip_prefix("claude v")
-        .or_else(|| version.strip_prefix("claude/"))
-        .or_else(|| {
-            // Try to extract version number from anywhere in the string
-            version
-                .split_whitespace()
-                .find(|s| s.chars().next().is_some_and(|c| c.is_ascii_digit()))
-        })
-        .map(|v| v.trim().to_string())
-}
-
-/// Try to create a Claude Code native LLM client for the Planning LLM.
-/// Returns `None` if Claude Code CLI is not authenticated locally.
-pub fn create_claude_code_native_client(model: &str) -> Option<Box<dyn LLMClient>> {
-    ClaudeCodeNativeClient::try_new(model).map(|c| Box::new(c) as Box<dyn LLMClient>)
+/// Try to create a single-turn interactive Claude LLM client for the Planning
+/// LLM. Returns `None` if native Claude Code subscription credentials are not
+/// present locally (`~/.claude/.credentials.json`).
+///
+/// Replaces the removed `create_claude_code_native_client`: native/subscription
+/// users get planning via the genuine `claude` binary (one-turn, transcript
+/// read) instead of the impersonation client — no extra API key, pool-safe,
+/// ToS-clean.
+pub fn create_interactive_claude_client(model: &str) -> Option<Box<dyn LLMClient>> {
+    if !native_claude_credentials_present() {
+        return None;
+    }
+    Some(Box::new(InteractiveClaudeClient::new(model)) as Box<dyn LLMClient>)
 }
 
 /// Build terminal completion prompt
@@ -1396,95 +1327,90 @@ mod full_chain_tests {
 }
 
 #[cfg(test)]
-mod claude_code_native_tests {
+mod interactive_claude_tests {
     use super::*;
 
     #[test]
-    fn test_cch_computation_deterministic() {
-        let body = r#"{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hello"}],"max_tokens":16384,"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.92; cc_entrypoint=cli; cch=00000;"},{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}],"stream":true}"#;
-        let cch = ClaudeCodeNativeClient::compute_cch(body);
-        // Must be exactly 5 hex characters
-        assert_eq!(cch.len(), 5, "cch must be 5 hex characters");
-        assert!(
-            cch.chars().all(|c| c.is_ascii_hexdigit()),
-            "cch must be all hex digits, got: {cch}"
+    fn test_flatten_prompt_system_and_user() {
+        let messages = vec![
+            LLMMessage {
+                role: "system".to_string(),
+                content: "You plan.".to_string(),
+            },
+            LLMMessage {
+                role: "user".to_string(),
+                content: "Build X.".to_string(),
+            },
+        ];
+        let prompt = InteractiveClaudeClient::flatten_prompt(&messages);
+        assert_eq!(prompt, "You plan.\n\nBuild X.");
+    }
+
+    #[test]
+    fn test_flatten_prompt_multiple_system_blocks() {
+        let messages = vec![
+            LLMMessage {
+                role: "system".to_string(),
+                content: "A".to_string(),
+            },
+            LLMMessage {
+                role: "system".to_string(),
+                content: "B".to_string(),
+            },
+            LLMMessage {
+                role: "user".to_string(),
+                content: "C".to_string(),
+            },
+        ];
+        assert_eq!(
+            InteractiveClaudeClient::flatten_prompt(&messages),
+            "A\nB\n\nC"
         );
-        // Must be deterministic
-        let cch2 = ClaudeCodeNativeClient::compute_cch(body);
-        assert_eq!(cch, cch2, "cch must be deterministic");
     }
 
     #[test]
-    fn test_cch_changes_with_different_input() {
-        let body1 = r#"{"model":"a","messages":[],"cch=00000"}"#;
-        let body2 = r#"{"model":"b","messages":[],"cch=00000"}"#;
-        let cch1 = ClaudeCodeNativeClient::compute_cch(body1);
-        let cch2 = ClaudeCodeNativeClient::compute_cch(body2);
-        assert_ne!(
-            cch1, cch2,
-            "Different inputs should produce different cch values"
-        );
-    }
-
-    #[test]
-    fn test_cch_masked_to_20_bits() {
-        // The cch value is hash & 0xFFFFF, so max value is 0xFFFFF = 1048575
-        let body = r"test body with cch=00000 placeholder";
-        let cch = ClaudeCodeNativeClient::compute_cch(body);
-        let val = u64::from_str_radix(&cch, 16).expect("cch must be valid hex");
-        assert!(val <= 0xFFFFF, "cch value {val} exceeds 20-bit mask");
-    }
-
-    #[test]
-    fn test_detect_cc_version_format() {
-        // This test just validates the function doesn't panic
-        // Actual version detection depends on CLI installation
-        let _version = detect_cc_version();
-    }
-
-    /// Ad-hoc upstream-acceptance probe for a candidate model ID under the
-    /// local Claude Code subscription. Marked `#[ignore]` — run manually with:
-    ///
-    ///   cargo test -p services --lib -- --ignored test_probe_subscription_model_acceptance
-    ///
-    /// Reads `~/.claude/.credentials.json`, sends a minimal "hi" prompt, and
-    /// asserts a 2xx response. Used to validate that
-    /// `claude-sonnet-4-6`/`claude-opus-4-6`/etc. are accepted by the
-    /// subscription endpoint BEFORE swapping the hardcoded default in
-    /// agent.rs:172 / :500 and planning_drafts.rs:339.
-    #[tokio::test]
-    #[ignore = "network + real OAuth token — manual run only (see doc comment)"]
-    async fn test_probe_subscription_model_acceptance() {
-        // reqwest is configured with `rustls-tls-webpki-roots-no-provider` at
-        // the workspace level — the app (server.exe) installs the ring
-        // crypto provider at startup, but unit tests must do it themselves.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
-        // Change this to test a different candidate model.
-        let candidate =
-            std::env::var("PROBE_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
-
-        let client = ClaudeCodeNativeClient::try_new(&candidate)
-            .expect("Claude Code OAuth credentials must be present at ~/.claude/.credentials.json");
-
+    fn test_flatten_prompt_user_only() {
         let messages = vec![LLMMessage {
             role: "user".to_string(),
-            content: "Respond with the single word 'ok' and nothing else.".to_string(),
+            content: "hi".to_string(),
         }];
+        assert_eq!(InteractiveClaudeClient::flatten_prompt(&messages), "hi");
+    }
 
-        match client.chat(messages).await {
-            Ok(resp) => {
-                println!(
-                    "UPSTREAM ACCEPTED model={} content={:?} usage={:?}",
-                    candidate, resp.content, resp.usage
-                );
-            }
-            Err(e) => {
-                panic!(
-                    "UPSTREAM REJECTED model={candidate}: {e}. \
-                     Do NOT swap the hardcoded default to this ID."
-                );
-            }
-        }
+    #[test]
+    fn test_extract_final_assistant_text_picks_last() {
+        // Two assistant envelopes; the last one's text must win.
+        let transcript = concat!(
+            r#"{"type":"system","subtype":"init","session_id":"s"}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"first"}]}}"#,
+            "\n",
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"again"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hmm"},{"type":"text","text":"final answer"}]}}"#,
+            "\n",
+        );
+        assert_eq!(
+            InteractiveClaudeClient::extract_final_assistant_text(transcript),
+            Some("final answer".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_final_assistant_text_joins_multiple_text_blocks() {
+        let transcript = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"line1"},{"type":"text","text":"line2"}]}}"#;
+        assert_eq!(
+            InteractiveClaudeClient::extract_final_assistant_text(transcript),
+            Some("line1\nline2".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_final_assistant_text_none_when_no_assistant() {
+        let transcript = r#"{"type":"system","subtype":"init","session_id":"s"}"#;
+        assert_eq!(
+            InteractiveClaudeClient::extract_final_assistant_text(transcript),
+            None
+        );
     }
 }

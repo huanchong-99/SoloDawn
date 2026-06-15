@@ -66,6 +66,20 @@ const SQLITE_FOREIGN_KEY_CONSTRAINT_CODE: &str = "787";
 /// SQLite extended error code observed for disk I/O failures under log bloat.
 const SQLITE_DISK_IO_ERROR_CODE: &str = "778";
 
+/// Directory-name prefix for per-logical-session interactive CLAUDE homes
+/// (the no-`-p` interactive transport). Kept in sync with
+/// `cc_switch::INTERACTIVE_CLAUDE_HOME_PREFIX`. Homes whose final path component
+/// starts with `<prefix>-` are EXEMPT from terminal-end cleanup (S4).
+const INTERACTIVE_HOME_PREFIX: &str = "claude-isession";
+
+/// Returns true if `home` is a per-logical-session interactive CLAUDE home
+/// (identified by its directory-name prefix), which must survive terminal-end.
+fn is_logical_session_home(home: &Path) -> bool {
+    home.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with(&format!("{INTERACTIVE_HOME_PREFIX}-")))
+}
+
 // ============================================================================
 // Spawn Configuration (Process Isolation)
 // ============================================================================
@@ -239,6 +253,13 @@ struct TrackedProcess {
     /// be removed when the terminal ends — both on the normal finalize path and
     /// via the `Drop` safety-net below (panic/abort) — so API keys never leak to disk.
     isolated_homes: Vec<PathBuf>,
+    /// S4 (no-`-p` interactive transport): per-logical-session interactive CLAUDE
+    /// homes that are EXEMPT from terminal-end cleanup (they hold the resumable
+    /// transcript and are keyed on the interactive session UUID, so they outlive
+    /// any single terminal). RB-37 secret cleanup is preserved but deferred to
+    /// logical-session teardown via `ProcessManager::cleanup_logical_session_home`.
+    /// Recorded here only for observability / safety-net logging — NOT auto-deleted.
+    exempt_isolated_homes: Vec<PathBuf>,
     /// Output fanout hub (single reader -> multi-subscriber)
     output_fanout: Arc<OutputFanout>,
     /// Background PTY reader task
@@ -277,6 +298,16 @@ impl Drop for TrackedProcess {
         // which is safe inside a synchronous destructor.
         for home in self.isolated_homes.drain(..) {
             ProcessManager::cleanup_isolated_home(&self.session_id, &home);
+        }
+        // S4: per-logical-session interactive homes are NOT deleted here — they
+        // outlive the terminal and are cleaned at logical-session teardown via
+        // `ProcessManager::cleanup_logical_session_home`. Log for observability.
+        for home in self.exempt_isolated_homes.drain(..) {
+            tracing::debug!(
+                session_id = %self.session_id,
+                home = %home.display(),
+                "Preserving per-logical-session interactive CLAUDE home across terminal end (deferred cleanup)"
+            );
         }
     }
 }
@@ -391,6 +422,17 @@ impl ProcessManager {
                 );
             }
         }
+    }
+
+    /// S4 (no-`-p` interactive transport): explicitly tear down a per-logical-session
+    /// interactive CLAUDE home. These dirs are EXEMPT from terminal-end cleanup (they
+    /// hold the resumable transcript keyed on the interactive session UUID), so RB-37
+    /// secret cleanup is deferred to here and must be invoked by the transport at
+    /// logical-session teardown (chat/workflow session end), NOT at terminal end.
+    ///
+    /// Reuses the same temp-dir safety guard as `cleanup_isolated_home`.
+    pub fn cleanup_logical_session_home(home: &Path) {
+        Self::cleanup_isolated_home("logical-session", home);
     }
 
     /// Attempt to terminate the child process for a tracked terminal.
@@ -652,7 +694,7 @@ impl ProcessManager {
         // failures via the guard). Each of these temp directories holds secret
         // files (auth.json, settings.json, .credentials.json, .env) that must not
         // leak to disk after the terminal ends.
-        let isolated_homes: Vec<PathBuf> = ["CODEX_HOME", "CLAUDE_HOME", "GEMINI_HOME"]
+        let all_isolated_homes: Vec<PathBuf> = ["CODEX_HOME", "CLAUDE_HOME", "GEMINI_HOME"]
             .iter()
             .filter_map(|key| {
                 config.env.set.get(*key).and_then(|value| {
@@ -665,6 +707,18 @@ impl ProcessManager {
                 })
             })
             .collect();
+
+        // S4 (no-`-p` interactive transport): partition out per-logical-session
+        // interactive CLAUDE homes (dir name prefix `claude-isession-`). These are
+        // keyed on the stable interactive session UUID and reused across terminal
+        // restarts / follow-ups (`--resume <uuid>`), so they MUST survive
+        // terminal-end cleanup. RB-37 secret cleanup is preserved — just DEFERRED
+        // to logical-session teardown (see `cleanup_logical_session_home`), not
+        // dropped. All non-interactive homes keep the proven terminal-end lifecycle.
+        let (exempt_isolated_homes, isolated_homes): (Vec<PathBuf>, Vec<PathBuf>) =
+            all_isolated_homes
+                .into_iter()
+                .partition(|home| is_logical_session_home(home));
         let mut isolated_homes_guard =
             IsolatedHomesGuard::new(terminal_id, isolated_homes.clone());
 
@@ -843,6 +897,7 @@ impl ProcessManager {
                 master: Mutex::new(pair.master),
                 shared_writer: OnceCell::new(),
                 isolated_homes,
+                exempt_isolated_homes,
                 output_fanout,
                 reader_task,
                 logger_task: None,
