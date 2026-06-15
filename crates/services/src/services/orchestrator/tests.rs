@@ -372,7 +372,7 @@ mod orchestrator_tests {
     #[tokio::test]
     async fn test_llm_client_basic_request() {
         // Install crypto provider for reqwest (ignore if already installed)
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let mock_server = MockServer::start().await;
 
@@ -419,7 +419,7 @@ mod orchestrator_tests {
     #[tokio::test]
     async fn test_llm_client_error_handling() {
         // Install crypto provider for reqwest (ignore if already installed)
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let mock_server = MockServer::start().await;
 
@@ -456,7 +456,7 @@ mod orchestrator_tests {
     #[tokio::test]
     async fn test_llm_client_empty_response() {
         // Install crypto provider for reqwest (ignore if already installed)
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let mock_server = MockServer::start().await;
 
@@ -2909,7 +2909,7 @@ next_action: handoff";
     #[tokio::test]
     async fn test_llm_error_propagation() {
         // Install crypto provider for reqwest
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let mock_server = MockServer::start().await;
 

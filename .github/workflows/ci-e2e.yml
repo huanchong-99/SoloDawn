@@ -89,6 +89,10 @@ jobs:
       run: |
         echo "CARGO_TERM_COLOR=always" >> "$GITHUB_ENV"
         echo "SQLX_OFFLINE=true" >> "$GITHUB_ENV"
+        # aws-lc-rs (openlark crypto migration) must link STATICALLY so the
+        # standalone release binary has no libaws_lc_*.so runtime dependency
+        # (the Dockerfiles already set this; the E2E build had missed it).
+        echo "AWS_LC_SYS_STATIC=1" >> "$GITHUB_ENV"
 
     # --- Node.js + frontend build ---
     - name: Setup Node.js
@@ -199,6 +203,10 @@ jobs:
       run: |
         echo "CARGO_TERM_COLOR=always" >> "$GITHUB_ENV"
         echo "SQLX_OFFLINE=true" >> "$GITHUB_ENV"
+        # aws-lc-rs (openlark crypto migration) must link STATICALLY so the
+        # standalone release binary has no libaws_lc_*.so runtime dependency
+        # (the Dockerfiles already set this; the E2E build had missed it).
+        echo "AWS_LC_SYS_STATIC=1" >> "$GITHUB_ENV"
 
     - name: Setup Node.js
       uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0

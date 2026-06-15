@@ -24,8 +24,8 @@ use crate::{DeploymentImpl, error::ApiError};
 pub struct CreateSlashCommandRequest {
     #[serde(rename = "command")]
     pub command: String,
-    #[serde(rename = "description")]
-    pub description: String,
+    #[serde(rename = "description", default)]
+    pub description: Option<String>,
     #[serde(rename = "promptTemplate")]
     pub prompt_template: Option<String>,
 }
@@ -88,8 +88,11 @@ pub async fn create_command_preset(
         ));
     }
 
-    // Validate: description is required
-    if req.description.trim().is_empty() {
+    // Validate: description is required (manual check so a missing/blank field
+    // returns a 400 with a string `message`, consistent with the leading-slash
+    // check above, instead of axum's typed-extractor 422).
+    let description = req.description.unwrap_or_default();
+    if description.trim().is_empty() {
         return Err(ApiError::BadRequest("Description is required".to_string()));
     }
 
@@ -99,7 +102,7 @@ pub async fn create_command_preset(
     let preset = SlashCommandPreset {
         id: id.clone(),
         command: req.command,
-        description: req.description,
+        description,
         prompt_template: req.prompt_template,
         is_system: false,
         created_at: now,

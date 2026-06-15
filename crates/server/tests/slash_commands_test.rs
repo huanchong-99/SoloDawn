@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use http_body_util::BodyExt;
+use uuid::Uuid;
 use serde_json::json;
 use server::{Deployment, DeploymentImpl, routes::subscription_hub::SubscriptionHub};
 use services::services::cli_health_monitor::{CliHealthMonitor, SharedCliHealthMonitor};
@@ -112,8 +113,11 @@ async fn test_create_command_preset_success() {
         create_test_concierge_broadcaster(),
     );
 
+    // Unique command per run so the test is re-runnable on the shared dev DB
+    // (the suite convention; see quality_gates_test using Uuid identifiers).
+    let cmd = format!("/test-{}", Uuid::new_v4());
     let new_command = json!({
-        "command": "/test-command",
+        "command": cmd.as_str(),
         "description": "Test command description",
         "promptTemplate": "Test template with {{variable}}"
     });
@@ -138,7 +142,7 @@ async fn test_create_command_preset_success() {
 
     assert_eq!(value["success"], true);
     assert!(value["data"]["id"].is_string());
-    assert_eq!(value["data"]["command"], "/test-command");
+    assert_eq!(value["data"]["command"], cmd.as_str());
     assert_eq!(value["data"]["description"], "Test command description");
     assert_eq!(
         value["data"]["promptTemplate"],
@@ -190,7 +194,7 @@ async fn test_create_command_preset_missing_leading_slash() {
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(value["success"], false);
-    assert!(value["error"].is_string());
+    assert!(value["message"].is_string());
 }
 
 #[tokio::test]
@@ -203,8 +207,9 @@ async fn test_create_command_preset_duplicate_command() {
     };
     use tower::ServiceExt;
 
+    let cmd = format!("/duplicate-{}", Uuid::new_v4());
     let new_command = json!({
-        "command": "/duplicate-test",
+        "command": cmd.as_str(),
         "description": "Test command description"
     });
 
@@ -305,8 +310,9 @@ async fn test_update_command_preset() {
     use tower::ServiceExt;
 
     // First create a command
+    let cmd = format!("/update-{}", Uuid::new_v4());
     let new_command = json!({
-        "command": "/update-test",
+        "command": cmd.as_str(),
         "description": "Original description",
         "promptTemplate": "Original template"
     });
@@ -369,7 +375,7 @@ async fn test_update_command_preset() {
 
     assert_eq!(value["success"], true);
     assert_eq!(value["data"]["id"], command_id.as_str());
-    assert_eq!(value["data"]["command"], "/update-test");
+    assert_eq!(value["data"]["command"], cmd.as_str());
     assert_eq!(value["data"]["description"], "Updated description");
     assert_eq!(value["data"]["promptTemplate"], "Updated template");
 }
@@ -385,8 +391,9 @@ async fn test_delete_command_preset() {
     use tower::ServiceExt;
 
     // First create a command
+    let cmd = format!("/delete-{}", Uuid::new_v4());
     let new_command = json!({
-        "command": "/delete-test",
+        "command": cmd.as_str(),
         "description": "Command to be deleted"
     });
 

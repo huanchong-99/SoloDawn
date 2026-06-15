@@ -167,7 +167,7 @@ async fn run_server() -> Result<(), SoloDawnError> {
     ensure_api_token_in_release();
 
     // Install rustls crypto provider before any TLS operations
-    rustls::crypto::ring::default_provider()
+    rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
@@ -474,7 +474,9 @@ async fn start_feishu_connector(
     tokio::spawn(async move {
         let mut policy = ReconnectPolicy::new(ClientConfig::default());
         loop {
-            if let Err(e) = service.start().await {
+            // `service.start()` (openlark WS client) is a large future; box it
+            // on the heap to satisfy clippy::large_futures under `-D warnings`.
+            if let Err(e) = Box::pin(service.start()).await {
                 tracing::warn!(error = %e, "Feishu service disconnected");
             }
             *connected_flag.write().await = false;

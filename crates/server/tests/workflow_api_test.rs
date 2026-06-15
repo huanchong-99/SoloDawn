@@ -38,7 +38,14 @@ fn create_test_concierge_broadcaster() -> Arc<services::services::concierge::Con
 }
 
 /// Helper: Setup test environment
-async fn setup_test() -> (DeploymentImpl, Uuid) {
+///
+/// Returns the deployment, the project id, and the per-test unique `cli_type`
+/// id and `model_config` id. All integration tests share one on-disk
+/// `db.sqlite` (see `DBService::new` / `asset_dir`), so hardcoded ids would
+/// collide on the `cli_type` PRIMARY KEY / UNIQUE(name) across parallel tests
+/// and re-runs. Mirror the sibling suite (quality_gates_test) by using fresh
+/// Uuids for every inserted identifier.
+async fn setup_test() -> (DeploymentImpl, Uuid, String, String) {
     let deployment = DeploymentImpl::new()
         .await
         .expect("Failed to create deployment");
@@ -53,13 +60,18 @@ async fn setup_test() -> (DeploymentImpl, Uuid) {
         .await
         .expect("Failed to create project");
 
+    // Unique per-test ids so parallel tests / re-runs never collide on the
+    // shared on-disk DB. `cli_type.id` and `cli_type.name` are both unique.
+    let cli_type_id = format!("test-cli-{}", Uuid::new_v4());
+    let model_config_id = format!("test-model-{}", Uuid::new_v4());
+
     // Create CLI type via raw SQL
     sqlx::query(
         r"INSERT INTO cli_type (id, name, display_name, detect_command, is_system, created_at)
           VALUES (?1, ?2, ?3, ?4, 0, ?5)",
     )
-    .bind("test-cli")
-    .bind("test-cli")
+    .bind(&cli_type_id)
+    .bind(&cli_type_id)
     .bind("Test CLI")
     .bind("echo --version")
     .bind(chrono::Utc::now())
@@ -67,13 +79,13 @@ async fn setup_test() -> (DeploymentImpl, Uuid) {
     .await
     .expect("Failed to create CLI type");
 
-    // Create model config via raw SQL
+    // Create model config via raw SQL (FK: cli_type_id -> cli_type.id)
     sqlx::query(
         r"INSERT INTO model_config (id, cli_type_id, name, display_name, api_model_id, is_default, is_official, created_at, updated_at)
           VALUES (?1, ?2, ?3, ?4, ?5, 1, 1, ?6, ?7)",
     )
-    .bind("test-model")
-    .bind("test-cli")
+    .bind(&model_config_id)
+    .bind(&cli_type_id)
     .bind("test-model")
     .bind("Test Model")
     .bind("test-model")
@@ -83,7 +95,7 @@ async fn setup_test() -> (DeploymentImpl, Uuid) {
     .await
     .expect("Failed to create model config");
 
-    (deployment, project_id)
+    (deployment, project_id, cli_type_id, model_config_id)
 }
 
 /// Helper: Create a minimal workflow
@@ -91,6 +103,8 @@ async fn create_minimal_workflow(
     deployment: &DeploymentImpl,
     project_id: Uuid,
     orchestrator_enabled: bool,
+    cli_type_id: &str,
+    model_config_id: &str,
 ) -> String {
     let workflow_id = Uuid::new_v4().to_string();
 
@@ -122,8 +136,8 @@ async fn create_minimal_workflow(
         error_terminal_enabled: false,
         error_terminal_cli_id: None,
         error_terminal_model_id: None,
-        merge_terminal_cli_id: "test-cli".to_string(),
-        merge_terminal_model_id: "test-model".to_string(),
+        merge_terminal_cli_id: cli_type_id.to_string(),
+        merge_terminal_model_id: model_config_id.to_string(),
         target_branch: "main".to_string(),
         git_watcher_enabled: true,
         ready_at: None,
@@ -145,8 +159,10 @@ async fn create_minimal_workflow(
 #[tokio::test]
 async fn test_start_workflow_requires_ready_status() {
     // Setup: Create deployment and workflow in 'created' status
-    let (deployment, project_id) = setup_test().await;
-    let workflow_id = create_minimal_workflow(&deployment, project_id, true).await;
+    let (deployment, project_id, cli_type_id, model_config_id) = setup_test().await;
+    let workflow_id =
+        create_minimal_workflow(&deployment, project_id, true, &cli_type_id, &model_config_id)
+            .await;
 
     // Verify workflow is in 'created' status
     let workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
@@ -186,8 +202,10 @@ async fn test_start_workflow_requires_ready_status() {
 #[tokio::test]
 async fn test_start_workflow_with_ready_status() {
     // Setup: Create deployment and workflow, then set to 'ready'
-    let (deployment, project_id) = setup_test().await;
-    let workflow_id = create_minimal_workflow(&deployment, project_id, true).await;
+    let (deployment, project_id, cli_type_id, model_config_id) = setup_test().await;
+    let workflow_id =
+        create_minimal_workflow(&deployment, project_id, true, &cli_type_id, &model_config_id)
+            .await;
 
     // Update workflow status to 'ready'
     Workflow::update_status(&deployment.db().pool, &workflow_id, "ready")
@@ -205,8 +223,10 @@ async fn test_start_workflow_with_ready_status() {
 #[tokio::test]
 async fn test_workflow_status_transitions() {
     // Setup
-    let (deployment, project_id) = setup_test().await;
-    let workflow_id = create_minimal_workflow(&deployment, project_id, true).await;
+    let (deployment, project_id, cli_type_id, model_config_id) = setup_test().await;
+    let workflow_id =
+        create_minimal_workflow(&deployment, project_id, true, &cli_type_id, &model_config_id)
+            .await;
 
     // Verify initial status
     let workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
@@ -230,8 +250,10 @@ async fn test_workflow_status_transitions() {
 #[tokio::test]
 async fn test_start_workflow_without_orchestrator() {
     // Setup: Create workflow without orchestrator
-    let (deployment, project_id) = setup_test().await;
-    let workflow_id = create_minimal_workflow(&deployment, project_id, false).await;
+    let (deployment, project_id, cli_type_id, model_config_id) = setup_test().await;
+    let workflow_id =
+        create_minimal_workflow(&deployment, project_id, false, &cli_type_id, &model_config_id)
+            .await;
 
     // Update to ready status
     Workflow::update_status(&deployment.db().pool, &workflow_id, "ready")
@@ -270,13 +292,16 @@ async fn test_start_workflow_without_orchestrator() {
 
     let response = app.oneshot(request).await.expect("Failed to get response");
 
-    // Should return 400 BadRequest
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    // DIY mode (orchestrator disabled) is a first-class path: starting a ready
+    // DIY workflow succeeds (no orchestrator agent required) and transitions it
+    // to "running" — see start_workflow's `else` branch which calls
+    // Workflow::set_started (status -> 'running').
+    assert_eq!(response.status(), StatusCode::OK);
 
-    // Verify workflow status is still 'ready' (not changed)
+    // Verify workflow transitioned to 'running'
     let workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
         .await
         .expect("Failed to query workflow")
         .expect("Workflow not found");
-    assert_eq!(workflow.status, "ready");
+    assert_eq!(workflow.status, "running");
 }
