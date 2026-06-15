@@ -252,20 +252,24 @@ correctness.**
 | C/C++ toolchain | MSVC Build Tools (Windows) · gcc/clang (Linux/macOS) | — |
 | protoc | 31.1 | `protoc --version` |
 | LLVM / libclang | recent (needed by bindgen) | `clang --version` |
+| cmake · nasm · perl | recent (needed by `aws-lc-rs` on x86-64) | `cmake --version` · `nasm --version` |
 | Node.js | ≥ 18 (recommend 20) | `node --version` |
 | pnpm | 10.13.1 | `pnpm --version` |
 | Git | Any recent | `git --version` |
 
-> ⚠️ **`protoc` and `LLVM/libclang` are required to build but are NOT installed by `scripts/setup-windows.ps1`** — install them manually:
+> ⚠️ **`protoc`, `LLVM/libclang`, and the `aws-lc-rs` build tools (`cmake`, `nasm`, `perl`) are required to build but are NOT installed by `scripts/setup-windows.ps1`** — install them manually:
 >
-> **Windows:** download [`protoc-31.1-win64.zip`](https://github.com/protocolbuffers/protobuf/releases/tag/v31.1), extract it, and add its `bin` to `PATH`; then install LLVM and point `LIBCLANG_PATH` at it:
+> **Windows:** download [`protoc-31.1-win64.zip`](https://github.com/protocolbuffers/protobuf/releases/tag/v31.1), extract it, and add its `bin` to `PATH`; then install LLVM, NASM, CMake, and Perl:
 > ```powershell
 > winget install LLVM.LLVM
+> winget install NASM.NASM
+> winget install Kitware.CMake
+> winget install StrawberryPerl.StrawberryPerl
 > [Environment]::SetEnvironmentVariable("PROTOC", "C:\path\to\protoc\bin\protoc.exe", "User")
 > [Environment]::SetEnvironmentVariable("LIBCLANG_PATH", "$env:ProgramFiles\LLVM\bin", "User")
 > ```
-> **Linux (apt):** `sudo apt-get install -y protobuf-compiler clang libclang-dev`
-> **macOS (brew):** `brew install protobuf llvm`
+> **Linux (apt):** `sudo apt-get install -y protobuf-compiler clang libclang-dev cmake nasm perl`
+> **macOS (brew):** `brew install protobuf llvm cmake nasm` (Perl ships with macOS)
 
 ### Getting Started After Cloning
 
@@ -350,7 +354,7 @@ These trip up first-time setup, especially on Windows:
 - **Pin `sqlx-cli` to 0.8.x.** The latest 0.9.0 requires rustc ≥ 1.94, but the pinned `nightly-2025-12-04` is rustc 1.93, so an unpinned `cargo install sqlx-cli` fails.
 - **No database is needed to build.** `.cargo/config.toml` sets `SQLX_OFFLINE=true`, so builds use the committed `crates/db/.sqlx/` query cache. You only need `sqlx-cli` / `pnpm run prepare-db` when you change SQL queries or migrations.
 - **Windows: restart your terminal after installing tools** so it picks up the updated `PATH`, `PROTOC`, and `LIBCLANG_PATH`.
-- **You do NOT need cmake / nasm / perl** for a local build — `libgit2-sys` builds via the `cc` crate, and the dependency tree uses `ring` (not aws-lc).
+- **`cmake`, `nasm`, and `perl` ARE required for a local build on x86-64.** Since the Feishu connector migrated to the `openlark` SDK, the dependency tree uses `aws-lc-rs` (AWS-LC) instead of `ring`; its `aws-lc-sys` build compiles AWS-LC's optimized assembly from source (needs `nasm` + `cmake`; `perl` on some platforms). Install commands are in [Prerequisites](#prerequisites). (`libgit2-sys` itself still builds via the `cc` crate.)
 
 ### Docker (One-Click Install)
 
