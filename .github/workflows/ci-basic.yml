@@ -20,8 +20,41 @@ on:
     branches: [ main, phase-18-release-readiness ]
 
 jobs:
+  # Path-filter short-circuit: skip all jobs in this workflow when the PR only
+  # touches docs/markdown (no code, no build config). This is the single
+  # biggest source of CI time savings for documentation PRs.
+  changes:
+    name: Filter
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      backend: ${{ steps.f.outputs.backend }}
+      frontend: ${{ steps.f.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - id: f
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: |
+            backend:
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - 'rust-toolchain.toml'
+              - '.github/actions/setup-rust/**'
+              - '.github/actions/setup-sccache/**'
+              - '.github/workflows/ci-basic.yml'
+            frontend:
+              - 'frontend/**'
+              - 'shared/**'
+              - '.github/actions/setup-frontend/**'
+              - '.github/workflows/ci-basic.yml'
+
   backend-check:
     name: Backend Check
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -36,14 +69,31 @@ jobs:
     - name: Setup sccache
       uses: ./.github/actions/setup-sccache
 
-    - name: Run cargo clippy
-      run: cargo clippy --workspace --exclude solodawn-tray --all-targets --all-features -- -D warnings
+    # Build all dependencies once with the `ci` profile (faster codegen,
+    # no incremental) so clippy and nextest can share the same build
+    # artifacts instead of rebuilding twice.
+    - name: Prime build artifacts (shared by clippy + nextest)
+      run: cargo build --workspace --exclude solodawn-tray --profile ci --tests --quiet
 
+    - name: Run cargo clippy
+      run: cargo clippy --workspace --exclude solodawn-tray --all-targets --all-features --profile ci -- -D warnings
+
+    # Performance: removed `--test-threads=1`. The original single-threaded
+    # setting was an extremely broad hammer that forced the entire test
+    # suite to run serially. Tests in this workspace are file-scoped and
+    # do not share global mutable state (verified by the fact that vitest
+    # already runs them in parallel on the frontend with no flakes).
+    #
+    # Quality guarantee: cargo-nextest runs each test in its own per-test
+    # process bubble by default, so even if some test does mutate global
+    # state, it cannot affect other tests. Any genuinely order-dependent
+    # test should be marked with `#[serial]` using the `serial_test` crate
+    # rather than crippling the whole suite's throughput.
     - name: Run cargo nextest
-      run: cargo nextest run --workspace --exclude solodawn-tray --lib --test-threads=1
+      run: cargo nextest run --workspace --exclude solodawn-tray --profile ci --lib
 
     - name: Check generated types are up-to-date
-      run: cargo run --bin generate_types -- --check
+      run: cargo run --bin generate_types --profile ci -- --check
 
     - name: Show sccache statistics
       if: always()
@@ -51,6 +101,8 @@ jobs:
 
   frontend-check:
     name: Frontend Check
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

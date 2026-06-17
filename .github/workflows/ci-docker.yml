@@ -16,6 +16,17 @@ on:
     branches: [ main, phase-18-release-readiness ]
   pull_request:
     branches: [ main, phase-18-release-readiness ]
+    # PR: only run when Dockerfile or docker/ context changes — the Docker
+    # build is ~10-20min and there is zero signal from re-running it on
+    # Rust-source-only PRs.
+    paths:
+      - 'docker/**'
+      - 'Dockerfile'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'frontend/**'
+      - '.github/workflows/ci-docker.yml'
 
 jobs:
   docker-build:

@@ -13,8 +13,11 @@ name: E2E Self-Test
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  # PRs: never trigger the 3-OS E2E matrix (45min × 3 = huge cost per push).
+  # E2E relies on a full release build + system deps that take >30min on
+  # free runners. Per-PR E2E is replaced by:
+  #   - ci-basic.yml backend-check (cargo nextest covers the logic)
+  #   - manual `workflow_dispatch` for risky platform-specific PRs
   workflow_dispatch:
 
 concurrency:

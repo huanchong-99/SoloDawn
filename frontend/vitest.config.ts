@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { Plugin } from 'vite';
 
 process.env.BROWSERSLIST_IGNORE_OLD_DATA = '1';
@@ -59,6 +60,24 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
+    },
+    // Performance: use 'forks' pool (one process per CPU core) instead of the
+    // default 'threads'. With jsdom + React Testing Library, the dominant cost
+    // is per-file setup; forks give better isolation and let many files run
+    // in parallel without contention. `singleThread: false` means each worker
+    // still runs multiple files sequentially within its own process.
+    //
+    // Quality guarantee: the exact same test files run, with the same
+    // environment and setup. Only the *scheduling* changes.
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        // Default is min(available CPUs, 16). Keep it explicit so CI runners
+        // (2-core GitHub Actions) and local dev both get sensible parallelism.
+        // `availableParallelism()` may not exist on older Node; fall back to 4.
+        maxForks: Math.max(2, (os.availableParallelism?.() ?? 4) - 1),
+        singleFork: false,
+      },
     },
   },
   resolve: {

@@ -79,8 +79,33 @@ runs:
         echo "AWS_LC_SYS_NO_PREGENERATED_SRC=1" >> "$GITHUB_ENV"
         echo "LIBGIT2_SYS_USE_PKG_CONFIG=1" >> "$GITHUB_ENV"
 
-    - name: Install cargo-nextest
+    - name: Install cargo-nextest (prebuilt binary)
+      # Pre-built binary install is ~5s; `cargo install --locked` was ~3min
+      # because it compiled nextest + all its dependencies from source on
+      # every CI run. Functionally identical: same binary, same test runner.
       if: inputs.install-nextest == 'true'
       shell: bash
       run: |
-        cargo install --locked cargo-nextest --version 0.9.88
+        set -euo pipefail
+        # Map runner OS to nextest release asset
+        case "${{ runner.os }}" in
+          Linux)  NEXTEST_TARGET="x86_64-unknown-linux-musl";;
+          macOS)  NEXTEST_TARGET="aarch64-apple-darwin";;
+          Windows) NEXTEST_TARGET="x86_64-pc-windows-msvc";;
+          *) echo "Unsupported OS: ${{ runner.os }}" >&2; exit 1;;
+        esac
+        NEXTEST_VERSION="0.9.88"
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          ARCHIVE="cargo-nextest-v${NEXTEST_VERSION}-${NEXTEST_TARGET}.zip"
+          URL="https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-v${NEXTEST_VERSION}/${ARCHIVE}"
+          curl -fsSL "${URL}" -o /tmp/nextest.zip
+          unzip -o /tmp/nextest.zip -d /tmp/nextest-extract >/dev/null
+          install -m755 /tmp/nextest-extract/nextest.exe "${HOME}/.cargo/bin/nextest.exe"
+        else
+          ARCHIVE="cargo-nextest-v${NEXTEST_VERSION}-${NEXTEST_TARGET}.tar.gz"
+          URL="https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-v${NEXTEST_VERSION}/${ARCHIVE}"
+          curl -fsSL "${URL}" -o /tmp/nextest.tar.gz
+          tar -xzf /tmp/nextest.tar.gz -C /tmp
+          install -m755 /tmp/cargo-nextest "${HOME}/.cargo/bin/cargo-nextest"
+        fi
+        cargo-nextest --version

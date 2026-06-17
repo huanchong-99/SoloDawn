@@ -30,11 +30,30 @@ openlark = { version = "=0.17.0", default-features = false, features = ["communi
 thiserror = "2.0.12"
 tracing = "0.1.43"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
-ts-rs = { git = "https://github.com/xazukx/ts-rs.git", branch = "use-ts-enum", features = ["uuid-impl", "chrono-impl", "no-serde-warnings", "serde-json-impl"] }
+ts-rs = { git = "https://github.com/xazukx/ts-rs.git", rev = "b5c8277ac9f321a0be7453eef029466152b13fc8", features = ["uuid-impl", "chrono-impl", "no-serde-warnings", "serde-json-impl"] }
 schemars = { version = "1.0.4", features = ["derive", "chrono04", "uuid1", "preserve_order"] }
 serde_with = "3"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
+
+# Local dev profile: prioritize fast incremental builds.
+# - incremental on by default for dev, but explicit here for clarity.
+# - debug = "line-tables-only": enough for panic backtraces, much smaller/faster
+#   than full debug info (which is the default for dev).
+# - codegen-units = 256: parallelize codegen for faster incremental builds.
+[profile.dev]
+incremental = true
+debug = "line-tables-only"
+codegen-units = 256
+
+# CI/dev "fast-check" profile: used by `cargo nextest run --profile ci` to get
+# back parallel-friendly codegen without expensive optimizations. Tests still
+# run the exact same code as release, just compiled faster.
+[profile.ci]
+inherits = "dev"
+incremental = false
+debug = "line-tables-only"
+codegen-units = 16
 
 [profile.release]
 debug = 0

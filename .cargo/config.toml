@@ -1,5 +1,16 @@
+# Faster linkers per target — these are bundled with the Rust toolchain
+# (`rust-lld`), so no system install is needed. Significantly speeds up
+# local dev builds by avoiding the slow default system linkers.
+#
+# On Windows MSVC we used to set `/DEBUG` for better PDB symbols, but that
+# forces the slow MSVC linker path. Keep `/DEBUG` only for release builds
+# (where link time is dwarfed by codegen) via a separate mechanism; dev
+# builds prefer speed.
+
 [target.x86_64-apple-darwin]
 rustflags = [
+    "-C", "linker-flavor=darwin-ld.lld",
+    "-C", "linker=rust-lld",
     "-C", "link-arg=-framework",
     "-C", "link-arg=AppKit",
     "-C", "link-arg=-framework",
@@ -10,6 +21,8 @@ rustflags = [
 
 [target.aarch64-apple-darwin]
 rustflags = [
+    "-C", "linker-flavor=darwin-ld.lld",
+    "-C", "linker=rust-lld",
     "-C", "link-arg=-framework",
     "-C", "link-arg=AppKit",
     "-C", "link-arg=-framework",
@@ -18,11 +31,18 @@ rustflags = [
     "-C", "link-arg=Foundation",
 ]
 
+# Windows MSVC: use rust-lld (shipped with the toolchain) instead of the slow
+# default `link.exe`. Drop the old `/DEBUG` rustflag that forced full PDB
+# generation on every dev build; we keep backtraces via
+# `[profile.dev] debug = "line-tables-only"` in Cargo.toml, which is enough
+# for panic location reporting and much faster.
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "link-arg=/DEBUG"]
+linker = "rust-lld"
+rustflags = []
 
 [target.aarch64-pc-windows-msvc]
-rustflags = ["-C", "link-arg=/DEBUG"]
+linker = "rust-lld"
+rustflags = []
 
 [env]
 AWS_LC_SYS_STATIC = "0"
@@ -42,4 +62,3 @@ AWS_LC_SYS_NO_PREGENERATED_SRC = "0"
 # schema. Add a CI job that runs `cargo sqlx prepare --check --workspace`
 # against a fresh DB built from all migrations.
 SQLX_OFFLINE = "true"
-
