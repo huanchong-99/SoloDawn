@@ -147,10 +147,40 @@ impl ConciergeBroadcaster {
         }
     }
 
-    /// Cleanup: remove all channels for a session.
+    /// Cleanup: remove channels for a session.
+    ///
+    /// [CONCURRENCY-016] We previously removed `web_channels` unconditionally,
+    /// which drops the broadcast `Sender`. In a multi-receiver scenario (e.g.
+    /// Feishu + Web, or multiple Web clients on the same session), when *one*
+    /// client disconnects and triggers `remove_session`, the `Sender` would be
+    /// dropped — yet the *other* still-alive `Receiver`s would not observe
+    /// `RecvError::Closed` immediately (they only do so once all `Sender`s are
+    /// gone and the buffered messages are drained). Those receivers would then
+    /// block on `recv()` indefinitely with no new events ever arriving,
+    /// effectively wedging the remaining clients.
+    ///
+    /// Fix: only drop the `web_channels` sender when its `receiver_count()`
+    /// is already 0 (i.e. no live subscribers remain). Otherwise we leave the
+    /// sender in place — broadcast channels with no senders are cleaned up
+    /// naturally once the last receiver is dropped, and `subscribe()` will
+    /// lazily recreate the channel if needed. Feishu targets are always
+    /// removed because they are owned 1:1 by the disconnecting client.
     pub fn remove_session(&self, session_id: &str) {
-        self.web_channels.remove(session_id);
+        // Feishu target is owned per-client; safe to remove unconditionally.
         self.feishu_channels.remove(session_id);
+
+        // Only remove the web sender if there are no live receivers. If
+        // receivers exist, other clients are still subscribed; removing the
+        // sender would starve them of further events without ever closing
+        // their streams (CONCURRENCY-016).
+        let should_remove_web = self
+            .web_channels
+            .get(session_id)
+            .map(|sender| sender.receiver_count() == 0)
+            .unwrap_or(true);
+        if should_remove_web {
+            self.web_channels.remove(session_id);
+        }
     }
 }
 

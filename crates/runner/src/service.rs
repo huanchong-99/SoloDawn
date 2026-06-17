@@ -115,9 +115,25 @@ impl RunnerService for RunnerGrpcService {
     ) -> Result<Response<ResizeResponse>, Status> {
         let req = request.into_inner();
 
+        // EDGE-007: Reuse the spawn-path bounds check. `req.cols` / `req.rows`
+        // are u32 on the wire and cast to u16 would silently wrap when the
+        // value exceeds u16::MAX, potentially yielding 0 and crashing the
+        // PTY. Reject out-of-range values and fall back to sensible defaults
+        // (matching spawn_terminal).
+        let cols = if req.cols > 0 && req.cols <= u16::MAX as u32 {
+            req.cols as u16
+        } else {
+            80
+        };
+        let rows = if req.rows > 0 && req.rows <= u16::MAX as u32 {
+            req.rows as u16
+        } else {
+            24
+        };
+
         match self
             .process_manager
-            .resize(&req.terminal_id, req.cols as u16, req.rows as u16)
+            .resize(&req.terminal_id, cols, rows)
             .await
         {
             Ok(()) => Ok(Response::new(ResizeResponse { success: true })),

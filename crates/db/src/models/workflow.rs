@@ -710,6 +710,30 @@ impl Workflow {
         Ok(())
     }
 
+    /// Atomically transition workflow from 'paused' to 'created' (CAS).
+    ///
+    /// CORE-019: Used by the resume-flow re-prepare path. Returning `Ok(false)`
+    /// (rather than an error) signals that the workflow was no longer in the
+    /// 'paused' state when the UPDATE executed — e.g. a concurrent stop/cancel
+    /// raced ahead. The caller MUST treat `false` as a conflict and abort the
+    /// re-prepare instead of proceeding with a non-CAS write.
+    pub async fn set_created_from_paused(pool: &SqlitePool, id: &str) -> sqlx::Result<bool> {
+        let now = Utc::now();
+        let result = sqlx::query(
+            r"
+            UPDATE workflow
+            SET status = 'created', updated_at = ?
+            WHERE id = ? AND status = 'paused'
+            ",
+        )
+        .bind(now)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Set workflow to ready (only from 'starting' state).
     ///
     /// Uses CAS to ensure workflow is in 'starting' state before transitioning
@@ -769,13 +793,19 @@ impl Workflow {
     /// `false` if the workflow was not in 'completed' state (another merge
     /// is already in progress or the workflow is in an incompatible state).
     pub async fn set_merging(pool: &SqlitePool, id: &str) -> anyhow::Result<bool> {
+        // EDGE-004: use a Rust-side timestamp (nanosecond precision) bound as
+        // a parameter instead of SQL datetime('now') (second precision), so
+        // ordering within the same second is consistent with the INSERT path
+        // and other UPDATEs that already use Utc::now().
+        let now = Utc::now();
         let result = sqlx::query(
             r"
             UPDATE workflow
-            SET status = 'merging', updated_at = datetime('now')
+            SET status = 'merging', updated_at = ?
             WHERE id = ? AND status = 'completed'
             ",
         )
+        .bind(now)
         .bind(id)
         .execute(pool)
         .await?;
@@ -787,13 +817,17 @@ impl Workflow {
     ///
     /// Used after a successful merge or to roll back on merge failure.
     pub async fn set_merge_completed(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
+        // EDGE-004: use a Rust-side timestamp for consistency with the INSERT
+        // path (see set_merging).
+        let now = Utc::now();
         sqlx::query(
             r"
             UPDATE workflow
-            SET status = 'completed', updated_at = datetime('now')
+            SET status = 'completed', updated_at = ?
             WHERE id = ? AND status = 'merging'
             ",
         )
+        .bind(now)
         .bind(id)
         .execute(pool)
         .await?;

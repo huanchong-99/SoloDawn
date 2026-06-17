@@ -103,31 +103,41 @@ impl SubscriptionHub {
         workflow_id: &str,
         event: WsEvent,
     ) -> Result<usize, broadcast::error::SendError<WsEvent>> {
-        // E30-11: hold the `senders` read lock across the sender lookup,
-        // receiver_count check, and (if caching is required) the pending-event
-        // insert. This prevents a subscribe() from racing between the
-        // receiver_count() == 0 check and cache_pending_event: if we dropped
-        // the lock in between, subscribe() could register and drain
-        // pending_events, then the publisher would cache an event that no
-        // subsequent subscriber will replay. Subscribe() acquires the senders
-        // *write* lock, so taking a read lock here serializes them correctly.
-        let senders = self.senders.read().await;
-        let sender_opt = senders.get(workflow_id).cloned();
+        // CONCURRENCY-002: Previously the `senders` read lock was held across
+        // an await on the `pending_events` write lock (via
+        // cache_pending_event_locked), forming a lock-ordering cycle with
+        // subscribe() which acquires the senders write lock and then the
+        // pending_events write lock. This is a classic deadlock risk under
+        // concurrent load.
+        //
+        // Fix: perform the receiver-count check under the senders read lock,
+        // but never hold that read lock across the pending_events write lock
+        // await. When there are active receivers we send immediately (no
+        // second lock involved). When there are no receivers we drop the
+        // senders read lock *before* acquiring the pending_events write lock.
+        let sender_opt = {
+            let senders = self.senders.read().await;
+            senders.get(workflow_id).cloned()
+        };
+
         match sender_opt {
             Some(sender) if sender.receiver_count() > 0 => {
-                // Drop the senders lock before delivering — broadcast::send is
-                // non-blocking but we still avoid holding the shared lock
-                // while invoking send().
-                drop(senders);
+                // Active subscribers: deliver directly. broadcast::send is
+                // non-blocking, and we no longer hold any lock here.
                 sender.send(event)
             }
             _ => {
-                // No sender or no receivers: cache the event while still
-                // holding the senders read lock so no subscribe() can slip
-                // in between our check and the insert.
-                self.cache_pending_event_locked(workflow_id, event.clone())
-                    .await;
-                drop(senders);
+                // No sender or no receivers: cache the event for later
+                // replay. We acquire the pending_events write lock on its own
+                // (the senders read lock has already been released above), so
+                // there is no lock held across this await and no lock-ordering
+                // cycle with subscribe().
+                //
+                // Note: subscribe() also acquires the pending_events write
+                // lock while replaying, but neither path now holds the senders
+                // lock across the pending_events await, eliminating the
+                // circular wait.
+                self.cache_pending_event(workflow_id, event.clone()).await;
                 Err(broadcast::error::SendError(event))
             }
         }
@@ -218,10 +228,12 @@ impl SubscriptionHub {
         self.senders.read().await.len()
     }
 
-    /// Insert an event into pending_events. The caller must already hold a
-    /// read or write guard on `self.senders` for the duration of this call to
-    /// prevent a subscribe() from racing (see E30-11 in `publish`).
-    async fn cache_pending_event_locked(&self, workflow_id: &str, event: WsEvent) {
+    /// Insert an event into pending_events.
+    ///
+    /// CONCURRENCY-002: This acquires only the `pending_events` write lock and
+    /// must NOT be called while holding the `senders` lock, to avoid a
+    /// lock-ordering cycle with `subscribe()`.
+    async fn cache_pending_event(&self, workflow_id: &str, event: WsEvent) {
         let mut pending_events = self.pending_events.write().await;
         let queue = pending_events.entry(workflow_id.to_string()).or_default();
         let now = Instant::now();

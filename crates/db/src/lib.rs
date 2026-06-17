@@ -237,7 +237,19 @@ impl DBService {
         let database_url = format!("sqlite://{}", database_path.to_string_lossy());
         let options = SqliteConnectOptions::from_str(&database_url)?
             .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Delete);
+            // CORE-010: Enable foreign keys so ON DELETE CASCADE on repos/merges,
+            // workflow cascades, etc. actually fire. SQLite defaults
+            // PRAGMA foreign_keys = OFF per-connection, which would otherwise
+            // leave orphan rows after parent deletes.
+            .foreign_keys(true)
+            // CORE-011: Use WAL so that PRAGMA wal_checkpoint(TRUNCATE) in
+            // TerminalLog::checkpoint_after_cleanup can actually reclaim disk
+            // space. Under Delete journal mode that checkpoint is a no-op.
+            // WAL also improves concurrent reader/writer throughput.
+            .journal_mode(SqliteJournalMode::Wal)
+            // CORE-011: Avoid SQLITE_BUSY under concurrent writers; SQLite
+            // will retry for up to 5s before returning a busy error.
+            .busy_timeout(Duration::from_secs(5));
         let pool = SqlitePool::connect_with(options).await?;
         run_migrations(&pool).await?;
         Ok(DBService { pool })
@@ -271,7 +283,14 @@ impl DBService {
         let database_url = format!("sqlite://{}", database_path.to_string_lossy());
         let options = SqliteConnectOptions::from_str(&database_url)?
             .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Delete);
+            // CORE-010 / CORE-011: keep these options consistent with DBService::new.
+            // foreign_keys must be enabled per-connection or ON DELETE CASCADE
+            // will silently leave orphan rows. WAL is required for
+            // wal_checkpoint(TRUNCATE) to reclaim disk space, and busy_timeout
+            // mitigates SQLITE_BUSY under concurrent writers.
+            .foreign_keys(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .busy_timeout(Duration::from_secs(5));
 
         // Configure connection pool for optimal performance
         // - max_connections: 10 (SQLite performs best with limited connections)

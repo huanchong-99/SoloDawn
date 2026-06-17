@@ -101,7 +101,7 @@ pub struct CreateRuntimeTerminalRequest {
     pub role: Option<String>,
     pub role_description: Option<String>,
     pub order_index: Option<i32>,
-    #[serde(default = "default_runtime_terminal_auto_confirm")]
+    #[serde(default)]
     pub auto_confirm: bool,
     #[serde(default)]
     pub start_immediately: bool,
@@ -215,10 +215,6 @@ fn can_merge_from_workflow_status(status: &str) -> bool {
     MERGE_ALLOWED_WORKFLOW_STATUSES.contains(&status)
 }
 
-fn default_runtime_terminal_auto_confirm() -> bool {
-    true
-}
-
 fn is_valid_workflow_status_transition(current: &str, next: &str) -> bool {
     if current == next {
         return is_known_workflow_status(current);
@@ -239,7 +235,14 @@ fn is_valid_workflow_status_transition(current: &str, next: &str) -> bool {
             | ("ready" | "paused", "running")
             | ("running", "paused" | "completed")
             | ("completed", "merging" | "created")
-            | ("merging", "completed")
+            // CORE-002: Allow recovery from a stuck "merging" state.
+            // merge_workflow keeps the workflow in "merging" when MergeConflicts
+            // or BranchesDiverged occur. Without these exits the workflow would
+            // be permanently stuck because no other endpoint can move it out of
+            // "merging". These paths let users terminate (failed/cancelled) or
+            // finalize (completed) via the status endpoint after resolving a
+            // conflict manually.
+            | ("merging", "completed" | "failed" | "cancelled")
             | ("failed" | "cancelled", "created")
     )
 }
@@ -611,10 +614,56 @@ async fn cascade_finished_workflow_children(
     Ok(())
 }
 
-fn should_auto_complete_workflow(workflow_status: &str, tasks: &[WorkflowTask]) -> bool {
-    workflow_status == "running"
-        && !tasks.is_empty()
-        && tasks.iter().all(|task| task.status == "completed")
+// CORE-005: Previously this only triggered when every task was "completed".
+// A workflow with any failed/cancelled task would stay in "running" forever
+// because no terminal decision was reached. We now consider the set of
+// terminal task statuses and finalize the workflow either way:
+//   - all completed                -> workflow "completed"
+//   - any failed/cancelled, but
+//     every task has reached a
+//     terminal state              -> workflow "failed" (logged as a warning)
+// The workflow must still be in "running" and must own at least one task.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum AutoCompleteDecision {
+    /// Every task reached the "completed" terminal state.
+    Completed,
+    /// All tasks reached a terminal state, but at least one failed/cancelled.
+    Failed,
+}
+
+fn should_auto_complete_workflow(
+    workflow_status: &str,
+    tasks: &[WorkflowTask],
+) -> Option<AutoCompleteDecision> {
+    const TERMINAL_STATUSES: &[&str] = &["completed", "failed", "cancelled"];
+
+    if workflow_status != "running" || tasks.is_empty() {
+        return None;
+    }
+
+    // Every task must have reached a terminal state.
+    if !tasks
+        .iter()
+        .all(|task| TERMINAL_STATUSES.contains(&task.status.as_str()))
+    {
+        return None;
+    }
+
+    if tasks.iter().all(|task| task.status == "completed") {
+        Some(AutoCompleteDecision::Completed)
+    } else {
+        // At least one task ended in failed/cancelled: surface the workflow as
+        // failed rather than leaving it stuck in "running".
+        tracing::warn!(
+            workflow_status = %workflow_status,
+            tasks = ?tasks
+                .iter()
+                .map(|t| (t.id.as_str(), t.status.as_str()))
+                .collect::<Vec<_>>(),
+            "DIY/auto-complete: at least one task reached failed/cancelled; finalizing workflow as failed"
+        );
+        Some(AutoCompleteDecision::Failed)
+    }
 }
 
 // ============================================================================
@@ -872,8 +921,12 @@ async fn list_workflows(
             execution_mode: w.execution_mode,
             created_at: w.created_at.to_rfc3339(),
             updated_at: w.updated_at.to_rfc3339(),
-            tasks_count: w.tasks_count as i32,
-            terminals_count: w.terminals_count as i32,
+            // EDGE-002: counts come back from SQLite as i64 (COUNT(*)) but the
+            // DTO field is i32. A bare `as i32` truncates/wraps for very large
+            // counts. Saturate at i32::MAX instead so the value stays correct
+            // (a workflow with > 2^31 tasks is already degenerate).
+            tasks_count: w.tasks_count.min(i32::MAX as i64) as i32,
+            terminals_count: w.terminals_count.min(i32::MAX as i64) as i32,
         })
         .collect();
 
@@ -1371,6 +1424,16 @@ async fn update_workflow_status(
         ("ready", "running", "Use POST /start instead"),
         (WORKFLOW_STATUS_PAUSED, "running", "Use POST /start instead"),
         ("completed", "merging", "Use POST /merge instead"),
+        // CORE-018: pausing must go through POST /pause, which also stops the
+        // live runtime. Setting "paused" via PUT /status would update the DB
+        // while leaving the underlying process/agent running, causing the
+        // recorded state to drift from reality.
+        ("running", WORKFLOW_STATUS_PAUSED, "Use POST /pause instead"),
+        // Completing a running workflow must go through the orchestration path
+        // (POST /complete or the merge flow). Directly flipping running ->
+        // completed via /status would bypass task verification, terminal
+        // teardown, and merge handling.
+        ("running", "completed", "Use POST /complete or POST /merge instead"),
     ];
     for &(from, to, hint) in protected_transitions {
         if workflow.status == from && target_status == to {
@@ -2104,8 +2167,25 @@ async fn start_workflow(
         let diy_process_manager = deployment.process_manager().clone();
         let diy_message_bus = deployment.message_bus().clone();
         tokio::spawn(async move {
-            const QUIET_SECS: u64 = 60;
+            // CORE-009: The async logger can lag the in-memory output fanout
+            // by tens of seconds when SQLite write locks contend, so judging
+            // silence purely from TerminalLog.created_at can prematurely
+            // conclude that an actively-producing terminal is quiet. We use
+            // two complementary signals instead:
+            //   1. A bumped QUIET_SECS (90s, up from 60s) for a 30s logger
+            //      write buffer.
+            //   2. An in-memory latest_output_seq tracker: if the live fanout
+            //      sequence for a terminal advanced since our last poll, we
+            //      treat the terminal as still active regardless of the DB
+            //      timestamp, because output is being produced faster than it
+            //      is flushed. This is an approximation; it can still mark a
+            //      slow producer quiet after QUIET_SECS, which is acceptable
+            //      for DIY automation.
+            const QUIET_SECS: u64 = 90;
             const POLL_SECS: u64 = 15;
+            // terminal_id -> last observed output sequence from the fanout.
+            let mut last_output_seqs: std::collections::HashMap<String, u64> =
+                std::collections::HashMap::new();
             // Wait for initial instructions to be processed
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
@@ -2154,6 +2234,25 @@ async fn start_workflow(
                         if latest_seq.is_none() {
                             continue;
                         }
+                        // CORE-009: If the in-memory fanout sequence advanced
+                        // since our last poll, the terminal is actively
+                        // producing output even if the DB row's created_at is
+                        // stale (logger writes are async and SQLite write
+                        // contention can delay them). Treat it as not-quiet.
+                        let produced_recently = match latest_seq {
+                            Some(seq) => match last_output_seqs.get(&terminal.id) {
+                                Some(&prev) => seq > prev,
+                                None => false,
+                            },
+                            None => false,
+                        };
+                        if produced_recently {
+                            // Refresh the tracked sequence and skip quiet check.
+                            if let Some(seq) = latest_seq {
+                                last_output_seqs.insert(terminal.id.clone(), seq);
+                            }
+                            continue;
+                        }
                         // Use log timestamp from DB
                         let latest_logs = db::models::TerminalLog::find_by_terminal(
                             &diy_db,
@@ -2169,6 +2268,12 @@ async fn start_workflow(
                             }
                             _ => false,
                         };
+
+                        // Refresh tracked sequence regardless so the next poll
+                        // compares against the freshest observation.
+                        if let Some(seq) = latest_seq {
+                            last_output_seqs.insert(terminal.id.clone(), seq);
+                        }
 
                         if is_quiet {
                             tracing::info!(
@@ -2424,7 +2529,29 @@ async fn resume_workflow(
                 "Workflow terminals are not launch-ready; re-preparing before resume"
             );
 
-            Workflow::update_status(&deployment.db().pool, &workflow_id, "created").await?;
+            // CORE-019: Use a CAS update (paused -> created) so a concurrent
+            // stop/cancel that changed the status away from 'paused' is
+            // detected here instead of being silently overwritten. If 0 rows
+            // were affected, the workflow is no longer 'paused' — return a
+            // Conflict error and do NOT call prepare_workflow, which would
+            // otherwise act on stale state.
+            let cas_succeeded = Workflow::set_created_from_paused(
+                &deployment.db().pool,
+                &workflow_id,
+            )
+            .await
+            .map_err(|e| {
+                ApiError::Internal(format!(
+                    "Resume-phase CAS status update failed for workflow {workflow_id}: {e}"
+                ))
+            })?;
+
+            if !cas_succeeded {
+                return Err(ApiError::Conflict(format!(
+                    "Workflow {workflow_id} is no longer 'paused' (likely modified by a concurrent \
+                     stop/cancel); aborting resume re-prepare"
+                )));
+            }
 
             let _ = prepare_workflow(
                 State(deployment.clone()),
@@ -2842,9 +2969,11 @@ async fn create_runtime_terminal(
             }
             order_index
         }
+        // EDGE-001: saturating_add avoids integer overflow when an existing
+        // terminal already sits at i32::MAX.
         None => existing_terminals
             .last()
-            .map_or(0, |terminal| terminal.order_index + 1),
+            .map_or(0, |terminal| terminal.order_index.saturating_add(1)),
     };
 
     let now = chrono::Utc::now();
@@ -3091,36 +3220,76 @@ async fn update_task_status(
     // Update task status
     WorkflowTask::update_status(&deployment.db().pool, &task_id, &req.status).await?;
 
-    // Auto-sync workflow status: when all tasks are completed, mark running workflow as completed.
-    // Uses CAS (running → completed) to prevent overwriting concurrent state changes.
+    // Auto-sync workflow status: when all tasks have reached a terminal state,
+    // finalize the workflow accordingly (completed if all succeeded, otherwise
+    // failed). Uses CAS (running -> completed) to prevent overwriting concurrent
+    // state changes. See CORE-005.
     let tasks = WorkflowTask::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
-    if should_auto_complete_workflow(&workflow.status, &tasks) {
-        match Workflow::set_completed_from_running(&deployment.db().pool, &workflow_id).await {
-            Ok(true) => {
-                tracing::info!(
-                    workflow_id = %workflow_id,
-                    "Workflow auto-synced to completed after all tasks completed"
-                );
-                cleanup_finished_workflow_logs_best_effort(
-                    &deployment,
-                    "task status auto-complete",
-                )
-                .await;
-            }
-            Ok(false) => {
-                tracing::warn!(
-                    workflow_id = %workflow_id,
-                    "Workflow auto-sync to completed skipped: status changed concurrently"
-                );
-            }
-            Err(e) => {
-                tracing::error!(
-                    workflow_id = %workflow_id,
-                    error = %e,
-                    "Failed to auto-sync workflow to completed"
-                );
+    match should_auto_complete_workflow(&workflow.status, &tasks) {
+        Some(AutoCompleteDecision::Completed) => {
+            match Workflow::set_completed_from_running(&deployment.db().pool, &workflow_id).await {
+                Ok(true) => {
+                    tracing::info!(
+                        workflow_id = %workflow_id,
+                        "Workflow auto-synced to completed after all tasks completed"
+                    );
+                    cleanup_finished_workflow_logs_best_effort(
+                        &deployment,
+                        "task status auto-complete",
+                    )
+                    .await;
+                }
+                Ok(false) => {
+                    tracing::warn!(
+                        workflow_id = %workflow_id,
+                        "Workflow auto-sync to completed skipped: status changed concurrently"
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        workflow_id = %workflow_id,
+                        error = %e,
+                        "Failed to auto-sync workflow to completed"
+                    );
+                }
             }
         }
+        Some(AutoCompleteDecision::Failed) => {
+            // A task reached failed/cancelled while every task is terminal:
+            // finalize the workflow as failed so it doesn't linger in running.
+            // `update_status` performs a CAS-style guard that refuses to
+            // overwrite an already-terminal workflow.
+            match Workflow::update_status(&deployment.db().pool, &workflow_id, "failed").await {
+                Ok(()) => {
+                    tracing::warn!(
+                        workflow_id = %workflow_id,
+                        "Workflow auto-synced to failed after a task reached failed/cancelled"
+                    );
+                    if let Err(e) = cascade_finished_workflow_children(
+                        &deployment,
+                        &workflow_id,
+                        "task status auto-complete (failed)",
+                    )
+                    .await
+                    {
+                        tracing::warn!(workflow_id = %workflow_id, error = %e, "Failed to cascade workflow children after auto-fail");
+                    }
+                    cleanup_finished_workflow_logs_best_effort(
+                        &deployment,
+                        "task status auto-complete (failed)",
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        workflow_id = %workflow_id,
+                        error = %e,
+                        "Failed to auto-sync workflow to failed"
+                    );
+                }
+            }
+        }
+        None => {}
     }
 
     // Fetch updated task
@@ -4300,8 +4469,14 @@ mod workflow_guard_tests {
             build_task_with_status("wf-1", "completed"),
             build_task_with_status("wf-1", "completed"),
         ];
-        assert!(should_auto_complete_workflow("running", &completed_tasks));
-        assert!(!should_auto_complete_workflow("paused", &completed_tasks));
+        assert_eq!(
+            should_auto_complete_workflow("running", &completed_tasks),
+            Some(AutoCompleteDecision::Completed)
+        );
+        assert_eq!(
+            should_auto_complete_workflow("paused", &completed_tasks),
+            None
+        );
     }
 
     #[test]
@@ -4310,8 +4485,42 @@ mod workflow_guard_tests {
             build_task_with_status("wf-1", "completed"),
             build_task_with_status("wf-1", "pending"),
         ];
-        assert!(!should_auto_complete_workflow("running", &mixed_tasks));
-        assert!(!should_auto_complete_workflow("running", &[]));
+        assert_eq!(
+            should_auto_complete_workflow("running", &mixed_tasks),
+            None
+        );
+        assert_eq!(should_auto_complete_workflow("running", &[]), None);
+    }
+
+    #[test]
+    fn auto_complete_guard_marks_failed_when_any_task_failed_or_cancelled() {
+        // CORE-005: a single failed/cancelled task among otherwise-terminal
+        // tasks should finalize the workflow as "failed" instead of stalling
+        // in "running".
+        let failed_mix = vec![
+            build_task_with_status("wf-1", "completed"),
+            build_task_with_status("wf-1", "failed"),
+        ];
+        assert_eq!(
+            should_auto_complete_workflow("running", &failed_mix),
+            Some(AutoCompleteDecision::Failed)
+        );
+
+        let cancelled_mix = vec![
+            build_task_with_status("wf-1", "cancelled"),
+            build_task_with_status("wf-1", "completed"),
+        ];
+        assert_eq!(
+            should_auto_complete_workflow("running", &cancelled_mix),
+            Some(AutoCompleteDecision::Failed)
+        );
+
+        // Non-terminal task present should still keep us from finalizing.
+        let still_running = vec![
+            build_task_with_status("wf-1", "failed"),
+            build_task_with_status("wf-1", "running"),
+        ];
+        assert_eq!(should_auto_complete_workflow("running", &still_running), None);
     }
 }
 

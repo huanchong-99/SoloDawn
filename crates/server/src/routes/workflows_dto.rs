@@ -30,14 +30,14 @@ pub struct WorkflowDetailDto {
     pub error_terminal_enabled: bool,
     pub error_terminal_cli_id: Option<String>,
     pub error_terminal_model_id: Option<String>,
-    /// Wrapped in Option for backward compatibility with older API clients that
-    /// may not send these fields. The underlying DB column is NOT NULL with a default.
-    // TODO(G01-005/G17-006): The DB column `merge_terminal_cli_id` is NOT NULL, so this
-    // should be `String` not `Option<String>`. Kept as Option for backward compat with
-    // older frontend clients that may omit the field. Migrate once all clients are updated.
-    pub merge_terminal_cli_id: Option<String>,
-    /// See `merge_terminal_cli_id` — same backward-compat rationale.
-    pub merge_terminal_model_id: Option<String>,
+    // EDGE-009: The DB column is NOT NULL, so the DTO exposes a non-Option
+    // String. The previous Option<String> was a backward-compat shim that no
+    // longer applies (all clients now read a non-null value). Keep
+    // `skip_serializing_if` absent: the JSON should always carry these keys
+    // (matches the NOT-NULL DB contract).
+    pub merge_terminal_cli_id: String,
+    /// See `merge_terminal_cli_id` — same NOT-NULL DB contract.
+    pub merge_terminal_model_id: String,
     pub target_branch: String,
     pub git_watcher_enabled: bool,
 
@@ -191,8 +191,8 @@ impl WorkflowDetailDto {
             error_terminal_enabled: workflow.error_terminal_enabled,
             error_terminal_cli_id: workflow.error_terminal_cli_id.clone(),
             error_terminal_model_id: workflow.error_terminal_model_id.clone(),
-            merge_terminal_cli_id: Some(workflow.merge_terminal_cli_id.clone()),
-            merge_terminal_model_id: Some(workflow.merge_terminal_model_id.clone()),
+            merge_terminal_cli_id: workflow.merge_terminal_cli_id.clone(),
+            merge_terminal_model_id: workflow.merge_terminal_model_id.clone(),
             target_branch: workflow.target_branch.clone(),
             git_watcher_enabled: workflow.git_watcher_enabled,
             ready_at: workflow.ready_at.map(|dt| dt.to_rfc3339()),
@@ -237,8 +237,8 @@ impl WorkflowDetailDto {
             error_terminal_enabled: workflow.error_terminal_enabled,
             error_terminal_cli_id: workflow.error_terminal_cli_id.clone(),
             error_terminal_model_id: workflow.error_terminal_model_id.clone(),
-            merge_terminal_cli_id: Some(workflow.merge_terminal_cli_id.clone()),
-            merge_terminal_model_id: Some(workflow.merge_terminal_model_id.clone()),
+            merge_terminal_cli_id: workflow.merge_terminal_cli_id.clone(),
+            merge_terminal_model_id: workflow.merge_terminal_model_id.clone(),
             target_branch: workflow.target_branch.clone(),
             git_watcher_enabled: workflow.git_watcher_enabled,
             ready_at: workflow.ready_at.map(|dt| dt.to_rfc3339()),
@@ -422,8 +422,8 @@ mod tests {
                 error_terminal_enabled: false,
                 error_terminal_cli_id: None,
                 error_terminal_model_id: None,
-                merge_terminal_cli_id: None,
-                merge_terminal_model_id: None,
+                merge_terminal_cli_id: "cli-merge".to_string(),
+                merge_terminal_model_id: "model-merge".to_string(),
                 target_branch: "main".to_string(),
                 git_watcher_enabled: true,
                 ready_at: None,

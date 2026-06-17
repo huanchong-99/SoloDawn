@@ -550,7 +550,7 @@ impl FeishuService {
                 "   "
             };
             let name = if session.name.is_empty() {
-                &session.id[..8]
+                &session.id[..8.min(session.id.len())]
             } else {
                 &session.name
             };

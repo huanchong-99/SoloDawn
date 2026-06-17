@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ApiError, oauthApi } from '@/lib/api';
+import { ApiError, oauthApi, UNAUTHORIZED_EVENT } from '@/lib/api';
 import { useEffect, useRef } from 'react';
 import { useAuth } from '@/hooks';
 
@@ -45,6 +45,21 @@ export function useAuthStatus(options: UseAuthStatusOptions) {
     if (!options.enabled) return;
     refetchRef.current();
   }, [isSignedIn, options.enabled]);
+
+  // React to centralized 401/403 notifications from the API layer: any
+  // endpoint returning unauthorized triggers an immediate auth-status refetch
+  // so the UI reflects the signed-out state without waiting for the next
+  // polling tick.
+  useEffect(() => {
+    if (!options.enabled) return;
+    const handleUnauthorized = () => {
+      refetchRef.current();
+    };
+    globalThis.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+    return () => {
+      globalThis.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+    };
+  }, [options.enabled]);
 
   return query;
 }

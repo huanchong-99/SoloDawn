@@ -324,6 +324,7 @@ impl GitWatcher {
 
                 let mut attempts = 0u32;
                 let mut succeeded = false;
+                let mut last_error: Option<anyhow::Error> = None;
                 while attempts < MAX_RETRIES_PER_COMMIT {
                     match self.handle_new_commit(commit.clone()).await {
                         Ok(()) => {
@@ -334,25 +335,46 @@ impl GitWatcher {
                         }
                         Err(e) => {
                             attempts += 1;
+                            // Stash the error so we can classify it after the
+                            // retry budget is exhausted (CORE-013).
+                            last_error = Some(e);
                             tracing::warn!(
                                 commit_hash = %commit.hash,
                                 attempt = attempts,
                                 max_retries = MAX_RETRIES_PER_COMMIT,
-                                error = %e,
+                                error = %last_error.as_ref().unwrap(),
                                 "Error handling commit, retrying"
                             );
                         }
                     }
                 }
                 if !succeeded {
-                    tracing::warn!(
+                    // CORE-013: `handle_new_commit` swallows message_bus
+                    // publish failures internally (it only logs a warn and
+                    // returns Ok), so an Err here is by construction NOT a
+                    // publish failure. The only way publish can fail without
+                    // a visible Err is via the internal warn path, which is
+                    // already retried on the next poll because the cursor is
+                    // not advanced.
+                    //
+                    // Advancing the cursor on a non-publish failure (e.g.
+                    // malformed commit, transient git/network error inside
+                    // the handler) is acceptable. But because we cannot rule
+                    // out an unanticipated publish-path that bubbles up as
+                    // Err, the conservative choice is to NOT advance the
+                    // cursor: dropping a TerminalCompleted event would
+                    // permanently stall the orchestrator. We stop processing
+                    // the remaining batch this poll and let the next poll
+                    // retry. The infinite-loop risk is handled by CORE-015
+                    // (cursor hash gc resets the cursor).
+                    tracing::error!(
                         commit_hash = %commit.hash,
-                        "Exhausted {} retries for commit; skipping and advancing cursor",
+                        error = ?last_error,
+                        "Exhausted {} retries for commit; NOT advancing cursor to avoid \
+                         losing TerminalCompleted event (will retry next poll)",
                         MAX_RETRIES_PER_COMMIT
                     );
-                    // Advance cursor so we don't re-process this commit forever
-                    let mut last_hash = self.last_commit_hash.lock().await;
-                    *last_hash = Some(commit.hash.clone());
+                    break;
                 }
             }
         }
@@ -381,23 +403,19 @@ impl GitWatcher {
 
         const MAX_NEW_COMMITS_PER_POLL: &str = "128";
 
-        // Keep polling bounded to the current worktree branch. Older test runs can
-        // leave many local branches behind; `git log --branches --not <last>` then
-        // walks unrelated history and has caused Windows git subprocess OOM.
+        // Keep polling bounded to HEAD to avoid scanning unrelated local
+        // branches (older test runs can leave many behind; `git log --branches`
+        // would walk unrelated history and has caused Windows git subprocess
+        // OOM). Using HEAD directly also eliminates a TOCTOU race between
+        // resolving the branch name and running `git log`: the branch could be
+        // switched in that window, causing `git log <last>..<branch>` to fail
+        // or return unexpected results.
         //
         // Revision range logic:
-        //   - With a known last commit: `<last>..<head_branch>` limits results to
-        //     commits that are on head_branch but not already seen.
-        //   - Without a known last commit: retrieve only the single latest commit
-        //     on the current HEAD to seed the cursor without replaying history.
-        //   - If head_branch cannot be determined, fall back to "HEAD" so git log
-        //     still works without scanning all local branches.
-        let head_branch = self.get_head_branch(repo_path).await;
-        let branch_ref = if head_branch == "unknown" {
-            "HEAD"
-        } else {
-            &head_branch
-        };
+        //   - With a known last commit: `<last>..HEAD` limits results to
+        //     commits reachable from HEAD but not already seen.
+        //   - Without a known last commit: retrieve only the single latest
+        //     commit on HEAD to seed the cursor without replaying history.
 
         let mut cmd = Command::new("git");
         cmd.current_dir(repo_path).args([
@@ -409,11 +427,11 @@ impl GitWatcher {
         ]);
 
         if let Some(last_hash) = last_seen {
-            cmd.arg(format!("{last_hash}..{branch_ref}"));
+            cmd.arg(format!("{last_hash}..HEAD"));
         } else {
-            // No cursor yet: just grab the most recent commit on the current branch
+            // No cursor yet: just grab the most recent commit on HEAD
             // to initialize the cursor without replaying entire history.
-            cmd.args(["-1", branch_ref]);
+            cmd.args(["-1", "HEAD"]);
         }
 
         let output = cmd.output().await.context(format!(
@@ -422,10 +440,32 @@ impl GitWatcher {
         ))?;
 
         if !output.status.success() {
-            anyhow::bail!(
-                "git log for new commits failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // CORE-015: If the cursor hash has been garbage-collected by git
+            // (`git gc`), `git log <last>..HEAD` fails with "bad revision" /
+            // "unknown revision". Returning Err here would cause watch() to
+            // log and `continue` without updating the cursor, which makes the
+            // next poll hit the same error again -> infinite error loop.
+            //
+            // Recover by clearing the cursor so the next poll re-seeds from
+            // HEAD, and return an empty vec so the watch loop proceeds
+            // normally this iteration.
+            let stderr_lower = stderr.to_ascii_lowercase();
+            if stderr_lower.contains("bad revision")
+                || stderr_lower.contains("unknown revision")
+                || stderr_lower.contains("ambiguous argument")
+            {
+                tracing::warn!(
+                    cursor_hash = ?last_seen,
+                    stderr = %stderr,
+                    "Git cursor hash is no longer valid (likely pruned by git gc); \
+                     resetting cursor to re-seed from HEAD on next poll"
+                );
+                let mut last_hash = self.last_commit_hash.lock().await;
+                *last_hash = None;
+                return Ok(Vec::new());
+            }
+            anyhow::bail!("git log for new commits failed: {}", stderr);
         }
 
         let hashes: Vec<String> = String::from_utf8_lossy(&output.stdout)

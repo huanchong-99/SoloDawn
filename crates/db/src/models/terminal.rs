@@ -290,12 +290,23 @@ impl Terminal {
 
     /// Update terminal status
     ///
-    /// When the new status is a terminal state (`failed` or `cancelled`),
-    /// `completed_at` is set automatically to prevent dangling incomplete
-    /// records.
+    /// When the new status is a terminal state (`completed`, `failed`,
+    /// `cancelled`, `review_passed`, or `review_rejected`), `completed_at` is
+    /// set automatically to prevent dangling incomplete records. Transient
+    /// states (`not_started`, `starting`, `waiting`, `working`,
+    /// `quality_pending`) leave `completed_at` untouched.
     pub async fn update_status(pool: &SqlitePool, id: &str, status: &str) -> sqlx::Result<()> {
         let now = Utc::now();
-        let is_terminal_state = status == "failed" || status == "cancelled";
+        // CORE-006: Previously only `failed` and `cancelled` were treated as
+        // terminal, so transitioning directly to `completed`,
+        // `review_passed`, or `review_rejected` via this entrypoint would not
+        // stamp `completed_at`. That broke set_completed_if_unfinished's
+        // "already finished" guard (which keys off status) and left
+        // half-finalized rows. Treat all review/completion states as terminal.
+        let is_terminal_state = matches!(
+            status,
+            "completed" | "failed" | "cancelled" | "review_passed" | "review_rejected"
+        );
         if is_terminal_state {
             sqlx::query(
                 r"
@@ -614,7 +625,12 @@ impl Terminal {
     /// Set terminal completion status only when terminal is not finalized yet.
     ///
     /// Returns `Ok(true)` when the transition succeeds, `Ok(false)` when the
-    /// terminal is already finalized (completed/failed/cancelled or completed_at set).
+    /// terminal is already finalized (`completed_at` set, or status is any
+    /// terminal state: `completed`, `failed`, `cancelled`, `review_passed`,
+    /// `review_rejected`). CORE-006: the status guard must mirror the
+    /// terminal-state set used by `update_status`, otherwise a row in
+    /// `review_passed`/`review_rejected` could be overwritten by a stale
+    /// fallback completion call.
     pub async fn set_completed_if_unfinished(
         pool: &SqlitePool,
         id: &str,
@@ -630,6 +646,8 @@ impl Terminal {
               AND status != 'completed'
               AND status != 'failed'
               AND status != 'cancelled'
+              AND status != 'review_passed'
+              AND status != 'review_rejected'
             ",
         )
         .bind(status)

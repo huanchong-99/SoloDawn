@@ -926,7 +926,13 @@ function SelectedWorkflowView({
 }>) {
   const { t } = useTranslation('workflow');
   const actions = getWorkflowActions(workflow.status as WorkflowStatusEnum);
-  const workflowTasks = workflow.tasks ?? [];
+  // Memoize the tasks array reference so downstream useMemo dependencies stay
+  // stable even when `workflow.tasks` is undefined (the `?? []` fallback would
+  // otherwise create a new array reference each render).
+  const workflowTasks = useMemo(
+    () => workflow.tasks ?? [],
+    [workflow.tasks]
+  );
   const hasCompletedAllTasks = workflowTasks.every(
     (task) => task.status === 'completed'
   );
@@ -938,6 +944,34 @@ function SelectedWorkflowView({
   const isWsDisconnected =
     wsConnectionStatus === 'disconnected' ||
     wsConnectionStatus === 'reconnecting';
+
+  // Memoize the mapped tasks so we don't re-sort/re-map the whole array on
+  // every render (e.g. when an unrelated parent state changes).
+  const pipelineTasks = useMemo(
+    () => mapWorkflowTasks(workflowTasks),
+    [workflowTasks]
+  );
+
+  // Stable object/function references for PipelineView props to avoid
+  // needless child re-renders.
+  const pipelineMergeTerminal = useMemo(
+    () => ({
+      cliTypeId: workflow.mergeTerminalCliId ?? '',
+      modelConfigId: workflow.mergeTerminalModelId ?? '',
+      status: mapMergeTerminalStatus(workflow.status),
+    }),
+    [workflow.mergeTerminalCliId, workflow.mergeTerminalModelId, workflow.status]
+  );
+
+  const handleMergeTerminalClick = useMemo(
+    () =>
+      canTriggerMerge
+        ? () => {
+            runAsyncSafely(onMerge(workflow.id));
+          }
+        : undefined,
+    [canTriggerMerge, runAsyncSafely, onMerge, workflow.id]
+  );
 
   return (
     <div className="h-full min-h-0 overflow-auto space-y-6">
@@ -1055,20 +1089,10 @@ function SelectedWorkflowView({
         status={mapWorkflowStatus(workflow.status)}
         executionMode={workflow.executionMode}
         initialGoal={workflow.initialGoal}
-        tasks={mapWorkflowTasks(workflowTasks)}
-        mergeTerminal={{
-          cliTypeId: workflow.mergeTerminalCliId ?? '',
-          modelConfigId: workflow.mergeTerminalModelId ?? '',
-          status: mapMergeTerminalStatus(workflow.status),
-        }}
+        tasks={pipelineTasks}
+        mergeTerminal={pipelineMergeTerminal}
         onTerminalClick={undefined}
-        onMergeTerminalClick={
-          canTriggerMerge
-            ? () => {
-                runAsyncSafely(onMerge(workflow.id));
-              }
-            : undefined
-        }
+        onMergeTerminalClick={handleMergeTerminalClick}
       />
       {promptDialog}
     </div>
@@ -1391,6 +1415,22 @@ export function Workflows() {
     queryClient.invalidateQueries({ queryKey: workflowKeys.all });
   }, [queryClient]);
 
+  // Reconnect recovery: after the WebSocket reconnects, refetch authoritative
+  // state because events may have been missed while the connection was down.
+  const handleSystemReconnected = useCallback(() => {
+    if (!selectedWorkflowId) {
+      return;
+    }
+    queryClient.invalidateQueries({
+      queryKey: workflowKeys.byId(selectedWorkflowId),
+    });
+    if (validProjectId) {
+      queryClient.invalidateQueries({
+        queryKey: workflowKeys.forProject(validProjectId),
+      });
+    }
+  }, [queryClient, selectedWorkflowId, validProjectId]);
+
   const workflowEventHandlers = useMemo(
     () => ({
       onTerminalPromptDetected: handleTerminalPromptDetected,
@@ -1404,6 +1444,8 @@ export function Workflows() {
       onQualityGateResult: handleQualityGateResult,
       // G08-006: Invalidate all caches when messages were dropped
       onSystemLagged: handleSystemLagged,
+      // Reconnect recovery: refetch authoritative state after reconnect
+      onSystemReconnected: handleSystemReconnected,
     }),
     [
       handleTerminalPromptDetected,
@@ -1411,6 +1453,7 @@ export function Workflows() {
       handleRealtimeWorkflowSignal,
       handleQualityGateResult,
       handleSystemLagged,
+      handleSystemReconnected,
     ]
   );
 

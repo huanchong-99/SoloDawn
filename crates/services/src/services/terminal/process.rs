@@ -1585,11 +1585,21 @@ impl Drop for TerminalLogger {
     // of log lines may be lost before reaching the DB. Structured shutdowns
     // should explicitly call `stop_flush_task().await` + `flush().await`
     // (see `stop_logger_task_gracefully`) to guarantee no loss.
+    //
+    // [CONCURRENCY-015] The previous implementation checked
+    // `Arc::strong_count(&self.flush_shutdown_tx) != 1` and bailed out early
+    // *before* taking the `Mutex`. This is a classic TOCTOU: when several
+    // clones are dropped concurrently, each one observes a `strong_count > 1`
+    // at the check site, so *none* of them proceeds to send the shutdown
+    // signal — the flush task keeps running forever (handle leak).
+    //
+    // Fix: skip the `strong_count` heuristic entirely and rely on the
+    // `Mutex<Option<Sender>>` itself to serialize the racing drops. The first
+    // drop to acquire the lock calls `take()` on the `Option`, retrieves the
+    // `Some(tx)`, sends the shutdown signal, and leaves `None` behind. Every
+    // subsequent drop sees `None` and does nothing. Exactly one shutdown
+    // signal is therefore guaranteed, regardless of clone/drop ordering.
     fn drop(&mut self) {
-        if Arc::strong_count(&self.flush_shutdown_tx) != 1 {
-            return;
-        }
-
         match self.flush_shutdown_tx.lock() {
             Ok(mut shutdown_tx) => {
                 if let Some(tx) = shutdown_tx.take() {

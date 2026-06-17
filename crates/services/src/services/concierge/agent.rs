@@ -3,6 +3,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result};
+use dashmap::DashMap;
 use db::models::concierge::{ConciergeMessage, ConciergeSession};
 use sqlx::SqlitePool;
 use tokio::sync::Mutex;
@@ -37,6 +38,18 @@ pub struct ConciergeAgent {
     /// Cancellation tokens for active notification watchers, keyed by
     /// `"{session_id}:{workflow_id}"`. Cancelled when the session is cleaned up.
     watcher_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    /// [CORE-014] Per-session serialization locks. Each entry is an
+    /// `Arc<Mutex<()>>` shared between concurrent callers of `process_message`
+    /// for the *same* `session_id`. HTTP and WS handlers can invoke
+    /// `process_message` concurrently for one session, which — without
+    /// serialization — would interleave conversation-history writes and duplicate
+    /// tool side effects. We take the per-session lock at the very top of
+    /// `process_message` so only one call per session runs at a time, while
+    /// different sessions still proceed in parallel.
+    ///
+    /// `DashMap` is used (rather than `Mutex<HashMap>`) so that lock acquisition
+    /// for one session does not block entry-lookup for another.
+    session_locks: Arc<DashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl ConciergeAgent {
@@ -47,6 +60,7 @@ impl ConciergeAgent {
             shared_config: None,
             message_bus: None,
             watcher_tokens: Arc::new(Mutex::new(HashMap::new())),
+            session_locks: Arc::new(DashMap::new()),
         }
     }
 
@@ -90,6 +104,26 @@ impl ConciergeAgent {
         source_provider: Option<&str>,
         source_user: Option<&str>,
     ) -> Result<String> {
+        // [CORE-014] Serialize per-session processing. HTTP and WS handlers may
+        // call `process_message` concurrently for the same `session_id`; without
+        // this lock their conversation-history writes would interleave and tool
+        // side effects would be duplicated. The lock is per-session, so different
+        // sessions are still processed in parallel.
+        //
+        // We hold `_session_lock_guard` for the entire body of this function;
+        // the guard is dropped at function return, serializing per-session calls.
+        //
+        // Race note: `entry().or_insert_with` is atomic on `DashMap`; two
+        // callers racing for a new session_id both observe the same `Arc`.
+        let session_lock = self
+            .session_locks
+            .entry(session_id.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+        // `.clone()` bumps the `Arc` refcount; dropping the DashMap entry
+        // later still leaves our local `Arc` valid until the guard releases.
+        let _session_lock_guard = session_lock.lock().await;
+
         // 1. Load session
         let session = ConciergeSession::find_by_id(&self.pool, session_id)
             .await?
@@ -142,10 +176,26 @@ impl ConciergeAgent {
                 );
 
                 // Save tool_call message
+                let tool_call_json = match serde_json::to_string(&tool_call) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!(
+                            session_id = %session_id,
+                            tool = %tool_call.tool,
+                            "Failed to serialize tool_call: {e}; using a fallback \
+                             JSON payload"
+                        );
+                        serde_json::to_string(&serde_json::json!({
+                            "tool": tool_call.tool,
+                            "error": "serialization_failed"
+                        }))
+                        .unwrap_or_else(|_| "{}".to_string())
+                    }
+                };
                 let tc_msg = ConciergeMessage::new_tool_call(
                     session_id,
                     &tool_call.tool,
-                    &serde_json::to_string(&tool_call).unwrap_or_default(),
+                    &tool_call_json,
                 );
                 let tool_call_id = tc_msg.tool_call_id.clone().unwrap_or_default();
                 ConciergeMessage::insert(&self.pool, &tc_msg).await?;

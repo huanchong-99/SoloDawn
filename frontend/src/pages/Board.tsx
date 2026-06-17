@@ -153,6 +153,19 @@ export function Board() {
     queryClient.invalidateQueries({ queryKey: workflowKeys.all });
   }, [queryClient]);
 
+  // Reconnect recovery: after the WebSocket reconnects, refetch authoritative
+  // state because events may have been missed while the connection was down.
+  const handleSystemReconnected = useCallback(() => {
+    if (!selectedWorkflowId) return;
+    if (!validProjectId) return;
+    queryClient.invalidateQueries({
+      queryKey: workflowKeys.byId(selectedWorkflowId),
+    });
+    queryClient.invalidateQueries({
+      queryKey: workflowKeys.forProject(validProjectId),
+    });
+  }, [queryClient, selectedWorkflowId, validProjectId]);
+
   const workflowEventHandlers = useMemo(
     () => ({
       onWorkflowStatusChanged: handleRealtimeWorkflowSignal,
@@ -165,8 +178,16 @@ export function Board() {
       onQualityGateResult: handleQualityGateResult,
       // G08-006: Invalidate all caches when messages were dropped
       onSystemLagged: handleSystemLagged,
+      // Reconnect recovery: refetch authoritative state after reconnect
+      onSystemReconnected: handleSystemReconnected,
     }),
-    [handleRealtimeWorkflowSignal, handlePromptEvent, handleQualityGateResult, handleSystemLagged]
+    [
+      handleRealtimeWorkflowSignal,
+      handlePromptEvent,
+      handleQualityGateResult,
+      handleSystemLagged,
+      handleSystemReconnected,
+    ]
   );
 
   useWorkflowEvents(selectedWorkflowId, workflowEventHandlers);

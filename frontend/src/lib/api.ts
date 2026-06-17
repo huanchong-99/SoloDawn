@@ -139,6 +139,28 @@ export const logApiError = (...args: unknown[]) => {
   console.error(...args);
 };
 
+/**
+ * Unified unauthorized-response notification.
+ *
+ * The app uses cookie-based sessions, so 401/403 typically mean the session
+ * has expired. Rather than handling this ad-hoc in every mutation, we emit a
+ * global DOM event (`UNAUTHORIZED_EVENT`) so a single listener (e.g. in the
+ * auth layer) can invalidate the auth query and surface the signed-out state
+ * immediately, instead of waiting for the next polling cycle.
+ *
+ * The event is only dispatched in browser environments.
+ */
+export const UNAUTHORIZED_EVENT = 'app:unauthorized';
+
+function notifyUnauthorized(status: number, url: string): void {
+  if (isTestEnv) return;
+  if (typeof globalThis !== 'undefined' && typeof globalThis.dispatchEvent === 'function') {
+    globalThis.dispatchEvent(
+      new CustomEvent(UNAUTHORIZED_EVENT, { detail: { status, url } })
+    );
+  }
+}
+
 export type Ok<T> = { success: true; data: T };
 export type Err<E> = { success: false; error: E | undefined; message?: string };
 
@@ -193,6 +215,12 @@ const handleApiResponseAsResult = async <T, E>(
       responsePayload = undefined;
     }
 
+    // Unified 401/403 handling: notify auth layer so it can react immediately
+    // rather than waiting for the next polling cycle.
+    if (response.status === 401 || response.status === 403) {
+      notifyUnauthorized(response.status, response.url);
+    }
+
     return {
       success: false,
       error: pickStructuredError<E>(responsePayload),
@@ -239,6 +267,13 @@ export const handleApiResponse = async <T, E = T>(
       endpoint: response.url,
       timestamp: new Date().toISOString(),
     });
+
+    // Unified 401/403 handling: notify auth layer so it can react immediately
+    // rather than waiting for the next polling cycle.
+    if (response.status === 401 || response.status === 403) {
+      notifyUnauthorized(response.status, response.url);
+    }
+
     throw new ApiError<E>(errorMessage, response.status, response);
   }
 

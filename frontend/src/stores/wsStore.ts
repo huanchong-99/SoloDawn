@@ -983,6 +983,10 @@ export const useWsStore = create<WsState>((set, get) => ({
           return;
         }
 
+        // Detect reconnection: if this connection previously had reconnect
+        // attempts, the server state may have diverged while we were offline.
+        const wasReconnecting = active.reconnectAttempts > 0;
+
         connectedConnections.set(targetWorkflowId, {
           ...active,
           status: 'connected',
@@ -1005,6 +1009,38 @@ export const useWsStore = create<WsState>((set, get) => ({
           lastHeartbeat: aggregateLastHeartbeat(connectedConnections),
           reconnectAttempts: aggregateReconnectAttempts(connectedConnections),
         });
+
+        // After a reconnect, the client may have missed events while offline.
+        // Notify global + workflow-scoped subscribers so they can refetch
+        // authoritative state (e.g. via queryClient.invalidateQueries).
+        if (wasReconnecting) {
+          const reconnectPayload: SystemReconnectedPayload = {
+            workflowId: targetWorkflowId,
+          };
+          const currentState = get();
+          const globalReconnectHandlers = currentState._handlers.get('system.reconnected');
+          if (globalReconnectHandlers) {
+            globalReconnectHandlers.forEach((handler) => {
+              try {
+                handler(reconnectPayload);
+              } catch (handlerErr) {
+                console.error('[wsStore] system.reconnected handler failed', handlerErr);
+              }
+            });
+          }
+          const scopedReconnectHandlers = currentState._workflowHandlers
+            .get(targetWorkflowId)
+            ?.get('system.reconnected');
+          if (scopedReconnectHandlers) {
+            scopedReconnectHandlers.forEach((handler) => {
+              try {
+                handler(reconnectPayload);
+              } catch (handlerErr) {
+                console.error('[wsStore] system.reconnected handler failed', handlerErr);
+              }
+            });
+          }
+        }
       };
     };
 
@@ -1601,6 +1637,15 @@ export interface SystemErrorPayload {
   message?: string;
 }
 
+/**
+ * Payload emitted on `system.reconnected` after a WebSocket successfully
+ * reconnects. Consumers should refetch authoritative state because events
+ * may have been missed while the connection was down.
+ */
+export interface SystemReconnectedPayload {
+  workflowId: string;
+}
+
 export interface QualityGateResultPayload {
   workflowId: string;
   taskId: string;
@@ -1736,6 +1781,11 @@ export type WorkflowEventHandlers = {
   onAcceptanceReviewResult?: (payload: AcceptanceReviewPayload) => void;
   onSystemError?: (payload: SystemErrorPayload) => void;
   onSystemLagged?: (payload: SystemLaggedPayload) => void;
+  /**
+   * Fired after a successful reconnect. Use to refetch authoritative state
+   * (e.g. queryClient.invalidateQueries) since events may have been missed.
+   */
+  onSystemReconnected?: (payload: SystemReconnectedPayload) => void;
   // G08-002 / G08-008: Provider failover event handlers
   onProviderSwitched?: (payload: ProviderSwitchedPayload) => void;
   onProviderExhausted?: (payload: ProviderExhaustedPayload) => void;
@@ -1799,6 +1849,7 @@ export function useWorkflowEvents(
       ['onAcceptanceReviewResult', 'acceptance.review_result'],
       ['onSystemError', 'system.error'],
       ['onSystemLagged', 'system.lagged'],
+      ['onSystemReconnected', 'system.reconnected'],
       // G08-008 / G17-002: Provider failover events
       ['onProviderSwitched', 'provider.switched'],
       ['onProviderExhausted', 'provider.exhausted'],

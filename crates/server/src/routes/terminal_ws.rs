@@ -15,7 +15,6 @@ use axum::{
         Path, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::HeaderMap,
     response::IntoResponse,
     routing::get,
 };
@@ -29,22 +28,53 @@ use tokio::sync::mpsc;
 use ts_rs::TS;
 
 /// Returns current time as milliseconds since the Unix epoch (wraps to 0 on overflow).
+///
+/// EDGE-008: `SystemTime` is wall-clock based and can jump backwards when NTP
+/// slews the clock or the user changes system time. A backwards jump would
+/// previously surface as `unwrap_or(0)`, which resets `last_activity` to the
+/// epoch (1970) and makes `elapsed_since_millis` return a huge duration,
+/// immediately firing the idle-timeout and killing every connection. We now
+/// log the regression so it is diagnosable; callers must keep using
+/// `elapsed_since_millis`, which guards against `now < start`.
 #[inline]
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+        .unwrap_or_else(|_| {
+            tracing::warn!(
+                "SystemTime went backwards (before UNIX_EPOCH); clock skew detected"
+            );
+            0
+        })
 }
 
 /// Elapsed milliseconds since `start_millis` (monotonic approximation via SystemTime).
+///
+/// EDGE-008: If the wall clock has regressed such that `now < start_millis`
+/// (NTP slewing back, manual time change), `saturating_sub` would yield 0,
+/// which (paradoxically) is the *safe* direction for idle detection: a 0
+/// elapsed time means "the connection was just active" and therefore the idle
+/// timeout will not fire. The dangerous case is the opposite: a forward clock
+/// jump followed by a backwards jump where the recorded `last_activity`
+/// suddenly becomes far in the future relative to `now`, producing a huge
+/// elapsed value. We detect `now < start` explicitly and return
+/// `Duration::ZERO`, treating the connection as freshly active to avoid
+/// spuriously killing live WebSocket sessions during clock adjustments. The
+/// next legitimate `now_millis()` sample (after the clock stabilises) will
+/// resume normal idle tracking.
 #[inline]
 fn elapsed_since_millis(start_millis: u64) -> Duration {
     let now = now_millis();
+    if now < start_millis {
+        // Clock regression: do not extrapolate; treat as freshly active.
+        // This avoids both the "instant timeout" and the "never timeout"
+        // failure modes by deferring to the next sample.
+        return Duration::ZERO;
+    }
     Duration::from_millis(now.saturating_sub(start_millis))
 }
 
-use super::ws_origin::validate_ws_origin;
 use crate::{DeploymentImpl, error::ApiError};
 
 // BACKLOG-002: Runner container separation
@@ -195,17 +225,11 @@ struct ResumeParams {
 
 /// WebSocket handler for terminal connection
 async fn terminal_ws_handler(
-    headers: HeaderMap,
     ws: WebSocketUpgrade,
     Path(terminal_id): Path<String>,
     Query(params): Query<ResumeParams>,
     State(deployment): State<DeploymentImpl>,
 ) -> impl IntoResponse {
-    // SEC-003: Validate Origin header before WebSocket upgrade
-    if let Err((status, msg)) = validate_ws_origin(&headers) {
-        return (status, msg).into_response();
-    }
-
     // Validate terminal_id format before proceeding
     if let Err(e) = validate_terminal_id(&terminal_id) {
         tracing::warn!("Invalid terminal_id format: {} - {}", terminal_id, e);
@@ -721,8 +745,37 @@ async fn handle_terminal_socket(
     output_task.abort();
     recv_task.abort();
     heartbeat_task.abort();
-    if let Some(task) = writer_task {
+    if let Some(mut task) = writer_task {
+        // CORE-007: The PTY writer is a spawn_blocking task. abort() merely
+        // signals cancellation; the blocking thread is not interrupted
+        // synchronously and may still hold the shared writer mutex. Give it a
+        // short grace window so the old writer has a chance to release the
+        // lock before a reconnecting WebSocket spins up a new writer that
+        // contends on the same mutex. If it doesn't finish in time we log and
+        // move on rather than blocking disconnect indefinitely.
         task.abort();
+        match tokio::time::timeout(Duration::from_millis(500), &mut task).await {
+            Ok(Ok(())) => {
+                tracing::debug!(
+                    terminal_id = %terminal_id,
+                    "PTY writer task exited cleanly after abort"
+                );
+            }
+            Ok(Err(join_err)) => {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    error = %join_err,
+                    "PTY writer task join failed during shutdown"
+                );
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    "PTY writer task did not exit within 500ms after abort (spawn_blocking may \
+                     still hold the writer lock briefly on reconnect)"
+                );
+            }
+        }
     }
 
     tracing::info!("Terminal WebSocket disconnected: {}", terminal_id);

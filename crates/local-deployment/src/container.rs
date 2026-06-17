@@ -41,9 +41,7 @@ use executors::{
     profile::{ExecutorConfigs, ExecutorProfileId},
 };
 use futures::{FutureExt, TryStreamExt, stream::select};
-use serde_json::json;
 use services::services::{
-    analytics::AnalyticsContext,
     approvals::{Approvals, executor_approvals::ExecutorApprovalBridge},
     config::Config,
     container::{ContainerError, ContainerRef, ContainerService},
@@ -95,10 +93,30 @@ pub struct LocalContainerService {
     config: Arc<RwLock<Config>>,
     git: GitService,
     image_service: ImageService,
-    analytics: Option<AnalyticsContext>,
     approvals: Approvals,
     queued_message_service: QueuedMessageService,
     notification_service: NotificationService,
+    /// [CONCURRENCY-014] Shutdown signal + handle for the periodic workspace
+    /// cleanup task spawned in [`Self::spawn_workspace_cleanup`].
+    ///
+    /// Previously the cleanup task's `JoinHandle` was silently dropped by
+    /// `tokio::spawn`, so on process shutdown the runtime would abort it at an
+    /// arbitrary await point — potentially in the middle of a worktree
+    /// deletion, leaving half-cleaned directories behind.
+    ///
+    /// We now (a) retain the handle so callers can `await` orderly teardown
+    /// via [`Self::shutdown_cleanup`], and (b) feed the task a shutdown signal
+    /// via a `tokio::sync::watch` channel so it breaks out of its loop only
+    /// at a transaction boundary (between `cleanup_expired` calls), avoiding
+    /// partial filesystem cleanups.
+    ///
+    /// `std::sync::Mutex` is used for `cleanup_handle` (rather than
+    /// `tokio::sync::RwLock`) so that `spawn_workspace_cleanup` can install
+    /// the handle synchronously from the (sync) constructor. The critical
+    /// section is trivial (a single `Option::replace`) and never `.await`s,
+    /// so a sync lock is both safe and correct here.
+    cleanup_shutdown_tx: Arc<tokio::sync::watch::Sender<bool>>,
+    cleanup_handle: Arc<std::sync::Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl LocalContainerService {
@@ -109,13 +127,17 @@ impl LocalContainerService {
         config: Arc<RwLock<Config>>,
         git: GitService,
         image_service: ImageService,
-        analytics: Option<AnalyticsContext>,
         approvals: Approvals,
         queued_message_service: QueuedMessageService,
     ) -> Self {
         let child_store = Arc::new(RwLock::new(HashMap::new()));
         let interrupt_senders = Arc::new(RwLock::new(HashMap::new()));
         let notification_service = NotificationService::new(config.clone());
+
+        // [CONCURRENCY-014] watch channel initialized to `false` (not yet
+        // shutting down). Cloning the `Sender` is cheap, so we wrap it in an
+        // `Arc` to satisfy `Clone` on the service without re-threading borrows.
+        let (cleanup_shutdown_tx, _) = tokio::sync::watch::channel(false);
 
         let container = LocalContainerService {
             db,
@@ -125,15 +147,31 @@ impl LocalContainerService {
             config,
             git,
             image_service,
-            analytics,
             approvals,
             queued_message_service,
             notification_service,
+            cleanup_shutdown_tx: Arc::new(cleanup_shutdown_tx),
+            cleanup_handle: Arc::new(std::sync::Mutex::new(None)),
         };
 
         container.spawn_workspace_cleanup();
 
         container
+    }
+
+    /// Gracefully stop the periodic workspace cleanup task.
+    ///
+    /// [CONCURRENCY-014] Signals the cleanup loop to exit at the next iteration
+    /// boundary (never mid-`cleanup_expired`), then awaits the task so callers
+    /// can be sure no worktree cleanup is in flight after this returns.
+    /// Idempotent: safe to call multiple times.
+    pub async fn shutdown_cleanup(&self) {
+        // Ignore send error: receivers may already be gone.
+        let _ = self.cleanup_shutdown_tx.send(true);
+        let handle = { self.cleanup_handle.lock().unwrap().take() };
+        if let Some(h) = handle {
+            let _ = h.await;
+        }
     }
 
     pub async fn get_child_from_store(&self, id: &Uuid) -> Option<Arc<RwLock<AsyncGroupChild>>> {
@@ -242,19 +280,47 @@ impl LocalContainerService {
     pub fn spawn_workspace_cleanup(&self) {
         let db = self.db.clone();
         let cleanup_expired = Self::cleanup_expired_workspaces;
-        tokio::spawn(async move {
+        // [CONCURRENCY-014] Subscribe to the shutdown watch so the task can
+        // break out of its loop at a clean boundary (between
+        // `cleanup_expired` invocations) instead of being aborted mid-call by
+        // the runtime when the JoinHandle is dropped on process exit.
+        let mut shutdown_rx = self.cleanup_shutdown_tx.subscribe();
+        let handle = tokio::spawn(async move {
             WorkspaceManager::cleanup_orphan_workspaces(&db.pool).await;
 
             let mut cleanup_interval =
                 tokio::time::interval(tokio::time::Duration::from_secs(1800)); // 30 minutes
             loop {
-                cleanup_interval.tick().await;
-                tracing::info!("Starting periodic workspace cleanup...");
-                cleanup_expired(&db).await.unwrap_or_else(|e| {
-                    tracing::error!("Failed to clean up expired workspaces: {}", e);
-                });
+                // Use `select!` so a shutdown signal wins over the next tick.
+                // We only check the signal *between* cleanup runs, never
+                // during one — so an in-flight `cleanup_expired` always
+                // completes (no half-deleted worktrees).
+                tokio::select! {
+                    _ = cleanup_interval.tick() => {
+                        tracing::info!("Starting periodic workspace cleanup...");
+                        cleanup_expired(&db).await.unwrap_or_else(|e| {
+                            tracing::error!("Failed to clean up expired workspaces: {}", e);
+                        });
+                    }
+                    // `changed()` resolves when the sender writes `true`.
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            tracing::info!(
+                                "Workspace cleanup task received shutdown signal, exiting loop"
+                            );
+                            break;
+                        }
+                    }
+                }
             }
         });
+
+        // [CONCURRENCY-014] Retain the JoinHandle so callers can await orderly
+        // teardown via `shutdown_cleanup`. Installed synchronously under the
+        // (sync) `std::sync::Mutex` so it is visible immediately after
+        // `spawn_workspace_cleanup` returns — no race where a concurrent
+        // `shutdown_cleanup` could observe `None` and skip awaiting the task.
+        *self.cleanup_handle.lock().unwrap() = Some(handle);
     }
 
     /// Record the current HEAD commit for each repository as the "after" state.
@@ -394,9 +460,7 @@ impl LocalContainerService {
         let child_store = self.child_store.clone();
         let msg_stores = self.msg_stores.clone();
         let db = self.db.clone();
-        let config = self.config.clone();
         let container = self.clone();
-        let analytics = self.analytics.clone();
 
         let mut process_exit_rx = self.spawn_os_exit_watcher(exec_id);
 
@@ -565,23 +629,6 @@ impl LocalContainerService {
                     }
                 }
 
-                // Fire analytics event when CodingAgent execution has finished
-                if config.read().await.analytics_enabled
-                    && matches!(
-                        &ctx.execution_process.run_reason,
-                        ExecutionProcessRunReason::CodingAgent
-                    )
-                    && let Some(analytics) = &analytics
-                {
-                    analytics.analytics_service.track_event(&analytics.user_id, "task_attempt_finished", Some(json!({
-                        "task_id": ctx.task.id.to_string(),
-                        "project_id": ctx.task.project_id.to_string(),
-                        "workspace_id": ctx.workspace.id.to_string(),
-                        "session_id": ctx.session.id.to_string(),
-                        "execution_success": matches!(ctx.execution_process.status, ExecutionProcessStatus::Completed),
-                        "exit_code": ctx.execution_process.exit_code,
-                    })));
-                }
             }
 
             // Now that commit/next-action/finalization steps for this process are complete,

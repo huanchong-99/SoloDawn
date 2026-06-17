@@ -159,8 +159,48 @@ async fn handle_concierge_ws(
         }
     }
 
-    // E25-12: abort any still-running message-processing tasks so they don't
-    // outlive the closed connection.
+    // CORE-020 / E25-12: On disconnect, give in-flight tasks a short grace
+    // period to finish before aborting them. Many of these tasks are awaiting
+    // external I/O with side effects (e.g. LLM API calls) where the provider
+    // has already metered/billed the request. Aborting immediately would
+    // discard the in-flight response, losing the result the user has already
+    // paid for. Waiting up to `SHUTDOWN_GRACE` lets such tasks complete and
+    // persist their output (the client can fetch it via list_messages after
+    // reconnecting). Only tasks that still haven't finished after the grace
+    // period are forcibly aborted to bound resource usage.
+    const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+
+    let shutdown_deadline = tokio::time::Instant::now() + SHUTDOWN_GRACE;
+    loop {
+        match tokio::time::timeout_at(shutdown_deadline, in_flight.join_next()).await {
+            // Deadline elapsed: stop waiting and forcibly abort the rest.
+            Err(_elapsed) => break,
+            // join_next returned None: the JoinSet is empty, nothing left to wait for.
+            Ok(None) => break,
+            Ok(Some(res)) => match res {
+                Ok(()) => debug!(
+                    session_id = %session_id,
+                    "In-flight task completed during shutdown grace"
+                ),
+                Err(join_err) => debug!(
+                    session_id = %session_id,
+                    error = %join_err,
+                    "In-flight task ended during shutdown grace"
+                ),
+            },
+        }
+    }
+
+    let remaining = in_flight.len();
+    if remaining > 0 {
+        warn!(
+            session_id = %session_id,
+            remaining,
+            "Aborting {} in-flight task(s) that did not complete within the {:?} shutdown grace",
+            remaining,
+            SHUTDOWN_GRACE
+        );
+    }
     in_flight.abort_all();
     while in_flight.join_next().await.is_some() {}
 
