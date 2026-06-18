@@ -10,6 +10,8 @@
 
 <p align="center">
   <a href="README.md">English</a>
+  &nbsp;·&nbsp;
+  <a href="https://linux.do/">社区</a>
 </p>
 
 ---
