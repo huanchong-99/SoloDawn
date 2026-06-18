@@ -90,7 +90,12 @@ jobs:
     # test should be marked with `#[serial]` using the `serial_test` crate
     # rather than crippling the whole suite's throughput.
     - name: Run cargo nextest
-      run: cargo nextest run --workspace --exclude solodawn-tray --profile ci --lib
+      # `--cargo-profile ci` builds the test binaries with Cargo's `ci` profile
+      # so they reuse the artifacts from the prime-build step above (the speed
+      # win). NOTE: nextest's `--profile` is its own run-config profile (from
+      # .config/nextest.toml), NOT a Cargo profile — there is no `ci` nextest
+      # profile, so `--profile ci` errored with "profile `ci` not found".
+      run: cargo nextest run --workspace --exclude solodawn-tray --cargo-profile ci --lib
 
     - name: Check generated types are up-to-date
       run: cargo run --bin generate_types --profile ci -- --check
