@@ -1,16 +1,20 @@
-# Faster linkers per target — these are bundled with the Rust toolchain
-# (`rust-lld`), so no system install is needed. Significantly speeds up
-# local dev builds by avoiding the slow default system linkers.
+# Faster linkers per target — `rust-lld` (bundled with the Rust toolchain, so
+# no system install is needed) significantly speeds up link times on Windows
+# MSVC vs the slow default `link.exe`.
 #
 # On Windows MSVC we used to set `/DEBUG` for better PDB symbols, but that
 # forces the slow MSVC linker path. Keep `/DEBUG` only for release builds
 # (where link time is dwarfed by codegen) via a separate mechanism; dev
 # builds prefer speed.
+#
+# macOS intentionally keeps the default `cc`/ld64 linker and only sets the
+# framework link-args below: driving `rust-lld` directly there bypasses the
+# clang driver that supplies the SDK sysroot and framework search paths, and
+# `-C linker-flavor=darwin-ld.lld` is not even a valid flavor (rustc rejects
+# it), which broke the macOS release build.
 
 [target.x86_64-apple-darwin]
 rustflags = [
-    "-C", "linker-flavor=darwin-ld.lld",
-    "-C", "linker=rust-lld",
     "-C", "link-arg=-framework",
     "-C", "link-arg=AppKit",
     "-C", "link-arg=-framework",
@@ -21,8 +25,6 @@ rustflags = [
 
 [target.aarch64-apple-darwin]
 rustflags = [
-    "-C", "linker-flavor=darwin-ld.lld",
-    "-C", "linker=rust-lld",
     "-C", "link-arg=-framework",
     "-C", "link-arg=AppKit",
     "-C", "link-arg=-framework",
