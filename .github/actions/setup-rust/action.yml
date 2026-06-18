@@ -80,39 +80,24 @@ runs:
         echo "LIBGIT2_SYS_USE_PKG_CONFIG=1" >> "$GITHUB_ENV"
 
     - name: Install cargo-nextest (prebuilt binary)
-      # Pre-built binary install is ~5s; `cargo install --locked` was ~3min
-      # because it compiled nextest + all its dependencies from source on
-      # every CI run. Functionally identical: same binary, same test runner.
+      # Pre-built binary (~5s) instead of `cargo install --locked` (~3min from
+      # source). Uses the official get.nexte.st distribution: the nextest GitHub
+      # release does NOT publish per-target tarball assets, so the previous
+      # github.com/.../releases/download URLs 404'd and failed CI. get.nexte.st
+      # serves a gzipped tar with the `cargo-nextest` binary for each platform.
       if: inputs.install-nextest == 'true'
       shell: bash
       run: |
         set -euo pipefail
-        # Map runner OS to nextest release asset
-        case "${{ runner.os }}" in
-          Linux)  NEXTEST_TARGET="x86_64-unknown-linux-musl";;
-          macOS)  NEXTEST_TARGET="aarch64-apple-darwin";;
-          Windows) NEXTEST_TARGET="x86_64-pc-windows-msvc";;
-          *) echo "Unsupported OS: ${{ runner.os }}" >&2; exit 1;;
-        esac
         NEXTEST_VERSION="0.9.88"
-        if [ "${{ runner.os }}" = "Windows" ]; then
-          ARCHIVE="cargo-nextest-v${NEXTEST_VERSION}-${NEXTEST_TARGET}.zip"
-          URL="https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-v${NEXTEST_VERSION}/${ARCHIVE}"
-          curl -fsSL "${URL}" -o /tmp/nextest.zip
-          unzip -o /tmp/nextest.zip -d /tmp/nextest-extract >/dev/null
-          # The archive ships `cargo-nextest.exe`; cargo requires the subcommand
-          # binary to be named `cargo-nextest` on PATH so `cargo nextest` works.
-          NEXTEST_BIN="$(find /tmp/nextest-extract -type f \( -name 'cargo-nextest.exe' -o -name 'nextest.exe' \) | head -1)"
-          if [ -z "${NEXTEST_BIN}" ]; then
-            echo "cargo-nextest binary not found in extracted archive" >&2
-            exit 1
-          fi
-          install -m755 "${NEXTEST_BIN}" "${HOME}/.cargo/bin/cargo-nextest.exe"
-        else
-          ARCHIVE="cargo-nextest-v${NEXTEST_VERSION}-${NEXTEST_TARGET}.tar.gz"
-          URL="https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-v${NEXTEST_VERSION}/${ARCHIVE}"
-          curl -fsSL "${URL}" -o /tmp/nextest.tar.gz
-          tar -xzf /tmp/nextest.tar.gz -C /tmp
-          install -m755 /tmp/cargo-nextest "${HOME}/.cargo/bin/cargo-nextest"
-        fi
+        case "${{ runner.os }}" in
+          Linux)   URL="https://get.nexte.st/${NEXTEST_VERSION}/linux" ;;
+          macOS)   URL="https://get.nexte.st/${NEXTEST_VERSION}/mac" ;;
+          Windows) URL="https://get.nexte.st/${NEXTEST_VERSION}/windows-tar" ;;
+          *) echo "Unsupported OS: ${{ runner.os }}" >&2; exit 1 ;;
+        esac
+        mkdir -p "${HOME}/.cargo/bin"
+        # Tarball contains `cargo-nextest` (cargo-nextest.exe on Windows),
+        # extracted straight onto PATH so `cargo nextest` resolves it.
+        curl -LsSf --retry 5 --retry-connrefused "${URL}" | tar zxf - -C "${HOME}/.cargo/bin"
         cargo-nextest --version
