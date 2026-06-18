@@ -79,6 +79,15 @@ impl ConciergeAgent {
                 token.cancel();
             }
         }
+
+        // [CORE-014] Evict the per-session serialization lock so `session_locks`
+        // doesn't grow unbounded (one entry per distinct session_id otherwise
+        // lived for the whole process). Safe because this runs only from
+        // `delete_session` — the session is gone, so no legitimate new
+        // `process_message` will race to recreate the entry; any in-flight call
+        // already holds its own clone of the `Arc`, so its guard stays valid
+        // until it returns.
+        self.session_locks.remove(session_id);
     }
 
     /// Set the message bus for subscribing to workflow events.

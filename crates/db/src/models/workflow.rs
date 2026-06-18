@@ -858,6 +858,33 @@ impl Workflow {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Atomically transition workflow from 'running' to 'failed' (CAS).
+    ///
+    /// CORE-005: Sibling of [`Self::set_completed_from_running`] for the
+    /// auto-finalize path. Returning `Ok(false)` means the workflow was no
+    /// longer `running` when the UPDATE executed (e.g. a concurrent
+    /// pause/cancel/merge raced ahead). The caller MUST treat `false` as "skip"
+    /// rather than stomping that concurrent transition with `failed`. Stamps
+    /// `completed_at` to match the terminal-state semantics of
+    /// `update_status_with_reason`.
+    pub async fn set_failed_from_running(pool: &SqlitePool, id: &str) -> anyhow::Result<bool> {
+        let now = Utc::now();
+        let result = sqlx::query(
+            r"
+            UPDATE workflow
+            SET status = 'failed', completed_at = COALESCE(completed_at, ?), updated_at = ?
+            WHERE id = ? AND status = 'running'
+            ",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Delete workflow
     pub async fn delete(pool: &SqlitePool, id: &str) -> sqlx::Result<u64> {
         let result = sqlx::query("DELETE FROM workflow WHERE id = ?")

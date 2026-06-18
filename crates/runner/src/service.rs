@@ -43,8 +43,20 @@ impl RunnerService for RunnerGrpcService {
             env,
         };
 
-        let cols = if req.cols > 0 { req.cols as u16 } else { 80 };
-        let rows = if req.rows > 0 { req.rows as u16 } else { 24 };
+        // EDGE-007: `req.cols`/`req.rows` are u32 on the wire; a bare `as u16`
+        // cast would silently wrap past u16::MAX (e.g. 65536 -> 0) and crash
+        // the PTY. Bound them and fall back to sensible defaults (the
+        // resize_terminal path applies the identical guard).
+        let cols = if req.cols > 0 && req.cols <= u16::MAX as u32 {
+            req.cols as u16
+        } else {
+            80
+        };
+        let rows = if req.rows > 0 && req.rows <= u16::MAX as u32 {
+            req.rows as u16
+        } else {
+            24
+        };
 
         match self
             .process_manager

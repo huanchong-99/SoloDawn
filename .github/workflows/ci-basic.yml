@@ -123,3 +123,36 @@ jobs:
     - name: Run type check
       working-directory: frontend
       run: pnpm run check
+
+  # Aggregate gate so branch protection can require a SINGLE always-reported
+  # check. `backend-check` / `frontend-check` are conditionally skipped on
+  # docs-only PRs (see the `changes` filter); a *skipped* required check can
+  # leave a PR stuck "Expected — waiting for status to be reported" and
+  # unmergeable. This job always runs: it passes when the needed jobs either
+  # succeeded or were legitimately skipped, and fails if any failed/was
+  # cancelled.
+  #
+  # ACTION REQUIRED in branch protection: require "CI Status" instead of
+  # "Backend Check" / "Frontend Check".
+  ci-status:
+    name: CI Status
+    if: always()
+    needs: [changes, backend-check, frontend-check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+    - name: Verify no required job failed
+      run: |
+        echo "changes=${{ needs.changes.result }}"
+        echo "backend-check=${{ needs.backend-check.result }}"
+        echo "frontend-check=${{ needs.frontend-check.result }}"
+        if [ "${{ needs.changes.result }}" = "failure" ] || [ "${{ needs.changes.result }}" = "cancelled" ]; then
+          echo "::error::filter (changes) job did not succeed"; exit 1
+        fi
+        if [ "${{ needs.backend-check.result }}" = "failure" ] || [ "${{ needs.backend-check.result }}" = "cancelled" ]; then
+          echo "::error::backend-check failed"; exit 1
+        fi
+        if [ "${{ needs.frontend-check.result }}" = "failure" ] || [ "${{ needs.frontend-check.result }}" = "cancelled" ]; then
+          echo "::error::frontend-check failed"; exit 1
+        fi
+        echo "All required jobs passed or were skipped."

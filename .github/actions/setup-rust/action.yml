@@ -100,7 +100,14 @@ runs:
           URL="https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-v${NEXTEST_VERSION}/${ARCHIVE}"
           curl -fsSL "${URL}" -o /tmp/nextest.zip
           unzip -o /tmp/nextest.zip -d /tmp/nextest-extract >/dev/null
-          install -m755 /tmp/nextest-extract/nextest.exe "${HOME}/.cargo/bin/nextest.exe"
+          # The archive ships `cargo-nextest.exe`; cargo requires the subcommand
+          # binary to be named `cargo-nextest` on PATH so `cargo nextest` works.
+          NEXTEST_BIN="$(find /tmp/nextest-extract -type f \( -name 'cargo-nextest.exe' -o -name 'nextest.exe' \) | head -1)"
+          if [ -z "${NEXTEST_BIN}" ]; then
+            echo "cargo-nextest binary not found in extracted archive" >&2
+            exit 1
+          fi
+          install -m755 "${NEXTEST_BIN}" "${HOME}/.cargo/bin/cargo-nextest.exe"
         else
           ARCHIVE="cargo-nextest-v${NEXTEST_VERSION}-${NEXTEST_TARGET}.tar.gz"
           URL="https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-v${NEXTEST_VERSION}/${ARCHIVE}"

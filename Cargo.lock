@@ -7905,7 +7905,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 [[package]]
 name = "ts-rs"
 version = "11.0.1"
-source = "git+https://github.com/xazukx/ts-rs.git?branch=use-ts-enum#b5c8277ac9f321a0be7453eef029466152b13fc8"
+source = "git+https://github.com/xazukx/ts-rs.git?rev=b5c8277ac9f321a0be7453eef029466152b13fc8#b5c8277ac9f321a0be7453eef029466152b13fc8"
 dependencies = [
  "chrono",
  "serde_json",
@@ -7929,7 +7929,7 @@ dependencies = [
 [[package]]
 name = "ts-rs-macros"
 version = "11.0.1"
-source = "git+https://github.com/xazukx/ts-rs.git?branch=use-ts-enum#b5c8277ac9f321a0be7453eef029466152b13fc8"
+source = "git+https://github.com/xazukx/ts-rs.git?rev=b5c8277ac9f321a0be7453eef029466152b13fc8#b5c8277ac9f321a0be7453eef029466152b13fc8"
 dependencies = [
  "proc-macro2",
  "quote",

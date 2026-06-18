@@ -70,7 +70,6 @@ async fn build_container() -> LocalContainerService {
         config,
         git,
         image_service,
-        None,
         approvals,
         queued,
     )

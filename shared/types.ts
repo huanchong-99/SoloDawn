@@ -4,16 +4,11 @@
 
 // If you are an AI, and you absolutely have to edit this file, please confirm with the user first.
 
-export type WorkflowDetailDto = { id: string, projectId: string, name: string, description: string | null, status: string, executionMode: string, initialGoal: string | null, useSlashCommands: boolean, orchestratorEnabled: boolean, orchestratorApiType: string | null, orchestratorBaseUrl: string | null, orchestratorModel: string | null, errorTerminalEnabled: boolean, errorTerminalCliId: string | null, errorTerminalModelId: string | null, 
+export type WorkflowDetailDto = { id: string, projectId: string, name: string, description: string | null, status: string, executionMode: string, initialGoal: string | null, useSlashCommands: boolean, orchestratorEnabled: boolean, orchestratorApiType: string | null, orchestratorBaseUrl: string | null, orchestratorModel: string | null, errorTerminalEnabled: boolean, errorTerminalCliId: string | null, errorTerminalModelId: string | null, mergeTerminalCliId: string, 
 /**
- * Wrapped in Option for backward compatibility with older API clients that
- * may not send these fields. The underlying DB column is NOT NULL with a default.
+ * See `merge_terminal_cli_id` — same NOT-NULL DB contract.
  */
-mergeTerminalCliId: string | null, 
-/**
- * See `merge_terminal_cli_id` — same backward-compat rationale.
- */
-mergeTerminalModelId: string | null, targetBranch: string, gitWatcherEnabled: boolean, readyAt: string | null, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, tasks: Array<WorkflowTaskDto>, commands: Array<WorkflowCommandDto>, };
+mergeTerminalModelId: string, targetBranch: string, gitWatcherEnabled: boolean, readyAt: string | null, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, tasks: Array<WorkflowTaskDto>, commands: Array<WorkflowCommandDto>, };
 
 export type WorkflowTaskDto = { id: string, workflowId: string, vkTaskId: string | null, name: string, description: string | null, branch: string, status: string, orderIndex: number, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, 
 /**

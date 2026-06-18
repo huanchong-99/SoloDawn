@@ -239,10 +239,10 @@ fn is_valid_workflow_status_transition(current: &str, next: &str) -> bool {
             // merge_workflow keeps the workflow in "merging" when MergeConflicts
             // or BranchesDiverged occur. Without these exits the workflow would
             // be permanently stuck because no other endpoint can move it out of
-            // "merging". These paths let users terminate (failed/cancelled) or
-            // finalize (completed) via the status endpoint after resolving a
-            // conflict manually.
-            | ("merging", "completed" | "failed" | "cancelled")
+            // "merging". These paths let users terminate (cancelled) or finalize
+            // (completed) via the status endpoint after resolving a conflict
+            // manually. ("merging", "failed") is already permitted above.
+            | ("merging", "completed" | "cancelled")
             | ("failed" | "cancelled", "created")
     )
 }
@@ -925,8 +925,8 @@ async fn list_workflows(
             // DTO field is i32. A bare `as i32` truncates/wraps for very large
             // counts. Saturate at i32::MAX instead so the value stays correct
             // (a workflow with > 2^31 tasks is already degenerate).
-            tasks_count: w.tasks_count.min(i32::MAX as i64) as i32,
-            terminals_count: w.terminals_count.min(i32::MAX as i64) as i32,
+            tasks_count: w.tasks_count.min(i64::from(i32::MAX)) as i32,
+            terminals_count: w.terminals_count.min(i64::from(i32::MAX)) as i32,
         })
         .collect();
 
@@ -2210,7 +2210,7 @@ async fn start_workflow(
 
                 let mut all_tasks_done = true;
                 for task in &tasks {
-                    if task.status == "completed" || task.status == "failed" {
+                    if matches!(task.status.as_str(), "completed" | "failed" | "cancelled") {
                         continue;
                     }
                     all_tasks_done = false;
@@ -2343,35 +2343,64 @@ async fn start_workflow(
                     }
                 }
 
-                // Re-check: are ALL tasks now completed?
+                // Re-check: have ALL tasks reached a terminal state? If so,
+                // finalize the workflow — "completed" only when every task
+                // completed, otherwise "failed" (CORE-005). This mirrors
+                // `should_auto_complete_workflow` so the Kanban and DIY
+                // finalizers always agree, treats "cancelled" as terminal, and
+                // uses a running-CAS so a concurrent pause/cancel is not
+                // overwritten.
                 if let Ok(refreshed_tasks) =
                     db::models::WorkflowTask::find_by_workflow(&diy_db, &diy_wf_id).await
                 {
-                    let all_done = refreshed_tasks
-                        .iter()
-                        .all(|t| t.status == "completed" || t.status == "failed");
-                    if all_done && !refreshed_tasks.is_empty() {
-                        tracing::info!(workflow_id = %diy_wf_id, "DIY: all tasks completed, marking workflow completed");
-                        if let Err(e) =
-                            db::models::Workflow::update_status(&diy_db, &diy_wf_id, "completed")
-                                .await
-                        {
-                            tracing::warn!(workflow_id = %diy_wf_id, error = %e, "DIY: failed to update workflow status");
-                        }
-                        // Broadcast workflow status change so frontend updates
-                        if let Err(e) = diy_message_bus
-                            .publish_workflow_event(
-                                &diy_wf_id,
-                                BusMessage::StatusUpdate {
-                                    workflow_id: diy_wf_id.clone(),
-                                    status: "completed".to_string(),
-                                },
+                    let all_terminal = !refreshed_tasks.is_empty()
+                        && refreshed_tasks.iter().all(|t| {
+                            matches!(t.status.as_str(), "completed" | "failed" | "cancelled")
+                        });
+                    if all_terminal {
+                        let all_completed =
+                            refreshed_tasks.iter().all(|t| t.status == "completed");
+                        let (target_status, cas) = if all_completed {
+                            (
+                                "completed",
+                                db::models::Workflow::set_completed_from_running(
+                                    &diy_db, &diy_wf_id,
+                                )
+                                .await,
                             )
-                            .await
-                        {
-                            tracing::warn!(workflow_id = %diy_wf_id, error = %e, "DIY: failed to broadcast workflow status update");
+                        } else {
+                            (
+                                "failed",
+                                db::models::Workflow::set_failed_from_running(&diy_db, &diy_wf_id)
+                                    .await,
+                            )
+                        };
+                        match cas {
+                            Ok(true) => {
+                                tracing::info!(workflow_id = %diy_wf_id, status = target_status, "DIY: all tasks terminal, finalized workflow");
+                                // Broadcast workflow status change so frontend updates
+                                if let Err(e) = diy_message_bus
+                                    .publish_workflow_event(
+                                        &diy_wf_id,
+                                        BusMessage::StatusUpdate {
+                                            workflow_id: diy_wf_id.clone(),
+                                            status: target_status.to_string(),
+                                        },
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(workflow_id = %diy_wf_id, error = %e, "DIY: failed to broadcast workflow status update");
+                                }
+                                break;
+                            }
+                            Ok(false) => {
+                                tracing::info!(workflow_id = %diy_wf_id, "DIY: workflow no longer running, monitor exiting");
+                                break;
+                            }
+                            Err(e) => {
+                                tracing::warn!(workflow_id = %diy_wf_id, error = %e, "DIY: failed to finalize workflow status");
+                            }
                         }
-                        break;
                     }
                 }
 
@@ -3257,10 +3286,10 @@ async fn update_task_status(
         Some(AutoCompleteDecision::Failed) => {
             // A task reached failed/cancelled while every task is terminal:
             // finalize the workflow as failed so it doesn't linger in running.
-            // `update_status` performs a CAS-style guard that refuses to
-            // overwrite an already-terminal workflow.
-            match Workflow::update_status(&deployment.db().pool, &workflow_id, "failed").await {
-                Ok(()) => {
+            // CAS (running -> failed) mirrors the Completed branch so a
+            // concurrent pause/cancel/merge is not silently overwritten.
+            match Workflow::set_failed_from_running(&deployment.db().pool, &workflow_id).await {
+                Ok(true) => {
                     tracing::warn!(
                         workflow_id = %workflow_id,
                         "Workflow auto-synced to failed after a task reached failed/cancelled"
@@ -3279,6 +3308,12 @@ async fn update_task_status(
                         "task status auto-complete (failed)",
                     )
                     .await;
+                }
+                Ok(false) => {
+                    tracing::warn!(
+                        workflow_id = %workflow_id,
+                        "Workflow auto-sync to failed skipped: status changed concurrently"
+                    );
                 }
                 Err(e) => {
                     tracing::error!(

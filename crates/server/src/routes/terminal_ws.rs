@@ -15,6 +15,7 @@ use axum::{
         Path, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
+    http::HeaderMap,
     response::IntoResponse,
     routing::get,
 };
@@ -76,6 +77,7 @@ fn elapsed_since_millis(start_millis: u64) -> Duration {
 }
 
 use crate::{DeploymentImpl, error::ApiError};
+use super::ws_origin::validate_ws_origin;
 
 // BACKLOG-002: Runner container separation
 // ============================================================================
@@ -225,11 +227,21 @@ struct ResumeParams {
 
 /// WebSocket handler for terminal connection
 async fn terminal_ws_handler(
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
     Path(terminal_id): Path<String>,
     Query(params): Query<ResumeParams>,
     State(deployment): State<DeploymentImpl>,
 ) -> impl IntoResponse {
+    // SEC-003: Validate the Origin header before the WebSocket upgrade. In the
+    // default local-first config (SOLODAWN_CORS_ORIGINS unset) this allows all
+    // origins; it only enforces when an allowlist is explicitly configured.
+    // Mirrors workflow_ws_handler so both WS endpoints are guarded uniformly —
+    // terminal I/O grants shell access, so it must not be the weaker endpoint.
+    if let Err((status, msg)) = validate_ws_origin(&headers) {
+        return (status, msg).into_response();
+    }
+
     // Validate terminal_id format before proceeding
     if let Err(e) = validate_terminal_id(&terminal_id) {
         tracing::warn!("Invalid terminal_id format: {} - {}", terminal_id, e);
