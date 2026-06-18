@@ -12,6 +12,32 @@ pub fn asset_dir() -> std::io::Result<std::path::PathBuf> {
         return Ok(path);
     }
 
+    // Under nextest, every test runs in its own process. Components that open
+    // the on-disk database resolve it through `asset_dir()/db.sqlite`; without
+    // per-process isolation, parallel test processes share a single `db.sqlite`
+    // and race on first-time migration — surfacing as non-deterministic
+    // "duplicate column name" / "no such table" migration errors. Give each
+    // nextest process a private, freshly-cleaned asset dir.
+    //
+    // Gated on nextest's `NEXTEST` env var, so production and `cargo test` are
+    // unaffected (`cargo test` runs all tests in one process; DB-touching tests
+    // there rely on `#[serial]`). An explicit `SOLODAWN_ASSET_DIR` (above) still
+    // wins.
+    if std::env::var_os("NEXTEST").is_some() {
+        static NEXTEST_ASSET_DIR: std::sync::OnceLock<std::path::PathBuf> =
+            std::sync::OnceLock::new();
+        let dir = NEXTEST_ASSET_DIR.get_or_init(|| {
+            let run = std::env::var("NEXTEST_RUN_ID").unwrap_or_else(|_| "local".to_string());
+            let d = std::env::temp_dir()
+                .join(format!("solodawn-nextest-{run}-{}", std::process::id()));
+            // PIDs can be reused as test processes finish within a run; start clean.
+            let _ = std::fs::remove_dir_all(&d);
+            d
+        });
+        std::fs::create_dir_all(dir)?;
+        return Ok(dir.clone());
+    }
+
     let path = if cfg!(debug_assertions) {
         std::path::PathBuf::from(PROJECT_ROOT).join("../../dev_assets")
     } else {
