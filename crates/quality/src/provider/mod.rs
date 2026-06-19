@@ -20,6 +20,8 @@ pub mod sonar;
 // the authoring-pipeline ground-truth executor). Instantiation with concrete
 // rules is wired from `crates/services` (the quality crate stays DB-free); these
 // re-exports keep construction injectable.
+#[cfg(feature = "ast-grep")]
+pub use compiled_rule::CompiledAstGrepRule;
 pub use compiled_rule::{
     compile, CompiledRegexRule, CompiledRule, RuleCompileError, RuleDefinition, RuleFormat,
     RuleMeta, RuleScope, REGEX_DFA_SIZE_LIMIT, REGEX_SIZE_LIMIT,

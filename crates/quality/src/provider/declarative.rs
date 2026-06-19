@@ -32,7 +32,7 @@ use crate::{
     issue::QualityIssue,
     metrics::MetricKey,
     provider::{
-        compiled_rule::{CompiledRegexRule, CompiledRule},
+        compiled_rule::{CompiledRegexRule, CompiledRule, RuleMeta},
         ProviderReport, QualityProvider,
     },
     rule::{AnalyzerSource, Severity},
@@ -100,6 +100,8 @@ impl DeclarativeRuleProvider {
             // Any rule scoped to this file needs its content; read once, lazily.
             let any_in_scope = self.rules.iter().any(|rule| match rule {
                 CompiledRule::Regex(r) => r.scope.matches_path(&rel_path),
+                #[cfg(feature = "ast-grep")]
+                CompiledRule::AstGrep(r) => r.scope.matches_path(&rel_path),
             });
             if !any_in_scope {
                 continue;
@@ -122,12 +124,37 @@ impl DeclarativeRuleProvider {
                             run_regex_rule(r, &content, &rel_path, &mut all_issues);
                         }
                     }
+                    #[cfg(feature = "ast-grep")]
+                    CompiledRule::AstGrep(r) => {
+                        if r.scope.matches_path(&rel_path) {
+                            run_ast_grep_rule(r, &content, &rel_path, &mut all_issues);
+                        }
+                    }
                 }
             }
         }
 
         all_issues
     }
+}
+
+/// Emit one [`QualityIssue`] for a rule match at a 1-based `(line, column)`.
+///
+/// The single construction path shared by every rule format: always
+/// [`AnalyzerSource::CustomRule`] (so severity is capped to `Major`; D3), carrying
+/// the rule's id/type/severity/message and the located file position. `line` is
+/// the primary anchor; `column` (no builder setter) is set on the public field.
+fn emit_issue(meta: &RuleMeta, rel_path: &str, line: u32, column: u32, out: &mut Vec<QualityIssue>) {
+    let mut issue = QualityIssue::new_capped(
+        meta.rule_id.clone(),
+        meta.rule_type,
+        meta.severity,
+        AnalyzerSource::CustomRule,
+        meta.message.clone(),
+    )
+    .with_location(rel_path.to_string(), line);
+    issue.column = Some(column);
+    out.push(issue);
 }
 
 /// Run one compiled regex rule over a file's content, pushing a
@@ -140,18 +167,34 @@ fn run_regex_rule(
 ) {
     for m in rule.regex.find_iter(content) {
         let (line, column) = line_col_for_offset(content, m.start());
-        let mut issue = QualityIssue::new_capped(
-            rule.meta.rule_id.clone(),
-            rule.meta.rule_type,
-            rule.meta.severity,
-            AnalyzerSource::CustomRule,
-            rule.meta.message.clone(),
-        )
-        .with_location(rel_path.to_string(), line);
-        // `column` has no builder setter; set the public field directly. `line`
-        // is the primary anchor, `column` a best-effort extra.
-        issue.column = Some(column);
-        out.push(issue);
+        emit_issue(&rule.meta, rel_path, line, column, out);
+    }
+}
+
+/// Run one compiled ast-grep structural rule over a file's content, pushing a
+/// [`QualityIssue`] per structural match.
+///
+/// Parses `content` with the rule's resolved grammar, then iterates
+/// `root.root().find_all(&config.matcher)`. ast-grep positions are **zero-based**
+/// (`Position::line()` row; `Position::column(node)` char column), so both are
+/// `+1`'d to the crate's 1-based convention. A file that fails to parse simply
+/// yields zero matches (hostile/garbage input must never break the scan).
+#[cfg(feature = "ast-grep")]
+fn run_ast_grep_rule(
+    rule: &crate::provider::compiled_rule::CompiledAstGrepRule,
+    content: &str,
+    rel_path: &str,
+    out: &mut Vec<QualityIssue>,
+) {
+    use ast_grep_language::LanguageExt;
+
+    let root = rule.lang.ast_grep(content);
+    for m in root.root().find_all(&rule.config.matcher) {
+        let pos = m.start_pos();
+        // `column` is char-based and needs the matched node (O(n) per call).
+        let line = pos.line() as u32 + 1;
+        let column = pos.column(&*m) as u32 + 1;
+        emit_issue(&rule.meta, rel_path, line, column, out);
     }
 }
 
@@ -284,6 +327,12 @@ pub fn run_candidate(rule: &CompiledRule, snippet: &str, virtual_path: &str) -> 
         CompiledRule::Regex(r) => {
             if r.scope.matches_path(&rel_path) {
                 run_regex_rule(r, snippet, &rel_path, &mut out);
+            }
+        }
+        #[cfg(feature = "ast-grep")]
+        CompiledRule::AstGrep(r) => {
+            if r.scope.matches_path(&rel_path) {
+                run_ast_grep_rule(r, snippet, &rel_path, &mut out);
             }
         }
     }
@@ -442,5 +491,110 @@ mod tests {
         assert!(report.issues.is_empty());
 
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+/// Execution tests for the P2 ast-grep structural format via [`run_candidate`].
+/// Only built when the `ast-grep` feature is enabled (CI runs these under
+/// `--all-features`).
+#[cfg(all(test, feature = "ast-grep"))]
+mod ast_grep_tests {
+    use super::*;
+    use crate::{
+        provider::compiled_rule::{compile, RuleDefinition, RuleFormat},
+        rule::RuleType,
+    };
+
+    fn ast_grep_def(rule_id: &str, yaml: &str, languages: &[&str], exts: &[&str]) -> RuleDefinition {
+        RuleDefinition {
+            rule_id: rule_id.to_string(),
+            name: "ast-grep rule".to_string(),
+            rule_format: RuleFormat::AstGrep,
+            pattern: yaml.to_string(),
+            severity: Severity::Major,
+            rule_type: RuleType::CodeSmell,
+            message: "structural match".to_string(),
+            languages: languages.iter().map(|s| s.to_string()).collect(),
+            extensions: exts.iter().map(|s| s.to_string()).collect(),
+            include_globs: vec![],
+            exclude_globs: vec![],
+        }
+    }
+
+    const RUST_UNWRAP_YAML: &str = "id: no-unwrap\nlanguage: rust\nrule:\n  pattern: $A.unwrap()\n";
+    const TS_CONSOLE_YAML: &str =
+        "id: no-console\nlanguage: typescript\nrule:\n  pattern: console.log($$$ARGS)\n";
+
+    #[test]
+    fn rust_unwrap_flags_positive_and_skips_negative() {
+        let def = ast_grep_def("ag-unwrap", RUST_UNWRAP_YAML, &["rust"], &["rs"]);
+        let compiled = compile(&def).expect("compile");
+
+        let positive = run_candidate(
+            &compiled,
+            "fn f(o: Option<i32>) -> i32 { o.unwrap() }\n",
+            "src/main.rs",
+        );
+        assert_eq!(positive.len(), 1, "the .unwrap() call must match once");
+        assert_eq!(positive[0].source, AnalyzerSource::CustomRule);
+        assert_eq!(positive[0].rule_id, "ag-unwrap");
+        assert_eq!(positive[0].line, Some(1));
+
+        let negative = run_candidate(
+            &compiled,
+            "fn f(o: Option<i32>) -> i32 { o.unwrap_or(0) }\n",
+            "src/main.rs",
+        );
+        assert_eq!(
+            negative.len(),
+            0,
+            "unwrap_or is structurally distinct and must not match"
+        );
+    }
+
+    #[test]
+    fn ast_grep_reports_1based_line_and_column() {
+        let def = ast_grep_def("ag-pos", RUST_UNWRAP_YAML, &["rust"], &["rs"]);
+        let compiled = compile(&def).expect("compile");
+        // `.unwrap()` receiver `x` starts on line 3, after two spaces of indent.
+        let snippet = "fn f() {\n    let x = g();\n  x.unwrap();\n}\n";
+        let issues = run_candidate(&compiled, snippet, "src/main.rs");
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].line, Some(3), "1-based line (ast-grep row + 1)");
+        assert_eq!(
+            issues[0].column,
+            Some(3),
+            "1-based column (ast-grep col + 1)"
+        );
+    }
+
+    #[test]
+    fn typescript_console_log_flags_positive_and_skips_negative() {
+        let def = ast_grep_def("ag-console", TS_CONSOLE_YAML, &["typescript"], &["ts"]);
+        let compiled = compile(&def).expect("compile");
+
+        let positive = run_candidate(&compiled, "function f() { console.log(1); }\n", "src/app.ts");
+        assert_eq!(positive.len(), 1, "console.log(...) must match");
+        assert_eq!(positive[0].rule_id, "ag-console");
+
+        let negative = run_candidate(&compiled, "function f() { logger.info(1); }\n", "src/app.ts");
+        assert_eq!(negative.len(), 0, "a different call must not match");
+    }
+
+    #[test]
+    fn ast_grep_honors_extension_scope() {
+        // Rust unwrap rule scoped to .rs only: a .ts virtual path is filtered out
+        // before the (Rust) grammar would even be applied.
+        let def = ast_grep_def("ag-scoped", RUST_UNWRAP_YAML, &["rust"], &["rs"]);
+        let compiled = compile(&def).expect("compile");
+        assert_eq!(
+            run_candidate(&compiled, "fn f(o: Option<i32>){ o.unwrap(); }", "src/x.ts").len(),
+            0,
+            "out-of-extension path must produce zero matches"
+        );
+        assert_eq!(
+            run_candidate(&compiled, "fn f(o: Option<i32>){ o.unwrap(); }", "src/x.rs").len(),
+            1
+        );
     }
 }
