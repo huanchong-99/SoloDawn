@@ -18,6 +18,13 @@ on:
 jobs:
   notify:
     name: Notify SoloDawn API
+    # Skip cleanly when the upstream run carries no real signal (e.g. a
+    # path-filtered Docker Build Check on a PR that touches no docker paths).
+    # A 'skipped' top-level conclusion is never produced by a real failure
+    # (those are failure/cancelled/timed_out), and the consumer only logs the
+    # conclusion, so notifying for it is pure waste. Notification-only,
+    # non-required workflow — this changes no gating.
+    if: ${{ github.event.workflow_run.conclusion != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
 

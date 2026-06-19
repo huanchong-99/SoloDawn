@@ -161,15 +161,26 @@ async fn test_find_all_presets_is_capped() {
     let pool = &deployment.db().pool;
     let test_run = Uuid::new_v4().simple().to_string();
 
+    // Insert 510 presets (must exceed the 500 cap) inside a single transaction.
+    // Batching collapses 510 per-row pool-acquire/commit round-trips into one
+    // commit; row count, uniqueness, and is_system=0 match SlashCommandPreset::create.
+    let mut tx = pool.begin().await.expect("Failed to begin transaction");
     for idx in 0..510 {
-        create_test_preset(
-            pool,
-            &format!("/limit-cmd-{test_run}-{idx:03}"),
-            "Bounded list test preset",
-            "Template",
+        sqlx::query(
+            r"
+            INSERT INTO slash_command_preset (id, command, description, prompt_template, is_system)
+            VALUES (?1, ?2, ?3, ?4, 0)
+            ",
         )
-        .await;
+        .bind(Uuid::new_v4().to_string())
+        .bind(format!("/limit-cmd-{test_run}-{idx:03}"))
+        .bind("Bounded list test preset")
+        .bind("Template")
+        .execute(&mut *tx)
+        .await
+        .expect("Failed to insert test preset");
     }
+    tx.commit().await.expect("Failed to commit transaction");
 
     let all = SlashCommandPreset::find_all(pool)
         .await

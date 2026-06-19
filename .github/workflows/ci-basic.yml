@@ -57,6 +57,17 @@ jobs:
     if: ${{ needs.changes.outputs.backend == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Single source of truth for the crate selection shared by the prime,
+    # clippy, and nextest steps. Keeping it in one place prevents the three
+    # steps from silently diverging (e.g. adding a crate or dropping the tray
+    # exclusion in only one place), which would let nextest test a crate clippy
+    # never linted, or vice-versa. NOTE: this only unifies *crate selection* —
+    # the target-scope flags deliberately differ per step (prime `--tests`,
+    # clippy `--all-targets`, nextest `--lib`) and so do feature flags (clippy
+    # uniquely passes `--all-features`); those intentional differences are left
+    # untouched here.
+    env:
+      CARGO_SELECT: --workspace --exclude solodawn-tray
 
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -73,10 +84,10 @@ jobs:
     # no incremental) so clippy and nextest can share the same build
     # artifacts instead of rebuilding twice.
     - name: Prime build artifacts (shared by clippy + nextest)
-      run: cargo build --workspace --exclude solodawn-tray --profile ci --tests --quiet
+      run: cargo build $CARGO_SELECT --profile ci --tests --quiet
 
     - name: Run cargo clippy
-      run: cargo clippy --workspace --exclude solodawn-tray --all-targets --all-features --profile ci -- -D warnings
+      run: cargo clippy $CARGO_SELECT --all-targets --all-features --profile ci -- -D warnings
 
     # Performance: removed `--test-threads=1`. The original single-threaded
     # setting was an extremely broad hammer that forced the entire test
@@ -95,7 +106,7 @@ jobs:
       # win). NOTE: nextest's `--profile` is its own run-config profile (from
       # .config/nextest.toml), NOT a Cargo profile — there is no `ci` nextest
       # profile, so `--profile ci` errored with "profile `ci` not found".
-      run: cargo nextest run --workspace --exclude solodawn-tray --cargo-profile ci --lib
+      run: cargo nextest run $CARGO_SELECT --cargo-profile ci --lib
 
     - name: Check generated types are up-to-date
       run: cargo run --bin generate_types --profile ci -- --check
