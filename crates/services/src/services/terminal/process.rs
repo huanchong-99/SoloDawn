@@ -458,7 +458,21 @@ impl ProcessManager {
         };
 
         match kill_result {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                // Reap the just-killed child so it does not linger as a zombie
+                // (Unix) holding a PID slot — self.kill already waited for it to
+                // die, so try_wait resolves almost immediately. Bounded so a
+                // child that somehow refuses to die can never hang teardown.
+                for _ in 0..50 {
+                    match tracked.child.try_wait() {
+                        Ok(Some(_)) | Err(_) => break,
+                        Ok(None) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        }
+                    }
+                }
+                Ok(())
+            }
             Err(kill_error) => {
                 let exited_already = matches!(tracked.child.try_wait(), Ok(Some(_)));
                 if exited_already {
@@ -2560,7 +2574,13 @@ mod tests {
             "EOF terminal must be removed from the process map"
         );
 
-        // Crucially: the child must have been killed, not orphaned.
+        // Crucially: the child must have been killed, not orphaned. is_running
+        // reaps the child it kills, so pid_is_alive becomes false; poll a short
+        // deadline to absorb any kill/reap propagation latency on a loaded runner.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while pid_is_alive(pid) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         assert!(
             !pid_is_alive(pid),
             "is_running must terminate the EOF-but-alive child rather than orphan it"
