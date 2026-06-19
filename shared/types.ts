@@ -914,7 +914,7 @@ project_key: string,
  */
 token: string | null, };
 
-export type MetricKey = "cargo_check_errors" | "clippy_warnings" | "clippy_errors" | "fmt_violations" | "rust_test_failures" | "eslint_errors" | "eslint_warnings" | "tsc_errors" | "frontend_test_failures" | "frontend_test_deps_missing" | "test_failures" | "test_coverage" | "bugs" | "new_bugs" | "code_smells" | "vulnerabilities" | "duplicated_lines_density" | "security_issues" | "redos_risks" | "generate_types_check_failures" | "prepare_db_check_failures" | "sonar_quality_gate_status" | "sonar_issues" | "sonar_blocker_issues" | "sonar_critical_issues" | "builtin_rust_issues" | "builtin_rust_critical" | "rust_cyclomatic_complexity" | "rust_cognitive_complexity" | "builtin_frontend_issues" | "builtin_frontend_critical" | "builtin_common_issues" | "duplicated_blocks" | "secrets_detected" | "line_coverage" | "branch_coverage" | "test_file_absence" | "todo_density" | "stub_test_count" | "coverage_exclusion_issues" | "test_authenticity_issues" | "project_convention_issues" | "runtime_security_smells";
+export type MetricKey = "cargo_check_errors" | "clippy_warnings" | "clippy_errors" | "fmt_violations" | "rust_test_failures" | "eslint_errors" | "eslint_warnings" | "tsc_errors" | "frontend_test_failures" | "frontend_test_deps_missing" | "test_failures" | "test_coverage" | "bugs" | "new_bugs" | "code_smells" | "vulnerabilities" | "duplicated_lines_density" | "security_issues" | "redos_risks" | "generate_types_check_failures" | "prepare_db_check_failures" | "sonar_quality_gate_status" | "sonar_issues" | "sonar_blocker_issues" | "sonar_critical_issues" | "builtin_rust_issues" | "builtin_rust_critical" | "rust_cyclomatic_complexity" | "rust_cognitive_complexity" | "builtin_frontend_issues" | "builtin_frontend_critical" | "builtin_common_issues" | "duplicated_blocks" | "secrets_detected" | "custom_rule_violations" | "custom_rule_critical" | "line_coverage" | "branch_coverage" | "test_file_absence" | "todo_density" | "stub_test_count" | "coverage_exclusion_issues" | "test_authenticity_issues" | "project_convention_issues" | "runtime_security_smells";
 
 export type Operator = "GT" | "LT";
 
@@ -936,7 +936,362 @@ metrics: Array<MetricKey>,
 /**
  * Supported condition operators: `["GT", "LT"]`.
  */
-operators: Array<string>, };
+operators: Array<string>, 
+/**
+ * Self-documenting tooltip catalog: one entry per selectable metric (D7 /
+ * PRD §7.1). A static compiled table — safe to cache (`staleTime` 1h).
+ */
+info: Array<MetricInfo>, };
+
+export type MeasureValue = { "Int": bigint } | { "Float": number } | { "String": string } | "None";
+
+export type MetricInfo = { 
+/**
+ * The metric this entry documents.
+ */
+key: MetricKey, 
+/**
+ * Human-readable name (mirrors `MetricKey::display_name()`).
+ */
+displayName: string, 
+/**
+ * What the metric measures, in plain language.
+ */
+description: string, 
+/**
+ * A concrete example of what it counts/flags.
+ */
+example: string, 
+/**
+ * `true` when a higher value is worse (counts); `false` for coverage-style
+ * metrics where higher is better.
+ */
+higherIsWorse: boolean, };
+
+export type ProjectMetricSnapshot = { 
+/**
+ * `MetricKey` -> the metric's measured value at the latest run.
+ */
+values: { [key in MetricKey]?: MeasureValue }, 
+/**
+ * The `quality_run.id` the snapshot came from (null = no run yet).
+ */
+runId: string | null, 
+/**
+ * When that run completed/was created (RFC3339; null = no run yet).
+ */
+ranAt: string | null, };
+
+export type CustomRule = { id: string, 
+/**
+ * NULL = global/org rule (schema-allowed; v1 UI requires non-null, D4).
+ */
+projectId: string | null, name: string, 
+/**
+ * Original NL ask (round-trip compare + reproducibility).
+ */
+nlRequest: string, 
+/**
+ * `regex` (P1) | `ast_grep` (P2).
+ */
+ruleFormat: string, 
+/**
+ * Scoped-regex JSON (P1) or ast-grep YAML (P2).
+ */
+ruleBody: string, 
+/**
+ * LLM-generated text powering the "!" tooltip.
+ */
+description: string | null, 
+/**
+ * Bug | Vulnerability | CodeSmell | SecurityHotspot.
+ */
+ruleType: string, 
+/**
+ * INFO | MINOR | MAJOR | CRITICAL | BLOCKER.
+ */
+severity: string, 
+/**
+ * `MetricKey::as_str()` token; free text, NOT an FK.
+ */
+mappedMetric: string | null, enabled: boolean, 
+/**
+ * draft | shadow | warn | enforce | disabled.
+ */
+status: string, createdBy: string | null, version: bigint, createdAt: string, updatedAt: string, };
+
+export type CreateCustomRule = { projectId: string | null, name: string, nlRequest: string, ruleFormat: string, ruleBody: string, description: string | null, ruleType: string, severity: string, mappedMetric: string | null, createdBy: string | null, };
+
+export type UpdateCustomRule = { name: string, nlRequest: string, ruleFormat: string, ruleBody: string, description: string | null, ruleType: string, severity: string, mappedMetric: string | null, };
+
+export type CustomRuleValidation = { id: string, ruleId: string, ruleVersion: bigint, 
+/**
+ * pass | fail | error | pending.
+ */
+verdict: string, 
+/**
+ * Judge verdict on reconstructed-NL vs original (NULL until run).
+ */
+roundtripOk: boolean | null, 
+/**
+ * `AuditScoreResult`-style total.
+ */
+judgeScore: number | null, examplesTotal: bigint, examplesPassed: bigint, roundsUsed: bigint, 
+/**
+ * Per-example {example_id, expected, actual, matched_spans}; + adversary transcript.
+ */
+resultsJson: string | null, errorMessage: string | null, validatedBy: string | null, createdAt: string, };
+
+export type CreateCustomRuleValidation = { ruleId: string, ruleVersion: bigint, verdict: string, roundtripOk: boolean | null, judgeScore: number | null, examplesTotal: bigint, examplesPassed: bigint, roundsUsed: bigint, resultsJson: string | null, errorMessage: string | null, validatedBy: string | null, };
+
+export type CustomRuleExample = { id: string, ruleId: string, 
+/**
+ * positive (SHOULD flag) | negative (MUST NOT flag).
+ */
+kind: string, 
+/**
+ * 'rust', 'typescript', NULL = agnostic.
+ */
+language: string | null, snippet: string, 
+/**
+ * 1 = rule expected to fire on this snippet.
+ */
+expectedMatch: boolean, note: string | null, createdAt: string, };
+
+export type CreateCustomRuleExample = { ruleId: string, kind: string, language: string | null, snippet: string, expectedMatch: boolean, note: string | null, };
+
+export type CustomRuleAudit = { id: string, ruleId: string, projectId: string | null, 
+/**
+ * create | update | enable | disable | delete | revalidate | promote.
+ */
+action: string, actor: string | null, fromVersion: bigint | null, toVersion: bigint | null, diffJson: string | null, createdAt: string, };
+
+export type CreateCustomRuleAudit = { ruleId: string, projectId: string | null, action: string, actor: string | null, fromVersion: bigint | null, toVersion: bigint | null, diffJson: string | null, };
+
+export type RuleFormat = "regex" | "ast_grep";
+
+export type RuleExample = { 
+/**
+ * `"positive"` (should flag) or `"negative"` (must not flag).
+ */
+kind: ExampleKind, 
+/**
+ * Source language hint (`"rust"`, `"typescript"`, or `None` = agnostic).
+ */
+language: string | null, 
+/**
+ * The code snippet to run the candidate rule against.
+ */
+snippet: string, 
+/**
+ * Optional human note describing why this example matters.
+ */
+note: string | null, };
+
+export type ExampleKind = "positive" | "negative";
+
+export type ExampleResult = { 
+/**
+ * `"positive"` / `"negative"`.
+ */
+kind: ExampleKind, 
+/**
+ * The snippet that was run.
+ */
+snippet: string, 
+/**
+ * Whether the rule was expected to fire.
+ */
+expectedMatch: boolean, 
+/**
+ * Whether the rule actually fired (match count > 0).
+ */
+actualMatch: boolean, 
+/**
+ * Number of matches produced.
+ */
+matchCount: number, 
+/**
+ * Whether this example passed (`expected_match == actual_match`).
+ */
+passed: boolean, };
+
+export type EmpiricalReport = { 
+/**
+ * Did the candidate compile at all?
+ */
+compiled: boolean, 
+/**
+ * Compile error, if compilation failed (forces a re-loop).
+ */
+compileError: string | null, 
+/**
+ * One result per example.
+ */
+perExample: Array<ExampleResult>, 
+/**
+ * Total examples run.
+ */
+total: number, 
+/**
+ * Examples that passed.
+ */
+passed: number, };
+
+export type RoundTripVerdict = { 
+/**
+ * Whether the reconstructed intent matches the original request.
+ */
+matches: boolean, 
+/**
+ * Human-readable rationale for the verdict.
+ */
+reason: string, 
+/**
+ * The context-free interpreter's reconstruction (step 5 output).
+ */
+reconstructedRequest: string, 
+/**
+ * The judge's `AuditScoreResult`-style total (0-100).
+ */
+judgeScore: number, };
+
+export type AuthoringBackend = "metered" | "subscription";
+
+export type CustomRuleInput = { 
+/**
+ * The original natural-language ask (kept for round-trip/reproducibility).
+ * Optional on a manual create; defaults to the rule name when omitted.
+ */
+nlRequest: string | null, 
+/**
+ * `regex` (P1) | `ast_grep` (P2).
+ */
+ruleFormat: string, 
+/**
+ * The matcher body (a Rust-`regex` pattern for `regex`). Accepts the alias
+ * `pattern`.
+ */
+ruleBody: string, 
+/**
+ * Short human-readable rule name.
+ */
+name: string, 
+/**
+ * Plain-language description powering the "!" tooltip.
+ */
+description: string | null, 
+/**
+ * Message attached to every match.
+ */
+message: string, 
+/**
+ * Bug | Vulnerability | CodeSmell | SecurityHotspot.
+ */
+ruleType: string, 
+/**
+ * INFO | MINOR | MAJOR | CRITICAL | BLOCKER.
+ */
+severity: string, 
+/**
+ * Target languages (informational/provenance).
+ */
+languages: Array<string>, 
+/**
+ * File extensions (no leading dot) the rule applies to.
+ */
+extensions: Array<string>, 
+/**
+ * Include globs (empty = all files).
+ */
+includeGlobs: Array<string>, 
+/**
+ * Exclude globs.
+ */
+excludeGlobs: Array<string>, 
+/**
+ * Optional `MetricKey::as_str()` token this rule's count maps to.
+ */
+mappedMetric: string | null, 
+/**
+ * Positive (MUST flag) + negative (MUST NOT flag) fixtures.
+ */
+examples: Array<RuleExample>, };
+
+export type FailingExample = { 
+/**
+ * `positive` / `negative`.
+ */
+kind: string, 
+/**
+ * The snippet that failed expectations.
+ */
+snippet: string, 
+/**
+ * Whether the rule was expected to fire.
+ */
+expectedMatch: boolean, 
+/**
+ * Whether it actually fired.
+ */
+actualMatch: boolean, };
+
+export type CustomRuleDraft = { ruleFormat: RuleFormat, ruleBody: string, name: string, description: string, message: string, ruleType: string, severity: string, mappedMetric: string | null, };
+
+export type AdversaryTranscript = { 
+/**
+ * Proposer-side notes (currently the final candidate's description; the
+ * proposer does not emit separate notes in P1).
+ */
+proposerNotes: string, 
+/**
+ * Every round's adversary critique, in order.
+ */
+attackerFindings: Array<string>, 
+/**
+ * How many revision rounds ran (rounds beyond the first).
+ */
+revisions: number, };
+
+export type AuthorEngine = { modelConfigId: string, backend: AuthoringBackend, };
+
+export type AuthorRuleResult = { candidate: CustomRuleDraft, 
+/**
+ * 2-3 positive + 2-3 negative fixtures the candidate carries.
+ */
+examples: Array<RuleExample>, empirical: EmpiricalReport, debate: AdversaryTranscript, roundTrip: RoundTripVerdict, 
+/**
+ * `passed` | `capped_out`.
+ */
+outcome: string, roundsUsed: number, engine: AuthorEngine, };
+
+export type AuthorRuleRequest = { 
+/**
+ * The natural-language ask ("prohibit X").
+ */
+nlRequest: string, 
+/**
+ * The user-selected model source (from the reused picker).
+ */
+modelConfigId: string, 
+/**
+ * Maps the source to its CLI roster.
+ */
+cliTypeId: string, 
+/**
+ * `regex` (honoured in P1) | `ast_grep` (P2). Informational in P1.
+ */
+ruleFormatPreference: string | null, 
+/**
+ * The live editor conditions, serialized as context for the proposer.
+ */
+currentRulesContext: JsonValue | null, };
+
+export type StatusUpdate = { 
+/**
+ * draft | shadow | warn | enforce | disabled.
+ */
+status: string, };
 
 export const DEFAULT_PR_DESCRIPTION_PROMPT = `Update the PR that was just created with a better title and description.
 The PR number is #{pr_number} and the URL is {pr_url}.
