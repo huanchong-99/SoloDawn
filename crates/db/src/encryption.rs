@@ -102,6 +102,8 @@ pub fn get_or_create_file_key() -> anyhow::Result<[u8; 32]> {
         })?;
         parse_key(contents.trim_end_matches(['\r', '\n']))?
     } else {
+        use std::io::Write;
+
         let generated = generate_ascii_key();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
@@ -111,18 +113,43 @@ pub fn get_or_create_file_key() -> anyhow::Result<[u8; 32]> {
                 )
             })?;
         }
-        std::fs::write(&path, generated.as_bytes()).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to write encryption key file {}: {e}",
-                path.display()
-            )
-        })?;
-        restrict_key_file_permissions(&path);
-        tracing::warn!(
-            path = %path.display(),
-            "{ENCRYPTION_KEY_ENV} not set; generated a persistent per-machine encryption key file"
-        );
-        parse_key(&generated)?
+        // Atomic generate-once: create_new(true) fails with AlreadyExists if a
+        // concurrent process won the race, so we never truncate a key another
+        // process already wrote (and may have encrypted blobs under).
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut f) => {
+                f.write_all(generated.as_bytes()).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to write encryption key file {}: {e}",
+                        path.display()
+                    )
+                })?;
+                drop(f);
+                restrict_key_file_permissions(&path);
+                tracing::warn!(
+                    path = %path.display(),
+                    "{ENCRYPTION_KEY_ENV} not set; generated a persistent per-machine encryption key file"
+                );
+                parse_key(&generated)?
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Lost the create race: read the winner's key so both processes converge.
+                let contents = std::fs::read_to_string(&path).map_err(|e| {
+                    anyhow::anyhow!("Failed to read encryption key file {}: {e}", path.display())
+                })?;
+                parse_key(contents.trim_end_matches(['\r', '\n']))?
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Failed to write encryption key file {}: {e}",
+                    path.display()
+                ));
+            }
+        }
     };
 
     if !override_set {

@@ -1,0 +1,37 @@
+# cargo-nextest run configuration.
+# This file did not exist before; nextest previously ran on built-in defaults.
+# CI invokes `cargo nextest run --cargo-profile ci` (a CARGO profile, see
+# Cargo.toml [profile.ci]) and passes NO nextest `--profile` flag, so the active
+# nextest run-profile is `default`. (There is intentionally no `ci` nextest
+# run-profile — see the note in .github/workflows/ci-basic.yml.)
+
+[profile.default]
+# A hung test (deadlocked tokio task, blocked recv, runaway loop) is WARNED at
+# 60s and KILLED at 180s (3 x 60s) with a clear per-test timeout signal, instead
+# of silently consuming the 45-min job budget and getting cancelled with no
+# indication of which test hung. The heaviest --lib tests bound themselves to
+# short waits (slowest real lib sleep ~1.1s; largest test-side wait cap is
+# Duration::from_secs(3)); every multi-second 90s/120s wait lives in tests/
+# integration files that `--lib` excludes. So 60s is ~160x the real per-test
+# cost and cannot kill a legitimately-passing lib test.
+slow-timeout = { period = "60s", terminate-after = 3 }
+
+# Default leak-timeout is 200ms; bump to 500ms so a test that spawns a child
+# process / background tokio task slow to drop its stdout handle on a loaded CI
+# runner is not falsely flagged as leaking. Leak detection still runs.
+leak-timeout = "500ms"
+
+# Re-print every failed AND every slow test in the end-of-run summary so a
+# scrollback-buried failure on a busy CI log is impossible to miss; 'slow'
+# surfaces tests approaching the 60s warn line as an early flake/perf signal.
+# Reporting-only: does not change pass/fail, exit codes, or retries.
+final-status-level = "slow"
+
+# Explicit: the CI gate does NOT auto-retry. Retries can MASK flaky failures by
+# turning them green (this is also the nextest default). Stated so nobody later
+# adds blanket retries to hide flakiness instead of fixing it.
+retries = 0
+
+# Keep per-failure detail inline and immediate (the nextest default, pinned for
+# clarity); do not suppress stdout/stderr of failing tests.
+failure-output = "immediate"

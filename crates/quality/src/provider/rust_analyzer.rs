@@ -276,8 +276,9 @@ impl QualityProvider for RustProvider {
                             .metrics
                             .insert(MetricKey::CargoCheckErrors, MeasureValue::Int(-1));
                     } else {
-                        let errors =
-                            out.stderr.lines().filter(|l| l.contains("error[")).count() as i64;
+                        // --message-format=json emits diagnostics (incl. error[E0xxx])
+                        // on STDOUT, not stderr; parse the JSON to count rustc errors.
+                        let (_issues, _warnings, errors) = Self::parse_clippy_output(&out.stdout);
                         report
                             .metrics
                             .insert(MetricKey::CargoCheckErrors, MeasureValue::Int(errors));

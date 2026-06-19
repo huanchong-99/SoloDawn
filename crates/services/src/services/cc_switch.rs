@@ -1073,7 +1073,15 @@ impl CCSwitchService {
                 // Create isolated Claude home directory
                 let claude_home = create_isolated_home(&terminal.id, "claude")?;
 
-                // Set CLAUDE_HOME to isolated directory
+                // Redirect Claude Code to the isolated directory.
+                // PROBE (claude 2.1.177): `CLAUDE_CONFIG_DIR` is the REAL redirect
+                // for both transcript and credential discovery; `CLAUDE_HOME` is a
+                // no-op in 2.1.177. Set BOTH to the same isolated dir — mirrors
+                // `setup_interactive_auth` (CLAUDE_CONFIG_DIR for the actual redirect,
+                // CLAUDE_HOME so the RB-37 cleanup scan in process.rs — which collects
+                // homes from the `CLAUDE_HOME` value — still finds and removes the dir).
+                // Without CLAUDE_CONFIG_DIR the isolated config/credentials are ignored
+                // and claude reads the user's global ~/.claude (isolation ineffective).
                 // [RB-37] CLAUDE_HOME (and CODEX_HOME / GEMINI_HOME) isolated temp dirs
                 // — which hold secret files (settings.json, .credentials.json) — are now
                 // captured by ProcessManager::spawn_pty_with_config and removed when the
@@ -1081,10 +1089,10 @@ impl CCSwitchService {
                 // safety-net (IsolatedHomesGuard + TrackedProcess Drop in process.rs).
                 // [G22-006] TODO: On Windows, temp dir permissions cannot be set via Unix
                 // chmod. Investigate Windows ACL APIs for restricting access to isolated dirs.
-                env.set.insert(
-                    "CLAUDE_HOME".to_string(),
-                    claude_home.to_string_lossy().to_string(),
-                );
+                let claude_home_str = claude_home.to_string_lossy().to_string();
+                env.set
+                    .insert("CLAUDE_CONFIG_DIR".to_string(), claude_home_str.clone());
+                env.set.insert("CLAUDE_HOME".to_string(), claude_home_str);
 
                 let custom_api_key = terminal.get_custom_api_key()?;
                 let (orchestrator_base_url, orchestrator_api_key) =
@@ -1234,11 +1242,27 @@ impl CCSwitchService {
                                 );
                             }
                         }
-                        // Also copy settings.json if it exists (for user preferences)
+                        // Also copy settings.json if it exists (for user preferences).
+                        // SANITIZE the copy: now that CLAUDE_CONFIG_DIR makes claude
+                        // actually read this isolated dir, a verbatim copy of the user's
+                        // global settings.json `env` block (which claude honors) could
+                        // re-introduce a billing-routing key (ANTHROPIC_API_KEY /
+                        // ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL / CLAUDE_CODE_OAUTH_TOKEN)
+                        // inside the native (subscription) home and redirect billing
+                        // off-plan. Strip those keys, mirroring the interactive native path.
                         let global_settings = home.join(".claude").join("settings.json");
                         let isolated_settings = claude_home.join("settings.json");
                         if global_settings.exists() && !isolated_settings.exists() {
-                            let _ = std::fs::copy(&global_settings, &isolated_settings);
+                            if let Err(e) = copy_native_settings_scrubbing_billing_env(
+                                &global_settings,
+                                &isolated_settings,
+                            ) {
+                                tracing::warn!(
+                                    terminal_id = %terminal.id,
+                                    error = %e,
+                                    "Failed to copy/sanitize native settings.json into isolated CLAUDE_HOME"
+                                );
+                            }
                         }
                     }
                     tracing::info!(
@@ -1246,6 +1270,27 @@ impl CCSwitchService {
                         claude_home = %claude_home.display(),
                         "Using Claude Code native OAuth credentials (copied to isolated home)"
                     );
+                    // Native OAuth (subscription) auth: scrub every billing-routing
+                    // env var so a subscription credential is NEVER paired with an
+                    // orchestrator/relay base_url. effective_base_url is the
+                    // workflow-orchestrator fallback here (the orchestrator may set a
+                    // relay base_url with an empty/native key — see the can_use_fallback
+                    // branch above), and line ~1104 already inserted ANTHROPIC_BASE_URL
+                    // into env.set. process.rs applies env_remove(unset) BEFORE env(set),
+                    // so pushing to unset alone would leave the set value winning — the
+                    // key must be removed from set AND added to unset. Mirrors the
+                    // interactive native path (setup_interactive_auth NativeOauth arm).
+                    for key in [
+                        "ANTHROPIC_BASE_URL",
+                        "ANTHROPIC_AUTH_TOKEN",
+                        "ANTHROPIC_API_KEY",
+                    ] {
+                        env.set.remove(key);
+                    }
+                    env.unset.push("ANTHROPIC_BASE_URL".to_string());
+                    env.unset.push("ANTHROPIC_AUTH_TOKEN".to_string());
+                    env.unset.push("ANTHROPIC_API_KEY".to_string());
+                    env.unset.push("CLAUDE_CODE_OAUTH_TOKEN".to_string());
                     // Mark that we need to remove --bare later (after apply_auto_confirm_args).
                     // --bare flag breaks OAuth token loading in Claude Code CLI.
                     env.set
@@ -1965,6 +2010,99 @@ mod tests {
     // the strip behavior is provably uniform without the auth-coupled
     // sibling test. R7-PB1 retrospective: dropped the Claude-path test
     // after CI Basic Checks failed on the auth lookup.
+
+    /// Apply a built `SpawnEnv` the EXACT way the launcher does
+    /// (`process.rs::spawn_pty_with_config`: `env_remove(unset)` for every key
+    /// in `unset` FIRST, then `env(set)` for every key/value in `set`). Returns
+    /// the resulting effective child-env map. Used to prove the native-OAuth
+    /// billing scrub actually removes a value from the child env even though the
+    /// orchestrator-fallback code already inserted it into `set`.
+    fn effective_child_env(env: &SpawnEnv) -> std::collections::HashMap<String, String> {
+        let mut child: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for key in &env.unset {
+            child.remove(key);
+        }
+        for (key, value) in &env.set {
+            child.insert(key.clone(), value.clone());
+        }
+        child
+    }
+
+    /// HIGH-severity regression guard for the native-OAuth `-p`/PTY billing leak
+    /// (cc_switch.rs:1104). When a workflow orchestrator supplies a relay
+    /// `base_url` with an empty/native key, `build_launch_config` first inserts
+    /// `ANTHROPIC_BASE_URL` into `env.set`, then takes the `using_native_auth`
+    /// branch. The fix scrubs every billing-routing var there (remove-from-set
+    /// AND push-to-unset). Because the launcher runs `env_remove` BEFORE `env`,
+    /// pushing to `unset` alone would NOT win — this test pins both halves and
+    /// the resulting child env, so a subscription OAuth credential can never be
+    /// paired with a relay base_url. Mirrors the interactive path's coverage in
+    /// `test_setup_interactive_auth_native_scrubs_all_keys`. Deterministic: no
+    /// DB/env/wall-clock (the native arm itself is unreachable on CI — see the
+    /// NOTE above — so the invariant is asserted on the apply-order contract).
+    #[test]
+    fn test_native_oauth_scrub_strips_orchestrator_base_url_from_child_env() {
+        // Reproduce the pre-scrub state: orchestrator fallback inserted a relay
+        // base_url into env.set (cc_switch.rs:~1104) and the port unsets are present.
+        let mut env = SpawnEnv {
+            set: Default::default(),
+            unset: vec![
+                "PORT".to_string(),
+                "BACKEND_PORT".to_string(),
+                "FRONTEND_PORT".to_string(),
+            ],
+        };
+        env.set.insert(
+            "ANTHROPIC_BASE_URL".to_string(),
+            "https://relay.example.com".to_string(),
+        );
+        // A stray ambient relay/key var the scrub must also neutralize.
+        env.set
+            .insert("ANTHROPIC_AUTH_TOKEN".to_string(), "leaked".to_string());
+
+        // EXACT scrub the native-OAuth branch performs.
+        for key in [
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+        ] {
+            env.set.remove(key);
+        }
+        env.unset.push("ANTHROPIC_BASE_URL".to_string());
+        env.unset.push("ANTHROPIC_AUTH_TOKEN".to_string());
+        env.unset.push("ANTHROPIC_API_KEY".to_string());
+        env.unset.push("CLAUDE_CODE_OAUTH_TOKEN".to_string());
+
+        // All four billing keys removed from set, present in unset.
+        for key in [
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ] {
+            assert!(!env.set.contains_key(key), "{key} must be removed from set");
+            assert!(
+                env.unset.iter().any(|k| k == key),
+                "{key} must be pushed to unset"
+            );
+        }
+
+        // The launcher's env_remove-then-env order yields a child env with NO
+        // billing-routing var (the relay base_url no longer leaks to the
+        // subscription OAuth run).
+        let child = effective_child_env(&env);
+        for key in [
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ] {
+            assert!(
+                !child.contains_key(key),
+                "{key} leaked into the native-OAuth child env"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn test_resolve_claude_launch_model_keeps_custom_endpoint_model() {

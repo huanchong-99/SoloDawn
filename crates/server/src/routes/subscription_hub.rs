@@ -122,10 +122,22 @@ impl SubscriptionHub {
         let sender_opt = senders.get(workflow_id).cloned();
         match sender_opt {
             Some(sender) if sender.receiver_count() > 0 => {
-                // Drop the senders lock before delivering — broadcast::send is
-                // non-blocking, but we avoid holding the shared lock across it.
-                drop(senders);
-                sender.send(event)
+                // Deliver under the read lock; on Err the last receiver vanished
+                // between the count check and send — cache for replay before
+                // releasing, mirroring the no-receiver arm (E30-11 invariant:
+                // senders -> pending_events, do NOT drop(senders) before caching).
+                match sender.send(event) {
+                    Ok(n) => {
+                        drop(senders);
+                        Ok(n)
+                    }
+                    Err(broadcast::error::SendError(event)) => {
+                        self.cache_pending_event_locked(workflow_id, event.clone())
+                            .await;
+                        drop(senders);
+                        Err(broadcast::error::SendError(event))
+                    }
+                }
             }
             _ => {
                 // No sender or no receivers: cache the event while still holding

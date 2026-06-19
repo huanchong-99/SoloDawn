@@ -61,22 +61,24 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
     },
-    // Performance: use 'forks' pool (one process per CPU core) instead of the
-    // default 'threads'. With jsdom + React Testing Library, the dominant cost
-    // is per-file setup; forks give better isolation and let many files run
-    // in parallel without contention. `singleThread: false` means each worker
-    // still runs multiple files sequentially within its own process.
+    // Performance: use the 'threads' pool (worker_threads) rather than 'forks'
+    // (child processes). With jsdom + React Testing Library the suite is bound
+    // by per-file fixed startup cost across many small files, not by CPU
+    // contention; worker threads have a lower per-file startup tax than forked
+    // processes, so threads is measurably faster here (~24.6s -> ~22.6s local).
+    // `singleThread: false` means each worker still runs multiple files
+    // sequentially within itself.
     //
     // Quality guarantee: the exact same test files run, with the same
     // environment and setup. Only the *scheduling* changes.
-    pool: 'forks',
+    pool: 'threads',
     poolOptions: {
-      forks: {
+      threads: {
         // Default is min(available CPUs, 16). Keep it explicit so CI runners
         // (2-core GitHub Actions) and local dev both get sensible parallelism.
         // `availableParallelism()` may not exist on older Node; fall back to 4.
-        maxForks: Math.max(2, (os.availableParallelism?.() ?? 4) - 1),
-        singleFork: false,
+        maxThreads: Math.max(2, (os.availableParallelism?.() ?? 4) - 1),
+        singleThread: false,
       },
     },
   },

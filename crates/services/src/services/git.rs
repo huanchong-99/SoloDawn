@@ -946,7 +946,22 @@ impl GitService {
         .into_reference();
         let remote = Self::get_remote_from_branch_ref(&repo, &base_branch_ref)?;
         Self::fetch_all_from_remote(&repo, &remote)?;
-        Self::get_branch_status_inner(&repo, &branch_ref, &base_branch_ref)
+        // Refs were captured before the fetch; the fetch only rewrote refs on disk
+        // (git2 Reference::target() returns a cached OID, no disk re-read), so
+        // re-resolve the base from disk to compare against the freshly-fetched
+        // remote state. branch_ref is a local/never-fetched ref so its cached
+        // target() is fine; only base_branch_ref (the remote-tracking ref the
+        // fetch advances) needs re-resolution.
+        let base_oid = repo.refname_to_id(base_branch_ref.name().ok_or_else(|| {
+            GitServiceError::InvalidRepository("Invalid base branch ref".into())
+        })?)?;
+        let (ahead, behind) = repo.graph_ahead_behind(
+            branch_ref.target().ok_or(GitServiceError::BranchNotFound(
+                "Branch not found".to_string(),
+            ))?,
+            base_oid,
+        )?;
+        Ok((ahead, behind))
     }
 
     pub fn is_worktree_clean(&self, worktree_path: &Path) -> Result<bool, GitServiceError> {

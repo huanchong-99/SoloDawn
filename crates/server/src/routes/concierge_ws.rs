@@ -42,8 +42,16 @@ async fn concierge_ws_handler(
     Extension(concierge): Extension<Arc<ConciergeAgent>>,
     Extension(broadcaster): Extension<Arc<ConciergeBroadcaster>>,
     Path(session_id): Path<String>,
+    headers: axum::http::HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, ApiError> {
+    // SEC-003: Validate the Origin header before upgrading to prevent
+    // Cross-Site WebSocket Hijacking, matching terminal_ws/workflow_ws. In dev
+    // (SOLODAWN_CORS_ORIGINS unset) `validate_ws_origin` no-ops by design.
+    if let Err((_status, msg)) = super::ws_origin::validate_ws_origin(&headers) {
+        return Err(ApiError::Forbidden(msg));
+    }
+
     // Verify session exists
     let pool = &deployment.db().pool;
     let _session = db::models::concierge::ConciergeSession::find_by_id(pool, &session_id)

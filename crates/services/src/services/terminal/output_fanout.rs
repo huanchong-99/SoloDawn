@@ -159,12 +159,17 @@ impl OutputFanout {
     pub fn subscribe(&self, from_seq: Option<u64>) -> OutputSubscription {
         let rx = self.tx.subscribe();
         let mut replay = VecDeque::new();
-        let mut last_seq = from_seq.unwrap_or(0);
 
         let inner = match self.inner.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
+        // Clamp the resume point against what the fanout has actually emitted.
+        // The seq space resets to 0 across a same-terminal_id restart (a fresh
+        // OutputFanout is built on respawn), so a stale-high client `from_seq`
+        // would otherwise cause recv() to discard every chunk of the new stream.
+        // Treat an out-of-range value as full replay (strictly more permissive).
+        let mut last_seq = from_seq.filter(|s| *s <= inner.next_seq).unwrap_or(0);
         for chunk in &inner.replay {
             if chunk.seq > last_seq {
                 replay.push_back(chunk.clone());

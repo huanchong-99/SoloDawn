@@ -29,12 +29,10 @@ impl ReconnectPolicy {
             base_secs.saturating_mul(1u64.checked_shl(self.attempt).unwrap_or(u64::MAX));
         let capped_secs = backoff_secs.min(MAX_BACKOFF_SECS);
         let base_ms = capped_secs * 1000;
-        // G32-010: Improved jitter using mixed bits instead of raw nanoseconds
-        let jitter_ms = if self.config.reconnect_nonce > 0 {
-            rand_jitter(self.config.reconnect_nonce * 1000)
-        } else {
-            0
-        };
+        // G32-010: Always apply a small jitter (independent of the server-sent
+        // nonce, which defaults to 0) so synchronized clients de-correlate and
+        // avoid a thundering-herd reconnect.
+        let jitter_ms = rand_jitter((base_ms / 2).min(2000));
         self.attempt += 1;
         Some(Duration::from_millis(base_ms + jitter_ms))
     }

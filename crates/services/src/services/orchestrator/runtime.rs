@@ -5,7 +5,10 @@
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use anyhow::{Result, anyhow};
@@ -14,7 +17,7 @@ use sqlx::Row;
 use tokio::{
     sync::{Mutex, RwLock},
     task::JoinHandle,
-    time::{Duration, sleep, timeout},
+    time::{Duration, timeout},
 };
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -85,10 +88,22 @@ pub struct OrchestratorChatCommandResult {
     pub error: Option<String>,
 }
 
+/// Process-global generation counter used to mint a unique `run_id` for each
+/// spawned workflow agent task. Lets the self-cleanup distinguish its own
+/// `running_workflows` entry from a newer same-id run installed by a
+/// stop+restart, so cleanup never clobbers the newer run.
+static RUN_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn next_run_id() -> u64 {
+    RUN_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
 /// Workflow agent with its task handle
 struct RunningWorkflow {
     agent: Arc<OrchestratorAgent>,
     task_handle: JoinHandle<()>,
+    /// Generation token identifying the task that owns this entry.
+    run_id: u64,
 }
 
 /// Git watcher with its task handle for lifecycle management
@@ -345,6 +360,69 @@ impl OrchestratorRuntime {
         starting.remove(workflow_id);
     }
 
+    /// Self-cleanup run by a spawned workflow agent task once `run()` returns
+    /// (natural completion, error exit, or channel close).
+    ///
+    /// Removes this task's `running_workflows` entry, clears its chat
+    /// idempotency, and stops its GitWatcher — but only if the entry still
+    /// belongs to THIS task (`run_id == my_run_id`). A stop+restart that
+    /// installs a newer same-id run bumps the `run_id`, so this guard refuses
+    /// to clobber the newer run. Reaching this code already means `run()`
+    /// returned, so no `is_finished()` self-check is needed (and would be
+    /// structurally always-false from inside the task).
+    async fn cleanup_finished_run(
+        running_workflows: &Arc<Mutex<HashMap<String, RunningWorkflow>>>,
+        git_watchers: &Arc<Mutex<HashMap<String, GitWatcherHandle>>>,
+        chat_idempotency: &Arc<
+            Mutex<HashMap<String, HashMap<String, OrchestratorChatCommandResult>>>,
+        >,
+        workflow_id: &str,
+        my_run_id: u64,
+    ) {
+        let removed_running = {
+            let mut running = running_workflows.lock().await;
+            if running
+                .get(workflow_id)
+                .is_some_and(|entry| entry.run_id == my_run_id)
+            {
+                running.remove(workflow_id);
+                true
+            } else {
+                false
+            }
+        };
+
+        if !removed_running {
+            return;
+        }
+
+        {
+            let mut idempotency = chat_idempotency.lock().await;
+            idempotency.remove(workflow_id);
+        }
+
+        let git_watcher_handle = {
+            let mut watchers = git_watchers.lock().await;
+            watchers.remove(workflow_id)
+        };
+
+        if let Some(handle) = git_watcher_handle {
+            // [W2-19-08] Conditional abort is intentional: first request a
+            // cooperative stop via `watcher.stop()` and give the task 5s to
+            // observe it and exit cleanly. Only if the cooperative shutdown
+            // times out do we force-abort. `watcher_task.await.ok()` after
+            // abort drains the JoinHandle so no resources leak. Both paths
+            // fully consume `watcher_task` — this is NOT a dropped JoinHandle.
+            handle.watcher.stop();
+            let mut watcher_task = handle.task_handle;
+            let shutdown_result = timeout(Duration::from_secs(5), &mut watcher_task).await;
+            if shutdown_result.is_err() {
+                watcher_task.abort();
+                watcher_task.await.ok();
+            }
+        }
+    }
+
     /// Start workflow after start slot has been reserved.
     async fn start_workflow_reserved(&self, workflow_id: &str) -> Result<()> {
         // Load workflow from database
@@ -417,6 +495,9 @@ impl OrchestratorRuntime {
         let git_watchers = self.git_watchers.clone();
         let chat_idempotency = self.orchestrator_chat_idempotency.clone();
         let workflow_id_owned = workflow_id.to_string();
+        // Mint a generation token BEFORE spawning so the self-cleanup can prove
+        // the `running_workflows` entry still belongs to THIS task.
+        let my_run_id = next_run_id();
         let task_handle = tokio::spawn(async move {
             if let Err(e) = Box::pin(agent_clone.run()).await {
                 error!(
@@ -425,67 +506,29 @@ impl OrchestratorRuntime {
                 );
             }
 
-            // Best-effort cleanup for naturally completed workflow runs.
-            // Guard against removing a newly restarted workflow with the same ID.
-            // NOTE(E21-07, W2-19-06, K11): Replace the fixed 5x100ms polling loop
-            // with an event-driven handshake (e.g. notify/condvar on task completion
-            // or a one-shot channel) so cleanup latency is bounded by the actual
-            // finish signal rather than by a hard-coded poll budget. The
-            // `is_finished()` check below is racy by design (we re-check under the
-            // lock), but the 500ms total budget is acceptable for user-visible
-            // workflow teardown. Refactor is tracked but deferred — current behavior
-            // is correct, only sub-optimal.
-            let mut removed_running = false;
-            for _ in 0..5 {
-                let mut running = running_workflows.lock().await;
-                let can_remove = running
-                    .get(&workflow_id_owned)
-                    .is_some_and(|entry| entry.task_handle.is_finished());
-
-                if can_remove {
-                    running.remove(&workflow_id_owned);
-                    removed_running = true;
-                    break;
-                }
-
-                drop(running);
-                sleep(Duration::from_millis(100)).await;
-            }
-
-            if removed_running {
-                {
-                    let mut idempotency = chat_idempotency.lock().await;
-                    idempotency.remove(&workflow_id_owned);
-                }
-
-                let git_watcher_handle = {
-                    let mut watchers = git_watchers.lock().await;
-                    watchers.remove(&workflow_id_owned)
-                };
-
-                if let Some(handle) = git_watcher_handle {
-                    // [W2-19-08] Conditional abort is intentional: first request a
-                    // cooperative stop via `watcher.stop()` and give the task 5s to
-                    // observe it and exit cleanly. Only if the cooperative shutdown
-                    // times out do we force-abort. `watcher_task.await.ok()` after
-                    // abort drains the JoinHandle so no resources leak. Both paths
-                    // fully consume `watcher_task` — this is NOT a dropped JoinHandle.
-                    handle.watcher.stop();
-                    let mut watcher_task = handle.task_handle;
-                    let shutdown_result = timeout(Duration::from_secs(5), &mut watcher_task).await;
-                    if shutdown_result.is_err() {
-                        watcher_task.abort();
-                        watcher_task.await.ok();
-                    }
-                }
-            }
+            // Best-effort cleanup once run() returns (natural completion, error
+            // exit, or channel close). Reaching here proves the task finished,
+            // so remove the entry unconditionally — guarded only by the run_id
+            // generation token so a stop+restart's newer run is never clobbered.
+            Self::cleanup_finished_run(
+                &running_workflows,
+                &git_watchers,
+                &chat_idempotency,
+                &workflow_id_owned,
+                my_run_id,
+            )
+            .await;
         });
 
         // Insert into running workflows map immediately to prevent race condition
         let mut running = self.running_workflows.lock().await;
         running.insert(
             workflow_id.to_string(),
-            RunningWorkflow { agent, task_handle },
+            RunningWorkflow {
+                agent,
+                task_handle,
+                run_id: my_run_id,
+            },
         );
         drop(running); // Release lock before logging
 
@@ -1216,6 +1259,9 @@ impl OrchestratorRuntime {
         let git_watchers = self.git_watchers.clone();
         let chat_idempotency = self.orchestrator_chat_idempotency.clone();
         let workflow_id_owned = workflow_id.to_string();
+        // Mint a generation token BEFORE spawning so the self-cleanup can prove
+        // the `running_workflows` entry still belongs to THIS task.
+        let my_run_id = next_run_id();
         let task_handle = tokio::spawn(async move {
             if let Err(e) = Box::pin(agent_clone.run()).await {
                 error!(
@@ -1224,52 +1270,27 @@ impl OrchestratorRuntime {
                 );
             }
 
-            // Best-effort cleanup (mirrors start_workflow_reserved)
-            let mut removed_running = false;
-            for _ in 0..5 {
-                let mut running = running_workflows.lock().await;
-                let can_remove = running
-                    .get(&workflow_id_owned)
-                    .is_some_and(|entry| entry.task_handle.is_finished());
-
-                if can_remove {
-                    running.remove(&workflow_id_owned);
-                    removed_running = true;
-                    break;
-                }
-
-                drop(running);
-                sleep(Duration::from_millis(100)).await;
-            }
-
-            if removed_running {
-                {
-                    let mut idempotency = chat_idempotency.lock().await;
-                    idempotency.remove(&workflow_id_owned);
-                }
-
-                let git_watcher_handle = {
-                    let mut watchers = git_watchers.lock().await;
-                    watchers.remove(&workflow_id_owned)
-                };
-
-                if let Some(handle) = git_watcher_handle {
-                    handle.watcher.stop();
-                    let mut watcher_task = handle.task_handle;
-                    let shutdown_result = timeout(Duration::from_secs(5), &mut watcher_task).await;
-                    if shutdown_result.is_err() {
-                        watcher_task.abort();
-                        watcher_task.await.ok();
-                    }
-                }
-            }
+            // Best-effort cleanup once run() returns (mirrors
+            // start_workflow_reserved); guarded by the run_id generation token.
+            Self::cleanup_finished_run(
+                &running_workflows,
+                &git_watchers,
+                &chat_idempotency,
+                &workflow_id_owned,
+                my_run_id,
+            )
+            .await;
         });
 
         // Register in running workflows map
         let mut running = self.running_workflows.lock().await;
         running.insert(
             workflow_id.to_string(),
-            RunningWorkflow { agent, task_handle },
+            RunningWorkflow {
+                agent,
+                task_handle,
+                run_id: my_run_id,
+            },
         );
         drop(running);
 
@@ -1659,6 +1680,79 @@ mod tests {
         runtime.release_start_slot(&workflow_id).await;
     }
 
+    /// Regression: the agent-task self-cleanup must remove its own
+    /// `running_workflows` entry once `run()` returns, so the slot becomes
+    /// reusable. The previous implementation gated removal on the task's OWN
+    /// `JoinHandle::is_finished()` (always false from inside the task), so the
+    /// entry leaked and `reserve_start_slot` rejected every restart with
+    /// "already running". The generation guard must also refuse to clobber a
+    /// newer same-id run installed by a stop+restart.
+    #[tokio::test]
+    async fn test_cleanup_finished_run_removes_own_entry_and_frees_slot() {
+        let (runtime, workflow_id) = setup_runtime_with_ready_workflow().await;
+
+        let agent = Arc::new(
+            OrchestratorAgent::with_llm_client(
+                OrchestratorConfig::default(),
+                workflow_id.clone(),
+                runtime.message_bus.clone(),
+                runtime.db.clone(),
+                Box::new(MockLLMClient::new()),
+            )
+            .expect("should create test agent"),
+        );
+
+        let my_run_id = next_run_id();
+        let task_handle = tokio::spawn(async {});
+        {
+            let mut running = runtime.running_workflows.lock().await;
+            running.insert(
+                workflow_id.clone(),
+                RunningWorkflow {
+                    agent,
+                    task_handle,
+                    run_id: my_run_id,
+                },
+            );
+        }
+        assert!(runtime.is_running(&workflow_id).await);
+
+        // A stale generation (e.g. a newer run already replaced this entry)
+        // must NOT remove the live entry.
+        OrchestratorRuntime::cleanup_finished_run(
+            &runtime.running_workflows,
+            &runtime.git_watchers,
+            &runtime.orchestrator_chat_idempotency,
+            &workflow_id,
+            my_run_id.wrapping_add(1),
+        )
+        .await;
+        assert!(
+            runtime.is_running(&workflow_id).await,
+            "cleanup with a non-matching run_id must not clobber a newer run"
+        );
+
+        // The owning generation removes its entry, freeing the slot.
+        OrchestratorRuntime::cleanup_finished_run(
+            &runtime.running_workflows,
+            &runtime.git_watchers,
+            &runtime.orchestrator_chat_idempotency,
+            &workflow_id,
+            my_run_id,
+        )
+        .await;
+        assert!(!runtime.is_running(&workflow_id).await);
+        assert_eq!(runtime.running_count().await, 0);
+
+        // The freed slot is reusable: reserve_start_slot no longer reports
+        // "already running".
+        runtime
+            .reserve_start_slot(&workflow_id)
+            .await
+            .expect("slot should be reusable after the owning run cleaned up");
+        runtime.release_start_slot(&workflow_id).await;
+    }
+
     #[tokio::test]
     async fn test_submit_user_prompt_response_returns_error_when_workflow_not_running() {
         let (runtime, workflow_id) = setup_runtime_with_ready_workflow().await;
@@ -1693,7 +1787,14 @@ mod tests {
         let task_handle = tokio::spawn(async {});
         {
             let mut running = runtime.running_workflows.lock().await;
-            running.insert(workflow_id.clone(), RunningWorkflow { agent, task_handle });
+            running.insert(
+                workflow_id.clone(),
+                RunningWorkflow {
+                    agent,
+                    task_handle,
+                    run_id: next_run_id(),
+                },
+            );
         }
 
         let terminal_id = "terminal-missing";
@@ -1753,7 +1854,14 @@ mod tests {
         let task_handle = tokio::spawn(async {});
         {
             let mut running = runtime.running_workflows.lock().await;
-            running.insert(workflow_id.clone(), RunningWorkflow { agent, task_handle });
+            running.insert(
+                workflow_id.clone(),
+                RunningWorkflow {
+                    agent,
+                    task_handle,
+                    run_id: next_run_id(),
+                },
+            );
         }
 
         runtime
@@ -1801,7 +1909,14 @@ mod tests {
         let task_handle = tokio::spawn(async {});
         {
             let mut running = runtime.running_workflows.lock().await;
-            running.insert(workflow_id.clone(), RunningWorkflow { agent, task_handle });
+            running.insert(
+                workflow_id.clone(),
+                RunningWorkflow {
+                    agent,
+                    task_handle,
+                    run_id: next_run_id(),
+                },
+            );
         }
 
         let first_command = runtime

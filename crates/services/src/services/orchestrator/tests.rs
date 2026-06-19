@@ -1178,8 +1178,18 @@ mod orchestrator_tests {
             let _ = agent.execute_instruction(instruction_json).await;
         });
 
-        // Verify workflow status updated
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Poll until the spawned execute_instruction flips workflow status (or deadline),
+        // instead of a fixed sleep: fast on healthy runs, still fails a real regression.
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(500);
+        loop {
+            let current = Workflow::find_by_id(&pool, &workflow_id).await.unwrap();
+            if matches!(current.as_ref(), Some(w) if w.status == "completed")
+                || tokio::time::Instant::now() >= deadline
+            {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+        }
 
         let updated_workflow = Workflow::find_by_id(&pool, &workflow_id)
             .await

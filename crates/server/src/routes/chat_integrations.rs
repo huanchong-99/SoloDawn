@@ -296,8 +296,12 @@ async fn handle_chat_event(
 
     ensure_supported_provider(&provider)?;
     verify_event_timestamp(payload.timestamp)?;
-    ensure_not_replayed(&provider, &payload.provider_message_id).await?;
 
+    // SEC: verify the HMAC signature BEFORE touching the replay cache. The
+    // timestamp is part of the signed canonical string, so an early timestamp
+    // reject above leaks nothing; but `ensure_not_replayed` mutates shared state
+    // (inserts the provider_message_id), so a forged request must be rejected
+    // here first or it could pre-seed a legitimate id and cause it to be dropped.
     let secret = read_chat_webhook_secret()?;
     let expected_signature = compute_chat_signature(&secret, &provider, &payload);
     if !constant_time_eq_chat(payload.signature.as_bytes(), expected_signature.as_bytes()) {
@@ -305,6 +309,8 @@ async fn handle_chat_event(
             "Invalid chat event signature".to_string(),
         ));
     }
+
+    ensure_not_replayed(&provider, &payload.provider_message_id).await?;
 
     let command_text = payload.text.trim();
     if command_text.is_empty() {

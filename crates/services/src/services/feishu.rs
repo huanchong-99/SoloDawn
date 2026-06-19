@@ -3,7 +3,8 @@
 //! Connects to Feishu via WebSocket, processes incoming events (messages,
 //! slash commands), and forwards chat messages to the orchestrator.
 
-use std::sync::Arc;
+use std::collections::{HashSet, VecDeque};
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -22,6 +23,36 @@ use super::{chat_connector::ChatConnector, orchestrator::message_bus::SharedMess
 
 const FEISHU_PROVIDER: &str = "feishu";
 use feishu_connector::events::EVENT_TYPE_MESSAGE;
+
+/// Maximum number of recently-seen event ids retained for redelivery dedup.
+const SEEN_EVENTS_CAPACITY: usize = 1024;
+
+/// Bounded LRU of recently-processed Feishu event keys. Feishu's long-connection
+/// protocol redelivers an event when a previous delivery was not acked, so the
+/// same event can re-enter the pipeline; this guards against double side effects
+/// (duplicate replies / LLM turns / bus publishes).
+#[derive(Default)]
+struct SeenEvents {
+    set: HashSet<String>,
+    order: VecDeque<String>,
+}
+
+impl SeenEvents {
+    /// Record `key`; returns `true` if it was already seen (i.e. a redelivery).
+    fn check_and_insert(&mut self, key: &str) -> bool {
+        if self.set.contains(key) {
+            return true;
+        }
+        self.set.insert(key.to_string());
+        self.order.push_back(key.to_string());
+        while self.order.len() > SEEN_EVENTS_CAPACITY {
+            if let Some(evicted) = self.order.pop_front() {
+                self.set.remove(&evicted);
+            }
+        }
+        false
+    }
+}
 
 // ---------------------------------------------------------------------------
 // FeishuService
@@ -42,6 +73,8 @@ pub struct FeishuService {
     concierge_agent: Option<Arc<super::concierge::ConciergeAgent>>,
     /// Shared config for reading workflow model library.
     shared_config: Option<Arc<tokio::sync::RwLock<super::config::Config>>>,
+    /// Recently-seen event ids for redelivery dedup.
+    seen_events: Arc<Mutex<SeenEvents>>,
 }
 
 impl FeishuService {
@@ -58,6 +91,7 @@ impl FeishuService {
             event_broadcaster: None,
             concierge_agent: None,
             shared_config: None,
+            seen_events: Arc::new(Mutex::new(SeenEvents::default())),
         }
     }
 
@@ -112,6 +146,7 @@ impl FeishuService {
         let broadcaster = self.event_broadcaster.as_ref();
         let concierge = self.concierge_agent.as_ref();
         let shared_config = self.shared_config.as_ref();
+        let seen_events = &self.seen_events;
 
         tokio::select! {
             conn_result = connect_fut => {
@@ -119,7 +154,7 @@ impl FeishuService {
                     tracing::error!(error = %e, "Feishu WebSocket connection ended with error");
                 }
             }
-            () = Self::process_events_inner(event_rx, pool, bus, messenger, broadcaster, concierge, shared_config) => {
+            () = Self::process_events_inner(event_rx, pool, bus, messenger, broadcaster, concierge, shared_config, seen_events) => {
                 tracing::info!("Feishu event processing loop ended");
             }
         }
@@ -136,6 +171,7 @@ impl FeishuService {
         broadcaster: Option<&tokio::sync::broadcast::Sender<FeishuEvent>>,
         concierge_agent: Option<&Arc<super::concierge::ConciergeAgent>>,
         shared_config: Option<&Arc<tokio::sync::RwLock<super::config::Config>>>,
+        seen_events: &Arc<Mutex<SeenEvents>>,
     ) {
         while let Some(event) = event_rx.recv().await {
             if let Some(tx) = broadcaster {
@@ -162,6 +198,7 @@ impl FeishuService {
                 messenger,
                 concierge_agent,
                 shared_config,
+                seen_events,
             )
             .await
             {
@@ -178,6 +215,7 @@ impl FeishuService {
         messenger: &Arc<FeishuMessenger>,
         concierge_agent: Option<&Arc<super::concierge::ConciergeAgent>>,
         shared_config: Option<&Arc<tokio::sync::RwLock<super::config::Config>>>,
+        seen_events: &Arc<Mutex<SeenEvents>>,
     ) -> Result<()> {
         let Some(header) = &event.header else {
             tracing::debug!("Ignoring Feishu event without header");
@@ -193,6 +231,7 @@ impl FeishuService {
                     messenger,
                     concierge_agent,
                     shared_config,
+                    seen_events,
                 )
                 .await
             }
@@ -214,8 +253,34 @@ impl FeishuService {
         messenger: &Arc<FeishuMessenger>,
         concierge_agent: Option<&Arc<super::concierge::ConciergeAgent>>,
         shared_config: Option<&Arc<tokio::sync::RwLock<super::config::Config>>>,
+        seen_events: &Arc<Mutex<SeenEvents>>,
     ) -> Result<()> {
         let msg = events::parse_message_event(event)?;
+
+        // Idempotency guard against Feishu redelivery (re-sent when a previous
+        // delivery was not acked). Key on the event id; fall back to the
+        // always-present message id when the header carries an empty id (the
+        // inner-only payload path synthesizes ""). Done before any side effect
+        // (reply / LLM turn / bus publish) so redeliveries are a no-op.
+        let dedup_key = match event.header.as_ref().map(|h| h.event_id.as_str()) {
+            Some(id) if !id.is_empty() => id.to_string(),
+            _ => msg.message_id.clone(),
+        };
+        {
+            let already_seen = match seen_events.lock() {
+                Ok(mut guard) => guard.check_and_insert(&dedup_key),
+                // A poisoned lock means a prior holder panicked; recover the
+                // guard and continue rather than dropping the message.
+                Err(poisoned) => poisoned.into_inner().check_and_insert(&dedup_key),
+            };
+            if already_seen {
+                tracing::debug!(
+                    event_id = %dedup_key,
+                    "Feishu event already processed, skipping (redelivery)"
+                );
+                return Ok(());
+            }
+        }
 
         // Only handle text messages.
         if msg.message_type != "text" {

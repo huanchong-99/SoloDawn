@@ -1301,14 +1301,21 @@ mod tests {
 
         executor.normalize_logs(msg_store.clone(), &current_dir);
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-        // Verify patches were emitted (system init + assistant add/replace)
-        let history = msg_store.get_history();
-        let patch_count = history
-            .iter()
-            .filter(|m| matches!(m, workspace_utils::log_msg::LogMsg::JsonPatch(_)))
-            .count();
+        // Poll until the spawned normalization task drains the store (or deadline),
+        // instead of a fixed sleep: fast on healthy runs, still fails a real regression.
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(500);
+        let mut patch_count;
+        loop {
+            patch_count = msg_store
+                .get_history()
+                .iter()
+                .filter(|m| matches!(m, workspace_utils::log_msg::LogMsg::JsonPatch(_)))
+                .count();
+            if patch_count >= 2 || tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+        }
         assert!(
             patch_count >= 2,
             "Expected at least 2 patches, got {patch_count}"

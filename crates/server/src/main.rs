@@ -476,8 +476,27 @@ async fn start_feishu_connector(
         loop {
             // `service.start()` (openlark WS client) is a large future; box it
             // on the heap to satisfy clippy::large_futures under `-D warnings`.
-            if let Err(e) = Box::pin(service.start()).await {
-                tracing::warn!(error = %e, "Feishu service disconnected");
+            let mut start_fut = Box::pin(service.start());
+            // Race the live connection against a manual-reconnect signal. While
+            // connected, nothing else reads `reconnect_rx`, so a manual request
+            // must force the connection down here. Dropping `start_fut` cancels
+            // the openlark `open()` future; its internal client_loop task then
+            // sees its command channel close and tears down the socket, and the
+            // adapter's pump task ends on its raw channel closing (both reap
+            // cleanly on drop — no task/socket leak).
+            tokio::select! {
+                res = &mut start_fut => {
+                    if let Err(e) = res {
+                        tracing::warn!(error = %e, "Feishu service disconnected");
+                    }
+                }
+                _ = reconnect_rx.recv() => {
+                    tracing::info!("Manual Feishu reconnect: dropping live connection");
+                    drop(start_fut);
+                    *connected_flag.write().await = false;
+                    policy.reset();
+                    continue; // immediate reconnect, no backoff
+                }
             }
             *connected_flag.write().await = false;
 

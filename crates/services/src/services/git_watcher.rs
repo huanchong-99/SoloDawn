@@ -551,13 +551,19 @@ impl GitWatcher {
         let branch = match branch_contains_output {
             Ok(out) if out.status.success() => {
                 let raw_branches = String::from_utf8_lossy(&out.stdout);
-                // `git branch --contains` prefixes the current branch with "* ".
-                // Parse the first branch name, stripping the "* " prefix if present.
+                // `git branch --contains` prefixes the current branch with "* "
+                // and a branch checked out in a linked worktree with "+ ".
+                // Parse the first branch name, stripping either marker if present
+                // (and skipping detached-HEAD placeholders like "(HEAD detached ...)").
                 raw_branches
                     .lines()
                     .find_map(|line| {
-                        let stripped = line.trim().strip_prefix("* ").unwrap_or(line.trim());
-                        if stripped.is_empty() {
+                        let t = line.trim();
+                        let stripped = t
+                            .strip_prefix("* ")
+                            .or_else(|| t.strip_prefix("+ "))
+                            .unwrap_or(t);
+                        if stripped.is_empty() || stripped.starts_with('(') {
                             None
                         } else {
                             Some(stripped.to_string())

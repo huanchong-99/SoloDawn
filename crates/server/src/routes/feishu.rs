@@ -248,7 +248,10 @@ async fn update_config(
 
 /// POST /api/integrations/feishu/reconnect
 ///
-/// Triggers a manual reconnection of the Feishu WebSocket client.
+/// Triggers a manual reconnection of the Feishu WebSocket client. The connector
+/// loop races this signal against the live connection, so a healthy connection
+/// is dropped and immediately re-established (no backoff); when already
+/// disconnected, the signal simply skips the pending backoff.
 async fn reconnect(
     State(deployment): State<DeploymentImpl>,
     Extension(feishu_handle): Extension<SharedFeishuHandle>,
