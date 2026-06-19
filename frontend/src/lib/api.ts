@@ -91,6 +91,12 @@ import {
   QualityGateConfig,
   QualityPolicyResponse,
   MetricCatalogResponse,
+  CustomRule,
+  CustomRuleInput,
+  CustomRuleValidation,
+  AuthorRuleRequest,
+  AuthorRuleResult,
+  ProjectMetricSnapshot,
 } from 'shared/types';
 // Re-export MetricKey so hook/component consumers can import the picker type from this module.
 export type { MetricKey } from 'shared/types';
@@ -700,6 +706,108 @@ export const qualityPolicyApi = {
       method: 'DELETE',
     });
     return handleApiResponse<void>(response);
+  },
+};
+
+// Custom Rules API (AI-editable, multi-agent-validated quality-gate rules).
+// Mirrors qualityPolicyApi (makeRequest + handleApiResponse). Paths/methods/bodies
+// match crates/server/src/routes/custom_rules.rs verbatim (mounted at /api/projects).
+export const customRulesApi = {
+  list: async (projectId: string): Promise<CustomRule[]> => {
+    const response = await makeRequest(`/api/projects/${projectId}/custom-rules`);
+    return handleApiResponse<CustomRule[]>(response);
+  },
+
+  create: async (projectId: string, input: CustomRuleInput): Promise<CustomRule> => {
+    const response = await makeRequest(`/api/projects/${projectId}/custom-rules`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return handleApiResponse<CustomRule>(response);
+  },
+
+  update: async (
+    projectId: string,
+    ruleId: string,
+    input: CustomRuleInput
+  ): Promise<CustomRule> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/custom-rules/${ruleId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }
+    );
+    return handleApiResponse<CustomRule>(response);
+  },
+
+  remove: async (projectId: string, ruleId: string): Promise<void> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/custom-rules/${ruleId}`,
+      { method: 'DELETE' }
+    );
+    return handleApiResponse<void>(response);
+  },
+
+  setStatus: async (
+    projectId: string,
+    ruleId: string,
+    status: string
+  ): Promise<CustomRule> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/custom-rules/${ruleId}/status`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      }
+    );
+    return handleApiResponse<CustomRule>(response);
+  },
+
+  getValidations: async (
+    projectId: string,
+    ruleId: string
+  ): Promise<CustomRuleValidation[]> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/custom-rules/${ruleId}/validations`
+    );
+    return handleApiResponse<CustomRuleValidation[]>(response);
+  },
+
+  author: async (
+    projectId: string,
+    req: AuthorRuleRequest
+  ): Promise<AuthorRuleResult> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/custom-rules/author`,
+      {
+        method: 'POST',
+        body: JSON.stringify(req),
+      }
+    );
+    return handleApiResponse<AuthorRuleResult>(response);
+  },
+
+  revalidate: async (
+    projectId: string,
+    ruleId: string,
+    req: AuthorRuleRequest
+  ): Promise<CustomRuleValidation> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/custom-rules/${ruleId}/revalidate`,
+      {
+        method: 'POST',
+        body: JSON.stringify(req),
+      }
+    );
+    return handleApiResponse<CustomRuleValidation>(response);
+  },
+
+  metricsLatest: async (projectId: string): Promise<ProjectMetricSnapshot> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/quality-metrics/latest`
+    );
+    return handleApiResponse<ProjectMetricSnapshot>(response);
   },
 };
 

@@ -29,5 +29,51 @@
     "shadow": "影子模式",
     "warn": "警告模式",
     "enforce": "强制模式"
+  },
+  "rulesEditor": {
+    "metricInfo": {
+      "indicatorLabel": "指标详情",
+      "example": "示例",
+      "noRun": "尚无运行记录",
+      "current": "当前",
+      "asOf": "截至 {{ranAt}}"
+    },
+    "customRules": {
+      "title": "自定义规则",
+      "generateWithAi": "用 AI 生成规则",
+      "empty": "暂无自定义规则。请使用上方的“用 AI 生成规则”来创建。",
+      "loadError": "加载自定义规则失败。",
+      "actionError": "上一步操作失败，请重试。",
+      "saveError": "保存规则失败。",
+      "ruleInfo": "规则详情",
+      "enable": "启用",
+      "disable": "停用",
+      "promoteTo": "→ {{status}}",
+      "promoteTitle": "提升到 {{status}}",
+      "revalidate": "重新校验",
+      "edit": "编辑",
+      "delete": "删除",
+      "editTitle": "编辑规则",
+      "editDescription": "修改规则主体会重新校验并将规则降为影子模式；仅修改名称或描述则不会。",
+      "revalidateTitle": "重新校验规则",
+      "revalidateDescription": "重新运行 AI 校验流程。在再次通过前，规则会降为影子模式。",
+      "revalidateAction": "重新校验",
+      "fieldName": "名称",
+      "fieldDescription": "描述",
+      "fieldSeverity": "严重级别",
+      "fieldType": "类型",
+      "fieldMetric": "映射指标",
+      "fieldMetricPlaceholder": "无",
+      "fieldBody": "规则主体（正则）",
+      "bodyChangeHint": "规则主体已更改——保存会重新校验并将规则降为影子模式。",
+      "confirmLoading": "正在加载自定义规则...",
+      "confirmTitle": "本次运行强制执行的自定义规则",
+      "confirmIntro": "确认前请检查 AI 编写的规则及其校验证据。",
+      "roundTripOk": "往返校验通过",
+      "roundTripFailed": "往返校验失败",
+      "evidenceTally": "通过示例：{{passed}}/{{total}}",
+      "judgeScore": "评审得分 {{score}}",
+      "evidenceLoading": "正在加载校验证据..."
+    }
   }
 }

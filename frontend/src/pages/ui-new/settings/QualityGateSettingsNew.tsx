@@ -17,6 +17,7 @@ import {
   useQualityMetricKeys,
   useSaveQualityPolicy,
   useResetQualityPolicy,
+  useProjectMetricsLatest,
 } from '@/hooks/useQualityPolicy';
 import type { QualityGateConfig } from 'shared/types';
 
@@ -73,6 +74,7 @@ export function QualityGateSettingsNew() {
   const policyQuery = useProjectQualityPolicy(projectId || null);
   const defaultQuery = useDefaultQualityPolicy();
   const metricsQuery = useQualityMetricKeys();
+  const metricsLatest = useProjectMetricsLatest(projectId || null);
   const saveMutation = useSaveQualityPolicy();
   const resetMutation = useResetQualityPolicy();
 
@@ -84,6 +86,7 @@ export function QualityGateSettingsNew() {
   const source = policyQuery.data?.source ?? 'bundled';
   const defaults = defaultQuery.data?.config;
   const metricOptions = metricsQuery.data?.metrics ?? [];
+  const metricInfo = metricsQuery.data?.info;
 
   // Sync local editor state to the server config when (re)loaded and not dirty.
   useEffect(() => {
@@ -244,6 +247,9 @@ export function QualityGateSettingsNew() {
                 value={config}
                 defaults={defaults}
                 metricOptions={metricOptions}
+                metricInfo={metricInfo}
+                currentValues={metricsLatest.data}
+                projectId={projectId}
                 onChange={setConfig}
                 readOnly={saveMutation.isPending || resetMutation.isPending}
               />

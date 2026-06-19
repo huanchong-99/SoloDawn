@@ -13,12 +13,14 @@ import {
 import { Button } from '@/components/ui-new/primitives/Button';
 import { ErrorAlert } from '@/components/ui-new/primitives/ErrorAlert';
 import { QualityGateRulesEditor } from '@/components/quality/QualityGateRulesEditor';
+import { CustomRulesConfirmPanel } from '@/components/quality/CustomRulesConfirmPanel';
 import {
   qualityPolicyApi,
   planningDraftsApi,
   type PlanningDraftResponse,
 } from '@/lib/api';
-import type { QualityGateConfig, MetricKey } from 'shared/types';
+import { useProjectMetricsLatest } from '@/hooks/useQualityPolicy';
+import type { QualityGateConfig, MetricKey, MetricInfo } from 'shared/types';
 
 interface QualityGateConfirmDialogProps {
   /** Whether the dialog is open. */
@@ -63,6 +65,10 @@ export function QualityGateConfirmDialog({
   const [original, setOriginal] = useState<QualityGateConfig | null>(null);
   const [defaults, setDefaults] = useState<QualityGateConfig | null>(null);
   const [metricOptions, setMetricOptions] = useState<MetricKey[]>([]);
+  const [metricInfo, setMetricInfo] = useState<MetricInfo[]>([]);
+
+  // Latest persisted snapshot for the metric tooltips (pure display, no recompute).
+  const metricsLatest = useProjectMetricsLatest(open ? projectId : null);
 
   // Load policy + default + metrics whenever the dialog opens for a project.
   useEffect(() => {
@@ -83,6 +89,7 @@ export function QualityGateConfirmDialog({
         setOriginal(project.config);
         setDefaults(def.config);
         setMetricOptions(metrics.metrics);
+        setMetricInfo(metrics.info);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -160,8 +167,9 @@ export function QualityGateConfirmDialog({
           <DialogDescription>
             {t('settings:qualityGates.confirmDescription', {
               defaultValue:
-                'Review the quality-gate rules enforced for this run. ' +
-                'You must confirm before materialization can begin.',
+                'Review the quality-gate rules and AI-authored custom rules ' +
+                'enforced for this run. Confirmation is mandatory — ' +
+                'materialization cannot begin until you Save & Confirm.',
             })}
           </DialogDescription>
         </DialogHeader>
@@ -174,13 +182,20 @@ export function QualityGateConfirmDialog({
               {t('common:loading', { defaultValue: 'Loading...' })}
             </p>
           ) : (
-            <QualityGateRulesEditor
-              value={config}
-              defaults={defaults}
-              metricOptions={metricOptions}
-              onChange={setConfig}
-              readOnly={submitting}
-            />
+            <div className="flex flex-col gap-base">
+              <QualityGateRulesEditor
+                value={config}
+                defaults={defaults}
+                metricOptions={metricOptions}
+                metricInfo={metricInfo}
+                currentValues={metricsLatest.data}
+                projectId={projectId}
+                onChange={setConfig}
+                readOnly={submitting}
+              />
+              {/* Read-only evidence for every active AI-authored custom rule. */}
+              <CustomRulesConfirmPanel projectId={projectId} />
+            </div>
           )}
         </div>
 
