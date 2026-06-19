@@ -596,6 +596,10 @@ impl Workspace {
         query_builder.push_values(generated_names.iter(), |mut builder, (workspace_id, name)| {
             builder.push_bind(*workspace_id).push_bind(name.as_str());
         });
+        // Backfill the generated name only; do NOT bump updated_at. This runs on
+        // the read/list path (find_all_with_status orders by updated_at DESC), so
+        // stamping updated_at here would reorder the list and reset the cleanup
+        // window for a workspace the user never touched.
         query_builder.push(
             r")
             UPDATE workspaces
@@ -603,8 +607,7 @@ impl Workspace {
                     SELECT generated_names.name
                     FROM generated_names
                     WHERE generated_names.workspace_id = workspaces.id
-                ),
-                updated_at = datetime('now', 'subsec')
+                )
             WHERE id IN (SELECT workspace_id FROM generated_names)",
         );
 
@@ -816,8 +819,13 @@ impl Workspace {
             && let Some(prompt) = Self::get_first_user_message(pool, ws.workspace.id).await?
         {
             let name = Self::truncate_to_name(&prompt, WORKSPACE_NAME_MAX_LEN);
-            Self::update(pool, ws.workspace.id, None, None, Some(&name)).await?;
-            ws.workspace.name = Some(name);
+            // Name-only backfill on a read path: reuse persist_generated_names so we do
+            // NOT bump updated_at (Self::update would), keeping listing/sorting and the
+            // cleanup window driven by genuine user/agent activity rather than this read.
+            if !name.is_empty() {
+                Self::persist_generated_names(pool, &[(ws.workspace.id, name.clone())]).await?;
+                ws.workspace.name = Some(name);
+            }
         }
 
         Ok(Some(ws))

@@ -916,10 +916,17 @@ export const useConversationHistory = ({
     }
 
     const controllers = activeStreamControllersRef.current;
+    const streamingIds = streamingProcessIdsRef.current;
     return () => {
-      // Close all active streaming WebSocket connections on unmount
-      for (const controller of controllers.values()) {
+      // Close all active streaming WebSocket connections on unmount.
+      // streamJsonPatchEntries.close() detaches its message/error/close
+      // listeners before ws.close(), so the per-id remover .finally() never
+      // fires; drop each closed id from streamingProcessIdsRef in the same
+      // loop so the next effect run can re-establish the stream for a
+      // still-running process (instead of permanently dropping its live logs).
+      for (const [id, controller] of controllers) {
         controller.close();
+        streamingIds.delete(id);
       }
       controllers.clear();
     };

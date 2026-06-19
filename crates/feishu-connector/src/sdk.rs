@@ -84,7 +84,10 @@ impl FeishuClient {
         self.cfg.get_or_build_core_config()
     }
 
-    /// Shared connected flag (true while the WebSocket is open).
+    /// Shared connected flag. Set `true` once the first live
+    /// `im.message.receive_v1` event is received (proving the socket is up),
+    /// and reset to `false` when the pump task or the connection ends. A
+    /// healthy-but-idle connection therefore reads `false` until traffic flows.
     pub fn connected_flag(&self) -> Arc<RwLock<bool>> {
         self.connected.clone()
     }
@@ -102,6 +105,7 @@ impl FeishuClient {
 
         // Pump: raw SDK bytes -> normalized FeishuEvent -> existing mpsc channel.
         let event_tx = self.event_tx.clone();
+        let connected = self.connected.clone();
         let pump = tokio::spawn(async move {
             let mut got_first = false;
             let mut watchdog_fired = false;
@@ -114,6 +118,9 @@ impl FeishuClient {
                             Some(bytes) => {
                                 if !got_first {
                                     got_first = true;
+                                    // First real event proves the socket is live;
+                                    // flip the shared flag to a true-positive here.
+                                    *connected.write().await = true;
                                     // Shape-calibration log of the first real payload.
                                     tracing::info!(
                                         payload = %String::from_utf8_lossy(&bytes),
@@ -145,9 +152,10 @@ impl FeishuClient {
                     }
                 }
             }
+            // Pump exiting means no more events flow on this connection.
+            *connected.write().await = false;
         });
 
-        *self.connected.write().await = true;
         tracing::info!("Feishu WS connecting (provider=openlark, event=im.message.receive_v1)");
         let res = LarkWsClient::open(Arc::new(self.cfg.clone()), handler).await;
         *self.connected.write().await = false;

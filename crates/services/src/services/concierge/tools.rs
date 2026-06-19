@@ -32,7 +32,7 @@ pub fn parse_tool_call(response: &str) -> Option<ToolCall> {
         .inspect_err(|e| {
             tracing::warn!(
                 error = %e,
-                preview = &json_str[..json_str.len().min(200)],
+                preview = truncate_chars(json_str, 200),
                 "Failed to parse tool call JSON"
             );
         })
@@ -41,6 +41,19 @@ pub fn parse_tool_call(response: &str) -> Option<ToolCall> {
         return None;
     }
     Some(parsed)
+}
+
+/// Truncate a string to at most `n` characters on a UTF-8 char boundary.
+///
+/// Plain byte-slicing (`&s[..s.len().min(n)]`) panics with "byte index N is
+/// not a char boundary" when the cut lands inside a multi-byte sequence, which
+/// is common for LLM output containing CJK text or emoji. Used for log/error
+/// previews where an exact length does not matter.
+fn truncate_chars(s: &str, n: usize) -> &str {
+    match s.char_indices().nth(n) {
+        Some((i, _)) => &s[..i],
+        None => s,
+    }
 }
 
 fn extract_fenced_json(text: &str) -> Option<&str> {

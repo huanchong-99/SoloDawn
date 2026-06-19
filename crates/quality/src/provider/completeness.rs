@@ -160,7 +160,7 @@ impl QualityProvider for CompletenessProvider {
 }
 
 fn detect_test_file_absence(
-    project_root: &Path,
+    _project_root: &Path,
     source_files: &[PathBuf],
     issues: &mut Vec<QualityIssue>,
 ) -> i64 {
@@ -168,16 +168,22 @@ fn detect_test_file_absence(
         return 0;
     }
 
-    let has_test_files = source_files.iter().any(|f| {
-        let name = f.to_string_lossy();
-        test_file_re().is_match(&name)
+    // is_test_file already matches /tests/, /__tests__/, /test/ path segments,
+    // so this covers nested integration tests (e.g. crates/<c>/tests/foo.rs) and
+    // non-root tests/ dirs in a workspace, subsuming the old root-only dir check.
+    let has_test_files = source_files.iter().any(|f| is_test_file(f));
+
+    // Idiomatic Rust unit tests live in inline `#[cfg(test)] mod tests` blocks
+    // with no separate test file; scan Rust sources for that idiom before
+    // declaring the project test-free.
+    let has_inline_rust_tests = source_files.iter().any(|f| {
+        analysis::is_rust_file(f)
+            && std::fs::read_to_string(f)
+                .map(|c| c.contains("#[cfg(test)]"))
+                .unwrap_or(false)
     });
 
-    let has_test_dir = project_root.join("tests").is_dir()
-        || project_root.join("__tests__").is_dir()
-        || project_root.join("test").is_dir();
-
-    if !has_test_files && !has_test_dir {
+    if !has_test_files && !has_inline_rust_tests {
         issues.push(QualityIssue::new(
             "completeness:test-file-absence",
             RuleType::Bug,

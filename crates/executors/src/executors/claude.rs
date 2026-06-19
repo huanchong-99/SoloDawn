@@ -2212,15 +2212,21 @@ mod tests {
         // Start normalization (this spawns async task)
         executor.normalize_logs(msg_store.clone(), &current_dir);
 
-        // Give some time for async processing
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        // Check that the history now contains patch messages
-        let history = msg_store.get_history();
-        let patch_count = history
-            .iter()
-            .filter(|msg| matches!(msg, workspace_utils::log_msg::LogMsg::JsonPatch(_)))
-            .count();
+        // Poll until the spawned normalization task produces patches (or deadline),
+        // instead of a fixed sleep: fast on healthy runs, still fails a real regression.
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(500);
+        let mut patch_count;
+        loop {
+            patch_count = msg_store
+                .get_history()
+                .iter()
+                .filter(|msg| matches!(msg, workspace_utils::log_msg::LogMsg::JsonPatch(_)))
+                .count();
+            if patch_count > 0 || tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+        }
         assert!(
             patch_count > 0,
             "Expected JsonPatch messages to be generated from streaming processing"

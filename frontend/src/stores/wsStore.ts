@@ -439,6 +439,14 @@ function normalizeTerminalPromptDetectedPayload(payload: unknown): unknown {
     normalizedPayload.optionDetails = optionDetails;
   }
 
+  // G27-005: Carry the backend-supplied detectedAt through the field-by-field
+  // rebuild so the 120s stale-prompt cleanup (which falls back to `now` when
+  // detectedAt is missing, and therefore never prunes) works as intended.
+  const detectedAt = getStringField(payload, 'detectedAt', 'detected_at');
+  if (detectedAt) {
+    normalizedPayload.detectedAt = detectedAt;
+  }
+
   return normalizedPayload;
 }
 

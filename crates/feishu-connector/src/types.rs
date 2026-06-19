@@ -24,7 +24,7 @@ pub struct ClientConfig {
 }
 
 fn default_reconnect_interval() -> u64 {
-    120
+    2
 }
 
 fn default_ping_interval() -> u64 {
@@ -35,7 +35,7 @@ impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             reconnect_count: -1,
-            reconnect_interval: 120,
+            reconnect_interval: 2,
             reconnect_nonce: 0,
             ping_interval: 120,
         }

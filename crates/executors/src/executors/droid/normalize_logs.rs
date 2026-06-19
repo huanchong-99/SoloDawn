@@ -235,6 +235,7 @@ pub fn normalize_logs(
                                     path: path.clone(),
                                     changes: changes.clone(),
                                     status: ToolStatus::Created,
+                                    is_apply_patch: false,
                                 };
                                 let index = add_normalized_entry(
                                     &msg_store,
@@ -292,6 +293,7 @@ pub fn normalize_logs(
                                     path: path.clone(),
                                     changes: changes.clone(),
                                     status: ToolStatus::Created,
+                                    is_apply_patch: false,
                                 };
                                 let index = add_normalized_entry(
                                     &msg_store,
@@ -314,6 +316,7 @@ pub fn normalize_logs(
                                     path: path.clone(),
                                     changes: changes.clone(),
                                     status: ToolStatus::Created,
+                                    is_apply_patch: false,
                                 };
                                 let index = add_normalized_entry(
                                     &msg_store,
@@ -337,6 +340,7 @@ pub fn normalize_logs(
                                     path: path.clone(),
                                     changes: vec![],
                                     status: ToolStatus::Created,
+                                    is_apply_patch: true,
                                 };
                                 let index = add_normalized_entry(
                                     &msg_store,
@@ -458,12 +462,12 @@ pub fn normalize_logs(
                 }
 
                 DroidJson::ToolResult {
-                    id: _,
+                    id,
                     is_error,
                     payload,
                     ..
                 } => {
-                    if let Some(pending_tool_call) = state.pending_fifo.pop_front() {
+                    if let Some(pending_tool_call) = state.take_pending(id.as_deref()) {
                         match pending_tool_call {
                             PendingToolCall::Read { tool_call_id } => {
                                 if let Some(mut state) = state.file_reads.remove(&tool_call_id) {
@@ -490,7 +494,7 @@ pub fn normalize_logs(
 
                                     // Parse patch results if ApplyPatch tool
                                     if let ToolResultPayload::Value { value } = payload
-                                        && tool_call_id.contains("ApplyPatch")
+                                        && state.is_apply_patch
                                     {
                                         let worktree_path_str = worktree_path.to_string_lossy();
                                         if let Some(parsed) =
@@ -1022,6 +1026,7 @@ struct FileEditState {
     path: String,
     changes: Vec<FileChange>,
     status: ToolStatus,
+    is_apply_patch: bool,
 }
 
 impl ToNormalizedEntry for FileEditState {
@@ -1210,6 +1215,20 @@ enum PendingToolCall {
     Generic { tool_call_id: ToolCallId },
 }
 
+impl PendingToolCall {
+    fn tool_call_id(&self) -> &str {
+        match self {
+            PendingToolCall::Read { tool_call_id }
+            | PendingToolCall::FileEdit { tool_call_id }
+            | PendingToolCall::CommandRun { tool_call_id }
+            | PendingToolCall::Todo { tool_call_id }
+            | PendingToolCall::Search { tool_call_id }
+            | PendingToolCall::Fetch { tool_call_id }
+            | PendingToolCall::Generic { tool_call_id } => tool_call_id,
+        }
+    }
+}
+
 // Tracks tool-calls from creation to completion updating tool arguments and results as they come in
 #[derive(Debug, Clone)]
 struct ToolCallStates {
@@ -1239,6 +1258,24 @@ impl ToolCallStates {
             pending_fifo: VecDeque::new(),
             model_reported: false,
         }
+    }
+
+    /// Resolve the pending tool call a result belongs to.
+    ///
+    /// Droid `ToolResult` events carry the originating call's `id`, so when it
+    /// is present we match on it (results can arrive out of order when an agent
+    /// issues parallel tools). Only when no id is provided do we fall back to
+    /// the historical FIFO behavior of taking the oldest in-flight call.
+    fn take_pending(&mut self, result_id: Option<&str>) -> Option<PendingToolCall> {
+        if let Some(result_id) = result_id
+            && let Some(pos) = self
+                .pending_fifo
+                .iter()
+                .position(|pending| pending.tool_call_id() == result_id)
+        {
+            return self.pending_fifo.remove(pos);
+        }
+        self.pending_fifo.pop_front()
     }
 }
 

@@ -138,12 +138,18 @@ async fn test_terminal_logger_flushes_on_full_buffer() {
     logger.append("line 2").await;
     logger.append("line 3").await;
 
-    // Give the async persistence a moment to complete
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-    let logs = TerminalLog::find_by_terminal(&db.pool, &terminal_id, Some(10))
+    // Poll until the async buffer flush persists all 3 rows (or deadline),
+    // instead of a fixed sleep: fast on healthy runs, still fails a real regression.
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(500);
+    let mut logs = TerminalLog::find_by_terminal(&db.pool, &terminal_id, Some(10))
         .await
         .unwrap();
+    while logs.len() < 3 && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+        logs = TerminalLog::find_by_terminal(&db.pool, &terminal_id, Some(10))
+            .await
+            .unwrap();
+    }
     assert_eq!(logs.len(), 3);
     let contents: Vec<&str> = logs.iter().map(|log| log.content.as_str()).collect();
     assert!(contents.contains(&"line 1"));

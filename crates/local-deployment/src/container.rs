@@ -262,6 +262,14 @@ impl LocalContainerService {
     }
 
     pub async fn cleanup_expired_workspaces(db: &DBService) -> Result<(), DeploymentError> {
+        // Reap stale isolated executor homes the `-p` path leaks. These ws-* dirs
+        // (created by `resolve_executor_env_vars`) hold copied credentials, are
+        // keyed on an unrecorded random UUID, and are never otherwise removed.
+        // Age-based (they cannot be matched to a live run) and guarded on the
+        // temp-dir prefix. Runs on EVERY sweep, before the expired-workspace
+        // early-return below.
+        Self::reap_stale_executor_homes();
+
         let expired_workspaces = Workspace::find_expired_for_cleanup(&db.pool).await?;
         if expired_workspaces.is_empty() {
             tracing::debug!("No expired workspaces found");
@@ -275,6 +283,74 @@ impl LocalContainerService {
             Self::cleanup_workspace(db, workspace).await;
         }
         Ok(())
+    }
+
+    /// Age in seconds after which a leaked isolated executor home (ws-*) is
+    /// reaped. Generous so a long-running `-p` agent run can never have its
+    /// in-use credential home deleted out from under it.
+    const STALE_EXECUTOR_HOME_MAX_AGE_SECS: u64 = 24 * 60 * 60;
+
+    /// Best-effort sweep of leaked per-run isolated executor homes.
+    ///
+    /// `resolve_executor_env_vars` creates `<temp>/solodawn/{claude,codex}-workspaces/ws-<uuid>`
+    /// (with copied credentials) for the `-p` path on every run and never removes
+    /// them. They are keyed on a random UUID that is never persisted, so they
+    /// cannot be matched to a live run; instead we remove any `ws-*` subdir whose
+    /// mtime is older than [`Self::STALE_EXECUTOR_HOME_MAX_AGE_SECS`]. Every
+    /// `remove_dir_all` is guarded on the `get_solodawn_temp_dir()` prefix so a
+    /// misconfigured `SOLODAWN_TEMP_DIR` cannot widen the delete (same safety
+    /// pattern as `ProcessManager::cleanup_isolated_home`). All errors are logged,
+    /// never propagated — this is opportunistic reclamation.
+    fn reap_stale_executor_homes() {
+        let temp_dir = utils::path::get_solodawn_temp_dir();
+        let now = std::time::SystemTime::now();
+        let max_age = Duration::from_secs(Self::STALE_EXECUTOR_HOME_MAX_AGE_SECS);
+
+        for sub in ["claude-workspaces", "codex-workspaces"] {
+            let base = temp_dir.join(sub);
+            // Safety: never recurse outside the temp dir, even if `base` is a symlink.
+            if !base.starts_with(&temp_dir) {
+                continue;
+            }
+            // Dir not created yet (or already gone) — nothing to reap.
+            let Ok(entries) = std::fs::read_dir(&base) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name();
+                let Some(name) = name.to_str() else { continue };
+                // Only touch the homes this code creates (ws-<uuid>).
+                if !name.starts_with("ws-") {
+                    continue;
+                }
+                // Re-assert the prefix guard on the concrete path before deleting.
+                if !path.starts_with(&temp_dir) {
+                    continue;
+                }
+                let too_old = entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|mtime| now.duration_since(mtime).ok())
+                    .is_some_and(|age| age >= max_age);
+                if !too_old {
+                    continue;
+                }
+                match std::fs::remove_dir_all(&path) {
+                    Ok(()) => tracing::info!(
+                        home = %path.display(),
+                        "Reaped stale isolated executor home"
+                    ),
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => tracing::warn!(
+                        home = %path.display(),
+                        error = %e,
+                        "Failed to reap stale isolated executor home"
+                    ),
+                }
+            }
+        }
     }
 
     pub fn spawn_workspace_cleanup(&self) {
@@ -478,9 +554,19 @@ impl LocalContainerService {
                 // Some coding agent processes do not automatically exit after processing the user request; instead the executor
                 // signals when processing has finished to gracefully kill the process.
                 exit_result = &mut exit_signal_future => {
-                    // Executor signaled completion: kill group and use the provided result
-                    if let Some(child_lock) = child_store.read().await.get(&exec_id).cloned() {
-                        let mut child = child_lock.write().await ;
+                    // Executor signaled completion: kill group and use the provided result.
+                    // Pre-scope the `child_store` read guard so it is dropped BEFORE the
+                    // multi-second `kill_process_group` (which holds the per-child write
+                    // lock + sleeps): holding the shared map read lock across the kill
+                    // would stall every other execution-process registration/lookup
+                    // behind a queued writer (write-preferring RwLock). Mirrors the
+                    // sibling pattern in `spawn_os_exit_watcher` / the interactive poll.
+                    let child_lock = {
+                        let map = child_store.read().await;
+                        map.get(&exec_id).cloned()
+                    };
+                    if let Some(child_lock) = child_lock {
+                        let mut child = child_lock.write().await;
                         if let Err(err) = command::kill_process_group(&mut child).await {
                             tracing::error!("Failed to kill process group after exit signal: {} {}", exec_id, err);
                         }
@@ -764,6 +850,7 @@ impl LocalContainerService {
         exec_id: Uuid,
         transcript_path: PathBuf,
         session_uuid: String,
+        child_exited: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<Arc<MsgStore>, ContainerError> {
         let store = Arc::new(MsgStore::new());
 
@@ -771,7 +858,7 @@ impl LocalContainerService {
         store.push_session_id(session_uuid);
 
         // Tail the JSONL into the store on a background task.
-        Self::spawn_transcript_tail_task(store.clone(), transcript_path);
+        Self::spawn_transcript_tail_task(store.clone(), transcript_path, child_exited);
 
         let mut map = self.msg_stores().write().await;
         map.insert(exec_id, store.clone());
@@ -782,12 +869,25 @@ impl LocalContainerService {
     ///
     /// Polls every [`TRANSCRIPT_POLL_INTERVAL`], reads any newly-appended bytes
     /// (tracking a byte offset), and pushes each complete newline-terminated line
-    /// as `LogMsg::Stdout`. Drives `LogMsg::Finished` on the `turn_duration`
-    /// completion marker + idle debounce, or — as the PROBE-verified fallback —
-    /// on an idle timeout with no new bytes.
-    fn spawn_transcript_tail_task(store: Arc<MsgStore>, transcript_path: PathBuf) -> JoinHandle<()> {
+    /// as `LogMsg::Stdout`. This task is the SINGLE owner of `LogMsg::Finished`
+    /// for the interactive transport: it pushes it on the `turn_duration`
+    /// completion marker + idle debounce, when the completion watcher signals the
+    /// genuine `claude` child has exited (`child_exited`), or — as the
+    /// PROBE-verified last resort — on an idle timeout with no new bytes. In every
+    /// case it first drains ALL remaining complete lines so the agent's final
+    /// assistant message is never dropped ahead of `Finished`.
+    fn spawn_transcript_tail_task(
+        store: Arc<MsgStore>,
+        transcript_path: PathBuf,
+        child_exited: Arc<std::sync::atomic::AtomicBool>,
+    ) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut offset: usize = 0;
+            // Undecoded trailing bytes carried across polls: a 250ms poll routinely
+            // lands mid multi-byte UTF-8 char (CJK/emoji), so we decode only up to
+            // the last valid char boundary and retain the incomplete tail for the
+            // next poll instead of lossily mangling it with per-slice from_utf8_lossy.
+            let mut carry: Vec<u8> = Vec::new();
             let mut pending = String::new();
             let mut saw_turn_duration = false;
             // Ticks with no new bytes since the last data; resets on any new bytes.
@@ -800,11 +900,23 @@ impl LocalContainerService {
                     Ok(bytes) => {
                         let total = bytes.len();
                         if total > offset {
-                            // Only decode the freshly-appended tail.
+                            // Only decode the freshly-appended tail, carrying any
+                            // incomplete trailing multi-byte char to the next poll.
                             let fresh = &bytes[offset..];
                             offset = total;
                             got_new_bytes = true;
-                            pending.push_str(&String::from_utf8_lossy(fresh));
+                            carry.extend_from_slice(fresh);
+                            let valid = match std::str::from_utf8(&carry) {
+                                Ok(s) => s.len(),
+                                Err(e) => e.valid_up_to(),
+                            };
+                            if valid > 0 {
+                                // `carry[..valid]` is valid UTF-8 by construction.
+                                pending.push_str(
+                                    std::str::from_utf8(&carry[..valid]).unwrap_or_default(),
+                                );
+                                carry.drain(..valid);
+                            }
 
                             // Emit every complete (newline-terminated) line.
                             while let Some(nl) = pending.find('\n') {
@@ -821,6 +933,7 @@ impl LocalContainerService {
                         } else if total < offset {
                             // File truncated/rotated (e.g. resume rewrote it) — restart.
                             offset = 0;
+                            carry.clear();
                             pending.clear();
                             got_new_bytes = true;
                         }
@@ -844,11 +957,36 @@ impl LocalContainerService {
                     idle_ticks = idle_ticks.saturating_add(1);
                 }
 
-                // Completion: marker seen + short idle debounce, OR a longer idle
-                // timeout with no activity (PROBE: marker may be absent in 2.1.177).
+                // Completion: the child has exited (authoritative — the completion
+                // watcher set the latch), OR the `turn_duration` marker + short idle
+                // debounce, OR a longer idle timeout with no activity (PROBE: marker
+                // may be absent in 2.1.177).
+                let exited = child_exited.load(std::sync::atomic::Ordering::Acquire);
                 let marker_done = saw_turn_duration && idle_ticks >= TRANSCRIPT_MARKER_DEBOUNCE_TICKS;
                 let idle_done = idle_ticks >= TRANSCRIPT_IDLE_TIMEOUT_TICKS;
-                if marker_done || idle_done {
+                if exited || marker_done || idle_done {
+                    // On a child-exit signal, do one final full read so any complete
+                    // lines written between the last poll and exit are drained BEFORE
+                    // `Finished` (the watcher no longer pushes `Finished` itself).
+                    if exited && let Ok(bytes) = tokio::fs::read(&transcript_path).await {
+                        let total = bytes.len();
+                        if total > offset {
+                            carry.extend_from_slice(&bytes[offset..]);
+                        }
+                        // Decode all remaining bytes (lossy on a genuinely torn tail
+                        // at EOF — the process is gone, nothing more will arrive).
+                        if !carry.is_empty() {
+                            pending.push_str(&String::from_utf8_lossy(&carry));
+                            carry.clear();
+                        }
+                        while let Some(nl) = pending.find('\n') {
+                            let line: String = pending.drain(..=nl).collect();
+                            if line.trim_end_matches(['\n', '\r']).is_empty() {
+                                continue;
+                            }
+                            store.push_stdout(line);
+                        }
+                    }
                     // Flush any trailing line that never got a newline.
                     let tail = pending.trim_end_matches(['\n', '\r']);
                     if !tail.is_empty() {
@@ -857,6 +995,7 @@ impl LocalContainerService {
                     store.push_finished();
                     tracing::debug!(
                         transcript = %transcript_path.display(),
+                        exited,
                         marker_done,
                         idle_done,
                         "interactive transcript tail complete"
@@ -927,8 +1066,15 @@ impl LocalContainerService {
             .kill_on_drop(true)
             // Closed/empty stdin => non-TTY one-turn-then-exit (PROBE-verified).
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            // The authoritative log source for this path is the on-disk transcript
+            // tailer (the genuine `claude` writes structured output to the JSONL,
+            // NOT stdout); nothing ever drains these pipes. Piping them would let a
+            // large turn (a final assistant message >64KB) fill the bounded OS pipe
+            // buffer and block the child's write() forever — it would never finish
+            // its turn, never exit, and the run would hang. `null` sidesteps the
+            // (platform-dependent) pipe-buffer deadlock on both Linux and Windows.
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .current_dir(&working_dir)
             .args(&args);
 
@@ -943,42 +1089,58 @@ impl LocalContainerService {
             .group_spawn()
             .map_err(|e| ContainerError::Other(anyhow!("failed to spawn interactive claude: {e}")))?;
 
+        // Shared child-exit latch coordinating the tailer and the completion
+        // watcher. The watcher (which observes the genuine `claude` exit) SETS it;
+        // the tailer OWNS `Finished`, so on seeing it set the tailer does one final
+        // ordered transcript read and pushes `Finished` exactly once AFTER draining
+        // every remaining line. This closes the race where `Finished` used to be
+        // pushed by the watcher BEFORE the tailer drained the final (complete)
+        // lines, silently dropping the agent's final assistant message.
+        let child_exited = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
         // Wire the transcript tailer to feed the per-execution MsgStore. The
         // genuine `claude` writes structured output to the on-disk JSONL (not
         // stdout), so the tailer — not the child's stdout — is the log source.
         let _ = working_dir; // working_dir no longer needed by the tailer (single normalization pass lives in the services layer)
         let store = self
-            .spawn_interactive_transcript_tailer(exec_id, transcript_path.clone(), session_uuid)
+            .spawn_interactive_transcript_tailer(
+                exec_id,
+                transcript_path,
+                session_uuid,
+                child_exited.clone(),
+            )
             .await?;
 
         // S6 completion-on-exit: the genuine `claude` piped one-shot emits NO
         // `type=result`/`turn_duration` in 2.1.177, and a short transcript idle
         // can fire mid-long-tool. Drive `Finished` off the child's ACTUAL exit:
-        // when the child is reaped, do a final transcript flush/read and push
-        // `Finished` promptly. The tailer's idle timeout remains only as a long
-        // (~120s) safety net should this signal ever be lost.
-        self.spawn_interactive_completion_watcher(exec_id, transcript_path, store.clone());
+        // when the child is reaped, SIGNAL the tailer (which then does the final
+        // read + push of `Finished`). The tailer's idle timeout remains only as a
+        // long (~120s) safety net should this signal ever be lost.
+        self.spawn_interactive_completion_watcher(exec_id, child_exited);
 
         Ok((store, child))
     }
 
-    /// S6 completion-on-exit: push `LogMsg::Finished` as soon as the interactive
-    /// `claude` child process exits (the reliable completion signal for the piped
-    /// one-shot — `type=result`/`turn_duration` never appear in 2.1.177).
+    /// S6 completion-on-exit: SIGNAL the transcript tailer as soon as the
+    /// interactive `claude` child process exits (the reliable completion signal
+    /// for the piped one-shot — `type=result`/`turn_duration` never appear in
+    /// 2.1.177).
     ///
     /// Polls `child_store` for `exec_id` (mirrors `spawn_os_exit_watcher`'s
     /// pattern) and observes the cached exit status via `try_wait`, so it does
     /// NOT race the exit monitor's own `try_wait` (command-group caches the
-    /// status; both pollers converge on `Some`). On exit it does one last
-    /// transcript read so any final lines the tailer's poll loop missed are
-    /// flushed before `Finished`, then idempotently pushes `Finished` (the
-    /// tailer's debounce/safety-net may also push it; `MsgStore` tolerates a
-    /// duplicate `Finished` — the normalizer stops at the first one).
+    /// status; both pollers converge on `Some`). On exit it sets the shared
+    /// `child_exited` latch and returns: the tailer (the SINGLE owner of
+    /// `Finished`) then does one final ordered transcript read — draining every
+    /// remaining COMPLETE line plus the unterminated tail — before pushing
+    /// `Finished` exactly once. Pushing `Finished` here instead would race the
+    /// tailer and could land BEFORE those final lines were drained (all consumers
+    /// stop at the first `Finished`), silently dropping the agent's final message.
     fn spawn_interactive_completion_watcher(
         &self,
         exec_id: Uuid,
-        transcript_path: PathBuf,
-        store: Arc<MsgStore>,
+        child_exited: Arc<std::sync::atomic::AtomicBool>,
     ) -> JoinHandle<()> {
         let child_store = self.child_store.clone();
         tokio::spawn(async move {
@@ -1016,27 +1178,13 @@ impl LocalContainerService {
                 tokio::time::sleep(TRANSCRIPT_POLL_INTERVAL).await;
             }
 
-            // Final flush: the tailer's poll loop only emits COMPLETE (newline-
-            // terminated) lines. If the process exited having written a final
-            // line WITHOUT a trailing newline, the tailer never pushed it. Push
-            // ONLY that unterminated tail (guarded on `!ends_with('\n')`) so we
-            // do not duplicate a line the tailer already emitted (the normalizer
-            // assigns a fresh entry index per Stdout line and does not dedup).
-            if let Ok(bytes) = tokio::fs::read(&transcript_path).await {
-                let text = String::from_utf8_lossy(&bytes);
-                if !text.is_empty()
-                    && !text.ends_with('\n')
-                    && let Some(last) = text.lines().last()
-                    && !last.trim().is_empty()
-                {
-                    store.push_stdout(format!("{last}\n"));
-                }
-            }
-
-            store.push_finished();
+            // Signal the tailer to do its final ordered flush + push `Finished`.
+            // `Release` pairs with the tailer's `Acquire` load so the tailer
+            // observes the child's last transcript writes.
+            child_exited.store(true, std::sync::atomic::Ordering::Release);
             tracing::debug!(
                 exec_id = %exec_id,
-                "interactive transport: pushed Finished on child exit"
+                "interactive transport: signaled tailer on child exit"
             );
         })
     }
@@ -2011,6 +2159,32 @@ impl ContainerService for LocalContainerService {
         env.insert("VK_WORKSPACE_ID", workspace.id.to_string());
         env.insert("VK_WORKSPACE_BRANCH", &workspace.branch);
 
+        // S6 — no-`-p` interactive transport selection. For native-OAuth
+        // (subscription) ClaudeCode coding-agent runs, route through the genuine
+        // `claude` interactive binary (transcript-tailing) instead of the metered
+        // `-p` stream-json path, UNLESS `SOLODAWN_NO_POOL` is set (kill-switch:
+        // accept pool draw, keep proven `-p` path). API-key/relay users and all
+        // other executors keep the `-p` path unchanged — it is byte-for-byte
+        // identical below.
+        //
+        // This decision MUST run BEFORE `resolve_executor_env_vars` below:
+        // that helper creates + populates an isolated workspace CLAUDE_HOME (with
+        // copied credentials) on disk, but the interactive path builds its OWN
+        // auth env and discards `env` entirely — so calling it first would leak a
+        // credential-bearing temp dir on every native-OAuth run. The interactive
+        // router builds its auth independently of `env`, so this reorder is safe.
+        if self
+            .try_spawn_interactive_native_oauth(
+                execution_process.id,
+                &current_dir,
+                executor_action,
+                model_config_id,
+            )
+            .await?
+        {
+            return Ok(());
+        }
+
         // Inject executor-specific authentication environment variables.
         // Without this, CLIs in workspace mode cannot authenticate because the
         // isolated workspace environment doesn't inherit global CLI configs.
@@ -2024,25 +2198,6 @@ impl ContainerService for LocalContainerService {
             )
             .await;
             env.merge(&profile_vars);
-        }
-
-        // S6 — no-`-p` interactive transport selection. For native-OAuth
-        // (subscription) ClaudeCode coding-agent runs, route through the genuine
-        // `claude` interactive binary (transcript-tailing) instead of the metered
-        // `-p` stream-json path, UNLESS `SOLODAWN_NO_POOL` is set (kill-switch:
-        // accept pool draw, keep proven `-p` path). API-key/relay users and all
-        // other executors keep the `-p` path unchanged — it is byte-for-byte
-        // identical below.
-        if self
-            .try_spawn_interactive_native_oauth(
-                execution_process.id,
-                &current_dir,
-                executor_action,
-                model_config_id,
-            )
-            .await?
-        {
-            return Ok(());
         }
 
         // Create the child and stream, add to execution tracker with timeout

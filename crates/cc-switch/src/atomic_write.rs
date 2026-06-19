@@ -117,28 +117,49 @@ pub async fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
                 first_error.kind(),
                 std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::PermissionDenied
             ) {
-                if let Err(remove_error) = tokio::fs::remove_file(path).await {
-                    if remove_error.kind() != std::io::ErrorKind::NotFound {
+                // Instead of deleting the destination first (which leaves a
+                // window where a crash destroys the previous good config),
+                // move the existing target aside to a sibling backup, then
+                // rename the temp into place. On success remove the backup;
+                // on failure restore the original from the backup so the
+                // destination is never left missing.
+                let backup_path = build_temp_path(path);
+                let mut have_backup = false;
+                if let Err(backup_error) = tokio::fs::rename(path, &backup_path).await {
+                    if backup_error.kind() != std::io::ErrorKind::NotFound {
+                        // The original could not be moved aside (e.g. still
+                        // locked); leave it untouched and clean up the temp.
                         let _ = std::fs::remove_file(&temp_path);
                         return Err(CCSwitchError::AtomicWriteError(format!(
-                            "Failed to remove existing target {} before rename: {}",
+                            "Failed to back up existing target {} before rename: {}",
                             path.display(),
-                            remove_error
+                            backup_error
                         )));
                     }
+                    // NotFound: the destination disappeared concurrently, so
+                    // there is nothing to back up; fall through to the rename.
+                } else {
+                    have_backup = true;
                 }
 
-                tokio::fs::rename(&temp_path, path)
-                    .await
-                    .map_err(|rename_error| {
-                        let _ = std::fs::remove_file(&temp_path);
-                        CCSwitchError::AtomicWriteError(format!(
-                            "Failed to rename {} to {} after removing existing target: {}",
-                            temp_path.display(),
-                            path.display(),
-                            rename_error
-                        ))
-                    })?;
+                if let Err(rename_error) = tokio::fs::rename(&temp_path, path).await {
+                    // Restore the original from the backup so the destination
+                    // is never left missing, then clean up the temp.
+                    if have_backup {
+                        let _ = tokio::fs::rename(&backup_path, path).await;
+                    }
+                    let _ = std::fs::remove_file(&temp_path);
+                    return Err(CCSwitchError::AtomicWriteError(format!(
+                        "Failed to rename {} to {} after backing up existing target: {}",
+                        temp_path.display(),
+                        path.display(),
+                        rename_error
+                    )));
+                }
+
+                if have_backup {
+                    let _ = std::fs::remove_file(&backup_path);
+                }
             } else {
                 let _ = std::fs::remove_file(&temp_path);
                 return Err(CCSwitchError::AtomicWriteError(format!(

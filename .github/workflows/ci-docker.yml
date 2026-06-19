@@ -54,7 +54,7 @@ jobs:
         file: docker/Dockerfile
         push: false
         tags: solodawn:ci-test
-        cache-from: type=gha
+        cache-from: type=gha,scope=docker-build
         # Scoped cache with version tag; GHA cache has a 7-day inactivity TTL enforced by GitHub
         cache-to: type=gha,mode=max,scope=docker-build
 

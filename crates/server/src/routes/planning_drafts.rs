@@ -348,6 +348,10 @@ async fn confirm_draft(
 
     // Read audit doc content from disk if path exists
     let audit_doc_content = if let Some(ref doc_path) = draft.audit_doc_path {
+        // Defense-in-depth: reject any stored path that could traverse outside
+        // the audit-docs dir before joining it (new uploads are already
+        // server-generated, but older rows are validated here too).
+        reject_unsafe_doc_path(doc_path)?;
         let full_path = audit_docs_dir().join(doc_path);
         match tokio::fs::read_to_string(&full_path).await {
             Ok(content) => Some(content),
@@ -1103,6 +1107,47 @@ fn audit_docs_dir() -> PathBuf {
     utils::cache_dir().join("audit_docs")
 }
 
+/// Validate the extension of a client-supplied upload filename against the
+/// allowlist and return a freshly generated, traversal-safe on-disk basename
+/// (`{uuid}.{ext}`). The original client filename is NEVER used as a path
+/// component, which neutralizes `..`/absolute-path traversal regardless of the
+/// client input. Mirrors the safe pattern in `ImageService::store_image`.
+fn safe_audit_doc_name(filename: &str) -> Result<String, ApiError> {
+    let ext = std::path::Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .filter(|e| AUDIT_DOC_ALLOWED_EXTENSIONS.contains(&e.as_str()))
+        .ok_or_else(|| {
+            ApiError::BadRequest(
+                "Unsupported file type. Accepted: .md, .txt, .pdf, .docx".to_string(),
+            )
+        })?;
+    Ok(format!("{}.{ext}", Uuid::new_v4()))
+}
+
+/// Reject a stored audit-doc relative path that could traverse outside the
+/// audit-docs directory before it is joined and read/removed. New uploads are
+/// always server-generated (see `safe_audit_doc_name`), but this guards
+/// previously-stored rows defensively at the read-back / delete sites.
+fn reject_unsafe_doc_path(doc_path: &str) -> Result<(), ApiError> {
+    use std::path::Component;
+    // Positive allowlist: every component must be a plain name (no `..`, no
+    // root/prefix/drive) and the joined path must stay under audit_docs_dir().
+    // A bare `contains("..") || is_absolute()` is bypassable on Windows
+    // (`C:foo.md` drive-relative, `\evil.md` rooted-driveless, UNC
+    // `\\server\share\...`, verbatim `\\?\C:\...`).
+    let p = std::path::Path::new(doc_path);
+    let only_normal = p.components().all(|c| matches!(c, Component::Normal(_)));
+    let joined = audit_docs_dir().join(doc_path);
+    if !only_normal || !joined.starts_with(audit_docs_dir()) {
+        return Err(ApiError::BadRequest(
+            "Invalid audit document path".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 async fn upload_audit_doc(
     State(deployment): State<DeploymentImpl>,
     Path(draft_id): Path<String>,
@@ -1135,35 +1180,28 @@ async fn upload_audit_doc(
             .file_name()
             .map_or_else(|| "audit-doc.md".to_string(), ToString::to_string);
 
-        // Validate extension
-        let ext = std::path::Path::new(&filename)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_lowercase())
-            .unwrap_or_default();
-        if !AUDIT_DOC_ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
-            return Err(ApiError::BadRequest(format!(
-                "Unsupported file type '.{ext}'. Accepted: .md, .txt, .pdf, .docx"
-            )));
-        }
+        // Validate extension and derive a traversal-safe, server-generated
+        // on-disk name. The raw client filename is never used as a path
+        // component, so `..`/absolute-path payloads cannot escape the dir.
+        let safe_name = safe_audit_doc_name(&filename)?;
 
         let data = field.bytes().await.map_err(|e| {
             ApiError::BadRequest(format!("Failed to read file data: {e}"))
         })?;
 
-        // Store file to disk under audit_docs/{draft_id}/{filename}
+        // Store file to disk under audit_docs/{draft_id}/{safe_name}
         let dir = audit_docs_dir().join(&draft_id);
         tokio::fs::create_dir_all(&dir)
             .await
             .map_err(|e| ApiError::Internal(format!("Failed to create audit docs dir: {e}")))?;
 
-        let file_path = dir.join(&filename);
+        let file_path = dir.join(&safe_name);
         tokio::fs::write(&file_path, &data)
             .await
             .map_err(|e| ApiError::Internal(format!("Failed to write audit doc: {e}")))?;
 
-        // Store the relative path: "{draft_id}/{filename}"
-        let relative_path = format!("{draft_id}/{filename}");
+        // Store the relative path: "{draft_id}/{safe_name}"
+        let relative_path = format!("{draft_id}/{safe_name}");
 
         PlanningDraft::update_audit_plan(
             &deployment.db().pool,
@@ -1212,22 +1250,31 @@ async fn delete_audit_doc(
         )));
     }
 
-    // Remove file from disk if it exists
+    // Remove file from disk if it exists. Skip disk removal (but still clear
+    // the DB row below) for any legacy path that could traverse outside the
+    // audit-docs dir, so a crafted stored value cannot delete an arbitrary file.
     if let Some(ref doc_path) = draft.audit_doc_path {
-        let full_path = audit_docs_dir().join(doc_path);
-        if let Err(e) = tokio::fs::remove_file(&full_path).await {
-            // Log but don't fail — the DB state is more important
+        if reject_unsafe_doc_path(doc_path).is_err() {
             tracing::warn!(
                 draft_id = %draft_id,
-                path = %full_path.display(),
-                error = %e,
-                "Failed to remove audit doc file from disk"
+                "Refusing to remove audit doc with unsafe stored path; clearing DB only"
             );
-        }
+        } else {
+            let full_path = audit_docs_dir().join(doc_path);
+            if let Err(e) = tokio::fs::remove_file(&full_path).await {
+                // Log but don't fail — the DB state is more important
+                tracing::warn!(
+                    draft_id = %draft_id,
+                    path = %full_path.display(),
+                    error = %e,
+                    "Failed to remove audit doc file from disk"
+                );
+            }
 
-        // Try to remove the parent directory if empty
-        let parent_dir = audit_docs_dir().join(&draft_id);
-        let _ = tokio::fs::remove_dir(&parent_dir).await; // ignore errors (may not be empty)
+            // Try to remove the parent directory if empty
+            let parent_dir = audit_docs_dir().join(&draft_id);
+            let _ = tokio::fs::remove_dir(&parent_dir).await; // ignore errors (may not be empty)
+        }
     }
 
     // Clear path and reset mode
@@ -1243,4 +1290,76 @@ async fn delete_audit_doc(
         .ok_or_else(|| ApiError::Internal("Draft disappeared after update".to_string()))?;
 
     Ok(Json(ApiResponse::success(DraftResponse::from(updated))))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{audit_docs_dir, reject_unsafe_doc_path, safe_audit_doc_name};
+
+    #[test]
+    fn safe_audit_doc_name_neutralizes_traversal_and_absolute_paths() {
+        // Traversal and absolute payloads that smuggle an allowed extension must
+        // NOT be used as the on-disk name; the generated name has no path
+        // components and the resulting write path stays under audit_docs_dir().
+        let base = audit_docs_dir().join("draft-1");
+        for payload in [
+            "..\\..\\evil.md",
+            "../../../../evil.md",
+            "C:\\Windows\\Temp\\evil.md",
+            "/etc/cron.d/evil.md",
+            "normal.md",
+        ] {
+            let safe = safe_audit_doc_name(payload).expect("allowed extension");
+            assert!(
+                Path::new(&safe)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("md")),
+                "generated name keeps the validated extension: {safe}"
+            );
+            assert!(
+                !safe.contains("..") && !safe.contains('/') && !safe.contains('\\'),
+                "generated name has no traversal/separator components: {safe}"
+            );
+
+            let file_path = base.join(&safe);
+            assert!(
+                file_path.starts_with(&base),
+                "write path must stay under the draft's audit dir: {}",
+                file_path.display()
+            );
+            assert!(
+                file_path.starts_with(audit_docs_dir()),
+                "write path must never escape audit_docs_dir(): {}",
+                file_path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn safe_audit_doc_name_rejects_disallowed_extension() {
+        assert!(safe_audit_doc_name("evil.sh").is_err());
+        assert!(safe_audit_doc_name("no-extension").is_err());
+    }
+
+    #[test]
+    fn reject_unsafe_doc_path_blocks_traversal_and_absolute() {
+        assert!(reject_unsafe_doc_path("..\\..\\evil.md").is_err());
+        assert!(reject_unsafe_doc_path("../../etc/passwd").is_err());
+        assert!(reject_unsafe_doc_path("/etc/cron.d/evil.md").is_err());
+        if cfg!(windows) {
+            assert!(reject_unsafe_doc_path("C:\\Windows\\Temp\\evil.md").is_err());
+            // Windows-specific bypasses of a naive contains("..")||is_absolute():
+            // drive-relative, rooted-driveless, and UNC paths.
+            assert!(reject_unsafe_doc_path("C:foo.md").is_err());
+            assert!(reject_unsafe_doc_path("\\evil.md").is_err());
+            assert!(reject_unsafe_doc_path("\\\\server\\share\\evil.md").is_err());
+        }
+        // A normal server-generated relative path is accepted and stays in-dir.
+        let ok = "draft-1/0123abcd.md";
+        assert!(reject_unsafe_doc_path(ok).is_ok());
+        assert!(audit_docs_dir().join(ok).starts_with(audit_docs_dir()));
+        assert!(!Path::new(ok).is_absolute());
+    }
 }

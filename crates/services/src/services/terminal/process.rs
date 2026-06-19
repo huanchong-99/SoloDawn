@@ -480,22 +480,21 @@ impl ProcessManager {
     ///
     /// This prevents stale subprocesses/tasks from leaking across workflow rounds.
     async fn evict_existing_terminal(&self, terminal_id: &str) -> anyhow::Result<()> {
+        // [E26-13] Remove the tracked process and DROP the shared `processes`
+        // write lock BEFORE the multi-second `kill().await`, mirroring
+        // kill_terminal. Holding the write-preferring lock across the kill would
+        // stall all other terminal map operations for up to ~3s on Windows.
         let tracked = {
             let mut processes = self.processes.write().await;
-            let Some(existing) = processes.get_mut(terminal_id) else {
-                return Ok(());
-            };
+            processes.remove(terminal_id)
+        };
 
-            self.terminate_tracked_child(terminal_id, existing)
+        if let Some(mut tracked) = tracked {
+            self.terminate_tracked_child(terminal_id, &mut tracked)
                 .await
                 .map_err(|e| {
                     anyhow::anyhow!("Failed to evict existing terminal {terminal_id}: {e}")
                 })?;
-
-            processes.remove(terminal_id)
-        };
-
-        if let Some(tracked) = tracked {
             self.finalize_terminated_process(terminal_id, tracked).await;
             tracing::info!(
                 terminal_id = %terminal_id,
@@ -1070,18 +1069,22 @@ impl ProcessManager {
 
     /// Kill terminal by terminal ID
     pub async fn kill_terminal(&self, terminal_id: &str) -> anyhow::Result<()> {
-        let tracked = {
+        // [E26-13] Take ownership of the tracked process and DROP the shared
+        // `processes` write lock BEFORE the multi-second `kill().await`. Holding
+        // the (write-preferring) lock across the kill would stall every other
+        // terminal map operation (is_running/list_running/get_handle/spawn/...)
+        // for up to ~3s on Windows. Removing-before-kill is safe: any concurrent
+        // re-spawn of the same id routes through evict_existing_terminal, and
+        // is_running/list_running already remove-then-act.
+        let mut tracked = {
             let mut processes = self.processes.write().await;
-            let tracked = processes
-                .get_mut(terminal_id)
-                .ok_or_else(|| anyhow::anyhow!("Terminal not found: {terminal_id}"))?;
-
-            self.terminate_tracked_child(terminal_id, tracked).await?;
             processes
                 .remove(terminal_id)
-                .ok_or_else(|| anyhow::anyhow!("Terminal not found after kill: {terminal_id}"))?
+                .ok_or_else(|| anyhow::anyhow!("Terminal not found: {terminal_id}"))?
         };
 
+        self.terminate_tracked_child(terminal_id, &mut tracked)
+            .await?;
         self.finalize_terminated_process(terminal_id, tracked).await;
 
         tracing::info!(terminal_id = %terminal_id, "Terminal killed");
@@ -1095,54 +1098,109 @@ impl ProcessManager {
     /// `cleanup()`. This ensures callers get accurate liveness information without
     /// waiting for the next cleanup poll cycle.
     pub async fn is_running(&self, terminal_id: &str) -> bool {
-        let mut processes = self.processes.write().await;
-        let Some(tracked) = processes.get_mut(terminal_id) else {
-            return false;
-        };
-        // [E26-05] If the background reader has observed PTY EOF, treat the
-        // terminal as no longer running even if `try_wait()` still returns
-        // `Ok(None)` (which can lag EOF on some platforms).
-        if tracked.pty_eof.load(Ordering::Acquire) {
-            processes.remove(terminal_id);
-            return false;
-        }
-        // Try to reap the child non-blockingly; if it has exited, treat as not running.
-        match tracked.child.try_wait() {
-            Ok(Some(_)) => {
-                // [E26-06] Remove dead process from the map so subsequent
-                // lookups don't resurrect it. We already hold a write lock.
-                processes.remove(terminal_id);
-                false
+        // [E26-14] When the background reader has observed PTY EOF we must treat
+        // the terminal as no longer running, but `Ok(0)`/EOF can be transient and
+        // does NOT prove the child is dead (a grandchild may keep it alive). A
+        // bare `processes.remove()` here would DROP the only Child handle without
+        // killing it — TrackedProcess::drop only aborts tasks and cleans homes,
+        // it never kills — orphaning a live CLI that then burns API credits with
+        // no handle left to stop it. So: take ownership, release the lock, and if
+        // the child is still alive terminate it BEFORE finalizing.
+        let mut tracked = {
+            let mut processes = self.processes.write().await;
+            let Some(tracked) = processes.get_mut(terminal_id) else {
+                return false;
+            };
+            if !tracked.pty_eof.load(Ordering::Acquire) {
+                // Try to reap the child non-blockingly; if it has exited, treat
+                // as not running and reap it so lookups don't resurrect it.
+                return match tracked.child.try_wait() {
+                    Ok(Some(_)) => {
+                        // [E26-06] Remove dead process from the map. We already
+                        // hold the write lock.
+                        processes.remove(terminal_id);
+                        false
+                    }
+                    Ok(None) => true, // process is still running
+                    Err(_) => true,   // cannot determine; assume running to be safe
+                };
             }
-            Ok(None) => true, // process is still running
-            Err(_) => true,   // cannot determine; assume still running to be safe
+            // EOF observed: take ownership and drop the lock before any kill.
+            match processes.remove(terminal_id) {
+                Some(tracked) => tracked,
+                None => return false,
+            }
+        };
+
+        // Lock released. If the child is genuinely dead, just finalize; otherwise
+        // kill it first so it is not orphaned by the EOF latch.
+        if !matches!(tracked.child.try_wait(), Ok(Some(_)))
+            && let Err(e) = self
+                .terminate_tracked_child(terminal_id, &mut tracked)
+                .await
+        {
+            tracing::warn!(
+                terminal_id = %terminal_id,
+                error = %e,
+                "Failed to terminate EOF-but-alive terminal during is_running"
+            );
         }
+        self.finalize_terminated_process(terminal_id, tracked).await;
+        false
     }
 
     /// Lists all currently tracked terminal IDs
     pub async fn list_running(&self) -> Vec<String> {
-        let mut processes = self.processes.write().await;
-        let mut running = Vec::new();
-        let mut dead: Vec<String> = Vec::new();
-        for (id, tracked) in processes.iter_mut() {
-            // [E26-05] PTY EOF observed by the reader task means the terminal is
-            // effectively closed even if `try_wait()` has not yet reported exit.
-            if tracked.pty_eof.load(Ordering::Acquire) {
-                dead.push(id.clone());
-                continue;
+        let (running, eof) = {
+            let mut processes = self.processes.write().await;
+            let mut running = Vec::new();
+            // Already-exited children: safe to bare-remove (dead, no handle to kill).
+            let mut exited: Vec<String> = Vec::new();
+            // [E26-14] PTY-EOF children: EOF does NOT prove death, so these must be
+            // terminated (not bare-removed) before dropping the Child handle, or a
+            // still-alive CLI is orphaned. Collect and handle them outside the lock.
+            let mut eof: Vec<String> = Vec::new();
+            for (id, tracked) in processes.iter_mut() {
+                // [E26-05] PTY EOF observed by the reader task means the terminal is
+                // effectively closed even if `try_wait()` has not yet reported exit.
+                if tracked.pty_eof.load(Ordering::Acquire) {
+                    eof.push(id.clone());
+                    continue;
+                }
+                match tracked.child.try_wait() {
+                    // [M18] Only include truly-running processes (try_wait == Ok(None)).
+                    // Ok(Some(_)) means the child already exited; Err(_) means we cannot
+                    // confirm liveness, so we conservatively exclude it from "running".
+                    Ok(None) => running.push(id.clone()),
+                    Ok(Some(_)) => exited.push(id.clone()),
+                    Err(_) => {}
+                }
             }
-            match tracked.child.try_wait() {
-                // [M18] Only include truly-running processes (try_wait == Ok(None)).
-                // Ok(Some(_)) means the child already exited; Err(_) means we cannot
-                // confirm liveness, so we conservatively exclude it from "running".
-                Ok(None) => running.push(id.clone()),
-                Ok(Some(_)) => dead.push(id.clone()),
-                Err(_) => {}
+            // Reap already-exited entries so they don't linger until the next cleanup.
+            for id in &exited {
+                processes.remove(id);
             }
-        }
-        // Reap exited entries so they don't linger until the next cleanup cycle.
-        for id in dead {
-            processes.remove(&id);
+            // Take ownership of the EOF entries; terminate them after the lock drops.
+            let eof: Vec<(String, TrackedProcess)> = eof
+                .into_iter()
+                .filter_map(|id| processes.remove(&id).map(|t| (id, t)))
+                .collect();
+            (running, eof)
+        };
+
+        // Lock released: kill any EOF-but-alive child before finalizing so it is
+        // not orphaned, mirroring is_running.
+        for (id, mut tracked) in eof {
+            if !matches!(tracked.child.try_wait(), Ok(Some(_)))
+                && let Err(e) = self.terminate_tracked_child(&id, &mut tracked).await
+            {
+                tracing::warn!(
+                    terminal_id = %id,
+                    error = %e,
+                    "Failed to terminate EOF-but-alive terminal during list_running"
+                );
+            }
+            self.finalize_terminated_process(&id, tracked).await;
         }
         running
     }
@@ -1689,6 +1747,7 @@ impl TerminalLogger {
 
     async fn flush_buffer(
         buffer: &Arc<RwLock<Vec<String>>>,
+        buffer_bytes: &Arc<std::sync::atomic::AtomicUsize>,
         flush_lock: &Arc<AsyncMutex<()>>,
         db: &DBService,
         terminal_id: &str,
@@ -1700,6 +1759,9 @@ impl TerminalLogger {
         if persistence_disabled.load(Ordering::Relaxed) {
             let mut buffer = buffer.write().await;
             buffer.clear();
+            // Reset the byte counter under the SAME write lock that clears the
+            // buffer so a concurrent append()'s fetch_add is never clobbered.
+            buffer_bytes.store(0, Ordering::Relaxed);
             return Ok(());
         }
 
@@ -1710,7 +1772,14 @@ impl TerminalLogger {
             if buffer.is_empty() {
                 return Ok(());
             }
-            std::mem::take(&mut *buffer)
+            let taken = std::mem::take(&mut *buffer);
+            // [G09-006] Reset the byte counter to 0 while STILL holding the buffer
+            // write lock that just drained it. Doing the reset here (instead of an
+            // unconditional external store(0)) makes it mutually exclusive with
+            // append()'s fetch_add (also under buffer.write()), so bytes for an
+            // entry appended after the drain are never discarded.
+            buffer_bytes.store(0, Ordering::Relaxed);
+            taken
         };
 
         if let Err(error) = Self::persist_entries(db, terminal_id, log_type, &entries).await {
@@ -1810,7 +1879,7 @@ impl TerminalLogger {
                 tokio::select! {
                     _ = &mut flush_shutdown_rx => {
                         if let Err(e) =
-                            Self::flush_buffer(&buffer, &flush_lock, &db, &terminal_id, &log_type, &persistence_disabled).await
+                            Self::flush_buffer(&buffer, &buffer_bytes, &flush_lock, &db, &terminal_id, &log_type, &persistence_disabled).await
                         {
                             tracing::warn!(
                                 terminal_id = %terminal_id,
@@ -1819,7 +1888,6 @@ impl TerminalLogger {
                                 "Failed to persist terminal logs during flush task shutdown"
                             );
                         }
-                        buffer_bytes.store(0, Ordering::Relaxed);
                         tracing::debug!(
                             terminal_id = %terminal_id,
                             log_type = %log_type,
@@ -1829,7 +1897,7 @@ impl TerminalLogger {
                     }
                     _ = interval.tick() => {
                         if let Err(e) =
-                            Self::flush_buffer(&buffer, &flush_lock, &db, &terminal_id, &log_type, &persistence_disabled).await
+                            Self::flush_buffer(&buffer, &buffer_bytes, &flush_lock, &db, &terminal_id, &log_type, &persistence_disabled).await
                         {
                             tracing::error!(
                                 terminal_id = %terminal_id,
@@ -1838,7 +1906,6 @@ impl TerminalLogger {
                                 "Failed to persist terminal logs in flush task"
                             );
                         }
-                        buffer_bytes.store(0, Ordering::Relaxed);
                     }
                 }
             }
@@ -1962,20 +2029,20 @@ impl TerminalLogger {
         self.flush_and_reset_bytes().await
     }
 
-    /// Flush buffer and reset the byte counter.
+    /// Flush buffer (the byte counter is reset inside `flush_buffer`, under the
+    /// same buffer write lock that drains it, so a concurrent append is never
+    /// clobbered).
     async fn flush_and_reset_bytes(&self) -> anyhow::Result<()> {
-        let result = Self::flush_buffer(
+        Self::flush_buffer(
             &self.buffer,
+            &self.buffer_bytes,
             &self.flush_lock,
             &self.db,
             &self.terminal_id,
             &self.log_type,
             &self.persistence_disabled,
         )
-        .await;
-        // Reset byte counter after flush (buffer was drained by flush_buffer via mem::take)
-        self.buffer_bytes.store(0, Ordering::Relaxed);
-        result
+        .await
     }
 
     fn is_sqlite_foreign_key_violation(error: &anyhow::Error) -> bool {
@@ -2412,6 +2479,92 @@ mod tests {
         let manager = ProcessManager::new();
         let result = manager.kill_terminal("missing-terminal").await;
         assert!(result.is_err());
+    }
+
+    /// Returns true if `pid` still refers to a live OS process.
+    fn pid_is_alive(pid: u32) -> bool {
+        #[cfg(unix)]
+        {
+            use nix::{sys::signal, unistd::Pid};
+            // signal 0 is a liveness probe: Ok => alive, Err => gone.
+            signal::kill(Pid::from_raw(pid as i32), None).is_ok()
+        }
+        #[cfg(windows)]
+        {
+            let out = std::process::Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+                .output()
+                .expect("tasklist should run");
+            String::from_utf8_lossy(&out.stdout).contains(&pid.to_string())
+        }
+    }
+
+    /// [E26-14] Regression: when the reader latches PTY EOF while the child is
+    /// still alive (try_wait == Ok(None)), `is_running` must TERMINATE the child
+    /// before dropping its handle — not bare-remove it and orphan a live CLI.
+    #[tokio::test]
+    async fn test_is_running_terminates_eof_but_alive_child() {
+        let manager = ProcessManager::new();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let spawn_config = build_test_spawn_command(temp_dir.path());
+
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            manager.spawn_pty_with_config("eof-alive-terminal", &spawn_config, 80, 24),
+        )
+        .await
+        .expect("spawn_pty_with_config should not hang")
+        .unwrap();
+
+        // Capture the live child's PID and force the EOF latch while it is still
+        // running (try_wait == Ok(None)), simulating a transient PTY EOF.
+        let pid = {
+            let mut processes = manager.processes.write().await;
+            let tracked = processes
+                .get_mut("eof-alive-terminal")
+                .expect("spawned terminal should be tracked");
+            assert!(
+                matches!(tracked.child.try_wait(), Ok(None)),
+                "child must still be alive before the test sets the EOF latch"
+            );
+            let pid = tracked
+                .child
+                .process_id()
+                .expect("child should expose a PID");
+            tracked.pty_eof.store(true, Ordering::Release);
+            pid
+        };
+        assert!(pid > 0, "child PID should be valid");
+        assert!(
+            pid_is_alive(pid),
+            "child must be alive immediately before is_running()"
+        );
+
+        // is_running must report not-running AND kill the EOF-but-alive child.
+        // It awaits the kill to completion, so no sleep is needed afterwards.
+        let running = tokio::time::timeout(
+            Duration::from_secs(10),
+            manager.is_running("eof-alive-terminal"),
+        )
+        .await
+        .expect("is_running should not hang");
+        assert!(!running, "EOF terminal must report not running");
+
+        // The entry must be gone from the map (no resurrection).
+        assert!(
+            !manager
+                .processes
+                .read()
+                .await
+                .contains_key("eof-alive-terminal"),
+            "EOF terminal must be removed from the process map"
+        );
+
+        // Crucially: the child must have been killed, not orphaned.
+        assert!(
+            !pid_is_alive(pid),
+            "is_running must terminate the EOF-but-alive child rather than orphan it"
+        );
     }
 
     #[tokio::test]
