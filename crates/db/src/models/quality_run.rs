@@ -202,6 +202,29 @@ impl QualityRun {
         .await
     }
 
+    /// Find the latest quality run for a project (PRD §10 D7 metric snapshot).
+    ///
+    /// `quality_run` has no direct `project_id` column; it links to a project
+    /// through `workflow` (`quality_run.workflow_id = workflow.id`, both TEXT) and
+    /// `workflow.project_id` (BLOB, matching `projects.id`). Bind the project id as
+    /// a `Uuid` so it compares against the BLOB column correctly (a TEXT bind would
+    /// silently never match, the class of bug fixed by `20260202090000`).
+    pub async fn find_latest_by_project(
+        pool: &SqlitePool,
+        project_id: uuid::Uuid,
+    ) -> sqlx::Result<Option<Self>> {
+        sqlx::query_as::<_, QualityRun>(
+            r"SELECT qr.* FROM quality_run qr
+              JOIN workflow w ON w.id = qr.workflow_id
+              WHERE w.project_id = ?
+              ORDER BY qr.created_at DESC
+              LIMIT 1",
+        )
+        .bind(project_id)
+        .fetch_optional(pool)
+        .await
+    }
+
     /// Find quality runs by task ID
     pub async fn find_by_task(pool: &SqlitePool, task_id: &str) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, QualityRun>(
