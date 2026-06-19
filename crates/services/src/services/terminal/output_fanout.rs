@@ -198,7 +198,24 @@ impl OutputSubscription {
 
         // Then receive from live stream with deduplication
         loop {
-            let chunk = self.rx.recv().await?;
+            // [G33] On Lagged (the broadcast buffer overflowed and dropped
+            // chunks because this subscriber fell behind) skip the lost window
+            // and keep streaming, instead of propagating the error and tearing
+            // down the whole output stream (gRPC stream_output / WS). Only a
+            // genuine Closed ends the subscription.
+            let chunk = match self.rx.recv().await {
+                Ok(chunk) => chunk,
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::warn!(
+                        skipped,
+                        "terminal output subscription lagged; resuming after dropped chunks"
+                    );
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    return Err(broadcast::error::RecvError::Closed);
+                }
+            };
             if chunk.seq <= self.last_seq {
                 // Skip duplicate (already seen in replay or previous live)
                 continue;

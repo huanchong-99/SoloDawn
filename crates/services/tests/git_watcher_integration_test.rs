@@ -328,8 +328,11 @@ mod git_watcher_tests {
                 "completed",
             );
             create_commit(&repo_path, &commit_msg);
-            // Wait longer than poll_interval to ensure watcher detects each commit
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            // Wait longer than poll_interval (50ms) to ensure watcher detects
+            // each commit in its own poll window. 80ms keeps a safe margin over
+            // one poll cycle (50ms sleep + git subprocess) while trimming idle
+            // wall-clock vs the prior 150ms.
+            tokio::time::sleep(Duration::from_millis(80)).await;
         }
 
         // Collect all messages
@@ -384,10 +387,14 @@ mod git_watcher_tests {
         }
 
         // Collect two TerminalCompleted events.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
+        // The outer deadline and per-recv timeout are failure-only upper bounds
+        // (a passing run receives both events within one ~300ms poll window, so
+        // these values do not affect success latency). Tightened from 4s/800ms
+        // to surface a real regression faster without changing semantics.
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(1500);
         let mut terminal_ids = Vec::new();
         while terminal_ids.len() < 2 && tokio::time::Instant::now() < deadline {
-            match timeout(Duration::from_millis(800), receiver.recv()).await {
+            match timeout(Duration::from_millis(500), receiver.recv()).await {
                 Ok(Ok(BusMessage::TerminalCompleted(event))) => {
                     terminal_ids.push(event.terminal_id);
                 }

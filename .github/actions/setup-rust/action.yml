@@ -101,3 +101,15 @@ runs:
         # extracted straight onto PATH so `cargo nextest` resolves it.
         curl -LsSf --retry 5 --retry-connrefused "${URL}" | tar zxf - -C "${HOME}/.cargo/bin"
         cargo-nextest --version
+
+    - name: Cache Rust build outputs (registry, git, target)
+      # Complements sccache: sccache (GHA backend) caches rustc compilation
+      # outputs, but NOT cargo's registry index, dependency metadata, or final
+      # link artifacts — those are re-done every run. rust-cache restores
+      # ~/.cargo/{registry,git} + target/, auto-scoping by job + Cargo.lock +
+      # rustc version and pruning stale deps (safe alongside sccache; a raw
+      # actions/cache on `target` would bloat and evict sccache's GHA entries).
+      # Keyed on Cargo.lock so a clean dependency set never serves stale.
+      uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      with:
+        cache-all-crates: "true"

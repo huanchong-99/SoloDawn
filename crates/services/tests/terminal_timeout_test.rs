@@ -34,11 +34,23 @@ mod tests {
             .await
             .expect("Process kill by PID should succeed");
 
-        // Wait for process to exit after SIGTERM/taskkill
-        tokio::time::sleep(Duration::from_millis(200)).await;
-
-        // Cleanup should remove dead processes
-        manager.cleanup().await;
+        // Poll until the killed process is reaped, or hit a hard deadline.
+        // kill() already waits for OS-level exit; this bounded loop only waits for
+        // the tracking map to observe it, so a healthy machine returns in tens of
+        // ms instead of a fixed 200ms sleep. cleanup() and list_running() are both
+        // idempotent reapers, so repeated calls are safe. A real cleanup regression
+        // (entry never reaped) still fails the final assertion at the 500ms deadline.
+        let deadline = std::time::Instant::now() + Duration::from_millis(500);
+        loop {
+            manager.cleanup().await;
+            if manager.list_running().await.is_empty() {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
 
         let running_after = manager.list_running().await;
         assert_eq!(running_after.len(), 0, "Dead process should be removed");
@@ -110,11 +122,23 @@ mod tests {
                 .expect("Process kill by PID should succeed");
         }
 
-        // Wait for processes to exit after SIGTERM/taskkill
-        tokio::time::sleep(Duration::from_millis(200)).await;
-
-        // Cleanup should remove all dead processes
-        manager.cleanup().await;
+        // Poll until all killed processes are reaped, or hit a hard deadline.
+        // kill() already waits for OS-level exit; this bounded loop only waits for
+        // the tracking map to observe it, returning early on healthy machines
+        // instead of a fixed 200ms sleep. cleanup() and list_running() are both
+        // idempotent reapers, so repeated calls are safe. A real cleanup regression
+        // still fails the final assertion at the 500ms deadline.
+        let deadline = std::time::Instant::now() + Duration::from_millis(500);
+        loop {
+            manager.cleanup().await;
+            if manager.list_running().await.is_empty() {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
 
         assert_eq!(
             manager.list_running().await.len(),
