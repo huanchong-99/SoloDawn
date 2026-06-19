@@ -5,14 +5,26 @@
 pub mod builtin_common;
 pub mod builtin_frontend;
 pub mod builtin_rust;
+pub mod compiled_rule;
 pub mod completeness;
 pub mod coverage;
+pub mod declarative;
 pub mod delivery_readiness;
 pub mod frontend;
 pub mod repo;
 pub mod rust_analyzer;
 pub mod security;
 pub mod sonar;
+
+// Re-export the declarative custom-rule surface (provider + compiled-rule types +
+// the authoring-pipeline ground-truth executor). Instantiation with concrete
+// rules is wired from `crates/services` (the quality crate stays DB-free); these
+// re-exports keep construction injectable.
+pub use compiled_rule::{
+    compile, CompiledRegexRule, CompiledRule, RuleCompileError, RuleDefinition, RuleFormat,
+    RuleMeta, RuleScope, REGEX_DFA_SIZE_LIMIT, REGEX_SIZE_LIMIT,
+};
+pub use declarative::{run_candidate, DeclarativeRuleProvider};
 
 use std::{collections::HashMap, path::Path};
 

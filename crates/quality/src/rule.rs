@@ -174,6 +174,8 @@ pub enum AnalyzerSource {
     Sonar,
     /// 安全审计脚本
     SecurityAudit,
+    /// 自定义声明式规则（用户/AI 编写，经确认后由 LLM-free 引擎执行）
+    CustomRule,
     /// 其他
     Other(String),
 }
@@ -205,7 +207,9 @@ impl AnalyzerSource {
     pub fn severity_origin(&self) -> SeverityOrigin {
         match self {
             // 严重级别由项目本地配置决定 —— 模型口味，不能阻断
-            Self::EsLint => SeverityOrigin::ProjectConfig,
+            // CustomRule 的 severity 由用户/AI 编写，同属"项目配置"出身，
+            // 必须封顶到 Major；阻断仅经 CustomRuleCritical 计数指标显式 opt-in。
+            Self::EsLint | Self::CustomRule => SeverityOrigin::ProjectConfig,
 
             // 严重级别由工具硬编码 —— 真实信号，允许阻断
             Self::CargoCheck
@@ -233,6 +237,7 @@ impl std::fmt::Display for AnalyzerSource {
             Self::Vitest => write!(f, "vitest"),
             Self::Sonar => write!(f, "sonarqube"),
             Self::SecurityAudit => write!(f, "security-audit"),
+            Self::CustomRule => write!(f, "custom-rule"),
             Self::Other(name) => write!(f, "{}", name),
         }
     }
@@ -270,6 +275,25 @@ mod tests {
         // Capping only reduces; it never inflates a minor finding into a major one.
         for sev in [Severity::Info, Severity::Minor, Severity::Major] {
             assert_eq!(sev.cap_for_advisory(&AnalyzerSource::EsLint), sev);
+        }
+    }
+
+    #[test]
+    fn custom_rule_severity_is_capped_to_major_and_nonblocking() {
+        // User/AI-authored custom rules are advisory: a generated rule must
+        // not be able to self-escalate to Blocker. Gating happens only via the
+        // explicit opt-in CustomRuleCritical count metric — never the label.
+        for raw in [Severity::Critical, Severity::Blocker] {
+            let capped = raw.cap_for_advisory(&AnalyzerSource::CustomRule);
+            assert_eq!(capped, Severity::Major);
+            assert!(
+                !capped.is_blocking(),
+                "custom-rule findings must never self-block"
+            );
+        }
+        // Capping only reduces; lower severities pass through unchanged.
+        for sev in [Severity::Info, Severity::Minor, Severity::Major] {
+            assert_eq!(sev.cap_for_advisory(&AnalyzerSource::CustomRule), sev);
         }
     }
 
@@ -317,6 +341,7 @@ mod tests {
             (AnalyzerSource::Vitest, Tool),
             (AnalyzerSource::Sonar, Tool),
             (AnalyzerSource::SecurityAudit, Tool),
+            (AnalyzerSource::CustomRule, ProjectConfig),
             (AnalyzerSource::Other("arbitrary".into()), Tool),
         ];
         for (source, expected) in expectations {
@@ -341,6 +366,7 @@ mod tests {
             AnalyzerSource::TypeScript,
             AnalyzerSource::CargoCheck,
             AnalyzerSource::Vitest,
+            AnalyzerSource::CustomRule,
             AnalyzerSource::Other("future-linter".into()),
         ] {
             let capped = Severity::Critical.cap_for_advisory(&source);
