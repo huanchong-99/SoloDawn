@@ -898,7 +898,16 @@ completeness: boolean,
 /**
  * Delivery authenticity/readiness checks for real-entry tests, conventions, runtime smells
  */
-delivery_readiness: boolean, };
+delivery_readiness: boolean, 
+/**
+ * Declarative AI-editable custom rules (PRD §14 P1). Dark-by-default: unlike
+ * the built-in providers above, this one defaults to FALSE so a project only
+ * runs authored rules after opting in. Existing policies that omit the field
+ * still parse (`serde(default)` = `false`). The compiled rules themselves are
+ * loaded + injected in `crates/services` (quality stays DB-free); this toggle
+ * only gates whether that injection happens.
+ */
+declarative_rules: boolean, };
 
 export type SonarConfig = { 
 /**

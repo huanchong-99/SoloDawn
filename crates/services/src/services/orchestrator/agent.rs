@@ -2804,14 +2804,14 @@ impl OrchestratorAgent {
                     // G3 (P3 §2.9 Site 1): build the engine from the DB-resolved
                     // policy when project_id is known; otherwise fall back to the
                     // filesystem chain (from_project) so behavior is unchanged.
+                    // `build_engine_for_project` also wires in authored
+                    // declarative custom rules (§14) when the policy opts in.
                     let engine_result = match project_id {
                         Some(pid) => {
-                            let resolved_cfg =
-                                crate::services::orchestrator::quality_policy::resolve_quality_config(
-                                    &db.pool, pid, wd,
-                                )
-                                .await;
-                            quality::engine::QualityEngine::from_config(resolved_cfg, wd)
+                            crate::services::orchestrator::quality_policy::build_engine_for_project(
+                                &db.pool, pid, wd,
+                            )
+                            .await
                         }
                         None => quality::engine::QualityEngine::from_project(wd),
                     };
@@ -7923,13 +7923,12 @@ impl OrchestratorAgent {
         };
         let engine_result = match project_id {
             Some(pid) => {
-                let resolved_cfg = crate::services::orchestrator::quality_policy::resolve_quality_config(
+                crate::services::orchestrator::quality_policy::build_engine_for_project(
                     &self.db.pool,
                     pid,
                     project_root,
                 )
-                .await;
-                quality::engine::QualityEngine::from_config(resolved_cfg, project_root)
+                .await
             }
             None => quality::engine::QualityEngine::from_project(project_root),
         };

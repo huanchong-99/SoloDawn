@@ -75,6 +75,19 @@ impl QualityEngine {
         Self { config, providers }
     }
 
+    /// Inject an externally-constructed provider after the toggle-driven set has
+    /// been built.
+    ///
+    /// This is the minimal seam the `crates/services` layer uses to wire the
+    /// DB-loaded [`crate::provider::DeclarativeRuleProvider`] (PRD §14) into a
+    /// gate-ready engine without the quality crate gaining a `db` dependency
+    /// (the verified G3 boundary). `build_providers` stays private — the
+    /// config-driven providers are this crate's concern; only the declarative,
+    /// DB-sourced one is pushed in from outside.
+    pub fn push_provider(&mut self, provider: Arc<dyn QualityProvider>) {
+        self.providers.push(provider);
+    }
+
     /// Build the enabled provider set from a config. Single source of truth for
     /// the toggle block (was inlined in `from_project`); shared by both
     /// constructors.

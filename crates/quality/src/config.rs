@@ -117,6 +117,14 @@ pub struct ProvidersConfig {
     /// Delivery authenticity/readiness checks for real-entry tests, conventions, runtime smells
     #[serde(default = "default_true")]
     pub delivery_readiness: bool,
+    /// Declarative AI-editable custom rules (PRD §14 P1). Dark-by-default: unlike
+    /// the built-in providers above, this one defaults to FALSE so a project only
+    /// runs authored rules after opting in. Existing policies that omit the field
+    /// still parse (`serde(default)` = `false`). The compiled rules themselves are
+    /// loaded + injected in `crates/services` (quality stays DB-free); this toggle
+    /// only gates whether that injection happens.
+    #[serde(default)]
+    pub declarative_rules: bool,
 }
 
 fn default_true() -> bool {
@@ -388,6 +396,63 @@ mod tests {
         let yaml = serde_yaml::to_string(&config).unwrap();
         let parsed = QualityGateConfig::from_yaml(&yaml).unwrap();
         assert_eq!(parsed.mode, config.mode);
+    }
+
+    #[test]
+    fn providers_default_has_declarative_rules_off() {
+        // §14 dark-by-default: a project only runs authored rules after an
+        // explicit opt-in. The derived `Default` zero-initializes every bool, so
+        // the field is false there; the serde `#[serde(default)]` (no
+        // `default = "default_true"`) likewise yields false when the YAML omits
+        // it — see `policy_without_declarative_rules_field_still_parses`.
+        let providers = ProvidersConfig::default();
+        assert!(
+            !providers.declarative_rules,
+            "declarative_rules must default to false"
+        );
+    }
+
+    #[test]
+    fn policy_without_declarative_rules_field_still_parses() {
+        // An existing YAML policy authored before §14 omits `declarative_rules`
+        // entirely. It MUST still deserialize (serde default = false), never error.
+        let yaml = r#"mode: enforce
+terminal_gate:
+  name: "T"
+  conditions: []
+branch_gate:
+  name: "B"
+  conditions: []
+repo_gate:
+  name: "R"
+  conditions: []
+providers:
+  rust: true
+  builtin_common: true
+"#;
+        let cfg = QualityGateConfig::from_yaml(yaml).expect("legacy policy must parse");
+        assert!(
+            !cfg.providers.declarative_rules,
+            "omitted field defaults to false"
+        );
+        assert!(cfg.providers.rust);
+    }
+
+    #[test]
+    fn policy_with_declarative_rules_field_round_trips() {
+        // A §14-aware policy that explicitly opts in round-trips the flag.
+        let mut cfg = QualityGateConfig::default_config();
+        cfg.providers.declarative_rules = true;
+        let yaml = serde_yaml::to_string(&cfg).expect("serialize");
+        assert!(
+            yaml.contains("declarative_rules: true"),
+            "flag must serialize: {yaml}"
+        );
+        let back = QualityGateConfig::from_yaml(&yaml).expect("parse");
+        assert!(
+            back.providers.declarative_rules,
+            "explicit true must round-trip"
+        );
     }
 
     #[test]
