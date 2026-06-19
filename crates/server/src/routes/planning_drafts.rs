@@ -1345,13 +1345,18 @@ mod tests {
 
     #[test]
     fn reject_unsafe_doc_path_blocks_traversal_and_absolute() {
-        assert!(reject_unsafe_doc_path("..\\..\\evil.md").is_err());
+        // Cross-platform escape vectors: forward-slash parent + absolute root
+        // are a traversal on every OS.
         assert!(reject_unsafe_doc_path("../../etc/passwd").is_err());
         assert!(reject_unsafe_doc_path("/etc/cron.d/evil.md").is_err());
         if cfg!(windows) {
+            // Windows-only: `\` is a path separator, so backslash-traversal,
+            // drive-relative, rooted-driveless, and UNC forms escape. On Linux
+            // `\` is a legal filename char, so these are harmless in-dir names
+            // that reject_unsafe_doc_path correctly accepts (verified against
+            // std's Unix path parser: `..\..\evil.md` is one Normal component).
+            assert!(reject_unsafe_doc_path("..\\..\\evil.md").is_err());
             assert!(reject_unsafe_doc_path("C:\\Windows\\Temp\\evil.md").is_err());
-            // Windows-specific bypasses of a naive contains("..")||is_absolute():
-            // drive-relative, rooted-driveless, and UNC paths.
             assert!(reject_unsafe_doc_path("C:foo.md").is_err());
             assert!(reject_unsafe_doc_path("\\evil.md").is_err());
             assert!(reject_unsafe_doc_path("\\\\server\\share\\evil.md").is_err());
