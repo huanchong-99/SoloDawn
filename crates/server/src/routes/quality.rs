@@ -200,6 +200,292 @@ pub struct MetricCatalogResponse {
     pub metrics: Vec<MetricKey>,
     /// Supported condition operators: `["GT", "LT"]`.
     pub operators: Vec<String>,
+    /// Self-documenting tooltip catalog: one entry per selectable metric (D7 /
+    /// PRD §7.1). A static compiled table — safe to cache (`staleTime` 1h).
+    pub info: Vec<MetricInfo>,
+}
+
+/// One tooltip entry for a selectable metric (PRD §7.1 / §10).
+///
+/// `higherIsWorse` tells the UI which direction is bad (most metrics are counts
+/// where higher = worse; coverage metrics invert it). `description` + `example`
+/// power the circled-"!" popover next to the metric `<select>`.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MetricInfo {
+    /// The metric this entry documents.
+    pub key: MetricKey,
+    /// Human-readable name (mirrors `MetricKey::display_name()`).
+    pub display_name: String,
+    /// What the metric measures, in plain language.
+    pub description: String,
+    /// A concrete example of what it counts/flags.
+    pub example: String,
+    /// `true` when a higher value is worse (counts); `false` for coverage-style
+    /// metrics where higher is better.
+    pub higher_is_worse: bool,
+}
+
+/// The latest-persisted-run metric snapshot for a project (D7 / PRD §10).
+///
+/// Read from the latest `quality_run.report_json`; NEVER recomputed on hover. The
+/// `values` map keys are the metric tokens; missing metrics simply have no entry.
+/// When the project has no run yet, `values` is empty and `runId`/`ranAt` null.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ProjectMetricSnapshot {
+    /// `MetricKey` -> the metric's measured value at the latest run.
+    pub values: std::collections::HashMap<MetricKey, quality::gate::result::MeasureValue>,
+    /// The `quality_run.id` the snapshot came from (null = no run yet).
+    pub run_id: Option<String>,
+    /// When that run completed/was created (RFC3339; null = no run yet).
+    pub ran_at: Option<String>,
+}
+
+/// Static per-metric tooltip text for every selectable metric (PRD §7.1). Kept
+/// as a compiled `match` so adding a `MetricKey` variant forces a compile error
+/// here (the catalog can never silently miss a metric). `(description, example,
+/// higher_is_worse)`.
+fn metric_doc(key: MetricKey) -> (&'static str, &'static str, bool) {
+    match key {
+        MetricKey::CargoCheckErrors => (
+            "Compiler errors reported by `cargo check` across the Rust workspace.",
+            "A type mismatch or unresolved import that fails compilation.",
+            true,
+        ),
+        MetricKey::ClippyWarnings => (
+            "Lint warnings from `cargo clippy` (style, correctness, complexity).",
+            "`needless_return` or `redundant_clone` warnings.",
+            true,
+        ),
+        MetricKey::ClippyErrors => (
+            "Clippy lints raised at error level (deny-by-default or `-D warnings`).",
+            "A `clippy::correctness` lint promoted to an error.",
+            true,
+        ),
+        MetricKey::FmtViolations => (
+            "Files that are not `cargo fmt`-clean.",
+            "A file with inconsistent indentation `rustfmt` would rewrite.",
+            true,
+        ),
+        MetricKey::RustTestFailures => (
+            "Failing Rust unit/integration tests.",
+            "An `assert_eq!` that does not hold at test time.",
+            true,
+        ),
+        MetricKey::EslintErrors => (
+            "ESLint errors in the frontend.",
+            "`no-unused-vars` raised at error severity.",
+            true,
+        ),
+        MetricKey::EslintWarnings => (
+            "ESLint warnings in the frontend.",
+            "A `react-hooks/exhaustive-deps` warning.",
+            true,
+        ),
+        MetricKey::TscErrors => (
+            "TypeScript compiler (`tsc`) type errors.",
+            "Assigning a `string` to a `number`-typed field.",
+            true,
+        ),
+        MetricKey::FrontendTestFailures => (
+            "Failing frontend tests (Vitest/Jest).",
+            "A component test whose snapshot no longer matches.",
+            true,
+        ),
+        MetricKey::FrontendTestDepsMissing => (
+            "Frontend test dependencies that are not installed.",
+            "A test importing a package missing from `node_modules`.",
+            true,
+        ),
+        MetricKey::TestFailures => (
+            "Total failing tests across all suites.",
+            "Any unit or integration test that does not pass.",
+            true,
+        ),
+        MetricKey::TestCoverage => (
+            "Overall test coverage percentage.",
+            "60% means 40% of lines are unexercised by tests.",
+            false,
+        ),
+        MetricKey::Bugs => (
+            "Reliability issues (SonarQube `Bug` type).",
+            "A possible null dereference.",
+            true,
+        ),
+        MetricKey::NewBugs => (
+            "Newly introduced bugs versus the baseline.",
+            "A bug added in the current change set.",
+            true,
+        ),
+        MetricKey::CodeSmells => (
+            "Maintainability issues (SonarQube `Code Smell`).",
+            "A deeply nested function that is hard to follow.",
+            true,
+        ),
+        MetricKey::Vulnerabilities => (
+            "Security vulnerabilities detected.",
+            "A SQL query built by string concatenation.",
+            true,
+        ),
+        MetricKey::DuplicatedLinesDensity => (
+            "Percentage of lines that are duplicated.",
+            "Two copy-pasted blocks differing only in a literal.",
+            true,
+        ),
+        MetricKey::SecurityIssues => (
+            "Security-category issues across analyzers.",
+            "A hard-coded credential in source.",
+            true,
+        ),
+        MetricKey::RedosRisks => (
+            "Regular expressions vulnerable to catastrophic backtracking (ReDoS).",
+            "A pattern like `(a+)+$` over untrusted input.",
+            true,
+        ),
+        MetricKey::GenerateTypesCheckFailures => (
+            "`generate_types --check` drift (shared TS types out of date).",
+            "A Rust DTO changed without regenerating `shared/types`.",
+            true,
+        ),
+        MetricKey::PrepareDbCheckFailures => (
+            "`sqlx prepare --check` drift (the offline query cache is stale).",
+            "A new `query!` without a committed `.sqlx/` entry.",
+            true,
+        ),
+        MetricKey::SonarQualityGateStatus => (
+            "The SonarQube project quality-gate status (OK/WARN/ERROR).",
+            "`ERROR` when a Sonar condition is breached.",
+            true,
+        ),
+        MetricKey::SonarIssues => (
+            "Total open issues reported by SonarQube.",
+            "Any unresolved Sonar finding.",
+            true,
+        ),
+        MetricKey::SonarBlockerIssues => (
+            "SonarQube issues at Blocker severity.",
+            "A resource leak Sonar marks as Blocker.",
+            true,
+        ),
+        MetricKey::SonarCriticalIssues => (
+            "SonarQube issues at Critical severity.",
+            "A Critical-severity security hotspot.",
+            true,
+        ),
+        MetricKey::BuiltinRustIssues => (
+            "Issues from the built-in Rust analyzer.",
+            "A `.unwrap()` in non-test production code.",
+            true,
+        ),
+        MetricKey::BuiltinRustCritical => (
+            "Critical issues from the built-in Rust analyzer.",
+            "A `panic!` on an external-input path.",
+            true,
+        ),
+        MetricKey::RustCyclomaticComplexity => (
+            "Cyclomatic complexity of Rust functions (branch count).",
+            "A function with many nested `match`/`if` arms.",
+            true,
+        ),
+        MetricKey::RustCognitiveComplexity => (
+            "Cognitive complexity of Rust functions (how hard to read).",
+            "Deeply nested control flow with early returns.",
+            true,
+        ),
+        MetricKey::BuiltinFrontendIssues => (
+            "Issues from the built-in frontend analyzer.",
+            "A `console.log` left in committed TS.",
+            true,
+        ),
+        MetricKey::BuiltinFrontendCritical => (
+            "Critical issues from the built-in frontend analyzer.",
+            "`dangerouslySetInnerHTML` with unsanitized input.",
+            true,
+        ),
+        MetricKey::BuiltinCommonIssues => (
+            "Issues from the built-in language-agnostic analyzer.",
+            "A committed merge-conflict marker.",
+            true,
+        ),
+        MetricKey::DuplicatedBlocks => (
+            "Count of duplicated code blocks.",
+            "The same 30-line block appearing in two files.",
+            true,
+        ),
+        MetricKey::SecretsDetected => (
+            "Hard-coded secrets detected in source.",
+            "An AWS access key committed in a config file.",
+            true,
+        ),
+        MetricKey::CustomRuleViolations => (
+            "Total matches from your project's custom (editable) rules. This is the \
+             count a quality gate uses to make custom rules block — add a \
+             `Custom Rule Violations` GT condition to enforce them.",
+            "Every hit of a rule like 'prohibit `dbg!`'.",
+            true,
+        ),
+        MetricKey::CustomRuleCritical => (
+            "Custom-rule matches at Critical+ severity. Custom-rule severity is \
+             advisory-capped to Major, so this stays 0 in practice — gate on \
+             `Custom Rule Violations` (the count), not this, to block custom rules.",
+            "Normally 0: a custom rule cannot self-escalate above Major.",
+            true,
+        ),
+        MetricKey::LineCoverage => (
+            "Percentage of lines covered by tests.",
+            "75% means a quarter of lines are untested.",
+            false,
+        ),
+        MetricKey::BranchCoverage => (
+            "Percentage of branches covered by tests.",
+            "An `if/else` whose `else` arm is never exercised.",
+            false,
+        ),
+        MetricKey::TestFileAbsence => (
+            "Source modules with no accompanying test file.",
+            "A `service.rs` with no `service` tests anywhere.",
+            true,
+        ),
+        MetricKey::TodoDensity => (
+            "Density of TODO/FIXME markers.",
+            "A file peppered with `// TODO` comments.",
+            true,
+        ),
+        MetricKey::StubTestCount => (
+            "Stubbed/empty tests that assert nothing real.",
+            "A test body that is just `assert!(true)`.",
+            true,
+        ),
+        MetricKey::CoverageExclusionIssues => (
+            "Suspicious coverage-exclusion annotations.",
+            "A broad `#[cfg(not(coverage))]` hiding real code.",
+            true,
+        ),
+        MetricKey::TestAuthenticityIssues => (
+            "Tests that look real but do not meaningfully verify behavior.",
+            "A test mocking the very thing it claims to check.",
+            true,
+        ),
+        MetricKey::ProjectConventionIssues => (
+            "Violations of project-specific conventions.",
+            "A new module not registered where the project expects.",
+            true,
+        ),
+        MetricKey::RuntimeSecuritySmells => (
+            "Runtime security smells (dynamic/unsafe patterns).",
+            "An `eval`-style dynamic execution on user input.",
+            true,
+        ),
+        // The sentinel is never selectable, but the exhaustive match must cover it.
+        MetricKey::QualityGateEmptyScan => (
+            "Internal sentinel emitted when a scan produced no analyzable files.",
+            "An empty repository or a fully-excluded scan.",
+            true,
+        ),
+    }
 }
 
 /// All selectable metric keys, EXCLUDING the internal `QualityGateEmptyScan`
@@ -240,6 +526,11 @@ fn selectable_metric_keys() -> Vec<MetricKey> {
         MetricKey::BuiltinCommonIssues,
         MetricKey::DuplicatedBlocks,
         MetricKey::SecretsDetected,
+        // Custom-rule opt-in gating (D3/G4): an operator adds a `CustomRuleViolations`
+        // GT condition to make authored rules block. `CustomRuleCritical` stays 0
+        // (severity is advisory-capped to Major) but is selectable for completeness.
+        MetricKey::CustomRuleViolations,
+        MetricKey::CustomRuleCritical,
         MetricKey::LineCoverage,
         MetricKey::BranchCoverage,
         MetricKey::TestFileAbsence,
@@ -273,11 +564,80 @@ pub async fn get_default_policy() -> Result<Json<ApiResponse<QualityPolicyRespon
     })))
 }
 
-/// GET /quality/policy/metrics — picker catalog (closed enum minus sentinel + operators).
+/// GET /quality/policy/metrics — picker catalog (closed enum minus sentinel +
+/// operators) ENRICHED with the self-documenting tooltip catalog (D7 / §7.1).
 pub async fn get_metric_catalog() -> Result<Json<ApiResponse<MetricCatalogResponse>>, ApiError> {
+    let metrics = selectable_metric_keys();
+    let info: Vec<MetricInfo> = metrics
+        .iter()
+        .map(|&key| {
+            let (description, example, higher_is_worse) = metric_doc(key);
+            MetricInfo {
+                key,
+                display_name: key.display_name().to_string(),
+                description: description.to_string(),
+                example: example.to_string(),
+                higher_is_worse,
+            }
+        })
+        .collect();
     Ok(Json(ApiResponse::success(MetricCatalogResponse {
-        metrics: selectable_metric_keys(),
+        metrics,
         operators: vec!["GT".to_string(), "LT".to_string()],
+        info,
+    })))
+}
+
+/// GET /projects/{project_id}/quality-metrics/latest — the latest persisted-run
+/// metric snapshot (D7). Reads `quality_run.report_json`; never recomputes.
+pub async fn get_project_metric_snapshot(
+    State(deployment): State<DeploymentImpl>,
+    AxumPath(project_id): AxumPath<Uuid>,
+) -> Result<Json<ApiResponse<ProjectMetricSnapshot>>, ApiError> {
+    use std::collections::HashMap;
+
+    let run = db::models::QualityRun::find_latest_by_project(&deployment.db().pool, project_id)
+        .await
+        .map_err(ApiError::Database)?;
+
+    let Some(run) = run else {
+        // No run yet (documented nullable case — degrades to "no run yet").
+        return Ok(Json(ApiResponse::success(ProjectMetricSnapshot {
+            values: HashMap::new(),
+            run_id: None,
+            ran_at: None,
+        })));
+    };
+
+    // Aggregate the per-provider metric maps out of the persisted report. The
+    // report is a serialized `quality::report::QualityReport`; its metrics live in
+    // `provider_reports[].metrics`. A later provider overrides an earlier one for
+    // the same key (the same precedence the engine aggregation uses).
+    let mut values: HashMap<MetricKey, quality::gate::result::MeasureValue> = HashMap::new();
+    if let Some(json) = run.report_json.as_deref() {
+        if let Ok(report) = serde_json::from_str::<quality::report::QualityReport>(json) {
+            for provider in &report.provider_reports {
+                for (key, value) in &provider.metrics {
+                    values.insert(*key, value.clone());
+                }
+            }
+        } else {
+            tracing::warn!(
+                %project_id, run_id = %run.id,
+                "quality_run.report_json failed to parse into QualityReport; snapshot values empty"
+            );
+        }
+    }
+
+    let ran_at = run
+        .completed_at
+        .map(|t| t.to_rfc3339())
+        .or_else(|| Some(run.created_at.to_rfc3339()));
+
+    Ok(Json(ApiResponse::success(ProjectMetricSnapshot {
+        values,
+        run_id: Some(run.id),
+        ran_at,
     })))
 }
 
@@ -366,10 +726,15 @@ pub fn quality_policy_routes() -> Router<DeploymentImpl> {
 
 /// Quality policy project CRUD routes nested under /projects.
 pub fn quality_policy_project_routes() -> Router<DeploymentImpl> {
-    Router::new().route(
-        "/{project_id}/quality-policy",
-        get(get_project_policy)
-            .put(put_project_policy)
-            .delete(delete_project_policy),
-    )
+    Router::new()
+        .route(
+            "/{project_id}/quality-policy",
+            get(get_project_policy)
+                .put(put_project_policy)
+                .delete(delete_project_policy),
+        )
+        .route(
+            "/{project_id}/quality-metrics/latest",
+            get(get_project_metric_snapshot),
+        )
 }

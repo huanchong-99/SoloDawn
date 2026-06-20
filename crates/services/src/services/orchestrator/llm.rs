@@ -635,6 +635,17 @@ impl InteractiveClaudeClient {
     /// How long to wait for the transcript file to materialize after exit.
     const TRANSCRIPT_SETTLE: Duration = Duration::from_millis(500);
 
+    /// Billing-routing env keys scrubbed from the off-pool subscription authoring
+    /// child (PRD §12). Mirrors `cc_switch::BILLING_ENV_KEYS`: any of these
+    /// inherited from the parent process would force pay-as-you-go billing or
+    /// redirect to a relay endpoint, defeating the subscription/OAuth surface.
+    const BILLING_SCRUB_ENV: [&'static str; 4] = [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+    ];
+
     pub fn new(model: &str) -> Self {
         Self {
             model: model.to_string(),
@@ -783,13 +794,20 @@ impl LLMClient for InteractiveClaudeClient {
             // and CLAUDE_HOME (so RB-37 cleanup still recognizes the dir).
             .env("CLAUDE_CONFIG_DIR", &home_dir_str)
             .env("CLAUDE_HOME", &home_dir_str)
-            // Never let an inherited api-key force pay-as-you-go billing on a
-            // subscription user; the genuine binary uses the copied OAuth creds.
-            .env_remove("ANTHROPIC_API_KEY")
             // R6 port-leak hygiene: strip SoloDawn dev ports from the child.
             .env_remove("PORT")
             .env_remove("BACKEND_PORT")
             .env_remove("FRONTEND_PORT");
+
+        // Never let inherited billing-routing env force pay-as-you-go billing (or
+        // redirect to a relay) on a subscription user; the genuine binary uses the
+        // copied OAuth creds. Scrub the full PRD §12 set (mirrors
+        // `cc_switch::BILLING_ENV_KEYS`) — scrubbing only ANTHROPIC_API_KEY left
+        // AUTH_TOKEN/BASE_URL/OAUTH_TOKEN able to silently reroute this off-pool
+        // authoring child.
+        for key in Self::BILLING_SCRUB_ENV {
+            command.env_remove(key);
+        }
 
         tracing::debug!(
             model = %self.model,
@@ -1412,5 +1430,24 @@ mod interactive_claude_tests {
             InteractiveClaudeClient::extract_final_assistant_text(transcript),
             None
         );
+    }
+
+    /// PRD §12: the off-pool subscription authoring child must scrub ALL
+    /// billing-routing env, not just the api-key. Lock the full set so a future
+    /// edit cannot silently drop one and reintroduce the billing-leak.
+    #[test]
+    fn billing_scrub_env_covers_all_billing_routing_keys() {
+        let keys = InteractiveClaudeClient::BILLING_SCRUB_ENV;
+        for required in [
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ] {
+            assert!(
+                keys.contains(&required),
+                "BILLING_SCRUB_ENV must scrub {required} (PRD §12); got {keys:?}"
+            );
+        }
     }
 }

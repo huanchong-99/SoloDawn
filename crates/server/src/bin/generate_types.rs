@@ -246,6 +246,38 @@ fn generate_types_content() -> String {
         quality::gate::condition::Operator::decl(),
         server::routes::quality::QualityPolicyResponse::decl(),
         server::routes::quality::MetricCatalogResponse::decl(),
+        // [P4-G3] AI-editable quality-rules API (PRD §10).
+        // Metric snapshot + tooltip catalog (quality.rs additions).
+        quality::gate::result::MeasureValue::decl(),
+        server::routes::quality::MetricInfo::decl(),
+        server::routes::quality::ProjectMetricSnapshot::decl(),
+        // Custom-rule DB models (custom_rule* tables).
+        db::models::CustomRule::decl(),
+        db::models::CreateCustomRule::decl(),
+        db::models::UpdateCustomRule::decl(),
+        db::models::CustomRuleValidation::decl(),
+        db::models::CreateCustomRuleValidation::decl(),
+        db::models::CustomRuleExample::decl(),
+        db::models::CreateCustomRuleExample::decl(),
+        db::models::CustomRuleAudit::decl(),
+        db::models::CreateCustomRuleAudit::decl(),
+        // Rule-authoring pipeline payloads (services rule_authoring::types).
+        quality::provider::RuleFormat::decl(),
+        services::services::rule_authoring::RuleExample::decl(),
+        services::services::rule_authoring::ExampleKind::decl(),
+        services::services::rule_authoring::ExampleResult::decl(),
+        services::services::rule_authoring::EmpiricalReport::decl(),
+        services::services::rule_authoring::RoundTripVerdict::decl(),
+        services::services::rule_authoring::AuthoringBackend::decl(),
+        // Custom-rule REST DTOs (routes/custom_rules.rs §10 contract shapes).
+        server::routes::custom_rules::CustomRuleInput::decl(),
+        server::routes::custom_rules::FailingExample::decl(),
+        server::routes::custom_rules::CustomRuleDraft::decl(),
+        server::routes::custom_rules::AdversaryTranscript::decl(),
+        server::routes::custom_rules::AuthorEngine::decl(),
+        server::routes::custom_rules::AuthorRuleResult::decl(),
+        server::routes::custom_rules::AuthorRuleRequest::decl(),
+        server::routes::custom_rules::StatusUpdate::decl(),
     ];
 
     let body = decls

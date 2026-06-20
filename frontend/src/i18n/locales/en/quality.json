@@ -29,5 +29,51 @@
     "shadow": "Shadow",
     "warn": "Warn",
     "enforce": "Enforce"
+  },
+  "rulesEditor": {
+    "metricInfo": {
+      "indicatorLabel": "Metric details",
+      "example": "Example",
+      "noRun": "No run yet",
+      "current": "Current",
+      "asOf": "as of {{ranAt}}"
+    },
+    "customRules": {
+      "title": "Custom Rules",
+      "generateWithAi": "Generate rule with AI",
+      "empty": "No custom rules yet. Use \"Generate rule with AI\" above to author one.",
+      "loadError": "Failed to load custom rules.",
+      "actionError": "The last action failed. Please retry.",
+      "saveError": "Failed to save the rule.",
+      "ruleInfo": "Rule details",
+      "enable": "Enable",
+      "disable": "Disable",
+      "promoteTo": "→ {{status}}",
+      "promoteTitle": "Promote to {{status}}",
+      "revalidate": "Revalidate",
+      "edit": "Edit",
+      "delete": "Delete",
+      "editTitle": "Edit rule",
+      "editDescription": "Editing the rule body re-runs validation and drops the rule to shadow; editing only the name or description does not.",
+      "revalidateTitle": "Revalidate rule",
+      "revalidateDescription": "Re-run the AI validation pipeline. The rule drops to shadow until it passes again.",
+      "revalidateAction": "Revalidate",
+      "fieldName": "Name",
+      "fieldDescription": "Description",
+      "fieldSeverity": "Severity",
+      "fieldType": "Type",
+      "fieldMetric": "Mapped metric",
+      "fieldMetricPlaceholder": "none",
+      "fieldBody": "Rule body (regex)",
+      "bodyChangeHint": "Body changed — saving re-runs validation and drops the rule to shadow.",
+      "confirmLoading": "Loading custom rules...",
+      "confirmTitle": "Custom rules enforced this run",
+      "confirmIntro": "Review the AI-authored rules and their validation evidence before confirming.",
+      "roundTripOk": "Round-trip verified",
+      "roundTripFailed": "Round-trip failed",
+      "evidenceTally": "Examples passed: {{passed}}/{{total}}",
+      "judgeScore": "Judge score {{score}}",
+      "evidenceLoading": "Loading validation evidence..."
+    }
   }
 }

@@ -24,6 +24,7 @@ pub mod project;
 pub mod qa_repos;
 pub mod queued_message;
 pub mod repo;
+pub mod rule_authoring;
 pub mod runner_client;
 pub mod template_renderer;
 pub mod terminal;

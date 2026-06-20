@@ -27,3 +27,31 @@ reqwest = { workspace = true, features = ["multipart"] }
 glob = "0.3"
 syn = { version = "2", features = ["full", "parsing", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
+
+# ---------------------------------------------------------------------------
+# P2 ast-grep structural rule format — OPTIONAL, OFF by default.
+#
+# Gated behind the `ast-grep` feature so the DEFAULT build pulls ZERO new deps
+# (and zero cc-compiled tree-sitter grammars) and behaves exactly as today. Only
+# a build that explicitly opts in (`--features ast-grep`, or CI `--all-features`)
+# pays the embedding-engine + grammar build cost.
+#
+# Build weight is minimized by selecting ONLY the four grammars the custom-rule
+# format targets — rust + typescript + tsx + javascript. `ast-grep-language`
+# exposes per-language cargo features, so we disable its default 27-grammar
+# `builtin-parser` and opt in to just `tree-sitter-rust` + `tree-sitter-typescript`
+# (which provides BOTH TypeScript and Tsx) + `tree-sitter-javascript`. That keeps
+# the cc (C) compile surface to 3 grammar crates instead of 27.
+ast-grep-config = { version = "0.43", optional = true }
+ast-grep-core = { version = "0.43", optional = true }
+ast-grep-language = { version = "0.43", optional = true, default-features = false, features = [
+    "tree-sitter-rust",
+    "tree-sitter-typescript",
+    "tree-sitter-javascript",
+] }
+
+[features]
+default = []
+# Enables the P2 ast-grep structural custom-rule format. NOT in `default` — the
+# stock build is dependency-identical to today's.
+ast-grep = ["dep:ast-grep-config", "dep:ast-grep-core", "dep:ast-grep-language"]

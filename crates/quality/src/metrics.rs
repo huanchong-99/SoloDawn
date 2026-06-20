@@ -130,6 +130,17 @@ pub enum MetricKey {
     #[serde(rename = "secrets_detected")]
     SecretsDetected,
 
+    // ── Custom rule 指标（用户/AI 编写的声明式规则）──
+    /// 自定义声明式规则命中总数。质量门通过此 *计数* 让自定义规则生效
+    /// （添加 CustomRuleViolations > N 条件即可阻断）。
+    #[serde(rename = "custom_rule_violations")]
+    CustomRuleViolations,
+    /// 自定义声明式规则中 Critical+ 严重度的命中数。自定义规则严重度被
+    /// 上限封顶为 Major（咨询性，D3），故此指标实际恒为 0；阻断请用
+    /// CustomRuleViolations 计数，而非此指标。
+    #[serde(rename = "custom_rule_critical")]
+    CustomRuleCritical,
+
     // ── Coverage 指标 ──
     /// 行覆盖率 (%)
     #[serde(rename = "line_coverage")]
@@ -209,6 +220,8 @@ impl MetricKey {
             Self::BuiltinCommonIssues => "builtin_common_issues",
             Self::DuplicatedBlocks => "duplicated_blocks",
             Self::SecretsDetected => "secrets_detected",
+            Self::CustomRuleViolations => "custom_rule_violations",
+            Self::CustomRuleCritical => "custom_rule_critical",
             Self::LineCoverage => "line_coverage",
             Self::BranchCoverage => "branch_coverage",
             Self::TestFileAbsence => "test_file_absence",
@@ -259,6 +272,8 @@ impl MetricKey {
             Self::BuiltinCommonIssues => "Built-in Common Issues",
             Self::DuplicatedBlocks => "Duplicated Blocks",
             Self::SecretsDetected => "Secrets Detected",
+            Self::CustomRuleViolations => "Custom Rule Violations",
+            Self::CustomRuleCritical => "Custom Rule Critical",
             Self::LineCoverage => "Line Coverage (%)",
             Self::BranchCoverage => "Branch Coverage (%)",
             Self::TestFileAbsence => "Test File Absence",

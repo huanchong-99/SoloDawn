@@ -71,6 +71,7 @@ pub mod concierge;
 pub mod concierge_ws;
 pub mod config;
 pub mod containers;
+pub mod custom_rules;
 pub mod filesystem;
 pub mod event_bridge;
 pub mod events;
@@ -169,6 +170,7 @@ pub fn build_router(
         .nest("/quality", quality::quality_routes())
         .nest("/quality", quality::quality_policy_routes())
         .nest("/projects", quality::quality_policy_project_routes())
+        .nest("/projects", custom_rules::custom_rules_project_routes())
         .nest("/concierge", concierge::concierge_routes())
         .nest("/terminal", terminal_ws::terminal_ws_routes())
         .nest("/terminals", terminals::terminal_routes())

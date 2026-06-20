@@ -1,13 +1,18 @@
 //! 求值结果 — 移植自 SonarQube `EvaluationResult.java` + `ConditionStatus.java`
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{gate::status::Level, metrics::MetricKey};
 
 /// 度量值（统一的可比较值类型）
 ///
 /// 参考 SonarQube `Measure.ValueType`
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// Derives `TS` so it can surface over the HTTP API as the value type of the
+/// project metric snapshot (`ProjectMetricSnapshot.values`, PRD §10 / D7).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
 pub enum MeasureValue {
     /// 整数值（错误数、警告数等）
     Int(i64),
