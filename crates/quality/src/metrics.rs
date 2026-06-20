@@ -131,10 +131,13 @@ pub enum MetricKey {
     SecretsDetected,
 
     // ── Custom rule 指标（用户/AI 编写的声明式规则）──
-    /// 自定义声明式规则发现的问题总数
+    /// 自定义声明式规则命中总数。质量门通过此 *计数* 让自定义规则生效
+    /// （添加 CustomRuleViolations > N 条件即可阻断）。
     #[serde(rename = "custom_rule_violations")]
     CustomRuleViolations,
-    /// 自定义声明式规则发现的 Critical+ 问题数
+    /// 自定义声明式规则中 Critical+ 严重度的命中数。自定义规则严重度被
+    /// 上限封顶为 Major（咨询性，D3），故此指标实际恒为 0；阻断请用
+    /// CustomRuleViolations 计数，而非此指标。
     #[serde(rename = "custom_rule_critical")]
     CustomRuleCritical,
 

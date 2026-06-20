@@ -35,6 +35,33 @@ pub struct RuleExample {
     pub note: Option<String>,
 }
 
+/// The persisted `custom_rule.rule_body` envelope for a `regex` rule (P1): the
+/// matcher pattern PLUS the authored project scope, serialized as one JSON
+/// document so a scoped rule actually scopes at enforcement time.
+///
+/// Legacy/raw rows (pre-envelope) stored the bare pattern with no JSON wrapper;
+/// the enforcement resolver falls back to treating a non-JSON `rule_body` as a
+/// bare pattern with empty scope, so this is fully backward-compatible. Every
+/// scope field is `#[serde(default)]` so an envelope written by an older path
+/// (or a partial document) still deserializes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleBodyEnvelope {
+    /// The matcher pattern (a Rust-`regex` pattern for a `regex` rule).
+    pub pattern: String,
+    /// Target languages (informational/provenance).
+    #[serde(default)]
+    pub languages: Vec<String>,
+    /// File extensions (no leading dot) the rule applies to. Empty = all files.
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    /// Include globs (empty = all files pass the include stage).
+    #[serde(default)]
+    pub include_globs: Vec<String>,
+    /// Exclude globs (applied after includes; empty = nothing extra excluded).
+    #[serde(default)]
+    pub exclude_globs: Vec<String>,
+}
+
 /// Whether an example is expected to flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]

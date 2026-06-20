@@ -26,8 +26,7 @@ import {
 } from '@/components/ui-new/primitives/Dropdown';
 import { cn } from '@/lib/utils';
 import { EmpiricalExampleTable } from '@/components/quality/EmpiricalExampleTable';
-import { customRulesApi } from '@/lib/api';
-import { useGenerateRule } from '@/hooks/useQualityPolicy';
+import { useGenerateRule, useCreateCustomRule } from '@/hooks/useQualityPolicy';
 import {
   useModelConfigForExecutor,
   type ModelOption,
@@ -155,6 +154,10 @@ export function RuleAuthoringDialog({
   } = useModelConfigForExecutor(AUTHORING_EXECUTOR, workflowModelLibrary);
 
   const generate = useGenerateRule();
+  // Persist + invalidate the rule-list cache via the shared mutation so a freshly
+  // confirmed rule appears in CustomRulesSection immediately (its useCustomRules
+  // list has a 30s staleTime; a raw customRulesApi.create would not invalidate).
+  const createRule = useCreateCustomRule();
   // `reset` is referentially stable across renders (TanStack v5); capturing it
   // lets the open-effect clear the last run without depending on the whole
   // mutation object (which is recreated every render).
@@ -288,7 +291,7 @@ export function RuleAuthoringDialog({
 
     try {
       const input = draftToInput(result.candidate, result.examples, nlRequest);
-      await customRulesApi.create(projectId, input);
+      await createRule.mutateAsync({ projectId, input });
       const mapped = result.candidate.mappedMetric;
       onConfirmed(
         result.candidate,
@@ -306,7 +309,7 @@ export function RuleAuthoringDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [result, nlRequest, projectId, onConfirmed, onClose, t]);
+  }, [result, nlRequest, projectId, createRule, onConfirmed, onClose, t]);
 
   const handleOpenChange = useCallback(
     (next: boolean) => {

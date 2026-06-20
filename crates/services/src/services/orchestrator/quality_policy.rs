@@ -13,6 +13,7 @@ use quality::config::QualityGateConfig;
 use quality::engine::QualityEngine;
 use quality::provider::{compile, CompiledRule, DeclarativeRuleProvider, RuleDefinition, RuleFormat};
 use quality::rule::{RuleType, Severity};
+use crate::services::rule_authoring::RuleBodyEnvelope;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -143,13 +144,16 @@ async fn load_compiled_custom_rules(pool: &SqlitePool, project_id: Uuid) -> Vec<
 /// quality crate compiles.
 ///
 /// Mirrors the column->definition mapping the create/authoring path uses
-/// (`server::routes::custom_rules` / `rule_authoring::pipeline`): `rule_body`
-/// IS the matcher pattern for a `regex` rule, `rule_format`/`rule_type` are the
-/// PascalCase/lowercase CHECK tokens, and `severity` is the uppercase token.
-/// The persisted row carries no per-file scope columns (D4: scope is
-/// project-only), so `languages`/`extensions`/`include_globs`/`exclude_globs`
-/// are empty — the rule applies to every collected source file. `message` has no
-/// column either, so the row's `description` (else its `name`) is used.
+/// (`server::routes::custom_rules` / `rule_authoring::pipeline`):
+/// `rule_format`/`rule_type` are the PascalCase/lowercase CHECK tokens, and
+/// `severity` is the uppercase token. `rule_body` is a pattern+scope JSON
+/// [`RuleBodyEnvelope`] for any rule written by the current route, so the
+/// authored project scope (`languages`/`extensions`/`include_globs`/
+/// `exclude_globs`) is recovered here and a scoped rule actually scopes at
+/// enforcement. A legacy/raw row whose `rule_body` is NOT valid envelope JSON
+/// falls back to a bare matcher pattern with empty scope (the rule then applies
+/// to every collected source file, exactly as before the envelope existed).
+/// `message` has no column, so the row's `description` (else its `name`) is used.
 fn db_rule_to_definition(row: &db::models::CustomRule) -> Result<RuleDefinition, &'static str> {
     let rule_format = parse_rule_format(&row.rule_format)?;
     let rule_type = parse_rule_type(&row.rule_type)?;
@@ -160,18 +164,27 @@ fn db_rule_to_definition(row: &db::models::CustomRule) -> Result<RuleDefinition,
         .filter(|d| !d.trim().is_empty())
         .unwrap_or_else(|| row.name.clone());
 
+    // Recover the pattern + authored scope from the JSON envelope; a legacy/raw
+    // row (bare pattern, not JSON) falls back to that pattern with empty scope.
+    let envelope = serde_json::from_str::<RuleBodyEnvelope>(&row.rule_body).unwrap_or_else(|_| {
+        RuleBodyEnvelope {
+            pattern: row.rule_body.clone(),
+            ..RuleBodyEnvelope::default()
+        }
+    });
+
     Ok(RuleDefinition {
         rule_id: row.id.to_string(),
         name: row.name.clone(),
         rule_format,
-        pattern: row.rule_body.clone(),
+        pattern: envelope.pattern,
         severity,
         rule_type,
         message,
-        languages: Vec::new(),
-        extensions: Vec::new(),
-        include_globs: Vec::new(),
-        exclude_globs: Vec::new(),
+        languages: envelope.languages,
+        extensions: envelope.extensions,
+        include_globs: envelope.include_globs,
+        exclude_globs: envelope.exclude_globs,
     })
 }
 

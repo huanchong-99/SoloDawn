@@ -43,8 +43,8 @@ use quality::rule::{RuleType, Severity};
 use serde::{Deserialize, Serialize};
 use services::services::rule_authoring::{
     AuthoringAgents, AuthoringBackend, AuthorRunResult, AuthoredCandidate, EmpiricalReport,
-    GeneratedRule, RoundTripVerdict, RuleExample, build_authoring_client_with_backend,
-    revalidate_rule_body, run_authoring,
+    GeneratedRule, RoundTripVerdict, RuleBodyEnvelope, RuleExample,
+    build_authoring_client_with_backend, revalidate_rule_body, run_authoring,
 };
 use ts_rs::TS;
 use utils::response::ApiResponse;
@@ -191,6 +191,24 @@ impl CustomRuleInput {
             include_globs: self.include_globs.clone(),
             exclude_globs: self.exclude_globs.clone(),
         }
+    }
+
+    /// Serialize the persisted `custom_rule.rule_body` envelope: the matcher
+    /// pattern PLUS the authored scope, as one JSON document so a scoped rule
+    /// actually scopes at enforcement time (the bare pattern alone would
+    /// over-match every file). The enforcement resolver
+    /// (`quality_policy::db_rule_to_definition`) parses this back, with a
+    /// bare-pattern fallback for legacy/raw rows.
+    fn rule_body_envelope_json(&self) -> Result<String, ApiError> {
+        let envelope = RuleBodyEnvelope {
+            pattern: self.rule_body.clone(),
+            languages: self.languages.clone(),
+            extensions: self.extensions.clone(),
+            include_globs: self.include_globs.clone(),
+            exclude_globs: self.exclude_globs.clone(),
+        };
+        serde_json::to_string(&envelope)
+            .map_err(|e| ApiError::Internal(format!("serialize rule_body envelope: {e}")))
     }
 }
 
@@ -363,6 +381,27 @@ pub struct StatusUpdate {
 fn run_admission_gate(
     input: &CustomRuleInput,
 ) -> Result<(RuleFormat, Severity, RuleType), ApiError> {
+    // (0) The empirical loop below is a no-op for an empty example set, which
+    // would let an unvalidated, over-broad rule persist. Require at least one
+    // positive AND one negative fixture so the loop can actually prove the rule
+    // fires where it must and stays silent where it must not. (The AI authoring
+    // path always emits 2-3 of each, so it stays green.)
+    let positives = input
+        .examples
+        .iter()
+        .filter(|ex| ex.kind == services::services::rule_authoring::ExampleKind::Positive)
+        .count();
+    let negatives = input
+        .examples
+        .iter()
+        .filter(|ex| ex.kind == services::services::rule_authoring::ExampleKind::Negative)
+        .count();
+    if positives == 0 || negatives == 0 {
+        return Err(ApiError::BadRequest(
+            "admission gate requires at least one positive and one negative example".to_string(),
+        ));
+    }
+
     // (a) CHECK-enum tokens.
     let rule_format = parse_rule_format(&input.rule_format)?;
     let severity = parse_severity(&input.severity)?;
@@ -424,11 +463,22 @@ fn virtual_path_for(example: &RuleExample) -> &'static str {
 }
 
 /// Whether a PUT changed a rule **body** field (D8 trigger) vs metadata only.
-/// Body fields are the matching logic: pattern (`rule_body`), `rule_format`,
-/// scope (languages/extensions/include/exclude globs), `severity`, `rule_type`,
-/// and `mapped_metric`. Metadata = `name`, `description`, `message`, `nl_request`.
-fn body_changed(existing: &db::models::CustomRule, input: &CustomRuleInput) -> bool {
-    existing.rule_body != input.rule_body
+/// Body fields are the matching logic: pattern + scope (now carried together in
+/// the `rule_body` JSON envelope), `rule_format`, `severity`, `rule_type`, and
+/// `mapped_metric`. Metadata = `name`, `description`, `message`, `nl_request`.
+///
+/// `new_envelope` is the freshly-serialized pattern+scope envelope for `input`;
+/// it is compared against the stored `existing.rule_body` (also an envelope for
+/// any rule written by the current path) so a scope-only edit is correctly
+/// detected as a body change and a metadata-only edit is not. A legacy/raw
+/// `existing.rule_body` (bare pattern) simply never byte-equals the new envelope,
+/// so any edit to such a row revalidates — the safe direction.
+fn body_changed(
+    existing: &db::models::CustomRule,
+    input: &CustomRuleInput,
+    new_envelope: &str,
+) -> bool {
+    existing.rule_body != new_envelope
         || existing.rule_format != input.rule_format
         || existing.severity != input.severity
         || existing.rule_type != input.rule_type
@@ -462,6 +512,9 @@ pub async fn create_custom_rule(
     // manually-entered rules, BEFORE persist.
     let (rule_format, _severity, rule_type) = run_admission_gate(&input)?;
 
+    // Persist the pattern + scope as a JSON envelope (not the bare pattern) so the
+    // authored scope survives to enforcement and a scoped rule actually scopes.
+    let rule_body = input.rule_body_envelope_json()?;
     let nl_request = input.nl_request.clone().unwrap_or_else(|| input.name.clone());
     let created = db::models::CustomRule::create(
         pool,
@@ -470,7 +523,7 @@ pub async fn create_custom_rule(
             name: input.name.clone(),
             nl_request,
             rule_format: rule_format_token(rule_format).to_string(),
-            rule_body: input.rule_body.clone(),
+            rule_body,
             description: input.description.clone(),
             rule_type: rule_type_token(rule_type).to_string(),
             // Persist the severity token verbatim (already validated).
@@ -517,7 +570,10 @@ pub async fn update_custom_rule(
         .map_err(ApiError::Database)?
         .ok_or_else(|| ApiError::NotFound(format!("custom rule {rule_id} not found")))?;
 
-    let is_body_change = body_changed(&existing, &input);
+    // Build the pattern+scope envelope once; it is both the body-change probe
+    // (compared against the stored envelope) and the value persisted below.
+    let rule_body = input.rule_body_envelope_json()?;
+    let is_body_change = body_changed(&existing, &input, &rule_body);
 
     // D8: a body change re-runs the admission gate BEFORE persist; a metadata-only
     // change skips it (but the tokens are still validated cheaply on a body
@@ -545,7 +601,7 @@ pub async fn update_custom_rule(
             name: input.name.clone(),
             nl_request,
             rule_format: input.rule_format.clone(),
-            rule_body: input.rule_body.clone(),
+            rule_body,
             description: input.description.clone(),
             rule_type: input.rule_type.clone(),
             severity: input.severity.clone(),

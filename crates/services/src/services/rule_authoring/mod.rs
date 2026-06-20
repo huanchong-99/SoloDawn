@@ -49,7 +49,8 @@ pub use pipeline::{
 };
 pub use types::{
     AdversaryFindings, AuthorOutcome, AuthorRunResult, AuthoredCandidate, AuthoringBackend,
-    EmpiricalReport, ExampleKind, ExampleResult, GeneratedRule, RoundTripVerdict, RuleExample,
+    EmpiricalReport, ExampleKind, ExampleResult, GeneratedRule, RoundTripVerdict, RuleBodyEnvelope,
+    RuleExample,
 };
 
 use std::sync::Arc;

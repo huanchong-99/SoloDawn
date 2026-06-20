@@ -160,10 +160,10 @@ async fn admission_gate_rejects_uncompilable_regex() {
     let (deployment, project_id) = setup().await;
 
     let mut body = sound_rule_body();
-    // An unclosed group is an invalid Rust `regex` pattern (compile error).
+    // An unclosed group is an invalid Rust `regex` pattern (compile error). Keep
+    // the sound (positive+negative) example set so the rejection is unambiguously
+    // the compile step, not the empty-examples guard.
     body["ruleBody"] = serde_json::json!(r"dbg!(\(");
-    // Drop the examples so the failure is unambiguously the compile step.
-    body["examples"] = serde_json::json!([]);
 
     let resp = post_create(&deployment, project_id, body).await;
     assert_eq!(
@@ -180,6 +180,61 @@ async fn admission_gate_rejects_uncompilable_regex() {
         rules.is_empty(),
         "no rule may be persisted when the admission gate rejects the regex"
     );
+}
+
+/// An empty example set is rejected with 400: the empirical loop is a no-op for
+/// zero examples, so a rule with `examples: []` would persist UNVALIDATED and
+/// over-broad. The gate requires ≥1 positive AND ≥1 negative fixture.
+#[tokio::test]
+async fn admission_gate_rejects_empty_examples() {
+    let (deployment, project_id) = setup().await;
+
+    let mut body = sound_rule_body();
+    // Otherwise-sound rule, but no fixtures for the empirical loop to run.
+    body["examples"] = serde_json::json!([]);
+
+    let resp = post_create(&deployment, project_id, body).await;
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "a rule with no examples must be rejected with 400 (nothing to validate against)"
+    );
+
+    let rules = CustomRule::find_by_project(&deployment.db().pool, project_id)
+        .await
+        .unwrap();
+    assert!(
+        rules.is_empty(),
+        "no rule may be persisted when the example set is empty"
+    );
+}
+
+/// A positives-only example set (no negative) is also rejected: without a
+/// negative fixture the gate cannot prove the rule stays silent where it must.
+#[tokio::test]
+async fn admission_gate_rejects_positives_only() {
+    let (deployment, project_id) = setup().await;
+
+    let mut body = sound_rule_body();
+    body["examples"] = serde_json::json!([
+        {
+            "kind": "positive",
+            "language": "rust",
+            "snippet": "fn f() { dbg!(x); }"
+        }
+    ]);
+
+    let resp = post_create(&deployment, project_id, body).await;
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "a rule with no negative example must be rejected with 400"
+    );
+
+    let rules = CustomRule::find_by_project(&deployment.db().pool, project_id)
+        .await
+        .unwrap();
+    assert!(rules.is_empty(), "no rule may persist without a negative example");
 }
 
 /// A rule whose negative example actually flags is rejected with 400 (the
@@ -259,9 +314,20 @@ async fn sound_rule_creates_lists_promotes_and_deletes() {
         json["data"]["status"], "shadow",
         "a freshly created rule must land at status=shadow"
     );
+    // `ruleBody` now persists a pattern+scope JSON envelope (FIX 2: scoped rules
+    // must scope at enforcement), so the stored body is the envelope, and its
+    // `pattern` field round-trips the submitted matcher + the submitted scope.
+    let stored_body = json["data"]["ruleBody"].as_str().expect("ruleBody is a string");
+    let envelope: serde_json::Value =
+        serde_json::from_str(stored_body).expect("ruleBody is a JSON envelope");
     assert_eq!(
-        json["data"]["ruleBody"], r"dbg!\(",
-        "the persisted rule body must round-trip the submitted pattern"
+        envelope["pattern"], r"dbg!\(",
+        "the envelope pattern must round-trip the submitted matcher"
+    );
+    assert_eq!(
+        envelope["extensions"],
+        serde_json::json!(["rs"]),
+        "the authored extensions scope must be persisted in the envelope"
     );
     let rule_id = json["data"]["id"].as_str().unwrap().to_string();
 

@@ -421,13 +421,17 @@ fn metric_doc(key: MetricKey) -> (&'static str, &'static str, bool) {
             true,
         ),
         MetricKey::CustomRuleViolations => (
-            "Total matches from your project's custom (editable) rules.",
+            "Total matches from your project's custom (editable) rules. This is the \
+             count a quality gate uses to make custom rules block — add a \
+             `Custom Rule Violations` GT condition to enforce them.",
             "Every hit of a rule like 'prohibit `dbg!`'.",
             true,
         ),
         MetricKey::CustomRuleCritical => (
-            "Custom-rule matches at the opt-in gating count (the only way a custom rule blocks).",
-            "Matches of a custom rule you promoted to enforce.",
+            "Custom-rule matches at Critical+ severity. Custom-rule severity is \
+             advisory-capped to Major, so this stays 0 in practice — gate on \
+             `Custom Rule Violations` (the count), not this, to block custom rules.",
+            "Normally 0: a custom rule cannot self-escalate above Major.",
             true,
         ),
         MetricKey::LineCoverage => (
@@ -522,6 +526,11 @@ fn selectable_metric_keys() -> Vec<MetricKey> {
         MetricKey::BuiltinCommonIssues,
         MetricKey::DuplicatedBlocks,
         MetricKey::SecretsDetected,
+        // Custom-rule opt-in gating (D3/G4): an operator adds a `CustomRuleViolations`
+        // GT condition to make authored rules block. `CustomRuleCritical` stays 0
+        // (severity is advisory-capped to Major) but is selectable for completeness.
+        MetricKey::CustomRuleViolations,
+        MetricKey::CustomRuleCritical,
         MetricKey::LineCoverage,
         MetricKey::BranchCoverage,
         MetricKey::TestFileAbsence,

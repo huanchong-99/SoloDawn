@@ -64,22 +64,61 @@ async fn seed_project(pool: &SqlitePool) -> Uuid {
 /// Insert one custom rule via the real `CustomRule::create` path, then set its
 /// `enabled` flag and lifecycle `status` so it is (or is not) part of the
 /// enforced set `find_enabled_by_project` returns.
+///
+/// `rule_body` is written VERBATIM. Passing a bare pattern (as these callers do)
+/// exercises the enforcement resolver's legacy/raw fallback — proof that
+/// pre-envelope rows still enforce. Scoped tests use [`seed_scoped_custom_rule`].
 async fn seed_custom_rule(
     pool: &SqlitePool,
     project_id: Uuid,
     pattern: &str,
     enabled: bool,
 ) -> Uuid {
+    seed_rule_with_body(pool, project_id, "no-dbg", pattern, enabled).await
+}
+
+/// Seed a rule whose `rule_body` is a pattern+scope JSON envelope (the shape the
+/// create route now persists), so the authored scope reaches enforcement. This
+/// is how a scoped rule (`exclude_globs`/`extensions`) is exercised end-to-end.
+async fn seed_scoped_custom_rule(
+    pool: &SqlitePool,
+    project_id: Uuid,
+    name: &str,
+    pattern: &str,
+    extensions: &[&str],
+    exclude_globs: &[&str],
+) -> Uuid {
+    let envelope = serde_json::json!({
+        "pattern": pattern,
+        "languages": [],
+        "extensions": extensions,
+        "include_globs": [],
+        "exclude_globs": exclude_globs,
+    });
+    let body = serde_json::to_string(&envelope).expect("serialize envelope");
+    seed_rule_with_body(pool, project_id, name, &body, true).await
+}
+
+/// Shared insert: create an enabled (or disabled) `regex` rule with the given
+/// `name` + raw `rule_body` string.
+async fn seed_rule_with_body(
+    pool: &SqlitePool,
+    project_id: Uuid,
+    name: &str,
+    rule_body: &str,
+    enabled: bool,
+) -> Uuid {
     let created = db::models::CustomRule::create(
         pool,
         &db::models::CreateCustomRule {
             project_id: Some(project_id),
-            name: "no-dbg".to_string(),
+            name: name.to_string(),
             nl_request: "forbid dbg! in committed code".to_string(),
-            // The migration CHECK accepts 'regex'; rule_body IS the matcher
-            // pattern for a regex rule (same as the create route + pipeline).
+            // The migration CHECK accepts 'regex'. `rule_body` is either a bare
+            // pattern (legacy/raw, resolver falls back) or a pattern+scope
+            // envelope (the current route's shape).
             rule_format: "regex".to_string(),
-            rule_body: pattern.to_string(),
+            rule_body: rule_body.to_string(),
             description: Some("dbg! macro left in source".to_string()),
             rule_type: "CodeSmell".to_string(),
             severity: "MAJOR".to_string(),
@@ -239,5 +278,155 @@ async fn declarative_rules_on_but_no_enabled_rule_is_absent() {
             .iter()
             .all(|i| i.source != AnalyzerSource::CustomRule),
         "no enabled rule must not surface any custom-rule issue"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FIX 2: authored scope (envelope) must actually scope at enforcement.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Whether the report carries any custom-rule violation (count > 0 OR an issue
+/// attributed to the custom-rule source).
+fn has_custom_violation(report: &quality::report::QualityReport) -> bool {
+    let counted = report
+        .provider_reports
+        .iter()
+        .find_map(|pr| pr.metrics.get(&MetricKey::CustomRuleViolations))
+        .is_some_and(|v| !matches!(v, quality::gate::result::MeasureValue::Int(0)));
+    let issued = report
+        .all_issues
+        .iter()
+        .any(|i| i.source == AnalyzerSource::CustomRule);
+    counted || issued
+}
+
+/// A temp project whose ONLY `dbg!(` violation lives under `tests/` — so an
+/// `exclude_globs` tests filter should make the rule not fire.
+fn temp_project_violation_under_tests() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir_all(dir.path().join("tests")).expect("tests dir");
+    std::fs::write(
+        dir.path().join("tests").join("it.rs"),
+        "fn helper() {\n    let _ = dbg!(40 + 2);\n}\n",
+    )
+    .expect("write test source");
+    dir
+}
+
+/// A temp project whose ONLY `dbg!(` violation lives in a `.ts` file — so a rule
+/// scoped to `extensions: ["rs"]` should not fire.
+fn temp_project_violation_in_ts() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("src dir");
+    std::fs::write(
+        dir.path().join("src").join("app.ts"),
+        "function f() {\n  const x = dbg!(1);\n}\n",
+    )
+    .expect("write ts source");
+    dir
+}
+
+#[tokio::test]
+async fn scoped_exclude_globs_skips_file_under_tests_path() {
+    let pool = setup_pool().await;
+    let project_id = seed_project(&pool).await;
+
+    // Rule bans `dbg!(` but EXCLUDES anything under tests/. The only violating
+    // file is under tests/, so the scoped rule must not flag it.
+    seed_scoped_custom_rule(
+        &pool,
+        project_id,
+        "no-dbg-excl-tests",
+        r"dbg!\(",
+        &[],
+        &["**/tests/**", "tests/**"],
+    )
+    .await;
+    seed_policy_with_toggle(&pool, project_id, true).await;
+
+    let dir = temp_project_violation_under_tests();
+    let engine = build_engine_for_project(&pool, project_id, dir.path())
+        .await
+        .expect("build engine");
+    let report = engine
+        .run(dir.path(), QualityGateLevel::Terminal, None)
+        .await
+        .expect("run gate");
+
+    assert!(
+        !has_custom_violation(&report),
+        "an exclude_globs tests filter must stop the rule firing on a tests/ file; \
+         issues = {:?}",
+        report.all_issues
+    );
+}
+
+#[tokio::test]
+async fn scoped_extensions_skips_other_language_file() {
+    let pool = setup_pool().await;
+    let project_id = seed_project(&pool).await;
+
+    // Rule scoped to Rust (`extensions: ["rs"]`); the only violation is in a .ts
+    // file, so the scoped rule must not flag it.
+    seed_scoped_custom_rule(
+        &pool,
+        project_id,
+        "no-dbg-rs-only",
+        r"dbg!\(",
+        &["rs"],
+        &[],
+    )
+    .await;
+    seed_policy_with_toggle(&pool, project_id, true).await;
+
+    let dir = temp_project_violation_in_ts();
+    let engine = build_engine_for_project(&pool, project_id, dir.path())
+        .await
+        .expect("build engine");
+    let report = engine
+        .run(dir.path(), QualityGateLevel::Terminal, None)
+        .await
+        .expect("run gate");
+
+    assert!(
+        !has_custom_violation(&report),
+        "a rule scoped to extensions=[rs] must not flag a .ts file; issues = {:?}",
+        report.all_issues
+    );
+}
+
+/// Positive control for the envelope path: a Rust-scoped rule DOES flag a `.rs`
+/// violation when persisted as an envelope (proves scope mapping does not
+/// over-restrict and the envelope pattern is recovered correctly).
+#[tokio::test]
+async fn scoped_extensions_still_flags_matching_language() {
+    let pool = setup_pool().await;
+    let project_id = seed_project(&pool).await;
+
+    seed_scoped_custom_rule(
+        &pool,
+        project_id,
+        "no-dbg-rs-pos",
+        r"dbg!\(",
+        &["rs"],
+        &[],
+    )
+    .await;
+    seed_policy_with_toggle(&pool, project_id, true).await;
+
+    let dir = temp_project_with_violation();
+    let engine = build_engine_for_project(&pool, project_id, dir.path())
+        .await
+        .expect("build engine");
+    let report = engine
+        .run(dir.path(), QualityGateLevel::Terminal, None)
+        .await
+        .expect("run gate");
+
+    assert!(
+        has_custom_violation(&report),
+        "a Rust-scoped envelope rule must still flag a matching .rs violation; \
+         issues = {:?}",
+        report.all_issues
     );
 }

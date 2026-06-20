@@ -8,6 +8,7 @@ import {
 
 import { cn } from '@/lib/utils';
 import { EmpiricalExampleTable } from '@/components/quality/EmpiricalExampleTable';
+import { parseRuleBody } from '@/components/quality/ruleBody';
 import {
   useCustomRules,
   useCustomRuleValidations,
@@ -164,7 +165,7 @@ function CustomRuleEvidence({
 
       {/* Rule body */}
       <pre className="overflow-x-auto rounded-sm bg-primary p-half text-xs font-ibm-plex-mono text-normal">
-        {rule.ruleBody}
+        {parseRuleBody(rule.ruleBody).pattern}
       </pre>
 
       {/* Empirical tally */}

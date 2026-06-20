@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
 import type { CustomRule } from 'shared/types';
+import type { ModelOption } from '@/hooks/useModelConfigForExecutor';
 import {
   isBodyChange,
+  isGoogleSource,
   type FormState,
 } from '../CustomRuleEditDialog';
 
@@ -86,5 +88,53 @@ describe('CustomRuleEditDialog D8 body-change policy', () => {
     expect(isBodyChange(rule, formFrom(rule, { mappedMetric: '' }))).toBe(
       false
     );
+  });
+});
+
+// FIX B (audit): the edit dialog must refuse a google source for a body edit /
+// revalidate (the metered path rejects api_type=google), mirroring
+// RuleAuthoringDialog. `isGoogleSource` keys off the row subtitle's apiType.
+function modelOption(over: Partial<ModelOption> = {}): ModelOption {
+  return {
+    id: 'm1',
+    displayName: 'Model 1',
+    subtitle: null,
+    isCustom: false,
+    hasApiKey: true,
+    ...over,
+  };
+}
+
+describe('CustomRuleEditDialog google-source guard', () => {
+  it('flags a model whose subtitle advertises a google apiType', () => {
+    expect(
+      isGoogleSource(modelOption({ subtitle: 'google · gemini-2.5-pro' }))
+    ).toBe(true);
+  });
+
+  it('is case-insensitive on the apiType token', () => {
+    expect(isGoogleSource(modelOption({ subtitle: 'Google · gemini' }))).toBe(
+      true
+    );
+  });
+
+  it('does not flag non-google sources', () => {
+    expect(
+      isGoogleSource(modelOption({ subtitle: 'openai · gpt-4o' }))
+    ).toBe(false);
+    expect(
+      isGoogleSource(modelOption({ subtitle: 'anthropic · claude' }))
+    ).toBe(false);
+  });
+
+  it('does not flag a substring match (word boundary)', () => {
+    // e.g. a hypothetical "googleish" provider name must not trip the guard.
+    expect(isGoogleSource(modelOption({ subtitle: 'googleish · x' }))).toBe(
+      false
+    );
+  });
+
+  it('treats a null subtitle (official row) as non-google', () => {
+    expect(isGoogleSource(modelOption({ subtitle: null }))).toBe(false);
   });
 });

@@ -15,6 +15,7 @@ import { ErrorAlert } from '@/components/ui-new/primitives/ErrorAlert';
 import { ToolbarDropdown } from '@/components/ui-new/primitives/Toolbar';
 import { DropdownMenuItem } from '@/components/ui-new/primitives/Dropdown';
 import { cn } from '@/lib/utils';
+import { parseRuleBody } from '@/components/quality/ruleBody';
 import {
   useUpdateCustomRule,
   useRevalidateRule,
@@ -43,6 +44,18 @@ const RULE_TYPES = [
   'CodeSmell',
   'SecurityHotspot',
 ] as const;
+
+/**
+ * A row is unauthorable when its (custom) subtitle advertises a google apiType.
+ * Mirrors RuleAuthoringDialog: the metered revalidation path rejects
+ * `api_type=google`, so a body edit must not begin with a google source (it
+ * would commit the PUT + drop the rule to shadow before revalidate throws).
+ *
+ * @internal Exported for unit tests of the google-source guard.
+ */
+export function isGoogleSource(model: ModelOption): boolean {
+  return /\bgoogle\b/i.test(model.subtitle ?? '');
+}
 
 export interface CustomRuleEditDialogProps {
   readonly open: boolean;
@@ -74,7 +87,8 @@ function seedForm(rule: CustomRule): FormState {
     severity: rule.severity,
     ruleType: rule.ruleType,
     mappedMetric: rule.mappedMetric ?? '',
-    ruleBody: rule.ruleBody,
+    // rule_body is a {pattern + scope} JSON envelope; the form edits the pattern.
+    ruleBody: parseRuleBody(rule.ruleBody).pattern,
   };
 }
 
@@ -88,7 +102,7 @@ function seedForm(rule: CustomRule): FormState {
  */
 export function isBodyChange(rule: CustomRule, form: FormState): boolean {
   return (
-    form.ruleBody !== rule.ruleBody ||
+    form.ruleBody !== parseRuleBody(rule.ruleBody).pattern ||
     form.severity !== rule.severity ||
     form.ruleType !== rule.ruleType ||
     (form.mappedMetric || null) !== (rule.mappedMetric ?? null)
@@ -97,6 +111,9 @@ export function isBodyChange(rule: CustomRule, form: FormState): boolean {
 
 /** Build the PUT payload. `message` is not persisted on update; default it. */
 function formToInput(rule: CustomRule, form: FormState): CustomRuleInput {
+  // The edit form exposes only the pattern, so preserve the stored scope; the
+  // server re-wraps {pattern + scope} into the rule_body envelope on update.
+  const scope = parseRuleBody(rule.ruleBody);
   return {
     nlRequest: rule.nlRequest,
     ruleFormat: rule.ruleFormat,
@@ -106,10 +123,10 @@ function formToInput(rule: CustomRule, form: FormState): CustomRuleInput {
     message: form.name,
     ruleType: form.ruleType,
     severity: form.severity,
-    languages: [],
-    extensions: [],
-    includeGlobs: [],
-    excludeGlobs: [],
+    languages: scope.languages,
+    extensions: scope.extensions,
+    includeGlobs: scope.includeGlobs,
+    excludeGlobs: scope.excludeGlobs,
     mappedMetric: form.mappedMetric ? form.mappedMetric : null,
     // A body change re-derives fixtures via the subsequent revalidate; a
     // metadata-only change leaves the stored fixtures untouched (the route only
@@ -179,6 +196,10 @@ export function CustomRuleEditDialog({
     return all.find((m) => m.id === selectedModelConfigId) ?? null;
   }, [customModels, officialModels, selectedModelConfigId]);
 
+  // google is rejected by the metered revalidation path; block it up front so a
+  // body edit can never start with an unsupported model (mirrors RuleAuthoringDialog).
+  const selectedIsGoogle = !!selectedModel && isGoogleSource(selectedModel);
+
   const pickerLabel =
     selectedModel?.displayName ??
     t('settings:ruleAuthoring.selectModel', { defaultValue: 'Select model' });
@@ -204,6 +225,18 @@ export function CustomRuleEditDialog({
       setError(
         t('settings:ruleAuthoring.selectModel', {
           defaultValue: 'Select model',
+        })
+      );
+      return;
+    }
+    // A body edit / revalidate with a google model would PUT (drop to shadow)
+    // then throw on revalidate; refuse before mutating anything.
+    if (needsModel && selectedIsGoogle) {
+      setError(
+        t('settings:ruleAuthoring.googleSelectedHint', {
+          defaultValue:
+            'Google models cannot author rules — pick an ' +
+            'OpenAI- or Anthropic-compatible source.',
         })
       );
       return;
@@ -242,6 +275,7 @@ export function CustomRuleEditDialog({
   }, [
     needsModel,
     selectedModelConfigId,
+    selectedIsGoogle,
     revalidateOnly,
     runRevalidate,
     update,
@@ -262,7 +296,7 @@ export function CustomRuleEditDialog({
 
   const primaryDisabled =
     submitting ||
-    (needsModel && !selectedModelConfigId) ||
+    (needsModel && (!selectedModelConfigId || selectedIsGoogle)) ||
     (!revalidateOnly && !dirty);
 
   return (
@@ -416,24 +450,41 @@ export function CustomRuleEditDialog({
                 })}
               </span>
               <ToolbarDropdown label={pickerLabel}>
-                {[...customModels, ...officialModels].map((model) => (
-                  <DropdownMenuItem
-                    key={model.id}
-                    icon={
-                      selectedModelConfigId === model.id ? CheckIcon : undefined
-                    }
-                    onClick={() => setSelectedModelConfigId(model.id)}
-                  >
-                    <span className="flex flex-col">
-                      <span>{model.displayName}</span>
-                      {model.subtitle && (
-                        <span className="text-low text-xs">
-                          {model.subtitle}
-                        </span>
-                      )}
-                    </span>
-                  </DropdownMenuItem>
-                ))}
+                {[...customModels, ...officialModels].map((model) => {
+                  const google = isGoogleSource(model);
+                  return (
+                    <DropdownMenuItem
+                      key={model.id}
+                      icon={
+                        selectedModelConfigId === model.id
+                          ? CheckIcon
+                          : undefined
+                      }
+                      disabled={google}
+                      onClick={
+                        google
+                          ? undefined
+                          : () => setSelectedModelConfigId(model.id)
+                      }
+                    >
+                      <span className="flex flex-col">
+                        <span>{model.displayName}</span>
+                        {model.subtitle && (
+                          <span className="text-low text-xs">
+                            {model.subtitle}
+                          </span>
+                        )}
+                        {google && (
+                          <span className="text-error text-xs">
+                            {t('settings:ruleAuthoring.googleUnsupported', {
+                              defaultValue: 'Not supported for authoring',
+                            })}
+                          </span>
+                        )}
+                      </span>
+                    </DropdownMenuItem>
+                  );
+                })}
                 {customModels.length === 0 && officialModels.length === 0 && (
                   <DropdownMenuItem disabled>
                     {t('settings:ruleAuthoring.noModels', {
@@ -442,6 +493,15 @@ export function CustomRuleEditDialog({
                   </DropdownMenuItem>
                 )}
               </ToolbarDropdown>
+              {selectedIsGoogle && (
+                <span className="text-error text-xs">
+                  {t('settings:ruleAuthoring.googleSelectedHint', {
+                    defaultValue:
+                      'Google models cannot author rules — pick an ' +
+                      'OpenAI- or Anthropic-compatible source.',
+                  })}
+                </span>
+              )}
               {bodyChange && !revalidateOnly && (
                 <span className="text-low text-xs">
                   {t('quality:rulesEditor.customRules.bodyChangeHint', {
