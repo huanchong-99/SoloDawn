@@ -25,6 +25,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui-new/primitives/Dropdown';
 import { cn } from '@/lib/utils';
+import { EmpiricalExampleTable } from '@/components/quality/EmpiricalExampleTable';
 import { customRulesApi } from '@/lib/api';
 import { useGenerateRule } from '@/hooks/useQualityPolicy';
 import {
@@ -365,7 +366,7 @@ export function RuleAuthoringDialog({
                         defaultValue: 'Custom',
                       })}
                     </DropdownMenuLabel>
-                    {customModels.map(renderModelItem)}
+                    {customModels.map((model) => renderModelItem(model))}
                   </>
                 )}
                 {officialModels.length > 0 && (
@@ -376,7 +377,7 @@ export function RuleAuthoringDialog({
                         defaultValue: 'Official',
                       })}
                     </DropdownMenuLabel>
-                    {officialModels.map(renderModelItem)}
+                    {officialModels.map((model) => renderModelItem(model))}
                   </>
                 )}
                 {customModels.length === 0 && officialModels.length === 0 && (
@@ -708,81 +709,7 @@ function ResultPanels({
             })}
           </p>
         ) : (
-          <div className="overflow-x-auto rounded border border-border">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-low">
-                  <th className="px-half py-half font-semibold">
-                    {t('settings:ruleAuthoring.colKind', {
-                      defaultValue: 'Kind',
-                    })}
-                  </th>
-                  <th className="px-half py-half font-semibold">
-                    {t('settings:ruleAuthoring.colSnippet', {
-                      defaultValue: 'Snippet',
-                    })}
-                  </th>
-                  <th className="px-half py-half font-semibold">
-                    {t('settings:ruleAuthoring.colExpected', {
-                      defaultValue: 'Expected',
-                    })}
-                  </th>
-                  <th className="px-half py-half font-semibold">
-                    {t('settings:ruleAuthoring.colActual', {
-                      defaultValue: 'Actual',
-                    })}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {empirical.perExample.map((ex, i) => (
-                  <tr
-                    key={`${ex.kind}-${i}-${ex.snippet.slice(0, 16)}`}
-                    className={cn(
-                      'border-t border-border align-top',
-                      !ex.passed && 'bg-error/10'
-                    )}
-                  >
-                    <td className="px-half py-half text-normal">{ex.kind}</td>
-                    <td className="px-half py-half">
-                      <pre className="max-w-[20rem] overflow-x-auto whitespace-pre-wrap font-ibm-plex-mono text-normal">
-                        {ex.snippet}
-                      </pre>
-                    </td>
-                    <td
-                      className={cn(
-                        'px-half py-half',
-                        !ex.passed ? 'text-error font-semibold' : 'text-normal'
-                      )}
-                    >
-                      {ex.expectedMatch
-                        ? t('settings:ruleAuthoring.match', {
-                            defaultValue: 'match',
-                          })
-                        : t('settings:ruleAuthoring.noMatch', {
-                            defaultValue: 'no match',
-                          })}
-                    </td>
-                    <td
-                      className={cn(
-                        'px-half py-half',
-                        !ex.passed ? 'text-error font-semibold' : 'text-normal'
-                      )}
-                    >
-                      {ex.actualMatch
-                        ? t('settings:ruleAuthoring.match', {
-                            defaultValue: 'match',
-                          })
-                        : t('settings:ruleAuthoring.noMatch', {
-                            defaultValue: 'no match',
-                          })}
-                      {ex.matchCount > 0 ? ` (${ex.matchCount})` : ''}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <EmpiricalExampleTable perExample={empirical.perExample} />
         )}
       </section>
 
