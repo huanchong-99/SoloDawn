@@ -689,14 +689,6 @@ impl InteractiveClaudeClient {
         }
     }
 
-    /// Parse the on-disk transcript JSONL and return the FINAL assistant
-    /// message's joined text blocks. Reuses the executor's public
-    /// `ClaudeJson` / `ClaudeContentItem` envelope types (the transcript bodies
-    /// are byte-identical to what `ClaudeLogProcessor` parses).
-    fn extract_final_assistant_text(transcript: &str) -> Option<String> {
-        Self::extract_best_assistant(transcript).map(|(text, _)| text)
-    }
-
     /// Pick the substantive assistant response from a transcript and return its
     /// joined text plus its `stop_reason`. A single interactive turn's transcript
     /// can carry several `assistant` envelopes — a thinking-only one with no text,
@@ -748,7 +740,7 @@ impl InteractiveClaudeClient {
             Some((text, stop_reason)) => {
                 let clean_finish = matches!(
                     stop_reason.as_deref(),
-                    Some("end_turn") | Some("stop_sequence")
+                    Some("end_turn" | "stop_sequence")
                 );
                 // claude intermittently reports end_turn yet emits a JSON object
                 // that is missing its final closing braces, so a clean finish is
@@ -800,9 +792,9 @@ impl InteractiveClaudeClient {
     /// callers do their own extraction. Braces inside string literals are ignored.
     fn looks_structurally_complete(text: &str) -> bool {
         let t = text.trim_start();
-        match t.as_bytes().first() {
-            Some(b'{') | Some(b'[') => {}
-            _ => return true,
+        let starts_json = matches!(t.as_bytes().first(), Some(b'{' | b'['));
+        if !starts_json {
+            return true;
         }
         let mut depth: i32 = 0;
         let mut in_str = false;
@@ -820,8 +812,19 @@ impl InteractiveClaudeClient {
             }
             match b {
                 b'"' => in_str = true,
-                b'{' | b'[' => depth += 1,
-                b'}' | b']' => {
+                b'{' => {
+                    depth += 1;
+                }
+                b'[' => {
+                    depth += 1;
+                }
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return true;
+                    }
+                }
+                b']' => {
                     depth -= 1;
                     if depth == 0 {
                         return true;
@@ -1603,7 +1606,7 @@ mod interactive_claude_tests {
             "\n",
         );
         assert_eq!(
-            InteractiveClaudeClient::extract_final_assistant_text(transcript),
+            InteractiveClaudeClient::extract_best_assistant(transcript).map(|(t, _)| t),
             Some("final answer".to_string())
         );
     }
@@ -1612,7 +1615,7 @@ mod interactive_claude_tests {
     fn test_extract_final_assistant_text_joins_multiple_text_blocks() {
         let transcript = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"line1"},{"type":"text","text":"line2"}]}}"#;
         assert_eq!(
-            InteractiveClaudeClient::extract_final_assistant_text(transcript),
+            InteractiveClaudeClient::extract_best_assistant(transcript).map(|(t, _)| t),
             Some("line1\nline2".to_string())
         );
     }
@@ -1621,7 +1624,7 @@ mod interactive_claude_tests {
     fn test_extract_final_assistant_text_none_when_no_assistant() {
         let transcript = r#"{"type":"system","subtype":"init","session_id":"s"}"#;
         assert_eq!(
-            InteractiveClaudeClient::extract_final_assistant_text(transcript),
+            InteractiveClaudeClient::extract_best_assistant(transcript).map(|(t, _)| t),
             None
         );
     }
