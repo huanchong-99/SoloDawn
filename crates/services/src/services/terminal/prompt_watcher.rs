@@ -112,6 +112,18 @@ Run /model now, pick an available model from the presented list (first/default o
 then continue this same task immediately and complete the required handoff commit. \
 Do not wait for additional instructions.\n";
 
+/// PTY key sequence sent to the `/model` picker to recover from a
+/// model-unavailable condition. The orchestrator's configured model id can be
+/// missing on the active subscription/endpoint; re-confirming the SAME
+/// highlighted (still-unavailable) entry with a bare Enter just re-opens the
+/// problem and loops (observed: the recovery fired repeatedly until the agent
+/// force-completed the stalled terminal). Instead, move to the TOP of the
+/// picker — claude lists the newest / generally-available model (e.g. Sonnet
+/// 4.6) first — with several ArrowUp presses (excess presses clamp at the top),
+/// then Enter to set it as default. This makes the orchestrator's recovery
+/// selection actually land on an available model and unblocks the run.
+const CLAUDE_MODEL_PICKER_SELECT_TOP_KEYS: &str = "\u{1b}[A\u{1b}[A\u{1b}[A\u{1b}[A\u{1b}[A\r";
+
 /// Legacy bypass-permissions toggle prompt (Codex-style TUI).
 /// Example: "bypass permissions on (shift+tab to cycle)"
 static BYPASS_PERMISSIONS_PROMPT_RE: Lazy<Regex> = Lazy::new(|| {
@@ -1604,13 +1616,19 @@ next_action: handoff\n"
                 tracing::info!(
                     terminal_id = %response_terminal_id,
                     session_id = %response_session_id,
-                    "Model-unavailable recovery injected (chunk); sending immediate Enter to submit"
+                    "Model-unavailable recovery injected (chunk); navigating /model picker to the top (newest/available) model"
                 );
                 self.publish_terminal_input_with_active_session(
                     &response_terminal_id,
                     &response_session_id,
-                    "\n",
-                    Some(PromptDecision::auto_enter()),
+                    CLAUDE_MODEL_PICKER_SELECT_TOP_KEYS,
+                    Some(PromptDecision::LLMDecision {
+                        response: CLAUDE_MODEL_PICKER_SELECT_TOP_KEYS.to_string(),
+                        reasoning:
+                            "Navigate the /model picker to the top (newest/available) model and confirm, instead of re-confirming the unavailable selection"
+                                .to_string(),
+                        target_index: Some(0),
+                    }),
                 )
                 .await;
                 return;

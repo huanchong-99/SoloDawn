@@ -180,8 +180,21 @@ impl ClaudeCode {
     /// `--resume <uuid>` — see `build_interactive_command_parts` /
     /// `build_interactive_follow_up_command_parts`.
     fn build_interactive_command_builder(&self) -> CommandBuilder {
-        let mut builder =
-            CommandBuilder::new(base_command(self.claude_code_router.unwrap_or(false)));
+        // The interactive transport is exclusively for native-OAuth (subscription)
+        // users, who have the genuine `claude` binary installed locally. Invoke it
+        // directly instead of via `npx -y @anthropic-ai/claude-code@<ver>`: on
+        // Windows the npx launcher resolves to `npx.cmd` (a batch file), and
+        // std::process rejects batch-file arguments containing newlines
+        // ("batch file arguments are invalid") — which breaks the multi-line
+        // single-turn planning prompt that is passed positionally. The native
+        // binary has no such restriction. The Claude Code Router path still needs
+        // npx, so keep it there.
+        let base = if self.claude_code_router.unwrap_or(false) {
+            base_command(true)
+        } else {
+            "claude".to_string()
+        };
+        let mut builder = CommandBuilder::new(base);
 
         // Tier-1 approvals for native OAuth: skip permission prompts. (No `--bare`
         // — it's stripped for native OAuth and breaks token loading; see contract.)

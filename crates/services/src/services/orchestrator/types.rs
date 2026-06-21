@@ -559,6 +559,13 @@ pub struct AuditScoreResult {
     pub passed: bool,
     pub dimensions: AuditDimensions,
     pub fix_instructions: String,
+    /// Internal: set when `parse()` could NOT extract a valid score from the LLM
+    /// response (empty / truncated / non-JSON). Lets the caller retry instead of
+    /// committing the 0.0 fallback as a real rejection that would send the coder
+    /// chasing a phantom defect. Not serialized and not part of the TS surface.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub parse_failed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -623,66 +630,118 @@ pub struct AuditDimensionSpec {
 impl AuditScoreResult {
     pub const PASS_THRESHOLD: f64 = 90.0;
 
+    /// Pass bar for the FOUNDATION (scaffolding) phase. A foundation is
+    /// intentionally partial — a sound, buildable skeleton, not a finished
+    /// product — so it is graded against its own deliverables and passes at a
+    /// "solid skeleton" bar rather than the full 90/100 product bar (which it
+    /// can never reach, deadlocking the phased build). Feature/product tasks
+    /// keep `PASS_THRESHOLD`.
+    pub const FOUNDATION_PASS_THRESHOLD: f64 = 70.0;
+
     /// Parse an LLM response into an `AuditScoreResult`.
     ///
     /// Uses the same JSON extraction pattern as `AcceptanceReviewResult::parse()`:
     /// find the outermost `{...}` block, deserialize, compute totals, set pass/fail.
     /// On parse failure: return a failing score with the error in `fix_instructions`.
     pub fn parse(response: &str) -> Self {
-        let trimmed = response.trim();
-        // Extract JSON block from response
-        let json_str = if let Some(start) = trimmed.find('{') {
-            if let Some(end) = trimmed.rfind('}') {
-                &trimmed[start..=end]
-            } else {
-                trimmed
-            }
-        } else {
-            return Self::parse_failure(
-                "Audit score response did not contain a JSON object.",
-            );
-        };
-
-        let value: serde_json::Value = match serde_json::from_str(json_str) {
-            Ok(v) => v,
-            Err(e) => {
-                return Self::parse_failure(&format!(
-                    "Failed to parse audit score JSON: {e}"
-                ));
-            }
-        };
-
-        // Try to deserialize the dimensions
-        let dimensions = match Self::extract_dimensions(&value) {
-            Ok(d) => d,
-            Err(e) => {
-                return Self::parse_failure(&format!(
-                    "Failed to extract audit dimensions: {e}"
-                ));
-            }
-        };
-
-        let fix_instructions = value
-            .get("fix_instructions")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        // Calculate total score from dimension scores
-        let total_score = dimensions.buildability.score
-            + dimensions.functional_completeness.score
-            + dimensions.code_quality.total
-            + dimensions.test_quality.score
-            + dimensions.engineering_docs.score;
-
-        let passed = total_score >= Self::PASS_THRESHOLD;
-
-        Self {
-            total_score,
-            passed,
-            dimensions,
-            fix_instructions,
+        // Robustly locate the score JSON. The review LLM (interactive transport)
+        // sometimes wraps the JSON in prose / markdown fences, or emits a small
+        // preamble object before the real one, so a naive first-`{` .. last-`}`
+        // slice grabs trailing characters and fails to parse ("trailing
+        // characters at line N"). Instead, scan every balanced-brace object and
+        // use the first one that yields valid audit dimensions.
+        let candidates = Self::extract_balanced_objects(response);
+        if candidates.is_empty() {
+            return Self::parse_failure("Audit score response did not contain a JSON object.");
         }
+
+        let mut last_err =
+            String::from("no JSON object in the response contained valid audit dimensions");
+        for cand in candidates {
+            let value: serde_json::Value = match serde_json::from_str(cand) {
+                Ok(v) => v,
+                Err(e) => {
+                    last_err = format!("Failed to parse audit score JSON: {e}");
+                    continue;
+                }
+            };
+            let dimensions = match Self::extract_dimensions(&value) {
+                Ok(d) => d,
+                Err(e) => {
+                    last_err = format!("Failed to extract audit dimensions: {e}");
+                    continue;
+                }
+            };
+
+            let fix_instructions = value
+                .get("fix_instructions")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let total_score = dimensions.buildability.score
+                + dimensions.functional_completeness.score
+                + dimensions.code_quality.total
+                + dimensions.test_quality.score
+                + dimensions.engineering_docs.score;
+            let passed = total_score >= Self::PASS_THRESHOLD;
+
+            return Self {
+                total_score,
+                passed,
+                dimensions,
+                fix_instructions,
+                parse_failed: false,
+            };
+        }
+
+        Self::parse_failure(&last_err)
+    }
+
+    /// Return every top-level balanced-brace `{...}` substring in `s`, ignoring
+    /// braces that occur inside JSON string literals. Lets `parse` locate the
+    /// score object even when the LLM wraps it in prose / markdown fences or
+    /// prefixes it with a smaller preamble object.
+    fn extract_balanced_objects(s: &str) -> Vec<&str> {
+        let bytes = s.as_bytes();
+        let mut objs = Vec::new();
+        let mut depth: i32 = 0;
+        let mut start: Option<usize> = None;
+        let mut in_str = false;
+        let mut escape = false;
+        for (i, &b) in bytes.iter().enumerate() {
+            if in_str {
+                if escape {
+                    escape = false;
+                } else if b == b'\\' {
+                    escape = true;
+                } else if b == b'"' {
+                    in_str = false;
+                }
+                continue;
+            }
+            match b {
+                b'"' => in_str = true,
+                b'{' => {
+                    if depth == 0 {
+                        start = Some(i);
+                    }
+                    depth += 1;
+                }
+                b'}' => {
+                    if depth > 0 {
+                        depth -= 1;
+                        if depth == 0 {
+                            if let Some(st) = start.take() {
+                                objs.push(&s[st..=i]);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        objs
     }
 
     /// Convert to `AcceptanceReviewResult` for backward compatibility.
@@ -803,6 +862,7 @@ impl AuditScoreResult {
                 engineering_docs: DimensionScore { score: 0.0, max_score: 10.0, details: String::new() },
             },
             fix_instructions: reason.to_string(),
+            parse_failed: true,
         }
     }
 }
