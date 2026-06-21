@@ -533,6 +533,15 @@ pub struct InteractiveHome {
     pub session_uuid: String,
     /// `<home_dir>/projects/<slug>/<uuid>.jsonl` — what S5 tails.
     pub transcript_path: std::path::PathBuf,
+    /// When true, `home_dir` is the user's REAL global `~/.claude` (shared,
+    /// already authorized + onboarded), NOT an isolated per-session copy. The
+    /// interactive auth setup then must NOT redirect `CLAUDE_CONFIG_DIR` or copy
+    /// credentials (the global config is already complete), and teardown must
+    /// NEVER delete it (the `cleanup_isolated_home` temp-dir guard enforces this
+    /// regardless, but callers should also skip the cleanup call). Used for the
+    /// native-OAuth (subscription) path so worker terminals reuse the global
+    /// login + onboarding instead of hitting a fresh-config login + model picker.
+    pub is_shared_global: bool,
 }
 
 /// Provision (or re-open) the per-logical-session interactive CLAUDE home.
@@ -555,6 +564,41 @@ pub fn create_interactive_isolated_home(
         home_dir,
         session_uuid,
         transcript_path,
+        is_shared_global: false,
+    })
+}
+
+/// Provision an interactive session that reuses the user's GLOBAL `~/.claude`
+/// instead of an isolated per-session copy.
+///
+/// The native-OAuth (subscription) path uses this so worker terminals inherit
+/// the global login AND first-run onboarding (`~/.claude.json`) — the isolated
+/// home only carried `.credentials.json`/`settings.json`, so the unmodified
+/// `claude` binary saw a fresh config and blocked on a login prompt + first-run
+/// model picker. The transcript still lands in the default
+/// `~/.claude/projects/<slug>/<uuid>.jsonl`, so S5's tailer reads it unchanged;
+/// `--session-id` keeps concurrent terminals on separate transcript files.
+///
+/// The returned home is flagged `is_shared_global` so [`setup_interactive_auth`]
+/// neither redirects `CLAUDE_CONFIG_DIR` nor copies credentials, and teardown
+/// skips it (the `cleanup_isolated_home` temp-dir guard also refuses to delete
+/// anything outside `<temp>/solodawn`).
+pub fn create_interactive_global_home(
+    session_uuid: Option<&str>,
+    working_dir: &Path,
+) -> anyhow::Result<InteractiveHome> {
+    let session_uuid = session_uuid
+        .map(ToString::to_string)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let home_dir = dirs::home_dir()
+        .map(|h| h.join(".claude"))
+        .ok_or_else(|| anyhow::anyhow!("cannot resolve home dir for global claude config"))?;
+    let transcript_path = interactive_transcript_path(&home_dir, working_dir, &session_uuid);
+    Ok(InteractiveHome {
+        home_dir,
+        session_uuid,
+        transcript_path,
+        is_shared_global: true,
     })
 }
 
@@ -719,52 +763,71 @@ pub fn setup_interactive_auth(
     let mut unset: Vec<String> = Vec::new();
     let mut settings_arg: Option<std::path::PathBuf> = None;
 
-    // ALWAYS: redirect home + cap retries (PROBE: CLAUDE_CONFIG_DIR is the real
-    // redirect in 2.1.177; CLAUDE_HOME kept for RB-37 cleanup scan).
-    set.insert("CLAUDE_CONFIG_DIR".to_string(), home_str.clone());
-    set.insert("CLAUDE_HOME".to_string(), home_str);
+    // Redirect home + cap retries (PROBE: CLAUDE_CONFIG_DIR is the real redirect
+    // in 2.1.177; CLAUDE_HOME kept for RB-37 cleanup scan). For the SHARED GLOBAL
+    // home (native subscription) we must NOT redirect: claude has to use its real
+    // default config so it inherits the complete login + first-run onboarding
+    // state (`~/.claude.json`), which an isolated copy never carried — that is
+    // what forced the login prompt + model picker. Force-clear any inherited
+    // redirect so an ambient `CLAUDE_CONFIG_DIR` cannot point the child at a
+    // stale/empty dir.
+    if home.is_shared_global {
+        unset.push("CLAUDE_CONFIG_DIR".to_string());
+        unset.push("CLAUDE_HOME".to_string());
+    } else {
+        set.insert("CLAUDE_CONFIG_DIR".to_string(), home_str.clone());
+        set.insert("CLAUDE_HOME".to_string(), home_str);
+    }
     set.insert("CLAUDE_CODE_MAX_RETRIES".to_string(), "2".to_string());
 
     match mode {
         InteractiveAuthMode::NativeOauth => {
-            // Copy the genuine OAuth credentials into the isolated home so the
-            // unmodified `claude` binary authenticates against the subscription
-            // plan (no key extracted into SoloDawn's own auth path). Mirrors the
-            // `-p` native-auth copy.
-            let global_creds = native_credentials_src.join(".credentials.json");
-            let isolated_creds = home_dir.join(".credentials.json");
-            if global_creds.exists() {
-                if let Err(e) = std::fs::copy(&global_creds, &isolated_creds) {
+            // For the SHARED GLOBAL home, `home_dir` IS the live `~/.claude`, so
+            // there is nothing to copy (the real credentials + settings are
+            // already there) — and copying would be actively harmful: a
+            // `std::fs::copy(src, dst)` with src == dst can truncate the real
+            // `.credentials.json`. Only the ISOLATED-home path copies.
+            if !home.is_shared_global {
+                // Copy the genuine OAuth credentials into the isolated home so the
+                // unmodified `claude` binary authenticates against the subscription
+                // plan (no key extracted into SoloDawn's own auth path). Mirrors the
+                // `-p` native-auth copy.
+                let global_creds = native_credentials_src.join(".credentials.json");
+                let isolated_creds = home_dir.join(".credentials.json");
+                if global_creds.exists() {
+                    if let Err(e) = std::fs::copy(&global_creds, &isolated_creds) {
+                        tracing::warn!(
+                            error = %e,
+                            "Failed to copy native credentials into interactive home"
+                        );
+                    }
+                } else {
                     tracing::warn!(
-                        error = %e,
-                        "Failed to copy native credentials into interactive home"
+                        creds = %global_creds.display(),
+                        "Native interactive auth selected but ~/.claude/.credentials.json is missing"
                     );
                 }
-            } else {
-                tracing::warn!(
-                    creds = %global_creds.display(),
-                    "Native interactive auth selected but ~/.claude/.credentials.json is missing"
-                );
-            }
-            // Copy settings.json for user preferences if present (do not clobber).
-            // SANITIZE the copy: the user's global settings.json `env` block may
-            // contain a billing-routing var (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN
-            // / ANTHROPIC_BASE_URL / CLAUDE_CODE_OAUTH_TOKEN). claude honors
-            // settings.json `env`, so copying it verbatim would re-introduce a
-            // key/relay endpoint inside the isolated home and defeat the
-            // process-level scrub (env_remove only strips the inherited PROCESS
-            // env — it cannot reach a value baked into settings.json on disk).
-            // Strip those keys so native OAuth stays on the subscription plan.
-            let global_settings = native_credentials_src.join("settings.json");
-            let isolated_settings = home_dir.join("settings.json");
-            if global_settings.exists() && !isolated_settings.exists() {
-                if let Err(e) =
-                    copy_native_settings_scrubbing_billing_env(&global_settings, &isolated_settings)
-                {
-                    tracing::warn!(
-                        error = %e,
-                        "Failed to copy/sanitize native settings.json into interactive home"
-                    );
+                // Copy settings.json for user preferences if present (do not clobber).
+                // SANITIZE the copy: the user's global settings.json `env` block may
+                // contain a billing-routing var (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN
+                // / ANTHROPIC_BASE_URL / CLAUDE_CODE_OAUTH_TOKEN). claude honors
+                // settings.json `env`, so copying it verbatim would re-introduce a
+                // key/relay endpoint inside the isolated home and defeat the
+                // process-level scrub (env_remove only strips the inherited PROCESS
+                // env — it cannot reach a value baked into settings.json on disk).
+                // Strip those keys so native OAuth stays on the subscription plan.
+                let global_settings = native_credentials_src.join("settings.json");
+                let isolated_settings = home_dir.join("settings.json");
+                if global_settings.exists() && !isolated_settings.exists() {
+                    if let Err(e) = copy_native_settings_scrubbing_billing_env(
+                        &global_settings,
+                        &isolated_settings,
+                    ) {
+                        tracing::warn!(
+                            error = %e,
+                            "Failed to copy/sanitize native settings.json into interactive home"
+                        );
+                    }
                 }
             }
             // No key env. Scrub anything that could redirect billing off the
@@ -1228,47 +1291,25 @@ impl CCSwitchService {
                             e
                         })?;
                 } else if using_native_auth {
-                    // Copy native credentials into the isolated CLAUDE_HOME
-                    // so the CLI can authenticate in the sandboxed environment.
-                    if let Some(home) = dirs::home_dir() {
-                        let global_creds = home.join(".claude").join(".credentials.json");
-                        let isolated_creds = claude_home.join(".credentials.json");
-                        if global_creds.exists() {
-                            if let Err(e) = std::fs::copy(&global_creds, &isolated_creds) {
-                                tracing::warn!(
-                                    terminal_id = %terminal.id,
-                                    error = %e,
-                                    "Failed to copy native credentials to isolated CLAUDE_HOME"
-                                );
-                            }
-                        }
-                        // Also copy settings.json if it exists (for user preferences).
-                        // SANITIZE the copy: now that CLAUDE_CONFIG_DIR makes claude
-                        // actually read this isolated dir, a verbatim copy of the user's
-                        // global settings.json `env` block (which claude honors) could
-                        // re-introduce a billing-routing key (ANTHROPIC_API_KEY /
-                        // ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL / CLAUDE_CODE_OAUTH_TOKEN)
-                        // inside the native (subscription) home and redirect billing
-                        // off-plan. Strip those keys, mirroring the interactive native path.
-                        let global_settings = home.join(".claude").join("settings.json");
-                        let isolated_settings = claude_home.join("settings.json");
-                        if global_settings.exists() && !isolated_settings.exists() {
-                            if let Err(e) = copy_native_settings_scrubbing_billing_env(
-                                &global_settings,
-                                &isolated_settings,
-                            ) {
-                                tracing::warn!(
-                                    terminal_id = %terminal.id,
-                                    error = %e,
-                                    "Failed to copy/sanitize native settings.json into isolated CLAUDE_HOME"
-                                );
-                            }
-                        }
-                    }
+                    // Reuse the user's GLOBAL ~/.claude (already authorized AND
+                    // onboarded) instead of an isolated copy. The previous approach
+                    // copied only .credentials.json + settings.json into the isolated
+                    // home — never ~/.claude.json (onboarding/account state) — so the
+                    // unmodified `claude` binary saw a fresh config and blocked the
+                    // orchestrator terminal on an interactive login prompt + first-run
+                    // model picker. Drop the isolated redirect set above and clear any
+                    // inherited one so claude uses its real default config and inherits
+                    // the live subscription login + onboarding. No credential copy: the
+                    // global config is already complete, and a std::fs::copy of
+                    // .credentials.json onto itself can truncate the real file. The
+                    // empty isolated dir created above holds no secrets.
+                    env.set.remove("CLAUDE_CONFIG_DIR");
+                    env.set.remove("CLAUDE_HOME");
+                    env.unset.push("CLAUDE_CONFIG_DIR".to_string());
+                    env.unset.push("CLAUDE_HOME".to_string());
                     tracing::info!(
                         terminal_id = %terminal.id,
-                        claude_home = %claude_home.display(),
-                        "Using Claude Code native OAuth credentials (copied to isolated home)"
+                        "Using GLOBAL ~/.claude for native OAuth (inherits login + onboarding; no isolated copy)"
                     );
                     // Native OAuth (subscription) auth: scrub every billing-routing
                     // env var so a subscription credential is NEVER paired with an
@@ -1344,7 +1385,11 @@ impl CCSwitchService {
                     }
                 }
 
-                // Set model for all tiers
+                // Set model for all tiers. The model comes from the terminal's
+                // model_config; it MUST be a current/available model id (a retired
+                // id such as claude-sonnet-4-20250514 makes claude report "model
+                // unavailable" and stall). Forcing it here also overrides any stale
+                // default in the inherited global ~/.claude config.
                 env.set.insert("ANTHROPIC_MODEL".to_string(), model.clone());
                 env.set
                     .insert("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), model.clone());

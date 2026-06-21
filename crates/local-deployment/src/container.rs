@@ -1593,13 +1593,27 @@ impl LocalContainerService {
             .or_else(|| model_config.as_ref().map(|m| m.name.clone()))
             .unwrap_or_default();
 
-        // Provision (or re-open) the per-logical-session interactive home. On a
-        // follow-up, reuse the same session UUID so `--resume` appends to the
-        // same transcript; on initial, mint a fresh one.
-        let home = services::services::cc_switch::create_interactive_isolated_home(
-            follow_up_session_id.as_deref(),
-            &working_dir,
-        )
+        // Provision (or re-open) the interactive home. Native-OAuth
+        // (subscription, no resolved api key) reuses the user's GLOBAL `~/.claude`
+        // — already authorized AND onboarded — so the worker terminal does not hit
+        // a fresh-config login prompt + first-run model picker (the isolated copy
+        // only carried `.credentials.json`/`settings.json`, never the
+        // `~/.claude.json` onboarding/account state). API-key / relay modes keep an
+        // isolated per-session home (their key is a secret that must be scrubbed on
+        // teardown). On a follow-up, reuse the same session UUID so `--resume`
+        // appends to the same transcript.
+        let use_global_home = resolved_api_key.is_none();
+        let home = if use_global_home {
+            services::services::cc_switch::create_interactive_global_home(
+                follow_up_session_id.as_deref(),
+                &working_dir,
+            )
+        } else {
+            services::services::cc_switch::create_interactive_isolated_home(
+                follow_up_session_id.as_deref(),
+                &working_dir,
+            )
+        }
         .map_err(|e| ContainerError::Other(anyhow!("create interactive home failed: {e}")))?;
 
         // Unified 3-mode auth setup: writes per-mode files into the home (native

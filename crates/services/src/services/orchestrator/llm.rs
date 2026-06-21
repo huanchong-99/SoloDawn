@@ -633,7 +633,16 @@ impl InteractiveClaudeClient {
     /// Maximum wall-clock for a single interactive planning turn.
     const TURN_TIMEOUT: Duration = Duration::from_secs(300);
     /// How long to wait for the transcript file to materialize after exit.
-    const TRANSCRIPT_SETTLE: Duration = Duration::from_millis(500);
+    const TRANSCRIPT_SETTLE: Duration = Duration::from_millis(1500);
+    /// How many times to re-spawn the interactive turn when it fails to complete
+    /// cleanly (truncated/interrupted/empty). The transport is flaky enough that
+    /// a single spawn is unreliable, but a clean turn lands often enough that a
+    /// handful of retries drives availability to ~100%. The common case succeeds
+    /// on the first attempt; only genuine failures pay the retry cost.
+    const MAX_TRANSPORT_ATTEMPTS: u32 = 6;
+    /// Brief pause between spawn attempts (lets transient subscription hiccups
+    /// clear before the next try).
+    const RETRY_BACKOFF: Duration = Duration::from_millis(1500);
 
     /// Billing-routing env keys scrubbed from the off-pool subscription authoring
     /// child (PRD §12). Mirrors `cc_switch::BILLING_ENV_KEYS`: any of these
@@ -685,7 +694,19 @@ impl InteractiveClaudeClient {
     /// `ClaudeJson` / `ClaudeContentItem` envelope types (the transcript bodies
     /// are byte-identical to what `ClaudeLogProcessor` parses).
     fn extract_final_assistant_text(transcript: &str) -> Option<String> {
-        let mut last: Option<String> = None;
+        Self::extract_best_assistant(transcript).map(|(text, _)| text)
+    }
+
+    /// Pick the substantive assistant response from a transcript and return its
+    /// joined text plus its `stop_reason`. A single interactive turn's transcript
+    /// can carry several `assistant` envelopes — a thinking-only one with no text,
+    /// the real answer, and occasionally a trailing fragment (e.g. a lone `[`) —
+    /// so we keep the LONGEST non-empty text (ties prefer the later one). This is
+    /// robust against trailing fragments while still matching "last wins" when the
+    /// last message is the substantive one. Only `Text` blocks count (thinking is
+    /// excluded), matching the prior behaviour.
+    fn extract_best_assistant(transcript: &str) -> Option<(String, Option<String>)> {
+        let mut best: Option<(String, Option<String>)> = None;
         for line in transcript.lines() {
             let trimmed = line.trim();
             if trimmed.is_empty() {
@@ -705,23 +726,122 @@ impl InteractiveClaudeClient {
                     text.push_str(t);
                 }
             }
-            if !text.is_empty() {
-                last = Some(text);
+            if text.is_empty() {
+                continue;
+            }
+            let take = best.as_ref().map_or(true, |(bt, _)| text.len() >= bt.len());
+            if take {
+                best = Some((text, message.stop_reason.clone()));
             }
         }
-        last
+        best
     }
-}
 
-#[async_trait]
-impl LLMClient for InteractiveClaudeClient {
-    async fn chat(&self, messages: Vec<LLMMessage>) -> anyhow::Result<LLMResponse> {
+    /// Validate a finished transcript. The substantive assistant message MUST
+    /// carry a clean finish marker (`stop_reason == "end_turn"` / `"stop_sequence"`).
+    /// A truncated or interrupted turn (the well-known failure mode of this
+    /// transport: the captured text stops mid-JSON, or there is no assistant text
+    /// at all) returns `Err` so the caller retries with a fresh spawn. The raw
+    /// transcript head is logged on failure for troubleshooting.
+    fn validate_turn(transcript: &str) -> anyhow::Result<LLMResponse> {
+        match Self::extract_best_assistant(transcript) {
+            Some((text, stop_reason)) => {
+                let clean_finish = matches!(
+                    stop_reason.as_deref(),
+                    Some("end_turn") | Some("stop_sequence")
+                );
+                // claude intermittently reports end_turn yet emits a JSON object
+                // that is missing its final closing braces, so a clean finish is
+                // necessary but NOT sufficient — the structure must also close.
+                let complete_json = Self::looks_structurally_complete(&text);
+                if clean_finish && complete_json {
+                    Ok(LLMResponse {
+                        content: text,
+                        usage: None,
+                    })
+                } else {
+                    let why = if !clean_finish {
+                        "turn did not finish cleanly (interrupted)"
+                    } else {
+                        "JSON content is structurally incomplete (truncated / unbalanced)"
+                    };
+                    tracing::warn!(
+                        stop_reason = ?stop_reason,
+                        content_len = text.len(),
+                        clean_finish,
+                        complete_json,
+                        transcript_len = transcript.len(),
+                        transcript_head = %transcript.chars().take(1200).collect::<String>(),
+                        "InteractiveClaudeClient response unusable: {why}"
+                    );
+                    Err(anyhow::anyhow!(
+                        "interactive response unusable: {why} (stop_reason={stop_reason:?})"
+                    ))
+                }
+            }
+            None => {
+                tracing::warn!(
+                    transcript_len = transcript.len(),
+                    transcript_head = %transcript.chars().take(1200).collect::<String>(),
+                    "InteractiveClaudeClient transcript had no assistant text"
+                );
+                Err(anyhow::anyhow!(
+                    "interactive transcript had no assistant text"
+                ))
+            }
+        }
+    }
+
+    /// For a response meant to be a single JSON value (it starts with `{` or `[`),
+    /// verify the top-level structure actually closes. claude occasionally emits a
+    /// JSON object missing its final closing braces while still reporting
+    /// `end_turn`; this catches that so `chat()` can retry. Responses that are not
+    /// JSON-leading (prose, or prose-wrapped JSON) are accepted as-is — their
+    /// callers do their own extraction. Braces inside string literals are ignored.
+    fn looks_structurally_complete(text: &str) -> bool {
+        let t = text.trim_start();
+        match t.as_bytes().first() {
+            Some(b'{') | Some(b'[') => {}
+            _ => return true,
+        }
+        let mut depth: i32 = 0;
+        let mut in_str = false;
+        let mut escape = false;
+        for &b in t.as_bytes() {
+            if in_str {
+                if escape {
+                    escape = false;
+                } else if b == b'\\' {
+                    escape = true;
+                } else if b == b'"' {
+                    in_str = false;
+                }
+                continue;
+            }
+            match b {
+                b'"' => in_str = true,
+                b'{' | b'[' => depth += 1,
+                b'}' | b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// One spawn of the genuine `claude` binary: provision a fresh isolated home,
+    /// deliver the prompt, wait for the turn, read the transcript, and return the
+    /// response ONLY if the turn completed cleanly (`validate_turn`). Any failure
+    /// (spawn error, non-zero exit, timeout, truncated/empty turn) returns `Err`
+    /// so `chat()` can retry. Always cleans up the isolated home; optionally
+    /// preserves the raw transcript for offline inspection.
+    async fn run_single_turn(&self, prompt: &str, attempt: u32) -> anyhow::Result<LLMResponse> {
         use std::process::Stdio;
 
-        // Scratch working dir for the single-turn run. The transcript slug is
-        // derived from this dir (see cc_switch::slug_working_dir); a stable
-        // scratch dir keeps the path deterministic and avoids polluting any
-        // real project's transcript folder.
         let working_dir = std::env::temp_dir().join("solodawn").join("planning-scratch");
         std::fs::create_dir_all(&working_dir)
             .map_err(|e| anyhow::anyhow!("Failed to create planning scratch dir: {e}"))?;
@@ -731,13 +851,11 @@ impl LLMClient for InteractiveClaudeClient {
             crate::services::cc_switch::create_interactive_isolated_home(None, &working_dir)?;
 
         // Copy native credentials (+ settings) into the isolated home so the
-        // genuine binary authenticates in the sandbox. We do NOT read the token
-        // ourselves — the binary consumes the copied file.
+        // genuine binary authenticates in the sandbox.
         if let Some(user_home) = dirs::home_dir() {
             let src_creds = user_home.join(".claude").join(".credentials.json");
             let dst_creds = home.home_dir.join(".credentials.json");
             if let Err(e) = std::fs::copy(&src_creds, &dst_creds) {
-                // Cleanup before bailing.
                 crate::services::terminal::process::ProcessManager::cleanup_logical_session_home(
                     &home.home_dir,
                 );
@@ -759,9 +877,6 @@ impl LLMClient for InteractiveClaudeClient {
             return Err(anyhow::anyhow!("Cannot determine home directory"));
         }
 
-        // Build the interactive argv. `ClaudeCode` has private fields, so
-        // construct via serde (the public interactive fields carry `#[serde]`
-        // attributes) rather than struct literal.
         let claude: ClaudeCode = serde_json::from_value(serde_json::json!({
             "interactive": true,
             "interactive_session_id": home.session_uuid,
@@ -776,51 +891,73 @@ impl LLMClient for InteractiveClaudeClient {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to resolve claude executable: {e}"))?;
 
-        // Prompt is passed positionally to interactive `claude` (single turn).
-        let prompt = Self::flatten_prompt(&messages);
-        args.push(prompt);
+        // SHORT prompts pass positionally; LARGE prompts (review with code context)
+        // would overflow the Windows command-line cap (os error 206), so pipe them
+        // through stdin (EOF yields the same one-turn-then-exit).
+        const STDIN_PROMPT_THRESHOLD: usize = 8000;
+        let deliver_via_stdin = prompt.len() > STDIN_PROMPT_THRESHOLD;
+        if !deliver_via_stdin {
+            args.push(prompt.to_string());
+        }
 
         let home_dir_str = home.home_dir.to_string_lossy().to_string();
         let mut command = tokio::process::Command::new(&program);
         command
             .kill_on_drop(true)
-            // Closed stdin => non-TTY one-turn-then-exit.
-            .stdin(Stdio::null())
+            .stdin(if deliver_via_stdin {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .current_dir(&working_dir)
             .args(&args)
-            // Isolated home as BOTH CLAUDE_CONFIG_DIR (real redirect in 2.1.177)
-            // and CLAUDE_HOME (so RB-37 cleanup still recognizes the dir).
             .env("CLAUDE_CONFIG_DIR", &home_dir_str)
             .env("CLAUDE_HOME", &home_dir_str)
-            // R6 port-leak hygiene: strip SoloDawn dev ports from the child.
             .env_remove("PORT")
             .env_remove("BACKEND_PORT")
             .env_remove("FRONTEND_PORT");
 
-        // Never let inherited billing-routing env force pay-as-you-go billing (or
-        // redirect to a relay) on a subscription user; the genuine binary uses the
-        // copied OAuth creds. Scrub the full PRD §12 set (mirrors
-        // `cc_switch::BILLING_ENV_KEYS`) — scrubbing only ANTHROPIC_API_KEY left
-        // AUTH_TOKEN/BASE_URL/OAUTH_TOKEN able to silently reroute this off-pool
-        // authoring child.
+        // Scrub billing-routing env so a subscription user stays off-pool.
         for key in Self::BILLING_SCRUB_ENV {
             command.env_remove(key);
         }
 
         tracing::debug!(
+            attempt,
             model = %self.model,
             session_uuid = %home.session_uuid,
             transcript = %home.transcript_path.display(),
-            "InteractiveClaudeClient single-turn planning run starting"
+            "InteractiveClaudeClient single-turn run starting"
         );
 
         let run = async {
-            let output = command
-                .output()
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to spawn interactive claude: {e}"))?;
+            let output = if deliver_via_stdin {
+                use tokio::io::AsyncWriteExt;
+                let mut child = command
+                    .spawn()
+                    .map_err(|e| anyhow::anyhow!("Failed to spawn interactive claude: {e}"))?;
+                if let Some(mut child_stdin) = child.stdin.take() {
+                    child_stdin
+                        .write_all(prompt.as_bytes())
+                        .await
+                        .map_err(|e| {
+                            anyhow::anyhow!("Failed to write prompt to claude stdin: {e}")
+                        })?;
+                    // EOF signals end-of-turn so claude processes and exits.
+                    let _ = child_stdin.shutdown().await;
+                }
+                child
+                    .wait_with_output()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to await interactive claude: {e}"))?
+            } else {
+                command
+                    .output()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to spawn interactive claude: {e}"))?
+            };
             Ok::<_, anyhow::Error>(output)
         };
 
@@ -832,7 +969,7 @@ impl LLMClient for InteractiveClaudeClient {
             )),
         };
 
-        let chat_result = match result {
+        let outcome = match result {
             Ok(output) => {
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -842,20 +979,10 @@ impl LLMClient for InteractiveClaudeClient {
                         stderr.chars().take(300).collect::<String>()
                     ))
                 } else {
-                    // Give the transcript a brief moment to flush, then read it.
+                    // Give the transcript a brief moment to flush, then validate it.
                     tokio::time::sleep(Self::TRANSCRIPT_SETTLE).await;
                     match tokio::fs::read_to_string(&home.transcript_path).await {
-                        Ok(transcript) => {
-                            match Self::extract_final_assistant_text(&transcript) {
-                                Some(content) => Ok(LLMResponse {
-                                    content,
-                                    usage: None,
-                                }),
-                                None => Err(anyhow::anyhow!(
-                                    "Interactive claude transcript had no assistant text"
-                                )),
-                            }
-                        }
+                        Ok(transcript) => Self::validate_turn(&transcript),
                         Err(e) => Err(anyhow::anyhow!(
                             "Failed to read interactive claude transcript {}: {e}",
                             home.transcript_path.display()
@@ -866,12 +993,79 @@ impl LLMClient for InteractiveClaudeClient {
             Err(e) => Err(e),
         };
 
+        // Optional debug capture: preserve the raw transcript before cleanup so
+        // transport failures can be inspected offline. Gated on
+        // SOLODAWN_DEBUG_TRANSCRIPTS (a directory path); no-op when unset.
+        if let Ok(dir) = std::env::var("SOLODAWN_DEBUG_TRANSCRIPTS") {
+            if !dir.trim().is_empty() && home.transcript_path.exists() {
+                let _ = std::fs::create_dir_all(dir.trim());
+                let dst = std::path::Path::new(dir.trim())
+                    .join(format!("{}.jsonl", home.session_uuid));
+                if let Err(e) = std::fs::copy(&home.transcript_path, &dst) {
+                    tracing::debug!("Failed to preserve debug transcript: {e}");
+                }
+            }
+        }
+
         // Always clean up the isolated home (RB-37 secret cleanup) afterwards.
         crate::services::terminal::process::ProcessManager::cleanup_logical_session_home(
             &home.home_dir,
         );
 
-        chat_result
+        outcome
+    }
+}
+
+#[async_trait]
+impl LLMClient for InteractiveClaudeClient {
+    async fn chat(&self, messages: Vec<LLMMessage>) -> anyhow::Result<LLMResponse> {
+        let prompt = Self::flatten_prompt(&messages);
+
+        // The interactive single-turn transport is intermittently unreliable: a
+        // given spawn may return a truncated / interrupted turn (the captured
+        // assistant text stops mid-output and carries no `stop_reason="end_turn"`).
+        // A clean turn lands a good fraction of the time, so we retry the whole
+        // spawn until ONE completes cleanly. This drives availability close to
+        // 100% for BOTH the acceptance review and the orchestrator's decision
+        // calls — the latter previously degraded (tasks auto-completed without
+        // review, "stuck foundation" recovery) whenever a decision response came
+        // back truncated. Each attempt provisions a fresh isolated home, and
+        // `run_single_turn` only returns `Ok` for a cleanly finished turn.
+        let mut last_err = anyhow::anyhow!("interactive transport produced no completed turn");
+        for attempt in 1..=Self::MAX_TRANSPORT_ATTEMPTS {
+            if attempt > 1 {
+                tokio::time::sleep(Self::RETRY_BACKOFF).await;
+            }
+            match self.run_single_turn(&prompt, attempt).await {
+                Ok(resp) => {
+                    if attempt > 1 {
+                        tracing::info!(
+                            attempt,
+                            model = %self.model,
+                            "Interactive transport recovered on retry"
+                        );
+                    }
+                    return Ok(resp);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        attempt,
+                        max = Self::MAX_TRANSPORT_ATTEMPTS,
+                        model = %self.model,
+                        error = %e,
+                        "Interactive transport attempt did not complete cleanly; retrying"
+                    );
+                    last_err = e;
+                }
+            }
+        }
+        tracing::error!(
+            attempts = Self::MAX_TRANSPORT_ATTEMPTS,
+            model = %self.model,
+            error = %last_err,
+            "Interactive transport exhausted all attempts without a clean turn"
+        );
+        Err(last_err)
     }
 }
 
@@ -1430,6 +1624,107 @@ mod interactive_claude_tests {
             InteractiveClaudeClient::extract_final_assistant_text(transcript),
             None
         );
+    }
+
+    #[test]
+    fn test_looks_structurally_complete() {
+        let c = InteractiveClaudeClient::looks_structurally_complete;
+        // Complete object / array close → usable.
+        assert!(c(r#"{"a":1,"b":{"c":2}}"#));
+        assert!(c(r#"  [{"x":1},{"y":2}]  "#));
+        // The real failure mode: a review JSON missing its final closing braces.
+        assert!(!c(r#"{"total_score":56,"dimensions":{"buildability":{"score":12}"#));
+        assert!(!c(r#"{"a":1,"b":["#));
+        // Braces inside string literals must not be counted.
+        assert!(c(r#"{"s":"a } b { c"}"#));
+        assert!(c(r#"{"s":"esc \" still in string } {"}"#));
+        // Non-JSON-leading content is accepted (callers extract themselves).
+        assert!(c("需求已经很清晰，规格如下…"));
+    }
+
+    #[test]
+    fn test_validate_turn_accepts_complete_end_turn() {
+        let transcript = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"{\"ok\":true}"}]}}"#;
+        let r = InteractiveClaudeClient::validate_turn(transcript).unwrap();
+        assert_eq!(r.content, r#"{"ok":true}"#);
+    }
+
+    #[test]
+    fn test_validate_turn_rejects_truncated_json_even_with_end_turn() {
+        // end_turn, but the JSON object is missing its final closing braces.
+        let transcript = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"{\"total_score\":56,\"dimensions\":{\"buildability\":{\"score\":12}"}]}}"#;
+        assert!(InteractiveClaudeClient::validate_turn(transcript).is_err());
+    }
+
+    #[test]
+    fn test_validate_turn_rejects_interrupted_turn() {
+        // No stop_reason (interrupted) → retry, even though the JSON is complete.
+        let transcript = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"{\"ok\":true}"}]}}"#;
+        assert!(InteractiveClaudeClient::validate_turn(transcript).is_err());
+    }
+
+    /// Manual ground-truth capture. Spawns the real `claude` binary on the
+    /// subscription and hammers a review-sized prompt to observe how often the
+    /// interactive transport returns a clean vs. truncated/degenerate response,
+    /// and what `stop_reason` / `turn_duration` the transcript carries.
+    ///
+    /// Run with:
+    ///   set SOLODAWN_DEBUG_TRANSCRIPTS=E:\SoloDawn\runtime-logs\transcripts
+    ///   cargo test -p services --lib -- --ignored --nocapture capture_interactive_transport
+    #[tokio::test]
+    #[ignore = "spawns real claude on the subscription; run manually to capture transcripts"]
+    async fn capture_interactive_transport() {
+        let client = InteractiveClaudeClient::new("claude-sonnet-4-6");
+        // A review-sized prompt: an audit rubric + a code blob + the same deeply
+        // nested dimensions-JSON demand build_scoring_review_prompt uses.
+        let code = "function add(a,b){return a+b}\nmodule.exports={add};\n".repeat(40);
+        let prompt = format!(
+            "You are a strict code auditor. Score the code below across five dimensions \
+             (buildability 0-20, functional_completeness 0-25, code_quality split into \
+             architecture/standards/security 0-10 each, test_quality 0-15, engineering_docs 0-10). \
+             For every dimension cite concrete evidence (file + line). Be exhaustive.\n\n\
+             ## Code under review\n```js\n{code}\n```\n\n\
+             Respond with ONLY one raw JSON object, no markdown, no prose:\n\
+             {{\"total_score\": <sum>, \"dimensions\": {{\
+             \"buildability\": {{\"score\": <0-20>, \"max_score\": 20, \"details\": \"evidence\"}}, \
+             \"functional_completeness\": {{\"score\": <0-25>, \"max_score\": 25, \"details\": \"evidence\"}}, \
+             \"code_quality\": {{\"architecture\": {{\"score\": <0-10>, \"max_score\": 10, \"details\": \"evidence\"}}, \
+             \"standards\": {{\"score\": <0-10>, \"max_score\": 10, \"details\": \"evidence\"}}, \
+             \"security\": {{\"score\": <0-10>, \"max_score\": 10, \"details\": \"evidence\"}}}}, \
+             \"test_quality\": {{\"score\": <0-15>, \"max_score\": 15, \"details\": \"evidence\"}}, \
+             \"engineering_docs\": {{\"score\": <0-10>, \"max_score\": 10, \"details\": \"evidence\"}}}}, \
+             \"fix_instructions\": \"...\"}}"
+        );
+        let n = 8usize;
+        let mut ok = 0usize;
+        for i in 0..n {
+            match client
+                .chat(vec![LLMMessage {
+                    role: "user".to_string(),
+                    content: prompt.clone(),
+                }])
+                .await
+            {
+                Ok(r) => {
+                    let parses = !crate::services::orchestrator::types::AuditScoreResult::parse(
+                        &r.content,
+                    )
+                    .parse_failed;
+                    let head: String = r.content.chars().take(120).collect();
+                    eprintln!(
+                        "[{i}] OK len={} parses={} head={:?}",
+                        r.content.len(),
+                        parses,
+                        head
+                    );
+                    if parses {
+                        ok += 1;
+                    }
+                }
+                Err(e) => eprintln!("[{i}] ERR {e}"),
+            }
+        }
+        eprintln!("=== {ok}/{n} produced a parseable review ===");
     }
 
     /// PRD §12: the off-pool subscription authoring child must scrub ALL

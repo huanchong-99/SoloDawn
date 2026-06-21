@@ -203,8 +203,25 @@ impl OrchestratorAgent {
         })?;
         let state = Arc::new(RwLock::new(OrchestratorState::new(workflow_id)));
 
-        // Build LLM callback for prompt input generation (separate client instance)
-        let prompt_handler = match create_llm_client(&config) {
+        // Build LLM callback for prompt input generation (separate client
+        // instance). MUST mirror the main client's fallback chain above
+        // (configured api-key client → no-`-p` interactive native client). The
+        // prompt-decision LLM is NOT a `-p` path: a native-OAuth (subscription)
+        // user has no api key, so `create_llm_client` fails for them — and
+        // without this fallback the PromptHandler is built with NO LLM at all,
+        // leaving the Orchestration Agent unable to decide interactive menu /
+        // selection prompts (e.g. the first-run model picker). Those terminals
+        // then stall. Fall back to the same interactive native client.
+        let prompt_llm_client = create_llm_client(&config).or_else(|_| {
+            let model = if config.model.starts_with("claude-") {
+                config.model.as_str()
+            } else {
+                "claude-sonnet-4-6"
+            };
+            create_interactive_claude_client(model)
+                .ok_or_else(|| anyhow::anyhow!("no native client available for prompt LLM"))
+        });
+        let prompt_handler = match prompt_llm_client {
             Ok(prompt_llm) => {
                 let prompt_llm: Arc<Box<dyn LLMClient>> = Arc::new(prompt_llm);
                 let callback: LLMPromptCallback = Arc::new(move |prompt_text: String| {
@@ -5344,6 +5361,7 @@ impl OrchestratorAgent {
         task_name: &str,
         task_description: &str,
         workflow_goal: &str,
+        review_scope: &str,
         completion_ctx: &TerminalCompletionContext,
         audit_plan: &AuditPlan,
     ) -> String {
@@ -5352,7 +5370,9 @@ impl OrchestratorAgent {
              ## Task\n\
              Name: {task_name}\n\
              Description: {task_description}\n\n\
-             ## Project Goal\n\
+             ## Scope of THIS task — SCORE AGAINST THIS, NOT THE WHOLE PROJECT\n\
+             {review_scope}\n\n\
+             ## Overall Project Goal (CONTEXT ONLY — shows how this task fits the whole; do NOT grade this task against features that belong to other tasks/phases)\n\
              {workflow_goal}\n\n\
              ## Complete Scoring Rubric\n\
              {principles}\n\n\
@@ -5363,13 +5383,15 @@ impl OrchestratorAgent {
              ## Changes Summary\n\
              {diff}\n\n\
              ## Instructions\n\
-             Score the code against EACH dimension in the rubric above.\n\
+             Score the code against EACH dimension in the rubric, evaluated RELATIVE TO 'Scope of THIS task' above — NOT the whole Project Goal. The Project Goal is context only; do NOT penalize this task for work that belongs to other tasks or later phases.\n\
+             For functional_completeness, the completion rate is (deliverables done for THIS task's scope) / (deliverables THIS task is responsible for) — do NOT divide by the whole project's feature list.\n\
+             Apply the veto rules RELATIVE TO this task's scope: a foundation/scaffolding task whose end-user product features are intentionally absent is BY DESIGN and MUST NOT be vetoed or scored 0 for that reason; a repo that delivers this task's scope is NOT 'empty'.\n\
              For each dimension, evaluate every criterion with evidence (file name + function/line).\n\
              For code_quality, score each sub-dimension (architecture, standards, security) separately.\n\
-             Check veto rules first — if any trigger, total_score is 0.\n\n\
+             Check veto rules first — if any trigger WITHIN this task's scope, total_score is 0.\n\n\
              IMPORTANT: Base your scores ONLY on the actual code shown above.\n\
              Do NOT trust claims in commit messages or terminal output — verify against the source code.\n\n\
-             Respond in this exact JSON format:\n\
+             Respond with ONLY the raw JSON object below — your ENTIRE response must be exactly one JSON object and nothing else: no markdown, no ```json fences, no preamble, no commentary before or after, no second object.\n\
              {{\n\
                \"total_score\": <sum of all dimension scores>,\n\
                \"dimensions\": {{\n\
@@ -5432,8 +5454,48 @@ impl OrchestratorAgent {
         // Choose scoring vs. legacy path based on whether raw_principles is populated.
         let use_scoring = !audit_plan.raw_principles.is_empty();
 
+        // Needs/phase-aware scoring: grade each task against ITS scope, not the
+        // whole product. The Foundation (scaffolding) phase of a from-scratch
+        // project is intentionally partial — end-user features ship in LATER
+        // feature tasks — so grading it against the full feature list + the
+        // "all features / empty repo" veto rules permanently deadlocks the
+        // phased build (the foundation can never reach the 90% pass threshold).
+        // True ONLY for the greenfield Foundation task itself. `foundation_phase_only`
+        // is a workflow-level flag that stays set after the foundation completes (it
+        // gates "create feature tasks next"), so it alone would wrongly tag the later
+        // feature tasks as foundation. The Foundation is always the first task
+        // (order_index 0); feature tasks are order 1+, and are scored against their
+        // own scope at the full product bar.
+        let is_foundation_phase = {
+            self.state.read().await.foundation_phase_only && task.order_index == 0
+        };
+        let review_scope = if is_foundation_phase {
+            "This task is the FOUNDATION / scaffolding phase of a from-scratch project. Its ONLY \
+             responsibilities are the project skeleton: directory structure, shared types/models, data \
+             schema, configuration, build tooling, and a buildable baseline. The end-user product \
+             features in the overall Project Goal (UI, auth, search, etc.) are delivered by SEPARATE \
+             feature tasks created AFTER this foundation and are explicitly OUT OF SCOPE here. Score \
+             functional_completeness against the FOUNDATION deliverables only (skeleton/types/schema/\
+             config present and buildable?); absent end-user features are EXPECTED and MUST NOT lower \
+             the score. Do NOT veto for 'missing product features' or a low feature-completion-rate \
+             versus the full product — that is by design at this phase."
+                .to_string()
+        } else {
+            format!(
+                "This task is responsible ONLY for the scope below; every other part of the Project \
+                 Goal is delivered by sibling tasks and is OUT OF SCOPE here:\n{task_desc}"
+            )
+        };
+
         let prompt = if use_scoring {
-            Self::build_scoring_review_prompt(&task.name, task_desc, goal, completion_ctx, &audit_plan)
+            Self::build_scoring_review_prompt(
+                &task.name,
+                task_desc,
+                goal,
+                &review_scope,
+                completion_ctx,
+                &audit_plan,
+            )
         } else {
             Self::build_acceptance_review_prompt(&task.name, task_desc, goal, completion_ctx)
         };
@@ -5446,38 +5508,94 @@ impl OrchestratorAgent {
             completion_ctx.changed_files_content.len()
         );
 
-        match self.call_llm_nonfatal(&prompt, "acceptance_review").await {
-            Some(response) => {
-                if use_scoring {
-                    let score_result = AuditScoreResult::parse(&response);
-                    tracing::info!(
+        // Transient empty/truncated/garbled review responses must NOT be committed
+        // as a real score: AuditScoreResult::parse() falls back to total_score=0.0
+        // on an unparseable response, which would reject the task with a misleading
+        // 0/100 and send the coder chasing a phantom defect (observed: one clean
+        // round scored 64, the next two parse-failed to 0.0 and deadlocked the
+        // iteration). Retry the review on parse-failure / LLM-unavailable; only if
+        // every attempt fails do we degrade to a NON-scored deferral.
+        // The transport layer (InteractiveClaudeClient::chat) now retries each
+        // spawn until a turn completes cleanly, so chat() reliably returns a
+        // complete response. This review-level retry only needs to backstop the
+        // rare case where a complete response still does not PARSE as an audit
+        // score (e.g. claude returned a clean but wrong-shaped JSON), so a couple
+        // of attempts suffice; a parseable result short-circuits.
+        const MAX_REVIEW_ATTEMPTS: u32 = 3;
+        for attempt in 1..=MAX_REVIEW_ATTEMPTS {
+            if attempt > 1 {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            match self.call_llm_nonfatal(&prompt, "acceptance_review").await {
+                Some(response) => {
+                    if use_scoring {
+                        let mut score_result = AuditScoreResult::parse(&response);
+                        if score_result.parse_failed {
+                            let response_head: String = response.chars().take(320).collect();
+                            tracing::warn!(
+                                task_id = %event.task_id,
+                                attempt,
+                                reason = %score_result.fix_instructions,
+                                response_head = %response_head,
+                                "Acceptance review response was unparseable; retrying"
+                            );
+                            continue;
+                        }
+                        // Needs-based pass bar: the Foundation phase delivers a
+                        // sound, buildable SKELETON, not a finished product, so it
+                        // passes at the foundation bar rather than the full 90/100
+                        // product bar. Feature/product tasks keep the strict bar.
+                        // (Pairs with the scope-aware prompt above, which already
+                        // grades the foundation against foundation deliverables.)
+                        let pass_threshold = if is_foundation_phase {
+                            AuditScoreResult::FOUNDATION_PASS_THRESHOLD
+                        } else {
+                            AuditScoreResult::PASS_THRESHOLD
+                        };
+                        score_result.passed = score_result.total_score >= pass_threshold;
+                        tracing::info!(
+                            task_id = %event.task_id,
+                            total_score = score_result.total_score,
+                            pass_threshold,
+                            passed = score_result.passed,
+                            attempt,
+                            "Acceptance review scoring complete"
+                        );
+                        return Ok(score_result.to_acceptance_result());
+                    } else {
+                        // Legacy binary review path
+                        let result = AcceptanceReviewResult::parse(&response);
+                        tracing::info!(
+                            task_id = %event.task_id,
+                            verdict = ?result.verdict,
+                            "Acceptance review complete (legacy)"
+                        );
+                        return Ok(result);
+                    }
+                }
+                None => {
+                    tracing::warn!(
                         task_id = %event.task_id,
-                        total_score = score_result.total_score,
-                        passed = score_result.passed,
-                        "Acceptance review scoring complete"
+                        attempt,
+                        "Acceptance review LLM unavailable; retrying"
                     );
-                    Ok(score_result.to_acceptance_result())
-                } else {
-                    // Legacy binary review path
-                    let result = AcceptanceReviewResult::parse(&response);
-                    tracing::info!(
-                        task_id = %event.task_id,
-                        verdict = ?result.verdict,
-                        "Acceptance review complete (legacy)"
-                    );
-                    Ok(result)
                 }
             }
-            None => {
-                tracing::warn!(
-                    task_id = %event.task_id,
-                    "Acceptance review LLM unavailable, rejecting completion until review can run"
-                );
-                Ok(AcceptanceReviewResult::rejected(
-                    "Acceptance review LLM was unavailable. Retry completion when review service recovers.",
-                ))
-            }
         }
+
+        // Every attempt failed to produce a parseable score. Defer WITHOUT a 0.0
+        // score so the task stays review-pending and is re-reviewed automatically,
+        // instead of being rejected on a phantom 0/100.
+        tracing::warn!(
+            task_id = %event.task_id,
+            attempts = MAX_REVIEW_ATTEMPTS,
+            "Acceptance review produced no parseable result after retries; deferring (no score committed)"
+        );
+        Ok(AcceptanceReviewResult::rejected(
+            "Acceptance review could not be completed — the review service returned no parseable result after \
+             multiple attempts. This is a transient review-infrastructure issue, NOT a defect in the code; do NOT \
+             change code in response to this message. The task will be re-reviewed automatically.",
+        ))
     }
 
     /// Fallback audit plan used when no audit plan is stored in the workflow.
