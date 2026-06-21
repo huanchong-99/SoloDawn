@@ -1230,6 +1230,63 @@ impl OrchestratorAgent {
                             let mut state = self.state.write().await;
                             state.enforce_deadlock_counters.remove(&task.id);
                         }
+
+                        // GATE: an agent-planned task must NOT be marked completed
+                        // without an acceptance review. The review normally runs on
+                        // the terminal-completion path (run_acceptance_review_gate),
+                        // but if the terminal finished via a path that bypassed it
+                        // (e.g. the coder exited without a terminal_completed event,
+                        // or the review LLM was mid-flight when this periodic sweep
+                        // fired), this sweep would otherwise stamp "completed" with
+                        // score=null — making every prior scoring fix (scope-aware,
+                        // foundation threshold, parse-retry) a no-op. So for an
+                        // un-reviewed agent-planned task, run the review gate NOW
+                        // (synthesizing a completion event from the task's terminal)
+                        // and only complete if it approves; a rejection leaves the
+                        // task review_pending for the normal re-drive path.
+                        if self.is_agent_planned_workflow().await.unwrap_or(false)
+                            && task.acceptance_verdict.is_none()
+                        {
+                            let terminal_for_review = task_terminals
+                                .iter()
+                                .find(|t| t.status == "completed")
+                                .or_else(|| task_terminals.first());
+                            if let Some(term) = terminal_for_review {
+                                let synthetic_event = TerminalCompletionEvent {
+                                    terminal_id: term.id.clone(),
+                                    task_id: task.id.clone(),
+                                    workflow_id: workflow_id.clone(),
+                                    status: TerminalCompletionStatus::Completed,
+                                    commit_hash: term.last_commit_hash.clone(),
+                                    commit_message: term.last_commit_message.clone(),
+                                    metadata: None,
+                                };
+                                tracing::info!(
+                                    task_id = %task.id, task_name = %task.name,
+                                    "Auto-complete sweep: running missing acceptance review before completing task"
+                                );
+                                match self.run_acceptance_review_gate(&synthetic_event).await {
+                                    Ok(can_complete) => {
+                                        if !can_complete {
+                                            // Review is pending/rejected/inconclusive —
+                                            // do not auto-complete; the review pipeline
+                                            // will re-drive this task.
+                                            continue;
+                                        }
+                                        // Review approved → fall through to complete.
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            task_id = %task.id,
+                                            error = %e,
+                                            "Auto-complete sweep: acceptance review gate errored; leaving task running"
+                                        );
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+
                         tracing::info!(
                             task_id = %task.id, task_name = %task.name,
                             "Auto-completing task: all terminals finished but task still running"
