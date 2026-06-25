@@ -9060,7 +9060,14 @@ impl OrchestratorAgent {
         // G15-002: Even after planning_complete, the LLM event loop may still create
         // new tasks on terminal completion events. Only auto-sync after a grace period
         // where no new tasks have been created and the LLM is idle.
-        if !workflow_planning_complete {
+        //
+        // R8-D1: However, if EVERY task is already in a final state, planning is moot
+        // — there is nothing left to plan and no terminal that could receive a new
+        // task. A stale `workflow_planning_complete=false` (e.g. tasks reached
+        // `completed` via the review-pending sweep recovery without the LLM ever
+        // emitting set_workflow_planning_complete, or the flag was reset by a
+        // re-plan) must not orphan a fully-done workflow at `running` forever.
+        if !workflow_planning_complete && !all_tasks_final {
             return Ok(());
         }
 
