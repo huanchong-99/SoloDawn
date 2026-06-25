@@ -6630,23 +6630,49 @@ impl OrchestratorAgent {
                             .take(10)
                             .collect();
                         if goal_terms.len() > 3 {
-                            let task_names: String = tasks
+                            // The term-overlap sanity check assumes Latin,
+                            // whitespace-delimited goal terms that can be
+                            // substring-matched against (often English) task
+                            // names. For CJK goals (Chinese/Japanese/Korean)
+                            // the byte-length filter produces multi-byte terms
+                            // that never match English task names even when the
+                            // tasks are perfectly on-target — a false "zero
+                            // overlap" rejection that deadlocks workflow
+                            // completion. Skip the overlap check when the goal
+                            // is predominantly non-ASCII (other guards — task
+                            // count, acceptance verdicts — still validate
+                            // relevance).
+                            let cjk_terms = goal_terms
                                 .iter()
-                                .map(|t| t.name.as_str())
-                                .collect::<Vec<_>>()
-                                .join(" ");
-                            let task_names_lower = task_names.to_lowercase();
-                            let coverage = goal_terms
-                                .iter()
-                                .filter(|term| task_names_lower.contains(&term.to_lowercase()))
+                                .filter(|t| t.chars().any(|c| !c.is_ascii()))
                                 .count();
-                            if coverage == 0 {
-                                tracing::warn!(
+                            let mostly_cjk = cjk_terms * 2 >= goal_terms.len();
+                            if mostly_cjk {
+                                tracing::debug!(
                                     workflow_id = %workflow_id,
-                                    "CompleteWorkflow rejected: zero overlap between \
-                                     goal terms and task names"
+                                    cjk_terms,
+                                    "Skipping goal/task term-overlap check: goal is predominantly CJK \
+                                     (cross-language substring match is unreliable)"
                                 );
-                                return Ok(());
+                            } else {
+                                let task_names: String = tasks
+                                    .iter()
+                                    .map(|t| t.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                let task_names_lower = task_names.to_lowercase();
+                                let coverage = goal_terms
+                                    .iter()
+                                    .filter(|term| task_names_lower.contains(&term.to_lowercase()))
+                                    .count();
+                                if coverage == 0 {
+                                    tracing::warn!(
+                                        workflow_id = %workflow_id,
+                                        "CompleteWorkflow rejected: zero overlap between \
+                                         goal terms and task names"
+                                    );
+                                    return Ok(());
+                                }
                             }
                         }
                     }

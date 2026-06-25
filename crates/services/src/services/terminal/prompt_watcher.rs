@@ -1652,40 +1652,96 @@ next_action: handoff\n"
             && is_bypass_permissions_prompt(&normalized_output)
             && !has_handoff_stall_context
         {
-            let decision = PromptDecision::auto_enter();
-            let detected_prompt =
-                DetectedPrompt::new(PromptKind::EnterConfirm, normalized_output.clone(), 0.95);
+            // Claude's bypass menu ("1. No, exit / 2. Yes, I accept") can
+            // match the broad `is_bypass_permissions_prompt` regex WITHOUT
+            // the full accept context latching (common in dense ANSI chunks
+            // emitted right after a clean-context relaunch). A bare Enter
+            // does not select item 2, so the prompt reappears in a tight
+            // loop — observed stranding a re-driven coder for 18+ min with
+            // thousands of spurious detections. When the Claude menu markers
+            // are visible, send the numeric "2\r" accept (reuses the proven
+            // accept path); otherwise keep the legacy bare-Enter behavior.
+            let is_claude_yes_accept_menu = normalized_output_lower.contains("yes, i accept")
+                || normalized_output_lower.contains("no, exit");
 
-            if state.state_machine.should_process(&detected_prompt) {
-                state.last_detection = Some(Instant::now());
-                state.state_machine.on_prompt_detected(detected_prompt);
-                state.state_machine.on_response_sent(decision.clone());
-                state.detector.clear_buffer();
+            let response_terminal_id = state.terminal_id.clone();
+            let response_session_id = state.session_id.clone();
 
-                let response_terminal_id = state.terminal_id.clone();
-                let response_session_id = state.session_id.clone();
+            if is_claude_yes_accept_menu {
+                let (response, action, reasoning) =
+                    claude_bypass_accept_response(&normalized_output);
+                let decision = PromptDecision::LLMDecision {
+                    response: response.to_string(),
+                    reasoning: reasoning.to_string(),
+                    target_index: Some(1),
+                };
+                let detected_prompt =
+                    DetectedPrompt::new(PromptKind::ArrowSelect, normalized_output.clone(), 0.95);
 
-                tracing::info!(
-                    terminal_id = %response_terminal_id,
-                    session_id = %response_session_id,
-                    "Detected bypass permissions prompt (chunk); sending direct auto-enter fallback"
-                );
+                if state.state_machine.should_process(&detected_prompt) {
+                    state.last_detection = Some(Instant::now());
+                    state.state_machine.on_prompt_detected(detected_prompt);
+                    state.state_machine.on_response_sent(decision.clone());
+                    state.detector.clear_buffer();
+                    state.clear_claude_bypass_context();
+                    state.mark_claude_bypass_accept_sent();
 
-                drop(terminals);
-                self.message_bus
-                    .publish_terminal_input(
+                    tracing::info!(
+                        terminal_id = %response_terminal_id,
+                        session_id = %response_session_id,
+                        action = %action,
+                        "Detected Claude bypass permissions prompt via broad regex (chunk); sending auto-accept sequence"
+                    );
+
+                    drop(terminals);
+                    self.send_claude_bypass_accept_with_fallback(
                         &response_terminal_id,
                         &response_session_id,
-                        "\n",
-                        Some(decision),
+                        response,
+                        decision,
+                        "chunk-broad",
+                        false,
                     )
                     .await;
-                return;
+                    return;
+                }
+                tracing::debug!(
+                    terminal_id = %state.terminal_id,
+                    "Skipping duplicate chunk-level Claude bypass accept (broad-regex) injection"
+                );
+            } else {
+                let decision = PromptDecision::auto_enter();
+                let detected_prompt =
+                    DetectedPrompt::new(PromptKind::EnterConfirm, normalized_output.clone(), 0.95);
+
+                if state.state_machine.should_process(&detected_prompt) {
+                    state.last_detection = Some(Instant::now());
+                    state.state_machine.on_prompt_detected(detected_prompt);
+                    state.state_machine.on_response_sent(decision.clone());
+                    state.detector.clear_buffer();
+
+                    tracing::info!(
+                        terminal_id = %response_terminal_id,
+                        session_id = %response_session_id,
+                        "Detected bypass permissions prompt (chunk); sending direct auto-enter fallback"
+                    );
+
+                    drop(terminals);
+                    self.message_bus
+                        .publish_terminal_input(
+                            &response_terminal_id,
+                            &response_session_id,
+                            "\n",
+                            Some(decision),
+                        )
+                        .await;
+                    return;
+                }
+                tracing::debug!(
+                    terminal_id = %state.terminal_id,
+                    "Skipping duplicate chunk-level bypass-permissions fallback injection"
+                );
             }
-            tracing::debug!(
-                terminal_id = %state.terminal_id,
-                "Skipping duplicate chunk-level bypass-permissions fallback injection"
-            );
         }
 
         // Chunk-level fallback: decline Notepad prompts to avoid blocking
@@ -2158,6 +2214,62 @@ next_action: handoff\n"
                 && is_bypass_permissions_prompt(&normalized_line)
                 && !has_handoff_stall_context
             {
+                // Same Claude-menu guard as the chunk-level handler: a bare
+                // Enter does not select item 2 on Claude's bypass menu and the
+                // prompt reappears in a loop. Route Claude menus to the "2\r"
+                // accept; keep bare Enter for legacy toggle prompts.
+                let is_claude_yes_accept_menu = normalized_line_lower.contains("yes, i accept")
+                    || normalized_line_lower.contains("no, exit");
+
+                let response_terminal_id = state.terminal_id.clone();
+                let response_session_id = state.session_id.clone();
+
+                if is_claude_yes_accept_menu {
+                    let (response, action, reasoning) =
+                        claude_bypass_accept_response(&normalized_line);
+                    let decision = PromptDecision::LLMDecision {
+                        response: response.to_string(),
+                        reasoning: reasoning.to_string(),
+                        target_index: Some(1),
+                    };
+                    let detected_prompt =
+                        DetectedPrompt::new(PromptKind::ArrowSelect, normalized_line.clone(), 0.95);
+
+                    if !state.state_machine.should_process(&detected_prompt) {
+                        tracing::debug!(
+                            terminal_id = %state.terminal_id,
+                            "Skipping duplicate Claude bypass accept (broad-regex) injection"
+                        );
+                        continue;
+                    }
+
+                    state.last_detection = Some(Instant::now());
+                    state.state_machine.on_prompt_detected(detected_prompt);
+                    state.state_machine.on_response_sent(decision.clone());
+                    state.detector.clear_buffer();
+                    state.clear_claude_bypass_context();
+                    state.mark_claude_bypass_accept_sent();
+
+                    tracing::info!(
+                        terminal_id = %response_terminal_id,
+                        session_id = %response_session_id,
+                        action = %action,
+                        "Detected Claude bypass permissions prompt via broad regex (line); sending auto-accept sequence"
+                    );
+
+                    drop(terminals);
+                    self.send_claude_bypass_accept_with_fallback(
+                        &response_terminal_id,
+                        &response_session_id,
+                        response,
+                        decision,
+                        "line-broad",
+                        false,
+                    )
+                    .await;
+                    return;
+                }
+
                 let decision = PromptDecision::auto_enter();
                 let detected_prompt =
                     DetectedPrompt::new(PromptKind::EnterConfirm, normalized_line.clone(), 0.95);
@@ -2174,9 +2286,6 @@ next_action: handoff\n"
                 state.state_machine.on_prompt_detected(detected_prompt);
                 state.state_machine.on_response_sent(decision.clone());
                 state.detector.clear_buffer();
-
-                let response_terminal_id = state.terminal_id.clone();
-                let response_session_id = state.session_id.clone();
 
                 tracing::info!(
                     terminal_id = %response_terminal_id,
