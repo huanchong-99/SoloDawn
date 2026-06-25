@@ -25,7 +25,8 @@ use super::{
         COMPLETION_CONTEXT_DIFF_MAX_CHARS, COMPLETION_CONTEXT_LOG_LINES,
         COMPLETION_CONTEXT_LOG_MAX_CHARS, GIT_COMMIT_METADATA_SEPARATOR, HANDOFF_COMMIT_MAX_CHARS,
         HANDOFF_NOTES_MAX_CHARS, MAX_CONSECUTIVE_LLM_FAILURES, MAX_ENFORCE_DEADLOCK_BLOCKS,
-        QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF, QUALITY_GATE_MODE_SHADOW,
+        MAX_REVIEW_REDRIVES, QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
+        QUALITY_GATE_MODE_SHADOW,
         QUALITY_GATE_STATUS_SKIPPED, QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX,
         QUALITY_REQUIREMENTS_SUFFIX, STATE_SAVE_DEBOUNCE_SECS, TASK_STATUS_CANCELLED,
         TASK_STATUS_COMPLETED, TASK_STATUS_FAILED, TASK_STATUS_PENDING, TASK_STATUS_REVIEW_PENDING,
@@ -1130,6 +1131,32 @@ impl OrchestratorAgent {
         Ok(false)
     }
 
+    /// Render the persisted acceptance-review dimensions JSON (an object keyed
+    /// by dimension name, each `{score,max_score,details}`) as a flat coder-
+    /// facing feedback list. Returns `None` if the JSON is missing/unparseable/
+    /// empty so the caller can fall back to a generic message.
+    fn summarize_review_dimensions(dimensions_json: &str) -> Option<String> {
+        let v: serde_json::Value = serde_json::from_str(dimensions_json).ok()?;
+        let obj = v.as_object()?;
+        if obj.is_empty() {
+            return None;
+        }
+        let mut lines: Vec<String> = Vec::new();
+        for (name, dim) in obj {
+            let details = dim.get("details").and_then(|d| d.as_str()).unwrap_or("");
+            match (
+                dim.get("score").and_then(|s| s.as_f64()),
+                dim.get("max_score").and_then(|s| s.as_f64()),
+            ) {
+                (Some(s), Some(m)) => {
+                    lines.push(format!("- {name}: {s:.0}/{m:.0} — {details}"));
+                }
+                _ => lines.push(format!("- {name}: {details}")),
+            }
+        }
+        Some(lines.join("\n"))
+    }
+
     /// Auto-complete tasks that are stuck:
     /// 1. Running tasks whose terminals are all completed/failed
     /// 2. Pending tasks with no terminals (Agent failed to create them)
@@ -1318,6 +1345,141 @@ impl OrchestratorAgent {
                         );
                         db::models::WorkflowTask::update_status(&self.db.pool, &task.id, "failed")
                             .await?;
+                    }
+                }
+                TASK_STATUS_REVIEW_PENDING => {
+                    // Recovery for tasks whose acceptance review already ran
+                    // (verdict + score persisted) but whose status never
+                    // advanced out of review_pending. Previously the sweep only
+                    // handled "running"/"pending", so a reviewpending task was
+                    // ignored forever — deadlocking the workflow even when the
+                    // review had already *approved* it.
+                    //
+                    // Why the stall happens: the approve path relies on
+                    // `is_task_completed()` (planning_complete && total_done >=
+                    // total_terminals) to flip status to completed, which can
+                    // stay false when terminal/planning counters are stale; the
+                    // reject path relaunches the coder, but if that relaunch
+                    // never took (process exited), no live coder remains to
+                    // receive the fix feedback. Both leave the task stranded.
+                    let task_terminals: Vec<_> = terminals
+                        .iter()
+                        .filter(|t| t.workflow_task_id == task.id)
+                        .collect();
+                    let all_done = !task_terminals.is_empty()
+                        && task_terminals
+                            .iter()
+                            .all(|t| t.status == "completed" || t.status == "failed");
+                    if !all_done {
+                        continue;
+                    }
+                    // A terminal with a live process means a coder is
+                    // mid-flight — don't double-dispatch; let it finish.
+                    if task_terminals.iter().any(|t| t.execution_process_id.is_some()) {
+                        continue;
+                    }
+                    match task.acceptance_verdict.as_deref() {
+                        Some("approved") => {
+                            tracing::info!(
+                                task_id = %task.id, task_name = %task.name,
+                                score = ?task.acceptance_score,
+                                "Recovery: completing approved task stranded in review_pending \
+                                 (status failed to advance after review)"
+                            );
+                            db::models::WorkflowTask::update_status(
+                                &self.db.pool,
+                                &task.id,
+                                TASK_STATUS_COMPLETED,
+                            )
+                            .await?;
+                            self.persist_event(
+                                "task_status",
+                                &format!(
+                                    "Task \"{}\" recovered to completed (approved review; status had stalled)",
+                                    task.name
+                                ),
+                            )
+                            .await;
+                            let mut state = self.state.write().await;
+                            state.review_redrive_counters.remove(&task.id);
+                        }
+                        Some("rejected") => {
+                            // Coder terminal died before the fix feedback could
+                            // be delivered. Re-drive: relaunch the coder with
+                            // the rejection feedback so the review-improve loop
+                            // can continue. Cap re-drives; past the cap, accept
+                            // best-effort (non-fatal band) to avoid deadlock.
+                            let redrive_count = {
+                                let mut state = self.state.write().await;
+                                let c = state
+                                    .review_redrive_counters
+                                    .entry(task.id.clone())
+                                    .or_insert(0);
+                                *c += 1;
+                                *c
+                            };
+                            let score = task.acceptance_score.unwrap_or(0.0);
+                            if redrive_count > MAX_REVIEW_REDRIVES {
+                                tracing::warn!(
+                                    task_id = %task.id, task_name = %task.name,
+                                    score, redrives = redrive_count,
+                                    "Review-improve loop did not converge after {} sweep re-drives; \
+                                     force-completing as best-effort (non-fatal band) to unblock workflow",
+                                    MAX_REVIEW_REDRIVES
+                                );
+                                db::models::WorkflowTask::update_status(
+                                    &self.db.pool,
+                                    &task.id,
+                                    TASK_STATUS_COMPLETED,
+                                )
+                                .await?;
+                                self.persist_event(
+                                    "task_status",
+                                    &format!(
+                                        "Task \"{}\" force-completed (review loop cap reached; last score {:.0})",
+                                        task.name, score
+                                    ),
+                                )
+                                .await;
+                                let mut state = self.state.write().await;
+                                state.review_redrive_counters.remove(&task.id);
+                            } else if let Some(term) = task_terminals.first() {
+                                let dims_feedback = task
+                                    .acceptance_dimensions_json
+                                    .as_deref()
+                                    .and_then(Self::summarize_review_dimensions)
+                                    .unwrap_or_else(|| {
+                                        "Address the weakest-scoring dimensions flagged by the \
+                                         acceptance review and commit again."
+                                            .to_string()
+                                    });
+                                let msg = format!(
+                                    "ACCEPTANCE REVIEW (re-drive {redrive_count}/{MAX_REVIEW_REDRIVES}): \
+                                     your last submission scored {score:.0}/100 (threshold 90) and was \
+                                     REJECTED.\n\nPer-dimension feedback:\n{dims_feedback}\n\n\
+                                     Improve the weak areas above and commit again. The acceptance review \
+                                     will re-run automatically."
+                                );
+                                tracing::info!(
+                                    task_id = %task.id, task_name = %task.name,
+                                    score, redrive = redrive_count,
+                                    "Recovery: re-driving rejected task whose terminal died (relaunching coder)"
+                                );
+                                if let Ok(ra) = self.runtime_actions()
+                                    && let Ok(restarted) =
+                                        ra.relaunch_terminal_clean_context(&term.id).await
+                                {
+                                    let _ = self
+                                        .dispatch_terminal_when_ready_or_queue(
+                                            &task.id,
+                                            &restarted,
+                                            &msg,
+                                        )
+                                        .await;
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -10732,6 +10894,21 @@ mod tests {
             acceptance_verdict: None,
             acceptance_reviewed_at: None,
         }
+    }
+
+    #[test]
+    fn summarize_review_dimensions_formats_scored_dimensions() {
+        let json = r#"{"buildability":{"score":18.0,"max_score":20.0,"details":"Vite+TS"},"functional_completeness":{"score":12.0,"max_score":25.0,"details":"missing tags"}}"#;
+        let out = OrchestratorAgent::summarize_review_dimensions(json).unwrap();
+        assert!(out.contains("- buildability: 18/20 — Vite+TS"));
+        assert!(out.contains("- functional_completeness: 12/25 — missing tags"));
+    }
+
+    #[test]
+    fn summarize_review_dimensions_returns_none_for_empty_or_bad_json() {
+        assert!(OrchestratorAgent::summarize_review_dimensions("{}").is_none());
+        assert!(OrchestratorAgent::summarize_review_dimensions("not json").is_none());
+        assert!(OrchestratorAgent::summarize_review_dimensions("").is_none());
     }
 
     #[tokio::test]

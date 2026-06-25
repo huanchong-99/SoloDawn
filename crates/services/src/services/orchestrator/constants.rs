@@ -99,6 +99,14 @@ pub const STARTABLE_TERMINAL_STATUSES: &[&str] = &[TERMINAL_STATUS_WAITING];
 // Phase 30: Enforce-mode deadlock resolution
 pub const MAX_ENFORCE_DEADLOCK_BLOCKS: u32 = 10;
 
+/// Max times the auto-complete sweep will re-drive a `reviewpending` task
+/// whose acceptance review was *rejected* and whose coder terminal has died
+/// (process exited, so the normal reject-path relaunch didn't take). After
+/// this many non-converging re-drives the task is force-completed as
+/// best-effort (a score in the 70-89 band is non-fatal) rather than
+/// deadlocking the workflow forever on a near-miss score.
+pub const MAX_REVIEW_REDRIVES: u32 = 3;
+
 // Phase 29C: Quality Gate constants
 pub const TERMINAL_STATUS_QUALITY_PENDING: &str = "quality_pending";
 pub const QUALITY_GATE_MODE_OFF: &str = "off";

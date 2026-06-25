@@ -181,6 +181,12 @@ pub struct OrchestratorState {
     /// When a task exceeds `MAX_ENFORCE_DEADLOCK_BLOCKS`, the quality gate is
     /// degraded and the task is force-completed.
     pub enforce_deadlock_counters: HashMap<String, u32>,
+
+    /// Tracks consecutive sweep-driven re-drives of a `reviewpending` task
+    /// whose review was *rejected* and whose coder terminal has died. After
+    /// `MAX_REVIEW_REDRIVES` non-converging re-drives the task is
+    /// force-completed (non-fatal band) to avoid a permanent workflow deadlock.
+    pub review_redrive_counters: HashMap<String, u32>,
 }
 
 impl OrchestratorState {
@@ -202,6 +208,7 @@ impl OrchestratorState {
             processed_checkpoints: HashSet::new(),
             foundation_phase_only: false,
             enforce_deadlock_counters: HashMap::new(),
+            review_redrive_counters: HashMap::new(),
         }
     }
 
