@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use super::{
-    llm::LLMClient,
+    llm::{LLMClient, RetryableLlmError},
     types::{LLMMessage, LLMResponse},
 };
 
@@ -22,6 +22,19 @@ const CIRCUIT_BREAKER_THRESHOLD: u32 = 5;
 
 /// Seconds to wait before probing a dead provider again.
 const PROBE_INTERVAL_SECS: u64 = 60;
+
+/// Total budget for retrying a retryable LLM failure (rate limit / over-load /
+/// server error / timeout). Supports multi-hour outages: the client keeps
+/// retrying with exponential backoff until the provider recovers or this
+/// budget is exhausted. 6 hours covers sustained provider-side incidents.
+const RETRY_TOTAL_BUDGET_SECS: u64 = 6 * 60 * 60;
+
+/// Exponential backoff (seconds) for retryable failures (1-indexed attempt).
+/// 5s → 10s → 20s → 40s → 80s → 160s → 300s (capped).
+fn retry_backoff_secs(attempt: u64) -> u64 {
+    let shift = attempt.saturating_sub(1).min(6) as u32;
+    5u64.checked_shl(shift).unwrap_or(300).min(300)
+}
 
 /// Per-provider health tracking state.
 #[derive(Default)]
@@ -255,83 +268,128 @@ impl LLMClient for ResilientLLMClient {
 
         let provider_count = self.providers.len();
         let start_index = self.active_index.load(Ordering::Relaxed);
+        let started = Instant::now();
+        let mut attempt: u64 = 0;
 
-        // Try each provider at most once per call.
-        for offset in 0..provider_count {
-            let idx = (start_index + offset) % provider_count;
-            let entry = &self.providers[idx];
+        // Outer loop: retry retryable failures (429/529/503/timeout/connect)
+        // with exponential backoff until the provider recovers or the total
+        // retry budget (RETRY_TOTAL_BUDGET_SECS) is exhausted. Non-retryable
+        // failures (401/403/400/parse) fail fast on the first round.
+        loop {
+            attempt += 1;
+            let mut last_err: Option<anyhow::Error> = None;
+            let mut last_retryable = false;
 
-            // Check circuit breaker and mark probe timestamp atomically
-            // to prevent TOCTOU race where multiple threads probe simultaneously.
-            {
-                let mut state = entry.state.write().await;
-                if state.is_dead {
-                    if !Self::should_probe(&state) {
-                        tracing::debug!(
-                            "ResilientLLMClient: skipping dead provider {} ({})",
+            // Try each provider at most once per round.
+            for offset in 0..provider_count {
+                let idx = (start_index + offset) % provider_count;
+                let entry = &self.providers[idx];
+
+                // Check circuit breaker and mark probe timestamp atomically
+                // to prevent TOCTOU race where multiple threads probe simultaneously.
+                {
+                    let mut state = entry.state.write().await;
+                    if state.is_dead {
+                        if !Self::should_probe(&state) {
+                            tracing::debug!(
+                                "ResilientLLMClient: skipping dead provider {} ({})",
+                                idx,
+                                entry.name,
+                            );
+                            continue;
+                        }
+                        tracing::info!(
+                            "ResilientLLMClient: probing dead provider {} ({})",
                             idx,
                             entry.name,
                         );
-                        continue;
+                        state.last_probe = Some(Instant::now());
                     }
-                    tracing::info!(
-                        "ResilientLLMClient: probing dead provider {} ({})",
-                        idx,
-                        entry.name,
-                    );
-                    state.last_probe = Some(Instant::now());
                 }
-            }
 
-            match entry.client.chat(messages.clone()).await {
-                Ok(response) => {
-                    self.record_success(idx).await;
-                    // If we drifted away from the active index, update it.
-                    if idx != start_index {
-                        let _ = self.active_index.compare_exchange(
-                            start_index,
-                            idx,
-                            Ordering::AcqRel,
-                            Ordering::Relaxed,
-                        );
-                    }
-                    return Ok(response);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "ResilientLLMClient: provider {} ({}) failed: {}",
-                        idx,
-                        entry.name,
-                        e,
-                    );
-                    let just_died = self.record_failure(idx).await;
-                    if offset + 1 < provider_count {
-                        let next_idx = (idx + 1) % provider_count;
-                        if just_died {
-                            self.switch_to_next(idx);
+                match entry.client.chat(messages.clone()).await {
+                    Ok(response) => {
+                        self.record_success(idx).await;
+                        // If we drifted away from the active index, update it.
+                        if idx != start_index {
+                            let _ = self.active_index.compare_exchange(
+                                start_index,
+                                idx,
+                                Ordering::AcqRel,
+                                Ordering::Relaxed,
+                            );
                         }
-                        // G24-003: emit Switched event on every actual provider switch,
-                        // not only when the provider transitions to "dead".
-                        let mut events = self.last_events.write().await;
-                        events.push(ProviderEvent::Switched {
-                            from_provider: self.providers[idx].name.clone(),
-                            to_provider: self.providers[next_idx].name.clone(),
-                        });
+                        return Ok(response);
                     }
-                    // Continue to next provider.
+                    Err(e) => {
+                        let retryable = e.downcast_ref::<RetryableLlmError>().is_some();
+                        tracing::warn!(
+                            "ResilientLLMClient: provider {} ({}) failed (retryable={}): {}",
+                            idx,
+                            entry.name,
+                            retryable,
+                            e,
+                        );
+                        let just_died = self.record_failure(idx).await;
+                        if offset + 1 < provider_count {
+                            let next_idx = (idx + 1) % provider_count;
+                            if just_died {
+                                self.switch_to_next(idx);
+                            }
+                            // G24-003: emit Switched event on every actual provider switch,
+                            // not only when the provider transitions to "dead".
+                            let mut events = self.last_events.write().await;
+                            events.push(ProviderEvent::Switched {
+                                from_provider: self.providers[idx].name.clone(),
+                                to_provider: self.providers[next_idx].name.clone(),
+                            });
+                        }
+                        last_err = Some(e);
+                        if retryable {
+                            last_retryable = true;
+                        }
+                        // Continue to next provider.
+                    }
                 }
             }
-        }
 
-        // Record exhausted event
-        {
-            let mut events = self.last_events.write().await;
-            events.push(ProviderEvent::Exhausted { provider_count });
-        }
+            let err = last_err.unwrap_or_else(|| {
+                anyhow::anyhow!(
+                    "All LLM providers exhausted ({provider_count} providers tried)"
+                )
+            });
 
-        Err(anyhow::anyhow!(
-            "All LLM providers exhausted ({provider_count} providers tried)",
-        ))
+            // Non-retryable failure: fail fast, no backoff.
+            if !last_retryable {
+                let mut events = self.last_events.write().await;
+                events.push(ProviderEvent::Exhausted { provider_count });
+                return Err(err);
+            }
+
+            // Retryable failure: respect the total retry budget.
+            let elapsed = started.elapsed();
+            if elapsed >= Duration::from_secs(RETRY_TOTAL_BUDGET_SECS) {
+                tracing::error!(
+                    attempt,
+                    elapsed_secs = elapsed.as_secs(),
+                    budget_secs = RETRY_TOTAL_BUDGET_SECS,
+                    "ResilientLLMClient: retryable failure persisted past retry budget; giving up"
+                );
+                let mut events = self.last_events.write().await;
+                events.push(ProviderEvent::Exhausted { provider_count });
+                return Err(err);
+            }
+
+            let backoff = Duration::from_secs(retry_backoff_secs(attempt));
+            tracing::warn!(
+                attempt,
+                backoff_secs = backoff.as_secs(),
+                elapsed_secs = elapsed.as_secs(),
+                budget_secs = RETRY_TOTAL_BUDGET_SECS,
+                "ResilientLLMClient: retryable failure (rate limit / over-load / timeout); backing off before retry"
+            );
+            tokio::time::sleep(backoff).await;
+        }
     }
 
     async fn provider_status(&self) -> Vec<ProviderStatusReport> {

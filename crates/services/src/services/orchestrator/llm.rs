@@ -39,6 +39,22 @@ pub trait LLMClient: Send + Sync {
     }
 }
 
+/// Marker error for LLM failures that should be retried with long exponential
+/// backoff before giving up — HTTP 408/429/500/502/503/504/529, connect
+/// timeouts, and connection errors. `ResilientLLMClient` downcasts this to
+/// decide whether to retry the provider (for hours if needed) or fail fast.
+///
+/// Contrast with non-retryable failures (401/403/400/parse errors), which
+/// return a plain `anyhow::Error` and surface immediately.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct RetryableLlmError(pub String);
+
+/// HTTP status codes that indicate a transient, retryable failure.
+fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504 | 529)
+}
+
 /// Wraps an LLM client with a per-second rate limiter.
 pub struct RateLimitedClient<T> {
     inner: T,
@@ -249,7 +265,14 @@ impl OpenAICompatibleClient {
             .await
             .map_err(|e| {
                 tracing::error!(url = %url, "OpenAI-compatible LLM request failed: {e}");
-                e
+                let msg = format!("OpenAI-compatible LLM request failed: {e}");
+                // Timeouts and connection errors are transient: wrap as
+                // retryable so ResilientLLMClient backs off and retries.
+                if e.is_timeout() || e.is_connect() {
+                    anyhow::Error::from(RetryableLlmError(msg))
+                } else {
+                    anyhow::anyhow!(msg)
+                }
             })?;
 
         tracing::info!(
@@ -260,10 +283,13 @@ impl OpenAICompatibleClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "LLM API error: {status} - {}",
-                &body[..body.len().min(200)]
-            ));
+            let msg = format!("LLM API error: {status} - {}", &body[..body.len().min(200)]);
+            // Retryable status (429/5xx/overload) → long backoff retry;
+            // non-retryable (401/403/400) → fail fast.
+            if is_retryable_status(status) {
+                return Err(anyhow::Error::from(RetryableLlmError(msg)));
+            }
+            return Err(anyhow::anyhow!(msg));
         }
 
         // Read body as text first for multi-format parsing (Rectifier pattern)
@@ -465,7 +491,16 @@ impl AnthropicCompatibleClient {
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::error!(url = %url, "Anthropic-compatible LLM request failed: {e}");
+                let msg = format!("Anthropic-compatible LLM request failed: {e}");
+                if e.is_timeout() || e.is_connect() {
+                    anyhow::Error::from(RetryableLlmError(msg))
+                } else {
+                    anyhow::anyhow!(msg)
+                }
+            })?;
 
         let status = response.status();
         tracing::debug!(
@@ -475,10 +510,11 @@ impl AnthropicCompatibleClient {
 
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "LLM API error: {status} - {}",
-                &body[..body.len().min(200)]
-            ));
+            let msg = format!("LLM API error: {status} - {}", &body[..body.len().min(200)]);
+            if is_retryable_status(status) {
+                return Err(anyhow::Error::from(RetryableLlmError(msg)));
+            }
+            return Err(anyhow::anyhow!(msg));
         }
 
         // Parse SSE stream and accumulate text content + usage
@@ -1137,46 +1173,45 @@ fn build_single_client(config: &OrchestratorConfig) -> anyhow::Result<Box<dyn LL
 pub fn create_llm_client(config: &OrchestratorConfig) -> anyhow::Result<Box<dyn LLMClient>> {
     config.validate().map_err(|e| anyhow::anyhow!(e))?;
 
-    if config.fallback_providers.is_empty() {
-        build_single_client(config)
-    } else {
-        // Multi-provider resilient path.
-        let primary_name = format!("primary({})", config.model);
-        let rps = config.rate_limit_requests_per_second;
-        let primary_client: Box<dyn LLMClient> = build_single_client(config)?;
+    // Always wrap in ResilientLLMClient, even for a single primary provider.
+    // A single provider still benefits from long exponential-backoff retry on
+    // transient failures (429/529/503/timeout/connect) so a multi-hour outage
+    // does not cascade into MAX_CONSECUTIVE_LLM_FAILURES marking the workflow
+    // failed. The previous `is_empty()` short-circuit returned a bare
+    // RateLimitedClient with zero retries.
+    let primary_name = format!("primary({})", config.model);
+    let rps = config.rate_limit_requests_per_second;
+    let primary_client: Box<dyn LLMClient> = build_single_client(config)?;
 
-        let mut providers: Vec<(String, Box<dyn LLMClient>)> = vec![(primary_name, primary_client)];
+    let mut providers: Vec<(String, Box<dyn LLMClient>)> = vec![(primary_name, primary_client)];
 
-        let mut fallbacks: Vec<_> = config.fallback_providers.clone();
-        fallbacks.sort_by_key(|p| p.priority);
+    let mut fallbacks: Vec<_> = config.fallback_providers.clone();
+    fallbacks.sort_by_key(|p| p.priority);
 
-        for fb in &fallbacks {
-            let fb_config = OrchestratorConfig {
-                api_type: fb.api_type.clone(),
-                base_url: fb.base_url.clone(),
-                api_key: fb.api_key.clone(),
-                model: fb.model.clone(),
-                timeout_secs: config.timeout_secs,
-                rate_limit_requests_per_second: rps,
-                ..Default::default()
-            };
-            let fb_client = build_single_client(&fb_config)?;
-            providers.push((fb.name.clone(), fb_client));
-        }
-
-        tracing::info!(
-            "ResilientLLMClient created with {} providers: {:?}",
-            providers.len(),
-            providers
-                .iter()
-                .map(|(n, _)| n.as_str())
-                .collect::<Vec<_>>(),
-        );
-
-        Ok(Box::new(super::resilient_llm::ResilientLLMClient::new(
-            providers,
-        )))
+    for fb in &fallbacks {
+        let fb_config = OrchestratorConfig {
+            api_type: fb.api_type.clone(),
+            base_url: fb.base_url.clone(),
+            api_key: fb.api_key.clone(),
+            model: fb.model.clone(),
+            timeout_secs: config.timeout_secs,
+            rate_limit_requests_per_second: rps,
+            ..Default::default()
+        };
+        let fb_client = build_single_client(&fb_config)?;
+        providers.push((fb.name.clone(), fb_client));
     }
+
+    tracing::info!(
+        "ResilientLLMClient created with {} providers: {:?}",
+        providers.len(),
+        providers
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect::<Vec<_>>(),
+    );
+
+    Ok(Box::new(super::resilient_llm::ResilientLLMClient::new(providers)))
 }
 
 #[cfg(test)]
