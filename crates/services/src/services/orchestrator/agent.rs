@@ -160,7 +160,13 @@ impl OrchestratorAgent {
     #[cfg(test)]
     const STALL_WATCHDOG_TICK: Duration = Duration::from_millis(80);
     #[cfg(not(test))]
-    const STALL_QUIET_WINDOW: Duration = Duration::from_secs(45);
+    // #N6 mitigation: provider rate-limiting (429/529) makes coders wait on
+    // slow LLM responses for >45s, which the stall detector misread as a dead
+    // terminal and re-dispatched — duplicating the instruction mid-flight,
+    // producing repeated commits that invalidated in-flight reviews. 180s
+    // tolerates slow-provider idle without blocking recovery of genuinely
+    // dead terminals (they still hit the recovery_count cap → force-complete).
+    const STALL_QUIET_WINDOW: Duration = Duration::from_secs(180);
     #[cfg(test)]
     const STALL_QUIET_WINDOW: Duration = Duration::from_millis(180);
     #[cfg(not(test))]
@@ -1479,7 +1485,40 @@ impl OrchestratorAgent {
                                 }
                             }
                         }
-                        _ => {}
+                        None => {
+                            // #N7: review never produced a verdict (all
+                            // invalidated by concurrent commits on shared
+                            // main, or review never ran). The terminal is
+                            // finalized but the task is stuck in
+                            // review_pending. Re-driving is pointless without
+                            // review feedback; force-complete as best-effort
+                            // (non-fatal band) to unblock workflow completion.
+                            tracing::warn!(
+                                task_id = %task.id,
+                                task_name = %task.name,
+                                "Recovery: review produced no verdict for review_pending task \
+                                 (all-invalidated or never ran); force-completing as best-effort \
+                                 to unblock workflow completion"
+                            );
+                            db::models::WorkflowTask::update_status(
+                                &self.db.pool,
+                                &task.id,
+                                TASK_STATUS_COMPLETED,
+                            )
+                            .await?;
+                            self.persist_event(
+                                "task_status",
+                                &format!(
+                                    "Task \"{}\" force-completed (review produced no verdict; \
+                                     status had stalled in review_pending)",
+                                    task.name
+                                ),
+                            )
+                            .await;
+                            let mut state = self.state.write().await;
+                            state.review_redrive_counters.remove(&task.id);
+                        }
+                        Some(_) => {}
                     }
                 }
                 _ => {}
@@ -1590,6 +1629,16 @@ impl OrchestratorAgent {
         let mut active_working_terminal_ids = HashSet::new();
 
         for task in tasks {
+            // A task in review_pending is owned by the acceptance-review
+            // pipeline (auto_complete_stalled_tasks re-drives it with fix
+            // feedback). Stall-re-dispatching its terminal here would inject a
+            // duplicate instruction that produces a handoff commit, which in
+            // turn invalidates the in-flight/next review — feeding the #4
+            // loop-stall deadlock. Leave review_pending tasks to the review
+            // pipeline.
+            if task.status == TASK_STATUS_REVIEW_PENDING {
+                continue;
+            }
             // Don't skip completed/failed tasks entirely — they may still have
             // working reviewer terminals that need stall recovery.
             let terminals = db::models::Terminal::find_by_task(&self.db.pool, &task.id).await?;
@@ -5244,6 +5293,7 @@ impl OrchestratorAgent {
                 &working_dir,
                 task_branch.as_deref(),
                 target_branch.as_deref(),
+                &event.task_id,
             )
             .await
             {
@@ -5350,6 +5400,7 @@ impl OrchestratorAgent {
             &review_working_dir,
             task_branch.as_deref(),
             target_branch.as_deref(),
+            &event.task_id,
         )
         .await
         {
@@ -5359,7 +5410,19 @@ impl OrchestratorAgent {
             )),
         };
 
-        if let Some(current_head) = current_git_head(&review_working_dir).await
+        // An APPROVED review (score >= threshold) must NOT be invalidated by a
+        // newer commit appearing during review. The newer commit is almost
+        // always a harmless stall-recovery handoff or a coder improvement on
+        // top of an already-passing submission. Invalidating an approved
+        // review leaves the terminal unfinalized and "working", which the
+        // stall detector then re-dispatches, producing yet another commit that
+        // invalidates the next approved review — the core #4 loop-stall
+        // deadlock (review>=90 passed=true yet never finalizing). Only
+        // rejected/inconclusive reviews are invalidated so they re-run on the
+        // latest commit; approved reviews finalize regardless.
+        let review_passed = review.verdict == AcceptanceVerdict::Approved;
+        if !review_passed
+            && let Some(current_head) = current_git_head(&review_working_dir).await
             && !same_commit_ref(&locked_commit_hash, &current_head)
         {
             tracing::warn!(
@@ -5367,7 +5430,7 @@ impl OrchestratorAgent {
                 terminal_id = %event.terminal_id,
                 locked_commit = %locked_commit_hash,
                 current_head = %current_head,
-                "Acceptance review result invalidated because a newer commit appeared during review"
+                "Acceptance review result invalidated because a newer commit appeared during review (non-approved review will re-run on the new commit)"
             );
             return Ok(false);
         }
@@ -10453,6 +10516,7 @@ async fn fetch_terminal_completion_context(
     working_dir: &Path,
     task_branch: Option<&str>,
     target_branch: Option<&str>,
+    task_id: &str,
 ) -> anyhow::Result<TerminalCompletionContext> {
     // 1. Query terminal logs (returned in DESC order, reverse for chronological)
     let log_summary = match db::models::terminal::TerminalLog::find_by_terminal(
@@ -10481,6 +10545,17 @@ async fn fetch_terminal_completion_context(
     let base_ref = match (task_branch, target_branch) {
         (Some(tb), Some(tgt)) => compute_merge_base(working_dir, tgt, tb).await,
         _ => None,
+    };
+
+    // #N1: on shared-main mode the task branch is never created as a real git
+    // ref, so base_ref is None and the diff would degrade to HEAD~1..HEAD
+    // (last commit only — often a tiny fix-up, badly skewing the review).
+    // Instead derive the exact file set THIS task touched across all its
+    // commits via the task_id footer every coder commit carries.
+    let task_file_list = if base_ref.is_none() {
+        collect_task_changed_file_list(working_dir, task_id).await
+    } else {
+        None
     };
 
     // 3. Get diff stat via git (use full branch range when available)
@@ -10551,6 +10626,7 @@ async fn fetch_terminal_completion_context(
             commit_hash,
             base_ref.as_deref(),
             ACCEPTANCE_REVIEW_MAX_BYTES,
+            task_file_list.as_deref(),
         )
         .await
     };
@@ -10621,9 +10697,17 @@ async fn collect_changed_files_content(
     commit_hash: &str,
     base_ref: Option<&str>,
     max_bytes: usize,
+    explicit_file_list: Option<&str>,
 ) -> String {
-    // Get list of changed files — full branch diff when base_ref available
-    let file_list = if let Some(base) = base_ref {
+    // Get list of changed files — explicit set > full branch diff > single-commit diff
+    let file_list = if let Some(files) = explicit_file_list {
+        // #N1: caller supplied the exact file set this task touched (via the
+        // task_id commit-footer grep). Use it directly — on shared-main mode
+        // this is the ONLY correct scope (HEAD~1..HEAD misses multi-commit
+        // tasks; root..HEAD overflows the byte cap and truncates the task's
+        // own files off the end).
+        files.to_string()
+    } else if let Some(base) = base_ref {
         match tokio::process::Command::new("git")
             .args(["diff", "--name-only", base, commit_hash])
             .current_dir(working_dir)
@@ -10744,6 +10828,45 @@ async fn collect_changed_files_content(
     }
 
     result
+}
+
+/// #N1: Collect the deduplicated set of files a task touched across ALL its
+/// commits, by grepping the `task_id:` footer every coder commit carries in
+/// its `---METADATA---` block. Returns newline-joined paths, or None if git
+/// finds no matching commits. This is the correct review scope on shared-main
+/// mode where the task branch is never a real git ref.
+async fn collect_task_changed_file_list(working_dir: &Path, task_id: &str) -> Option<String> {
+    let output = tokio::process::Command::new("git")
+        .args([
+            "log",
+            "--all",
+            "--name-only",
+            "--format=",
+            &format!("--grep=task_id: {task_id}"),
+        ])
+        .current_dir(working_dir)
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let mut seen = std::collections::HashSet::new();
+    let lines: Vec<&str> = raw
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .filter(|l| seen.insert((*l).to_string()))
+        .collect();
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
 }
 
 /// Fetch context from the previous completed terminal in the same task.
