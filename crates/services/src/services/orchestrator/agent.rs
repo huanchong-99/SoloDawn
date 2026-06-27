@@ -8478,27 +8478,54 @@ impl OrchestratorAgent {
             return Ok(true);
         }
 
-        // Final-gate environmental exemption (agent.rs §final-gate).
+        // Final-gate environmental + advisory exemption (agent.rs §final-gate).
         //
         // A workflow whose tasks already passed per-terminal + acceptance review
-        // must not be stranded at the completion gate by metrics that simply
-        // could not be collected in the current stack: SonarQube is not running
-        // in the dev stack → line_coverage / sonar_* are absent; no coverage
-        // report was uploaded → coverage metrics absent. Such ERROR conditions
-        // carry value=None (the provider never produced a measurement), so they
-        // mean "quality not measurable here", not "quality is bad". We exempt
-        // them at the FINAL gate only. Hard blockers — value=Some, a real
-        // threshold breach such as test_failures>0, tsc_errors>0, critical
-        // issues — still block. Per-terminal gates keep strict fail-closed
-        // (evaluator.rs:39), so low-level defects are still caught at commit time.
+        // must not be stranded at the completion gate by ERROR conditions that
+        // are either unmeasurable in the current stack or advisory lint totals
+        // that compete with code volume rather than quality:
+        //   (a) provider-unavailable — SonarQube is not running in the dev stack
+        //       → line_coverage / sonar_* are absent; no coverage report →
+        //       coverage metrics absent. These carry value=None ("quality not
+        //       measurable here", not "quality is bad").
+        //   (b) advisory lint counts — builtin_frontend_issues / builtin_rust_issues
+        //       sum EVERY Minor/Major advisory finding, so a fixed threshold
+        //       competes with code volume: a well-tested feature carrying 50+
+        //       advisory notes gets stranded even after acceptance review approved
+        //       it. The authoritative blocker signal is the *critical* severity,
+        //       gated separately by builtin_*_critical.
+        // We exempt both classes at the FINAL gate only. Hard blockers — value=Some
+        // AND non-advisory, a real threshold breach such as test_failures>0,
+        // tsc_errors>0, critical issues — still block. Per-terminal gates keep
+        // strict fail-closed (evaluator.rs:39), so low-level defects are still
+        // caught at commit time.
         if level != quality::gate::QualityGateLevel::Terminal {
             let any_hard_blocker = report
                 .decision
                 .as_ref()
                 .map(|decision| {
                     decision.condition_results.iter().any(|result| {
-                        result.level == quality::gate::status::Level::Error
-                            && result.value.is_some()
+                        if result.level != quality::gate::status::Level::Error {
+                            return false;
+                        }
+                        // Exempt provider-unavailable (value=None) AND advisory
+                        // built-in lint counts (builtin_frontend_issues /
+                        // builtin_rust_issues): these sum EVERY Minor/Major
+                        // advisory finding (ts:type-assertion flags every
+                        // necessary `as` DOM cast, ts:function-length flags long
+                        // functions), so a fixed threshold competes with code
+                        // volume, not quality — a well-tested feature carrying
+                        // 50+ advisory notes gets stranded even after acceptance
+                        // review approved it. Critical severity is gated
+                        // separately by builtin_*_critical. See §final-gate.
+                        const ADVISORY_LINT_METRICS: [&str; 2] =
+                            ["builtin_frontend_issues", "builtin_rust_issues"];
+                        let provider_unavailable = result.value.is_none();
+                        let advisory = result
+                            .value
+                            .is_some()
+                            && ADVISORY_LINT_METRICS.contains(&result.metric.as_str());
+                        !(provider_unavailable || advisory)
                     })
                 })
                 .unwrap_or(false);
@@ -8536,7 +8563,7 @@ impl OrchestratorAgent {
                     task_id = ?task_id,
                     gate_level,
                     exempted = ?exempted,
-                    "Final readiness gate {gate_level}: every ERROR condition is provider-unavailable (value=None); treating gate as passed so an accepted deliverable is not stranded. value=Some hard blockers still block."
+                    "Final readiness gate {gate_level}: every ERROR condition is final-gate-exemptible (provider-unavailable value=None OR advisory builtin_*_issues lint count); treating gate as passed so an accepted deliverable is not stranded. Hard blockers (value=Some, non-advisory) still block."
                 );
                 return Ok(true);
             }
