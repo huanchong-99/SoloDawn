@@ -87,6 +87,15 @@ static TASK_HINT_FROM_COMMIT_RE: Lazy<Regex> = Lazy::new(|| {
         .expect("task hint regex must be valid")
 });
 
+/// #N3 fix: strips ANSI escape sequences from raw terminal_log content so
+/// idle-prompt signatures can be matched as plain text. Matches CSI sequences
+/// (`ESC [ ... final-byte`); sufficient for the screen-redraw chunks claude
+/// emits — color/style escapes are removed while the underlying UI text stays
+/// contiguous.
+static TERMINAL_ANSI_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"\x1b\[[0-9;?]*[a-zA-Z]").expect("terminal ansi regex must be valid")
+});
+
 #[derive(Debug, Clone)]
 struct InferredNoMetadataCompletion {
     task_id: String,
@@ -175,6 +184,19 @@ impl OrchestratorAgent {
     const STALL_RECOVERY_COOLDOWN: Duration = Duration::from_millis(220);
     const STALL_RECOVERY_CLAUDE_SUBMIT_DELAY_MS: u64 = 260;
     const STALL_RECOVERY_SUFFIX: &str = "Watchdog notice: execution appears stalled. Resume this same task from current workspace state immediately and continue implementation; do not wait for a new task.";
+    /// #N3 fix: hard cap on quiet time for a terminal whose process is still
+    /// alive. During long LLM generations (45-55min) claude emits no
+    /// terminal_log output, so a LIVE, working process looks "quiet". We must
+    /// not re-dispatch it (that disrupts the coder → commit invalidation →
+    /// §8 convergence failure; observed web-memo Tags/UI/Search all hit
+    /// recovery_count=10 → force-complete 2026-06-27). A live process quiet
+    /// past THIS cap is genuinely frozen (re-dispatch can't unfreeze a hung
+    /// process → force-complete directly). Set above the longest observed
+    /// generation (~55min) so active work is never disrupted.
+    #[cfg(not(test))]
+    const STALL_ALIVE_HARD_CAP: Duration = Duration::from_secs(3600);
+    #[cfg(test)]
+    const STALL_ALIVE_HARD_CAP: Duration = Duration::from_millis(400);
 
     /// Builds a new orchestrator agent with a configured LLM client.
     /// Falls back to Claude Code native credentials when the configured
@@ -1658,6 +1680,76 @@ impl OrchestratorAgent {
                     .is_some()
                 {
                     continue;
+                }
+
+                // #N3 fix: a quiet terminal is NOT necessarily stalled. During
+                // long LLM generations (45-55min) claude emits no terminal_log
+                // output (it generates internally), so the 180s quiet window
+                // elapses on a LIVE, working process. Re-dispatching
+                // mid-generation disrupts the coder (duplicated instructions,
+                // commit invalidation) and — after MAX_STALL_RECOVERY_ATTEMPTS
+                // — force-completes a task still making progress (§8 convergence
+                // failure; web-memo Tags/UI/Search all hit recovery_count=10 →
+                // force-complete 2026-06-27, while Markdown's quieter
+                // generations converged to 90). Discriminate by process
+                // liveness: an alive process is generating, not stalled.
+                let process_is_alive = match terminal.process_id {
+                    Some(pid) if pid > 0 => Self::is_terminal_process_alive(pid).await,
+                    _ => false,
+                };
+                if process_is_alive {
+                    // #N3 companion: alive does NOT always mean generating.
+                    // The cold-start onboarding/welcome flow can swallow the
+                    // task instruction (dispatched before claude's input box
+                    // is ready), leaving claude sitting at an idle prompt —
+                    // alive but doing nothing. Re-dispatch is the only self-
+                    // heal for that swallow; detect the idle-prompt state and
+                    // let it fall through to re-dispatch. Only the genuinely
+                    // mid-generation case (recent output is response text)
+                    // stays protected.
+                    if Self::is_terminal_at_idle_prompt(&self.db.pool, &terminal.id)
+                        .await
+                    {
+                        tracing::info!(
+                            workflow_id = %workflow_id,
+                            task_id = %task.id,
+                            terminal_id = %terminal.id,
+                            process_id = ?terminal.process_id,
+                            "Live terminal at idle input prompt (instruction likely swallowed by cold-start); allowing re-dispatch to self-heal"
+                        );
+                        // fall through to the re-dispatch path below.
+                    } else if self
+                        .remaining_terminal_quiet_duration(
+                            &terminal.id,
+                            Self::STALL_ALIVE_HARD_CAP,
+                        )
+                        .await?
+                        .is_some()
+                    {
+                        // Alive, NOT idle, under the hard cap = mid-generation.
+                        continue;
+                    } else {
+                        // Alive, NOT idle, past the hard cap = genuinely frozen.
+                        // Re-dispatch can't unfreeze a hung process.
+                        tracing::warn!(
+                            workflow_id = %workflow_id,
+                            task_id = %task.id,
+                            terminal_id = %terminal.id,
+                            process_id = ?terminal.process_id,
+                            quiet_cap_secs = Self::STALL_ALIVE_HARD_CAP.as_secs(),
+                            "Process alive but exceeded alive-quiet hard cap; force-completing frozen terminal"
+                        );
+                        if let Err(e) = db::models::Terminal::set_completed_if_unfinished(
+                            &self.db.pool,
+                            &terminal.id,
+                            "completed",
+                        )
+                        .await
+                        {
+                            tracing::error!(terminal_id = %terminal.id, error = %e, "Failed to force-complete frozen-alive terminal");
+                        }
+                        continue;
+                    }
                 }
 
                 let cooldown_check_at = Instant::now();
@@ -5383,12 +5475,29 @@ impl OrchestratorAgent {
                 return self.handle_acceptance_review_result(event, review).await;
             }
         };
-        let locked_commit_hash = if let Some(commit_hash) = event.commit_hash.clone() {
-            commit_hash
-        } else {
-            current_git_head(&review_working_dir)
-                .await
-                .unwrap_or_else(|| "HEAD".to_string())
+        // §8 safety-net: capture uncommitted working-tree changes BEFORE locking
+        // the review commit. The captured new HEAD becomes locked_commit_hash, so
+        // the post-review invalidation guard (agent.rs:5424 — locked ≠ current_head)
+        // never fires on the safety-net's own commit. This fixes the parallel-phase
+        // loop where shared-main always has cross-task uncommitted work → the
+        // safety-net (formerly inside fetch_terminal_completion_context, which runs
+        // AFTER this lock is captured) always moved HEAD post-lock → every feature
+        // review was invalidated → coders never received score feedback → no
+        // convergence (observed 2026-06-27: Tags 38 / Markdown 44 / UI 78 all
+        // invalidated in a tight storm).
+        let locked_commit_hash = match auto_commit_pending_changes_for_review(
+            &review_working_dir,
+            &event.task_id,
+        )
+        .await
+        {
+            Some(new_head) => new_head,
+            None => match event.commit_hash.clone() {
+                Some(commit_hash) => commit_hash,
+                None => current_git_head(&review_working_dir)
+                    .await
+                    .unwrap_or_else(|| "HEAD".to_string()),
+            },
         };
 
         let (task_branch, target_branch) =
@@ -7637,6 +7746,94 @@ impl OrchestratorAgent {
 
         #[allow(unreachable_code)]
         Ok(())
+    }
+
+    /// #N3 fix: probes whether a terminal's backing process is still alive.
+    /// The stall detector uses this to discriminate a live process (mid-
+    /// LLM-generation, no PTY output) from a genuinely dead one. On Unix uses
+    /// signal 0 (no signal delivered, pure liveness check); on Windows uses
+    /// `tasklist` PID filter — locale-safe because the alive row always
+    /// contains the PID number while the "no tasks running" message never does.
+    async fn is_terminal_process_alive(pid: i32) -> bool {
+        if pid <= 0 {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            use nix::sys::signal;
+            use nix::unistd::Pid;
+            // signal 0 = liveness probe (no signal actually delivered).
+            signal::kill(Pid::from_raw(pid), None).is_ok()
+        }
+        #[cfg(windows)]
+        {
+            let pid_str = pid.to_string();
+            let output = tokio::process::Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+                .env_remove("PORT")
+                .env_remove("BACKEND_PORT")
+                .env_remove("FRONTEND_PORT")
+                .output()
+                .await;
+            match output {
+                Ok(o) => String::from_utf8_lossy(&o.stdout).contains(pid_str.as_str()),
+                Err(_) => false,
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = pid;
+            false
+        }
+    }
+
+    /// #N3 fix companion: a LIVE process can be either mid-LLM-generation
+    /// (no PTY output but genuinely working — protect from re-dispatch) OR
+    /// sitting at an idle input prompt because the task instruction was
+    /// swallowed by the cold-start onboarding/welcome flow. The liveness
+    /// probe alone cannot tell these apart, so without this check the
+    /// swallow's only self-heal (re-dispatch) stays blocked for the full
+    /// alive-quiet hard cap — a §8 no-convergence regression. We inspect
+    /// the MOST RECENT terminal_log content: terminal_log is append-only,
+    /// so scanning full history would carry stale idle renders from an
+    /// earlier turn and false-positive while claude is generating. The
+    /// cold-start Welcome screen ("Tips for getting started" / "Welcome
+    /// back") and the bypass-mode input footer ("shift+tab to cycle") only
+    /// appear when claude is awaiting input, never mid-generation.
+    async fn is_terminal_at_idle_prompt(
+        pool: &sqlx::SqlitePool,
+        terminal_id: &str,
+    ) -> bool {
+        let rows: Vec<String> = match sqlx::query_scalar(
+            r"
+            SELECT content FROM terminal_log
+            WHERE terminal_id = ?
+            ORDER BY created_at DESC
+            LIMIT 10
+            ",
+        )
+        .bind(terminal_id)
+        .fetch_all(pool)
+        .await
+        {
+            Ok(r) => r,
+            Err(_) => return false,
+        };
+        if rows.is_empty() {
+            return false;
+        }
+        // rows are newest-first, so the join front is the most recent output.
+        // Strip ANSI, then inspect only the leading ~2KB so stale idle renders
+        // deeper in history don't trigger a false positive during generation.
+        let joined = rows.join("");
+        let stripped = TERMINAL_ANSI_RE.replace_all(&joined, "");
+        let recent: String = stripped.chars().take(2048).collect();
+        const IDLE_SIGNATURES: &[&str] = &[
+            "Tips for getting started",
+            "Welcome back",
+            "shift+tab to cycle",
+        ];
+        IDLE_SIGNATURES.iter().any(|s| recent.contains(s))
     }
 
     fn needs_explicit_submit(terminal: &db::models::Terminal) -> bool {
@@ -10731,16 +10928,13 @@ async fn fetch_terminal_completion_context(
     target_branch: Option<&str>,
     task_id: &str,
 ) -> anyhow::Result<TerminalCompletionContext> {
-    // §8 loop-stall safety net: before building the review context, capture any
-    // uncommitted coder modifications as a commit attributed to this task. The
-    // shadowed `commit_hash` then points at the captured state (or the original
-    // when the tree was already clean). See auto_commit_pending_changes_for_review.
-    let effective_commit_hash =
-        match auto_commit_pending_changes_for_review(working_dir, task_id).await {
-            Some(new_head) => new_head,
-            None => commit_hash.to_string(),
-        };
-    let commit_hash = effective_commit_hash.as_str();
+    // §8 NOTE: the safety-net capture now runs in the CALLER
+    // (handle_acceptance_review) BEFORE locked_commit_hash is captured, so the
+    // captured commit becomes the locked commit and the post-review invalidation
+    // guard never trips on the safety-net's own commit. The `commit_hash` passed
+    // in here is already the effective (post-capture) HEAD. The other caller
+    // (build_completion_prompt) is informational only and does not review/lock,
+    // so it intentionally runs without the safety-net.
 
     // 1. Query terminal logs (returned in DESC order, reverse for chronological)
     let log_summary = match db::models::terminal::TerminalLog::find_by_terminal(
