@@ -344,6 +344,22 @@ impl WorktreeManager {
         Ok(repo.commondir().join("worktrees"))
     }
 
+    /// Returns true if `path` is a repository's MAIN working directory (it has a
+    /// `.git` *directory*), as opposed to a linked git worktree (whose `.git` is a
+    /// *file* pointing back at the main repo's `.git/worktrees/<name>`).
+    ///
+    /// Worktree cleanup must never delete the main repository. In shared-main
+    /// execution mode a task's recorded "worktree path" IS the project repo
+    /// (`default_agent_working_dir`); `git worktree remove` fails on it (it is not
+    /// a linked worktree) and the unconditional `remove_dir_all` fallback then
+    /// deletes the whole project repo — destroying the deliverable and starving
+    /// the merge step that runs immediately after (merge needs the repo intact).
+    /// Observed on web-memo task 7: repo self-deleted at workflow completion →
+    /// "failed to resolve path" → workflow failed. See [[worktree-self-delete-bug]].
+    fn is_main_repository(path: &Path) -> bool {
+        path.join(".git").is_dir()
+    }
+
     /// Comprehensive cleanup of worktree path and metadata to prevent "path exists" errors (blocking)
     fn comprehensive_worktree_cleanup(
         repo: &Repository,
@@ -368,18 +384,31 @@ impl WorktreeManager {
 
         // Step 3: Clean up physical worktree directory if it exists
         if worktree_path.exists() {
-            debug!(
-                "Removing existing worktree directory: {}",
-                worktree_path.display()
-            );
-            // G23-008: Downgrade remove_dir_all failure to a warning so that one
-            // stubborn directory does not abort the entire cleanup sequence.
-            if let Err(e) = std::fs::remove_dir_all(worktree_path) {
+            // Never delete the main repository. In shared-main mode the "worktree
+            // path" passed in is the project repo itself; deleting it destroys the
+            // deliverable and breaks the post-cleanup merge. Only linked worktrees
+            // (`.git` is a file) are removable here.
+            if Self::is_main_repository(worktree_path) {
                 tracing::warn!(
-                    "Failed to remove worktree directory {} (continuing cleanup): {}",
-                    worktree_path.display(),
-                    e
+                    "Skipping directory removal for {}: it is the main repository (.git is a \
+                     directory), not a linked worktree — worktree cleanup must never delete the \
+                     project repo. Leaving it intact for the merge step.",
+                    worktree_path.display()
                 );
+            } else {
+                debug!(
+                    "Removing existing worktree directory: {}",
+                    worktree_path.display()
+                );
+                // G23-008: Downgrade remove_dir_all failure to a warning so that one
+                // stubborn directory does not abort the entire cleanup sequence.
+                if let Err(e) = std::fs::remove_dir_all(worktree_path) {
+                    tracing::warn!(
+                        "Failed to remove worktree directory {} (continuing cleanup): {}",
+                        worktree_path.display(),
+                        e
+                    );
+                }
             }
         }
 
@@ -619,11 +648,21 @@ impl WorktreeManager {
 
         tokio::task::spawn_blocking(move || -> Result<(), WorktreeError> {
             if worktree_path_owned.exists() {
-                std::fs::remove_dir_all(&worktree_path_owned).map_err(WorktreeError::Io)?;
-                info!(
-                    "Removed worktree directory: {}",
-                    worktree_path_owned.display()
-                );
+                // Same main-repo guard as comprehensive_worktree_cleanup: never
+                // delete the project repo in shared-main mode.
+                if Self::is_main_repository(&worktree_path_owned) {
+                    tracing::warn!(
+                        "Skipping simple cleanup directory removal for {}: it is the main \
+                         repository, not a linked worktree.",
+                        worktree_path_owned.display()
+                    );
+                } else {
+                    std::fs::remove_dir_all(&worktree_path_owned).map_err(WorktreeError::Io)?;
+                    info!(
+                        "Removed worktree directory: {}",
+                        worktree_path_owned.display()
+                    );
+                }
             }
             Ok(())
         })
