@@ -17,16 +17,24 @@ pub fn is_ts_file(path: &Path) -> bool {
         .is_some_and(|ext| ext == "ts" || ext == "tsx" || ext == "js" || ext == "jsx")
 }
 
-/// Check if a file path should be excluded from analysis
+/// Check if a file path should be excluded from analysis.
+///
+/// Matches on path *components* (platform-independent) so excludes apply on
+/// both POSIX (`/`) and Windows (`\`). The previous `contains("dist/")` form
+/// matched nothing on Windows — where paths use `\` (e.g. `...\dist\assets\…`)
+/// — silently leaking build artifacts (minified bundles under `dist/`,
+/// `build/`, `target/`, coverage output, …) into security/quality scans and
+/// producing false blocker issues that final-repair rounds could never clear.
 pub fn is_excluded(path: &Path) -> bool {
-    let path_str = path.to_string_lossy();
-    path_str.contains("node_modules")
-        || path_str.contains("target/")
-        || path_str.contains("dist/")
-        || path_str.contains(".git/")
-        || path_str.contains("vendor/")
-        || path_str.contains(".next/")
-        || path_str.contains("build/")
+    path.components().any(|c| {
+        matches!(
+            c.as_os_str().to_str(),
+            Some(
+                "node_modules" | "target" | "dist" | ".git" | "vendor" | ".next" | "build"
+                    | "coverage" | ".turbo" | "out" | ".cache" | "__pycache__"
+            )
+        )
+    })
 }
 
 /// Collect all source files from a directory recursively

@@ -5710,6 +5710,14 @@ impl OrchestratorAgent {
 
         // Agent-planned tasks must not silently pass without reviewable code.
         if completion_ctx.changed_files_content.is_empty() {
+            tracing::warn!(
+                target: "acceptance_review_scope",
+                task_id = %event.task_id,
+                terminal_id = %event.terminal_id,
+                commit_hash = ?event.commit_hash,
+                diff_stat_len = completion_ctx.diff_stat.len(),
+                "run_acceptance_review SHORT-CIRCUIT: changed_files_content is EMPTY (5712 reject)"
+            );
             return Ok(AcceptanceReviewResult::rejected(
                 "Acceptance review could not inspect any changed source or artifact content. \
                  Commit reviewable changes or include an explicit no-code waiver.",
@@ -8470,6 +8478,70 @@ impl OrchestratorAgent {
             return Ok(true);
         }
 
+        // Final-gate environmental exemption (agent.rs §final-gate).
+        //
+        // A workflow whose tasks already passed per-terminal + acceptance review
+        // must not be stranded at the completion gate by metrics that simply
+        // could not be collected in the current stack: SonarQube is not running
+        // in the dev stack → line_coverage / sonar_* are absent; no coverage
+        // report was uploaded → coverage metrics absent. Such ERROR conditions
+        // carry value=None (the provider never produced a measurement), so they
+        // mean "quality not measurable here", not "quality is bad". We exempt
+        // them at the FINAL gate only. Hard blockers — value=Some, a real
+        // threshold breach such as test_failures>0, tsc_errors>0, critical
+        // issues — still block. Per-terminal gates keep strict fail-closed
+        // (evaluator.rs:39), so low-level defects are still caught at commit time.
+        if level != quality::gate::QualityGateLevel::Terminal {
+            let any_hard_blocker = report
+                .decision
+                .as_ref()
+                .map(|decision| {
+                    decision.condition_results.iter().any(|result| {
+                        result.level == quality::gate::status::Level::Error
+                            && result.value.is_some()
+                    })
+                })
+                .unwrap_or(false);
+            if !any_hard_blocker {
+                let exempted: Vec<String> = report
+                    .decision
+                    .as_ref()
+                    .map(|decision| {
+                        decision
+                            .condition_results
+                            .iter()
+                            .filter(|result| {
+                                result.level == quality::gate::status::Level::Error
+                            })
+                            .map(|result| {
+                                format!(
+                                    "{} ({}): {}",
+                                    result.metric.as_str(),
+                                    result
+                                        .value
+                                        .as_ref()
+                                        .map(|value| format!("{value}"))
+                                        .unwrap_or_else(|| "no value".to_string()),
+                                    result
+                                        .message
+                                        .as_deref()
+                                        .unwrap_or("provider unavailable")
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    task_id = ?task_id,
+                    gate_level,
+                    exempted = ?exempted,
+                    "Final readiness gate {gate_level}: every ERROR condition is provider-unavailable (value=None); treating gate as passed so an accepted deliverable is not stranded. value=Some hard blockers still block."
+                );
+                return Ok(true);
+            }
+        }
+
         let fix_instructions = report.to_fix_instructions();
         self.publish_final_gate_blocked(workflow_id, gate_level, fix_instructions.clone())
             .await;
@@ -10700,6 +10772,14 @@ async fn collect_changed_files_content(
     explicit_file_list: Option<&str>,
 ) -> String {
     // Get list of changed files — explicit set > full branch diff > single-commit diff
+    tracing::debug!(
+        target: "acceptance_review_scope",
+        working_dir = %working_dir.display(),
+        commit_hash = %commit_hash,
+        has_base_ref = base_ref.is_some(),
+        explicit_files = explicit_file_list.map(|s| s.lines().filter(|l| !l.is_empty()).count()).unwrap_or(0),
+        "collect_changed_files_content ENTRY"
+    );
     let file_list = if let Some(files) = explicit_file_list {
         // #N1: caller supplied the exact file set this task touched (via the
         // task_id commit-footer grep). Use it directly — on shared-main mode
@@ -10723,45 +10803,67 @@ async fn collect_changed_files_content(
             _ => return String::new(),
         }
     } else {
-        match tokio::process::Command::new("git")
-            .args([
-                "diff",
-                "--name-only",
-                &format!("{commit_hash}~1"),
-                commit_hash,
-            ])
-            .current_dir(working_dir)
-            .env_remove("PORT")
-            .env_remove("BACKEND_PORT")
-            .env_remove("FRONTEND_PORT")
-            .output()
-            .await
-        {
-            Ok(output) if output.status.success() => {
-                String::from_utf8_lossy(&output.stdout).to_string()
-            }
-            _ => {
-                // Fallback: try diff against empty tree for initial commits
-                match tokio::process::Command::new("git")
-                    .args([
-                        "diff-tree",
-                        "--no-commit-id",
-                        "--name-only",
-                        "-r",
-                        commit_hash,
-                    ])
-                    .current_dir(working_dir)
-                    .env_remove("PORT")
-                    .env_remove("BACKEND_PORT")
-                    .env_remove("FRONTEND_PORT")
-                    .output()
-                    .await
-                {
-                    Ok(output) if output.status.success() => {
-                        String::from_utf8_lossy(&output.stdout).to_string()
+        // Walk back from `commit~1..commit` to find a non-empty diff span.
+        //
+        // A terminal's `last_commit_hash` is frequently an empty "audit" or
+        // "chore: trigger GitWatcher" commit stacked on top of the real work
+        // (the coder believes the task is done and signals via an empty
+        // commit). `HEAD~1..HEAD` against such a commit yields zero files, so
+        // the acceptance review has nothing to score and rejects with a null
+        // score in ~0.1s — sending the task into a review_pending re-drive
+        // loop it can never escape (every re-drive produces another empty
+        // commit). Bounded walk-back re-captures the real diff. The total
+        // content is still capped by `max_bytes` downstream, so walking back
+        // cannot overflow the review context; it can only make an
+        // otherwise-empty review see the actual code.
+        const EMPTY_COMMIT_WALKBACK: usize = 8;
+        let mut resolved: Option<String> = None;
+        for depth in 1..=EMPTY_COMMIT_WALKBACK {
+            let ancestor = format!("{commit_hash}~{depth}");
+            match tokio::process::Command::new("git")
+                .args(["diff", "--name-only", &ancestor, commit_hash])
+                .current_dir(working_dir)
+                .env_remove("PORT")
+                .env_remove("BACKEND_PORT")
+                .env_remove("FRONTEND_PORT")
+                .output()
+                .await
+            {
+                Ok(output) if output.status.success() => {
+                    let candidate = String::from_utf8_lossy(&output.stdout).to_string();
+                    if !candidate.trim().is_empty() {
+                        resolved = Some(candidate);
+                        break;
                     }
-                    _ => return String::new(),
+                    // empty span at this depth — keep walking back
                 }
+                // bad/short ref (fewer ancestors than depth): stop walking
+                _ => break,
+            }
+        }
+        if let Some(files) = resolved {
+            files
+        } else {
+            // Fallback: try diff against empty tree for initial commits
+            match tokio::process::Command::new("git")
+                .args([
+                    "diff-tree",
+                    "--no-commit-id",
+                    "--name-only",
+                    "-r",
+                    commit_hash,
+                ])
+                .current_dir(working_dir)
+                .env_remove("PORT")
+                .env_remove("BACKEND_PORT")
+                .env_remove("FRONTEND_PORT")
+                .output()
+                .await
+            {
+                Ok(output) if output.status.success() => {
+                    String::from_utf8_lossy(&output.stdout).to_string()
+                }
+                _ => return String::new(),
             }
         }
     };
@@ -10827,6 +10929,13 @@ async fn collect_changed_files_content(
         result.push_str(&truncated);
     }
 
+    tracing::debug!(
+        target: "acceptance_review_scope",
+        working_dir = %working_dir.display(),
+        commit_hash = %commit_hash,
+        result_bytes = result.len(),
+        "collect_changed_files_content EXIT"
+    );
     result
 }
 

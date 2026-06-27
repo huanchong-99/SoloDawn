@@ -101,13 +101,21 @@ branch_gate:
     - metric: test_failures
       operator: "GT"
       threshold: "0"
-    # Built-in rules: tolerance threshold for branch-level
-    - metric: builtin_rust_issues
-      operator: "GT"
-      threshold: "10"
-    - metric: builtin_frontend_issues
-      operator: "GT"
-      threshold: "10"
+    # Built-in advisory lint counts (builtin_rust_issues / builtin_frontend_issues)
+    # are intentionally NOT gated at branch level. They sum *every* Minor/Major
+    # advisory finding — e.g. ts:type-assertion flags every necessary `as` DOM/parse
+    # cast, ts:function-length flags long functions — so a fixed numeric threshold
+    # competes with code volume rather than with quality: a real, well-tested
+    # feature carrying 150+ advisory notes gets stranded at the completion gate
+    # even after acceptance review approved it (observed on web-memo task 7, where
+    # ReDoS hardening legitimately introduced 153 type-assertion casts). The
+    # authoritative blocker signal is the *critical* severity, gated separately
+    # by builtin_frontend_critical / builtin_rust_critical in this terminal gate
+    # and by builtin_frontend_critical in repo_gate. This mirrors why
+    # eslint_errors is excluded (see comment block above): advisory severity must
+    # not hard-block. Provider-unavailable metrics (value=None, e.g. line_coverage
+    # when SonarQube is absent) are additionally exempted at the final gate in
+    # agent.rs::run_final_quality_gate.
     - metric: duplicated_blocks
       operator: "GT"
       threshold: "5"

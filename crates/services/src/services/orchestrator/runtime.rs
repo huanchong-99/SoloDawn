@@ -1355,7 +1355,28 @@ async fn resume_cursor_for_workflow(
     .bind(workflow_id)
     .fetch_optional(pool)
     .await?;
-    Ok(row.and_then(|r| r.try_get::<Option<String>, _>("commit_hash").ok().flatten()))
+    // Filter out placeholder values (e.g. the literal "HEAD") that some code
+    // paths write into quality_run.commit_hash when the real hash can't be
+    // resolved. If such a row is the newest by created_at, returning it here
+    // seeds the GitWatcher cursor to the string "HEAD", and
+    // `get_new_commits_since` then runs `git log HEAD..HEAD` — which is always
+    // empty — so EVERY post-restart handoff commit is silently lost and the
+    // task appears stuck forever. Rejecting non-hash values lets the watcher
+    // fall back to fresh HEAD-seeding, which correctly detects future commits.
+    Ok(row
+        .and_then(|r| r.try_get::<Option<String>, _>("commit_hash").ok().flatten())
+        .filter(|hash| is_real_commit_hash(hash)))
+}
+
+/// A GitWatcher resume cursor must be a real commit object hash. Placeholder
+/// strings like `"HEAD"` (written by legacy quality_run paths) poison the
+/// cursor and make post-restart commit detection a permanent no-op — see
+/// `resume_cursor_for_workflow`. Accept abbreviated (>=7) or full (40) hex
+/// object names; reject everything else so the watcher re-seeds from HEAD.
+fn is_real_commit_hash(hash: &str) -> bool {
+    (7..=40).contains(&hash.len())
+        && hash != "HEAD"
+        && hash.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 #[cfg(test)]

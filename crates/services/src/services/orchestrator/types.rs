@@ -652,6 +652,15 @@ impl AuditScoreResult {
         // use the first one that yields valid audit dimensions.
         let candidates = Self::extract_balanced_objects(response);
         if candidates.is_empty() {
+            // No balanced object: the response is likely truncated, or contains
+            // an unescaped quote inside a verbose `details` string that defeats
+            // the brace scanner. Recover the score via regex before giving up —
+            // a hard parse_failure here rejects with no score and, because the
+            // coder cannot fix a reviewer-side malformation, deadlocks the gate
+            // (observed: glm-5.2 review loop on web-memo, 3x unparseable REJECT).
+            if let Some(recovered) = Self::regex_extract_score(response) {
+                return recovered;
+            }
             return Self::parse_failure("Audit score response did not contain a JSON object.");
         }
 
@@ -695,6 +704,11 @@ impl AuditScoreResult {
             };
         }
 
+        // Every balanced object failed to deserialize (malformed JSON the brace
+        // scanner did locate, e.g. unescaped chars). Same regex recovery first.
+        if let Some(recovered) = Self::regex_extract_score(response) {
+            return recovered;
+        }
         Self::parse_failure(&last_err)
     }
 
@@ -742,6 +756,105 @@ impl AuditScoreResult {
             }
         }
         objs
+    }
+
+    /// Lenient last-resort score recovery. When the review JSON is too malformed
+    /// for structured parsing — truncated by an output limit, or an unescaped
+    /// quote inside a verbose `details` string that defeats the brace scanner so
+    /// `extract_balanced_objects` finds nothing — the model still emits
+    /// recognizable `"dimension": { "score": N, "max_score": M, ... }` tokens.
+    /// A key-anchored regex recovers those scores directly from the raw text.
+    /// This turns a transient reviewer-output malformation (which the coder
+    /// cannot fix) into an ordinary scored rejection the coder CAN act on,
+    /// instead of a hard parse_failure that rejects with no score and deadlocks
+    /// the gate loop. Returns None only when too few dimensions are recoverable.
+    fn regex_extract_score(response: &str) -> Option<Self> {
+        // Anchor on each leaf dimension key, then take the first "score":<num>
+        // inside its object. The `[^{}]{0,N}` window stays inside the leaf
+        // object (no nested braces there) so it never bleeds into the next
+        // dimension.
+        let score_for = |key: &str| -> Option<f64> {
+            let pat = format!(
+                r#""{key}"\s*:\s*\{{[^{{}}]{{0,80}}"score"\s*:\s*([0-9]+(?:\.[0-9]+)?)"#
+            );
+            let re = regex::Regex::new(&pat).ok()?;
+            re.captures(response)
+                .and_then(|c| c.get(1)?.as_str().parse::<f64>().ok())
+                .filter(|&v| (0.0..=100.0).contains(&v))
+        };
+        let max_for = |key: &str, default_max: f64| -> f64 {
+            let pat = format!(
+                r#""{key}"\s*:\s*\{{[^{{}}]{{0,140}}"max_score"\s*:\s*([0-9]+(?:\.[0-9]+)?)"#
+            );
+            regex::Regex::new(&pat)
+                .ok()
+                .and_then(|re| {
+                    re.captures(response)
+                        .and_then(|c| c.get(1)?.as_str().parse::<f64>().ok())
+                })
+                .filter(|&v| (1.0..=100.0).contains(&v))
+                .unwrap_or(default_max)
+        };
+
+        // (key, canonical max) in emission order.
+        let dims: [(&str, f64); 7] = [
+            ("buildability", 20.0),
+            ("functional_completeness", 25.0),
+            ("architecture", 10.0),
+            ("standards", 10.0),
+            ("security", 10.0),
+            ("test_quality", 15.0),
+            ("engineering_docs", 10.0),
+        ];
+        let recovered: Vec<Option<f64>> = dims.iter().map(|(k, _)| score_for(k)).collect();
+        let found = recovered.iter().filter(|v| v.is_some()).count();
+        // Require a strong majority so a near-empty / garbage response still
+        // falls through to parse_failure rather than committing noise.
+        if found < 4 {
+            return None;
+        }
+
+        let pair = |i: usize| -> (f64, f64) {
+            (recovered[i].unwrap_or(0.0), max_for(dims[i].0, dims[i].1))
+        };
+        let (b, b_max) = pair(0);
+        let (f, f_max) = pair(1);
+        let (a, a_max) = pair(2);
+        let (s, s_max) = pair(3);
+        let (sec, sec_max) = pair(4);
+        let (t, t_max) = pair(5);
+        let (e, e_max) = pair(6);
+        let mk = |score: f64, mx: f64| DimensionScore {
+            score,
+            max_score: mx,
+            details: String::new(),
+        };
+        let dimensions = AuditDimensions {
+            buildability: mk(b, b_max),
+            functional_completeness: mk(f, f_max),
+            code_quality: CodeQualityScore {
+                architecture: mk(a, a_max),
+                standards: mk(s, s_max),
+                security: mk(sec, sec_max),
+                total: a + s + sec,
+                max_score: a_max + s_max + sec_max,
+            },
+            test_quality: mk(t, t_max),
+            engineering_docs: mk(e, e_max),
+        };
+        let total_score = b + f + a + s + sec + t + e;
+        tracing::info!(
+            total_score,
+            recovered_dims = found,
+            "Acceptance review score recovered via regex fallback (structured parse failed)"
+        );
+        Some(Self {
+            total_score,
+            passed: false, // caller recomputes against the phase threshold
+            dimensions,
+            fix_instructions: String::new(),
+            parse_failed: false,
+        })
     }
 
     /// Convert to `AcceptanceReviewResult` for backward compatibility.
@@ -1074,6 +1187,28 @@ mod tests {
         assert!(!result.passed);
         assert!(result.total_score.abs() < f64::EPSILON);
         assert!(result.fix_instructions.contains("Failed to extract"));
+    }
+
+    #[test]
+    fn audit_score_parse_recovers_score_from_malformed_json_via_regex() {
+        // Unescaped quotes inside a verbose `details` string defeat the brace
+        // scanner / serde. The regex fallback must still recover the
+        // per-dimension scores so a transient reviewer-output malformation does
+        // NOT reject with no score and deadlock the gate loop (the coder cannot
+        // fix a reviewer-side parse error). Mirrors the glm-5.2 web-memo failure.
+        let resp = r#"{"total_score":43,"dimensions":{"buildability":{"score":10,"max_score":20,"details":"The "code" runs but needs a build tool."},"functional_completeness":{"score":12,"max_score":25,"details":"CRUD ok"},"code_quality":{"architecture":{"score":7,"max_score":10,"details":"clean"},"standards":{"score":6,"max_score":10,"details":"ok"},"security":{"score":5,"max_score":10,"details":"safe"}},"test_quality":{"score":0,"max_score":15,"details":"none"},"engineering_docs":{"score":3,"max_score":10,"details":"min"}}}"#;
+
+        let result = AuditScoreResult::parse(resp);
+
+        assert!(
+            !result.parse_failed,
+            "regex fallback should recover a score, not parse-fail"
+        );
+        assert_eq!(result.total_score, 43.0);
+        assert_eq!(result.dimensions.buildability.score, 10.0);
+        assert_eq!(result.dimensions.functional_completeness.score, 12.0);
+        assert_eq!(result.dimensions.code_quality.security.score, 5.0);
+        assert_eq!(result.dimensions.test_quality.score, 0.0);
     }
 
     #[test]
