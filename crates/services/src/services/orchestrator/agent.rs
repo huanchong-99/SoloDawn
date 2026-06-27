@@ -10604,6 +10604,120 @@ fn loop_progress_hint(class: &LoopProgressClass) -> Option<String> {
     }
 }
 
+/// §8 loop-stall safety net: capture uncommitted coder changes as a real
+/// commit attributed to `task_id` BEFORE the acceptance review runs.
+///
+/// A coder that modifies files but signals completion via an empty
+/// `--allow-empty` handoff commit (the stall-recovery re-dispatch race,
+/// [[stall-recovery-redispatch-race]] — the stall-detector misreads a long
+/// LLM generation as a dead terminal and re-dispatches mid-work) leaves its
+/// implementation in the working tree, invisible to the review. The review
+/// only inspects committed code (`collect_task_changed_file_list` greps the
+/// `task_id:` footer; the walk-back diffs committed ancestors), so it scores
+/// 0, re-drives the coder, which re-modifies the same already-modified files
+/// (no new commit) → empty handoff → 0 → unbounded loop. Auto-committing the
+/// pending changes (with the `task_id:` footer so they are attributed to the
+/// reviewing task) makes them visible and breaks the loop.
+///
+/// `--no-verify` skips pre-commit hooks so the capture never fails on lint —
+/// the acceptance review (not a hook) is the quality gate here, and the
+/// alternative is losing the work to an empty handoff. Returns `Some(new_head)`
+/// when a commit was created, else `None` (clean tree / non-fatal git error).
+async fn auto_commit_pending_changes_for_review(
+    working_dir: &Path,
+    task_id: &str,
+) -> Option<String> {
+    // 1. Stage all working-tree changes (.gitignore still applies).
+    let add_status = tokio::process::Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(working_dir)
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
+        .status()
+        .await
+        .ok()?;
+    if !add_status.success() {
+        tracing::warn!(
+            task_id = %task_id,
+            "auto-commit safety net: `git add -A` failed; leaving working tree as-is"
+        );
+        return None;
+    }
+
+    // 2. Bail out when nothing is staged (`git diff --cached --quiet` exits 0
+    //    on a clean index, 1 when staged changes exist).
+    let cached = tokio::process::Command::new("git")
+        .args(["diff", "--cached", "--quiet"])
+        .current_dir(working_dir)
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
+        .status()
+        .await
+        .ok()?;
+    if cached.success() {
+        return None;
+    }
+
+    // 3. Commit with the `task_id:` footer so collect_task_changed_file_list
+    //    (`git log --grep=task_id: <id>`) attributes these files to this task.
+    let message = format!(
+        "chore: auto-commit pending working-tree changes for acceptance review\n\n\
+Captures uncommitted coder modifications before the review so it sees the latest\n\
+implementation (prevents empty-handoff 0-score re-drive loops).\n\n\
+---METADATA---\n\
+task_id: {task_id}\n"
+    );
+    let commit_status = tokio::process::Command::new("git")
+        .args(["commit", "--no-verify", "-m", &message])
+        .current_dir(working_dir)
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
+        .status()
+        .await
+        .ok()?;
+    if !commit_status.success() {
+        tracing::warn!(
+            task_id = %task_id,
+            "auto-commit safety net: `git commit` failed; unstaging to keep the index clean"
+        );
+        let _ = tokio::process::Command::new("git")
+            .args(["reset"])
+            .current_dir(working_dir)
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
+            .status()
+            .await;
+        return None;
+    }
+
+    // 4. Return the new HEAD hash so the caller reviews the captured state.
+    let head_output = tokio::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(working_dir)
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
+        .output()
+        .await
+        .ok()?;
+    if head_output.status.success() {
+        let hash = String::from_utf8_lossy(&head_output.stdout).trim().to_string();
+        if !hash.is_empty() {
+            tracing::info!(
+                task_id = %task_id,
+                new_head = %hash,
+                "auto-commit safety net: captured uncommitted working-tree changes before review"
+            );
+            return Some(hash);
+        }
+    }
+    None
+}
+
 /// Collect terminal completion context (log summary, diff stat, commit body)
 /// for injection into LLM completion prompts.
 /// When `task_branch` and `target_branch` are provided, the acceptance review
@@ -10617,6 +10731,17 @@ async fn fetch_terminal_completion_context(
     target_branch: Option<&str>,
     task_id: &str,
 ) -> anyhow::Result<TerminalCompletionContext> {
+    // §8 loop-stall safety net: before building the review context, capture any
+    // uncommitted coder modifications as a commit attributed to this task. The
+    // shadowed `commit_hash` then points at the captured state (or the original
+    // when the tree was already clean). See auto_commit_pending_changes_for_review.
+    let effective_commit_hash =
+        match auto_commit_pending_changes_for_review(working_dir, task_id).await {
+            Some(new_head) => new_head,
+            None => commit_hash.to_string(),
+        };
+    let commit_hash = effective_commit_hash.as_str();
+
     // 1. Query terminal logs (returned in DESC order, reverse for chronological)
     let log_summary = match db::models::terminal::TerminalLog::find_by_terminal(
         &db.pool,
