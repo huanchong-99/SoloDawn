@@ -7832,6 +7832,16 @@ impl OrchestratorAgent {
             "Tips for getting started",
             "Welcome back",
             "shift+tab to cycle",
+            // v2.1.x first-run onboarding screens (text-style picker / welcome /
+            // trust dialog) — these only render during onboarding, never mid-turn,
+            // so their presence means the coder is parked at an interactive prompt
+            // (instruction swallowed). Normally pre-empted by the onboarding-state
+            // seed in cc_switch; kept here as a safety net.
+            "Choose the text style",
+            "Let's get started",
+            "Welcome to Claude Code",
+            "Yes, I trust this folder",
+            "Quick safety check",
         ];
         IDLE_SIGNATURES.iter().any(|s| recent.contains(s))
     }

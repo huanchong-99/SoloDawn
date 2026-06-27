@@ -198,6 +198,61 @@ fn create_claude_config(
     Ok(())
 }
 
+/// Pre-seed the isolated Claude home's `.claude.json` with onboarding-complete
+/// and folder-trust state, so claude skips its first-run onboarding TUI
+/// (text-style picker → security notes → "Do you trust this folder?").
+///
+/// An isolated `CLAUDE_CONFIG_DIR` is a fresh state directory; without this
+/// marker claude v2.1.x blocks on the interactive onboarding flow and swallows
+/// the orchestrator's dispatched task instruction — the coder then sits at the
+/// trust prompt indefinitely (process alive, zero output, zero commits), which
+/// the liveness stall-gate misreads as "generating" and protects for up to the
+/// hard cap. claude reads/writes `.claude.json` inside `CLAUDE_CONFIG_DIR`
+/// (empirically verified against claude 2.1.193 / 2.1.195).
+///
+/// In the `using_native_auth` path this file is unused (claude reuses the
+/// already-onboarded global `~/.claude`), so writing it is harmless there.
+fn write_claude_onboarding_state(
+    claude_home: &Path,
+    working_dir: &Path,
+) -> anyhow::Result<()> {
+    // claude normalizes Windows paths to forward slashes in the projects map key.
+    let project_key = working_dir.to_string_lossy().replace('\\', "/");
+    let mut projects = serde_json::Map::new();
+    projects.insert(
+        project_key.clone(),
+        serde_json::json!({
+            "allowedTools": [],
+            "mcpServers": {},
+            "hasTrustDialogAccepted": true,
+            "projectOnboardingSeenCount": 1,
+            "hasClaudeMdExternalIncludesApproved": false,
+            "hasClaudeMdExternalIncludesWarningShown": false
+        }),
+    );
+    let state = serde_json::json!({
+        "hasCompletedOnboarding": true,
+        "lastOnboardingVersion": "2.1.195",
+        "numStartups": 1,
+        "migrationVersion": 13,
+        // Suppress one-time migration / marketplace prompts that also block the TUI.
+        "officialMarketplaceAutoInstallAttempted": true,
+        "officialMarketplaceAutoInstalled": true,
+        "opusProMigrationComplete": true,
+        "sonnet1m45MigrationComplete": true,
+        "projects": serde_json::Value::Object(projects)
+    });
+    let state_path = claude_home.join(".claude.json");
+    std::fs::write(&state_path, serde_json::to_string_pretty(&state)?)
+        .map_err(|e| anyhow::anyhow!("Failed to write claude .claude.json onboarding state: {e}"))?;
+    tracing::debug!(
+        claude_home = %claude_home.display(),
+        project_key = %project_key,
+        "Pre-seeded claude onboarding-complete + folder-trust state"
+    );
+    Ok(())
+}
+
 /// Creates Claude Code settings.json in isolated directory and returns its path.
 /// This is passed via `--settings <path>` to avoid global ~/.claude settings interference.
 fn create_claude_settings(
@@ -1156,6 +1211,19 @@ impl CCSwitchService {
                 env.set
                     .insert("CLAUDE_CONFIG_DIR".to_string(), claude_home_str.clone());
                 env.set.insert("CLAUDE_HOME".to_string(), claude_home_str);
+
+                // Pre-seed onboarding-complete + folder-trust state so claude skips
+                // its first-run onboarding TUI (which would swallow the dispatched
+                // task instruction and stall the coder at the trust prompt). Harmless
+                // in the native-auth path below (claude then reuses global ~/.claude).
+                if let Err(e) = write_claude_onboarding_state(&claude_home, working_dir) {
+                    tracing::warn!(
+                        terminal_id = %terminal.id,
+                        claude_home = %claude_home.display(),
+                        error = %e,
+                        "Failed to pre-seed claude onboarding-complete state; terminal may block on first-run onboarding"
+                    );
+                }
 
                 let custom_api_key = terminal.get_custom_api_key()?;
                 let (orchestrator_base_url, orchestrator_api_key) =
