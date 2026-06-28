@@ -467,6 +467,11 @@ pub struct AcceptanceReviewResult {
     /// Per-dimension breakdown from the scoring-based audit (None for legacy
     /// binary reviews). Carried through so Phase B can persist + emit it.
     pub dimensions: Option<AuditDimensions>,
+    /// True when the response could not be parsed into a clear APPROVED/REJECTED
+    /// verdict. Mirrors `AuditScoreResult::parse_failed`: the legacy review path
+    /// retries/defers instead of rejecting the code on a phantom verdict (glm
+    /// intermittently returns malformed JSON, which caused legacy reject loops).
+    pub parse_failed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -482,6 +487,7 @@ impl AcceptanceReviewResult {
             fix_instructions: String::new(),
             score: None,
             dimensions: None,
+            parse_failed: false,
         }
     }
 
@@ -491,36 +497,41 @@ impl AcceptanceReviewResult {
             fix_instructions: fix_instructions.into(),
             score: None,
             dimensions: None,
+            parse_failed: false,
         }
     }
 
     pub fn parse(response: &str) -> Self {
-        let trimmed = response.trim();
-        // Try to extract JSON from the response
-        let json_str = if let Some(start) = trimmed.find('{') {
-            if let Some(end) = trimmed.rfind('}') {
-                &trimmed[start..=end]
-            } else {
-                trimmed
-            }
-        } else {
-            trimmed
-        };
-
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_str) {
+        // Robustly locate the verdict JSON. The review LLM (glm) intermittently
+        // wraps the JSON in a ```json markdown fence or trails it with prose; a
+        // naive first-`{`..last-`}` slice then grabs trailing characters from
+        // the prose and fails to parse — which (pre-fix) drove legacy reject
+        // loops (3x unparseable → deferral → re-review → repeat). Reuse the
+        // depth-aware balanced-brace scanner from the scored path so fenced /
+        // prose-wrapped JSON parses cleanly. Mirrors `AuditScoreResult::parse`.
+        for cand in AuditScoreResult::extract_balanced_objects(response) {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(cand) else {
+                continue;
+            };
             let Some(verdict_str) = value.get("verdict").and_then(|v| v.as_str()) else {
-                return Self::rejected(
-                    "Acceptance review response was invalid: missing `verdict` field.",
-                );
+                // Valid JSON object but no verdict field — keep scanning other
+                // candidates (e.g. a preamble object) before giving up.
+                continue;
             };
             let verdict = if verdict_str.eq_ignore_ascii_case("REJECTED") {
                 AcceptanceVerdict::Rejected
             } else if verdict_str.eq_ignore_ascii_case("APPROVED") {
                 AcceptanceVerdict::Approved
             } else {
-                return Self::rejected(format!(
-                    "Acceptance review response was invalid: unsupported verdict `{verdict_str}`."
-                ));
+                return Self {
+                    verdict: AcceptanceVerdict::Rejected,
+                    fix_instructions: format!(
+                        "Acceptance review response was invalid: unsupported verdict `{verdict_str}`."
+                    ),
+                    score: None,
+                    dimensions: None,
+                    parse_failed: true,
+                };
             };
             let fix_instructions = value
                 .get("fix_instructions")
@@ -528,21 +539,32 @@ impl AcceptanceReviewResult {
                 .unwrap_or("")
                 .to_string();
 
-            Self {
+            return Self {
                 verdict,
                 fix_instructions,
                 score: None,
                 dimensions: None,
-            }
+                parse_failed: false,
+            };
+        }
+
+        // No balanced object yielded a verdict — the response had no parseable
+        // verdict JSON (truncated / pure prose / empty). Mark parse_failed so the
+        // legacy review path retries/defers instead of rejecting the code on a
+        // phantom verdict (mirrors AuditScoreResult; glm intermittently emits
+        // malformed JSON, which previously caused legacy reject loops).
+        let trimmed = response.trim();
+        let fix_instructions = if trimmed.to_uppercase().contains("REJECTED") {
+            trimmed.to_string()
         } else {
-            // Fallback: check for REJECTED keyword in raw text
-            if trimmed.to_uppercase().contains("REJECTED") {
-                Self::rejected(trimmed.to_string())
-            } else {
-                Self::rejected(
-                    "Acceptance review response was not valid JSON and did not contain an explicit REJECTED verdict.",
-                )
-            }
+            String::from("Acceptance review response was not valid JSON and did not contain an explicit REJECTED verdict.")
+        };
+        Self {
+            verdict: AcceptanceVerdict::Rejected,
+            fix_instructions,
+            score: None,
+            dimensions: None,
+            parse_failed: true,
         }
     }
 }

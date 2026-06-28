@@ -96,6 +96,24 @@ fn redos_nested_quantifier_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"\((?:\\.|[^)])*[*+](?:\\.|[^)])*\)\s*(?:[*+]|\{)").unwrap())
 }
 
+/// Extracts JS/TS regex-literal bodies (`/pattern/flags`) from a line of code.
+///
+/// The nested-quantifier check must run on actual regex literals rather than on
+/// arbitrary code parentheses — otherwise string literals (`"*"`) and
+/// arithmetic (`i + 1`) sitting inside `if (...) {` lines false-positive as
+/// ReDoS-prone nested quantifiers. This blocked legit markdown parsers whose
+/// `"**"` bold markers sat inside `if (text[i + 1] === "*") {` lines (web-memo
+/// task 7 final gate, 2026-06-27). The leading `(?:^|[^A-Za-z0-9_)/])` avoids
+/// division (`a / b`) and call-then-slash (`foo()/`); the `regex` crate has no
+/// look-around so a char-class anchor is used instead. Division expressions
+/// that still match `/.../` harmlessly fail the nested-quantifier test.
+fn regex_literal_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?:^|[^A-Za-z0-9_)/])/(?:\\.|[^/\\\n])+/[gimsuy]*").unwrap()
+    })
+}
+
 fn detect_redos_risks(project_root: &Path, changed_files: Option<&[String]>) -> Vec<QualityIssue> {
     files_for_scope(project_root, changed_files, analysis::is_ts_file)
         .into_iter()
@@ -110,7 +128,14 @@ fn detect_redos_risk_in_file(project_root: &Path, file: &Path) -> Option<Quality
         if trimmed.starts_with("//") || trimmed.starts_with('*') {
             return None;
         }
-        if redos_nested_quantifier_re().is_match(line) {
+        // Only inspect actual regex literals (`/pattern/flags`), not arbitrary
+        // code parentheses — see `regex_literal_re`. Without this guard, string
+        // literals (`"*"`) and arithmetic (`i + 1`) inside `if (...) {` lines
+        // false-positive as nested quantifiers.
+        let any_unsafe = regex_literal_re()
+            .find_iter(line)
+            .any(|m| redos_nested_quantifier_re().is_match(m.as_str()));
+        if any_unsafe {
             Some((idx + 1) as u32)
         } else {
             None
@@ -213,6 +238,29 @@ mod tests {
         let issues = detect_redos_risks(&root, None);
 
         assert!(issues.is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ignores_string_literals_and_arithmetic_in_parens() {
+        // Regression (web-memo task 7 final gate, 2026-06-27): the line
+        // `if (text[i + 1] === "*") {` must NOT be flagged as a ReDoS-prone
+        // nested quantifier. The `"*"` string literal and `i + 1` arithmetic
+        // sit inside `(...)` followed by `{`, which the old whole-line regex
+        // matched; only true regex literals (`/.../`) should be inspected.
+        let root = temp_dir();
+        write(
+            &root,
+            "src/markdown.ts",
+            "if (text[i + 1] === \"*\") {\n  return parse(text);\n}\n",
+        );
+
+        let issues = detect_redos_risks(&root, None);
+        assert!(
+            issues.is_empty(),
+            "string literal + arithmetic must not be flagged as ReDoS: {:?}",
+            issues
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

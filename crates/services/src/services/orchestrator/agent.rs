@@ -25,7 +25,7 @@ use super::{
         COMPLETION_CONTEXT_DIFF_MAX_CHARS, COMPLETION_CONTEXT_LOG_LINES,
         COMPLETION_CONTEXT_LOG_MAX_CHARS, GIT_COMMIT_METADATA_SEPARATOR, HANDOFF_COMMIT_MAX_CHARS,
         HANDOFF_NOTES_MAX_CHARS, MAX_CONSECUTIVE_LLM_FAILURES, MAX_ENFORCE_DEADLOCK_BLOCKS,
-        MAX_REVIEW_REDRIVES, QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
+        MAX_REVIEW_REDRIVES, ORPHAN_PENDING_GRACE_SECS, QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
         QUALITY_GATE_MODE_SHADOW,
         QUALITY_GATE_STATUS_SKIPPED, QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX,
         QUALITY_REQUIREMENTS_SUFFIX, STATE_SAVE_DEBOUNCE_SECS, TASK_STATUS_CANCELLED,
@@ -1367,9 +1367,34 @@ impl OrchestratorAgent {
                         .filter(|t| t.workflow_task_id == task.id)
                         .collect();
                     if task_terminals.is_empty() && !any_active_terminal {
+                        // GRACE: a pending task created moments ago (e.g. feature
+                        // tasks materialized by the stuck-foundation replanning
+                        // LLM call) has not yet had its terminal spawned — terminal
+                        // dispatch is an LLM-driven follow-up (create_terminal +
+                        // start_terminal) that races this sweep
+                        // (auto_complete_stalled_tasks runs every
+                        // STALL_WATCHDOG_TICK = 5s). Failing on the first idle
+                        // sweep orphans the entire feature phase. Observed
+                        // 2026-06-28 on knowledge-base-demo: 7 feature tasks
+                        // auto-failed the SAME second they were created, so zero
+                        // feature work ever ran and the workflow failed instantly.
+                        // Give the dispatcher a fair window first.
+                        let age_secs = (chrono::Utc::now() - task.created_at)
+                            .num_seconds()
+                            .max(0);
+                        if age_secs < ORPHAN_PENDING_GRACE_SECS {
+                            tracing::info!(
+                                task_id = %task.id, task_name = %task.name,
+                                age_secs, grace = ORPHAN_PENDING_GRACE_SECS,
+                                "Pending task has no terminal yet but is within the dispatch \
+                                 grace window; skipping orphan-fail (terminal dispatch may be in flight)"
+                            );
+                            continue;
+                        }
                         tracing::info!(
-                            task_id = %task.id, task_name = %task.name,
-                            "Auto-failing orphaned pending task: no terminals and no active work"
+                            task_id = %task.id, task_name = %task.name, age_secs,
+                            "Auto-failing orphaned pending task: no terminals and no active work \
+                             (past dispatch grace window)"
                         );
                         db::models::WorkflowTask::update_status(&self.db.pool, &task.id, "failed")
                             .await?;
@@ -1591,6 +1616,21 @@ impl OrchestratorAgent {
                     if let Err(e) = self.execute_instruction(&response).await {
                         tracing::error!(error = %e, "Failed to execute replanning instructions");
                     }
+                    // Replanning frequently returns ONLY create_task instructions
+                    // (no create_terminal/start_terminal), leaving the freshly-
+                    // created feature tasks pending with no terminals. The
+                    // auto-complete sweep's orphan-fail (Case 2) would then kill
+                    // the entire feature phase — observed 2026-06-28 on
+                    // knowledge-base-demo: 7 feature tasks materialized via 7
+                    // CreateTask instructions, zero terminals, all auto-failed
+                    // 4ms later. Dispatch terminals for any task that still
+                    // lacks one, mirroring the post-initial-planning path.
+                    let tasks_after_replan =
+                        db::models::WorkflowTask::find_by_workflow(&self.db.pool, &workflow_id)
+                            .await
+                            .unwrap_or_default();
+                    self.dispatch_terminals_for_pending_tasks(&tasks_after_replan)
+                        .await;
                 }
             }
         }
@@ -1726,7 +1766,41 @@ impl OrchestratorAgent {
                         .await?
                         .is_some()
                     {
-                        // Alive, NOT idle, under the hard cap = mid-generation.
+                        // Alive, NOT idle, under the hard cap. Normally a long
+                        // LLM generation (claude generates internally for up to
+                        // ~55min) — protect it. BUT a process hung on a stalled
+                        // network/IO request also shows an alive PID, a frozen
+                        // spinner, and no PTY output, and would waste the full
+                        // 1h hard cap before the force-complete below fires
+                        // (observed: ecommerce idx5 hung 19min+ at flat CPU with
+                        // a frozen "Calculating" spinner, protected until 1h).
+                        // Discriminate by CPU: a real generation consumes CPU
+                        // continuously (TUI render loop + response processing);
+                        // a deadlocked process is flat. Sample twice — flat over
+                        // the window = hung → force-complete now instead of 1h.
+                        if matches!(
+                            Self::is_terminal_process_cpu_flat(terminal.process_id).await,
+                            Some(true)
+                        ) {
+                            tracing::warn!(
+                                workflow_id = %workflow_id,
+                                task_id = %task.id,
+                                terminal_id = %terminal.id,
+                                process_id = ?terminal.process_id,
+                                "Process alive with frozen spinner but flat CPU over sample window — hung/deadlocked, not generating; force-completing to avoid 1h hard-cap waste"
+                            );
+                            if let Err(e) = db::models::Terminal::set_completed_if_unfinished(
+                                &self.db.pool,
+                                &terminal.id,
+                                "completed",
+                            )
+                            .await
+                            {
+                                tracing::error!(terminal_id = %terminal.id, error = %e, "Failed to force-complete CPU-flat terminal");
+                            }
+                            continue;
+                        }
+                        // CPU growing (or unreadable) = genuinely mid-generation.
                         continue;
                     } else {
                         // Alive, NOT idle, past the hard cap = genuinely frozen.
@@ -5817,6 +5891,36 @@ impl OrchestratorAgent {
             return Ok(AcceptanceReviewResult::approved());
         }
 
+        // Final-integration-repair tasks exist ONLY to clear final-readiness gate
+        // blockers. Their success criterion is the quality gate passing (verified
+        // independently by the gate loop), NOT a feature-grade 5-dimension score.
+        // Running the normal acceptance review against them deadloops in two ways:
+        //   (1) empty `--allow-empty` commit (blockers already exempt / advisory
+        //       metric-only — the task instruction explicitly allows this) → empty
+        //       diff → SHORT-CIRCUIT reject → re-drive → empty commit …
+        //   (2) a real repair diff graded against the full feature 90-bar scores
+        //       ~85 (a patch is not a feature) → reject → re-drive …
+        // Approve unconditionally: the final-readiness gate is the real keeper
+        // (it re-runs on completion and creates the next repair round if blockers
+        // remain, capped by FINAL_REPAIR_MAX_ROUNDS). See web-memo task 7
+        // (workflow 99648da5, 2026-06-28).
+        let early_task = db::models::WorkflowTask::find_by_id(&self.db.pool, &event.task_id)
+            .await?;
+        if let Some(ref t) = early_task {
+            if Self::is_final_repair_task(t) {
+                tracing::info!(
+                    target: "acceptance_review_scope",
+                    task_id = %event.task_id,
+                    terminal_id = %event.terminal_id,
+                    commit_hash = ?event.commit_hash,
+                    empty_diff = completion_ctx.changed_files_content.is_empty(),
+                    "run_acceptance_review: final-repair task APPROVED (skipped feature-bar LLM review; \
+                     quality gate drives success / next repair round)"
+                );
+                return Ok(AcceptanceReviewResult::approved());
+            }
+        }
+
         // Agent-planned tasks must not silently pass without reviewable code.
         if completion_ctx.changed_files_content.is_empty() {
             tracing::warn!(
@@ -5964,6 +6068,16 @@ impl OrchestratorAgent {
                     } else {
                         // Legacy binary review path
                         let result = AcceptanceReviewResult::parse(&response);
+                        if result.parse_failed {
+                            let response_head: String = response.chars().take(320).collect();
+                            tracing::warn!(
+                                task_id = %event.task_id,
+                                attempt,
+                                response_head = %response_head,
+                                "Acceptance review response was unparseable (legacy); retrying"
+                            );
+                            continue;
+                        }
                         tracing::info!(
                             task_id = %event.task_id,
                             verdict = ?result.verdict,
@@ -7787,6 +7901,108 @@ impl OrchestratorAgent {
         }
     }
 
+    /// CPU-activity probe used by the stall detector to distinguish a
+    /// genuinely long LLM generation (CPU growing continuously — the TUI
+    /// render loop and response processing never stop) from a process
+    /// hung/deadlocked on a stalled network or IO request (CPU flat).
+    /// The alive-hard-cap gate (STALL_ALIVE_HARD_CAP = 1h) protects the
+    /// former but lets the latter waste the full hour before recovery.
+    /// Sampling total CPU time twice over an 8s window catches a hung
+    /// process within one sweep after the quiet window elapses, instead
+    /// of after 1h. Returns None when CPU time cannot be sampled — the
+    /// caller treats None as "not flat" (conservative: keeps protecting,
+    /// no regression vs. the previous behavior).
+    async fn is_terminal_process_cpu_flat(pid: Option<i32>) -> Option<bool> {
+        let pid = pid.filter(|&p| p > 0)?;
+        let t1 = Self::read_process_cpu_time_ms(pid).await?;
+        sleep(Duration::from_secs(8)).await;
+        let t2 = Self::read_process_cpu_time_ms(pid).await?;
+        // A generating process consumes well over 50ms of CPU per 8s
+        // (spinner animation alone ticks every ~100-200ms); a deadlocked
+        // process is 0ms. 50ms separates them with margin and tolerates
+        // brief scheduler/GC jitter. (Observed: hung idx5 claude.exe
+        // delta=0ms/12s; active claude.exe delta=~470ms/12s.)
+        Some(t2.saturating_sub(t1) < 50)
+    }
+
+    /// Reads a process TREE's total CPU time (user + kernel) in
+    /// milliseconds. The terminal's tracked PID (`terminal.process_id`)
+    /// is typically a cmd/shell wrapper with ~0 CPU (it just waits);
+    /// the real worker (claude.exe) is a DIRECT CHILD of that wrapper.
+    /// Sampling only the wrapper PID returns 0 → None → the CPU-flat
+    /// guard treats it as "not flat" and never force-completes, so a
+    /// hung claude.exe stays protected for the full 1h hard cap. Query
+    /// the wrapper + its direct children and SUM their CPU so the
+    /// worker's activity is captured.
+    #[cfg(windows)]
+    async fn read_process_cpu_time_ms(pid: i32) -> Option<u64> {
+        // WMIC reports UserModeTime/KernelModeTime in 100-nanosecond units.
+        let output = tokio::process::Command::new("wmic")
+            .args([
+                "process",
+                "where",
+                // Wrapper PID + direct children (claude.exe is a direct
+                // child of the cmd wrapper). SUM covers both.
+                &format!("ProcessId={pid} or ParentProcessId={pid}"),
+                "get",
+                "UserModeTime,KernelModeTime",
+                "/format:csv",
+            ])
+            .env_remove("PORT")
+            .env_remove("BACKEND_PORT")
+            .env_remove("FRONTEND_PORT")
+            .output()
+            .await
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut total_100ns: u64 = 0;
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+            // CSV layout: header "Node,KernelModeTime,UserModeTime" then one
+            // data row per process "<node>,<kernel>,<user>". Take the last
+            // two numeric fields and ACCUMULATE (multiple rows = tree).
+            if parts.len() >= 3 {
+                if let (Ok(k), Ok(u)) = (
+                    parts[parts.len() - 2].parse::<u64>(),
+                    parts[parts.len() - 1].parse::<u64>(),
+                ) {
+                    total_100ns += k + u;
+                }
+            }
+        }
+        if total_100ns == 0 {
+            return None;
+        }
+        Some(total_100ns / 10_000) // 100ns units → ms
+    }
+
+    /// Reads a process's total CPU time (user + kernel) in milliseconds.
+    #[cfg(unix)]
+    async fn read_process_cpu_time_ms(pid: i32) -> Option<u64> {
+        let stat = tokio::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .await
+            .ok()?;
+        // comm is parenthesized and may contain spaces/parens; skip past
+        // the last ')' before splitting on whitespace.
+        let rest = stat.rsplit_once(')').map(|(_, r)| r).unwrap_or(&stat);
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        // After comm: state(0) ppid(1) pgrp(2) session(3) tty(4) tpgid(5)
+        // flags(6) minflt(7) cminflt(8) majflt(9) cmajflt(10) utime(11)
+        // stime(12) ...
+        if fields.len() < 13 {
+            return None;
+        }
+        let utime: u64 = fields[11].parse().ok()?;
+        let stime: u64 = fields[12].parse().ok()?;
+        // Standard Linux uses 100 Hz (CLK_TCK=100) → 10ms per tick.
+        Some((utime + stime) * 10)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    async fn read_process_cpu_time_ms(_pid: i32) -> Option<u64> {
+        None
+    }
+
     /// #N3 fix companion: a LIVE process can be either mid-LLM-generation
     /// (no PTY output but genuinely working — protect from re-dispatch) OR
     /// sitting at an idle input prompt because the task instruction was
@@ -7843,6 +8059,31 @@ impl OrchestratorAgent {
             "Yes, I trust this folder",
             "Quick safety check",
         ];
+        // claude v2.1.x generation spinners — mid-turn the TUI periodically
+        // redraws the whole screen INCLUDING the idle prompt marker
+        // ("bypass permissions on" / "shift+tab to cycle"), so the
+        // idle-signature check above false-positives during long generations
+        // and re-dispatch interrupts them (observed: Tags task stuck in a
+        // ~3.5min re-dispatch loop while claude was actually in ✻ Ionizing,
+        // each re-dispatch restarting generation, wasting ~25min). If a
+        // generation spinner is present in the same window, the terminal is
+        // generating, NOT idle — return false so the alive-hard-cap gate
+        // protects it from re-dispatch.
+        const GENERATING_SIGNATURES: &[&str] = &[
+            "Ionizing",
+            "Sublimating",
+            "Deliberating",
+            "Befuddling",
+            "Pondering",
+            "Reasoning",
+            "Musing",
+            "Thinking",
+            "Ruminating",
+            "Synthesizing",
+        ];
+        if GENERATING_SIGNATURES.iter().any(|s| recent.contains(s)) {
+            return false;
+        }
         IDLE_SIGNATURES.iter().any(|s| recent.contains(s))
     }
 
@@ -8725,8 +8966,19 @@ impl OrchestratorAgent {
                         // 50+ advisory notes gets stranded even after acceptance
                         // review approved it. Critical severity is gated
                         // separately by builtin_*_critical. See §final-gate.
-                        const ADVISORY_LINT_METRICS: [&str; 2] =
-                            ["builtin_frontend_issues", "builtin_rust_issues"];
+                        // builtin_common provider (builtin_common.rs) emits the same
+                        // advisory-lint shape — common-pattern hits + token-level
+                        // duplication counts that compete with code volume, not quality.
+                        // Add builtin_common_issues + duplicated_blocks so a well-tested
+                        // deliverable isn't stranded at the repo gate (web-memo task 7,
+                        // 2026-06-27). SecretsDetected is deliberately NOT here — it is a
+                        // real security signal and stays gated.
+                        const ADVISORY_LINT_METRICS: [&str; 4] = [
+                            "builtin_frontend_issues",
+                            "builtin_rust_issues",
+                            "builtin_common_issues",
+                            "duplicated_blocks",
+                        ];
                         let provider_unavailable = result.value.is_none();
                         let advisory = result
                             .value
@@ -11055,6 +11307,7 @@ async fn fetch_terminal_completion_context(
             base_ref.as_deref(),
             ACCEPTANCE_REVIEW_MAX_BYTES,
             task_file_list.as_deref(),
+            Some(task_id),
         )
         .await
     };
@@ -11117,6 +11370,48 @@ fn same_commit_ref(left: &str, right: &str) -> bool {
     left.len() >= 8 && right.len() >= 8 && (left.starts_with(right) || right.starts_with(left))
 }
 
+/// #N1: Check whether the commit resolved by `ancestor_ref` carries a
+/// `---METADATA--- task_id: <id>` footer naming a task OTHER than
+/// `current_task_id`. Used by the walk-back in `collect_changed_files_content`
+/// to stop accumulating at the previous task's boundary (its last commit), so
+/// the review scope is exactly the current task's cumulative file set even
+/// when the coder's own work commits lack the footer.
+async fn ancestor_commit_belongs_to_other_task(
+    working_dir: &Path,
+    ancestor_ref: &str,
+    current_task_id: &str,
+) -> bool {
+    let output = match tokio::process::Command::new("git")
+        .args(["show", "-s", "--format=%B", ancestor_ref])
+        .current_dir(working_dir)
+        .env_remove("PORT")
+        .env_remove("BACKEND_PORT")
+        .env_remove("FRONTEND_PORT")
+        .output()
+        .await
+    {
+        Ok(o) => o,
+        Err(_) => return false,
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let body = String::from_utf8_lossy(&output.stdout);
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("task_id:") {
+            let found = rest.trim();
+            if !found.is_empty() && found != current_task_id {
+                return true;
+            }
+            // same task (or empty footer) — not a boundary, keep walking
+            return false;
+        }
+    }
+    // No task_id footer on this commit — not a boundary (keep walking).
+    false
+}
+
 /// Collect the actual content of files changed in a commit for acceptance review.
 /// When `base_ref` is provided, collects all files changed since the branch divergence
 /// point (full branch diff). Otherwise falls back to single-commit diff.
@@ -11126,6 +11421,7 @@ async fn collect_changed_files_content(
     base_ref: Option<&str>,
     max_bytes: usize,
     explicit_file_list: Option<&str>,
+    current_task_id: Option<&str>,
 ) -> String {
     // Get list of changed files — explicit set > full branch diff > single-commit diff
     tracing::debug!(
@@ -11138,11 +11434,56 @@ async fn collect_changed_files_content(
     );
     let file_list = if let Some(files) = explicit_file_list {
         // #N1: caller supplied the exact file set this task touched (via the
-        // task_id commit-footer grep). Use it directly — on shared-main mode
-        // this is the ONLY correct scope (HEAD~1..HEAD misses multi-commit
-        // tasks; root..HEAD overflows the byte cap and truncates the task's
-        // own files off the end).
-        files.to_string()
+        // task_id commit-footer grep). On shared-main mode this is the correct
+        // scope — BUT LLM coders don't always attach the task_id footer to
+        // every commit, so a footer-only grep silently drops their footerless
+        // source commits (e.g. a `feat:` commit) and the review sees only
+        // README/config files, rejects with "changes not visible", and loops
+        // forever (§8). Merge the footer set with a bounded walk-back from the
+        // locked commit so footerless source commits are included; the
+        // walk-back still stops at a previous-task boundary, and total content
+        // is capped by `max_bytes` downstream.
+        let mut set: std::collections::HashSet<String> = files
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        const FOOTERLESS_WALKBACK: usize = 8;
+        for depth in 1..=FOOTERLESS_WALKBACK {
+            let ancestor = format!("{commit_hash}~{depth}");
+            if let Some(tid) = current_task_id {
+                if ancestor_commit_belongs_to_other_task(working_dir, &ancestor, tid).await {
+                    break;
+                }
+            }
+            match tokio::process::Command::new("git")
+                .args(["diff", "--name-only", &ancestor, commit_hash])
+                .current_dir(working_dir)
+                .env_remove("PORT")
+                .env_remove("BACKEND_PORT")
+                .env_remove("FRONTEND_PORT")
+                .output()
+                .await
+            {
+                Ok(output) if output.status.success() => {
+                    let candidate = String::from_utf8_lossy(&output.stdout);
+                    if candidate.trim().is_empty() {
+                        // empty span at this depth — keep walking back
+                        continue;
+                    }
+                    for line in candidate.lines() {
+                        let l = line.trim();
+                        if !l.is_empty() {
+                            set.insert(l.to_string());
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+        let mut v: Vec<String> = set.into_iter().collect();
+        v.sort();
+        v.join("\n")
     } else if let Some(base) = base_ref {
         match tokio::process::Command::new("git")
             .args(["diff", "--name-only", base, commit_hash])
@@ -11173,9 +11514,35 @@ async fn collect_changed_files_content(
         // cannot overflow the review context; it can only make an
         // otherwise-empty review see the actual code.
         const EMPTY_COMMIT_WALKBACK: usize = 8;
-        let mut resolved: Option<String> = None;
+        // #N1 fix: ACCUMULATE non-empty diff spans going back. The diff
+        // `ancestor..commit_hash` is already cumulative, so the deepest non-empty
+        // span is the most complete superset — we keep overwriting `accumulated`.
+        // The previous logic broke on the FIRST non-empty span (= HEAD~1..HEAD,
+        // the newest commit only). On shared-main mode (no real task branch),
+        // when a coder lands several real work commits (feat -> refactor ->
+        // harden -> chore), the newest is frequently a tiny chore/cleanup, so
+        // the review saw ~3KB and scored ~14, never converging. We now stop at
+        // a TASK BOUNDARY — an ancestor whose `---METADATA--- task_id:` footer
+        // belongs to a DIFFERENT task (the previous task's last commit) — so
+        // the scope is exactly this task's cumulative file set even when the
+        // coder's own commits lack the footer. Total content is still capped by
+        // `max_bytes` downstream.
+        let mut accumulated: Option<String> = None;
         for depth in 1..=EMPTY_COMMIT_WALKBACK {
             let ancestor = format!("{commit_hash}~{depth}");
+            if let Some(tid) = current_task_id {
+                if ancestor_commit_belongs_to_other_task(working_dir, &ancestor, tid)
+                    .await
+                {
+                    tracing::debug!(
+                        target: "acceptance_review_scope",
+                        depth,
+                        ancestor = %ancestor,
+                        "walk-back stopped at previous-task boundary"
+                    );
+                    break;
+                }
+            }
             match tokio::process::Command::new("git")
                 .args(["diff", "--name-only", &ancestor, commit_hash])
                 .current_dir(working_dir)
@@ -11188,8 +11555,7 @@ async fn collect_changed_files_content(
                 Ok(output) if output.status.success() => {
                     let candidate = String::from_utf8_lossy(&output.stdout).to_string();
                     if !candidate.trim().is_empty() {
-                        resolved = Some(candidate);
-                        break;
+                        accumulated = Some(candidate);
                     }
                     // empty span at this depth — keep walking back
                 }
@@ -11197,7 +11563,7 @@ async fn collect_changed_files_content(
                 _ => break,
             }
         }
-        if let Some(files) = resolved {
+        if let Some(files) = accumulated {
             files
         } else {
             // Fallback: try diff against empty tree for initial commits

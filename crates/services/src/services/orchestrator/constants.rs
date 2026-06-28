@@ -107,6 +107,26 @@ pub const MAX_ENFORCE_DEADLOCK_BLOCKS: u32 = 10;
 /// deadlocking the workflow forever on a near-miss score.
 pub const MAX_REVIEW_REDRIVES: u32 = 3;
 
+/// Grace period (seconds) before orphan-failing a `pending` task that has no
+/// terminal, when the workflow is otherwise idle.
+///
+/// Feature tasks are materialized asynchronously AFTER the Foundation task
+/// completes — the "stuck-foundation" detector fires a replanning LLM call
+/// (~10-30s) whose response creates the feature tasks, and each task's
+/// terminal is then dispatched via a follow-up LLM `create_terminal` +
+/// `start_terminal` instruction (another async round-trip). Meanwhile
+/// `auto_complete_stalled_tasks` runs every `STALL_WATCHDOG_TICK` (= 5s in
+/// release). Without a grace window, the sweep sees freshly-created pending
+/// feature tasks (no terminal yet) + no active terminal (Foundation just
+/// finished) and auto-fails them the SAME second they were created — racing
+/// the dispatcher and orphaning the entire feature phase.
+///
+/// Observed 2026-06-28 on knowledge-base-demo (workflow 8d47190c): 7 feature
+/// tasks auto-failed at 21:31:00, the exact second they were created, so zero
+/// feature work ever ran and the workflow failed instantly. 180s comfortably
+/// covers the replanning LLM call + terminal spawn + several sweep ticks.
+pub const ORPHAN_PENDING_GRACE_SECS: i64 = 180;
+
 // Phase 29C: Quality Gate constants
 pub const TERMINAL_STATUS_QUALITY_PENDING: &str = "quality_pending";
 pub const QUALITY_GATE_MODE_OFF: &str = "off";
