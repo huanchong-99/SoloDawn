@@ -4,7 +4,7 @@
 ; ============================================================================
 
 #define MyAppName "SoloDawn"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "SoloDawn"
 #define MyAppURL "https://github.com/huanchong-99/SoloDawn"
 #define MyAppExeName "solodawn-tray.exe"

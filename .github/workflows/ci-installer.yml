@@ -1,15 +1,19 @@
 # ============================================================================
 # CI Workflow: Windows Installer Build
-# Triggers: push tag v*.*.*
+# Triggers: manual (workflow_dispatch) only
 # Jobs: build-installer
-# Produces: SoloDawn-Setup-v{version}.exe uploaded to GitHub Release
+# Produces: SoloDawn-Setup-v{version}.exe as a workflow ARTIFACT (not a release
+#           asset). SoloDawn 1.0+ ships source-run with no prebuilt installer;
+#           run this workflow by hand whenever a Windows .exe is desired.
 # ============================================================================
 name: Build Windows Installer
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  # Manual trigger only. Tag pushes no longer auto-build an installer, so
+  # releases stay installer-free. A maintainer runs this by hand to produce a
+  # Windows .exe on demand; the artifact lives in the run (30-day retention)
+  # rather than being auto-published to any release.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -123,10 +127,12 @@ jobs:
         }
         & $iscc installer/solodawn.iss
 
-    # --- Upload to release ---
-    - name: Upload installer to release
-      uses: softprops/action-gh-release@c95fe1c8d4547f8c42bd29fae893987ccd1e411b # v2.2.1
+    # --- Upload installer as a workflow artifact (NOT a release asset) ---
+    # SoloDawn 1.0+ ships source-run; the installer is built on demand and
+    # held as a run artifact for the maintainer, never auto-published.
+    - name: Upload installer artifact
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
       with:
-        files: installer/output/SoloDawn-Setup-*.exe
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: SoloDawn-Windows-Installer
+        path: installer/output/SoloDawn-Setup-*.exe
+        retention-days: 30
