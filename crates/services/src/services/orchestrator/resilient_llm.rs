@@ -442,6 +442,12 @@ mod tests {
 
     #[tokio::test]
     async fn all_providers_fail_returns_error() {
+        // MockLLMClient::that_fails() returns a plain anyhow error (not a
+        // RetryableLlmError), so ResilientLLMClient treats it as non-retryable
+        // and fails fast — propagating the ORIGINAL provider error verbatim
+        // rather than the "All LLM providers exhausted" aggregate. That
+        // aggregate is only produced when retryable failures exhaust the 6h
+        // retry budget (resilient_llm.rs RETRY_TOTAL_BUDGET_SECS path).
         let client = ResilientLLMClient::new(vec![
             ("p1".into(), Box::new(MockLLMClient::that_fails())),
             ("p2".into(), Box::new(MockLLMClient::that_fails())),
@@ -452,7 +458,8 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("All LLM providers exhausted")
+                .contains("Mock LLM client error"),
+            "non-retryable provider error should be propagated verbatim (fail-fast)"
         );
     }
 

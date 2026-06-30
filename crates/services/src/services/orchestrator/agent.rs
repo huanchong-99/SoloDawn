@@ -13300,7 +13300,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_acceptance_review_gate_invalidates_result_when_new_commit_appears() {
+    async fn run_acceptance_review_gate_keeps_approved_when_new_commit_appears() {
+        // [§8 #4 — loop-stall-rootcause-fix] CommitDuringReviewClient both
+        // returns verdict=APPROVED and commits a late change mid-review. An
+        // APPROVED review must NOT be invalidated by the post-review commit-
+        // drift guard: previously every approved review was invalidated (HEAD
+        // moved post-lock), so coders never received a "passed" signal and the
+        // workflow deadlocked (review>=90, passed=true, never finalizing).
+        // Only rejected/inconclusive reviews are invalidated; approved ones
+        // finalize regardless.
         let fixture = setup_acceptance_review_gate_fixture(|repo_path| {
             Box::new(CommitDuringReviewClient {
                 repo_path: repo_path.to_path_buf(),
@@ -13316,16 +13324,18 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(!passed);
+        assert!(passed, "APPROVED review must survive a mid-review commit (§8 #4)");
+        // Precondition: the late commit really did land.
         assert_ne!(
             run_git(&fixture.repo_path, &["rev-parse", "HEAD"]),
             locked_commit
         );
+        // Approved path must not flag the task review_pending (no invalidation).
         let task = db::models::WorkflowTask::find_by_id(&fixture.db.pool, &event.task_id)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(task.status, "running");
+        assert_ne!(task.status, TASK_STATUS_REVIEW_PENDING);
     }
 
     async fn insert_failed_quality_run_with_blockers(

@@ -2923,10 +2923,16 @@ next_action: handoff";
 
         let mock_server = MockServer::start().await;
 
+        // Use 401 (non-retryable) instead of 500: create_llm_client always
+        // wraps in ResilientLLMClient (§7 long-backoff retry on transient
+        // failures), and 500 is classified retryable (llm::is_retryable_status),
+        // so a 500 mock would loop on the 6h retry budget and hang the test.
+        // 401 is non-retryable → fail-fast → the HTTP error is propagated
+        // immediately, which is what this test verifies.
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
-            .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
-                "error": "Internal server error"
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": "Unauthorized"
             })))
             .mount(&mock_server)
             .await;
@@ -2948,12 +2954,11 @@ next_action: handoff";
 
         let result = client.chat(messages).await;
 
-        // G24-006: Single-provider client has no internal retry.
-        // A 500 error should be propagated immediately.
+        // Non-retryable HTTP error must be propagated immediately.
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("500"),
+            err_msg.contains("401"),
             "Error should contain status code: {err_msg}"
         );
     }
