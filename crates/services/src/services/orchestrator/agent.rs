@@ -1216,9 +1216,38 @@ impl OrchestratorAgent {
                     if task_terminals.is_empty() {
                         continue;
                     }
-                    let all_done = task_terminals
-                        .iter()
-                        .all(|t| t.status == "completed" || t.status == "failed");
+                    // §8 #19 (orphaned completed-terminal recovery): an
+                    // agent-planned feature task normally has ONE coder
+                    // terminal that completes with a handoff commit, plus a
+                    // not_started follow-up slot. If the coder terminal
+                    // finished via a path that bypassed the
+                    // terminal-completion review (e.g. it exited before the
+                    // review LLM fired, or a restart orphaned it), the task
+                    // is left running with verdict=None and the synthetic
+                    // review below never runs — because all_done is false
+                    // while the inert not_started placeholder exists. Treat
+                    // the task as done when every terminal is inert
+                    // (completed/failed/not_started) AND at least one
+                    // completed terminal committed real work; the synthetic
+                    // review gate (§8 #19-recovery below) then backfills the
+                    // missing score instead of the task stalling forever.
+                    let has_completed_commit = task_terminals.iter().any(|t| {
+                        t.status == "completed"
+                            && t
+                                .last_commit_hash
+                                .as_deref()
+                                .map(|s| !s.is_empty())
+                                .unwrap_or(false)
+                    });
+                    let all_done = task_terminals.iter().all(|t| {
+                        t.status == "completed" || t.status == "failed"
+                    }) || (has_completed_commit
+                        && task_terminals.iter().all(|t| {
+                            matches!(
+                                t.status.as_str(),
+                                "completed" | "failed" | "not_started"
+                            )
+                        }));
                     if all_done {
                         // R8-B3 guard #2: don't auto-complete a task whose
                         // terminals technically exited but whose enforce
@@ -1750,14 +1779,56 @@ impl OrchestratorAgent {
                     if Self::is_terminal_at_idle_prompt(&self.db.pool, &terminal.id)
                         .await
                     {
+                        // [G32-idle-flat-forcecomplete] idle-prompt signature
+                        // alone is ambiguous: it can be (a) a freshly-spawned
+                        // claude that swallowed the cold-start instruction and
+                        // is sitting at the prompt waiting (re-dispatch may
+                        // self-heal), OR (b) a claude process that has gone
+                        // internally hung — alive PID, idle-prompt residue in
+                        // the log, but no longer reading PTY input. Re-
+                        // dispatching case (b) is permanently ineffective: the
+                        // injected instruction is never consumed, yet the stall
+                        // detector re-dispatches every quiet window, looping for
+                        // 76min+ with zero commit (observed: baf63f12 task5
+                        // 2026-06-30, claude pid 14980 CPU flat 476s→0 delta,
+                        // GLM provider healthy, 12+ re-dispatches, no commit).
+                        // CPU activity discriminates: flat = hung/swallowed-
+                        // and-stuck -> force-complete (kill + spawn FRESH
+                        // claude via re-dispatch, which has a real chance of
+                        // receiving the instruction — oid=2's coders reached
+                        // 92 this way); active = generating/waiting-on-LLM ->
+                        // protect.
+                        let idle_cpu_flat = matches!(
+                            Self::is_terminal_process_cpu_flat(terminal.process_id).await,
+                            Some(true)
+                        );
+                        if idle_cpu_flat {
+                            tracing::warn!(
+                                workflow_id = %workflow_id,
+                                task_id = %task.id,
+                                terminal_id = %terminal.id,
+                                process_id = ?terminal.process_id,
+                                "Idle-prompt + CPU flat (process hung / instruction swallowed and stuck); re-dispatch of same process ineffective — force-completing to spawn fresh claude"
+                            );
+                            if let Err(e) = db::models::Terminal::set_completed_if_unfinished(
+                                &self.db.pool,
+                                &terminal.id,
+                                "completed",
+                            )
+                            .await
+                            {
+                                tracing::error!(terminal_id = %terminal.id, error = %e, "Failed to force-complete idle+flat terminal");
+                            }
+                            continue;
+                        }
                         tracing::info!(
                             workflow_id = %workflow_id,
                             task_id = %task.id,
                             terminal_id = %terminal.id,
                             process_id = ?terminal.process_id,
-                            "Live terminal at idle input prompt (instruction likely swallowed by cold-start); allowing re-dispatch to self-heal"
+                            "Live terminal at idle input prompt but CPU active (waiting on LLM response); protecting in-flight generation"
                         );
-                        // fall through to the re-dispatch path below.
+                        continue;
                     } else if self
                         .remaining_terminal_quiet_duration(
                             &terminal.id,
