@@ -32,7 +32,17 @@
     clippy::incompatible_msrv,
     clippy::return_self_not_must_use,
     clippy::default_trait_access,
-    clippy::if_same_then_else
+    clippy::if_same_then_else,
+    // Align with crates/server/src/lib.rs allow-list — pedantic lints the
+    // project already chose not to enforce server-side; mirrored here so both
+    // core crates share one consistent lint policy.
+    clippy::redundant_closure_for_method_calls,
+    clippy::wildcard_imports,
+    clippy::struct_field_names,
+    clippy::needless_continue,
+    // Additional pedantic/style lints surfaced by the orchestrator code.
+    clippy::many_single_char_names,
+    clippy::doc_lazy_continuation
 )]
 
 pub mod services;

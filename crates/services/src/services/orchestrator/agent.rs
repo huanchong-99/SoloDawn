@@ -7135,7 +7135,7 @@ impl OrchestratorAgent {
                             // relevance).
                             let cjk_terms = goal_terms
                                 .iter()
-                                .filter(|t| t.chars().any(|c| !c.is_ascii()))
+                                .filter(|t| !t.is_ascii())
                                 .count();
                             let mostly_cjk = cjk_terms * 2 >= goal_terms.len();
                             if mostly_cjk {

@@ -1049,6 +1049,7 @@ pub struct AcceptanceReviewResultEvent {
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)] // tests assert exact scores parsed from fixed JSON inputs
 mod tests {
     use super::*;
 
