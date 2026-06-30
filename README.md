@@ -124,6 +124,44 @@ When a quality gate fails, structured fix instructions are automatically sent ba
 
 ---
 
+## Acceptance Review & Scoring Rubric — Proving the Delivery Meets Your Requirements
+
+Quality gates catch *mechanical* errors (compile, lint, complexity, secrets). But "does this task actually deliver what I asked for?" needs deeper judgment. SoloDawn answers it with an **LLM-scored acceptance review** driven by a **project-tailored scoring rubric**.
+
+### The rubric is generated from your spec
+
+The moment your technical spec is confirmed, SoloDawn generates an **AuditPlan** — a scoring rubric tailored to *your specific project*. An LLM adapts the built-in 100-point, 5-dimension audit principles to your spec:
+
+| Dimension | Max |
+|---|---|
+| Buildability | 20 |
+| Functional completeness | 25 |
+| Code quality (architecture / standards / security) | 30 |
+| Test quality | 15 |
+| Engineering & docs | 10 |
+
+You can **upload your own audit document** to lead the rubric — three modes:
+
+| Mode | What the rubric uses |
+|---|---|
+| **Builtin** (default) | built-in principles, tailored to your spec |
+| **Merged** | your document **+** built-in; your document takes precedence |
+| **Custom** | your document only |
+
+> The rubric is generated the instant you confirm the spec. To influence it, upload your audit document **before** confirming — the panel becomes read-only afterward.
+
+### Every task is scored against the rubric
+
+When a task finishes, the acceptance-review LLM scores the delivered code against the rubric, dimension by dimension, citing file/line evidence.
+
+- **score ≥ 90 (pass threshold) → APPROVED → the task proceeds**
+- **score < 90 → REJECTED → fix instructions sent back → the terminal self-corrects and re-commits** (self-healing loop)
+- A **veto rule** (missing requirement, security risk, fake tests, etc.) forces the total to **0** regardless of other dimensions
+
+This is why the final delivery is trustworthy: every task had to prove — against criteria derived from *your* requirements — that it met the bar, not merely that it compiled.
+
+---
+
 ## Core Design Philosophy
 
 - **Upper-layer orchestration, not code generation.** The orchestrator Agent never writes code — it commands the best professional AI CLIs (Claude Code, Gemini CLI, Codex, Amp, Cursor Agent, etc.) to do the work.
