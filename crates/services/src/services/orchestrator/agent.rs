@@ -9870,14 +9870,30 @@ impl OrchestratorAgent {
 
         let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, workflow_id).await?;
         let terminals = db::models::Terminal::find_by_workflow(&self.db.pool, workflow_id).await?;
+        // §8 #20: a not_started terminal on an ALREADY-FINAL task is an inert
+        // orphan placeholder — the dispatch sweep (auto_complete_stalled_tasks)
+        // skips completed/failed/cancelled tasks, so that terminal will never be
+        // started. Counting it as "runnable" here orphans the workflow at
+        // `running` forever even though every task is done (e.g. a feature task
+        // whose coder terminal completed but whose not_started follow-up slot
+        // lingers). Only block on not_started when its task is still active;
+        // in-flight states (starting/waiting/working) always block.
         let has_runnable_terminals = terminals.iter().any(|terminal| {
-            matches!(
+            let in_flight = matches!(
                 terminal.status.as_str(),
-                TERMINAL_STATUS_NOT_STARTED
-                    | TERMINAL_STATUS_STARTING
-                    | TERMINAL_STATUS_WAITING
-                    | TERMINAL_STATUS_WORKING
-            )
+                TERMINAL_STATUS_STARTING | TERMINAL_STATUS_WAITING | TERMINAL_STATUS_WORKING
+            );
+            let queued_on_active_task = terminal.status == TERMINAL_STATUS_NOT_STARTED
+                && tasks.iter().any(|t| {
+                    t.id == terminal.workflow_task_id
+                        && !matches!(
+                            t.status.as_str(),
+                            TASK_STATUS_COMPLETED
+                                | TASK_STATUS_FAILED
+                                | TASK_STATUS_CANCELLED
+                        )
+                });
+            in_flight || queued_on_active_task
         });
         if has_runnable_terminals {
             return Ok(());
@@ -11015,11 +11031,26 @@ async fn terminal_has_unresolved_enforce_blockers(db: &Arc<DBService>, terminal_
     if latest.mode != QUALITY_GATE_MODE_ENFORCE {
         return false;
     }
-    match latest.gate_status.as_str() {
+    let would_block = match latest.gate_status.as_str() {
         "pending" | "running" => true,
         "error" => latest.blocking_issues > 0,
         _ => false, // ok / skipped / warn — gate cleared
+    };
+    if !would_block {
+        return false;
     }
+    // §8 #20: if every blocking issue is infra/tooling (::unavailable /
+    // ::evaluation_error), this is an environment blocker the coder cannot
+    // fix — scheduling a final-repair task for it is futile and strands the
+    // workflow in an oscillation loop (final-repair commits → infra blocker
+    // persists → re-schedule). The per-terminal admission gate and the final
+    // readiness gate both already exempt infra; this rollup must match, or
+    // all-tasks-completed workflows with TS+Tauri (or other infra-noise)
+    // projects never transition to `completed`.
+    if is_quality_run_only_infra_blockers(db, &latest.id).await {
+        return false;
+    }
+    true
 }
 
 /// R8-B3: workflow-level rollup. Returns true iff ANY terminal in the
