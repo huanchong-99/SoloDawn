@@ -303,7 +303,7 @@ If a build step fails, read the error, install the missing prerequisite, and ret
 | Cache footprint | modest `target/` (server binary + deps only) | large `target/` (whole-workspace test/clippy/codegen) |
 | See | [Quick Start](#quick-start) below | [Contributing](#contributing) |
 
-> **1.0 ships source-run** — there is no prebuilt installer. Clone and run with `pnpm run dev` (or build a release binary). A Windows installer can still be produced on demand via the `Build Windows Installer` workflow (manual trigger).
+> **1.0 ships source-run** — there is **no installer of any kind**. Clone and run with `pnpm run dev` (or build a release binary). The `installer/` directory and the `Build Windows Installer` workflow are retained from earlier development; 1.0 does not publish a Windows installer.
 
 ---
 
