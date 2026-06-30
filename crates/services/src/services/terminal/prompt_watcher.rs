@@ -2922,7 +2922,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_process_output_bypass_prompt_auto_confirms_with_terminal_input() {
+    async fn test_process_output_bypass_status_line_suppressed_with_terminal_input() {
         let message_bus = Arc::new(MessageBus::new(100));
         let process_manager = Arc::new(ProcessManager::new());
         let watcher = PromptWatcher::new(message_bus.clone(), process_manager);
@@ -2946,32 +2946,21 @@ mod tests {
 
         watcher.process_output("term-1", bypass_line).await;
 
-        let event = tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv())
-            .await
-            .expect("expected terminal input broadcast")
-            .expect("broadcast channel should be open");
-
-        match event {
-            BusMessage::TerminalInput {
-                terminal_id,
-                session_id,
-                input,
-                decision,
-            } => {
-                assert_eq!(terminal_id, "term-1");
-                assert_eq!(session_id, "session-1");
-                assert_eq!(input, "\n");
-                assert!(matches!(
-                    decision,
-                    Some(crate::services::orchestrator::types::PromptDecision::AutoConfirm { .. })
-                ));
-            }
-            other => panic!("expected TerminalInput event, got: {other:?}"),
-        }
+        // [G30-bypass-statusline] The line carries the persistent TUI status
+        // marker "bypass permissions on (shift+tab to cycle)"; the bare-Enter
+        // fallback must be suppressed — this is a per-frame redraw, not an
+        // interactive prompt, and a bare Enter floods the PTY (328 injections
+        // observed on wf 6a2e3214). Genuine bypass-menu acceptance ("Yes, I
+        // accept") is covered by the auto_selects_yes_accept tests below.
+        let event = tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv()).await;
+        assert!(
+            event.is_err(),
+            "bypass permissions STATUS LINE must not auto-enter (G30 line-level suppression)"
+        );
     }
 
     #[tokio::test]
-    async fn test_process_output_bypass_prompt_chunk_level_auto_confirms_with_terminal_input() {
+    async fn test_process_output_bypass_status_line_chunk_level_suppressed() {
         let message_bus = Arc::new(MessageBus::new(100));
         let process_manager = Arc::new(ProcessManager::new());
         let watcher = PromptWatcher::new(message_bus.clone(), process_manager);
@@ -2996,28 +2985,14 @@ mod tests {
 
         watcher.process_output("term-1", bypass_chunk).await;
 
-        let event = tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv())
-            .await
-            .expect("expected terminal input broadcast")
-            .expect("broadcast channel should be open");
-
-        match event {
-            BusMessage::TerminalInput {
-                terminal_id,
-                session_id,
-                input,
-                decision,
-            } => {
-                assert_eq!(terminal_id, "term-1");
-                assert_eq!(session_id, "session-1");
-                assert_eq!(input, "\n");
-                assert!(matches!(
-                    decision,
-                    Some(crate::services::orchestrator::types::PromptDecision::AutoConfirm { .. })
-                ));
-            }
-            other => panic!("expected TerminalInput event, got: {other:?}"),
-        }
+        // [G23-bypass-statusline] Chunk-level mirror of G30: an ANSI-heavy
+        // chunk carrying the persistent "bypass permissions on (shift+tab to
+        // cycle)" status-line marker must not trigger a bare Enter either.
+        let event = tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv()).await;
+        assert!(
+            event.is_err(),
+            "bypass permissions STATUS LINE chunk must not auto-enter (G23 chunk-level suppression)"
+        );
     }
 
     #[tokio::test]
@@ -4286,7 +4261,7 @@ WARNING: Claude Code running in Bypass Permissions mode
     }
 
     #[tokio::test]
-    async fn test_process_output_bypass_fallback_dedupes_consecutive_injection() {
+    async fn test_process_output_bypass_status_line_suppressed_across_repeats() {
         let message_bus = Arc::new(MessageBus::new(100));
         let process_manager = Arc::new(ProcessManager::new());
         let watcher = PromptWatcher::new(message_bus.clone(), process_manager);
@@ -4311,15 +4286,14 @@ WARNING: Claude Code running in Bypass Permissions mode
 
         watcher.process_output("term-1", bypass_prompt).await;
 
-        let first_event = tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv())
-            .await
-            .expect("expected first terminal input broadcast")
-            .expect("broadcast channel should be open");
-
-        match first_event {
-            BusMessage::TerminalInput { input, .. } => assert_eq!(input, "\n"),
-            other => panic!("expected TerminalInput event, got: {other:?}"),
-        }
+        // [G30] First redraw of the persistent status line: bare-Enter fallback
+        // is suppressed (no auto-enter on a non-interactive status line).
+        let first_event =
+            tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv()).await;
+        assert!(
+            first_event.is_err(),
+            "first bypass STATUS LINE invocation must not auto-enter (G30 suppression)"
+        );
 
         {
             let mut terminals = watcher.terminals.write().await;
@@ -4341,7 +4315,7 @@ WARNING: Claude Code running in Bypass Permissions mode
     }
 
     #[tokio::test]
-    async fn test_process_output_bypass_status_line_auto_enters_in_auto_confirm() {
+    async fn test_process_output_bypass_status_line_with_notepad_hint_suppressed() {
         let message_bus = Arc::new(MessageBus::new(100));
         let process_manager = Arc::new(ProcessManager::new());
         let watcher = PromptWatcher::new(message_bus.clone(), process_manager);
@@ -4370,8 +4344,8 @@ WARNING: Claude Code running in Bypass Permissions mode
 
         let event = tokio::time::timeout(Duration::from_millis(200), broadcast_rx.recv()).await;
         assert!(
-            event.is_ok(),
-            "bypass permissions prompt should auto-enter when auto_confirm is enabled"
+            event.is_err(),
+            "bypass permissions STATUS LINE must not auto-enter even with a Notepad hint (G30 suppression)"
         );
     }
 

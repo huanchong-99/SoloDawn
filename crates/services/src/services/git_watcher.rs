@@ -1103,8 +1103,17 @@ next_action: continue";
             .await
             .expect("mismatch should be handled safely");
 
+        // [G24-stale-metadata] A mismatched workflow_id no longer causes the
+        // commit to be skipped — the stale METADATA is stripped and a GitEvent
+        // is published for the BOUND workflow so the orchestrator can
+        // re-attribute the handoff (stale-metadata recovery, see
+        // handle_new_commit). The subscriber on the bound workflow channel
+        // should therefore receive the event.
         let recv = tokio::time::timeout(Duration::from_millis(150), workflow_rx.recv()).await;
-        assert!(recv.is_err(), "mismatch commit should not publish events");
+        assert!(
+            recv.is_ok(),
+            "mismatch commit should publish a GitEvent for the bound workflow (G24 stale-metadata recovery)"
+        );
 
         let _ = std::fs::remove_dir_all(repo_path);
     }
