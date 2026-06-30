@@ -815,6 +815,23 @@ impl ProcessManager {
             }
         }
 
+        // [G22-husky] Disable repo-managed git hooks for agent workspaces. In shared-main
+        // parallel mode, pre-commit hooks (husky/lefthook/native) read the working tree
+        // which concurrent coders mutate mid-hook (ENOENT) → hook failure → coder runs
+        // `git reset --hard` to recover → drops peer coders' commits → re-commit cascade
+        // (§8 stall; wf 40eb3ffd hoppscotch, 2026-06-29: same "charts" commit re-made 7+
+        // times). Agent workspaces are gated by SoloDawn's own quality_run; repo hooks are
+        // redundant here and unsafe under concurrent tree mutation. HUSKY=0 makes husky
+        // v9+'s runner skip; GIT_CONFIG core.hooksPath disables native hooks for repos
+        // that don't set core.hooksPath in their own config (env has lower precedence than
+        // repo config, so this belt only fires when the repo doesn't pin hooksPath itself).
+        cmd.env("HUSKY", "0");
+        let empty_hooks = std::env::temp_dir().join("solodawn-empty-hooks");
+        let _ = std::fs::create_dir_all(&empty_hooks);
+        cmd.env("GIT_CONFIG_COUNT", "1");
+        cmd.env("GIT_CONFIG_KEY_0", "core.hooksPath");
+        cmd.env("GIT_CONFIG_VALUE_0", empty_hooks.to_string_lossy().to_string());
+
         // [G21-001] Isolated AI-CLI homes were already captured above and stored in
         // `isolated_homes_guard`. The duplicate parsing here previously overwrote the
         // guard-protected value. Removed to use the single source of truth.

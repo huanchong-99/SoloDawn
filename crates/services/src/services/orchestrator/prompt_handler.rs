@@ -35,6 +35,36 @@ pub type LLMPromptCallback =
 const AUTO_CONFIRM_CONFIDENCE_THRESHOLD: f32 = 0.85;
 
 const SPINNER_NOISE_MARKERS: [&str; 2] = ["brewing", "loading"];
+
+/// Claude Code TUI chrome markers. When an ArrowSelect detection's raw_text
+/// contains any of these, the "menu" is actually claude TUI output being
+/// re-rendered (idle prompt, bypass status line, generation spinner, onboarding
+/// remnant) — not a real arrow-key menu. The rule-based "select first option"
+/// handler would otherwise inject ↑↑↑\n on every detection (~0.5s cadence) and
+/// flood the PTY, stranding the coder (observed: baf63f12 2026-06-30, 21 ArrowUp
+/// + 7 Enter in 3s → claude could not process the re-dispatch instruction →
+/// idle-prompt → stall re-dispatch loop → §8 convergence stall).
+const CLAUDE_TUI_NOISE_MARKERS: &[&str] = &[
+    "bypass permissions",
+    "shift+tab",
+    "tips for getting started",
+    "welcome back",
+    "welcome to claude code",
+    "tokens)",
+    "choose the text style",
+    "ionizing",
+    "pondering",
+    "thinking",
+    "deliberating",
+    "musing",
+    "ruminating",
+    "synthesizing",
+    "germinating",
+    "sublimating",
+    "befuddling",
+    "reasoning",
+];
+
 const ADVISORY_CHECKLIST_PREFIXES: [&str; 5] = ["[ ]", "[x]", "[X]", "- [ ]", "* [ ]"];
 const ENTER_CONFIRM_MARKERS: [&str; 6] = [
     "press enter to continue",
@@ -402,6 +432,37 @@ impl PromptHandler {
 
             PromptKind::ArrowSelect => {
                 let normalized_prompt = prompt.raw_text.to_ascii_lowercase();
+
+                // [G31-arrowselect-claude-tui] Claude Code's TUI periodically
+                // redraws multi-line chrome (Tips list, bypass status line,
+                // spinner frame) that the detector reads as >=3 `>`/`*`-marked
+                // "options" — a hint-less ArrowSelect at confidence 0.75. A real
+                // arrow-key menu always carries an explicit navigation hint
+                // (↑↓ / "arrow keys to select") → confidence 0.95. Injecting
+                // ↑↑↑\n into the TUI-redraw misread floods the PTY every ~0.5s
+                // and strands the coder (baf63f12 2026-06-30). Skip auto arrow
+                // injection when the detection is hint-less OR the raw_text
+                // carries Claude TUI chrome markers.
+                let claude_tui_noise = CLAUDE_TUI_NOISE_MARKERS
+                    .iter()
+                    .filter(|marker| normalized_prompt.contains(**marker))
+                    .count();
+                let hintless = prompt.confidence < 0.9;
+                if claude_tui_noise > 0 || hintless {
+                    tracing::warn!(
+                        raw_text = %prompt.raw_text,
+                        confidence = prompt.confidence,
+                        claude_tui_noise,
+                        hintless,
+                        "ArrowSelect looks like Claude TUI redraw / hint-less inference; skip auto arrow injection to avoid PTY flood"
+                    );
+                    return PromptDecision::Skip {
+                        reason:
+                            "Ignore TUI-chrome / hint-less ArrowSelect misread to avoid arrow-key PTY flood"
+                                .to_string(),
+                    };
+                }
+
                 let spinner_noise_score = SPINNER_NOISE_MARKERS
                     .iter()
                     .filter(|marker| normalized_prompt.contains(**marker))

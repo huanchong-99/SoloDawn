@@ -28,7 +28,7 @@ pub use compiled_rule::{
 };
 pub use declarative::{run_candidate, DeclarativeRuleProvider};
 
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, time::Duration};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -120,7 +120,22 @@ pub async fn run_node_quality_command(
     // no-op for absolute results but caused primary-brain review concern
     // about idempotency assumptions — keep a single resolution point.
     let (cmd, args) = resolve_node_command(package_manager, command);
-    tokio::process::Command::new(cmd)
+    // Bound the subprocess so a hung test/lint runner cannot block the
+    // quality gate forever. The resolved command is typically a PM shim
+    // (`pnpm exec ...`) which itself spawns a worker tree (tsx/vitest/tsc);
+    // a worker that waits on a port/DB/service that never arrives hangs the
+    // whole tree, and without a timeout `child.wait_with_output()` awaits
+    // indefinitely, stranding the quality_run in "running" forever. Observed
+    // 2026-06-29 (ecommerce final gate): a hung worker produced 140+
+    // never-completing quality_runs and 230+ orphan node processes because
+    // nothing ever reaped the tree.
+    //
+    // We capture the child PID, then race `wait_with_output` against a
+    // generous budget. On timeout we tree-kill (taskkill /T on Windows,
+    // process-group kill on Unix) so grandchildren are reaped too — killing
+    // only the direct child leaves the hung worker (a grandchild) alive and
+    // holding whatever resource it is stuck on.
+    let child = tokio::process::Command::new(cmd)
         .args(args)
         .current_dir(cwd)
         // SoloDawn's root `.env` carries `PORT=23456` / `BACKEND_PORT=23456`
@@ -134,9 +149,55 @@ pub async fn run_node_quality_command(
         .env_remove("PORT")
         .env_remove("BACKEND_PORT")
         .env_remove("FRONTEND_PORT")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    let pid = child.id().unwrap_or(0);
+    match tokio::time::timeout(NODE_QUALITY_TIMEOUT, child.wait_with_output()).await {
+        Ok(result) => result.map_err(Into::into),
+        Err(_) => {
+            kill_process_tree(pid).await;
+            anyhow::bail!(
+                "node quality command exceeded {}s timeout — likely a hung test/lint runner (killed process tree)",
+                NODE_QUALITY_TIMEOUT.as_secs()
+            )
+        }
+    }
+}
+
+/// Per-subprocess wall-clock budget for `run_node_quality_command`. Generous
+/// enough to cover a real `pnpm test`/`tsc`/`vitest` run on a service, but
+/// bounded so a hung runner is reaped instead of stranding the gate.
+const NODE_QUALITY_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// Kill a process and its entire descendant tree. On timeout the hung leaf is
+/// typically a grandchild (a tsx/vitest worker the PM shim spawned), so killing
+/// only the direct child is insufficient.
+#[cfg(windows)]
+async fn kill_process_tree(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    // `taskkill /T` walks the tree rooted at `pid` and kills every descendant;
+    // `/F` forces it. Best-effort — ignore failures (process may already be gone).
+    let _ = tokio::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
         .output()
-        .await
-        .map_err(Into::into)
+        .await;
+}
+
+#[cfg(not(windows))]
+async fn kill_process_tree(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    // Best-effort: send SIGKILL to the PID. Cross-platform tree-kill via a new
+    // process group is handled at spawn time only when the caller opts in; the
+    // dev stack runs on Windows so this Unix branch is a safety net.
+    let _ = tokio::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .output()
+        .await;
 }
 
 /// 分析器 Provider trait

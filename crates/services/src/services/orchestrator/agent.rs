@@ -3243,6 +3243,42 @@ impl OrchestratorAgent {
                             changed_files = ?files,
                             "Terminal quality gate changed-files detail"
                         );
+                        // [G28-empty-handoff-passthrough] An empty handoff commit
+                        // (`git commit --allow-empty`, the standard shared-main
+                        // "done" signal — the coder's real changes already landed
+                        // in prior commits and were gated there) has 0 files in
+                        // its introduced scope. The engine produces
+                        // gate_status=skipped for an empty scope (no metrics to
+                        // evaluate), and handle_quality_gate_result refuses to
+                        // promote enforce-mode skipped gates → task completion
+                        // deadlocks (observed hoppscotch wf6a2e3214: 13/16 runs
+                        // skipped on empty handoffs → done=0 for 1h). For 0
+                        // introduced files there is nothing new to verify;
+                        // produce a clean pass so the terminal promotes on its
+                        // prior already-gated commits. The acceptance review
+                        // (which walks back to the real changes) still scores
+                        // the task independently.
+                        if files.is_empty() {
+                            tracing::info!(
+                                terminal_id = %terminal_id,
+                                commit_hash = ?commit_hash,
+                                "Quality gate: empty introduced scope (0 changed files) \
+                                 — empty handoff commit, passing through (real code changes \
+                                 gated in prior commits)"
+                            );
+                            return GateOutcome {
+                                gate_status: "passed",
+                                total_issues: 0,
+                                blocking_issues: 0,
+                                new_issues: 0,
+                                passed: true,
+                                fix_instructions: None,
+                                report_json: None,
+                                providers_json: None,
+                                decision_json: None,
+                                issues: Vec::new(),
+                            };
+                        }
                     }
 
                     // R4 Fix A: pre-gate JS dep bootstrap. If the worktree has a
@@ -5094,34 +5130,54 @@ impl OrchestratorAgent {
         // if a candidate terminal's recent logs contain this commit hash
         // (usually shown by the CLI right after commit), prefer that terminal.
         if inferred_candidates.len() > 1 {
-            let mut hash_matched_candidates: Vec<(i32, i32, InferredNoMetadataCompletion)> =
+            // [G25-hash-count-attribution] On shared-main, multiple coders share
+            // one branch, so a no-metadata handoff commit cannot be attributed by
+            // task hint or branch alone. Score each candidate terminal by how many
+            // times the commit hash appears in its recent logs. The PRODUCING
+            // terminal always shows the hash most prominently (claude prints the
+            // commit summary, then git status/log echoes it), so the highest count
+            // reliably identifies the producer. Other coders that pulled the commit
+            // reference it only once or twice.
+            //
+            // The previous bool-based check (any-match) plus a 240-row log window
+            // failed in two ways on long-running tasks: (a) the hash scrolled past
+            // 240 rows as the coder kept generating, so the producer was never
+            // matched; (b) when multiple terminals had the hash, the tie fell
+            // through to the deterministic lowest-order fallback, attributing
+            // EVERY handoff to task 0 and starving tasks 1/2/3 of completion
+            // signals (completion-chain deadlock).
+            let mut scored_candidates: Vec<(usize, i32, i32, InferredNoMetadataCompletion)> =
                 Vec::new();
             for (task_order, terminal_order, inferred) in &inferred_candidates {
-                if self
-                    .terminal_recent_logs_contain_commit_hash(&inferred.terminal_id, commit_hash)
-                    .await
-                {
-                    hash_matched_candidates.push((*task_order, *terminal_order, inferred.clone()));
+                let count = self
+                    .terminal_count_commit_hash_in_logs(&inferred.terminal_id, commit_hash)
+                    .await;
+                if count > 0 {
+                    scored_candidates.push((count, *task_order, *terminal_order, inferred.clone()));
                 }
             }
 
-            if hash_matched_candidates.len() == 1 {
-                let (_, _, inferred) = hash_matched_candidates
+            if !scored_candidates.is_empty() {
+                // Highest count wins (producer); tie-break by lowest order_index.
+                scored_candidates.sort_by(|lhs, rhs| {
+                    rhs.0
+                        .cmp(&lhs.0)
+                        .then(lhs.1.cmp(&rhs.1))
+                        .then(lhs.2.cmp(&rhs.2))
+                });
+                let (count, _, _, inferred) = scored_candidates
                     .into_iter()
                     .next()
-                    .expect("hash-matched candidate length checked");
+                    .expect("scored candidate length checked");
                 tracing::info!(
                     workflow_id = %workflow_id,
                     commit_hash = %commit_hash,
                     task_id = %inferred.task_id,
                     terminal_id = %inferred.terminal_id,
-                    "Resolved ambiguous no-metadata commit via terminal log hash hint"
+                    hash_log_count = count,
+                    "Resolved no-metadata commit via commit-hash log count (producer attribution)"
                 );
                 return Ok(Some(inferred));
-            }
-
-            if hash_matched_candidates.len() > 1 {
-                inferred_candidates = hash_matched_candidates;
             }
         }
 
@@ -5163,13 +5219,20 @@ impl OrchestratorAgent {
         Ok(None)
     }
 
-    async fn terminal_recent_logs_contain_commit_hash(
+    /// Count how many times a commit hash appears in a terminal's recent logs.
+    ///
+    /// Used by no-metadata commit attribution to identify the PRODUCING
+    /// terminal on shared-main branches: the producer's claude TUI prints the
+    /// commit hash prominently (commit summary + git status), so it accrues the
+    /// highest count. Returns `usize` so the caller can rank candidates.
+    /// [G25-hash-count-attribution]
+    async fn terminal_count_commit_hash_in_logs(
         &self,
         terminal_id: &str,
         commit_hash: &str,
-    ) -> bool {
+    ) -> usize {
         if commit_hash.trim().is_empty() {
-            return false;
+            return 0;
         }
 
         let short_hash: String = commit_hash
@@ -5179,10 +5242,14 @@ impl OrchestratorAgent {
             .to_ascii_lowercase();
         let full_hash = commit_hash.to_ascii_lowercase();
 
+        // [G25] Window raised from 240 → 2000. On long-running tasks a coder
+        // generates hundreds/thousands of log lines after committing, so the
+        // 240-row window lost the hash and attribution fell back to the
+        // deterministic (lowest order_index) path — starving all but task 0.
         let recent_logs = match db::models::terminal::TerminalLog::find_by_terminal(
             &self.db.pool,
             terminal_id,
-            Some(240),
+            Some(2000),
         )
         .await
         {
@@ -5194,15 +5261,18 @@ impl OrchestratorAgent {
                     error = %error,
                     "Failed to load terminal logs while resolving no-metadata commit"
                 );
-                return false;
+                return 0;
             }
         };
 
-        recent_logs.iter().any(|log| {
-            let content = log.content.to_ascii_lowercase();
-            content.contains(&full_hash)
-                || (!short_hash.is_empty() && content.contains(&short_hash))
-        })
+        recent_logs
+            .iter()
+            .filter(|log| {
+                let content = log.content.to_ascii_lowercase();
+                content.contains(&full_hash)
+                    || (!short_hash.is_empty() && content.contains(&short_hash))
+            })
+            .count()
     }
 
     async fn align_task_state_for_no_metadata_completion(
@@ -6029,7 +6099,7 @@ impl OrchestratorAgent {
             if attempt > 1 {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
-            match self.call_llm_nonfatal(&prompt, "acceptance_review").await {
+            match self.call_llm_stateless_nonfatal(&prompt, "acceptance_review").await {
                 Some(response) => {
                     if use_scoring {
                         let mut score_result = AuditScoreResult::parse(&response);
@@ -6389,6 +6459,7 @@ impl OrchestratorAgent {
         Ok(response.content)
     }
 
+    #[allow(dead_code)] // retained as the history-accumulating sibling of call_llm_stateless_nonfatal
     async fn call_llm_nonfatal(&self, prompt: &str, context: &str) -> Option<String> {
         match self.call_llm(prompt).await {
             Ok(response) => {
@@ -6426,6 +6497,61 @@ impl OrchestratorAgent {
                 }
 
                 self.maybe_save_state().await;
+                None
+            }
+        }
+    }
+
+    /// Stateless LLM call: sends ONLY the given prompt as a fresh single-turn
+    /// message list, bypassing the orchestrator's accumulating
+    /// `conversation_history` entirely. Use for large self-contained prompts
+    /// (e.g. acceptance review carrying ~256KB of code context) where
+    /// accumulating the prompt across retries would balloon the request past
+    /// the provider's effective limit — `max_conversation_history` bounds the
+    /// message COUNT, not bytes, so a few 262KB review prompts survive the
+    /// trim and the 3rd retry ships ~786KB → GLM returns `event: error`
+    /// (observed wf6a2e3214: 12 empty-content failures, acceptance review
+    /// deadlocked). The acceptance review is a stateless code→score eval; it
+    /// needs no prior turns. [G29-review-stateless]
+    async fn call_llm_stateless(&self, prompt: &str) -> anyhow::Result<String> {
+        let messages = vec![LLMMessage {
+            role: "user".to_string(),
+            content: prompt.to_string(),
+        }];
+        let response = self.llm_client.chat(messages).await?;
+        self.publish_provider_events().await;
+        Ok(response.content)
+    }
+
+    /// Nonfatal wrapper for `call_llm_stateless` — same error handling as
+    /// `call_llm_nonfatal` but does not touch conversation_history.
+    async fn call_llm_stateless_nonfatal(&self, prompt: &str, context: &str) -> Option<String> {
+        match self.call_llm_stateless(prompt).await {
+            Ok(response) => Some(response),
+            Err(e) => {
+                let workflow_id = {
+                    let state = self.state.read().await;
+                    state.workflow_id.clone()
+                };
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    context,
+                    error = %e,
+                    "Nonfatal stateless LLM call failed"
+                );
+                if let Err(e2) = self
+                    .message_bus
+                    .publish_workflow_event(
+                        &workflow_id,
+                        BusMessage::Error {
+                            workflow_id: workflow_id.clone(),
+                            error: format!("LLM call failed during {context}: {e}"),
+                        },
+                    )
+                    .await
+                {
+                    tracing::warn!(error = %e2, "Failed to publish nonfatal stateless LLM failure event");
+                }
                 None
             }
         }
@@ -8080,6 +8206,18 @@ impl OrchestratorAgent {
             "Thinking",
             "Ruminating",
             "Synthesizing",
+            "Germinating",
+            // #N3 verb-rotation复发(2026-06-29 task3 final-repair):
+            // claude TUI spinner 动词集会轮转,"Germinating" 不在原 10 个枚举里
+            // → 生成签名未命中 → 落入 IDLE_SIGNATURES("shift+tab to cycle"
+            // TUI 重绘命中)→ 误判 idle → 每 3.5min 假 re-dispatch 打断 42min
+            // 长 final-repair turn → 零 commit 收敛 2.5h。枚举动词是 whack-a-mole,
+            // 用 token-counter 模式根治:spinner 行 "(Xm Ys · Nk tokens)" 在
+            // 任何动词下都出现,且 idle prompt 无 token 计数 → ascii-safe 健壮信号。
+            // 权衡:turn 结束后 spinner 行可能短暂残留在 2048 窗口 → 极少数真 idle
+            // 被误判生成(不 re-dispatch),但 onboarding-seed 已防 swallow,
+            // 1h hard-cap 兜底,远好于打断活跃生成(本 bug 浪费 2.5h)。
+            "tokens)",
         ];
         if GENERATING_SIGNATURES.iter().any(|s| recent.contains(s)) {
             return false;
@@ -8694,6 +8832,30 @@ impl OrchestratorAgent {
             return Ok(true);
         }
 
+        // Concurrency guard: the auto-complete sweep (every
+        // STALL_WATCHDOG_TICK = 5s) calls this whenever all tasks are
+        // completed, and `run_final_quality_gate` awaits external node
+        // subprocesses (tsc/vitest/eslint) that can take minutes per branch.
+        // Without a guard, each tick starts a NEW final-gate pass while the
+        // previous is still awaiting a slow/hung provider, spawning an
+        // unbounded flock of concurrent quality_runs + their node subprocess
+        // trees (observed 2026-06-29 ecommerce: 140+ never-completing
+        // quality_runs, 230+ orphan node processes). The in-memory guard
+        // serializes per-workflow: if a pass is already in flight, the sweep
+        // returns "not yet passed" and retries next tick without piling on.
+        // Stale-safe by construction — a server restart drops the set, so a
+        // resumed workflow can always start a fresh pass.
+        let _final_gate_guard = match acquire_final_gate_guard(workflow_id) {
+            Some(g) => g,
+            None => {
+                tracing::debug!(
+                    workflow_id = %workflow_id,
+                    "final readiness gate already in progress; skipping concurrent invocation"
+                );
+                return Ok(false);
+            }
+        };
+
         let workflow = db::models::Workflow::find_by_id(&self.db.pool, workflow_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Workflow {workflow_id} not found"))?;
@@ -8971,19 +9133,36 @@ impl OrchestratorAgent {
                         // duplication counts that compete with code volume, not quality.
                         // Add builtin_common_issues + duplicated_blocks so a well-tested
                         // deliverable isn't stranded at the repo gate (web-memo task 7,
-                        // 2026-06-27). SecretsDetected is deliberately NOT here — it is a
-                        // real security signal and stays gated.
-                        const ADVISORY_LINT_METRICS: [&str; 4] = [
+                        // 2026-06-27).
+                        // #N final-gate secrets_detected exemption (2026-06-29 task3
+                        // express→Rust): the TERMINAL gate already enforces
+                        // secrets_detected=0 on each coder's own diff at commit time
+                        // (the real "did THIS terminal introduce a secret" check).
+                        // The BRANCH/final gate re-scans the WHOLE branch with the
+                        // common:secret-detection heuristic, whose "Potential Unquoted
+                        // Secret Assignment" pattern false-positives on legitimate
+                        // auth/token-handling code — `let token = jwt.sign(...)`,
+                        // `EncodingKey::from_secret(env)`, password-reset token issue.
+                        // Task3's Rust auth migration drew 12/20 Blocker secret findings
+                        // in NEW Rust (jwt.rs/middleware.rs/config.rs) + 8 in pre-existing
+                        // .ts the workflow never touched; the final-repair cannot clear
+                        // them without breaking auth code, 4-round cap then FAILs an
+                        // otherwise 90+ deliverable. Exempting secrets_detected at the
+                        // FINAL gate does NOT weaken real security: the terminal gate is
+                        // the secret enforcer at commit time. Same heuristic-aggregate
+                        // logic as duplicated_blocks.
+                        const FINAL_GATE_SOFT_METRICS: [&str; 5] = [
                             "builtin_frontend_issues",
                             "builtin_rust_issues",
                             "builtin_common_issues",
                             "duplicated_blocks",
+                            "secrets_detected",
                         ];
                         let provider_unavailable = result.value.is_none();
                         let advisory = result
                             .value
                             .is_some()
-                            && ADVISORY_LINT_METRICS.contains(&result.metric.as_str());
+                            && FINAL_GATE_SOFT_METRICS.contains(&result.metric.as_str());
                         !(provider_unavailable || advisory)
                     })
                 })
@@ -10516,6 +10695,41 @@ async fn get_bootstrap_lock(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
 
 const JS_BOOTSTRAP_TIMEOUT_SECS: u64 = 600;
 
+/// In-process lock set recording which workflows currently have a
+/// `run_final_readiness_gates` pass in flight. See the guard at the top of
+/// `run_final_readiness_gates` for why this is needed.
+static FINAL_GATE_IN_FLIGHT: Lazy<std::sync::Mutex<HashSet<String>>> =
+    Lazy::new(|| std::sync::Mutex::new(HashSet::new()));
+
+/// RAII guard: created when a final-gate pass starts, removed (releasing the
+/// workflow slot) when dropped — so every return path, `?` error, or panic in
+/// `run_final_readiness_gates` releases the slot automatically.
+struct FinalGateGuard {
+    workflow_id: String,
+}
+
+impl Drop for FinalGateGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = FINAL_GATE_IN_FLIGHT.lock() {
+            set.remove(&self.workflow_id);
+        }
+    }
+}
+
+/// Tries to mark `workflow_id` as having a final-gate pass in flight. Returns
+/// `Some(guard)` if this caller acquired it (caller proceeds), `None` if
+/// another pass is already running (caller should skip).
+fn acquire_final_gate_guard(workflow_id: &str) -> Option<FinalGateGuard> {
+    let mut set = FINAL_GATE_IN_FLIGHT.lock().ok()?;
+    if set.contains(workflow_id) {
+        return None;
+    }
+    set.insert(workflow_id.to_string());
+    Some(FinalGateGuard {
+        workflow_id: workflow_id.to_string(),
+    })
+}
+
 #[derive(Debug, Clone, Copy)]
 enum JsPackageManager {
     Npm,
@@ -10679,7 +10893,7 @@ async fn reset_js_bootstrap_cache_for_test() {
 /// Returns `false` on DB errors (fail-safe: treat as code blocker so the
 /// terminal still gets fix instructions — no silent mislabeling).
 async fn is_quality_run_only_infra_blockers(db: &Arc<DBService>, quality_run_id: &str) -> bool {
-    use quality::provider::frontend::UNAVAILABLE_RULE_SUFFIX;
+    use quality::provider::frontend::{EVALUATION_ERROR_RULE_SUFFIX, UNAVAILABLE_RULE_SUFFIX};
     let issues = match db::models::QualityIssueRecord::find_blocking_by_run(
         &db.pool,
         quality_run_id,
@@ -10699,9 +10913,15 @@ async fn is_quality_run_only_infra_blockers(db: &Arc<DBService>, quality_run_id:
     if issues.is_empty() {
         return false;
     }
-    issues
-        .iter()
-        .all(|i| i.rule_id.ends_with(UNAVAILABLE_RULE_SUFFIX))
+    // Both suffixes are infra-class: `::unavailable` = tool program not found;
+    // `::evaluation_error` = tool ran but couldn't evaluate this project (e.g.
+    // Rust metric on a TS project with a Tauri sub-project). Neither is a code
+    // defect the coder can fix, so neither may strand the task in the
+    // gate-loop plateau (§8: no cap bailout for infra noise).
+    issues.iter().all(|i| {
+        i.rule_id.ends_with(UNAVAILABLE_RULE_SUFFIX)
+            || i.rule_id.ends_with(EVALUATION_ERROR_RULE_SUFFIX)
+    })
 }
 
 /// R8-B3: returns true iff this terminal's most recent enforce-mode quality
@@ -11448,12 +11668,23 @@ async fn collect_changed_files_content(
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .collect();
-        const FOOTERLESS_WALKBACK: usize = 8;
+        // #N1 parallel-interleave: depth must cover the whole workflow history so
+        // an interleaved task's earlier footerless commits are reachable. On a
+        // reset-to-start repo this walks to the root (deeper depths error→break).
+        const FOOTERLESS_WALKBACK: usize = 30;
         for depth in 1..=FOOTERLESS_WALKBACK {
             let ancestor = format!("{commit_hash}~{depth}");
             if let Some(tid) = current_task_id {
+                // #N1 parallel-interleave fix: in shared-main PARALLEL mode feature
+                // tasks' commits interleave on master, so the immediately-prior
+                // ancestor is very often ANOTHER task's commit. Breaking there makes
+                // the review see only the single HEAD commit → severe under-scoring
+                // (observed task4 i2=41 for completed ESLint/Prettier toolchain
+                // work). SKIP the interleaved other-task commit and keep walking;
+                // deeper cumulative diffs (ancestor..commit_hash) re-capture this
+                // task's footerless earlier commits. Content is max_bytes-capped.
                 if ancestor_commit_belongs_to_other_task(working_dir, &ancestor, tid).await {
-                    break;
+                    continue;
                 }
             }
             match tokio::process::Command::new("git")
@@ -11513,7 +11744,7 @@ async fn collect_changed_files_content(
         // content is still capped by `max_bytes` downstream, so walking back
         // cannot overflow the review context; it can only make an
         // otherwise-empty review see the actual code.
-        const EMPTY_COMMIT_WALKBACK: usize = 8;
+        const EMPTY_COMMIT_WALKBACK: usize = 30; // #N1 parallel-interleave: cover whole workflow (see FOOTERLESS_WALKBACK)
         // #N1 fix: ACCUMULATE non-empty diff spans going back. The diff
         // `ancestor..commit_hash` is already cumulative, so the deepest non-empty
         // span is the most complete superset — we keep overwriting `accumulated`.
@@ -11531,6 +11762,9 @@ async fn collect_changed_files_content(
         for depth in 1..=EMPTY_COMMIT_WALKBACK {
             let ancestor = format!("{commit_hash}~{depth}");
             if let Some(tid) = current_task_id {
+                // #N1 parallel-interleave fix (see FOOTERLESS_WALKBACK note): skip
+                // interleaved other-task commits instead of stopping, so the
+                // cumulative diff re-captures this task's footerless earlier commits.
                 if ancestor_commit_belongs_to_other_task(working_dir, &ancestor, tid)
                     .await
                 {
@@ -11538,9 +11772,9 @@ async fn collect_changed_files_content(
                         target: "acceptance_review_scope",
                         depth,
                         ancestor = %ancestor,
-                        "walk-back stopped at previous-task boundary"
+                        "walk-back skipping interleaved other-task commit (parallel mode)"
                     );
-                    break;
+                    continue;
                 }
             }
             match tokio::process::Command::new("git")

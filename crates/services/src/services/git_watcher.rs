@@ -681,13 +681,41 @@ impl GitWatcher {
         if let Some(bound_workflow_id) = self.workflow_id.as_deref()
             && metadata.workflow_id != bound_workflow_id
         {
+            // [G24-stale-metadata] A coder may emit a handoff commit carrying
+            // STALE metadata — workflow_id/task_id/terminal_id copied from a
+            // PREVIOUS workflow that ran on this same repo (common when the
+            // coder uses a historical handoff commit as a template). Strictly
+            // skipping these commits (the old behaviour) silently drops the
+            // completion signal: the orchestrator never sees the handoff, the
+            // task never finalizes, and the idle-prompt detector re-dispatches
+            // the coder into an infinite re-mark loop.
+            //
+            // Instead, strip the stale METADATA section and publish a GitEvent
+            // for the BOUND workflow so the orchestrator's no-metadata inference
+            // attributes the commit to the terminal that actually produced it
+            // (via commit-hash log count, agent.rs [G25]) and finalizes.
+            let stripped_message = match commit.message.find("---METADATA---") {
+                Some(pos) => commit.message[..pos].trim_end().to_string(),
+                None => commit.message.clone(),
+            };
             tracing::warn!(
                 commit_hash = %commit.hash,
                 commit_workflow_id = %metadata.workflow_id,
                 bound_workflow_id = %bound_workflow_id,
                 terminal_id = %metadata.terminal_id,
-                "Commit metadata workflow_id does not match watcher binding, skipping"
+                "Commit metadata workflow_id does not match watcher binding; routing to GitEvent inference path (stale-metadata handoff recovery) instead of skipping"
             );
+            if let Err(e) = self
+                .message_bus
+                .publish_git_event(bound_workflow_id, &commit.hash, &commit.branch, &stripped_message)
+                .await
+            {
+                tracing::warn!(
+                    commit_hash = %commit.hash,
+                    error = %e,
+                    "Failed to publish git event for stale-metadata commit (will retry on next poll)"
+                );
+            }
             return Ok(());
         }
 

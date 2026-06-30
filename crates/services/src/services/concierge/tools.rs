@@ -481,6 +481,50 @@ async fn execute_create_workflow(
         }
     }
 
+    // Detect the repository's current/default branch instead of hardcoding
+    // "main". Many existing repos (e.g. the V1 test fixtures) default to
+    // "master"; a hardcoded "main" target_branch makes the final merge fail
+    // with "Branch not found: main" even when the feature branch merges
+    // cleanly into master. Observed 2026-06-29 (task4 refactor-test-demo):
+    // all 6 tasks completed (i0=93 / i2=95 approved) but the workflow failed
+    // because merge_coordinator could not resolve branch "main".
+    //
+    // The resolution mirrors `OrchestratorAgent::resolve_project_working_dir`
+    // (agent.rs:5410) so the detected branch always matches the path the
+    // workflow will actually operate on: prefer `project.default_agent_working_dir`
+    // (set for e.g. refactor/web-memo), else the first linked project repo
+    // (knowledge-base/ecommerce). Fall back to "main" only when neither is
+    // available or branch detection fails, so greenfield/from-scratch repos
+    // (which DO use main) are unaffected.
+    let target_branch = {
+        let project = Project::find_by_id(pool, project_id).await.ok().flatten();
+        // Mirror resolve_project_working_dir: prefer default_agent_working_dir,
+        // else the first linked project repo. The repo fallback is async, so it
+        // cannot live inside an `or_else` closure — branch on the primary source.
+        let primary = project
+            .as_ref()
+            .and_then(|p| p.default_agent_working_dir.as_deref())
+            .filter(|s| !s.trim().is_empty())
+            .map(std::path::PathBuf::from);
+        let working_dir: Option<std::path::PathBuf> = match primary {
+            Some(p) => Some(p),
+            None => ProjectRepo::find_repos_for_project(pool, project_id)
+                .await
+                .ok()
+                .and_then(|repos| repos.into_iter().next())
+                .map(|repo| repo.path)
+                .filter(|p: &std::path::PathBuf| !p.to_string_lossy().trim().is_empty()),
+        };
+        working_dir
+            .and_then(|path| {
+                crate::services::git::GitService::new()
+                    .get_current_branch(&path)
+                    .ok()
+            })
+            .filter(|b| !b.trim().is_empty())
+            .unwrap_or_else(|| "main".to_string())
+    };
+
     // Build a minimal agent-planned Workflow struct
     let now = chrono::Utc::now();
     let workflow = Workflow {
@@ -502,7 +546,7 @@ async fn execute_create_workflow(
         error_terminal_model_id: None,
         merge_terminal_cli_id: cli_type_id.to_string(),
         merge_terminal_model_id: model_config_id.to_string(),
-        target_branch: "main".to_string(),
+        target_branch,
         git_watcher_enabled: true,
         ready_at: None,
         started_at: None,

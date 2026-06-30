@@ -77,7 +77,13 @@ pub const COMPLETION_CONTEXT_LOG_LINES: usize = 120;
 pub const COMPLETION_CONTEXT_LOG_MAX_CHARS: usize = 6000;
 pub const COMPLETION_CONTEXT_DIFF_MAX_CHARS: usize = 4000;
 pub const COMPLETION_CONTEXT_BODY_MAX_CHARS: usize = 500;
-pub const ACCEPTANCE_REVIEW_MAX_BYTES: usize = 131_072;
+// #N1 parallel-interleave: depth-30 walk-back now scopes the full workflow
+// (interleaved feature tasks on shared main), so the cumulative file set can
+// exceed the old 128KB cap — source files alone hit ~155KB, starving the
+// config-priority tail (e.g. an i2 toolchain task's ESLint/Prettier/Husky
+// deliverables get truncated out → false "not visible" reject). 256KB fits a
+// typical workflow's ~80 files with margin; glm-5.2[1m] context is not the limit.
+pub const ACCEPTANCE_REVIEW_MAX_BYTES: usize = 262_144;
 
 // Phase 28C: Agent event loop fault tolerance
 pub const MAX_CONSECUTIVE_LLM_FAILURES: u32 = 10;

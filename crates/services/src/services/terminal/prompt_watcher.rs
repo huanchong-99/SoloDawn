@@ -1710,37 +1710,58 @@ next_action: handoff\n"
                     "Skipping duplicate chunk-level Claude bypass accept (broad-regex) injection"
                 );
             } else {
-                let decision = PromptDecision::auto_enter();
-                let detected_prompt =
-                    DetectedPrompt::new(PromptKind::EnterConfirm, normalized_output.clone(), 0.95);
-
-                if state.state_machine.should_process(&detected_prompt) {
-                    state.last_detection = Some(Instant::now());
-                    state.state_machine.on_prompt_detected(detected_prompt);
-                    state.state_machine.on_response_sent(decision.clone());
-                    state.detector.clear_buffer();
-
-                    tracing::info!(
-                        terminal_id = %response_terminal_id,
-                        session_id = %response_session_id,
-                        "Detected bypass permissions prompt (chunk); sending direct auto-enter fallback"
+                // [G23-bypass-statusline] The Claude TUI redraws a persistent
+                // status line "bypass permissions on (shift+tab to cycle)"
+                // every frame once --dangerously-skip-permissions is active.
+                // It satisfies the broad `is_bypass_permissions_prompt` regex
+                // but is NOT an interactive prompt. Sending a bare Enter on
+                // every redraw loops (12x/60s observed on wf 6c1bf533) and
+                // interrupts the coder mid-generation, stranding re-dispatched
+                // terminals (coder idles at 0% CPU while the watcher keeps
+                // injecting Enters). Skip when bypass is already ON (status
+                // line); keep the legacy bare-Enter only for the unexpected
+                // OFF case (a genuine toggle prompt). The line-level detector
+                // already ignores this status line (prompt_detector tests
+                // test_*_bypass_permissions_status_line_*); this aligns the
+                // chunk-level path with that behavior.
+                if normalized_output_lower.contains("bypass permissions on") {
+                    tracing::debug!(
+                        terminal_id = %state.terminal_id,
+                        "Ignoring bypass-permissions chunk match: status line shows bypass already ON (persistent TUI redraw, not an interactive prompt)"
                     );
+                } else {
+                    let decision = PromptDecision::auto_enter();
+                    let detected_prompt =
+                        DetectedPrompt::new(PromptKind::EnterConfirm, normalized_output.clone(), 0.95);
 
-                    drop(terminals);
-                    self.message_bus
-                        .publish_terminal_input(
-                            &response_terminal_id,
-                            &response_session_id,
-                            "\n",
-                            Some(decision),
-                        )
-                        .await;
-                    return;
+                    if state.state_machine.should_process(&detected_prompt) {
+                        state.last_detection = Some(Instant::now());
+                        state.state_machine.on_prompt_detected(detected_prompt);
+                        state.state_machine.on_response_sent(decision.clone());
+                        state.detector.clear_buffer();
+
+                        tracing::info!(
+                            terminal_id = %response_terminal_id,
+                            session_id = %response_session_id,
+                            "Detected bypass permissions prompt (chunk); sending direct auto-enter fallback"
+                        );
+
+                        drop(terminals);
+                        self.message_bus
+                            .publish_terminal_input(
+                                &response_terminal_id,
+                                &response_session_id,
+                                "\n",
+                                Some(decision),
+                            )
+                            .await;
+                        return;
+                    }
+                    tracing::debug!(
+                        terminal_id = %state.terminal_id,
+                        "Skipping duplicate chunk-level bypass-permissions fallback injection"
+                    );
                 }
-                tracing::debug!(
-                    terminal_id = %state.terminal_id,
-                    "Skipping duplicate chunk-level bypass-permissions fallback injection"
-                );
             }
         }
 
@@ -2270,40 +2291,60 @@ next_action: handoff\n"
                     return;
                 }
 
-                let decision = PromptDecision::auto_enter();
-                let detected_prompt =
-                    DetectedPrompt::new(PromptKind::EnterConfirm, normalized_line.clone(), 0.95);
-
-                if !state.state_machine.should_process(&detected_prompt) {
+                // [G30-bypass-statusline-line] Persistent status-line guard,
+                // mirroring the chunk-level handler (G23, ~line 1727). Claude's
+                // TUI redraws "bypass permissions on (shift+tab to cycle)" as a
+                // STATUS line every frame once --dangerously-skip-permissions
+                // is active. BYPASS_PERMISSIONS_PROMPT_RE matches it, but it is
+                // NOT an interactive prompt — a bare Enter on every redraw
+                // floods the PTY and disrupts the coder (328 injections observed
+                // on wf 6a2e3214, 4/5 coders stranded at ~0% CPU while the
+                // watcher kept injecting Enters). Skip when bypass is already
+                // ON (status line); keep the legacy bare Enter only for the
+                // unexpected OFF case (a genuine toggle prompt). Fall through
+                // (no continue) so the force-handoff-submit path below can still
+                // run when queued input is pending.
+                if normalized_line_lower.contains("bypass permissions on") {
                     tracing::debug!(
                         terminal_id = %state.terminal_id,
-                        "Skipping duplicate bypass-permissions fallback injection"
+                        "Ignoring bypass-permissions line match: status line shows bypass already ON (persistent TUI redraw, not an interactive prompt)"
                     );
-                    continue;
+                } else {
+                    let decision = PromptDecision::auto_enter();
+                    let detected_prompt =
+                        DetectedPrompt::new(PromptKind::EnterConfirm, normalized_line.clone(), 0.95);
+
+                    if !state.state_machine.should_process(&detected_prompt) {
+                        tracing::debug!(
+                            terminal_id = %state.terminal_id,
+                            "Skipping duplicate bypass-permissions fallback injection"
+                        );
+                        continue;
+                    }
+
+                    state.last_detection = Some(Instant::now());
+                    state.state_machine.on_prompt_detected(detected_prompt);
+                    state.state_machine.on_response_sent(decision.clone());
+                    state.detector.clear_buffer();
+
+                    tracing::info!(
+                        terminal_id = %response_terminal_id,
+                        session_id = %response_session_id,
+                        "Detected bypass permissions prompt; sending direct auto-enter fallback"
+                    );
+
+                    // Publish input (drop lock first to avoid deadlock)
+                    drop(terminals);
+                    self.message_bus
+                        .publish_terminal_input(
+                            &response_terminal_id,
+                            &response_session_id,
+                            "\n",
+                            Some(decision),
+                        )
+                        .await;
+                    return;
                 }
-
-                state.last_detection = Some(Instant::now());
-                state.state_machine.on_prompt_detected(detected_prompt);
-                state.state_machine.on_response_sent(decision.clone());
-                state.detector.clear_buffer();
-
-                tracing::info!(
-                    terminal_id = %response_terminal_id,
-                    session_id = %response_session_id,
-                    "Detected bypass permissions prompt; sending direct auto-enter fallback"
-                );
-
-                // Publish input (drop lock first to avoid deadlock)
-                drop(terminals);
-                self.message_bus
-                    .publish_terminal_input(
-                        &response_terminal_id,
-                        &response_session_id,
-                        "\n",
-                        Some(decision),
-                    )
-                    .await;
-                return;
             }
 
             if !state.should_debounce()

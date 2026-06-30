@@ -228,9 +228,50 @@ impl QualityProvider for FrontendProvider {
                     Ok(out) => match classify_outcome(&out, TSC_ERROR_PATTERNS) {
                         ToolOutcome::Usable => {
                             let combined = format!("{}\n{}", out.stdout, out.stderr);
-                            let (errors, issues) = parse_tsc_output(&combined);
-                            tsc_errors += errors;
-                            all_issues.extend(prefix_issues(project_root, target, issues));
+                            // [G27-vue-sfc-unavailable] If the type-checker (tsc or
+                            // vue-tsc) emits TS2307 for a `.vue` SFC module, it
+                            // CANNOT resolve Vue single-file-component imports — a
+                            // toolchain incompatibility (e.g. vue-tsc 1.x patching a
+                            // newer TypeScript's internals, or plain tsc which never
+                            // understood SFCs). Its ENTIRE output is then unreliable:
+                            // the unresolved `.vue` imports strip type info from every
+                            // `.ts` file that imports a component, cascading into
+                            // dozens of phantom TS2339/TS2322/TS2345 errors in
+                            // untouched pre-existing files. Emitting those as
+                            // Critical blocking issues deadlocks the gate-loop on
+                            // issues the coder cannot fix (observed on hoppscotch:
+                            // vue-tsc 1.8.8 + TS 5.9.3 → 173 blocking, 144 in files
+                            // the coder never touched). Treat as Unavailable (infra)
+                            // — "could not evaluate", not "ignore real errors". The
+                            // vitest metric (runtime, not type-based) still catches
+                            // genuine defects in the coder's new code.
+                            if output_has_vue_sfc_ts2307(&combined) {
+                                tsc_failed_closed = true;
+                                warn!(
+                                    target = %target.display_name(project_root),
+                                    command = %command.describe(),
+                                    "TypeScript output unreliable for Vue SFC project \
+                                     (TS2307 on .vue imports — toolchain cannot resolve \
+                                     SFCs, suppressing phantom cascade): {}",
+                                    stderr_head(&out.stderr)
+                                );
+                                all_issues.push(unavailable_issue(
+                                    "tsc::unavailable",
+                                    AnalyzerSource::TypeScript,
+                                    &format!(
+                                        "TypeScript check cannot resolve Vue SFC imports \
+                                         for target {} via {} (TS2307 on .vue modules — \
+                                         toolchain/SFC incompatibility, output suppressed)",
+                                        target.display_name(project_root),
+                                        command.describe()
+                                    ),
+                                    &out.stderr,
+                                ));
+                            } else {
+                                let (errors, issues) = parse_tsc_output(&combined);
+                                tsc_errors += errors;
+                                all_issues.extend(prefix_issues(project_root, target, issues));
+                            }
                         }
                         ToolOutcome::Unavailable => {
                             tsc_failed_closed = true;
@@ -418,6 +459,20 @@ fn classify_outcome(out: &CommandOutput, error_patterns: &[&str]) -> ToolOutcome
 /// Adding a new "tool program not found" issue? Append `::unavailable` too.
 pub const UNAVAILABLE_RULE_SUFFIX: &str = "::unavailable";
 
+/// Suffix emitted by the quality engine when a metric's provider **ran but
+/// could not evaluate** the project (e.g. a Rust metric — `cargo_check`,
+/// `clippy`, `rust_test` — invoked on a TypeScript project that embeds a Tauri
+/// Rust sub-project, or any analyzer whose evaluation threw). See `engine.rs`
+/// `quality_gate::<metric>::evaluation_error`.
+///
+/// Semantically identical to `::unavailable`: both mean "the gate could not
+/// produce a meaningful verdict for this project", NOT "the code is wrong".
+/// The orchestrator must NOT strand the task in the gate-loop plateau waiting
+/// for a coder to fix something the coder cannot affect — so
+/// `is_quality_run_only_infra_blockers` (agent.rs) treats this suffix as
+/// infra-class, same as `::unavailable` (§8: no cap bailout for infra noise).
+pub const EVALUATION_ERROR_RULE_SUFFIX: &str = "::evaluation_error";
+
 fn unavailable_issue(
     rule_id: &str,
     source: AnalyzerSource,
@@ -459,12 +514,27 @@ fn stderr_head(stderr: &str) -> String {
 
 fn resolve_typecheck_command(target: &JsTarget) -> Option<NodeQualityCommand> {
     target.capabilities().typecheck.clone().or_else(|| {
-        target
-            .has_tsconfig()
-            .then_some(NodeQualityCommand::PackageExec {
-                binary: "tsc".to_string(),
-                args: vec!["--noEmit".to_string()],
-            })
+        if !target.has_tsconfig() {
+            return None;
+        }
+        // [G26-vue-tsc-fallback] Plain `tsc --noEmit` cannot resolve Vue SFC
+        // `.vue` imports — every `import X from "./Foo.vue"` emits a false
+        // TS2307 ("Cannot find module") and cascades into 100+ downstream
+        // type errors, deadlocking the quality gate on Vue projects (observed
+        // on hoppscotch: 59 false TS2307 + 107 cascade = 168 phantom blocking
+        // errors → terminal handoff loop). When the target declares `vue-tsc`,
+        // use it instead: it is the canonical Vue type-checker, resolves SFC
+        // imports correctly, and is the same tool the project itself uses
+        // (e.g. hoppscotch `"lint:ts": "vue-tsc --noEmit"`).
+        let binary = if target.dependency_names().contains("vue-tsc") {
+            "vue-tsc"
+        } else {
+            "tsc"
+        };
+        Some(NodeQualityCommand::PackageExec {
+            binary: binary.to_string(),
+            args: vec!["--noEmit".to_string()],
+        })
     })
 }
 
@@ -716,6 +786,18 @@ fn parse_eslint_summary(line: &str) -> Option<(i64, i64)> {
     let errors = caps.get(1)?.as_str().parse().ok()?;
     let warnings = caps.get(2)?.as_str().parse().ok()?;
     Some((errors, warnings))
+}
+
+/// Detect whether a type-checker output contains TS2307 ("Cannot find module")
+/// errors that reference a `.vue` single-file-component module. When present,
+/// the checker (tsc or vue-tsc) cannot resolve Vue SFC imports — a toolchain
+/// incompatibility whose entire output is unreliable (unresolved `.vue` imports
+/// cascade into phantom errors across every file that imports a component). See
+/// [G27-vue-sfc-unavailable].
+fn output_has_vue_sfc_ts2307(output: &str) -> bool {
+    output
+        .lines()
+        .any(|line| line.contains("TS2307") && line.contains(".vue"))
 }
 
 fn parse_tsc_output(output: &str) -> (i64, Vec<QualityIssue>) {

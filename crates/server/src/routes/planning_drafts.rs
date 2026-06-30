@@ -1012,6 +1012,48 @@ async fn materialize_draft(
                 )
             });
 
+    // Detect the repository's default branch instead of hardcoding "main".
+    // Repos that default to "master" would otherwise fail the final merge with
+    // "Branch not found: main" (observed 2026-06-29 task4 refactor-test-demo:
+    // all 6 tasks completed but workflow failed at merge). Mirror
+    // OrchestratorAgent::resolve_project_working_dir (agent.rs:5410): prefer
+    // project.default_agent_working_dir, else the first linked project repo.
+    // Fall back to "main" only when neither resolves or branch detection fails.
+    let target_branch = {
+        let project = db::models::project::Project::find_by_id(
+            &deployment.db().pool,
+            draft.project_id,
+        )
+        .await
+        .ok()
+        .flatten();
+        let primary = project
+            .as_ref()
+            .and_then(|p| p.default_agent_working_dir.as_deref())
+            .filter(|s| !s.trim().is_empty())
+            .map(PathBuf::from);
+        let working_dir: Option<PathBuf> = match primary {
+            Some(p) => Some(p),
+            None => db::models::project_repo::ProjectRepo::find_repos_for_project(
+                &deployment.db().pool,
+                draft.project_id,
+            )
+            .await
+            .ok()
+            .and_then(|repos| repos.into_iter().next())
+            .map(|repo| repo.path)
+            .filter(|p: &PathBuf| !p.to_string_lossy().trim().is_empty()),
+        };
+        working_dir
+            .and_then(|path| {
+                services::services::git::GitService::new()
+                    .get_current_branch(&path)
+                    .ok()
+            })
+            .filter(|b| !b.trim().is_empty())
+            .unwrap_or_else(|| "main".to_string())
+    };
+
     let mut workflow = Workflow {
         id: workflow_id.clone(),
         project_id: draft.project_id,
@@ -1035,7 +1077,7 @@ async fn materialize_draft(
         error_terminal_model_id: None,
         merge_terminal_cli_id: default_cli_id,
         merge_terminal_model_id: default_model_id,
-        target_branch: "main".to_string(),
+        target_branch,
         git_watcher_enabled: true,
         ready_at: None,
         started_at: None,
