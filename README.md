@@ -24,6 +24,45 @@ SoloDawn's ultimate design goal is to **complete complex, production-grade produ
 
 ---
 
+## 🤖 Prompt for AI Assistants — "Run It For Me"
+
+> **For end users.** You're not here to modify SoloDawn's source — you just want it running so you can use it. Paste the block below to any coding AI (Claude Code, Cursor, Codex, …) and it will get SoloDawn running on your machine.
+
+```markdown
+Help me install and RUN SoloDawn locally. I want to USE it, not modify its source.
+
+Repository (clone source): https://github.com/huanchong-99/SoloDawn
+Clone command: git clone https://github.com/huanchong-99/SoloDawn.git
+
+Detect my OS (Windows / Linux / macOS) and do whatever is needed to get the web UI open at http://localhost:23457:
+
+1. Install prerequisites if missing, verifying each:
+   - Rust toolchain nightly-2025-12-04 (rustup install nightly-2025-12-04)
+   - Node.js >= 18 and pnpm 10.13.1
+   - Git
+   - Build toolchain the Rust backend needs: a C/C++ compiler, protoc 31.1, LLVM/libclang, and (on x86-64) cmake + nasm + perl (for aws-lc-rs)
+2. cd SoloDawn && pnpm install
+3. Set a 32-character SOLODAWN_ENCRYPTION_KEY environment variable.
+4. pnpm run dev  —  first launch compiles the Rust backend (several minutes), then serves frontend :23457 / backend :23456.
+5. Poll http://localhost:23456/readyz until it returns {"ready":true}, then open http://localhost:23457.
+6. When the Setup Wizard appears, STOP there and hand the model configuration over to me — I will set up the AI model myself in the UI.
+
+If a build step fails, read the error, install the missing prerequisite, and retry. Only edit SoloDawn's own files if a step truly requires it.
+```
+
+**Run vs Develop — which one are you?**
+
+| | Run SoloDawn (use it) | Develop SoloDawn (change its code) |
+|---|---|---|
+| What you do | `git clone` → `pnpm run dev` → open the web UI | everything at left, plus edit Rust/TS source |
+| Prerequisites | the build toolchain above (backend compiles once) | + `sqlx-cli` 0.8.6, linter, full test tooling |
+| Cache footprint | modest `target/` (server binary + deps only) | large `target/` (whole-workspace test/clippy/codegen) |
+| See | [Quick Start](#quick-start) below | [Contributing](#contributing) |
+
+> **1.0 ships source-run** — there is **no installer of any kind**. Clone and run with `pnpm run dev` (or build a release binary). The `installer/` directory and the `Build Windows Installer` workflow are retained from earlier development; 1.0 does not publish a Windows installer.
+
+---
+
 ## The Problem We Solve
 
 There's a fundamental contradiction in AI-assisted coding today:
@@ -265,45 +304,6 @@ Scoring dimensions: buildability (20) / functionality (25) / code quality (30) /
 The test itself was a stress test of SoloDawn's self-healing. The 48-hour run surfaced and fixed **21 orchestrator deadlock / stall root causes** (the "§8" chain, #1–#21) — each one a scenario where a naive implementation loops forever. Every fix was deployed and re-validated live before continuing. Full report: `docs/undeveloped/current/V1.0-质量验收-2026-06-30-48h自修复测试.md`.
 
 > Model: `glm-5.2[1m]` via solodawn.cloud (Anthropic protocol). Test harness: browser-MCP UI, serial execution, /goal + Stop-hook self-repair.
-
----
-
-## 🤖 Prompt for AI Assistants — "Run It For Me"
-
-> **For end users.** You're not here to modify SoloDawn's source — you just want it running so you can use it. Paste the block below to any coding AI (Claude Code, Cursor, Codex, …) and it will get SoloDawn running on your machine.
-
-```markdown
-Help me install and RUN SoloDawn locally. I want to USE it, not modify its source.
-
-Repository (clone source): https://github.com/huanchong-99/SoloDawn
-Clone command: git clone https://github.com/huanchong-99/SoloDawn.git
-
-Detect my OS (Windows / Linux / macOS) and do whatever is needed to get the web UI open at http://localhost:23457:
-
-1. Install prerequisites if missing, verifying each:
-   - Rust toolchain nightly-2025-12-04 (rustup install nightly-2025-12-04)
-   - Node.js >= 18 and pnpm 10.13.1
-   - Git
-   - Build toolchain the Rust backend needs: a C/C++ compiler, protoc 31.1, LLVM/libclang, and (on x86-64) cmake + nasm + perl (for aws-lc-rs)
-2. cd SoloDawn && pnpm install
-3. Set a 32-character SOLODAWN_ENCRYPTION_KEY environment variable.
-4. pnpm run dev  —  first launch compiles the Rust backend (several minutes), then serves frontend :23457 / backend :23456.
-5. Poll http://localhost:23456/readyz until it returns {"ready":true}, then open http://localhost:23457.
-6. Confirm the Setup Wizard appears, then help me configure an AI model and verify it.
-
-If a build step fails, read the error, install the missing prerequisite, and retry. Only edit SoloDawn's own files if a step truly requires it.
-```
-
-**Run vs Develop — which one are you?**
-
-| | Run SoloDawn (use it) | Develop SoloDawn (change its code) |
-|---|---|---|
-| What you do | `git clone` → `pnpm run dev` → open the web UI | everything at left, plus edit Rust/TS source |
-| Prerequisites | the build toolchain above (backend compiles once) | + `sqlx-cli` 0.8.6, linter, full test tooling |
-| Cache footprint | modest `target/` (server binary + deps only) | large `target/` (whole-workspace test/clippy/codegen) |
-| See | [Quick Start](#quick-start) below | [Contributing](#contributing) |
-
-> **1.0 ships source-run** — there is **no installer of any kind**. Clone and run with `pnpm run dev` (or build a release binary). The `installer/` directory and the `Build Windows Installer` workflow are retained from earlier development; 1.0 does not publish a Windows installer.
 
 ---
 
