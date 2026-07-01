@@ -49,9 +49,11 @@ impl Config {
         let old_config = match serde_json::from_str::<v3::Config>(raw_config) {
             Ok(cfg) => cfg,
             Err(e) => {
-                tracing::error!("❌ Failed to parse config: {}", e);
-                tracing::error!("   at line {}, column {}", e.line(), e.column());
-                return Err(e.into());
+                // The on-disk config is older than v3. Chain down through v3's own
+                // migration instead of returning Err here — From<String> maps an Err
+                // to Self::default(), which would silently discard the user's data.
+                tracing::warn!("Direct v3 parse failed ({e}); chaining migration from an older version");
+                v3::Config::from(raw_config.to_string())
             }
         };
         let mut onboarding_acknowledged = old_config.onboarding_acknowledged;

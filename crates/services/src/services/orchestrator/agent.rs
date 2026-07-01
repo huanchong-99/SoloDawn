@@ -6391,7 +6391,7 @@ impl OrchestratorAgent {
             }
 
             tracing::warn!(
-                extracted_preview = &extracted[..extracted.len().min(2000)],
+                extracted_preview = &extracted[..extracted.floor_char_boundary(2000)],
                 "Extracted JSON did not parse as orchestrator instructions"
             );
         }
@@ -6402,7 +6402,7 @@ impl OrchestratorAgent {
         }
 
         tracing::warn!(
-            response_preview = &response[..response.len().min(2000)],
+            response_preview = &response[..response.floor_char_boundary(2000)],
             "Could not parse any instructions from LLM response"
         );
         None
@@ -6415,7 +6415,7 @@ impl OrchestratorAgent {
             .inspect_err(|e| {
                 tracing::warn!(
                     error = %e,
-                    preview = &json_str[..json_str.len().min(200)],
+                    preview = &json_str[..json_str.floor_char_boundary(200)],
                     "Failed to parse instruction array JSON"
                 );
             })

@@ -240,7 +240,18 @@ impl GitHostProvider for GitHubProvider {
                 .with_max_times(3)
                 .with_jitter(),
         )
-        .when(|e: &GitHostError| e.should_retry())
+        .when(|e: &GitHostError| {
+            // `gh pr create` is NOT idempotent. If the PR was actually created but
+            // the CLI output failed to parse (UnexpectedOutput) or the command
+            // reported a generic PR failure (PullRequest, e.g. "a pull request
+            // already exists"), retrying spawns duplicate PRs or spuriously fails.
+            // Only retry conditions that are safe to repeat for a mutating create.
+            e.should_retry()
+                && !matches!(
+                    e,
+                    GitHostError::UnexpectedOutput(_) | GitHostError::PullRequest(_)
+                )
+        })
         .notify(|err: &GitHostError, dur: Duration| {
             tracing::warn!(
                 "GitHub API call failed, retrying after {:.2}s: {}",

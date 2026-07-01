@@ -21,7 +21,7 @@ use uuid::Uuid;
 use crate::{
     DeploymentImpl,
     error::ApiError,
-    middleware::load_workspace_middleware,
+    middleware::{RequestContext, assert_authorized, load_workspace_middleware},
     routes::images::{ImageMetadata, ImageResponse, process_image_upload},
 };
 
@@ -240,6 +240,20 @@ async fn load_workspace_with_wildcard(
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    // Mirror `load_workspace_middleware`: enforce the opt-in strict-auth gate so the
+    // file-serving route (which streams raw workspace bytes) cannot bypass
+    // authentication when `SOLODAWN_REQUIRE_AUTH` is set.
+    let ctx = request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .unwrap_or(RequestContext {
+            authenticated: false,
+        });
+    if let Err(resp) = assert_authorized(&ctx) {
+        return Ok(resp);
+    }
+
     let attempt = match Workspace::find_by_id(&deployment.db().pool, id).await {
         Ok(Some(a)) => a,
         Ok(None) => return Err(StatusCode::NOT_FOUND),

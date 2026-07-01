@@ -283,7 +283,10 @@ impl OpenAICompatibleClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            let msg = format!("LLM API error: {status} - {}", &body[..body.len().min(200)]);
+            let msg = format!(
+            "LLM API error: {status} - {}",
+            body.chars().take(200).collect::<String>()
+        );
             // Retryable status (429/5xx/overload) → long backoff retry;
             // non-retryable (401/403/400) → fail fast.
             if is_retryable_status(status) {
@@ -510,7 +513,10 @@ impl AnthropicCompatibleClient {
 
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            let msg = format!("LLM API error: {status} - {}", &body[..body.len().min(200)]);
+            let msg = format!(
+            "LLM API error: {status} - {}",
+            body.chars().take(200).collect::<String>()
+        );
             if is_retryable_status(status) {
                 return Err(anyhow::Error::from(RetryableLlmError(msg)));
             }

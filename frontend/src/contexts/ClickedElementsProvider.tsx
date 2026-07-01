@@ -372,7 +372,13 @@ function formatClickedMarkdown(
 ): string {
   const { payload, selectedDepth = 0 } = entry;
   const chain = buildChainInnerToOuter(payload, workspaceRoot);
-  const effectiveChain = chain.slice(selectedDepth); // Start from selected anchor outward
+  if (chain.length === 0) return '';
+  // The banner builds its chain WITHOUT the location-based dedup that
+  // buildChainInnerToOuter applies, so selectedDepth (a banner index) can exceed
+  // this shorter chain's length. Clamp it so effectiveChain[0] is always defined
+  // and we never read `.pathToSource` off `undefined`.
+  const clampedDepth = Math.min(Math.max(selectedDepth, 0), chain.length - 1);
+  const effectiveChain = chain.slice(clampedDepth); // Start from selected anchor outward
 
   // DOM
   const dom = formatDomBits(payload.clickedElement);
