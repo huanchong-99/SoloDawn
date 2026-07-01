@@ -1145,16 +1145,26 @@ impl ProcessManager {
             if !tracked.pty_eof.load(Ordering::Acquire) {
                 // Try to reap the child non-blockingly; if it has exited, treat
                 // as not running and reap it so lookups don't resurrect it.
-                return match tracked.child.try_wait() {
+                match tracked.child.try_wait() {
                     Ok(Some(_)) => {
-                        // [E26-06] Remove dead process from the map. We already
-                        // hold the write lock.
-                        processes.remove(terminal_id);
-                        false
+                        // [E26-06] Dead child: take ownership and finalize it after
+                        // releasing the lock so the logger task is shut down
+                        // gracefully (final flush) instead of being aborted by
+                        // TrackedProcess::drop, which would lose the last log batch.
+                        match processes.remove(terminal_id) {
+                            Some(tracked) => tracked,
+                            None => return false,
+                        }
                     }
-                    Ok(None) => true, // process is still running
-                    Err(_) => true,   // cannot determine; assume running to be safe
-                };
+                    Ok(None) => return true, // process is still running
+                    Err(_) => return true,   // cannot determine; assume running to be safe
+                }
+            } else {
+                // EOF observed: take ownership and drop the lock before any kill.
+                match processes.remove(terminal_id) {
+                    Some(tracked) => tracked,
+                    None => return false,
+                }
             }
             // EOF observed: take ownership and drop the lock before any kill.
             match processes.remove(terminal_id) {
@@ -1207,17 +1217,25 @@ impl ProcessManager {
                     Err(_) => {}
                 }
             }
-            // Reap already-exited entries so they don't linger until the next cleanup.
-            for id in &exited {
-                processes.remove(id);
-            }
+            // Take ownership of already-exited entries so they don't linger until
+            // the next cleanup; finalize them after the lock drops.
+            let exited: Vec<(String, TrackedProcess)> = exited
+                .into_iter()
+                .filter_map(|id| processes.remove(&id).map(|t| (id, t)))
+                .collect();
             // Take ownership of the EOF entries; terminate them after the lock drops.
             let eof: Vec<(String, TrackedProcess)> = eof
                 .into_iter()
                 .filter_map(|id| processes.remove(&id).map(|t| (id, t)))
                 .collect();
-            (running, eof)
+            (running, exited, eof)
         };
+
+        // Lock released: finalize already-exited children gracefully (final logger
+        // flush) instead of aborting their logger task via a bare remove.
+        for (id, tracked) in exited {
+            self.finalize_terminated_process(&id, tracked).await;
+        }
 
         // Lock released: kill any EOF-but-alive child before finalizing so it is
         // not orphaned, mirroring is_running.

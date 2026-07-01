@@ -1267,13 +1267,12 @@ impl ToolCallStates {
     /// issues parallel tools). Only when no id is provided do we fall back to
     /// the historical FIFO behavior of taking the oldest in-flight call.
     fn take_pending(&mut self, result_id: Option<&str>) -> Option<PendingToolCall> {
-        if let Some(result_id) = result_id
-            && let Some(pos) = self
+        if let Some(result_id) = result_id {
+            return self
                 .pending_fifo
                 .iter()
                 .position(|pending| pending.tool_call_id() == result_id)
-        {
-            return self.pending_fifo.remove(pos);
+                .and_then(|pos| self.pending_fifo.remove(pos));
         }
         self.pending_fifo.pop_front()
     }

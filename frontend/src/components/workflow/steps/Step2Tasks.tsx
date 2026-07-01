@@ -167,11 +167,13 @@ export const Step2Tasks: React.FC<Step2TasksProps> = ({
   }
 
   const currentTask = config[currentTaskIndex];
-  const completedTasks = config.filter(
-    (task) => task.name && task.description && task.branch
-  ).length;
+  const completedTasks = config
+    .slice(0, taskCount)
+    .filter((task) => task.name && task.description && task.branch).length;
   const progressPercent =
-    taskCount > 0 ? Math.round((completedTasks / taskCount) * 100) : 0;
+    taskCount > 0
+      ? Math.min(100, Math.round((completedTasks / taskCount) * 100))
+      : 0;
 
   return (
     <div className="flex flex-col gap-base">

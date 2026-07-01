@@ -292,7 +292,10 @@ async fn list_messages(
 ) -> Result<ResponseJson<ApiResponse<Vec<ConciergeMessage>>>, ApiError> {
     let pool = &deployment.db().pool;
     let cursor = query.cursor.unwrap_or(0);
-    let limit = query.limit.unwrap_or(100);
+    // Clamp to a sane maximum so a huge/overflowing `limit` cannot turn into a
+    // negative i64 (SQLite treats a negative LIMIT as unlimited) and scan/return
+    // the entire session in one response.
+    let limit = query.limit.unwrap_or(100).min(500);
 
     let messages = ConciergeMessage::list_by_session_paginated(pool, &id, cursor, limit)
         .await

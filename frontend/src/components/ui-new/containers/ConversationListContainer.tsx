@@ -101,6 +101,11 @@ export function ConversationList({ attempt, task }: Readonly<ConversationListPro
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+      debounceTimeoutRef.current = null;
+    }
+    pendingUpdateRef.current = null;
     setLoading(true);
     setChannelData(null);
     reset();

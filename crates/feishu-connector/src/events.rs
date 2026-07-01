@@ -88,8 +88,13 @@ pub fn parse_text_content(content_json: &str) -> String {
 pub fn feishu_event_from_sdk_payload(bytes: &[u8]) -> anyhow::Result<FeishuEvent> {
     let v: serde_json::Value = serde_json::from_slice(bytes)?;
     if v.get("event").is_some() && v.get("header").is_some() {
-        // Already a full envelope: deserialize directly (equivalent to legacy path).
-        return Ok(serde_json::from_value(v)?);
+        // Full envelope: try the strict deserialize first, but if header-shape
+        // drift (e.g. missing/non-string event_id or event_type) makes it fail,
+        // fall through to the tolerant wrapper below rather than dropping the
+        // message. Dedup already tolerates an empty event_id.
+        if let Ok(ev) = serde_json::from_value::<FeishuEvent>(v.clone()) {
+            return Ok(ev);
+        }
     }
     // Only the inner event body (or missing header): wrap it so downstream
     // `parse_message_event` sees a well-formed im.message.receive_v1 event.

@@ -185,15 +185,19 @@ impl TrayApp {
 
         let log_file_path = logs_dir.join("server.log");
 
-        let stdout_file = fs::File::create(&log_file_path)
-            .map(Stdio::from)
-            .unwrap_or(Stdio::null());
-        let stderr_file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_file_path)
-            .map(Stdio::from)
-            .unwrap_or(Stdio::null());
+        // Open the log file ONCE (truncating for a fresh log each start) and share
+        // the same file handle for stdout and stderr via try_clone, so both streams
+        // write through a single file description and do not clobber each other.
+        let (stdout_file, stderr_file) = match fs::File::create(&log_file_path) {
+            Ok(f) => {
+                let stderr = f
+                    .try_clone()
+                    .map(Stdio::from)
+                    .unwrap_or_else(|_| Stdio::null());
+                (Stdio::from(f), stderr)
+            }
+            Err(_) => (Stdio::null(), Stdio::null()),
+        };
 
         // CREATE_NO_WINDOW (0x08000000) hides the console window on Windows
         #[cfg(target_os = "windows")]

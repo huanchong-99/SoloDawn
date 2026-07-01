@@ -713,8 +713,11 @@ impl GitWatcher {
                 tracing::warn!(
                     commit_hash = %commit.hash,
                     error = %e,
-                    "Failed to publish git event for stale-metadata commit (will retry on next poll)"
+                    "Failed to publish git event for stale-metadata commit; returning Err so the cursor is NOT advanced and the watch loop retries on the next poll"
                 );
+                return Err(anyhow::anyhow!(
+                    "failed to publish stale-metadata git event: {e}"
+                ));
             }
             return Ok(());
         }

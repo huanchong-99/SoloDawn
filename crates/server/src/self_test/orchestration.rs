@@ -272,7 +272,7 @@ async fn test_configure_model(
     if status >= 400 {
         return Err(format!(
             "Update model credentials returned {status}: {}",
-            &body[..body.len().min(300)]
+            &body[..body.floor_char_boundary(body.len().min(300))]
         ));
     }
 
@@ -336,7 +336,7 @@ async fn test_create_project(
     let body: Value = serde_json::from_str(&body_text).map_err(|e| {
         format!(
             "Parse project JSON ({status}): {e}\nBody: {}",
-            &body_text[..body_text.len().min(500)]
+            &body_text[..body_text.floor_char_boundary(body_text.len().min(500))]
         )
     })?;
 
@@ -403,7 +403,7 @@ async fn test_full_workflow(
     let body: Value = serde_json::from_str(&body_text).map_err(|e| {
         format!(
             "Parse JSON ({status}): {e}\nBody: {}",
-            &body_text[..body_text.len().min(500)]
+            &body_text[..body_text.floor_char_boundary(body_text.len().min(500))]
         )
     })?;
     if status >= 400 {
@@ -448,7 +448,7 @@ async fn test_full_workflow(
         let logs = collect_terminal_logs(client, api, &terminal_id).await;
         return Err(format!(
             "Prepare workflow returned {status}: {}\n\nTerminal logs:\n{}",
-            &body_text[..body_text.len().min(500)],
+            &body_text[..body_text.floor_char_boundary(body_text.len().min(500))],
             logs
         ));
     }
@@ -472,7 +472,7 @@ async fn test_full_workflow(
         let logs = collect_terminal_logs(client, api, &terminal_id).await;
         return Err(format!(
             "Start workflow returned {status}: {}\n\nTerminal logs:\n{}",
-            &body_text[..body_text.len().min(500)],
+            &body_text[..body_text.floor_char_boundary(body_text.len().min(500))],
             logs
         ));
     }

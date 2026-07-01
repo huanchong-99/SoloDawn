@@ -330,6 +330,15 @@ async fn handle_chat_event(
             ));
         }
 
+        let workflow = Workflow::find_by_id(&deployment.db().pool, workflow_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound("Workflow not found".to_string()))?;
+        if workflow.execution_mode != "agent_planned" {
+            return Err(ApiError::Conflict(
+                "Only agent_planned workflows can be bound to chat connectors".to_string(),
+            ));
+        }
+
         ExternalConversationBinding::upsert(
             &deployment.db().pool,
             &provider,
@@ -389,10 +398,6 @@ async fn handle_chat_event(
     };
 
     let mut headers = HeaderMap::new();
-    headers.insert(
-        "x-orchestrator-role",
-        "operator".parse().expect("valid header value"),
-    );
     headers.insert(
         "x-orchestrator-role",
         "operator".parse().map_err(|e| {

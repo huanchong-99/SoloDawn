@@ -161,10 +161,12 @@ export const Step6Advanced: React.FC<Step6AdvancedProps> = ({
         advancedConfig.errorTerminal.cliTypeId
       );
 
-    const mergeTerminalModelIncompatible = !isModelCompatibleWithCli(
-      advancedConfig.mergeTerminal.modelConfigId,
-      advancedConfig.mergeTerminal.cliTypeId
-    );
+    const mergeTerminalModelIncompatible =
+      !!advancedConfig.mergeTerminal.cliTypeId?.trim() &&
+      !isModelCompatibleWithCli(
+        advancedConfig.mergeTerminal.modelConfigId,
+        advancedConfig.mergeTerminal.cliTypeId
+      );
 
     if (!errorTerminalModelIncompatible && !mergeTerminalModelIncompatible) {
       return;

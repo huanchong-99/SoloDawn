@@ -191,7 +191,9 @@ export function PreviewBrowserContainer({
           );
         }
 
-        return { width: newWidth, height: newHeight };
+        const next = { width: newWidth, height: newHeight };
+        localDimensionsRef.current = next;
+        return next;
       });
     };
 

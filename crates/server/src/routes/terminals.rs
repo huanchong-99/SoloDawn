@@ -186,6 +186,7 @@ async fn find_executable(cmd: &str) -> Option<String> {
             .ok()
             .filter(|o| o.status.success())
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())
     }
 
     #[cfg(windows)]
@@ -202,8 +203,10 @@ async fn find_executable(cmd: &str) -> Option<String> {
                     .lines()
                     .next()
                     .unwrap_or("")
+                    .trim()
                     .to_string()
             })
+            .filter(|s| !s.is_empty())
     }
 }
 

@@ -156,6 +156,12 @@ impl FeishuClient {
             *connected.write().await = false;
         });
 
+        // The socket is about to be opened by the (blocking-until-close) call
+        // below. Treat 'attempting/holding the connection' as live so a healthy
+        // but idle bot (no inbound traffic yet) is not misreported as
+        // disconnected. open() blocks until the connection closes/errors, at
+        // which point we flip this back to false right after it returns.
+        *self.connected.write().await = true;
         tracing::info!("Feishu WS connecting (provider=openlark, event=im.message.receive_v1)");
         let res = LarkWsClient::open(Arc::new(self.cfg.clone()), handler).await;
         *self.connected.write().await = false;

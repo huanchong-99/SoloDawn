@@ -325,7 +325,19 @@ impl MessageBusBackend for RedisBus {
 
             let mut msg_stream = pubsub.into_on_message();
             use futures_util::StreamExt;
-            while let Some(msg) = msg_stream.next().await {
+            loop {
+                let msg = tokio::select! {
+                    // Receiver dropped: exit promptly even if no message ever arrives,
+                    // so we don't park forever holding a Redis PubSub connection.
+                    _ = tx.closed() => {
+                        tracing::debug!(channel = %channel, "Topic subscriber dropped, stopping Redis listener");
+                        break;
+                    }
+                    next = msg_stream.next() => match next {
+                        Some(m) => m,
+                        None => break,
+                    },
+                };
                 let payload: String = match msg.get_payload() {
                     Ok(p) => p,
                     Err(err) => {

@@ -1919,24 +1919,59 @@ impl GitService {
         // Set up callbacks for authentication if token is provided
         let mut callbacks = RemoteCallbacks::new();
         if let Some(token) = token {
-            callbacks.credentials(|_url, username_from_url, _allowed_types| {
-                Cred::userpass_plaintext(username_from_url.unwrap_or("git"), token)
+            let attempts = std::cell::Cell::new(0u32);
+            callbacks.credentials(move |_url, username_from_url, allowed_types| {
+                // Two-phase auth: satisfy the USERNAME request first.
+                if allowed_types.contains(git2::CredentialType::USERNAME) {
+                    return Cred::username(username_from_url.unwrap_or("git"));
+                }
+                if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
+                    let n = attempts.get();
+                    if n >= 1 {
+                        return Err(git2::Error::from_str(
+                            "authentication failed: token credentials exhausted",
+                        ));
+                    }
+                    attempts.set(n + 1);
+                    return Cred::userpass_plaintext(username_from_url.unwrap_or("git"), token);
+                }
+                Err(git2::Error::from_str(
+                    "no supported authentication method offered by server",
+                ))
             });
         } else {
             // Fallback to SSH agent and key file authentication
-            callbacks.credentials(|_url, username_from_url, _| {
-                // Try SSH agent first
-                if let Some(username) = username_from_url
-                    && let Ok(cred) = Cred::ssh_key_from_agent(username)
-                {
-                    return Ok(cred);
+            let attempts = std::cell::Cell::new(0u32);
+            callbacks.credentials(move |_url, username_from_url, allowed_types| {
+                let username = username_from_url.unwrap_or("git");
+                // Two-phase SSH auth: satisfy the USERNAME request first.
+                if allowed_types.contains(git2::CredentialType::USERNAME) {
+                    return Cred::username(username);
                 }
-
-                // Fallback to key file (~/.ssh/id_rsa)
-                let home = dirs::home_dir()
-                    .ok_or_else(|| git2::Error::from_str("Could not find home directory"))?;
-                let key_path = home.join(".ssh").join("id_rsa");
-                Cred::ssh_key(username_from_url.unwrap_or("git"), None, &key_path, None)
+                if !allowed_types.contains(git2::CredentialType::SSH_KEY) {
+                    return Err(git2::Error::from_str(
+                        "no supported authentication method offered by server",
+                    ));
+                }
+                let n = attempts.get();
+                attempts.set(n + 1);
+                match n {
+                    // Try SSH agent first
+                    0 => Cred::ssh_key_from_agent(username),
+                    // Fallback to key file (~/.ssh/id_rsa)
+                    1 => {
+                        let home = dirs::home_dir().ok_or_else(|| {
+                            git2::Error::from_str("Could not find home directory")
+                        })?;
+                        let key_path = home.join(".ssh").join("id_rsa");
+                        Cred::ssh_key(username, None, &key_path, None)
+                    }
+                    // Exhausted: return Err so libgit2 stops retrying and a
+                    // clean auth error propagates instead of looping.
+                    _ => Err(git2::Error::from_str(
+                        "authentication failed: SSH credentials exhausted",
+                    )),
+                }
             });
         }
 

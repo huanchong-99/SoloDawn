@@ -141,7 +141,18 @@ impl GitHostProvider for AzureDevOpsProvider {
                 .with_max_times(3)
                 .with_jitter(),
         )
-        .when(|e: &GitHostError| e.should_retry())
+        .when(|e: &GitHostError| {
+            // `az repos pr create` is NOT idempotent. If the PR was actually created
+            // but the CLI output failed to parse (UnexpectedOutput) or the command
+            // reported a generic PR failure (PullRequest, e.g. "already exists"),
+            // retrying spawns duplicate PRs or spuriously fails. Only retry conditions
+            // that are safe to repeat for a mutating create.
+            e.should_retry()
+                && !matches!(
+                    e,
+                    GitHostError::UnexpectedOutput(_) | GitHostError::PullRequest(_)
+                )
+        })
         .notify(|err: &GitHostError, dur: Duration| {
             tracing::warn!(
                 "Azure DevOps API call failed, retrying after {:.2}s: {}",

@@ -288,6 +288,16 @@ pub async fn create_task_and_start(
         Ok(_) => true,
         Err(err) => {
             tracing::error!("Failed to start task attempt: {err}");
+            // Roll back the just-created workspace (and cascaded workspace_repos)
+            // so a failed start does not leave an orphaned workspace with no
+            // running process, mirroring create_task_attempt (G34-005).
+            if let Err(del_err) = Workspace::delete(pool, workspace.id).await {
+                tracing::error!(
+                    workspace_id = %workspace.id,
+                    "Failed to roll back workspace record after start_workspace failure: {}",
+                    del_err
+                );
+            }
             false
         }
     };
@@ -333,14 +343,14 @@ pub async fn update_task(
                 "title must not be empty".to_string(),
             ));
         }
-        if t.len() > MAX_TITLE_LEN {
+        if t.chars().count() > MAX_TITLE_LEN {
             return Err(ApiError::BadRequest(format!(
                 "title must not exceed {MAX_TITLE_LEN} characters"
             )));
         }
     }
     if let Some(ref d) = payload.description {
-        if d.len() > MAX_DESCRIPTION_LEN {
+        if d.chars().count() > MAX_DESCRIPTION_LEN {
             return Err(ApiError::BadRequest(format!(
                 "description must not exceed {MAX_DESCRIPTION_LEN} characters"
             )));
@@ -348,7 +358,10 @@ pub async fn update_task(
     }
 
     // Use existing values if not provided in update
-    let title = payload.title.unwrap_or(existing_task.title);
+    let title = payload
+        .title
+        .map(|t| t.trim().to_string())
+        .unwrap_or(existing_task.title);
     let description = match payload.description {
         Some(s) if s.trim().is_empty() => None, // Empty string = clear description
         Some(s) => Some(s),                     // Non-empty string = update description

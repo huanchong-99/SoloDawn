@@ -3924,6 +3924,15 @@ async fn list_orchestrator_messages(
         return Ok(ResponseJson(ApiResponse::success(response)));
     }
 
+    // An empty persisted result with an EXPLICIT cursor means the caller paged
+    // to/past the end of the persisted store. Return an empty page instead of
+    // falling through to the independent runtime store, which would mix two
+    // unrelated pagination sequences. The runtime store is only a fallback for
+    // the bootstrap case where no message has been persisted yet (auto cursor).
+    if params.cursor.is_some() {
+        return Ok(ResponseJson(ApiResponse::success(Vec::new())));
+    }
+
     let runtime = deployment.orchestrator_runtime();
     if !runtime.is_running(&workflow_id).await {
         return Ok(ResponseJson(ApiResponse::success(Vec::new())));

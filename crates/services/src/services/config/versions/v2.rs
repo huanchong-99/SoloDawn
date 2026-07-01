@@ -99,7 +99,9 @@ impl Config {
 
 impl From<String> for Config {
     fn from(raw_config: String) -> Self {
-        if let Ok(config) = serde_json::from_str(&raw_config) {
+        if let Ok(config) = serde_json::from_str::<Config>(&raw_config)
+            && config.config_version == "v2"
+        {
             config
         } else if let Ok(config) = Self::from_previous_version(&raw_config) {
             tracing::info!("Config upgraded from previous version");

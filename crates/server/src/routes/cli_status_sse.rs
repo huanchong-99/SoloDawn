@@ -37,6 +37,11 @@ pub fn cli_status_sse_routes() -> Router<crate::DeploymentImpl> {
 /// 2. Subsequent `cli_status_change` events whenever the monitor detects a change.
 /// 3. Keep-alive comment frames every 30 seconds.
 async fn cli_status_stream(Extension(monitor): Extension<SharedCliHealthMonitor>) -> Response {
+    // Subscribe to the broadcast channel *before* snapshotting the cached
+    // statuses so any change broadcast after the snapshot is still captured by
+    // the already-live receiver (the client dedupes against the initial event).
+    let rx = monitor.subscribe();
+
     // Snapshot current cached statuses for the initial event
     let cached = monitor.get_cached_statuses().await;
     let initial_data = serde_json::to_string(&cached).unwrap_or_else(|_| "[]".to_string());
@@ -44,10 +49,6 @@ async fn cli_status_stream(Extension(monitor): Extension<SharedCliHealthMonitor>
     let initial_event: Result<Event, Infallible> = Ok(Event::default()
         .event("connection_established")
         .data(initial_data));
-
-    // Subscribe to the broadcast channel *before* yielding the initial event
-    // so we don't miss any changes that happen concurrently.
-    let rx = monitor.subscribe();
     let change_stream = BroadcastStream::new(rx).filter_map(|result| async {
         match result {
             Ok(change) => {

@@ -41,11 +41,11 @@ const exceedsMaxLineCount = (d: Diff, maxLines: number): boolean => {
   if (d.additions != null || d.deletions != null)
     return (d.additions ?? 0) + (d.deletions ?? 0) > maxLines;
 
-  return true;
+  return false;
 };
 
 const getDiffId = ({ diff, index }: Readonly<{ diff: Diff; index: number }>) =>
-  `${diff.newPath || diff.oldPath || index}`;
+  `${index}:${diff.newPath || diff.oldPath || ''}`;
 
 export function DiffsPanel({ selectedAttempt, gitOps }: Readonly<DiffsPanelProps>) {
   const { t } = useTranslation('tasks');
@@ -196,7 +196,7 @@ function DiffListContent({
   return (
     <>
       {diffs.map((diff, idx) => {
-        const id = diff.newPath || diff.oldPath || String(idx);
+        const id = getDiffId({ diff, index: idx });
         return (
           <DiffCard
             key={id}

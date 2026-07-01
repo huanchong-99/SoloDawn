@@ -641,7 +641,7 @@ impl FeishuService {
         match session {
             Some(s) => {
                 let name = if s.name.is_empty() {
-                    s.id[..8].to_string()
+                    s.id[..8.min(s.id.len())].to_string()
                 } else {
                     s.name.clone()
                 };

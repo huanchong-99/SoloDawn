@@ -92,7 +92,7 @@ impl ImageService {
 
         let new_filename = format!("{}.{}", Uuid::new_v4(), extension);
         let cached_path = self.cache_dir.join(&new_filename);
-        fs::write(&cached_path, data)?;
+        tokio::fs::write(&cached_path, data).await?;
 
         let image = Image::create(
             &self.pool,

@@ -325,8 +325,7 @@ async fn run_server() -> Result<(), SoloDawnError> {
         .ok()
         .and_then(|s| {
             // remove any ANSI codes, then turn into String
-            let cleaned =
-                String::from_utf8(strip(s.as_bytes())).expect("UTF-8 after stripping ANSI");
+            let cleaned = String::from_utf8_lossy(&strip(s.as_bytes())).into_owned();
             cleaned.trim().parse::<u16>().ok()
         })
         .unwrap_or_else(|| {

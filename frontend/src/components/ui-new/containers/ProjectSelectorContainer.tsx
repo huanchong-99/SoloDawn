@@ -139,6 +139,7 @@ export function ProjectSelectorContainer({
 
   const renderProjectItem = useCallback((idx: number) => {
     const item = filteredItems[idx];
+    if (!item) return null;
     const isHighlighted = idx + 1 === safeHighlightedIndex;
     const isSelected = selectedProjectId === item.id;
     return (
