@@ -329,7 +329,7 @@ impl MessageBusBackend for RedisBus {
                 let msg = tokio::select! {
                     // Receiver dropped: exit promptly even if no message ever arrives,
                     // so we don't park forever holding a Redis PubSub connection.
-                    _ = tx.closed() => {
+                    () = tx.closed() => {
                         tracing::debug!(channel = %channel, "Topic subscriber dropped, stopping Redis listener");
                         break;
                     }

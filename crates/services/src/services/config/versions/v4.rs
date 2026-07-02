@@ -45,6 +45,10 @@ pub struct Config {
 }
 
 impl Config {
+    // Result kept for uniformity with the migration chain (v2::from_previous_version
+    // can still Err on an unparseable v1 config); this level always succeeds because
+    // it chains down via v3::Config::from on a failed direct parse.
+    #[allow(clippy::unnecessary_wraps)]
     pub fn from_previous_version(raw_config: &str) -> Result<Self, Error> {
         let old_config = match serde_json::from_str::<v3::Config>(raw_config) {
             Ok(cfg) => cfg,

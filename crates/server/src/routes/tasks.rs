@@ -360,8 +360,7 @@ pub async fn update_task(
     // Use existing values if not provided in update
     let title = payload
         .title
-        .map(|t| t.trim().to_string())
-        .unwrap_or(existing_task.title);
+        .map_or(existing_task.title, |t| t.trim().to_string());
     let description = match payload.description {
         Some(s) if s.trim().is_empty() => None, // Empty string = clear description
         Some(s) => Some(s),                     // Non-empty string = update description
