@@ -92,6 +92,7 @@
       ]
     },
     "profile": {
+      "description": "Deprecated: the v2 thread/turn API has no profile parameter. Kept as a\nno-op so stored profiles that set it keep deserializing.",
       "type": [
         "string",
         "null"
@@ -104,6 +105,7 @@
       ]
     },
     "include_apply_patch_tool": {
+      "description": "Deprecated: no v2 equivalent. Kept as a no-op so stored profiles that\nset it keep deserializing.",
       "type": [
         "boolean",
         "null"
@@ -116,6 +118,7 @@
       ]
     },
     "compact_prompt": {
+      "description": "Deprecated: no v2 equivalent. Kept as a no-op so stored profiles that\nset it keep deserializing.",
       "type": [
         "string",
         "null"

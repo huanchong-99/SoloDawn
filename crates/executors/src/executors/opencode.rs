@@ -48,7 +48,7 @@ pub struct Opencode {
 
 impl Opencode {
     /// Package version for opencode-ai
-    const OPENCODE_NPX_VERSION: &'static str = "1.1.3";
+    const OPENCODE_NPX_VERSION: &'static str = "1.17.13";
 
     fn build_command_builder(&self) -> CommandBuilder {
         let base_cmd = format!("npx -y opencode-ai@{}", Self::OPENCODE_NPX_VERSION);

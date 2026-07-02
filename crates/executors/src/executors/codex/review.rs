@@ -1,17 +1,15 @@
 use std::sync::Arc;
 
-use codex_app_server_protocol::{NewConversationParams, ReviewTarget};
-
 use super::{
     client::{AppServerClient, LogWriter},
     jsonrpc::{ExitSignalSender, JsonRpcPeer},
-    session::SessionHandler,
+    protocol::{ReviewTarget, ThreadForkParams, ThreadStartParams},
 };
 use crate::{approvals::ExecutorApprovalService, executors::ExecutorError};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn launch_codex_review(
-    conversation_params: NewConversationParams,
+    thread_params: ThreadStartParams,
     resume_session: Option<String>,
     review_target: ReviewTarget,
     child_stdout: tokio::process::ChildStdout,
@@ -32,29 +30,25 @@ pub async fn launch_codex_review(
         ));
     }
 
-    let conversation_id = if let Some(session_id) = resume_session {
-        let (rollout_path, _forked_session_id) = SessionHandler::fork_rollout_file(&session_id)
-            .map_err(|e| ExecutorError::FollowUpNotSupported(e.to_string()))?;
+    let thread_id = if let Some(session_id) = resume_session {
+        // Fork the previous session into a fresh thread so the review runs on
+        // its own session id (replaces the old manual rollout-file copy +
+        // resumeConversation flow).
+        let params = ThreadForkParams::from_thread_start(session_id, thread_params);
         let response = client
-            .resume_conversation(rollout_path.clone(), conversation_params)
-            .await?;
-        tracing::debug!(
-            "resuming session for review using rollout file {}, response {:?}",
-            rollout_path.display(),
-            response
-        );
-        response.conversation_id
+            .fork_thread(params)
+            .await
+            .map_err(|e| ExecutorError::FollowUpNotSupported(e.to_string()))?;
+        tracing::debug!("forked session for review, response {:?}", response);
+        response.thread.id
     } else {
-        let response = client.new_conversation(conversation_params).await?;
-        response.conversation_id
+        let response = client.start_thread(thread_params).await?;
+        response.thread.id
     };
 
-    client.register_session(&conversation_id).await?;
-    client.add_conversation_listener(conversation_id).await?;
+    client.register_session(&thread_id).await?;
 
-    client
-        .start_review(conversation_id.to_string(), review_target)
-        .await?;
+    client.start_review(thread_id, review_target).await?;
 
     Ok(())
 }

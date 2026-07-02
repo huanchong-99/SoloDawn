@@ -219,7 +219,7 @@
     "roleLabel": "角色描述（可选）",
     "rolePlaceholder": "例如：负责后端 API 开发的专家",
     "errors": {
-      "noCliInstalled": "未安装任何 CLI 工具。请至少安装一个 CLI 工具（Claude Code、Gemini CLI、Codex 或 Cursor Agent）以继续。"
+      "noCliInstalled": "未安装任何 CLI 工具。请至少安装一个 CLI 工具（Claude Code、Codex 或 Cursor Agent）以继续。"
     },
     "cliNotInstalledTitle": "CLI 未安装",
     "cliNotInstalledDescription": "所选的 CLI 工具未安装。请在运行工作流之前先安装该工具。"

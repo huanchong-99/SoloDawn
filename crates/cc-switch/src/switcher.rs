@@ -7,7 +7,7 @@ use std::fmt;
 use crate::{
     claude, codex,
     error::{CCSwitchError, Result},
-    gemini, CliType,
+    CliType,
 };
 
 /// 模型切换配置
@@ -64,10 +64,6 @@ pub async fn switch_model(cli_type: CliType, config: &SwitchConfig) -> Result<()
         }
         CliType::Codex => {
             codex::update_codex_model(config.base_url.as_deref(), &config.api_key, &config.model)
-                .await
-        }
-        CliType::Gemini => {
-            gemini::update_gemini_model(config.base_url.as_deref(), &config.api_key, &config.model)
                 .await
         }
         _ => Err(CCSwitchError::UnsupportedCli {

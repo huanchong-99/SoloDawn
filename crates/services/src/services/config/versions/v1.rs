@@ -24,6 +24,8 @@ pub(super) enum ExecutorConfig {
     Claude,
     ClaudePlan,
     Amp,
+    // Retired executor — kept so legacy v1 configs still deserialize;
+    // the v2 migration maps it to the default profile.
     Gemini,
     #[serde(alias = "setup_script")]
     SetupScript {

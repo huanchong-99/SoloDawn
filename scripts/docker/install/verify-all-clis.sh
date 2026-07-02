@@ -28,13 +28,12 @@ check_optional() {
 
 check_required "Claude Code"  claude --version
 check_required "Codex CLI"    codex --version
-check_required "Gemini CLI"   gemini --version
 
 check_optional "Qwen Code"    qwen --version
 check_optional "Amp"          amp --version
 check_optional "OpenCode"     opencode --version
-check_optional "Kilo CLI"     kilocode --version
-check_optional "GH Copilot"   gh copilot --version
+check_optional "Droid"        droid --version
+check_optional "GH Copilot"   copilot --version
 
 log_info "=== Verification: $OK/$TOTAL available, required failures: $REQUIRED_FAIL ==="
 

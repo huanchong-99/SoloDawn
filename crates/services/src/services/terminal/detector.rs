@@ -107,13 +107,12 @@ impl CliDetector {
         // via crafted detect_command values when using `cmd /c` on Windows.
         const ALLOWED_CLI_COMMANDS: &[&str] = &[
             "claude",
-            "gemini",
             "codex",
             "amp",
             "cursor",
             "cursor-agent",
             "qwen",
-            "gh",
+            "copilot",
             "opencode",
             "droid",
         ];

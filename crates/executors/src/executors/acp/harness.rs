@@ -25,31 +25,16 @@ use crate::{
     executors::{ExecutorError, ExecutorExitResult, SpawnedChild, acp::AcpEvent},
 };
 
-/// Reusable harness for ACP-based conns (Gemini, Qwen, etc.)
+/// Reusable harness for ACP-based agents (Qwen Code today; any CLI speaking
+/// the Agent Client Protocol over stdio can plug in with its own namespace).
 pub struct AcpAgentHarness {
     session_namespace: String,
     model: Option<String>,
     mode: Option<String>,
 }
 
-impl Default for AcpAgentHarness {
-    fn default() -> Self {
-        // Keep existing behavior for Gemini
-        Self::new()
-    }
-}
-
 impl AcpAgentHarness {
-    /// Create a harness with the default Gemini namespace
-    pub fn new() -> Self {
-        Self {
-            session_namespace: "gemini_sessions".to_string(),
-            model: None,
-            mode: None,
-        }
-    }
-
-    /// Create a harness with a custom session namespace (e.g. for Qwen)
+    /// Create a harness with a custom session namespace (e.g. "qwen_sessions")
     pub fn with_session_namespace(namespace: impl Into<String>) -> Self {
         Self {
             session_namespace: namespace.into(),

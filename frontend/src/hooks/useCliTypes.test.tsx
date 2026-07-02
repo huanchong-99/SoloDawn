@@ -47,13 +47,13 @@ const mockCliTypes: CliType[] = [
     documentationUrl: 'https://docs.anthropic.com/claude/code',
   },
   {
-    id: 'gemini-cli',
-    name: 'gemini-cli',
-    displayName: 'Gemini CLI',
-    description: 'Google Gemini CLI',
-    executableCommand: 'gemini',
-    versionCheckCommand: 'gemini --version',
-    website: 'https://ai.google.dev/gemini-cli',
+    id: 'qwen-code',
+    name: 'qwen-code',
+    displayName: 'Qwen Code',
+    description: 'Alibaba Qwen Code CLI',
+    executableCommand: 'qwen',
+    versionCheckCommand: 'qwen --version',
+    website: 'https://github.com/QwenLM/qwen-code',
   },
   {
     id: 'codex',
@@ -75,7 +75,7 @@ const mockDetectionResults: CliDetectionResult[] = [
     path: '/usr/local/bin/claude',
   },
   {
-    cliTypeId: 'gemini-cli',
+    cliTypeId: 'qwen-code',
     isInstalled: false,
     error: 'Command not found',
   },
@@ -353,9 +353,9 @@ describe('useCliTypes', () => {
       expect(claudeDetection?.version).toBe('1.0.0');
       expect(claudeDetection?.path).toBe('/usr/local/bin/claude');
 
-      const geminiDetection = result.current.data?.find((d) => d.cliTypeId === 'gemini-cli');
-      expect(geminiDetection?.isInstalled).toBe(false);
-      expect(geminiDetection?.error).toBe('Command not found');
+      const qwenDetection = result.current.data?.find((d) => d.cliTypeId === 'qwen-code');
+      expect(qwenDetection?.isInstalled).toBe(false);
+      expect(qwenDetection?.error).toBe('Command not found');
     });
 
     it('should correctly parse model information', async () => {

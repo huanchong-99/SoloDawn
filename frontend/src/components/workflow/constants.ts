@@ -13,12 +13,6 @@ export const CLI_TYPES = {
     description: 'Anthropic Claude Code CLI',
     icon: 'terminal',
   },
-  'cli-gemini-cli': {
-    id: 'cli-gemini-cli',
-    label: 'Gemini CLI',
-    description: 'Google Gemini CLI',
-    icon: 'terminal',
-  },
   'cli-codex': {
     id: 'cli-codex',
     label: 'Codex',

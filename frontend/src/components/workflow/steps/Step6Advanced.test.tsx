@@ -348,10 +348,10 @@ describe('Step6Advanced', () => {
       );
 
       const select = screen.getByLabelText(i18n.t('workflow:step6.mergeTerminal.cliLabel'));
-      fireEvent.change(select, { target: { value: 'cli-gemini-cli' } });
+      fireEvent.change(select, { target: { value: 'cli-qwen-code' } });
 
       const advanced = getLastAdvanced();
-      expect(advanced.mergeTerminal.cliTypeId).toBe('cli-gemini-cli');
+      expect(advanced.mergeTerminal.cliTypeId).toBe('cli-qwen-code');
     });
 
     it('should update merge terminal model selection', () => {
@@ -662,7 +662,7 @@ describe('Step6Advanced', () => {
       const mergeCliSelect = screen.getByLabelText(i18n.t('workflow:step6.mergeTerminal.cliLabel'));
       fireEvent.change(mergeCliSelect, { target: { value: '' } });
 
-      const options = screen.getAllByText(/Claude Code|Gemini CLI|Codex/);
+      const options = screen.getAllByText(/Claude Code|Qwen Code|Codex/);
       expect(options.length).toBeGreaterThanOrEqual(3);
     });
   });

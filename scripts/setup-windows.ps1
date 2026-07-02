@@ -176,7 +176,6 @@ $script:Messages = @{
         AI_CLI_TOGGLE              = "输入编号切换选择, a=全选, n=全不选, 回车=确认:"
         AI_CLI_NONE_SELECTED       = "未选择任何 AI CLI，跳过安装"
         AI_CLI_INSTALLING          = "将安装 {0} 个 AI CLI..."
-        AI_CLI_GH_NEEDED           = "GitHub Copilot 需要 GitHub CLI，正在安装..."
 
         PROMPT_CONTINUE            = "是否继续？(Y/n)"
         PROMPT_PROJECT_SETUP       = "是否初始化项目？（运行 pnpm install + prepare-db）"
@@ -240,7 +239,6 @@ $script:Messages = @{
         AI_CLI_TOGGLE              = "Enter number to toggle, a=all, n=none, Enter=confirm:"
         AI_CLI_NONE_SELECTED       = "No AI CLI selected, skipping"
         AI_CLI_INSTALLING          = "Installing {0} AI CLI(s)..."
-        AI_CLI_GH_NEEDED           = "GitHub Copilot requires GitHub CLI, installing..."
 
         PROMPT_CONTINUE            = "Continue? (Y/n)"
         PROMPT_PROJECT_SETUP       = "Initialize project? (run pnpm install + prepare-db)"
@@ -275,15 +273,16 @@ $script:CurrentLang = $Lang
 # ────────────────────────────────────────
 
 $script:AiClis = @(
-    @{ Key = "claude-code";  Name = "Claude Code";    Pkg = "@anthropic-ai/claude-code"; Cmd = "claude";       Type = "npm" }
-    @{ Key = "gemini-cli";   Name = "Gemini CLI";     Pkg = "@google/gemini-cli";        Cmd = "gemini";       Type = "npm" }
-    @{ Key = "codex";        Name = "Codex";           Pkg = "@openai/codex";             Cmd = "codex";        Type = "npm" }
-    @{ Key = "amp";          Name = "Amp";             Pkg = "@sourcegraph/amp";          Cmd = "amp";          Type = "npm" }
-    @{ Key = "qwen-code";    Name = "Qwen Code";      Pkg = "@qwen-code/qwen-code";     Cmd = "qwen";         Type = "npm" }
-    @{ Key = "copilot";      Name = "GitHub Copilot"; Pkg = "github/gh-copilot";         Cmd = "gh";           Type = "gh-ext" }
-    @{ Key = "droid";        Name = "Droid";           Pkg = "@kilocode/cli";             Cmd = "droid";        Type = "npm" }
-    @{ Key = "opencode";     Name = "Opencode";       Pkg = "opencode-ai";               Cmd = "opencode";     Type = "npm" }
-    @{ Key = "cursor-agent"; Name = "Cursor Agent";   Pkg = "cursor-agent";              Cmd = "cursor-agent"; Type = "npm" }
+    @{ Key = "claude-code";  Name = "Claude Code";    Pkg = "@anthropic-ai/claude-code";          Cmd = "claude";       Type = "npm" }
+    @{ Key = "codex";        Name = "Codex";           Pkg = "@openai/codex";                      Cmd = "codex";        Type = "npm" }
+    @{ Key = "amp";          Name = "Amp";             Pkg = "@ampcode/cli";                       Cmd = "amp";          Type = "npm" }
+    @{ Key = "qwen-code";    Name = "Qwen Code";      Pkg = "@qwen-code/qwen-code";              Cmd = "qwen";         Type = "npm" }
+    @{ Key = "copilot";      Name = "GitHub Copilot"; Pkg = "@github/copilot";                    Cmd = "copilot";      Type = "npm" }
+    @{ Key = "droid";        Name = "Droid";           Pkg = "droid";                              Cmd = "droid";        Type = "npm" }
+    @{ Key = "opencode";     Name = "Opencode";       Pkg = "opencode-ai";                        Cmd = "opencode";     Type = "npm" }
+    # Cursor ships no official npm package (the npm name "cursor-agent" is an
+    # unrelated third-party library); install via Cursor's official installer.
+    @{ Key = "cursor-agent"; Name = "Cursor Agent";   Pkg = "https://cursor.com/install?win32=true"; Cmd = "cursor-agent"; Type = "script" }
 )
 
 # Track results: key -> @{ Status = "OK"|"FAILED"|"SKIPPED"; Version = "..." }
@@ -655,12 +654,6 @@ $DIRECT_DOWNLOADS = @{
         Args     = "--wait --quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
         FileName = "vs_BuildTools.exe"
     }
-    "GitHub.cli" = @{
-        Url      = "https://github.com/cli/cli/releases/download/v2.74.0/gh_2.74.0_windows_amd64.msi"
-        Args     = "/qn"
-        FileName = "gh-installer.msi"
-        IsMsi    = $true
-    }
 }
 
 function Install-Direct {
@@ -802,7 +795,7 @@ function Show-AiCliMenu {
         for ($i = 0; $i -lt $count; $i++) {
             $cli = $script:AiClis[$i]
             $mark = if ($selected[$i]) { "x" } else { " " }
-            $pkgInfo = if ($cli.Type -eq "gh-ext") { "gh extension" } else { $cli.Pkg }
+            $pkgInfo = if ($cli.Type -eq "script") { "official installer" } else { $cli.Pkg }
             $num = $i + 1
             $line = "  [$mark] $num. $($cli.Name)"
             $line = $line.PadRight(32)
@@ -1240,24 +1233,26 @@ if ($SkipAiClis) {
 
         foreach ($cli in $selectedClis) {
             # Check if already installed
-            if ($cli.Type -eq "gh-ext") {
-                # GitHub Copilot special handling
-                if (-not (Test-CommandExists "gh")) {
-                    Write-Info (T "AI_CLI_GH_NEEDED")
-                    $ok = Install-WithWinget "GitHub.cli" "GitHub CLI"
-                    Update-PathEnvironment
-                    if (-not $ok -or -not (Test-CommandExists "gh")) {
-                        Write-Err (Tf "ERR_INSTALL_FAILED" @("GitHub CLI"))
-                        Record-Result $cli.Name "FAILED"
-                        continue
-                    }
+            if ($cli.Type -eq "script") {
+                # Official vendor installer (no npm package); Pkg holds the installer URL
+                if (Test-CommandExists $cli.Cmd) {
+                    $v = Get-InstalledVersion $cli.Cmd @("--version")
+                    Write-Ok (Tf "ALREADY_INSTALLED" @($cli.Name, $v))
+                    Record-Result $cli.Name "OK" $v
+                    continue
                 }
 
                 Write-Info (Tf "INSTALLING" @($cli.Name))
                 try {
-                    & gh extension install $cli.Pkg 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+                    Invoke-RestMethod $cli.Pkg | Invoke-Expression
+                    Update-PathEnvironment
+                    if (Test-CommandExists $cli.Cmd) {
+                        $v = Get-InstalledVersion $cli.Cmd @("--version")
+                        Record-Result $cli.Name "OK" $v
+                    } else {
+                        Record-Result $cli.Name "OK" "installed (restart terminal)"
+                    }
                     Write-Ok (Tf "INSTALL_OK" @($cli.Name))
-                    Record-Result $cli.Name "OK" "gh extension"
                 } catch {
                     Write-Err (Tf "ERR_INSTALL_FAILED" @($cli.Name))
                     Record-Result $cli.Name "FAILED"

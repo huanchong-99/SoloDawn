@@ -18,7 +18,7 @@
 
 ## What Is SoloDawn?
 
-SoloDawn is an open-source web app that runs on your own machine (Rust backend + React frontend): an upper-layer orchestrator Agent (the primary Agent) commands the **AI CLIs actually installed on your computer** (Claude Code, Codex, Gemini CLI — 9 in total) to carry out fully automated development inside a Git repository — requirement clarification → technical spec generation → task decomposition → parallel development on isolated branches → three-layer quality gates → scored acceptance review → automatic merge.
+SoloDawn is an open-source web app that runs on your own machine (Rust backend + React frontend): an upper-layer orchestrator Agent (the primary Agent) commands the **AI CLIs actually installed on your computer** (Claude Code, Codex — 8 in total) to carry out fully automated development inside a Git repository — requirement clarification → technical spec generation → task decomposition → parallel development on isolated branches → three-layer quality gates → scored acceptance review → automatic merge.
 
 SoloDawn's ultimate design goal is to **complete complex, production-grade products through a simple conversation on a social platform** — not toy demos, but real, complex, production-ready software.
 
@@ -54,9 +54,9 @@ Whichever mode you use, SoloDawn launches the **real CLI processes installed on 
 - **Zero migration for skills, plugins, MCP servers, and slash commands** — no re-configuration inside SoloDawn; they're inherited as-is, and you're free to use and change them however you like;
 - **All official built-in commands inherited (including UltraCode)** — in a manual workflow, configure a dedicated prompt for a task to enable UltraCode: it generates standardized workflow scripts that hardcode clear capability boundaries for each Agent; afterwards, invoking that script reuses the entire workflow;
 - **Full automation or manual control — both work** — the Orchestrated Workspace hands everything to AI; the Manual Workflow lets you customize every detail of the workflow graph: how many terminals, what roles, which models, which slash commands;
-- **9 AI CLIs collaborating inside one workflow** — e.g. a Claude Code terminal running a GLM model as the developer and a Codex terminal running a GPT model as the auditor.
+- **8 AI CLIs collaborating inside one workflow** — e.g. a Claude Code terminal running a GLM model as the developer and a Codex terminal running a GPT model as the auditor.
 
-**This project offers extremely high flexibility with nearly unlimited room for exploration: 9 AI CLIs × your skills × your MCP servers × any plugins, freely combined — ten different users will come up with a hundred unique ways to use it. That is a critical advantage for every user.**
+**This project offers extremely high flexibility with nearly unlimited room for exploration: 8 AI CLIs × your skills × your MCP servers × any plugins, freely combined — ten different users will come up with a hundred unique ways to use it. That is a critical advantage for every user.**
 
 Step-by-step instructions for both modes are at the bottom of this file: [Usage Guide: Orchestrated Workspace](#usage-guide-orchestrated-workspace) · [Usage Guide: Manual Workflow](#usage-guide-manual-workflow).
 
@@ -85,7 +85,7 @@ Step-by-step instructions for both modes are at the bottom of this file: [Usage 
 - ✅ Policy snapshots and issue tracking; LLM fault tolerance and graceful degradation; multi-provider circuit breaker with failover; state persistence with crash recovery
 
 ### CLI & Model Support
-- ✅ 9 AI CLIs; mixed CLI types within one task, each terminal taking a different role (developer / auditor / …)
+- ✅ 8 AI CLIs; mixed CLI types within one task, each terminal taking a different role (developer / auditor / …)
 - ✅ Provider/model switching within one CLI via CC-Switch
 - ✅ Five model interface types: Anthropic / Google / OpenAI / Anthropic-compatible / OpenAI-compatible (custom base URLs, relays work)
 - ✅ Per-terminal environment variable injection; MCP server config adapted per CLI
@@ -110,7 +110,7 @@ Step-by-step instructions for both modes are at the bottom of this file: [Usage 
 
 Four core design principles:
 
-- **Upper-layer orchestration, not code generation.** The orchestrator Agent never writes code — it commands the best professional AI CLIs (Claude Code, Gemini CLI, Codex, Amp, Cursor Agent, etc.) to do the work.
+- **Upper-layer orchestration, not code generation.** The orchestrator Agent never writes code — it commands the best professional AI CLIs (Claude Code, Codex, Amp, Cursor Agent, etc.) to do the work.
 - **Two layers of Agents, no fixed workflows.** Just a primary Agent and child Agents — none preconfigured, no rigid workflow definitions. Fixed workflows are too heavy for simple tasks, too small for complex ones, and their conditional logic inevitably misjudges — so full decision authority lives with the primary Agent, which spawns and closes child Agents dynamically.
 - **Non-invasive by design.** SoloDawn doesn't replace any CLI, modify any config, or define new tools. It inherits the full native ecosystem of every CLI — all slash commands, plugins, skills, and MCP servers work unchanged.
 - **Git-driven event loop.** The orchestrator only consumes LLM tokens when a Git commit event occurs; between events it sleeps at zero cost — saving 98%+ tokens compared to polling.
@@ -173,7 +173,6 @@ Four core design principles:
 | CLI | Status | Model Switching | MCP Config |
 |---|---|---|---|
 | Claude Code | ✅ Supported | ✅ Via CC-Switch | Passthrough |
-| Gemini CLI | ✅ Supported | ✅ Via CC-Switch | Gemini adapter |
 | Codex | ✅ Supported | ✅ Via CC-Switch | Codex adapter |
 | Amp | ✅ Supported | — | Passthrough |
 | Cursor Agent | ✅ Supported | — | Cursor adapter |
@@ -181,6 +180,8 @@ Four core design principles:
 | GitHub Copilot | ✅ Supported | — | Copilot adapter |
 | Droid | ✅ Supported | — | Passthrough |
 | Opencode | ✅ Supported | — | Opencode adapter |
+
+> Gemini CLI support was removed after Google deprecated it for consumers in favor of the [Antigravity CLI](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
 
 Any CLI that runs in a terminal and supports slash commands can be integrated.
 
@@ -422,7 +423,7 @@ For users who want full control over the workflow graph. The creation wizard has
 3. **Define tasks** (Step 2): split the work into tasks; each task will get its own branch and worktree.
 4. **Configure models** (Step 3): maintain the model library (provider / base URL / key). Anything configured in global Settings is read directly here; you can also configure models just for this workflow.
 5. **Configure terminals** (Step 4): the page detects your machine's runtime environment and installed AI CLIs (scroll down on this page to see it). Then, for each task, choose which terminal (CLI) to use, which model that terminal runs, and a role description for it. **This is where multi-CLI collaboration happens** — e.g., a Claude Code terminal running a GLM model as the developer, and a Codex terminal running a GPT model as the auditor.
-6. **Slash commands** (Step 5): enable slash commands for the workflow. Commands are not sent to a terminal directly — they are delivered to the primary Agent, which recognizes them and forwards them to the right terminal on its own as the run proceeds (the entire workflow is under the primary Agent's control anyway). Six presets ship built-in (write-code / review / fix-issues / test / refactor / document) and you can add your own — plugin marketplaces are full of plugins, each with its own command; add yours here and the primary Agent can invoke your plugin during the run.
+6. **Slash commands** (Step 5): enable slash commands for the workflow. In an Agent-Planned run, commands are not sent to a terminal directly — they are delivered to the primary Agent, which recognizes them and forwards them to the right terminal on its own as the run proceeds (the entire workflow is under the primary Agent's control anyway). In a DIY run there is no primary Agent — each enabled command is rendered and typed into every task's terminal automatically, right after that task's description. Six presets ship built-in (write-code / review / fix-issues / test / refactor / document) and you can add your own — plugin marketplaces are full of plugins, each with its own command; add yours here and the primary Agent can invoke your plugin during the run.
 7. **Advanced** (Step 6): choose which AI coordinates the multi-task run (the orchestrator model), and which terminal + model resolves conflicts and completes the merge when branches come together; you can also toggle "run tests before merge" and "pause on conflict".
 
 > **Power move: UltraCode.** A manual workflow launches your native terminal, so beyond your skills / MCP servers / plugins, the CLI's official built-in commands are inherited too — including UltraCode mode. Enable it by configuring a dedicated prompt for a task (the task description is typed into that task's terminal verbatim): UltraCode generates standardized workflow scripts that hardcode clear capability boundaries for each Agent, and invoking that script afterwards reuses the entire workflow.
@@ -598,7 +599,7 @@ SoloDawn/
 │   ├── server/                # Axum HTTP/WebSocket server + MCP Task Server
 │   ├── services/              # Business logic (orchestrator, terminal, Git watcher, merge coordinator, acceptance review)
 │   ├── quality/               # Three-layer quality gate engine + 31 built-in rules
-│   ├── executors/             # 9 AI CLI integrations + MCP config adapters
+│   ├── executors/             # 8 AI CLI integrations + MCP config adapters
 │   ├── cc-switch/             # CLI model switching library
 │   ├── feishu-connector/      # Feishu long-connection client (openlark SDK)
 │   ├── db/                    # Database layer (models, migrations, DAO, AES-256-GCM encryption)

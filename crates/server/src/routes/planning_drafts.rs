@@ -1066,6 +1066,9 @@ async fn materialize_draft(
         status: "created".to_string(),
         execution_mode: "agent_planned".to_string(),
         initial_goal,
+        // Planning drafts carry no slash-command configuration, so the
+        // feature stays off. If drafts ever gain command support, propagate
+        // it here — `execute_slash_commands` activates purely on this flag.
         use_slash_commands: false,
         orchestrator_enabled: true,
         orchestrator_api_type: draft.planner_api_type.clone(),

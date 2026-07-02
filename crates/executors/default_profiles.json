@@ -24,33 +24,7 @@
     },
     "AMP": {
       "DEFAULT": {
-        "AMP": {
-          "dangerously_allow_all": true
-        }
-      }
-    },
-    "GEMINI": {
-      "DEFAULT": {
-        "GEMINI": {
-          "yolo": true
-        }
-      },
-      "FLASH": {
-        "GEMINI": {
-          "model": "gemini-3-flash-preview",
-          "yolo": true
-        }
-      },
-      "PRO": {
-        "GEMINI": {
-          "model": "gemini-3-pro-preview",
-          "yolo": true
-        }
-      },
-      "APPROVALS": {
-        "GEMINI": {
-          "yolo": false
-        }
+        "AMP": {}
       }
     },
     "CODEX": {

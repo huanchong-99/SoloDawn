@@ -14,7 +14,6 @@
 //! 支持为各 CLI 注入自动确认参数：
 //! - Claude Code: `--dangerously-skip-permissions`
 //! - Codex: `--yolo`
-//! - Gemini: `--yolo`
 
 use std::{path::Path, sync::Arc};
 
@@ -366,46 +365,6 @@ fn create_claude_settings(
     Ok(settings_path)
 }
 
-/// Creates Gemini .env in isolated directory to skip authentication
-fn create_gemini_env(
-    gemini_home: &Path,
-    api_key: &str,
-    base_url: Option<&str>,
-    model: &str,
-) -> anyhow::Result<()> {
-    let env_path = gemini_home.join(".env");
-
-    let mut env_content = format!("GEMINI_API_KEY={api_key}\nGEMINI_MODEL={model}\n");
-
-    if let Some(url) = base_url {
-        env_content.push_str(&format!("GOOGLE_GEMINI_BASE_URL={url}\n"));
-    }
-
-    std::fs::write(&env_path, env_content)
-        .map_err(|e| anyhow::anyhow!("Failed to write Gemini .env: {e}"))?;
-
-    // Set restrictive permissions on Unix
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = std::fs::set_permissions(&env_path, std::fs::Permissions::from_mode(0o600))
-        {
-            tracing::warn!(
-                env_path = %env_path.display(),
-                error = %e,
-                "Failed to set restrictive permissions on Gemini .env"
-            );
-        }
-    }
-
-    tracing::debug!(
-        gemini_home = %gemini_home.display(),
-        "Created Gemini .env for authentication skip"
-    );
-
-    Ok(())
-}
-
 // NOTE: create_opencode_config was removed as dead code (G20-012).
 // OpenCode configuration is handled via environment variables at launch time,
 // not via config file creation.
@@ -431,14 +390,13 @@ fn apply_auto_confirm_args(cli: &CcCliType, args: &mut Vec<String>, auto_confirm
         // the TUI-only flags --full-auto / -a / never. Injecting them caused Codex
         // to exit immediately with an "unknown flag" error. Approval bypass for
         // app-server mode is already wired via the JSON-RPC approval_policy field
-        // (set to Never in build_new_conversation_params when auto_confirm), so no
+        // (set to Never in build_thread_start_params when auto_confirm), so no
         // argv mutation is needed here.
         return;
     }
 
     let flag = match cli {
         CcCliType::ClaudeCode => "--dangerously-skip-permissions",
-        CcCliType::Gemini => "--yolo",
         _ => return,
     };
 
@@ -1086,13 +1044,11 @@ impl CCSwitchService {
     /// - **Codex**: Sets OPENAI_API_KEY, OPENAI_BASE_URL, CODEX_HOME (temp directory),
     ///   and CLI arguments --model and --config.
     ///   Auto-confirm: `--yolo`
-    /// - **Gemini**: Sets GOOGLE_GEMINI_BASE_URL, GEMINI_API_KEY, GEMINI_MODEL.
-    ///   Auto-confirm: `--yolo`
     ///
     /// # Arguments
     ///
     /// * `terminal` - Terminal configuration from database
-    /// * `base_command` - CLI command to execute (e.g., "claude", "codex", "gemini")
+    /// * `base_command` - CLI command to execute (e.g., "claude", "codex")
     /// * `working_dir` - Working directory for the spawned process
     /// * `auto_confirm` - Whether to add CLI auto-confirm flags
     ///
@@ -1150,11 +1106,8 @@ impl CCSwitchService {
             return Ok(empty_config());
         };
 
-        // Only Claude Code, Codex, and Gemini support environment-based configuration
-        if !matches!(
-            cli,
-            CcCliType::ClaudeCode | CcCliType::Codex | CcCliType::Gemini
-        ) {
+        // Only Claude Code and Codex support environment-based configuration
+        if !matches!(cli, CcCliType::ClaudeCode | CcCliType::Codex) {
             tracing::warn!(
                 cli_name = %cli_type.name,
                 terminal_id = %terminal.id,
@@ -1200,7 +1153,7 @@ impl CCSwitchService {
                 // homes from the `CLAUDE_HOME` value — still finds and removes the dir).
                 // Without CLAUDE_CONFIG_DIR the isolated config/credentials are ignored
                 // and claude reads the user's global ~/.claude (isolation ineffective).
-                // [RB-37] CLAUDE_HOME (and CODEX_HOME / GEMINI_HOME) isolated temp dirs
+                // [RB-37] CLAUDE_HOME (and CODEX_HOME) isolated temp dirs
                 // — which hold secret files (settings.json, .credentials.json) — are now
                 // captured by ProcessManager::spawn_pty_with_config and removed when the
                 // terminal ends, on both the normal finalize path and the panic/abort
@@ -1545,91 +1498,6 @@ impl CCSwitchService {
                     cli = "codex",
                     codex_home = %codex_home.display(),
                     "Built launch config for Codex with authentication skip"
-                );
-            }
-            CcCliType::Gemini => {
-                // Gemini requires API key.
-                // Prefer terminal-level key, then fallback to workflow orchestrator config.
-                // [G20-002/G22-007] Gemini now supports orchestrator API key fallback,
-                // matching the pattern used by Claude Code and Codex.
-                let custom_api_key = terminal.get_custom_api_key()?;
-                let mut fallback_api_key = None;
-                let mut fallback_base_url = None;
-
-                if custom_api_key.is_none() {
-                    let (fb_base_url, orch_api_key) = self
-                        .resolve_workflow_orchestrator_fallback(&terminal.workflow_task_id)
-                        .await?;
-                    fallback_base_url = fb_base_url;
-                    fallback_api_key = orch_api_key;
-                    if fallback_api_key.is_some() {
-                        tracing::info!(
-                            terminal_id = %terminal.id,
-                            workflow_task_id = %terminal.workflow_task_id,
-                            "Using workflow orchestrator API key as Gemini terminal fallback"
-                        );
-                    }
-                }
-
-                let api_key = custom_api_key.or(fallback_api_key)
-                    .ok_or_else(|| anyhow::anyhow!("Gemini requires API key (set terminal.custom_api_key or workflow.orchestrator_config.api_key)"))?;
-
-                // Create isolated Gemini home directory
-                let gemini_home = create_isolated_home(&terminal.id, "gemini")?;
-
-                // Get model name
-                let model = model_config
-                    .api_model_id
-                    .clone()
-                    .unwrap_or_else(|| model_config.name.clone());
-
-                // [H04] Compute effective_base_url BEFORE create_gemini_env so the
-                // .env file includes the orchestrator fallback URL when the terminal
-                // has no custom_base_url.  Previously, terminal.custom_base_url was
-                // passed directly, discarding the fallback and causing Gemini CLI
-                // to use the wrong endpoint when reading the .env file.
-                let effective_base_url = terminal.custom_base_url.clone().or(fallback_base_url);
-
-                // G22-003: Propagate .env creation failure instead of silently swallowing it.
-                // A missing .env can cause Gemini CLI to fall back to global auth,
-                // leading to unexpected billing or auth errors.
-                create_gemini_env(
-                    &gemini_home,
-                    &api_key,
-                    effective_base_url.as_deref(),
-                    &model,
-                )
-                .map_err(|e| {
-                    tracing::error!(
-                        terminal_id = %terminal.id,
-                        error = %e,
-                        "Failed to create Gemini .env for authentication skip"
-                    );
-                    e
-                })?;
-
-                // Set GEMINI_HOME to isolated directory (Gemini CLI respects this)
-                env.set.insert(
-                    "GEMINI_HOME".to_string(),
-                    gemini_home.to_string_lossy().to_string(),
-                );
-
-                // Handle base URL — effective_base_url already computed above
-                if let Some(base_url) = &effective_base_url {
-                    env.set
-                        .insert("GOOGLE_GEMINI_BASE_URL".to_string(), base_url.clone());
-                } else {
-                    env.unset.push("GOOGLE_GEMINI_BASE_URL".to_string());
-                }
-
-                env.set.insert("GEMINI_API_KEY".to_string(), api_key);
-                env.set.insert("GEMINI_MODEL".to_string(), model);
-
-                tracing::debug!(
-                    terminal_id = %terminal.id,
-                    cli = "gemini",
-                    gemini_home = %gemini_home.display(),
-                    "Built launch config for Gemini with authentication skip"
                 );
             }
             _ => {

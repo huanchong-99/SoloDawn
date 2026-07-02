@@ -9,8 +9,6 @@ import { useModelsForCli } from './useCliTypes';
  */
 function executorToCliTypeId(executor: BaseCodingAgent): string {
   switch (executor) {
-    case 'GEMINI':
-      return 'cli-gemini-cli';
     case 'COPILOT':
       return 'cli-copilot';
     default:

@@ -176,7 +176,7 @@ git commit --allow-empty -m "trigger event"
 **Diagnosis:**
 ```bash
 # Check running processes
-ps aux | grep -E "claude|gemini|codex"
+ps aux | grep -E "claude|codex|qwen"
 
 # Check terminal status in DB
 sqlite3 crates/db/data.db "SELECT id, status, exit_code FROM terminals WHERE status = 'working';"
@@ -293,7 +293,6 @@ Terminal starts but produces no output or hangs silently.
 ```bash
 # Check CLI availability
 claude --version
-gemini --version
 codex --version
 ```
 
@@ -303,11 +302,8 @@ codex --version
   # Claude Code
   npm install -g @anthropic-ai/claude-code
 
-  # Gemini CLI
-  npm install -g @google/gemini-cli
-
   # Codex
-  npm install -g codex-cli
+  npm install -g @openai/codex
   ```
 - Update PATH if installed but not found
 
@@ -317,7 +313,6 @@ codex --version
 ```bash
 # Check config files exist
 ls -la ~/.claude/settings.json
-ls -la ~/.gemini/.env
 ls -la ~/.codex/auth.json
 ls -la ~/.codex/config.toml
 ```
@@ -327,7 +322,6 @@ ls -la ~/.codex/config.toml
 - Reinitialize CLI configuration:
   ```bash
   claude auth
-  gemini auth
   codex auth
   ```
 

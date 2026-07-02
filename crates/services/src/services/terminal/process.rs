@@ -133,7 +133,7 @@ impl SpawnEnv {
 /// command, arguments, working directory, and environment configuration.
 #[derive(Debug, Clone)]
 pub struct SpawnCommand {
-    /// Command to execute (e.g., "claude", "codex", "gemini").
+    /// Command to execute (e.g., "claude", "codex").
     pub command: String,
     /// Command-line arguments.
     pub args: Vec<String>,
@@ -248,7 +248,7 @@ struct TrackedProcess {
     /// `get_or_try_init` wins; all others observe the initialized value.
     shared_writer: OnceCell<Arc<Mutex<PtyWriter>>>,
     /// RB-37 (P0 SECURITY): Isolated AI-CLI home directories created under the
-    /// system temp dir (CODEX_HOME / CLAUDE_HOME / GEMINI_HOME). These contain
+    /// system temp dir (CODEX_HOME / CLAUDE_HOME). These contain
     /// secret files (auth.json, settings.json, .credentials.json, .env) and MUST
     /// be removed when the terminal ends — both on the normal finalize path and
     /// via the `Drop` safety-net below (panic/abort) — so API keys never leak to disk.
@@ -317,7 +317,7 @@ impl Drop for TrackedProcess {
 // ============================================================================
 
 /// RB-37 (P0 SECURITY): Guard that ensures isolated AI-CLI home directories
-/// (CODEX_HOME / CLAUDE_HOME / GEMINI_HOME — each holding secret files) are
+/// (CODEX_HOME / CLAUDE_HOME — each holding secret files) are
 /// cleaned up on early spawn failures. Uses the RAII pattern to guarantee
 /// cleanup even if `spawn_pty_with_config` returns early before the process is
 /// tracked. On success the guard is disarmed and ownership of cleanup passes to
@@ -375,7 +375,7 @@ impl ProcessManager {
     }
 
     /// RB-37 (P0 SECURITY): Cleans up an isolated AI-CLI home temporary directory
-    /// (CODEX_HOME / CLAUDE_HOME / GEMINI_HOME) for a terminated terminal. These
+    /// (CODEX_HOME / CLAUDE_HOME) for a terminated terminal. These
     /// directories contain secret files (auth.json, settings.json,
     /// .credentials.json, .env), so they must be removed on terminal end to avoid
     /// leaking API keys to disk.
@@ -703,11 +703,11 @@ impl ProcessManager {
         self.evict_existing_terminal(terminal_id).await?;
 
         // RB-37 (P0 SECURITY): capture every isolated AI-CLI home (CODEX_HOME /
-        // CLAUDE_HOME / GEMINI_HOME) for cleanup on process exit (and on early
+        // CLAUDE_HOME) for cleanup on process exit (and on early
         // failures via the guard). Each of these temp directories holds secret
         // files (auth.json, settings.json, .credentials.json, .env) that must not
         // leak to disk after the terminal ends.
-        let all_isolated_homes: Vec<PathBuf> = ["CODEX_HOME", "CLAUDE_HOME", "GEMINI_HOME"]
+        let all_isolated_homes: Vec<PathBuf> = ["CODEX_HOME", "CLAUDE_HOME"]
             .iter()
             .filter_map(|key| {
                 config.env.set.get(*key).and_then(|value| {

@@ -20,7 +20,7 @@ use crate::{
     env::ExecutionEnv,
     executors::{
         amp::Amp, claude::ClaudeCode, codex::Codex, copilot::Copilot, cursor::CursorAgent,
-        droid::Droid, gemini::Gemini, opencode::Opencode, qwen::QwenCode,
+        droid::Droid, opencode::Opencode, qwen::QwenCode,
     },
     mcp_config::McpConfig,
 };
@@ -32,7 +32,6 @@ pub mod codex;
 pub mod copilot;
 pub mod cursor;
 pub mod droid;
-pub mod gemini;
 pub mod opencode;
 #[cfg(feature = "qa-mode")]
 pub mod qa_mock;
@@ -92,7 +91,6 @@ pub enum ExecutorError {
 pub enum CodingAgent {
     ClaudeCode,
     Amp,
-    Gemini,
     Codex,
     Opencode,
     #[serde(alias = "CURSOR")]
@@ -152,8 +150,6 @@ impl CodingAgent {
     pub fn capabilities(&self) -> Vec<BaseAgentCapability> {
         match self {
             Self::ClaudeCode(_)
-            | Self::Amp(_)
-            | Self::Gemini(_)
             | Self::QwenCode(_)
             | Self::Droid(_)
             | Self::Opencode(_) => vec![BaseAgentCapability::SessionFork],
@@ -162,7 +158,8 @@ impl CodingAgent {
                 BaseAgentCapability::SetupHelper,
             ],
             Self::CursorAgent(_) => vec![BaseAgentCapability::SetupHelper],
-            Self::Copilot(_) => vec![],
+            // Amp lost SessionFork: `amp threads fork` no longer exists upstream.
+            Self::Amp(_) | Self::Copilot(_) => vec![],
             #[cfg(feature = "qa-mode")]
             Self::QaMock(_) => vec![], // QA mock doesn't need special capabilities
         }

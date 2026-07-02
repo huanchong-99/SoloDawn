@@ -1,6 +1,6 @@
 //! CLI Type Model
 //!
-//! Stores supported AI coding agent CLI information like Claude Code, Gemini CLI, Codex, etc.
+//! Stores supported AI coding agent CLI information like Claude Code, Codex, etc.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -131,12 +131,19 @@ pub struct CliDetectionStatus {
 
 impl CliType {
     /// Get all CLI types from database
+    ///
+    /// Excludes the retired Gemini CLI row: it is deleted by migration on
+    /// databases where it was never referenced, but survives on legacy
+    /// databases for FK integrity and must not be offered as a selectable
+    /// CLI. `find_by_id`/`find_by_name` still resolve it so historical
+    /// workflows keep rendering.
     pub async fn find_all(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
         sqlx::query_as::<_, CliType>(
             r"
             SELECT id, name, display_name, detect_command, install_command,
                    install_guide_url, config_file_path, is_system, created_at
             FROM cli_type
+            WHERE id <> 'cli-gemini'
             ORDER BY is_system DESC, name ASC
             ",
         )
@@ -342,6 +349,9 @@ impl ModelConfig {
     }
 
     /// Get all model configs
+    ///
+    /// Excludes configs owned by the retired Gemini CLI (see
+    /// `CliType::find_all` for the legacy-database rationale).
     pub async fn find_all(pool: &SqlitePool) -> sqlx::Result<Vec<Self>> {
         let items = sqlx::query_as::<_, ModelConfig>(
             r"
@@ -349,6 +359,7 @@ impl ModelConfig {
                    is_default, is_official, created_at, updated_at,
                    encrypted_api_key, base_url, api_type
             FROM model_config
+            WHERE cli_type_id <> 'cli-gemini'
             ORDER BY cli_type_id, is_default DESC, name ASC
             ",
         )

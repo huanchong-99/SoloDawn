@@ -16,7 +16,6 @@ use tokio::{
 const ALLOWED_CLI_NAMES: &[&str] = &[
     "claude-code",
     "codex",
-    "gemini-cli",
     "amp",
     "cursor-agent",
     "qwen-code",

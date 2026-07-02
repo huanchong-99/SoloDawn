@@ -11,7 +11,7 @@
 
 //! CC-Switch Core
 //!
-//! CLI 配置切换核心库，支持 Claude Code、Codex、Gemini CLI 等。
+//! CLI 配置切换核心库，支持 Claude Code、Codex 等。
 //!
 //! # 功能
 //!
@@ -34,7 +34,6 @@ pub mod claude;
 pub mod codex;
 pub mod config_path;
 pub mod error;
-pub mod gemini;
 pub mod switcher;
 
 pub use atomic_write::*;
@@ -42,7 +41,6 @@ pub use claude::*;
 pub use codex::*;
 pub use config_path::*;
 pub use error::{CCSwitchError, Result};
-pub use gemini::*;
 pub use switcher::*;
 
 /// 支持的 CLI 类型
@@ -52,8 +50,6 @@ pub enum CliType {
     ClaudeCode,
     /// OpenAI Codex
     Codex,
-    /// Google Gemini CLI
-    Gemini,
     /// Amp
     Amp,
     /// Cursor Agent
@@ -74,7 +70,6 @@ impl CliType {
         match s.to_lowercase().as_str() {
             "claude-code" | "claude" => Some(Self::ClaudeCode),
             "codex" => Some(Self::Codex),
-            "gemini-cli" | "gemini" => Some(Self::Gemini),
             "amp" => Some(Self::Amp),
             "cursor-agent" | "cursor" => Some(Self::CursorAgent),
             "qwen-code" | "qwen" => Some(Self::QwenCode),
@@ -90,7 +85,6 @@ impl CliType {
         match self {
             Self::ClaudeCode => "claude-code",
             Self::Codex => "codex",
-            Self::Gemini => "gemini-cli",
             Self::Amp => "amp",
             Self::CursorAgent => "cursor-agent",
             Self::QwenCode => "qwen-code",
@@ -105,7 +99,6 @@ impl CliType {
         match self {
             Self::ClaudeCode => "Claude Code",
             Self::Codex => "Codex",
-            Self::Gemini => "Gemini CLI",
             Self::Amp => "Amp",
             Self::CursorAgent => "Cursor Agent",
             Self::QwenCode => "Qwen Code",
@@ -117,7 +110,7 @@ impl CliType {
 
     /// 是否支持配置切换
     pub fn supports_config_switch(&self) -> bool {
-        matches!(self, Self::ClaudeCode | Self::Codex | Self::Gemini)
+        matches!(self, Self::ClaudeCode | Self::Codex)
     }
 }
 

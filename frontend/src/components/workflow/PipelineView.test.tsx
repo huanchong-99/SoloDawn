@@ -36,7 +36,7 @@ describe('PipelineView', () => {
   const mockTerminalDto2: TerminalDto = {
     id: 'terminal-2',
     workflowTaskId: 'task-1',
-    cliTypeId: 'gemini-cli',
+    cliTypeId: 'qwen-code',
     modelConfigId: 'model-2',
     customBaseUrl: null,
     customApiKey: null,

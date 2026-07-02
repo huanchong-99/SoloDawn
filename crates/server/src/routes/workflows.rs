@@ -31,6 +31,7 @@ use services::services::{
     cc_switch::CCSwitchService,
     config::Config as AppConfig,
     git::GitServiceError,
+    template_renderer::{TemplateRenderer, WorkflowContext},
     orchestrator::{
         BusMessage, OrchestratorRuntime, TerminalCoordinator,
         constants::{
@@ -1901,6 +1902,65 @@ async fn prepare_workflow(
     Ok(ResponseJson(ApiResponse::success(())))
 }
 
+/// Load and render a workflow's slash commands for direct terminal dispatch.
+///
+/// DIY workflows have no orchestrator agent to consume configured commands,
+/// so the rendered prompts are typed into the terminals instead. Returns
+/// `(command_name, rendered_prompt)` pairs in `order_index` order; commands
+/// whose preset is missing or whose template fails to render are skipped
+/// with a warning rather than failing the workflow start.
+async fn render_workflow_commands(
+    pool: &sqlx::SqlitePool,
+    workflow: &Workflow,
+) -> Result<Vec<(String, String)>, ApiError> {
+    let commands = WorkflowCommand::find_by_workflow(pool, &workflow.id).await?;
+    if commands.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let presets = SlashCommandPreset::find_all(pool).await?;
+    let renderer = TemplateRenderer::new();
+    let workflow_ctx = WorkflowContext::new(
+        workflow.name.clone(),
+        workflow.description.clone(),
+        workflow.target_branch.clone(),
+    );
+
+    let mut rendered = Vec::with_capacity(commands.len());
+    for cmd in &commands {
+        let Some(preset) = presets.iter().find(|p| p.id == cmd.preset_id) else {
+            tracing::warn!(
+                workflow_id = %workflow.id,
+                preset_id = %cmd.preset_id,
+                "DIY: slash-command preset not found; skipping command"
+            );
+            continue;
+        };
+        let template = preset.prompt_template.as_deref().unwrap_or("");
+        match renderer.render(template, cmd.custom_params.as_deref(), Some(&workflow_ctx)) {
+            Ok(prompt) if !prompt.trim().is_empty() => {
+                rendered.push((preset.command.clone(), prompt));
+            }
+            Ok(_) => {
+                tracing::warn!(
+                    workflow_id = %workflow.id,
+                    command = %preset.command,
+                    "DIY: slash command rendered empty; skipping"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    workflow_id = %workflow.id,
+                    command = %preset.command,
+                    error = %e,
+                    "DIY: failed to render slash command; skipping"
+                );
+            }
+        }
+    }
+    Ok(rendered)
+}
+
 /// POST /api/workflows/:workflow_id/start
 /// Start workflow (user confirmed) or resume from paused state
 async fn start_workflow(
@@ -2112,6 +2172,26 @@ async fn start_workflow(
                 .iter()
                 .map(|t| (t.id.clone(), t.name.clone(), t.description.clone()))
                 .collect();
+            // DIY mode has no orchestrator agent, so configured slash commands
+            // would otherwise have no consumer. Render them here and type them
+            // into each terminal after its task instruction (the prompts reach
+            // the CLI verbatim, same as manual typing). Render failures skip
+            // the offending command instead of aborting the dispatch.
+            let rendered_commands: Vec<(String, String)> = if workflow.use_slash_commands {
+                match render_workflow_commands(&deployment.db().pool, &workflow).await {
+                    Ok(cmds) => cmds,
+                    Err(e) => {
+                        tracing::warn!(
+                            workflow_id = %workflow_id,
+                            error = %e,
+                            "DIY: failed to load slash commands; dispatching task instructions only"
+                        );
+                        Vec::new()
+                    }
+                }
+            } else {
+                Vec::new()
+            };
             tokio::spawn(async move {
                 for (task_id, task_name, task_description) in &dispatch_tasks {
                     let task_terminals = match Terminal::find_by_task(&dispatch_db, task_id).await {
@@ -2144,6 +2224,26 @@ async fn start_workflow(
                                     terminal_id = %terminal.id,
                                     task_name = %task_name,
                                     "DIY: dispatched task instruction to terminal"
+                                );
+                            }
+                            for (command_name, prompt) in &rendered_commands {
+                                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                dispatch_bus
+                                    .publish_terminal_input(
+                                        &terminal.id,
+                                        pty_session_id,
+                                        prompt,
+                                        None,
+                                    )
+                                    .await;
+                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                dispatch_bus
+                                    .publish_terminal_input(&terminal.id, pty_session_id, "", None)
+                                    .await;
+                                tracing::info!(
+                                    terminal_id = %terminal.id,
+                                    command = %command_name,
+                                    "DIY: dispatched slash-command prompt to terminal"
                                 );
                             }
                         } else {
@@ -5107,5 +5207,148 @@ mod orchestrator_pagination_tests {
     fn clamps_values_to_safe_bounds() {
         let (start, end) = paginate_orchestrator_messages(30, Some(40), Some(500));
         assert_eq!((start, end), (30, 30));
+    }
+}
+
+#[cfg(test)]
+mod render_workflow_commands_tests {
+    use chrono::Utc;
+    use db::models::Workflow;
+
+    use super::*;
+
+    async fn setup_pool_with_workflow() -> (sqlx::SqlitePool, Workflow) {
+        let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
+        sqlx::query(
+            r"
+            CREATE TABLE slash_command_preset (
+                id TEXT PRIMARY KEY,
+                command TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL,
+                prompt_template TEXT,
+                is_system INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE workflow_command (
+                id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                preset_id TEXT NOT NULL,
+                order_index INTEGER NOT NULL,
+                custom_params TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            ",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let now = Utc::now();
+        let workflow = Workflow {
+            id: "wf-render-test".to_string(),
+            project_id: uuid::Uuid::new_v4(),
+            name: "Render Test".to_string(),
+            description: Some("desc".to_string()),
+            status: "created".to_string(),
+            execution_mode: "diy".to_string(),
+            initial_goal: None,
+            use_slash_commands: true,
+            orchestrator_enabled: false,
+            orchestrator_api_type: None,
+            orchestrator_base_url: None,
+            orchestrator_api_key: None,
+            orchestrator_model: None,
+            error_terminal_enabled: false,
+            error_terminal_cli_id: None,
+            error_terminal_model_id: None,
+            merge_terminal_cli_id: "cli-test".to_string(),
+            merge_terminal_model_id: "model-test".to_string(),
+            target_branch: "main".to_string(),
+            git_watcher_enabled: true,
+            ready_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: now,
+            updated_at: now,
+            pause_reason: None,
+            audit_plan: None,
+        };
+        (pool, workflow)
+    }
+
+    async fn insert_preset(pool: &sqlx::SqlitePool, id: &str, command: &str, template: &str) {
+        sqlx::query(
+            "INSERT INTO slash_command_preset (id, command, description, prompt_template) \
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(id)
+        .bind(command)
+        .bind("test preset")
+        .bind(template)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_command(
+        pool: &sqlx::SqlitePool,
+        id: &str,
+        workflow_id: &str,
+        preset_id: &str,
+        order_index: i32,
+        custom_params: Option<&str>,
+    ) {
+        sqlx::query(
+            "INSERT INTO workflow_command (id, workflow_id, preset_id, order_index, custom_params) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind(id)
+        .bind(workflow_id)
+        .bind(preset_id)
+        .bind(order_index)
+        .bind(custom_params)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn renders_commands_in_order_with_workflow_context() {
+        let (pool, workflow) = setup_pool_with_workflow().await;
+        insert_preset(&pool, "p-review", "/review", "Review branch {{workflow.targetBranch}}").await;
+        insert_preset(&pool, "p-test", "/test", "Run tests for {{workflow.name}}").await;
+        insert_command(&pool, "c2", &workflow.id, "p-test", 1, None).await;
+        insert_command(&pool, "c1", &workflow.id, "p-review", 0, None).await;
+
+        let rendered = render_workflow_commands(&pool, &workflow).await.unwrap();
+        assert_eq!(rendered.len(), 2);
+        assert_eq!(rendered[0].0, "/review");
+        assert_eq!(rendered[0].1, "Review branch main");
+        assert_eq!(rendered[1].0, "/test");
+        assert_eq!(rendered[1].1, "Run tests for Render Test");
+    }
+
+    #[tokio::test]
+    async fn skips_missing_preset_and_failed_render() {
+        let (pool, workflow) = setup_pool_with_workflow().await;
+        insert_preset(&pool, "p-ok", "/ok", "plain prompt").await;
+        // strict handlebars: {{undefined_var}} fails to render
+        insert_preset(&pool, "p-bad", "/bad", "needs {{undefined_var}}").await;
+        insert_command(&pool, "c1", &workflow.id, "p-ok", 0, None).await;
+        insert_command(&pool, "c2", &workflow.id, "p-bad", 1, None).await;
+        insert_command(&pool, "c3", &workflow.id, "p-gone", 2, None).await;
+
+        let rendered = render_workflow_commands(&pool, &workflow).await.unwrap();
+        assert_eq!(rendered.len(), 1);
+        assert_eq!(rendered[0].0, "/ok");
+        assert_eq!(rendered[0].1, "plain prompt");
+    }
+
+    #[tokio::test]
+    async fn returns_empty_when_no_commands_configured() {
+        let (pool, workflow) = setup_pool_with_workflow().await;
+        let rendered = render_workflow_commands(&pool, &workflow).await.unwrap();
+        assert!(rendered.is_empty());
     }
 }

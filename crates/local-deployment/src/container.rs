@@ -1905,33 +1905,6 @@ impl LocalContainerService {
             );
         }
 
-        if matches!(base_executor, BaseCodingAgent::Gemini) {
-            // Inject Gemini credentials from model_config
-            match db::models::ModelConfig::resolve_preferred_or_default(
-                pool,
-                model_config_id,
-                "cli-gemini-cli",
-            )
-            .await
-            {
-                Ok(Some(model_config)) => {
-                    if let Ok(Some(api_key)) = model_config.get_api_key() {
-                        vars.insert("GEMINI_API_KEY".to_string(), api_key);
-                        tracing::info!("Injected API key from model_config for Gemini workspace");
-                        if let Some(ref base_url) = model_config.base_url {
-                            vars.insert("GOOGLE_GEMINI_BASE_URL".to_string(), base_url.clone());
-                        }
-                    }
-                }
-                Ok(None) => {
-                    tracing::debug!("No model_config credentials found for Gemini CLI");
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to query model_config credentials for Gemini");
-                }
-            }
-        }
-
         vars
     }
 }
@@ -2144,7 +2117,6 @@ impl ContainerService for LocalContainerService {
                 Some(
                     BaseCodingAgent::Codex
                     | BaseCodingAgent::ClaudeCode
-                    | BaseCodingAgent::Gemini
                     | BaseCodingAgent::QwenCode
                     | BaseCodingAgent::Opencode,
                 ) => ExecutorApprovalBridge::new(

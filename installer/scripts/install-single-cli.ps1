@@ -1,7 +1,7 @@
 # Install or uninstall a single AI CLI tool (Windows).
 # Usage: install-single-cli.ps1 <action> <cli_name>
 #   action: install | uninstall
-#   cli_name: claude-code | codex | gemini-cli | amp | cursor-agent | qwen-code | copilot | opencode | droid
+#   cli_name: claude-code | codex | amp | cursor-agent | qwen-code | copilot | opencode | droid
 param(
     [Parameter(Mandatory=$true)][string]$Action,
     [Parameter(Mandatory=$true)][string]$CliName
@@ -46,7 +46,7 @@ $env:NO_UPDATE_NOTIFIER = "1"
 $env:NPM_CONFIG_UPDATE_NOTIFIER = "false"
 
 # --- Validation ---
-$ValidClis = @("claude-code","codex","gemini-cli","amp","cursor-agent","qwen-code","copilot","opencode","droid")
+$ValidClis = @("claude-code","codex","amp","cursor-agent","qwen-code","copilot","opencode","droid")
 if ($ValidClis -notcontains $CliName) {
     Log-Error "Invalid CLI name: $CliName"
     Log-Error "Valid names: $($ValidClis -join ', ')"
@@ -64,13 +64,14 @@ function Resolve-Package {
     switch ($cli) {
         "claude-code"  { if ($env:CLAUDE_CODE_NPM_PKG)  { $env:CLAUDE_CODE_NPM_PKG }  else { "@anthropic-ai/claude-code" } }
         "codex"        { if ($env:CODEX_NPM_PKG)        { $env:CODEX_NPM_PKG }        else { "@openai/codex" } }
-        "gemini-cli"   { if ($env:GEMINI_NPM_PKG)       { $env:GEMINI_NPM_PKG }       else { "@google/gemini-cli" } }
-        "amp"          { if ($env:AMP_NPM_PKG)           { $env:AMP_NPM_PKG }           else { "@sourcegraph/amp" } }
+        "amp"          { if ($env:AMP_NPM_PKG)           { $env:AMP_NPM_PKG }           else { "@ampcode/cli" } }
         "qwen-code"    { if ($env:QWEN_NPM_PKG)         { $env:QWEN_NPM_PKG }         else { "@qwen-code/qwen-code" } }
         "opencode"     { if ($env:OPENCODE_NPM_PKG)     { $env:OPENCODE_NPM_PKG }     else { "opencode-ai" } }
-        "droid"        { if ($env:KILOCODE_NPM_PKG)     { $env:KILOCODE_NPM_PKG }     else { "@kilocode/cli" } }
-        "cursor-agent" { if ($env:CURSOR_AGENT_NPM_PKG) { $env:CURSOR_AGENT_NPM_PKG } else { "cursor-agent" } }
-        "copilot"      { "__gh_extension__" }
+        "droid"        { if ($env:DROID_NPM_PKG)        { $env:DROID_NPM_PKG }        else { "droid" } }
+        # Cursor ships no official npm package (the npm name "cursor-agent" is an
+        # unrelated third-party library); handled via Cursor's official installer below.
+        "cursor-agent" { "" }
+        "copilot"      { if ($env:COPILOT_NPM_PKG)      { $env:COPILOT_NPM_PKG }      else { "@github/copilot" } }
         default        { Log-Error "Unknown CLI: $cli"; exit 1 }
     }
 }
@@ -81,44 +82,14 @@ function Get-DetectCommand {
     switch ($cli) {
         "claude-code"  { "claude --version" }
         "codex"        { "codex --version" }
-        "gemini-cli"   { "gemini --version" }
         "amp"          { "amp --version" }
         "qwen-code"    { "qwen --version" }
         "opencode"     { "opencode --version" }
         "droid"        { "droid --version" }
         "cursor-agent" { "cursor-agent --version" }
-        "copilot"      { "gh copilot --version" }
+        "copilot"      { "copilot --version" }
         default        { "" }
     }
-}
-
-# --- Copilot handlers ---
-function Install-Copilot {
-    $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
-    if (-not $ghCmd) {
-        Log-Error "gh CLI not found; cannot install gh-copilot extension"
-        exit 1
-    }
-
-    $extensions = & gh extension list 2>$null
-    if ($extensions -match "github/gh-copilot") {
-        Log-Info "GitHub Copilot extension already installed"
-        return
-    }
-
-    Log-Info "Installing GitHub Copilot CLI extension..."
-    & gh extension install github/gh-copilot 2>&1 | ForEach-Object { Write-Host $_ }
-}
-
-function Uninstall-Copilot {
-    $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
-    if (-not $ghCmd) {
-        Log-Error "gh CLI not found; cannot uninstall gh-copilot extension"
-        exit 1
-    }
-
-    Log-Info "Removing GitHub Copilot CLI extension..."
-    & gh extension remove github/gh-copilot 2>&1 | ForEach-Object { Write-Host $_ }
 }
 
 # --- npm install with retry ---
@@ -150,8 +121,18 @@ $Package = Resolve-Package -cli $CliName
 if ($Action -eq "install") {
     Log-Info "Installing CLI: $CliName"
 
-    if ($Package -eq "__gh_extension__") {
-        Install-Copilot
+    if ($CliName -eq "cursor-agent") {
+        Log-Info "Running official Cursor installer (cursor.com/install)..."
+        try {
+            Invoke-RestMethod 'https://cursor.com/install?win32=true' | Invoke-Expression
+        } catch {
+            Log-Error "Cursor installer failed: $_"
+            exit 1
+        }
+        # The installer registers %LOCALAPPDATA%\cursor-agent on the user PATH
+        # for future sessions; extend this session so verification below works.
+        $CursorDir = Join-Path $env:LOCALAPPDATA "cursor-agent"
+        if (Test-Path $CursorDir) { $env:PATH = "$CursorDir;$env:PATH" }
     } else {
         # Verify node and npm are available
         $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
@@ -187,31 +168,33 @@ if ($Action -eq "install") {
 } elseif ($Action -eq "uninstall") {
     Log-Info "Uninstalling CLI: $CliName"
 
-    if ($Package -eq "__gh_extension__") {
-        Uninstall-Copilot
-    } else {
-        $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
-        if (-not $npmCmd) {
-            Log-Error "npm not found in PATH"
-            exit 1
-        }
-
-        # Strip version specifier for uninstall.
-        # Handles scoped names with hyphens (e.g. @anthropic-ai/claude-code@1.0)
-        # by anchoring a capture group on the full @scope/name before the version @.
-        $UninstallPkg = $Package
-        if ($UninstallPkg -match '^(@[^/]+/[^@]+)@(.+)$') {
-            # Scoped: @scope/name@version -> @scope/name
-            $UninstallPkg = $Matches[1]
-        } elseif ($UninstallPkg -match '^([^@]+)@(.+)$') {
-            # Unscoped: name@version -> name (first @ is the version separator)
-            $UninstallPkg = $Matches[1]
-        }
-        # else: no version specifier, leave $UninstallPkg as-is.
-
-        Log-Info "Running: npm uninstall -g $UninstallPkg"
-        & npm uninstall -g $UninstallPkg 2>&1 | ForEach-Object { Write-Host $_ }
+    if ($CliName -eq "cursor-agent") {
+        Log-Error "cursor-agent is managed by Cursor's official installer, not npm."
+        Log-Error "Remove it manually: delete %LOCALAPPDATA%\cursor-agent and its user PATH entry."
+        exit 1
     }
+
+    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npmCmd) {
+        Log-Error "npm not found in PATH"
+        exit 1
+    }
+
+    # Strip version specifier for uninstall.
+    # Handles scoped names with hyphens (e.g. @anthropic-ai/claude-code@1.0)
+    # by anchoring a capture group on the full @scope/name before the version @.
+    $UninstallPkg = $Package
+    if ($UninstallPkg -match '^(@[^/]+/[^@]+)@(.+)$') {
+        # Scoped: @scope/name@version -> @scope/name
+        $UninstallPkg = $Matches[1]
+    } elseif ($UninstallPkg -match '^([^@]+)@(.+)$') {
+        # Unscoped: name@version -> name (first @ is the version separator)
+        $UninstallPkg = $Matches[1]
+    }
+    # else: no version specifier, leave $UninstallPkg as-is.
+
+    Log-Info "Running: npm uninstall -g $UninstallPkg"
+    & npm uninstall -g $UninstallPkg 2>&1 | ForEach-Object { Write-Host $_ }
 
     Log-Info "Uninstall complete: $CliName"
 }

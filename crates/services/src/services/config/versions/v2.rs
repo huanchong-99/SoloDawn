@@ -72,8 +72,8 @@ impl Config {
             v1::ExecutorConfig::Claude | v1::ExecutorConfig::ClaudeCodeRouter => "claude-code",
             v1::ExecutorConfig::ClaudePlan => "claude-code-plan",
             v1::ExecutorConfig::Amp => "amp",
-            v1::ExecutorConfig::Gemini => "gemini",
             v1::ExecutorConfig::SstOpencode => "opencode",
+            // Retired executors (e.g. Gemini) fall through here as well.
             _ => {
                 onboarding_acknowledged = false; // Reset the user's onboarding if executor is not supported
                 "claude-code"

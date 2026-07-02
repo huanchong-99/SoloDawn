@@ -205,7 +205,7 @@ function getInstallPhaseKey(
   }
   if (elapsedSec < 90) {
     return t('settings.agents.installAiCliPhaseCore', {
-      defaultValue: 'Installing core CLIs (Claude/Codex/Gemini)...',
+      defaultValue: 'Installing core CLIs (Claude/Codex)...',
     });
   }
   if (elapsedSec < 180) {

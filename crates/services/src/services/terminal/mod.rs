@@ -20,7 +20,7 @@ pub mod utf8_decoder;
 
 pub use bridge::TerminalBridge;
 pub use detector::CliDetector;
-pub use launcher::{LaunchResult, TerminalLauncher};
+pub use launcher::{LaunchResult, TerminalLauncher, cli_binary_name};
 pub use output_fanout::{OutputChunk, OutputFanout, OutputFanoutConfig, OutputSubscription};
 pub use process::{ProcessHandle, ProcessManager};
 pub use prompt_detector::{

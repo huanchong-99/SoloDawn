@@ -13,7 +13,7 @@
     },
     "dangerously_allow_all": {
       "title": "Dangerously Allow All",
-      "description": "Allow all commands to be executed, even if they are not safe.",
+      "description": "Deprecated: no longer supported by Amp CLI (permissions moved to Amp's settings/plugin system); this option has no effect.",
       "type": [
         "boolean",
         "null"

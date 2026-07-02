@@ -218,7 +218,7 @@
     "roleLabel": "Role description (optional)",
     "rolePlaceholder": "e.g. Backend API expert",
     "errors": {
-      "noCliInstalled": "No CLI tools are installed. Please install at least one CLI tool (Claude Code, Gemini CLI, Codex, or Cursor Agent) to continue."
+      "noCliInstalled": "No CLI tools are installed. Please install at least one CLI tool (Claude Code, Codex, or Cursor Agent) to continue."
     },
     "cliNotInstalledTitle": "CLI not installed",
     "cliNotInstalledDescription": "The selected CLI tool is not installed. Please install it before running the workflow."

@@ -187,20 +187,20 @@ async fn test_cli_detector_with_database() {
     let db = setup_integration_db().await;
 
     // Use pre-seeded cli_type from migrations
-    // The migrations already include several CLI types (claude-code, gemini-cli, codex, etc.)
+    // The migrations already include several CLI types (claude-code, codex, etc.)
 
     let detector = CliDetector::new(db);
     let all_status = detector.detect_all().await.unwrap();
 
     // Verify detector returns status for all CLI types in database
-    // There are 9 pre-seeded CLI types in the migration
+    // There are at least 8 pre-seeded CLI types in the migration
     assert!(!all_status.is_empty());
 
     #[cfg(unix)]
     {
         // On Unix, verify at least one CLI type is detected
         // (even if the actual CLI isn't installed, the detector should run)
-        assert!(all_status.len() >= 9);
+        assert!(all_status.len() >= 8);
     }
 
     #[cfg(windows)]

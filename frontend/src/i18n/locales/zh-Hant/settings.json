@@ -243,7 +243,7 @@
       "installAiCliExitCode": "退出碼：{{code}}",
       "installAiCliInProgress": "正在安裝 AI CLI，已耗時 {{seconds}} 秒",
       "installAiCliPhasePreparing": "正在準備安裝環境...",
-      "installAiCliPhaseCore": "正在安裝核心 CLI（Claude/Codex/Gemini）...",
+      "installAiCliPhaseCore": "正在安裝核心 CLI（Claude/Codex）...",
       "installAiCliPhaseExtended": "正在安裝擴展 CLI（Qwen/Amp/OpenCode/Kilo）...",
       "installAiCliPhaseVerifying": "正在校驗安裝結果...",
       "editor": {
@@ -294,7 +294,7 @@
         "addServerFailed": "新增預設伺服器失敗",
         "mcpError": "MCP 設定錯誤：{{error}}",
         "notSupported": "不支援 MCP",
-        "supportMessage": "要使用 MCP 伺服器，請在上方選擇支援 MCP 的其他執行器（Claude、Amp、Gemini、Codex 或 Opencode）。"
+        "supportMessage": "要使用 MCP 伺服器，請在上方選擇支援 MCP 的其他執行器（Claude、Amp、Codex 或 Opencode）。"
       },
       "save": {
         "button": "儲存 MCP 設定",

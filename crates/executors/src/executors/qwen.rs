@@ -13,7 +13,7 @@ use crate::{
     env::ExecutionEnv,
     executors::{
         AppendPrompt, AvailabilityInfo, ExecutorError, SpawnedChild, StandardCodingAgentExecutor,
-        gemini::AcpAgentHarness,
+        acp::AcpAgentHarness,
     },
 };
 
@@ -34,12 +34,12 @@ pub struct QwenCode {
 
 impl QwenCode {
     fn build_command_builder(&self) -> CommandBuilder {
-        let mut builder = CommandBuilder::new("npx -y @qwen-code/qwen-code@0.2.1");
+        let mut builder = CommandBuilder::new("npx -y @qwen-code/qwen-code@0.19.5");
 
         if self.yolo.unwrap_or(false) {
             builder = builder.extend_params(["--yolo"]);
         }
-        builder = builder.extend_params(["--experimental-acp"]);
+        builder = builder.extend_params(["--acp"]);
         apply_overrides(builder, &self.cmd)
     }
 }
@@ -125,5 +125,28 @@ impl StandardCodingAgentExecutor for QwenCode {
         } else {
             AvailabilityInfo::NotFound
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builder_uses_pinned_package_and_acp_flag() {
+        let qwen = QwenCode {
+            append_prompt: AppendPrompt::default(),
+            yolo: Some(true),
+            cmd: CmdOverrides::default(),
+            approvals: None,
+        };
+        let command = qwen
+            .build_command_builder()
+            .build_initial()
+            .expect("should build");
+        let args = command.args();
+        assert!(args.contains(&"@qwen-code/qwen-code@0.19.5".to_string()));
+        assert!(args.contains(&"--acp".to_string()));
+        assert!(!args.contains(&"--experimental-acp".to_string()));
     }
 }

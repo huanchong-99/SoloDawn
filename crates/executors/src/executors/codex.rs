@@ -1,8 +1,8 @@
 pub mod client;
 pub mod jsonrpc;
 pub mod normalize_logs;
+pub mod protocol;
 pub mod review;
-pub mod session;
 use std::{
     collections::HashMap,
     env,
@@ -24,10 +24,6 @@ pub fn codex_home() -> Option<PathBuf> {
 }
 
 use async_trait::async_trait;
-use codex_app_server_protocol::{NewConversationParams, ReviewTarget};
-use codex_protocol::{
-    config_types::SandboxMode as CodexSandboxMode, protocol::AskForApproval as CodexAskForApproval,
-};
 use command_group::AsyncCommandGroup;
 use derivative::Derivative;
 use schemars::JsonSchema;
@@ -42,7 +38,10 @@ use self::{
     client::{AppServerClient, LogWriter},
     jsonrpc::JsonRpcPeer,
     normalize_logs::normalize_logs,
-    session::SessionHandler,
+    protocol::{
+        AskForApproval as CodexAskForApproval, ReviewTarget, SandboxMode as CodexSandboxMode,
+        ThreadForkParams, ThreadStartParams,
+    },
 };
 use crate::{
     approvals::ExecutorApprovalService,
@@ -141,14 +140,20 @@ pub struct Codex {
     pub model_reasoning_summary: Option<ReasoningSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_reasoning_summary_format: Option<ReasoningSummaryFormat>,
+    /// Deprecated: the v2 thread/turn API has no profile parameter. Kept as a
+    /// no-op so stored profiles that set it keep deserializing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_instructions: Option<String>,
+    /// Deprecated: no v2 equivalent. Kept as a no-op so stored profiles that
+    /// set it keep deserializing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include_apply_patch_tool: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_provider: Option<String>,
+    /// Deprecated: no v2 equivalent. Kept as a no-op so stored profiles that
+    /// set it keep deserializing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compact_prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,7 +258,7 @@ impl StandardCodingAgentExecutor for Codex {
 
 impl Codex {
     /// Package version for @openai/codex
-    const CODEX_NPX_VERSION: &'static str = "0.77.0";
+    const CODEX_NPX_VERSION: &'static str = "0.142.5";
 
     pub fn base_command() -> String {
         format!("npx -y @openai/codex@{}", Self::CODEX_NPX_VERSION)
@@ -269,7 +274,7 @@ impl Codex {
         apply_overrides(builder, &self.cmd)
     }
 
-    fn build_new_conversation_params(&self, cwd: &Path) -> NewConversationParams {
+    fn build_thread_start_params(&self, cwd: &Path) -> ThreadStartParams {
         let sandbox = match self.sandbox.as_ref() {
             Some(SandboxMode::ReadOnly) => Some(CodexSandboxMode::ReadOnly),
             Some(SandboxMode::DangerFullAccess) => Some(CodexSandboxMode::DangerFullAccess),
@@ -291,17 +296,16 @@ impl Codex {
             Some(AskForApproval::Never) => Some(CodexAskForApproval::Never),
         };
 
-        NewConversationParams {
+        // `profile`, `include_apply_patch_tool`, and `compact_prompt` have no
+        // v2 equivalents and are intentionally not sent.
+        ThreadStartParams {
             model: self.model.clone(),
-            profile: self.profile.clone(),
+            model_provider: self.model_provider.clone(),
             cwd: Some(cwd.to_string_lossy().to_string()),
             approval_policy,
             sandbox,
             config: self.build_config_overrides(),
             base_instructions: self.base_instructions.clone(),
-            include_apply_patch_tool: self.include_apply_patch_tool,
-            model_provider: self.model_provider.clone(),
-            compact_prompt: self.compact_prompt.clone(),
             developer_instructions: self.developer_instructions.clone(),
         }
     }
@@ -377,7 +381,7 @@ impl Codex {
         let new_stdout = create_stdout_pipe_writer(&mut child)?;
         let (exit_signal_tx, exit_signal_rx) = tokio::sync::oneshot::channel();
 
-        let params = self.build_new_conversation_params(current_dir);
+        let params = self.build_thread_start_params(current_dir);
         let resume_session = resume_session.map(ToString::to_string);
         let auto_approve = matches!(
             (&self.sandbox, &self.ask_for_approval),
@@ -460,7 +464,7 @@ impl Codex {
 
     #[allow(clippy::too_many_arguments)]
     async fn launch_codex_app_server(
-        conversation_params: NewConversationParams,
+        thread_params: ThreadStartParams,
         resume_session: Option<String>,
         combined_prompt: String,
         child_stdout: tokio::process::ChildStdout,
@@ -481,38 +485,26 @@ impl Codex {
                 "Codex authentication required".to_string(),
             ));
         }
-        match resume_session {
+        let thread_id = match resume_session {
             None => {
-                let params = conversation_params;
-                let response = client.new_conversation(params).await?;
-                let conversation_id = response.conversation_id;
-                client.register_session(&conversation_id).await?;
-                client.add_conversation_listener(conversation_id).await?;
-                client
-                    .send_user_message(conversation_id, combined_prompt)
-                    .await?;
+                let response = client.start_thread(thread_params).await?;
+                response.thread.id
             }
             Some(session_id) => {
-                let (rollout_path, _forked_session_id) =
-                    SessionHandler::fork_rollout_file(&session_id)
-                        .map_err(|e| ExecutorError::FollowUpNotSupported(e.to_string()))?;
-                let overrides = conversation_params;
+                // Fork the previous session into a fresh thread so each
+                // follow-up gets its own session id (replaces the old manual
+                // rollout-file copy + resumeConversation flow).
+                let params = ThreadForkParams::from_thread_start(session_id, thread_params);
                 let response = client
-                    .resume_conversation(rollout_path.clone(), overrides)
-                    .await?;
-                tracing::debug!(
-                    "resuming session using rollout file {}, response {:?}",
-                    rollout_path.display(),
-                    response
-                );
-                let conversation_id = response.conversation_id;
-                client.register_session(&conversation_id).await?;
-                client.add_conversation_listener(conversation_id).await?;
-                client
-                    .send_user_message(conversation_id, combined_prompt)
-                    .await?;
+                    .fork_thread(params)
+                    .await
+                    .map_err(|e| ExecutorError::FollowUpNotSupported(e.to_string()))?;
+                tracing::debug!("forked session for follow-up, response {:?}", response);
+                response.thread.id
             }
-        }
+        };
+        client.register_session(&thread_id).await?;
+        client.start_turn(thread_id, combined_prompt).await?;
         Ok(())
     }
 }

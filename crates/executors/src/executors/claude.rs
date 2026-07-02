@@ -40,7 +40,7 @@ use crate::{
 };
 
 /// Package version for @anthropic-ai/claude-code
-const CLAUDE_CODE_VERSION: &str = "2.1.2";
+const CLAUDE_CODE_VERSION: &str = "2.1.199";
 /// Package version for @musistudio/claude-code-router
 const CLAUDE_CODE_ROUTER_VERSION: &str = "1.0.66";
 

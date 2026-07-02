@@ -55,24 +55,6 @@ pub fn get_codex_config_path() -> Result<PathBuf> {
 }
 
 // ============================================================================
-// Gemini CLI 配置路径
-// ============================================================================
-
-/// 获取 Gemini 配置目录
-///
-/// 默认: ~/.gemini
-pub fn get_gemini_config_dir() -> Result<PathBuf> {
-    Ok(get_home_dir()?.join(".gemini"))
-}
-
-/// 获取 Gemini .env 路径
-///
-/// 路径: ~/.gemini/.env
-pub fn get_gemini_env_path() -> Result<PathBuf> {
-    Ok(get_gemini_config_dir()?.join(".env"))
-}
-
-// ============================================================================
 // 通用工具
 // ============================================================================
 
@@ -108,12 +90,5 @@ mod tests {
         let auth = get_codex_auth_path().unwrap();
         assert!(auth.to_string_lossy().contains(".codex"));
         assert!(auth.to_string_lossy().ends_with("auth.json"));
-    }
-
-    #[test]
-    fn test_gemini_paths() {
-        let env = get_gemini_env_path().unwrap();
-        assert!(env.to_string_lossy().contains(".gemini"));
-        assert!(env.to_string_lossy().ends_with(".env"));
     }
 }

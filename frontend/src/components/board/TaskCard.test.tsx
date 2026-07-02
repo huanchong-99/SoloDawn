@@ -35,7 +35,7 @@ const task: WorkflowTaskDto = {
     {
       id: 'term-2',
       workflowTaskId: 'task-1',
-      cliTypeId: 'gemini-cli',
+      cliTypeId: 'qwen-code',
       modelConfigId: 'model-2',
       customBaseUrl: null,
       customApiKey: null,

@@ -543,6 +543,10 @@ async fn execute_create_workflow(
         status: "created".to_string(),
         execution_mode: "agent_planned".to_string(),
         initial_goal: Some(initial_goal.to_string()),
+        // The concierge create-workflow tool exposes no slash-command
+        // parameters, so the feature stays off. If the tool schema ever
+        // gains command support, propagate it here — `execute_slash_commands`
+        // activates purely on this flag.
         use_slash_commands: false,
         orchestrator_enabled: true,
         orchestrator_api_type: session.llm_api_type.clone(),

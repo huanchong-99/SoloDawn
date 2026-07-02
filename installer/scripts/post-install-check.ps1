@@ -302,12 +302,11 @@ Write-Host "--- 5. AI CLIs ---" -ForegroundColor White
 $CLIs = @(
     @{ Name = "Claude Code"; Cmd = "claude"; Args = "--version" },
     @{ Name = "Codex"; Cmd = "codex"; Args = "--version" },
-    @{ Name = "Gemini CLI"; Cmd = "gemini"; Args = "--version" },
     @{ Name = "Amp"; Cmd = "amp"; Args = "--version" },
     @{ Name = "Qwen Code"; Cmd = "qwen"; Args = "--version" },
     @{ Name = "Opencode"; Cmd = "opencode"; Args = "--version" },
     @{ Name = "Droid"; Cmd = "droid"; Args = "--version" },
-    @{ Name = "GitHub Copilot"; Cmd = "gh copilot"; Args = "--version" }
+    @{ Name = "GitHub Copilot"; Cmd = "copilot"; Args = "--version" }
 )
 
 $DetectedCount = 0

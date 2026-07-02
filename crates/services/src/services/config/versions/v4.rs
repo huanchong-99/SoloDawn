@@ -70,10 +70,10 @@ impl Config {
                 ProfileVariantLabel::with_variant("claude-code".to_string(), "router".to_string())
             }
             "amp" => ProfileVariantLabel::default("amp".to_string()),
-            "gemini" => ProfileVariantLabel::default("gemini".to_string()),
             "codex" => ProfileVariantLabel::default("codex".to_string()),
             "opencode" => ProfileVariantLabel::default("opencode".to_string()),
             "qwen-code" => ProfileVariantLabel::default("qwen-code".to_string()),
+            // Retired profiles (e.g. "gemini") fall through here as well.
             _ => {
                 onboarding_acknowledged = false; // Reset the user's onboarding if executor is not supported
                 ProfileVariantLabel::default("claude-code".to_string())

@@ -35,6 +35,20 @@ use crate::services::{
     orchestrator::{BusMessage, SharedMessageBus, constants::WORKFLOW_TOPIC_PREFIX},
 };
 
+/// Map a `cli_type.name` to the executable to launch on the PATH.
+///
+/// Single source of truth for the CLI-name → binary-name mapping (verified
+/// against official installers, 2026-07): most CLIs install a binary matching
+/// their internal name (`cursor-agent`, `copilot`, `droid`, `opencode`,
+/// `amp`, `codex`); the exceptions are mapped explicitly.
+pub fn cli_binary_name(cli_name: &str) -> &str {
+    match cli_name {
+        "claude-code" => "claude",
+        "qwen-code" => "qwen",
+        _ => cli_name,
+    }
+}
+
 /// Terminal launcher for serial terminal startup
 pub struct TerminalLauncher {
     db: Arc<DBService>,
@@ -680,14 +694,7 @@ impl TerminalLauncher {
     /// # Returns
     /// The command string to execute
     fn get_cli_command(&self, cli_name: &str) -> String {
-        match cli_name {
-            "claude-code" => "claude".to_string(),
-            "gemini-cli" => "gemini".to_string(),
-            "codex" => "codex".to_string(),
-            "amp" => "amp".to_string(),
-            "cursor-agent" => "cursor".to_string(),
-            _ => cli_name.to_string(),
-        }
+        cli_binary_name(cli_name).to_string()
     }
 
     /// Get workflow ID for a terminal by querying workflow_task table
@@ -940,10 +947,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_cli_command_gemini() {
+    async fn test_get_cli_command_qwen() {
         let (launcher, _) = setup_launcher().await;
-        let cmd = launcher.get_cli_command("gemini-cli");
-        assert_eq!(cmd, "gemini");
+        let cmd = launcher.get_cli_command("qwen-code");
+        assert_eq!(cmd, "qwen");
+    }
+
+    #[tokio::test]
+    async fn test_get_cli_command_cursor_agent_identity() {
+        // The real Cursor CLI binary is `cursor-agent` (`cursor` is the IDE),
+        // so the CLI name must pass through unchanged via the fallthrough arm.
+        let (launcher, _) = setup_launcher().await;
+        let cmd = launcher.get_cli_command("cursor-agent");
+        assert_eq!(cmd, "cursor-agent");
     }
 
     #[tokio::test]

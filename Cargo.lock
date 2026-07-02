@@ -1124,85 +1124,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-app-server-protocol"
-version = "0.71.0"
-source = "git+https://github.com/openai/codex.git?rev=565488c15b8969694ec52cda3d6fcc99655a972f#565488c15b8969694ec52cda3d6fcc99655a972f"
-dependencies = [
- "anyhow",
- "clap",
- "codex-protocol",
- "mcp-types",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "strum_macros",
- "thiserror 2.0.18",
- "ts-rs 11.1.0",
- "uuid",
-]
-
-[[package]]
-name = "codex-git"
-version = "0.71.0"
-source = "git+https://github.com/openai/codex.git?rev=565488c15b8969694ec52cda3d6fcc99655a972f#565488c15b8969694ec52cda3d6fcc99655a972f"
-dependencies = [
- "once_cell",
- "regex",
- "schemars 0.8.22",
- "serde",
- "tempfile",
- "thiserror 2.0.18",
- "ts-rs 11.1.0",
- "walkdir",
-]
-
-[[package]]
-name = "codex-protocol"
-version = "0.71.0"
-source = "git+https://github.com/openai/codex.git?rev=565488c15b8969694ec52cda3d6fcc99655a972f#565488c15b8969694ec52cda3d6fcc99655a972f"
-dependencies = [
- "codex-git",
- "codex-utils-image",
- "icu_decimal",
- "icu_locale_core",
- "icu_provider",
- "mcp-types",
- "mime_guess",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_with",
- "strum",
- "strum_macros",
- "sys-locale",
- "tracing",
- "ts-rs 11.1.0",
- "uuid",
-]
-
-[[package]]
-name = "codex-utils-cache"
-version = "0.71.0"
-source = "git+https://github.com/openai/codex.git?rev=565488c15b8969694ec52cda3d6fcc99655a972f#565488c15b8969694ec52cda3d6fcc99655a972f"
-dependencies = [
- "lru",
- "sha1",
- "tokio",
-]
-
-[[package]]
-name = "codex-utils-image"
-version = "0.71.0"
-source = "git+https://github.com/openai/codex.git?rev=565488c15b8969694ec52cda3d6fcc99655a972f#565488c15b8969694ec52cda3d6fcc99655a972f"
-dependencies = [
- "base64 0.22.1",
- "codex-utils-cache",
- "image",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1606,7 +1527,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "ts-rs 11.0.1",
+ "ts-rs",
  "utils",
  "uuid",
 ]
@@ -2008,8 +1929,6 @@ dependencies = [
  "bon",
  "bytes",
  "chrono",
- "codex-app-server-protocol",
- "codex-protocol",
  "command-group",
  "convert_case 0.6.0",
  "derivative",
@@ -2021,7 +1940,6 @@ dependencies = [
  "futures",
  "futures-io",
  "json-patch",
- "mcp-types",
  "once_cell",
  "os_pipe",
  "rand 0.8.5",
@@ -2042,7 +1960,7 @@ dependencies = [
  "tokio-util",
  "toml 0.8.2",
  "tracing",
- "ts-rs 11.0.1",
+ "ts-rs",
  "utils",
  "uuid",
  "walkdir",
@@ -2124,17 +2042,6 @@ dependencies = [
  "lazy_static",
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "fixed_decimal"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35eabf480f94d69182677e37571d3be065822acfafd12f2f085db44fbbcc8e57"
-dependencies = [
- "displaydoc",
- "smallvec 1.15.1",
- "writeable",
 ]
 
 [[package]]
@@ -3024,42 +2931,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "icu_decimal"
-version = "2.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a38c52231bc348f9b982c1868a2af3195199623007ba2c7650f432038f5b3e8e"
-dependencies = [
- "fixed_decimal",
- "icu_decimal_data",
- "icu_locale",
- "icu_locale_core",
- "icu_provider",
- "writeable",
- "zerovec",
-]
-
-[[package]]
-name = "icu_decimal_data"
-version = "2.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2905b4044eab2dd848fe84199f9195567b63ab3a93094711501363f63546fef7"
-
-[[package]]
-name = "icu_locale"
-version = "2.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "532b11722e350ab6bf916ba6eb0efe3ee54b932666afec989465f9243fe6dd60"
-dependencies = [
- "icu_collections",
- "icu_locale_core",
- "icu_locale_data",
- "icu_provider",
- "potential_utf",
- "tinystr",
- "zerovec",
-]
-
-[[package]]
 name = "icu_locale_core"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3067,17 +2938,10 @@ checksum = "edba7861004dd3714265b4db54a3c390e880ab658fec5f7db895fae2046b5bb6"
 dependencies = [
  "displaydoc",
  "litemap",
- "serde",
  "tinystr",
  "writeable",
  "zerovec",
 ]
-
-[[package]]
-name = "icu_locale_data"
-version = "2.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c5f1d16b4c3a2642d3a719f18f6b06070ab0aef246a6418130c955ae08aa831"
 
 [[package]]
 name = "icu_normalizer"
@@ -3127,8 +2991,6 @@ checksum = "85962cf0ce02e1e0a629cc34e7ca3e373ce20dda4c4d7294bbd0bf1fdb59e614"
 dependencies = [
  "displaydoc",
  "icu_locale_core",
- "serde",
- "stable_deref_trait",
  "writeable",
  "yoke",
  "zerofrom",
@@ -3196,8 +3058,6 @@ dependencies = [
  "moxcms",
  "num-traits",
  "png 0.18.1",
- "zune-core",
- "zune-jpeg",
 ]
 
 [[package]]
@@ -3767,17 +3627,6 @@ name = "maybe-uninit"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60302e4db3a61da70c0cb7991976248362f30319e88850c487b9b95bbf059e00"
-
-[[package]]
-name = "mcp-types"
-version = "0.71.0"
-source = "git+https://github.com/openai/codex.git?rev=565488c15b8969694ec52cda3d6fcc99655a972f#565488c15b8969694ec52cda3d6fcc99655a972f"
-dependencies = [
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "ts-rs 11.1.0",
-]
 
 [[package]]
 name = "md-5"
@@ -5162,8 +5011,6 @@ version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b73949432f5e2a09657003c25bca5e19a0e9c84f8058ca374f49e0ebe605af77"
 dependencies = [
- "serde_core",
- "writeable",
  "zerovec",
 ]
 
@@ -5387,7 +5234,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "ts-rs 11.0.1",
+ "ts-rs",
  "uuid",
 ]
 
@@ -6126,18 +5973,6 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.8.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
-dependencies = [
- "dyn-clone",
- "schemars_derive 0.8.22",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "schemars"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cd191f9397d57d581cddd31014772520aa448f65ef991055d7f61582c65165f"
@@ -6157,22 +5992,10 @@ dependencies = [
  "chrono",
  "dyn-clone",
  "ref-cast",
- "schemars_derive 1.2.1",
+ "schemars_derive",
  "serde",
  "serde_json",
  "uuid",
-]
-
-[[package]]
-name = "schemars_derive"
-version = "0.8.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32e265784ad618884abaea0600a9adf15393368d840e0222d101a072f3f7534d"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde_derive_internals",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -6685,7 +6508,7 @@ dependencies = [
  "tower-http 0.5.2",
  "tracing",
  "tracing-subscriber",
- "ts-rs 11.0.1",
+ "ts-rs",
  "url",
  "utils",
  "uuid",
@@ -6753,7 +6576,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tracing",
- "ts-rs 11.0.1",
+ "ts-rs",
  "twox-hash",
  "url",
  "utils",
@@ -7308,15 +7131,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sys-locale"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "system-deps"
 version = "6.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7505,7 +7319,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42d3e9c45c09de15d06dd8acf5f4e0e399e85927b7f00711024eb7ae10fa4869"
 dependencies = [
  "displaydoc",
- "serde_core",
  "zerovec",
 ]
 
@@ -8030,19 +7843,7 @@ dependencies = [
  "chrono",
  "serde_json",
  "thiserror 2.0.18",
- "ts-rs-macros 11.0.1",
- "uuid",
-]
-
-[[package]]
-name = "ts-rs"
-version = "11.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4994acea2522cd2b3b85c1d9529a55991e3ad5e25cdcd3de9d505972c4379424"
-dependencies = [
- "serde_json",
- "thiserror 2.0.18",
- "ts-rs-macros 11.1.0",
+ "ts-rs-macros",
  "uuid",
 ]
 
@@ -8050,18 +7851,6 @@ dependencies = [
 name = "ts-rs-macros"
 version = "11.0.1"
 source = "git+https://github.com/xazukx/ts-rs.git?rev=b5c8277ac9f321a0be7453eef029466152b13fc8#b5c8277ac9f321a0be7453eef029466152b13fc8"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
- "termcolor",
-]
-
-[[package]]
-name = "ts-rs-macros"
-version = "11.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee6ff59666c9cbaec3533964505d39154dc4e0a56151fdea30a09ed0301f62e2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8277,7 +8066,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "ts-rs 11.0.1",
+ "ts-rs",
  "url",
  "uuid",
  "which",
@@ -9544,7 +9333,6 @@ version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c28719294829477f525be0186d13efa9a3c602f7ec202ca9e353d310fb9a002"
 dependencies = [
- "serde",
  "yoke",
  "zerofrom",
  "zerovec-derive",
@@ -9566,21 +9354,6 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
-
-[[package]]
-name = "zune-core"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb8a0807f7c01457d0379ba880ba6322660448ddebc890ce29bb64da71fb40f9"
-
-[[package]]
-name = "zune-jpeg"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
-dependencies = [
- "zune-core",
-]
 
 [[package]]
 name = "zvariant"

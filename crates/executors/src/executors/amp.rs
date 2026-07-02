@@ -25,7 +25,7 @@ pub struct Amp {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(
         title = "Dangerously Allow All",
-        description = "Allow all commands to be executed, even if they are not safe."
+        description = "Deprecated: no longer supported by Amp CLI (permissions moved to Amp's settings/plugin system); this option has no effect."
     )]
     pub dangerously_allow_all: Option<bool>,
     #[serde(flatten)]
@@ -33,12 +33,13 @@ pub struct Amp {
 }
 
 impl Amp {
-    fn build_command_builder(&self) -> CommandBuilder {
-        let mut builder = CommandBuilder::new("npx -y @sourcegraph/amp@0.0.1764777697-g907e30")
-            .params(["--execute", "--stream-json"]);
-        if self.dangerously_allow_all.unwrap_or(false) {
-            builder = builder.extend_params(["--dangerously-allow-all"]);
-        }
+    /// Build the command line. `thread_args` are subcommand words (e.g.
+    /// `threads continue <id>`) which must precede the flags.
+    /// `--no-archive-after-execute` keeps execute-mode threads continuable.
+    fn build_command_builder(&self, thread_args: &[&str]) -> CommandBuilder {
+        let builder = CommandBuilder::new("npx -y @ampcode/cli@0.0.1782995668-g845e5b")
+            .params(thread_args.iter().copied())
+            .extend_params(["--execute", "--stream-json", "--no-archive-after-execute"]);
         apply_overrides(builder, &self.cmd)
     }
 }
@@ -51,7 +52,7 @@ impl StandardCodingAgentExecutor for Amp {
         prompt: &str,
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
-        let command_parts = self.build_command_builder().build_initial()?;
+        let command_parts = self.build_command_builder(&[]).build_initial()?;
         let (executable_path, args) = command_parts.into_resolved().await?;
 
         let combined_prompt = self.append_prompt.combine_prompt(prompt);
@@ -87,44 +88,10 @@ impl StandardCodingAgentExecutor for Amp {
         session_id: &str,
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
-        // 1) Fork the thread synchronously to obtain new thread id
-        let builder = self.build_command_builder();
-        let fork_line = builder.build_follow_up(&[
-            "threads".to_string(),
-            "fork".to_string(),
-            session_id.to_string(),
-        ])?;
-        let (fork_program, fork_args) = fork_line.into_resolved().await?;
-        let fork_output = Command::new(fork_program)
-            .kill_on_drop(true)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .current_dir(current_dir)
-            .args(&fork_args)
-            .output()
-            .await?;
-        let stdout_str = String::from_utf8_lossy(&fork_output.stdout);
-        let new_thread_id = stdout_str
-            .lines()
-            .rev()
-            .find(|l| !l.trim().is_empty())
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if new_thread_id.is_empty() {
-            return Err(ExecutorError::Io(std::io::Error::other(
-                "AMP threads fork did not return a thread id",
-            )));
-        }
-
-        tracing::debug!("AMP threads fork -> new thread id: {}", new_thread_id);
-
-        // 2) Continue using the new thread id
-        let continue_line = builder.build_follow_up(&[
-            "threads".to_string(),
-            "continue".to_string(),
-            new_thread_id.clone(),
-        ])?;
+        // Continue the existing thread (`amp threads fork` no longer exists upstream)
+        let continue_line = self
+            .build_command_builder(&["threads", "continue", session_id])
+            .build_follow_up(&[])?;
         let (continue_program, continue_args) = continue_line.into_resolved().await?;
 
         let combined_prompt = self.append_prompt.combine_prompt(prompt);
@@ -182,5 +149,57 @@ impl StandardCodingAgentExecutor for Amp {
         } else {
             AvailabilityInfo::NotFound
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn amp() -> Amp {
+        Amp {
+            append_prompt: AppendPrompt::default(),
+            dangerously_allow_all: Some(true),
+            cmd: CmdOverrides::default(),
+        }
+    }
+
+    #[test]
+    fn initial_build_uses_new_package_and_params() {
+        let command = amp()
+            .build_command_builder(&[])
+            .build_initial()
+            .expect("should build");
+        assert_eq!(
+            command.args(),
+            [
+                "-y",
+                "@ampcode/cli@0.0.1782995668-g845e5b",
+                "--execute",
+                "--stream-json",
+                "--no-archive-after-execute",
+            ]
+        );
+    }
+
+    #[test]
+    fn follow_up_build_puts_threads_continue_before_flags() {
+        let command = amp()
+            .build_command_builder(&["threads", "continue", "T-123"])
+            .build_follow_up(&[])
+            .expect("should build");
+        assert_eq!(
+            command.args(),
+            [
+                "-y",
+                "@ampcode/cli@0.0.1782995668-g845e5b",
+                "threads",
+                "continue",
+                "T-123",
+                "--execute",
+                "--stream-json",
+                "--no-archive-after-execute",
+            ]
+        );
     }
 }

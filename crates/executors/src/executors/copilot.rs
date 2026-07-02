@@ -2,21 +2,14 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
-    time::Duration,
 };
 
 use async_trait::async_trait;
 use command_group::AsyncCommandGroup;
 use futures::StreamExt;
-use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tokio::{
-    fs,
-    io::AsyncWriteExt,
-    process::Command,
-    time::{interval, timeout},
-};
+use tokio::{fs, process::Command};
 use ts_rs::TS;
 use uuid::Uuid;
 use workspace_utils::{msg_store::MsgStore, path::get_solodawn_temp_dir};
@@ -31,7 +24,7 @@ use crate::{
         NormalizedEntry, NormalizedEntryType, plain_text_processor::PlainTextLogProcessor,
         stderr_processor::normalize_stderr_logs, utils::EntryIndexProvider,
     },
-    stdout_dup::{self, StdoutAppender},
+    stdout_dup,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, JsonSchema)]
@@ -56,12 +49,13 @@ pub struct Copilot {
 
 impl Copilot {
     /// Package version for @github/copilot
-    const COPILOT_NPX_VERSION: &'static str = "0.0.375";
+    const COPILOT_NPX_VERSION: &'static str = "1.0.68";
 
     fn build_command_builder(&self, log_dir: &str) -> CommandBuilder {
         let base_cmd = format!("npx -y @github/copilot@{}", Self::COPILOT_NPX_VERSION);
         let mut builder = CommandBuilder::new(&base_cmd).params([
             "--no-color",
+            "--no-auto-update",
             "--log-level",
             "debug",
             "--log-dir",
@@ -109,17 +103,25 @@ impl StandardCodingAgentExecutor for Copilot {
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
         let log_dir = Self::create_temp_log_dir(current_dir).await?;
+        // Deterministic session id: set the UUID for the new session via
+        // `--session-id` instead of scraping it from the log directory.
+        let session_id = Uuid::new_v4().to_string();
+        let combined_prompt = self.append_prompt.combine_prompt(prompt);
         let command_parts = self
             .build_command_builder(&log_dir.to_string_lossy())
+            .extend_params([
+                "--session-id",
+                session_id.as_str(),
+                "--prompt",
+                combined_prompt.as_str(),
+            ])
             .build_initial()?;
         let (program_path, args) = command_parts.into_resolved().await?;
-
-        let combined_prompt = self.append_prompt.combine_prompt(prompt);
 
         let mut command = Command::new(program_path);
         command
             .kill_on_drop(true)
-            .stdin(Stdio::piped())
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .current_dir(current_dir)
@@ -132,14 +134,8 @@ impl StandardCodingAgentExecutor for Copilot {
 
         let mut child = command.group_spawn()?;
 
-        // Write prompt to stdin
-        if let Some(mut stdin) = child.inner().stdin.take() {
-            stdin.write_all(combined_prompt.as_bytes()).await?;
-            stdin.shutdown().await?;
-        }
-
         let (_, appender) = stdout_dup::tee_stdout_with_appender(&mut child)?;
-        Self::send_session_id(log_dir, appender);
+        appender.append_line(format!("{}{}", Self::SESSION_PREFIX, session_id));
 
         Ok(child.into())
     }
@@ -152,18 +148,22 @@ impl StandardCodingAgentExecutor for Copilot {
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
         let log_dir = Self::create_temp_log_dir(current_dir).await?;
+        let combined_prompt = self.append_prompt.combine_prompt(prompt);
         let command_parts = self
             .build_command_builder(&log_dir.to_string_lossy())
-            .build_follow_up(&["--resume".to_string(), session_id.to_string()])?;
+            .build_follow_up(&[
+                "--resume".to_string(),
+                session_id.to_string(),
+                "--prompt".to_string(),
+                combined_prompt,
+            ])?;
         let (program_path, args) = command_parts.into_resolved().await?;
-
-        let combined_prompt = self.append_prompt.combine_prompt(prompt);
 
         let mut command = Command::new(program_path);
 
         command
             .kill_on_drop(true)
-            .stdin(Stdio::piped())
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .current_dir(current_dir)
@@ -176,14 +176,8 @@ impl StandardCodingAgentExecutor for Copilot {
 
         let mut child = command.group_spawn()?;
 
-        // Write comprehensive prompt to stdin
-        if let Some(mut stdin) = child.inner().stdin.take() {
-            stdin.write_all(combined_prompt.as_bytes()).await?;
-            stdin.shutdown().await?;
-        }
-
         let (_, appender) = stdout_dup::tee_stdout_with_appender(&mut child)?;
-        Self::send_session_id(log_dir, appender);
+        appender.append_line(format!("{}{}", Self::SESSION_PREFIX, session_id));
 
         Ok(child.into())
     }
@@ -269,56 +263,5 @@ impl Copilot {
         Ok(run_log_dir)
     }
 
-    // Scan the log directory for a file named `<UUID>.log` or `session-<UUID>.log` and extract the UUID as session ID.
-    async fn watch_session_id(log_dir_path: PathBuf) -> Result<String, String> {
-        let session_regex =
-            Regex::new(r"events to session ([0-9a-fA-F-]{36})").map_err(|e| e.to_string())?;
-
-        let log_dir_clone = log_dir_path.clone();
-        timeout(Duration::from_secs(600), async move {
-            let mut ticker = interval(Duration::from_millis(200));
-            loop {
-                if let Ok(mut rd) = fs::read_dir(&log_dir_clone).await {
-                    while let Ok(Some(entry)) = rd.next_entry().await {
-                        let path = entry.path();
-                        if path.extension().is_some_and(|e| e == "log")
-                            && let Ok(content) = fs::read_to_string(&path).await
-                            && let Some(caps) = session_regex.captures(&content)
-                            && let Some(matched) = caps.get(1)
-                        {
-                            let uuid_str = matched.as_str();
-                            if Uuid::parse_str(uuid_str).is_ok() {
-                                return Ok(uuid_str.to_string());
-                            }
-                        }
-                    }
-                }
-                ticker.tick().await;
-            }
-        })
-        .await
-        .map_err(|_| {
-            format!(
-                "No session ID found in log files at {}",
-                log_dir_path.display()
-            )
-        })?
-    }
-
     const SESSION_PREFIX: &'static str = "[copilot-session] ";
-
-    // Find session id and write it to stdout prefixed
-    fn send_session_id(log_dir_path: PathBuf, stdout_appender: StdoutAppender) {
-        tokio::spawn(async move {
-            match Self::watch_session_id(log_dir_path).await {
-                Ok(session_id) => {
-                    let session_line = format!("{}{}\n", Self::SESSION_PREFIX, session_id);
-                    stdout_appender.append_line(&session_line);
-                }
-                Err(e) => {
-                    tracing::error!("Failed to find session ID: {}", e);
-                }
-            }
-        });
-    }
 }

@@ -16,9 +16,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use codex_app_server_protocol::{
-    JSONRPCError, JSONRPCMessage, JSONRPCNotification, JSONRPCRequest, JSONRPCResponse, RequestId,
-};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::{
@@ -27,6 +24,9 @@ use tokio::{
     sync::{Mutex, oneshot},
 };
 
+use super::protocol::{
+    JSONRPCError, JSONRPCMessage, JSONRPCNotification, JSONRPCRequest, JSONRPCResponse, RequestId,
+};
 use crate::executors::{ExecutorError, ExecutorExitResult};
 
 #[derive(Debug)]

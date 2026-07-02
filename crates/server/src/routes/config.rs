@@ -796,10 +796,10 @@ fn resolve_install_single_cli_script() -> Option<PathBuf> {
 const BATCH_INSTALL_CLIS: &[&str] = &[
     "claude-code",
     "codex",
-    "gemini-cli",
     "amp",
     "cursor-agent",
     "qwen-code",
+    "copilot",
     "opencode",
     "droid",
 ];

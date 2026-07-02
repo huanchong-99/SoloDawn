@@ -44,7 +44,7 @@ use crate::{DeploymentImpl, error::ApiError};
 pub(crate) struct TerminalSpawnConfig {
     /// Unique terminal identifier.
     pub terminal_id: String,
-    /// Command to execute (e.g., "claude", "codex", "gemini").
+    /// Command to execute (e.g., "claude", "codex", "qwen").
     pub command: String,
     /// Command-line arguments.
     pub args: Vec<String>,
@@ -276,14 +276,7 @@ pub async fn start_terminal(
             })?;
 
     // Determine shell command based on CLI type
-    let cmd_name = match cli_type.name.as_str() {
-        "claude-code" => "claude",
-        "gemini-cli" => "gemini",
-        "codex" => "codex",
-        "amp" => "amp",
-        "cursor-agent" => "cursor",
-        _ => &cli_type.name,
-    };
+    let cmd_name = services::services::terminal::cli_binary_name(&cli_type.name);
 
     // Find the absolute path of the CLI executable
     let shell = find_executable(cmd_name).await.ok_or_else(|| {

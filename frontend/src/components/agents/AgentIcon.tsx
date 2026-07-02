@@ -23,8 +23,6 @@ export function getAgentName(
       return 'Claude Code';
     case BaseCodingAgent.AMP:
       return 'AMP';
-    case BaseCodingAgent.GEMINI:
-      return 'Gemini';
     case BaseCodingAgent.CODEX:
       return 'Codex';
     case BaseCodingAgent.OPENCODE:
@@ -37,6 +35,10 @@ export function getAgentName(
       return 'Copilot';
     case BaseCodingAgent.DROID:
       return 'Droid';
+    default:
+      // Legacy values from old databases (e.g. removed executors) degrade
+      // to the generic label instead of breaking rendering.
+      return 'Agent';
   }
 }
 
@@ -59,9 +61,6 @@ export function AgentIcon({ agent, className = 'h-4 w-4' }: Readonly<AgentIconPr
       break;
     case BaseCodingAgent.AMP:
       iconPath = `/agents/amp${suffix}.svg`;
-      break;
-    case BaseCodingAgent.GEMINI:
-      iconPath = `/agents/gemini${suffix}.svg`;
       break;
     case BaseCodingAgent.CODEX:
       iconPath = `/agents/codex${suffix}.svg`;

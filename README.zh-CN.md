@@ -18,7 +18,7 @@
 
 ## SoloDawn 是什么？
 
-SoloDawn 是一个跑在你本机的开源 Web 应用（Rust 后端 + React 前端）：由一个上层编排 Agent（主 Agent）指挥你电脑上**真实安装的 AI CLI**（Claude Code、Codex、Gemini CLI 等 9 种），在 Git 仓库里完成全自动开发——需求澄清 → 生成技术规范 → 拆分任务 → 多分支并行开发 → 三层质量门拦截 → 验收评审打分 → 自动合并。
+SoloDawn 是一个跑在你本机的开源 Web 应用（Rust 后端 + React 前端）：由一个上层编排 Agent（主 Agent）指挥你电脑上**真实安装的 AI CLI**（Claude Code、Codex 等 8 种），在 Git 仓库里完成全自动开发——需求澄清 → 生成技术规范 → 拆分任务 → 多分支并行开发 → 三层质量门拦截 → 验收评审打分 → 自动合并。
 
 SoloDawn 的最终设计目标是**通过社交平台的简单对话，完成复杂项目的产出**——不是那种玩具 Demo，而是真正的复杂化的生产级产品。
 
@@ -54,9 +54,9 @@ SoloDawn 的最终设计目标是**通过社交平台的简单对话，完成复
 - **skill、插件、MCP 服务器、斜杠命令零迁移** —— 不需要在 SoloDawn 里额外设置，直接继承、原样可用，你可以随你心意去做、去改；
 - **官方内置命令全部继承（含 UltraCode）** —— 在手动工作流里为任务配置专用提示词即可启用 UltraCode：它会生成标准化的工作流脚本，为每个 Agent 硬编码清晰的能力边界；之后直接调用这个脚本，就能复用整套工作流；
 - **全自动可以，手动掌控也可以** —— 编排工作区把一切交给 AI；手动工作流让你自定义工作流图的每个细节：几个终端、什么角色、哪个模型、启用哪些斜杠命令；
-- **9 种 AI CLI 在同一个工作流里协作** —— 比如 Claude Code 终端跑 GLM 模型当开发，Codex 终端跑 GPT 模型当审计。
+- **8 种 AI CLI 在同一个工作流里协作** —— 比如 Claude Code 终端跑 GLM 模型当开发，Codex 终端跑 GPT 模型当审计。
 
-**这个项目的可玩性和拓展性非常强，可探索的空间近乎无限：9 种 AI CLI × 你的 skill × 你的 MCP × 各种插件自由组合，10 个用户能玩出 100 种用法——这对所有用户都是关键优势。**
+**这个项目的可玩性和拓展性非常强，可探索的空间近乎无限：8 种 AI CLI × 你的 skill × 你的 MCP × 各种插件自由组合，10 个用户能玩出 100 种用法——这对所有用户都是关键优势。**
 
 两种模式的逐步操作说明见文末：[编排工作区使用指南](#编排工作区使用指南) · [手动工作流使用指南](#手动工作流使用指南)。
 
@@ -85,7 +85,7 @@ SoloDawn 的最终设计目标是**通过社交平台的简单对话，完成复
 - ✅ 策略快照与问题追踪；LLM 容错降级；多提供商熔断与故障转移；状态持久化与崩溃恢复
 
 ### CLI 与模型
-- ✅ 9 种 AI CLI；同一任务内可混用不同 CLI，各终端可担任开发 / 审计等不同角色
+- ✅ 8 种 AI CLI；同一任务内可混用不同 CLI，各终端可担任开发 / 审计等不同角色
 - ✅ 同一 CLI 内通过 CC-Switch 切换不同供应商/模型
 - ✅ 五类模型接口：Anthropic / Google / OpenAI / Anthropic 兼容 / OpenAI 兼容（自定义 base URL，中转可用）
 - ✅ 每终端独立环境变量注入；MCP 服务器按 CLI 自适应配置格式
@@ -110,7 +110,7 @@ SoloDawn 的最终设计目标是**通过社交平台的简单对话，完成复
 
 四条核心设计理念：
 
-- **上层编排，不生成代码。** 编排 Agent 不写任何代码——它指挥最强的专业 AI CLI（Claude Code、Gemini CLI、Codex、Amp、Cursor Agent 等）去完成工作。
+- **上层编排，不生成代码。** 编排 Agent 不写任何代码——它指挥最强的专业 AI CLI（Claude Code、Codex、Amp、Cursor Agent 等）去完成工作。
 - **两层 Agent，拒绝固定工作流。** 只有主 Agent 和子 Agent 两层，没有预配置的子 Agent，也没有固定的工作流定义——僵化工作流对简单任务过重、对复杂任务不足，条件判断必然误判。完整决策权在主 Agent 手里，子 Agent 按需动态开、动态关。
 - **非侵入式设计。** SoloDawn 不替换任何 CLI，不修改任何配置，不定义新工具。它继承每个 CLI 的完整原生生态——所有斜杠命令、插件、skill 和 MCP 服务器都原样可用。
 - **Git 驱动的事件循环。** 编排器只在 Git 提交事件发生时消耗 LLM token，事件间休眠零消耗——相比轮询方案节省 98% 以上 token。
@@ -173,7 +173,6 @@ SoloDawn 的最终设计目标是**通过社交平台的简单对话，完成复
 | CLI | 状态 | 模型切换 | MCP 配置 |
 |---|---|---|---|
 | Claude Code | ✅ 已支持 | ✅ 通过 CC-Switch | Passthrough |
-| Gemini CLI | ✅ 已支持 | ✅ 通过 CC-Switch | Gemini 适配器 |
 | Codex | ✅ 已支持 | ✅ 通过 CC-Switch | Codex 适配器 |
 | Amp | ✅ 已支持 | — | Passthrough |
 | Cursor Agent | ✅ 已支持 | — | Cursor 适配器 |
@@ -181,6 +180,8 @@ SoloDawn 的最终设计目标是**通过社交平台的简单对话，完成复
 | GitHub Copilot | ✅ 已支持 | — | Copilot 适配器 |
 | Droid | ✅ 已支持 | — | Passthrough |
 | Opencode | ✅ 已支持 | — | Opencode 适配器 |
+
+> Gemini CLI 支持已移除：Google 已停止面向消费者提供 Gemini CLI，转向 [Antigravity CLI](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)。
 
 任何能在终端运行且支持斜杠命令的 CLI 都可以集成。
 
@@ -420,7 +421,7 @@ docker-compose -f docker-compose.split.yml up -d
 3. **定义任务**（Step 2）：把要做的事拆成任务；每个任务将获得独立分支与 worktree。
 4. **配置模型**（Step 3）：维护模型库（供应商 / base URL / Key）。全局设置里配过的这里会直接读取到；也可以只为本工作流单独配置。
 5. **配置终端**（Step 4）：页面会检测你电脑上的运行环境与已安装的 AI CLI（在页面里往下滚动即可看到）。然后为每个任务选择：用哪个终端（CLI）、这个终端用什么模型、以及此终端的角色描述。**多 AI CLI 协作就在这一步实现**——比如 Claude Code 终端跑 GLM 模型作为开发人员，Codex 终端跑 GPT 模型作为审计人员。
-6. **斜杠命令**（Step 5）：为工作流启用斜杠命令。命令不会直接发送给对应终端，而是统一交给主 Agent——由主 Agent 识别命令，并在运行过程中自行转发给合适的终端（整个工作流本就由主 Agent 全程掌控）。内置 write-code / review / fix-issues / test / refactor / document 六个预设，也可以加入你自己的命令——插件市场那么多插件，每个都有自己的命令，把你的命令加到这里，主 Agent 就能在流程中调用你的插件。
+6. **斜杠命令**（Step 5）：为工作流启用斜杠命令。在 Agent Planned 模式下，命令不会直接发送给对应终端，而是统一交给主 Agent——由主 Agent 识别命令，并在运行过程中自行转发给合适的终端（整个工作流本就由主 Agent 全程掌控）。在 DIY 模式下没有主 Agent——每条启用的命令会自动渲染并输入到每个任务的终端里，紧跟在该任务的描述之后。内置 write-code / review / fix-issues / test / refactor / document 六个预设，也可以加入你自己的命令——插件市场那么多插件，每个都有自己的命令，把你的命令加到这里，主 Agent 就能在流程中调用你的插件。
 7. **高级设置**（Step 6）：选择谁当协调多任务的主 AI（编排模型），以及合并分支的时候，使用哪个终端、哪个模型来解决冲突、完成合并；还可以配置合并前是否跑测试、遇到冲突是否暂停。
 
 > **进阶玩法：UltraCode。** 手动工作流启动的是你的原生终端，因此除了你的 skill / MCP / 插件，CLI 的官方内置命令也全部继承——包括 UltraCode 模式。为任务配置专用提示词即可启用（任务描述会原样输入到该任务的终端）：UltraCode 会生成标准化的工作流脚本，为每个 Agent 硬编码清晰的能力边界，之后直接调用该脚本即可复用整套工作流。
@@ -591,7 +592,7 @@ SoloDawn/
 │   ├── server/                # Axum HTTP/WebSocket 服务器 + MCP Task Server
 │   ├── services/              # 业务逻辑（编排器、终端、Git 监控、合并协调、验收评审）
 │   ├── quality/               # 三层质量门引擎 + 31 条内置规则
-│   ├── executors/             # 9 种 AI CLI 集成 + MCP 配置适配器
+│   ├── executors/             # 8 种 AI CLI 集成 + MCP 配置适配器
 │   ├── cc-switch/             # CLI 模型切换库
 │   ├── feishu-connector/      # 飞书长连接客户端（openlark SDK）
 │   ├── db/                    # 数据库层（模型、迁移、DAO、AES-256-GCM 加密）

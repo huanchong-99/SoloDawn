@@ -10618,10 +10618,18 @@ impl OrchestratorAgent {
             // Deliver the command with its leading '/' removed so it cannot
             // execute directly in the orchestrator conversation; the agent
             // must prepend '/' when forwarding the command to a terminal.
+            //
+            // This injection runs at agent start, before any terminals exist,
+            // and its responses are stored as conversation context only — they
+            // are never parsed for instructions. Make that contract explicit
+            // to the model so it does not emit instruction JSON that would be
+            // silently discarded.
             let command_name = preset.command.trim_start_matches('/');
             let safe_prompt = Self::strip_leading_slash(&rendered_prompt);
             let message = format!(
-                "Workflow slash command '{command_name}' (leading '/' removed — prepend '/' to the command when you send it to a terminal):\n{safe_prompt}"
+                "Workflow slash command '{command_name}' (leading '/' removed — prepend '/' to the command when you send it to a terminal):\n{safe_prompt}\n\n\
+                 NOTE: this is initial context injection; no terminals exist yet and this response is NOT parsed for instructions. \
+                 Reply with a brief acknowledgment only — act on this command during your normal planning cycles once terminals are available."
             );
 
             // Add the sanitized command prompt as user message to conversation
@@ -10650,6 +10658,29 @@ impl OrchestratorAgent {
                 if let Some(usage) = &response.usage {
                     state.total_tokens_used += i64::from(usage.total_tokens);
                 }
+            }
+
+            // Injection responses are context only. If the model ignored the
+            // acknowledgment-only contract and emitted an instruction array,
+            // surface that loudly instead of discarding it silently.
+            let looks_like_instructions = {
+                let trimmed = response
+                    .content
+                    .trim()
+                    .trim_start_matches("```json")
+                    .trim_start_matches("```")
+                    .trim_end_matches("```")
+                    .trim();
+                serde_json::from_str::<serde_json::Value>(trimmed)
+                    .map(|v| v.is_array())
+                    .unwrap_or(false)
+            };
+            if looks_like_instructions {
+                tracing::warn!(
+                    command = %preset.command,
+                    "Slash-command injection response looks like an instruction array; \
+                     it is stored as conversation context only and will NOT be executed"
+                );
             }
 
             tracing::info!(

@@ -75,7 +75,6 @@ curl http://localhost:23456/readyz
 | `SOLODAWN_DOCKER_API_TOKEN` | No | - | Bearer token for `/api` routes (Docker-only variable) |
 | `ANTHROPIC_API_KEY` | No | - | Claude Code API key |
 | `OPENAI_API_KEY` | No | - | Codex CLI API key |
-| `GOOGLE_API_KEY` | No | - | Gemini CLI API key |
 | `PORT` | No | 23456 | Host port mapping |
 | `RUST_LOG` | No | info | Log level (debug/info/warn/error) |
 | `HOST_WORKSPACE_ROOT` | No | `../..` | Host path mounted into container for repo discovery |

@@ -122,7 +122,6 @@ pub struct Terminal {
     /// When enabled, CLI will be launched with auto-confirm flags:
     /// - Claude Code: --dangerously-skip-permissions
     /// - Codex: --yolo
-    /// - Gemini: --yolo
     pub auto_confirm: bool,
 
     /// Last Git commit hash
