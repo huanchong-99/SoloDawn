@@ -13,11 +13,12 @@ name: E2E Self-Test
 on:
   push:
     branches: [ main ]
-  # PRs: never trigger the 3-OS E2E matrix (45min × 3 = huge cost per push).
-  # E2E relies on a full release build + system deps that take >30min on
-  # free runners. Per-PR E2E is replaced by:
-  #   - ci-basic.yml backend-check (cargo nextest covers the logic)
-  #   - manual `workflow_dispatch` for risky platform-specific PRs
+  # PRs: run ONLY the ubuntu self-test leg (enforced by the `if` on the `e2e`
+  # job below) so the full-API validation runs on the release binary without
+  # paying the full 3-OS matrix cost (45min × 3). macOS/Windows legs and the
+  # secret-dependent orchestration job remain push/dispatch-only.
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 concurrency:
@@ -26,6 +27,9 @@ concurrency:
 
 jobs:
   e2e:
+    # On pull_request, run only the ubuntu leg (cost control); push and manual
+    # dispatch still run the full windows/ubuntu/macos matrix.
+    if: ${{ github.event_name != 'pull_request' || matrix.os == 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
