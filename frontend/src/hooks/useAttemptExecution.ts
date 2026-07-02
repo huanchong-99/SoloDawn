@@ -33,11 +33,6 @@ export function useAttemptExecution(attemptId?: string, taskId?: string) {
 
   // Extract data from queries so useMemo has a stable dependency
   const processDetailData = processDetailQueries.map((q) => q.data);
-  // Stable primitive key so the memo below only recomputes when detail data
-  // actually changes (processDetailData itself is a fresh array every render).
-  const processDetailKey = processDetailQueries
-    .map((q) => q.dataUpdatedAt)
-    .join(',');
 
   // Build attempt data combining processes and details
   const attemptData: AttemptData = useMemo(() => {
@@ -59,7 +54,7 @@ export function useAttemptExecution(attemptId?: string, taskId?: string) {
       processes: executionProcesses,
       runningProcessDetails,
     };
-  }, [executionProcesses, setupProcesses, processDetailKey]);
+  }, [executionProcesses, setupProcesses, processDetailData]);
 
   // Stop execution function
   const stopExecution = useCallback(async () => {
