@@ -13,12 +13,11 @@ name: E2E Self-Test
 on:
   push:
     branches: [ main ]
-  # PRs: run ONLY the ubuntu self-test leg (enforced by the `if` on the `e2e`
-  # job below) so the full-API validation runs on the release binary without
-  # paying the full 3-OS matrix cost (45min × 3). macOS/Windows legs and the
-  # secret-dependent orchestration job remain push/dispatch-only.
-  pull_request:
-    branches: [ main ]
+  # PRs: never trigger the 3-OS E2E matrix (45min × 3 = huge cost per push).
+  # E2E relies on a full release build + system deps that take >30min on
+  # free runners. Per-PR E2E is replaced by:
+  #   - ci-basic.yml backend-check (cargo nextest covers the logic)
+  #   - manual `workflow_dispatch` for risky platform-specific PRs
   workflow_dispatch:
 
 concurrency:
@@ -26,31 +25,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Compute the OS matrix per event: pull_request runs ubuntu-only (cost
-  # control), while push-to-main and manual dispatch run the full
-  # windows/ubuntu/macos matrix. (A job-level `if` cannot reference `matrix`, so
-  # the selection is done here and consumed via fromJSON below.)
-  set-matrix:
-    name: Select E2E matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    outputs:
-      matrix: ${{ steps.pick.outputs.matrix }}
-    steps:
-      - id: pick
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo 'matrix={"include":[{"os":"ubuntu-latest","binary":"target/release/server"}]}' >> "$GITHUB_OUTPUT"
-          else
-            echo 'matrix={"include":[{"os":"windows-latest","binary":"target/release/server.exe"},{"os":"ubuntu-latest","binary":"target/release/server"},{"os":"macos-latest","binary":"target/release/server"}]}' >> "$GITHUB_OUTPUT"
-          fi
-
   e2e:
-    needs: set-matrix
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.set-matrix.outputs.matrix) }}
+      matrix:
+        include:
+          - os: windows-latest
+            binary: target/release/server.exe
+          - os: ubuntu-latest
+            binary: target/release/server
+          - os: macos-latest
+            binary: target/release/server
 
     name: E2E (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

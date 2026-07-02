@@ -106,15 +106,7 @@ jobs:
       # win). NOTE: nextest's `--profile` is its own run-config profile (from
       # .config/nextest.toml), NOT a Cargo profile — there is no `ci` nextest
       # profile, so `--profile ci` errored with "profile `ci` not found".
-      #
-      # Runs the FULL suite (lib unit tests + integration tests under `tests/`)
-      # instead of just `--lib`, so route/service integration coverage runs in
-      # CI, not merely compiles. nextest skips `#[ignore]`d tests by default —
-      # which is exactly the set requiring a live server / live CLI / live
-      # Feishu (`#[ignore = "requires running server"]` etc.) — so no external
-      # services or secrets are needed. The heavier full-API validation on a
-      # release binary is the E2E self-test (ci-e2e.yml).
-      run: cargo nextest run $CARGO_SELECT --cargo-profile ci
+      run: cargo nextest run $CARGO_SELECT --cargo-profile ci --lib
 
     - name: Check generated types are up-to-date
       run: cargo run --bin generate_types --profile ci -- --check
