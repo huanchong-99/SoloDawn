@@ -119,8 +119,11 @@ export const useConciergeWsStore = create<ConciergeWsState>((set, get) => {
       for (const handler of handlers) {
         try {
           handler(payload);
-        } catch {
-          // swallow handler errors
+        } catch (handlerErr) {
+          console.error(
+            `[conciergeWsStore] handler for "${type}" failed`,
+            handlerErr
+          );
         }
       }
     }

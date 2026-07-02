@@ -947,7 +947,18 @@ export const useWsStore = create<WsState>((set, get) => ({
           id: generateMessageId(),
         };
 
-        latest.ws.send(JSON.stringify(heartbeatMessage));
+        try {
+          latest.ws.send(JSON.stringify(heartbeatMessage));
+        } catch (err) {
+          // Socket transitioned to CLOSING/CLOSED between the readyState
+          // check and send(); treat as a transport failure and let the
+          // close handler drive reconnect instead of leaking an uncaught throw.
+          console.error(
+            `[wsStore] heartbeat send failed for workflow "${targetWorkflowId}"`,
+            err
+          );
+          return;
+        }
 
         const heartbeatConnections = new Map(get()._workflowConnections);
         const active = heartbeatConnections.get(targetWorkflowId);

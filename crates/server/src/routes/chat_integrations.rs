@@ -139,7 +139,11 @@ fn constant_time_eq_chat(a: &[u8], b: &[u8]) -> bool {
 
 fn verify_event_timestamp(timestamp: i64) -> Result<(), ApiError> {
     let now = Utc::now().timestamp();
-    let delta = (now - timestamp).abs();
+    // `timestamp` is attacker-controlled (i64 from the signed request). A plain
+    // `now - timestamp` can overflow (panic in debug, wrap in release) and `.abs()`
+    // panics on i64::MIN. Saturating ops make an out-of-range value simply fall
+    // outside the tolerance window and get rejected.
+    let delta = now.saturating_sub(timestamp).saturating_abs();
     if delta > CHAT_EVENT_TIMESTAMP_TOLERANCE_SECS {
         return Err(ApiError::Forbidden(
             "Chat event timestamp is outside the allowed time window".to_string(),
@@ -326,6 +330,15 @@ async fn handle_chat_event(
             ));
         }
 
+        let workflow = Workflow::find_by_id(&deployment.db().pool, workflow_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound("Workflow not found".to_string()))?;
+        if workflow.execution_mode != "agent_planned" {
+            return Err(ApiError::Conflict(
+                "Only agent_planned workflows can be bound to chat connectors".to_string(),
+            ));
+        }
+
         ExternalConversationBinding::upsert(
             &deployment.db().pool,
             &provider,
@@ -385,10 +398,6 @@ async fn handle_chat_event(
     };
 
     let mut headers = HeaderMap::new();
-    headers.insert(
-        "x-orchestrator-role",
-        "operator".parse().expect("valid header value"),
-    );
     headers.insert(
         "x-orchestrator-role",
         "operator".parse().map_err(|e| {

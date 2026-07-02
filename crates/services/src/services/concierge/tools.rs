@@ -231,17 +231,25 @@ async fn execute_create_project(
 
     // Create directory and init git
     let path = std::path::Path::new(repo_path);
-    if !path.exists() {
-        std::fs::create_dir_all(path)
-            .with_context(|| format!("Failed to create directory: {repo_path}"))?;
-    }
-    if !path.join(".git").exists() {
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(path)
-            .output()
-            .with_context(|| format!("Failed to git init at {repo_path}"))?;
-    }
+    // Blocking filesystem + subprocess work: run off the async worker thread
+    // so `git init`/disk I/O does not stall the tokio runtime.
+    let repo_path_owned = repo_path.to_string();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let path = std::path::Path::new(&repo_path_owned);
+        if !path.exists() {
+            std::fs::create_dir_all(path)
+                .with_context(|| format!("Failed to create directory: {repo_path_owned}"))?;
+        }
+        if !path.join(".git").exists() {
+            std::process::Command::new("git")
+                .args(["init"])
+                .current_dir(path)
+                .output()
+                .with_context(|| format!("Failed to git init at {repo_path_owned}"))?;
+        }
+        Ok(())
+    })
+    .await??;
 
     // Create project in DB
     let project_id = uuid::Uuid::new_v4();

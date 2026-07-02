@@ -302,11 +302,11 @@ async fn assert_status(
     if status != expected {
         return Err(format!(
             "{name}: expected {expected}, got {status}. Body: {}",
-            &body[..body.len().min(200)]
+            &body[..body.floor_char_boundary(body.len().min(200))]
         ));
     }
     serde_json::from_str(&body)
-        .map_err(|_| format!("{name}: invalid JSON: {}", &body[..body.len().min(200)]))
+        .map_err(|_| format!("{name}: invalid JSON: {}", &body[..body.floor_char_boundary(body.len().min(200))]))
 }
 
 /// Assert response status is NOT 500.
@@ -316,7 +316,7 @@ async fn assert_not_500(resp: reqwest::Response, name: &str) -> Result<Value, St
     if status >= 500 {
         return Err(format!(
             "{name}: got {status} (internal error). Body: {}",
-            &body[..body.len().min(200)]
+            &body[..body.floor_char_boundary(body.len().min(200))]
         ));
     }
     serde_json::from_str(&body).or_else(|_| Ok(json!({"status": status})))
@@ -1083,7 +1083,7 @@ async fn test_create_scratch(ctx: &mut TestContext) -> Result<(), String> {
         let body = resp.text().await.unwrap_or_default();
         return Err(format!(
             "create_scratch: got {status}. Body: {}",
-            &body[..body.len().min(200)]
+            &body[..body.floor_char_boundary(body.len().min(200))]
         ));
     }
     ctx.scratch_type = Some("draft_follow_up".to_string());

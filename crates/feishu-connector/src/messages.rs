@@ -31,7 +31,7 @@ impl FeishuMessenger {
             .execute(text_body(chat_id, text))
             .await
             .map_err(|e| anyhow::anyhow!("Feishu send_text failed: {e}"))?;
-        Ok(extract_message_id(&resp))
+        extract_message_id(&resp)
     }
 
     /// Reply to a specific message with text. Returns the provider message ID.
@@ -41,7 +41,7 @@ impl FeishuMessenger {
             .execute(reply_text_body(text))
             .await
             .map_err(|e| anyhow::anyhow!("Feishu reply_text failed: {e}"))?;
-        Ok(extract_message_id(&resp))
+        extract_message_id(&resp)
     }
 
     /// Send an interactive card message to a chat. Returns the provider message ID.
@@ -51,7 +51,7 @@ impl FeishuMessenger {
             .execute(card_body(chat_id, card))
             .await
             .map_err(|e| anyhow::anyhow!("Feishu send_card failed: {e}"))?;
-        Ok(extract_message_id(&resp))
+        extract_message_id(&resp)
     }
 
     /// Best-effort discovery of a default chat id.
@@ -95,15 +95,32 @@ fn reply_text_body(text: &str) -> ReplyMessageBody {
     }
 }
 
-/// Extract `message_id` from the SDK's JSON response, tolerating either a
+/// Extract `message_id` from the SDK's JSON response.
+///
+/// Feishu returns HTTP 200 with a non-zero body `code` on logical failures
+/// (e.g. 230002 "bot not in group", 230027 permission, 230020 rate-limit). The
+/// SDK does not always turn these into transport errors, so `code` must be
+/// inspected here — otherwise a rejected send would be reported as success with
+/// an empty message id, silently swallowing the failure. Tolerates either a
 /// `{ data: { message_id } }` envelope or a flattened `{ message_id }` shape.
-fn extract_message_id(resp: &serde_json::Value) -> String {
+fn extract_message_id(resp: &serde_json::Value) -> Result<String> {
+    if let Some(code) = resp.get("code").and_then(|c| c.as_i64())
+        && code != 0
+    {
+        let msg = resp
+            .get("msg")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown error");
+        return Err(anyhow::anyhow!("Feishu send failed: code={code} msg={msg}"));
+    }
+
     resp.get("data")
         .and_then(|d| d.get("message_id"))
         .and_then(|m| m.as_str())
         .or_else(|| resp.get("message_id").and_then(|m| m.as_str()))
-        .unwrap_or_default()
-        .to_string()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow::anyhow!("Feishu send response missing message_id: {resp}"))
 }
 
 #[cfg(test)]
@@ -144,10 +161,16 @@ mod tests {
     #[test]
     fn extract_message_id_handles_both_envelopes() {
         let nested = serde_json::json!({ "code": 0, "data": { "message_id": "om_nested" } });
-        assert_eq!(extract_message_id(&nested), "om_nested");
+        assert_eq!(extract_message_id(&nested).unwrap(), "om_nested");
         let flat = serde_json::json!({ "message_id": "om_flat" });
-        assert_eq!(extract_message_id(&flat), "om_flat");
+        assert_eq!(extract_message_id(&flat).unwrap(), "om_flat");
+        // code:0 but no message_id -> error (previously silently returned "")
         let missing = serde_json::json!({ "code": 0, "data": {} });
-        assert_eq!(extract_message_id(&missing), "");
+        assert!(extract_message_id(&missing).is_err());
+        // Non-zero code: a Feishu logical failure returned with HTTP 200 must surface
+        // as an error rather than a successful send with an empty id.
+        let rejected =
+            serde_json::json!({ "code": 230002, "msg": "bot not in group", "data": {} });
+        assert!(extract_message_id(&rejected).is_err());
     }
 }

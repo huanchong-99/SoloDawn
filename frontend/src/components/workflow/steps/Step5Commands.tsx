@@ -352,10 +352,14 @@ export const Step5Commands: React.FC<Step5CommandsProps> = ({
   // Combine all presets
   const allPresets = [...SYSTEM_PRESETS, ...userPresets];
 
-  // Get selected preset objects
-  const selectedPresets = allPresets.filter((p) =>
-    config.presetIds.includes(p.id)
-  );
+  // Get selected preset objects, in the user's chosen order (config.presetIds).
+  // moveUp/moveDown index into config.presetIds, so the rendered order must match
+  // that array — filtering allPresets would instead follow declaration order, so
+  // the reorder buttons would move the wrong entry and diverge from execution order.
+  const selectedPresets = config.presetIds.flatMap((id) => {
+    const preset = allPresets.find((p) => p.id === id);
+    return preset ? [preset] : [];
+  });
 
   // Handlers
   const handleEnable = () => {

@@ -32,9 +32,13 @@ impl ReconnectPolicy {
         // G32-010: Always apply a small jitter (independent of the server-sent
         // nonce, which defaults to 0) so synchronized clients de-correlate and
         // avoid a thundering-herd reconnect.
-        let jitter_ms = rand_jitter((base_ms / 2).min(2000));
+        // Full jitter centered on the backoff: delay in [base_ms/2, base_ms + base_ms/2]
+        // so synchronized clients de-correlate on BOTH sides of the target,
+        // not only upward from the base_ms floor. Mean stays at base_ms.
+        let half = base_ms / 2;
+        let delay_ms = base_ms.saturating_sub(half) + rand_jitter(2 * half + 1);
         self.attempt += 1;
-        Some(Duration::from_millis(base_ms + jitter_ms))
+        Some(Duration::from_millis(delay_ms))
     }
 
     pub fn reset(&mut self) {

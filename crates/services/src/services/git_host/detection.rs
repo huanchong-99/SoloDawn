@@ -11,7 +11,9 @@ use super::types::ProviderKind;
 pub fn detect_provider_from_url(url: &str) -> ProviderKind {
     let url_lower = url.to_lowercase();
 
-    if url_lower.contains("github.com") {
+    if let Some(host) = extract_host(&url_lower)
+        && (host == "github.com" || host.ends_with(".github.com"))
+    {
         return ProviderKind::GitHub;
     }
 

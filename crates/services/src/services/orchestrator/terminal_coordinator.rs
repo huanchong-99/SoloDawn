@@ -180,18 +180,18 @@ impl TerminalCoordinator {
                     ));
                 }
 
+                // A broadcast SendError only means there are currently no UI/WS
+                // subscribers (headless run, UI closed, client just disconnected).
+                // The authoritative topic publish above already succeeded, so this is
+                // non-fatal: log and keep preparing the remaining terminals instead of
+                // aborting the whole workflow start just because nobody is listening.
                 if let Err(e) = message_bus.broadcast(message) {
-                    error!(
+                    tracing::debug!(
                         terminal_id = %terminal.id,
                         workflow_id = %workflow_id,
                         error = %e,
-                        "Failed to broadcast terminal starting status"
+                        "No broadcast subscribers for terminal starting status (non-fatal)"
                     );
-                    return Err(anyhow::anyhow!(
-                        "Failed to broadcast terminal starting status {}: {}",
-                        terminal.id,
-                        e
-                    ));
                 }
             }
 

@@ -224,7 +224,7 @@ pub async fn create_pr(
             "PR title must not be empty".to_string(),
         ));
     }
-    if title_trimmed.len() > 256 {
+    if title_trimmed.chars().count() > 256 {
         return Err(ApiError::BadRequest(
             "PR title must not exceed 256 characters".to_string(),
         ));
@@ -439,7 +439,10 @@ pub async fn attach_existing_pr(
 
     // Check if PR already attached for this repo
     let merges = Merge::find_by_workspace_and_repo_id(pool, workspace.id, request.repo_id).await?;
-    if let Some(Merge::Pr(pr_merge)) = merges.into_iter().next() {
+    if let Some(pr_merge) = merges.into_iter().find_map(|m| match m {
+        Merge::Pr(pr_merge) => Some(pr_merge),
+        _ => None,
+    }) {
         return Ok(ResponseJson(ApiResponse::success(AttachPrResponse {
             pr_attached: true,
             pr_url: Some(pr_merge.pr_info.url.clone()),
@@ -586,9 +589,12 @@ pub async fn get_pr_comments(
     let merges = Merge::find_by_workspace_and_repo_id(pool, workspace.id, query.repo_id).await?;
 
     // Ensure there's an attached PR for this repo
-    let pr_info = match merges.into_iter().next() {
-        Some(Merge::Pr(pr_merge)) => pr_merge.pr_info,
-        _ => {
+    let pr_info = match merges.into_iter().find_map(|m| match m {
+        Merge::Pr(pr_merge) => Some(pr_merge),
+        _ => None,
+    }) {
+        Some(pr_merge) => pr_merge.pr_info,
+        None => {
             return Ok(ResponseJson(ApiResponse::error_with_data(
                 GetPrCommentsError::NoPrAttached,
             )));

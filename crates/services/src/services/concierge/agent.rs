@@ -515,10 +515,18 @@ impl ConciergeAgent {
                             let cancel = CancellationToken::new();
                             // Store token so we can cancel when the session is cleaned up
                             let watcher_key = format!("{}:{}", session.id, workflow_id);
-                            self.watcher_tokens
+                            let previous = self
+                                .watcher_tokens
                                 .lock()
                                 .await
                                 .insert(watcher_key, cancel.clone());
+                            if let Some(previous) = previous {
+                                // A watcher for this session+workflow already existed
+                                // (e.g. start_workflow was invoked twice). Cancel it so
+                                // the prior task and its bus receiver do not leak and
+                                // emit duplicate notifications for the process lifetime.
+                                previous.cancel();
+                            }
                             tokio::spawn(super::notifications::watch_workflow_events(
                                 sid,
                                 workflow_id.to_string(),

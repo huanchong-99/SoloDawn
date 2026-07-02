@@ -25,13 +25,19 @@ pub struct Config {
 }
 
 impl Config {
+    // Result kept for uniformity with the migration chain (v2::from_previous_version
+    // can still Err on an unparseable v1 config); this level always succeeds because
+    // it chains down via v4::Config::from on a failed direct parse.
+    #[allow(clippy::unnecessary_wraps)]
     pub fn from_previous_version(raw_config: &str) -> Result<Self, Error> {
         let old_config = match serde_json::from_str::<v4::Config>(raw_config) {
             Ok(cfg) => cfg,
             Err(e) => {
-                tracing::error!("❌ Failed to parse config: {}", e);
-                tracing::error!("   at line {}, column {}", e.line(), e.column());
-                return Err(e.into());
+                // The on-disk config is older than v4. Chain down through v4's own
+                // migration instead of returning Err here — From<String> maps an Err
+                // to Self::default(), which would silently discard the user's data.
+                tracing::warn!("Direct v4 parse failed ({e}); chaining migration from an older version");
+                v4::Config::from(raw_config.to_string())
             }
         };
 

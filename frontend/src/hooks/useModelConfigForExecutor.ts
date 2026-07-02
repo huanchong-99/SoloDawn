@@ -124,7 +124,10 @@ export function useModelConfigForExecutor(
       setSelectedModelConfigId(null);
       return;
     }
-    if (executorChanged || selectedModelConfigId === null) {
+    const stillValid =
+      selectedModelConfigId !== null &&
+      allModelsKey.split('|').includes(selectedModelConfigId);
+    if (executorChanged || selectedModelConfigId === null || !stillValid) {
       const preferredId = firstCustomId ?? firstOfficialId ?? firstAnyId;
       setSelectedModelConfigId(preferredId);
     }

@@ -55,19 +55,26 @@ impl ProtocolPeer {
         let mut interrupt_rx = interrupt_rx.fuse();
 
         loop {
-            buffer.clear();
             tokio::select! {
                 line_result = reader.read_line(&mut buffer) => {
                     match line_result {
                         Ok(0) => break, // EOF
                         Ok(_) => {
+                            // `read_line` is NOT cancellation-safe: if the
+                            // interrupt branch below wins mid-read, bytes
+                            // already appended to `buffer` would be lost. We
+                            // therefore only take/clear `buffer` here, after a
+                            // COMPLETE line was read, leaving any partially-read
+                            // bytes intact across a cancellation so the next
+                            // `read_line` continues appending the remainder.
+                            let line_owned = std::mem::take(&mut buffer);
                             // E33-07: `trim()` strips both leading and trailing
                             // whitespace (including the `\n` terminator). This
                             // is acceptable here because the Claude CLI emits
                             // one JSON object per line, and any leading/
                             // trailing whitespace is never semantically
                             // significant inside the line framing.
-                            let line = buffer.trim();
+                            let line = line_owned.trim();
                             if line.is_empty() {
                                 continue;
                             }

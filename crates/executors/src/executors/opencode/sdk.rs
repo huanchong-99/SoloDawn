@@ -417,6 +417,11 @@ async fn create_session(
         .json::<SessionResponse>()
         .await
         .map_err(|err| ExecutorError::Io(io::Error::other(err)))?;
+    if session.id.trim().is_empty() {
+        return Err(ExecutorError::Io(io::Error::other(
+            "OpenCode session.create returned an empty session id",
+        )));
+    }
     Ok(session.id)
 }
 

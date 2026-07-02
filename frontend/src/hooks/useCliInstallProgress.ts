@@ -54,7 +54,13 @@ export function useCliInstallProgress(
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
-      const msg: InstallLogLine = JSON.parse(event.data);
+      let msg: InstallLogLine;
+      try {
+        msg = JSON.parse(event.data) as InstallLogLine;
+      } catch {
+        // Ignore non-JSON frames (e.g. keepalive/ping)
+        return;
+      }
       setState((prev) => {
         const newLines = [...prev.lines, msg];
         if (msg.type === 'completed') {
@@ -83,6 +89,12 @@ export function useCliInstallProgress(
         isComplete: true,
         error: 'WebSocket connection error',
       }));
+    };
+
+    ws.onclose = () => {
+      setState((prev) =>
+        prev.isComplete ? prev : { ...prev, isComplete: true }
+      );
     };
 
     return () => {

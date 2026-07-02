@@ -413,7 +413,7 @@ fn verify_response_body_ok(body: &str, expected_keys: &[&str], label: &str) -> b
         Err(_) => {
             tracing::warn!(
                 "{label} verification returned 200 but body is not valid JSON (likely wrong URL): {}",
-                &body[..body.len().min(200)]
+                body.chars().take(200).collect::<String>()
             );
             false
         }

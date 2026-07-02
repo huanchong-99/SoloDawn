@@ -579,10 +579,12 @@ impl TaskServer {
         description = "Return project, task, and workspace metadata for the current workspace session context."
     )]
     async fn get_context(&self) -> Result<CallToolResult, ErrorData> {
-        // Context was fetched at startup and cached
-        // This tool is only registered if context exists, so unwrap is safe
-        let context = self.context.as_ref().expect("VK context should exist");
-        Ok(TaskServer::success(context))
+        // Context is fetched at startup and cached; this tool is normally only
+        // registered when context exists, but guard defensively instead of panicking.
+        match self.context.as_ref() {
+            Some(context) => Ok(TaskServer::success(context)),
+            None => Ok(Self::err("No workspace context available", None::<&str>)),
+        }
     }
 
     #[tool(
