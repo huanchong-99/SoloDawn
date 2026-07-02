@@ -9,7 +9,6 @@
     [string]$EncryptionKey,
     [string]$AnthropicApiKey = "",
     [string]$OpenAiApiKey = "",
-    [string]$GoogleApiKey = "",
     [switch]$SkipBuild,
     [switch]$SkipStart,
     [switch]$ResetDataVolume,
@@ -79,7 +78,6 @@ $script:Messages = @{
         PROMPT_SET_API_TOKEN = "是否配置 Docker API Bearer Token"
         PROMPT_SET_ANTHROPIC = "现在设置 ANTHROPIC_API_KEY"
         PROMPT_SET_OPENAI = "现在设置 OPENAI_API_KEY"
-        PROMPT_SET_GOOGLE = "现在设置 GOOGLE_API_KEY"
         PROMPT_CREATE_MISSING_PATH = "目录不存在，是否立即创建"
         PROMPT_OVERWRITE_ENV = ".env 已存在，是否覆盖"
         PROMPT_RUN_UPDATE_FLOW = "检测到已有 Docker 配置，是否改为执行更新流程"
@@ -166,7 +164,6 @@ $script:Messages = @{
         PROMPT_SET_API_TOKEN = "Configure Docker API Bearer token"
         PROMPT_SET_ANTHROPIC = "Set ANTHROPIC_API_KEY now"
         PROMPT_SET_OPENAI = "Set OPENAI_API_KEY now"
-        PROMPT_SET_GOOGLE = "Set GOOGLE_API_KEY now"
         PROMPT_CREATE_MISSING_PATH = "Path does not exist. Create it now"
         PROMPT_OVERWRITE_ENV = ".env already exists. Overwrite it"
         PROMPT_RUN_UPDATE_FLOW = "Existing Docker config detected. Switch to update flow instead"
@@ -1026,9 +1023,6 @@ if (-not $NonInteractive) {
     if ([string]::IsNullOrWhiteSpace($OpenAiApiKey) -and (Read-YesNo (T "PROMPT_SET_OPENAI") $false)) {
         $OpenAiApiKey = Read-Host "OPENAI_API_KEY"
     }
-    if ([string]::IsNullOrWhiteSpace($GoogleApiKey) -and (Read-YesNo (T "PROMPT_SET_GOOGLE") $false)) {
-        $GoogleApiKey = Read-Host "GOOGLE_API_KEY"
-    }
 }
 else {
     if ([string]::IsNullOrWhiteSpace($EncryptionKey)) {
@@ -1081,7 +1075,6 @@ SOLODAWN_ENCRYPTION_KEY=$EncryptionKey
 SOLODAWN_DOCKER_API_TOKEN=$DockerApiToken
 ANTHROPIC_API_KEY=$AnthropicApiKey
 OPENAI_API_KEY=$OpenAiApiKey
-GOOGLE_API_KEY=$GoogleApiKey
 PORT=$Port
 RUST_LOG=$RustLog
 HOST_WORKSPACE_ROOT=$composeHostWorkspaceRoot

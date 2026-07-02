@@ -33,7 +33,7 @@ check_optional "Qwen Code"    qwen --version
 check_optional "Amp"          amp --version
 check_optional "OpenCode"     opencode --version
 check_optional "Droid"        droid --version
-check_optional "GH Copilot"   copilot --version
+check_optional "Copilot"      copilot --version
 
 log_info "=== Verification: $OK/$TOTAL available, required failures: $REQUIRED_FAIL ==="
 
