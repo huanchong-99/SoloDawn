@@ -18,24 +18,35 @@
 -- 1. Remove the Gemini CLI seed row where it was never used.
 --    model_config rows cascade; guard against every FK that references
 --    cli_type or a Gemini-owned model_config (terminal, workflow merge/error).
+--    Each subquery lists cli_type ids referenced through one FK path (NULLs
+--    filtered so NOT IN stays well-defined).
 DELETE FROM cli_type
 WHERE id = 'cli-gemini'
-  AND NOT EXISTS (SELECT 1 FROM terminal WHERE cli_type_id = 'cli-gemini')
-  AND NOT EXISTS (
-      SELECT 1 FROM terminal t
+  AND id NOT IN (
+      SELECT cli_type_id FROM terminal WHERE cli_type_id IS NOT NULL
+  )
+  AND id NOT IN (
+      SELECT mc.cli_type_id FROM terminal t
       JOIN model_config mc ON t.model_config_id = mc.id
-      WHERE mc.cli_type_id = 'cli-gemini'
+      WHERE mc.cli_type_id IS NOT NULL
   )
-  AND NOT EXISTS (
-      SELECT 1 FROM workflow
-      WHERE merge_terminal_cli_id = 'cli-gemini'
-         OR error_terminal_cli_id = 'cli-gemini'
+  AND id NOT IN (
+      SELECT merge_terminal_cli_id FROM workflow
+      WHERE merge_terminal_cli_id IS NOT NULL
   )
-  AND NOT EXISTS (
-      SELECT 1 FROM workflow w
-      JOIN model_config mc ON mc.cli_type_id = 'cli-gemini'
-      WHERE w.merge_terminal_model_id = mc.id
-         OR w.error_terminal_model_id = mc.id
+  AND id NOT IN (
+      SELECT error_terminal_cli_id FROM workflow
+      WHERE error_terminal_cli_id IS NOT NULL
+  )
+  AND id NOT IN (
+      SELECT mc.cli_type_id FROM workflow w
+      JOIN model_config mc ON w.merge_terminal_model_id = mc.id
+      WHERE mc.cli_type_id IS NOT NULL
+  )
+  AND id NOT IN (
+      SELECT mc.cli_type_id FROM workflow w
+      JOIN model_config mc ON w.error_terminal_model_id = mc.id
+      WHERE mc.cli_type_id IS NOT NULL
   );
 
 -- 2. GitHub Copilot: standalone CLI replaced the dead gh extension.

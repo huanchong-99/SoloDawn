@@ -1243,8 +1243,12 @@ if ($SkipAiClis) {
                 }
 
                 Write-Info (Tf "INSTALLING" @($cli.Name))
+                # Download to a file and execute it instead of piping into
+                # Invoke-Expression, so the installer content is never string-eval'd.
+                $installerPath = Join-Path ([System.IO.Path]::GetTempPath()) "$($cli.Key)-install.ps1"
                 try {
-                    Invoke-RestMethod $cli.Pkg | Invoke-Expression
+                    Invoke-RestMethod $cli.Pkg -OutFile $installerPath
+                    & $installerPath
                     Update-PathEnvironment
                     if (Test-CommandExists $cli.Cmd) {
                         $v = Get-InstalledVersion $cli.Cmd @("--version")
@@ -1256,6 +1260,8 @@ if ($SkipAiClis) {
                 } catch {
                     Write-Err (Tf "ERR_INSTALL_FAILED" @($cli.Name))
                     Record-Result $cli.Name "FAILED"
+                } finally {
+                    Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
                 }
             } else {
                 # npm-based CLI

@@ -123,11 +123,17 @@ if ($Action -eq "install") {
 
     if ($CliName -eq "cursor-agent") {
         Log-Info "Running official Cursor installer (cursor.com/install)..."
+        # Download to a file and execute it instead of piping into
+        # Invoke-Expression, so the installer content is never string-eval'd.
+        $InstallerPath = Join-Path ([System.IO.Path]::GetTempPath()) "cursor-cli-install.ps1"
         try {
-            Invoke-RestMethod 'https://cursor.com/install?win32=true' | Invoke-Expression
+            Invoke-RestMethod 'https://cursor.com/install?win32=true' -OutFile $InstallerPath
+            & $InstallerPath
         } catch {
             Log-Error "Cursor installer failed: $_"
             exit 1
+        } finally {
+            Remove-Item $InstallerPath -Force -ErrorAction SilentlyContinue
         }
         # The installer registers %LOCALAPPDATA%\cursor-agent on the user PATH
         # for future sessions; extend this session so verification below works.

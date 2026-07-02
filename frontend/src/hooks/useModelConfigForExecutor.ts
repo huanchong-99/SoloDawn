@@ -6,14 +6,13 @@ import { useModelsForCli } from './useCliTypes';
 /**
  * Derive cli_type_id from BaseCodingAgent enum value.
  * Convention: SCREAMING_SNAKE → kebab-case, prefixed with "cli-".
+ * The cli_type seed rows for Cursor and Qwen use ids shorter than their
+ * executor names, so those two need explicit mappings.
  */
 function executorToCliTypeId(executor: BaseCodingAgent): string {
-  switch (executor) {
-    case 'COPILOT':
-      return 'cli-copilot';
-    default:
-      return `cli-${executor.toLowerCase().replaceAll('_', '-')}`;
-  }
+  if (executor === 'CURSOR_AGENT') return 'cli-cursor';
+  if (executor === 'QWEN_CODE') return 'cli-qwen';
+  return `cli-${executor.toLowerCase().replaceAll('_', '-')}`;
 }
 
 /** Extended model info for the dropdown UI */
