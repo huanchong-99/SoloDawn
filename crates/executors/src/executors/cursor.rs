@@ -996,7 +996,6 @@ pub struct CursorShellOutcome {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct CursorShellWrappedResult {
     #[serde(default)]
     pub success: Option<CursorShellOutcome>,
@@ -1042,7 +1041,6 @@ pub struct CursorMcpOutcome {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct CursorMcpWrappedResult {
     #[serde(default)]
     pub success: Option<CursorMcpOutcome>,

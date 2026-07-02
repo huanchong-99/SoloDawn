@@ -1735,19 +1735,15 @@ impl LocalContainerService {
 
             let mut has_global_auth = false;
 
-            // Copy config.json, settings.json, and the native OAuth credential file
-            // (.credentials.json) from global if they exist. The native-auth marker
-            // is .credentials.json — mirroring build_launch_config /
-            // setup_interactive_auth and has_native_creds above — NOT config.json,
-            // which is only onboarding state and may not carry any key.
+            // Copy config.json and settings.json from global if they exist
             if let Some(ref global_home) = global_claude_home {
-                for filename in &["config.json", "settings.json", ".credentials.json"] {
+                for filename in &["config.json", "settings.json"] {
                     let src = global_home.join(filename);
                     if src.exists() {
                         if let Err(e) = std::fs::copy(&src, claude_home.join(filename)) {
                             tracing::warn!(error = %e, file = filename, "Failed to copy Claude config to workspace");
                         }
-                        if *filename == ".credentials.json" {
+                        if *filename == "config.json" {
                             has_global_auth = true;
                         }
                     }
