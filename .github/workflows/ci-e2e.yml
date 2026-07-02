@@ -26,20 +26,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Compute the OS matrix per event: pull_request runs ubuntu-only (cost
+  # control), while push-to-main and manual dispatch run the full
+  # windows/ubuntu/macos matrix. (A job-level `if` cannot reference `matrix`, so
+  # the selection is done here and consumed via fromJSON below.)
+  set-matrix:
+    name: Select E2E matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo 'matrix={"include":[{"os":"ubuntu-latest","binary":"target/release/server"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"include":[{"os":"windows-latest","binary":"target/release/server.exe"},{"os":"ubuntu-latest","binary":"target/release/server"},{"os":"macos-latest","binary":"target/release/server"}]}' >> "$GITHUB_OUTPUT"
+          fi
+
   e2e:
-    # On pull_request, run only the ubuntu leg (cost control); push and manual
-    # dispatch still run the full windows/ubuntu/macos matrix.
-    if: ${{ github.event_name != 'pull_request' || matrix.os == 'ubuntu-latest' }}
+    needs: set-matrix
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            binary: target/release/server.exe
-          - os: ubuntu-latest
-            binary: target/release/server
-          - os: macos-latest
-            binary: target/release/server
+      matrix: ${{ fromJSON(needs.set-matrix.outputs.matrix) }}
 
     name: E2E (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
