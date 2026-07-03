@@ -66,6 +66,8 @@ pub struct DraftResponse {
     pub technical_spec: Option<String>,
     pub workflow_seed: Option<String>,
     pub materialized_workflow_id: Option<String>,
+    /// Rounds: the draft this one continues (None for round 1 / standalone).
+    pub parent_draft_id: Option<String>,
     pub feishu_sync: bool,
     pub sync_tools: bool,
     pub sync_terminal: bool,
@@ -90,6 +92,7 @@ impl From<PlanningDraft> for DraftResponse {
             technical_spec: d.technical_spec,
             workflow_seed: d.workflow_seed,
             materialized_workflow_id: d.materialized_workflow_id,
+            parent_draft_id: d.parent_draft_id,
             feishu_sync: d.feishu_sync,
             sync_tools: d.sync_tools,
             sync_terminal: d.sync_terminal,
@@ -160,6 +163,7 @@ pub fn planning_draft_routes() -> Router<DeploymentImpl> {
         .route("/{draft_id}/spec", put(update_spec))
         .route("/{draft_id}/confirm", post(confirm_draft))
         .route("/{draft_id}/confirm-gates", post(confirm_gates))
+        .route("/{draft_id}/continue", post(continue_draft))
         .route("/{draft_id}/materialize", post(materialize_draft))
         .route("/{draft_id}/feishu-sync", post(toggle_feishu_sync))
         .route(
@@ -375,7 +379,7 @@ async fn confirm_draft(
         create_interactive_claude_client("claude-sonnet-4-6")
     });
 
-    let audit_plan = if let Some(client) = llm_client {
+    let mut audit_plan = if let Some(client) = llm_client {
         generate_audit_plan(
             client.as_ref(),
             draft.requirement_summary.as_deref().unwrap_or(""),
@@ -388,6 +392,57 @@ async fn confirm_draft(
         tracing::info!(draft_id = %draft_id, "No LLM client available for audit plan generation; using default");
         default_audit_plan()
     };
+
+    // Requirement ledger (评分点账本): extract the functional-completeness
+    // criteria as project-level points with stable server-assigned codes
+    // (RP-001, ...), rewriting the rubric criteria to carry them. Fail-open:
+    // a ledger sync failure must not block confirmation — the rubric still
+    // works untagged.
+    match services::services::requirement_ledger::sync_ledger_from_audit_plan(
+        &deployment.db().pool,
+        draft.project_id,
+        &draft_id,
+        &mut audit_plan,
+    )
+    .await
+    {
+        Ok(inserted) => {
+            tracing::info!(draft_id = %draft_id, inserted, "Requirement ledger synced from audit plan");
+        }
+        Err(e) => {
+            tracing::warn!(
+                draft_id = %draft_id,
+                error = %e,
+                "Requirement ledger sync failed; continuing without point codes"
+            );
+        }
+    }
+
+    // Follow-up rounds: previously delivered points enter the rubric as
+    // regression assertions (verify-not-broken), never re-scored as new work.
+    if draft.parent_draft_id.is_some() {
+        match db::models::RequirementItem::find_by_project_and_status(
+            &deployment.db().pool,
+            draft.project_id,
+            db::models::requirement_item::REQUIREMENT_STATUS_DELIVERED,
+        )
+        .await
+        {
+            Ok(delivered) => {
+                services::services::requirement_ledger::append_regression_section(
+                    &mut audit_plan,
+                    &delivered,
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    draft_id = %draft_id,
+                    error = %e,
+                    "Could not load delivered points for the regression section"
+                );
+            }
+        }
+    }
 
     // Serialize and store the audit plan
     let audit_plan_json = serde_json::to_string(&audit_plan).unwrap_or_default();
@@ -475,6 +530,79 @@ async fn confirm_gates(
         .ok_or_else(|| ApiError::Internal("Draft disappeared".into()))?;
 
     Ok(Json(ApiResponse::success(DraftResponse::from(updated))))
+}
+
+/// Continue a delivered round in the same conversation: create a child draft
+/// (round N+1) linked to its parent via `parent_draft_id`.
+///
+/// Guards:
+/// - the parent must be `materialized` (rounds are continued, never reopened);
+/// - the parent's workflow must be in a terminal state — one active round at
+///   a time on a repository;
+/// - the parent must not already have a continuation (linear chain).
+async fn continue_draft(
+    State(deployment): State<DeploymentImpl>,
+    Path(draft_id): Path<String>,
+) -> Result<ResponseJson<ApiResponse<DraftResponse>>, ApiError> {
+    let parent = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("Planning draft {draft_id} not found")))?;
+
+    if parent.status != "materialized" {
+        return Err(ApiError::BadRequest(format!(
+            "Only materialized drafts can be continued, current status is '{}'",
+            parent.status
+        )));
+    }
+
+    if let Some(child) = PlanningDraft::find_child(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+    {
+        return Err(ApiError::BadRequest(format!(
+            "This round already has a continuation (draft {})",
+            child.id
+        )));
+    }
+
+    if let Some(workflow_id) = parent.materialized_workflow_id.as_deref() {
+        let workflow = db::models::Workflow::find_by_id(&deployment.db().pool, workflow_id)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
+        if let Some(workflow) = workflow {
+            let terminal =
+                matches!(workflow.status.as_str(), "completed" | "failed" | "cancelled");
+            if !terminal {
+                return Err(ApiError::BadRequest(format!(
+                    "The current round's workflow is still '{}'. Wait for it to finish before \
+                     starting the next round.",
+                    workflow.status
+                )));
+            }
+        }
+    }
+
+    let mut child = PlanningDraft::new(parent.project_id, &parent.name);
+    child.parent_draft_id = Some(parent.id.clone());
+    // Inherit the planner configuration; the API key is copied in its
+    // encrypted-at-rest form (never decrypted on this path).
+    child.planner_model_id = parent.planner_model_id.clone();
+    child.planner_api_type = parent.planner_api_type.clone();
+    child.planner_base_url = parent.planner_base_url.clone();
+    child.planner_api_key = parent.planner_api_key.clone();
+
+    PlanningDraft::insert(&deployment.db().pool, &child)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to create continuation draft: {e}")))?;
+
+    tracing::info!(
+        parent_draft_id = %draft_id,
+        child_draft_id = %child.id,
+        "Created continuation round"
+    );
+
+    Ok(Json(ApiResponse::success(DraftResponse::from(child))))
 }
 
 async fn send_message(
@@ -591,7 +719,33 @@ async fn send_message(
             .await
             .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
 
-        let system_prompt = system_prompt_for_profile(PromptProfile::WorkspacePlanning);
+        let mut system_prompt = system_prompt_for_profile(PromptProfile::WorkspacePlanning);
+        // Continuation rounds plan against the compressed project background
+        // (ledger index + capsules), never the previous rounds' raw history.
+        if draft.parent_draft_id.is_some() {
+            match services::services::requirement_ledger::build_ledger_background(
+                &deployment.db().pool,
+                draft.project_id,
+            )
+            .await
+            {
+                Ok(Some(background)) => {
+                    system_prompt = format!(
+                        "{system_prompt}\n\nThis conversation is a FOLLOW-UP ROUND on an existing \
+                         project. Clarify and spec ONLY the new requirement the user brings up; \
+                         everything already delivered is described below and must not be re-planned.\n\n{background}"
+                    );
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        draft_id = %draft_id,
+                        error = %e,
+                        "Failed to build ledger background for continuation round"
+                    );
+                }
+            }
+        }
         let mut llm_messages = vec![LLMMessage {
             role: "system".to_string(),
             content: system_prompt,
@@ -981,6 +1135,25 @@ async fn materialize_draft(
         ));
     }
 
+    // Rounds guard: a continuation round must not start while the project has
+    // any other active workflow — two rounds mutating the same baseline would
+    // conflict. Round-1 drafts keep the existing parallel-workflow behaviour.
+    if draft.parent_draft_id.is_some() {
+        let workflows = Workflow::find_by_project(&deployment.db().pool, draft.project_id)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
+        if let Some(active) = workflows
+            .iter()
+            .find(|w| !matches!(w.status.as_str(), "completed" | "failed" | "cancelled"))
+        {
+            return Err(ApiError::BadRequest(format!(
+                "Project already has an active workflow ('{}', status '{}'). One active round \
+                 per project: wait for it to finish before starting the next round.",
+                active.name, active.status
+            )));
+        }
+    }
+
     let now = chrono::Utc::now();
     let workflow_id = Uuid::new_v4().to_string();
 
@@ -996,6 +1169,33 @@ async fn materialize_draft(
         (Some(summary), None) => Some(summary.clone()),
         (None, Some(spec)) => Some(spec.clone()),
         (None, None) => None,
+    };
+
+    // Continuation rounds: the orchestrator receives the compressed project
+    // background (ledger index + delivered capsules) with the goal, so it
+    // plans the delta from the existing implementation instead of from zero.
+    let initial_goal = if draft.parent_draft_id.is_some() {
+        match services::services::requirement_ledger::build_ledger_background(
+            &deployment.db().pool,
+            draft.project_id,
+        )
+        .await
+        {
+            Ok(Some(background)) => initial_goal
+                .map(|g| format!("{g}\n\n---\n\n{background}"))
+                .or(Some(background)),
+            Ok(None) => initial_goal,
+            Err(e) => {
+                tracing::warn!(
+                    draft_id = %draft_id,
+                    error = %e,
+                    "Failed to build ledger background for materialization"
+                );
+                initial_goal
+            }
+        }
+    } else {
+        initial_goal
     };
 
     // Use the first user-configured model for merge terminal defaults.

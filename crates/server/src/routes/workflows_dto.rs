@@ -40,6 +40,10 @@ pub struct WorkflowDetailDto {
     pub merge_terminal_model_id: String,
     pub target_branch: String,
     pub git_watcher_enabled: bool,
+    /// JSON-serialized `AuditPlan` snapshot copied from the planning draft at
+    /// materialize time. `None` for DIY workflows (no audit plan). Exposed so
+    /// the UI can show the per-run acceptance rubric.
+    pub audit_plan: Option<String>,
 
     // Timestamps
     pub ready_at: Option<String>,
@@ -195,6 +199,7 @@ impl WorkflowDetailDto {
             merge_terminal_model_id: workflow.merge_terminal_model_id.clone(),
             target_branch: workflow.target_branch.clone(),
             git_watcher_enabled: workflow.git_watcher_enabled,
+            audit_plan: workflow.audit_plan.clone(),
             ready_at: workflow.ready_at.map(|dt| dt.to_rfc3339()),
             started_at: workflow.started_at.map(|dt| dt.to_rfc3339()),
             completed_at: workflow.completed_at.map(|dt| dt.to_rfc3339()),
@@ -241,6 +246,7 @@ impl WorkflowDetailDto {
             merge_terminal_model_id: workflow.merge_terminal_model_id.clone(),
             target_branch: workflow.target_branch.clone(),
             git_watcher_enabled: workflow.git_watcher_enabled,
+            audit_plan: workflow.audit_plan.clone(),
             ready_at: workflow.ready_at.map(|dt| dt.to_rfc3339()),
             started_at: workflow.started_at.map(|dt| dt.to_rfc3339()),
             completed_at: workflow.completed_at.map(|dt| dt.to_rfc3339()),
@@ -365,6 +371,7 @@ mod tests {
             merge_terminal_model_id: "model-merge".to_string(),
             target_branch: "main".to_string(),
             git_watcher_enabled: true,
+            audit_plan: Some("{\"mode\":\"builtin\"}".to_string()),
             ready_at: None,
             started_at: None,
             completed_at: None,
@@ -378,6 +385,7 @@ mod tests {
 
         // Verify camelCase serialization
         assert!(json.contains("\"projectId\""));
+        assert!(json.contains("\"auditPlan\""));
         assert!(json.contains("\"executionMode\""));
         assert!(json.contains("\"useSlashCommands\""));
         assert!(json.contains("\"orchestratorEnabled\""));
@@ -426,6 +434,7 @@ mod tests {
                 merge_terminal_model_id: "model-merge".to_string(),
                 target_branch: "main".to_string(),
                 git_watcher_enabled: true,
+                audit_plan: None,
                 ready_at: None,
                 started_at: None,
                 completed_at: None,

@@ -24,6 +24,10 @@ pub struct PlanningDraft {
     pub confirmed_at: Option<DateTime<Utc>>,
     pub gates_confirmed_at: Option<DateTime<Utc>>,
     pub materialized_workflow_id: Option<String>,
+    /// Rounds: the draft this one continues (NULL for round 1 / standalone).
+    /// A conversation is a linear chain of drafts linked by this pointer; each
+    /// round keeps the 1:1 draft→workflow invariant.
+    pub parent_draft_id: Option<String>,
     pub feishu_sync: bool,
     pub feishu_chat_id: Option<String>,
     /// Push tool call events to Feishu when true.
@@ -93,6 +97,7 @@ impl PlanningDraft {
             confirmed_at: None,
             gates_confirmed_at: None,
             materialized_workflow_id: None,
+            parent_draft_id: None,
             feishu_sync: false,
             feishu_chat_id: None,
             sync_tools: false,
@@ -114,12 +119,12 @@ impl PlanningDraft {
                 id, project_id, name, status,
                 requirement_summary, technical_spec, workflow_seed,
                 planner_model_id, planner_api_type, planner_base_url, planner_api_key,
-                confirmed_at, gates_confirmed_at, materialized_workflow_id,
+                confirmed_at, gates_confirmed_at, materialized_workflow_id, parent_draft_id,
                 feishu_sync, feishu_chat_id,
                 sync_tools, sync_terminal, sync_progress, notify_on_completion,
                 audit_plan, audit_mode, audit_doc_path,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
             ",
         )
         .bind(&draft.id)
@@ -136,6 +141,7 @@ impl PlanningDraft {
         .bind(draft.confirmed_at)
         .bind(draft.gates_confirmed_at)
         .bind(&draft.materialized_workflow_id)
+        .bind(&draft.parent_draft_id)
         .bind(draft.feishu_sync)
         .bind(&draft.feishu_chat_id)
         .bind(draft.sync_tools)
@@ -167,6 +173,17 @@ impl PlanningDraft {
             "SELECT * FROM planning_draft WHERE materialized_workflow_id = ?1 LIMIT 1",
         )
         .bind(workflow_id)
+        .fetch_optional(pool)
+        .await
+    }
+
+    /// The follow-up round continuing this draft, if any (linear chain: at
+    /// most one child per draft is created through the continue endpoint).
+    pub async fn find_child(pool: &SqlitePool, parent_id: &str) -> sqlx::Result<Option<Self>> {
+        sqlx::query_as::<_, Self>(
+            "SELECT * FROM planning_draft WHERE parent_draft_id = ?1 ORDER BY created_at ASC LIMIT 1",
+        )
+        .bind(parent_id)
         .fetch_optional(pool)
         .await
     }
@@ -421,5 +438,52 @@ mod tests {
         assert_eq!(msg.draft_id, "draft-123");
         assert_eq!(msg.role, "user");
         assert_eq!(msg.content, "Build a blog");
+    }
+
+    #[tokio::test]
+    async fn parent_draft_id_roundtrip_and_find_child() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        let project_id = Uuid::new_v4();
+        crate::models::project::Project::create(
+            &pool,
+            &crate::models::project::CreateProject {
+                name: "rounds-test".to_string(),
+                repositories: vec![],
+            },
+            project_id,
+        )
+        .await
+        .unwrap();
+
+        // Round 1: no parent.
+        let parent = PlanningDraft::new(project_id, "memo app");
+        PlanningDraft::insert(&pool, &parent).await.unwrap();
+        let loaded = PlanningDraft::find_by_id(&pool, &parent.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(loaded.parent_draft_id.is_none());
+        assert!(PlanningDraft::find_child(&pool, &parent.id)
+            .await
+            .unwrap()
+            .is_none());
+
+        // Round 2: linked to round 1 via parent_draft_id.
+        let mut child = PlanningDraft::new(project_id, "memo app");
+        child.parent_draft_id = Some(parent.id.clone());
+        PlanningDraft::insert(&pool, &child).await.unwrap();
+
+        let loaded_child = PlanningDraft::find_by_id(&pool, &child.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded_child.parent_draft_id.as_deref(), Some(parent.id.as_str()));
+
+        let found_child = PlanningDraft::find_child(&pool, &parent.id)
+            .await
+            .unwrap()
+            .expect("child draft should be discoverable from its parent");
+        assert_eq!(found_child.id, child.id);
     }
 }

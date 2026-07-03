@@ -581,6 +581,12 @@ pub struct AuditScoreResult {
     pub passed: bool,
     pub dimensions: AuditDimensions,
     pub fix_instructions: String,
+    /// Per-point verdicts for ledger requirement points ([RP-xxx] tags in the
+    /// rubric) evidenced by the reviewed code. Green verdicts carry a
+    /// compressed context capsule written at scoring time (评分即结算). Empty
+    /// for legacy responses — `serde(default)` keeps old JSON parseable.
+    #[serde(default)]
+    pub requirement_verdicts: Vec<RequirementVerdict>,
     /// Internal: set when `parse()` could NOT extract a valid score from the LLM
     /// response (empty / truncated / non-JSON). Lets the caller retry instead of
     /// committing the 0.0 fallback as a real rejection that would send the coder
@@ -588,6 +594,30 @@ pub struct AuditScoreResult {
     #[serde(skip)]
     #[ts(skip)]
     pub parse_failed: bool,
+}
+
+/// Verdict for one ledger requirement point (评分点) covered by a review.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct RequirementVerdict {
+    /// Ledger point code, e.g. "RP-003".
+    pub point_code: String,
+    /// "green" — the reviewed code demonstrably satisfies the point;
+    /// "red" — the point is broken (new-scope failure or regression).
+    pub status: String,
+    /// One-line evidence for the verdict.
+    #[serde(default)]
+    pub evidence: String,
+    /// Compressed context capsule for points turned green: map, not
+    /// encyclopedia — pointers plus what the code cannot show. Absent on red
+    /// verdicts.
+    #[serde(default)]
+    pub capsule: Option<db::models::requirement_item::ContextCapsule>,
+}
+
+impl RequirementVerdict {
+    pub fn is_green(&self) -> bool {
+        self.status.eq_ignore_ascii_case("green")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -710,6 +740,13 @@ impl AuditScoreResult {
                 .unwrap_or("")
                 .to_string();
 
+            // Lenient by design: verdicts are an additive channel — a missing
+            // or malformed array must never fail an otherwise valid score.
+            let requirement_verdicts = value
+                .get("requirement_verdicts")
+                .and_then(|v| serde_json::from_value::<Vec<RequirementVerdict>>(v.clone()).ok())
+                .unwrap_or_default();
+
             let total_score = dimensions.buildability.score
                 + dimensions.functional_completeness.score
                 + dimensions.code_quality.total
@@ -722,6 +759,7 @@ impl AuditScoreResult {
                 passed,
                 dimensions,
                 fix_instructions,
+                requirement_verdicts,
                 parse_failed: false,
             };
         }
@@ -875,6 +913,7 @@ impl AuditScoreResult {
             passed: false, // caller recomputes against the phase threshold
             dimensions,
             fix_instructions: String::new(),
+            requirement_verdicts: Vec::new(),
             parse_failed: false,
         })
     }
@@ -997,6 +1036,7 @@ impl AuditScoreResult {
                 engineering_docs: DimensionScore { score: 0.0, max_score: 10.0, details: String::new() },
             },
             fix_instructions: reason.to_string(),
+            requirement_verdicts: Vec::new(),
             parse_failed: true,
         }
     }

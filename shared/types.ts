@@ -8,7 +8,13 @@ export type WorkflowDetailDto = { id: string, projectId: string, name: string, d
 /**
  * See `merge_terminal_cli_id` — same NOT-NULL DB contract.
  */
-mergeTerminalModelId: string, targetBranch: string, gitWatcherEnabled: boolean, readyAt: string | null, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, tasks: Array<WorkflowTaskDto>, commands: Array<WorkflowCommandDto>, };
+mergeTerminalModelId: string, targetBranch: string, gitWatcherEnabled: boolean, 
+/**
+ * JSON-serialized `AuditPlan` snapshot copied from the planning draft at
+ * materialize time. `None` for DIY workflows (no audit plan). Exposed so
+ * the UI can show the per-run acceptance rubric.
+ */
+auditPlan: string | null, readyAt: string | null, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, tasks: Array<WorkflowTaskDto>, commands: Array<WorkflowCommandDto>, };
 
 export type WorkflowTaskDto = { id: string, workflowId: string, vkTaskId: string | null, name: string, description: string | null, branch: string, status: string, orderIndex: number, startedAt: string | null, completedAt: string | null, createdAt: string, updatedAt: string, 
 /**

@@ -88,6 +88,7 @@ pub mod projects;
 pub mod provider_health;
 pub mod quality;
 pub mod repo;
+pub mod requirement_items;
 pub mod scratch;
 pub mod sessions;
 pub mod setup;
@@ -171,6 +172,10 @@ pub fn build_router(
         .nest("/quality", quality::quality_policy_routes())
         .nest("/projects", quality::quality_policy_project_routes())
         .nest("/projects", custom_rules::custom_rules_project_routes())
+        .nest(
+            "/projects",
+            requirement_items::requirement_items_project_routes(),
+        )
         .nest("/concierge", concierge::concierge_routes())
         .nest("/terminal", terminal_ws::terminal_ws_routes())
         .nest("/terminals", terminals::terminal_routes())
