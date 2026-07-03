@@ -470,6 +470,83 @@
         "saveError": "保存飞书配置失败。",
         "requiredFields": "应用 ID 和应用密钥为必填项。"
       }
+    },
+    "designStyles": {
+      "title": "设计风格",
+      "loadError": "加载设计风格失败",
+      "saveError": "保存设计风格失败",
+      "deleteError": "删除设计风格失败",
+      "copyName": "{{name}}（副本）",
+      "defaultNone": "无（不注入设计方向）",
+      "defaultCard": {
+        "title": "默认设计风格",
+        "description": "新的编排回合未单独选择风格时，将采用此默认风格。",
+        "label": "默认风格"
+      },
+      "listCard": {
+        "title": "风格库",
+        "description": "内置预设改编自高星开源设计 Skill（见 LICENSE）。可复制后自定义，也可以新建自己的风格。"
+      },
+      "badge": {
+        "builtin": "内置",
+        "custom": "自定义"
+      },
+      "sourceLabel": "来源：{{source}}",
+      "actions": {
+        "viewContent": "查看内容",
+        "duplicate": "复制",
+        "edit": "编辑",
+        "delete": "删除",
+        "create": "新建风格"
+      },
+      "editor": {
+        "createTitle": "新建设计风格",
+        "editTitle": "编辑设计风格",
+        "nameLabel": "名称",
+        "descriptionLabel": "描述",
+        "contentLabel": "风格指令",
+        "contentHint": "注入到 UI 相关任务的提示词：配色、字体、间距与动效规则等。",
+        "requiredFields": "名称和风格指令为必填项"
+      }
+    },
+    "architecture": {
+      "title": "架构知识库",
+      "loadError": "加载架构设置失败",
+      "saveError": "保存失败",
+      "syncError": "同步失败",
+      "deleteError": "删除知识源失败",
+      "guidanceCard": {
+        "title": "规划引导",
+        "description": "在回合物化时，将架构思维清单与匹配到的参考架构摘要注入给规划器。",
+        "toggleLabel": "启用架构引导",
+        "toggleDescription": "方法论改编自 architecture-copilot；参考模板从下方知识源同步。"
+      },
+      "sourcesCard": {
+        "title": "知识源",
+        "description": "同步到本地知识库的 GitHub 仓库。内置源为 awesome-architecture（MIT），也可以添加自己的仓库。"
+      },
+      "source": {
+        "builtinBadge": "内置",
+        "paths": "路径：{{paths}}",
+        "entryCount": "{{count}} 个条目",
+        "lastSync": "上次同步：{{time}}",
+        "neverSynced": "尚未同步"
+      },
+      "actions": {
+        "syncNow": "立即同步",
+        "delete": "删除",
+        "addSource": "添加知识源"
+      },
+      "addDialog": {
+        "title": "添加知识源",
+        "nameLabel": "显示名称",
+        "ownerLabel": "GitHub 所有者",
+        "repoLabel": "仓库名",
+        "branchLabel": "分支",
+        "includePathsLabel": "包含路径（逗号分隔）",
+        "includePathsHint": "仅同步这些目录前缀下的 Markdown 文件，例如 \"templates/\"。",
+        "requiredFields": "名称、所有者和仓库名为必填项"
+      }
     }
   },
   "integrations": {
@@ -523,7 +600,9 @@
       "feishu": "飞书",
       "runtime": "运行环境",
       "qualityGates": "质量门禁",
-      "organizations": "组织"
+      "organizations": "组织",
+      "architecture": "架构知识",
+      "designStyles": "设计风格"
     },
     "common": {
       "save": "保存更改",

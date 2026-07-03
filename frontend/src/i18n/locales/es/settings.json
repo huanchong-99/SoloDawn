@@ -386,6 +386,83 @@
         "discard": "Descartar",
         "confirmSwitch": "Tienes cambios sin guardar. ¿Estás seguro de que quieres cambiar de repositorio? Tus cambios se perderán."
       }
+    },
+    "designStyles": {
+      "title": "Estilos de diseño",
+      "loadError": "No se pudieron cargar los estilos de diseño",
+      "saveError": "No se pudo guardar el estilo de diseño",
+      "deleteError": "No se pudo eliminar el estilo de diseño",
+      "copyName": "{{name}} (copia)",
+      "defaultNone": "Ninguno (sin dirección de diseño)",
+      "defaultCard": {
+        "title": "Estilo de diseño predeterminado",
+        "description": "Se aplica a las nuevas rondas de orquestación que no elijan su propio estilo.",
+        "label": "Estilo predeterminado"
+      },
+      "listCard": {
+        "title": "Biblioteca de estilos",
+        "description": "Los preajustes integrados están adaptados de skills de diseño de código abierto muy valoradas (ver LICENSE). Duplica uno para personalizarlo o crea el tuyo."
+      },
+      "badge": {
+        "builtin": "Integrado",
+        "custom": "Personalizado"
+      },
+      "sourceLabel": "Fuente: {{source}}",
+      "actions": {
+        "viewContent": "Ver contenido",
+        "duplicate": "Duplicar",
+        "edit": "Editar",
+        "delete": "Eliminar",
+        "create": "Nuevo estilo"
+      },
+      "editor": {
+        "createTitle": "Crear estilo de diseño",
+        "editTitle": "Editar estilo de diseño",
+        "nameLabel": "Nombre",
+        "descriptionLabel": "Descripción",
+        "contentLabel": "Directrices de estilo",
+        "contentHint": "Texto de prompt inyectado en tareas de UI: paleta, tipografía, espaciado y reglas de movimiento.",
+        "requiredFields": "El nombre y las directrices de estilo son obligatorios"
+      }
+    },
+    "architecture": {
+      "title": "Base de conocimiento de arquitectura",
+      "loadError": "No se pudo cargar la configuración de arquitectura",
+      "saveError": "No se pudieron guardar los cambios",
+      "syncError": "La sincronización falló",
+      "deleteError": "No se pudo eliminar la fuente",
+      "guidanceCard": {
+        "title": "Guía de planificación",
+        "description": "Inyecta una lista de verificación de pensamiento arquitectónico y resúmenes de arquitecturas de referencia coincidentes al planificador al materializar una ronda.",
+        "toggleLabel": "Activar guía de arquitectura",
+        "toggleDescription": "Metodología adaptada de architecture-copilot; las plantillas de referencia se sincronizan desde las fuentes de conocimiento de abajo."
+      },
+      "sourcesCard": {
+        "title": "Fuentes de conocimiento",
+        "description": "Repositorios de GitHub sincronizados con la base de conocimiento local. La fuente integrada es awesome-architecture (MIT); puedes añadir las tuyas."
+      },
+      "source": {
+        "builtinBadge": "Integrada",
+        "paths": "Rutas: {{paths}}",
+        "entryCount": "{{count}} entradas",
+        "lastSync": "Última sincronización: {{time}}",
+        "neverSynced": "Nunca sincronizada"
+      },
+      "actions": {
+        "syncNow": "Sincronizar ahora",
+        "delete": "Eliminar",
+        "addSource": "Añadir fuente"
+      },
+      "addDialog": {
+        "title": "Añadir fuente de conocimiento",
+        "nameLabel": "Nombre para mostrar",
+        "ownerLabel": "Propietario de GitHub",
+        "repoLabel": "Repositorio",
+        "branchLabel": "Rama",
+        "includePathsLabel": "Rutas incluidas (separadas por comas)",
+        "includePathsHint": "Solo se sincronizan los archivos Markdown bajo estos prefijos de directorio, p. ej. \"templates/\".",
+        "requiredFields": "El nombre, el propietario y el repositorio son obligatorios"
+      }
     }
   },
   "integrations": {
@@ -438,7 +515,9 @@
       "mcp": "Servidores MCP",
       "feishu": "Feishu",
       "qualityGates": "Quality Gates",
-      "organizations": "Organizaciones"
+      "organizations": "Organizaciones",
+      "architecture": "Arquitectura",
+      "designStyles": "Estilos de diseño"
     },
     "common": {
       "save": "Guardar cambios",

@@ -548,6 +548,8 @@ export interface PlanningDraftResponse {
   auditPlan: string | null;
   auditMode: 'builtin' | 'merged' | 'custom';
   auditDocPath: string | null;
+  /** Selected design style slug; null falls back to the system default. */
+  designStyleSlug: string | null;
   gatesConfirmedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -634,6 +636,7 @@ export const planningDraftsApi = {
     plannerApiType?: string;
     plannerBaseUrl?: string;
     plannerApiKey?: string;
+    designStyleSlug?: string;
   }): Promise<PlanningDraftResponse> => {
     const response = await makeRequest('/api/planning-drafts', {
       method: 'POST',
@@ -674,6 +677,18 @@ export const planningDraftsApi = {
     const response = await makeRequest(
       `/api/planning-drafts/${draftId}/confirm`,
       { method: 'POST', body: JSON.stringify({ retainBuiltin: retainBuiltin ?? true }) }
+    );
+    return handleApiResponse<PlanningDraftResponse>(response);
+  },
+
+  /** Set or clear the draft's design style (null clears the selection). */
+  updateDesignStyle: async (
+    draftId: string,
+    designStyleSlug: string | null
+  ): Promise<PlanningDraftResponse> => {
+    const response = await makeRequest(
+      `/api/planning-drafts/${draftId}/design-style`,
+      { method: 'PUT', body: JSON.stringify({ designStyleSlug }) }
     );
     return handleApiResponse<PlanningDraftResponse>(response);
   },
@@ -738,6 +753,151 @@ export const planningDraftsApi = {
       body: config ? JSON.stringify(config) : undefined,
     });
     return handleApiResponse<PlanningDraftResponse>(response);
+  },
+};
+
+// Design styles: builtin presets (license-attributed) + user-defined styles.
+export interface DesignStyleResponse {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  content: string;
+  sourceName: string | null;
+  sourceUrl: string | null;
+  license: string | null;
+  builtin: boolean;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const designStylesApi = {
+  list: async (): Promise<DesignStyleResponse[]> => {
+    const response = await makeRequest('/api/design-styles');
+    return handleApiResponse<DesignStyleResponse[]>(response);
+  },
+
+  create: async (data: {
+    name: string;
+    slug?: string;
+    description?: string;
+    content: string;
+  }): Promise<DesignStyleResponse> => {
+    const response = await makeRequest('/api/design-styles', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return handleApiResponse<DesignStyleResponse>(response);
+  },
+
+  update: async (
+    styleId: string,
+    data: {
+      name?: string;
+      description?: string;
+      content?: string;
+      enabled?: boolean;
+    }
+  ): Promise<DesignStyleResponse> => {
+    const response = await makeRequest(`/api/design-styles/${styleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    return handleApiResponse<DesignStyleResponse>(response);
+  },
+
+  remove: async (styleId: string): Promise<void> => {
+    const response = await makeRequest(`/api/design-styles/${styleId}`, {
+      method: 'DELETE',
+    });
+    return handleApiResponse<void>(response);
+  },
+};
+
+// Architecture knowledge: GitHub-synced sources feeding planner guidance.
+export interface ArchitectureSourceResponse {
+  id: string;
+  name: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  includePaths: string[];
+  enabled: boolean;
+  builtin: boolean;
+  lastSyncedAt: string | null;
+  lastSyncStatus: string | null;
+  entryCount: number;
+}
+
+export interface ArchitectureEntrySummaryResponse {
+  id: string;
+  sourceId: string;
+  path: string;
+  category: string;
+  slug: string;
+  title: string;
+  syncedAt: string;
+}
+
+export const architectureApi = {
+  listSources: async (): Promise<ArchitectureSourceResponse[]> => {
+    const response = await makeRequest('/api/architecture/sources');
+    return handleApiResponse<ArchitectureSourceResponse[]>(response);
+  },
+
+  createSource: async (data: {
+    name: string;
+    owner: string;
+    repo: string;
+    branch?: string;
+    includePaths?: string[];
+  }): Promise<ArchitectureSourceResponse> => {
+    const response = await makeRequest('/api/architecture/sources', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return handleApiResponse<ArchitectureSourceResponse>(response);
+  },
+
+  updateSource: async (
+    sourceId: string,
+    data: {
+      name?: string;
+      branch?: string;
+      includePaths?: string[];
+      enabled?: boolean;
+    }
+  ): Promise<ArchitectureSourceResponse> => {
+    const response = await makeRequest(
+      `/api/architecture/sources/${sourceId}`,
+      { method: 'PUT', body: JSON.stringify(data) }
+    );
+    return handleApiResponse<ArchitectureSourceResponse>(response);
+  },
+
+  removeSource: async (sourceId: string): Promise<void> => {
+    const response = await makeRequest(
+      `/api/architecture/sources/${sourceId}`,
+      { method: 'DELETE' }
+    );
+    return handleApiResponse<void>(response);
+  },
+
+  syncSource: async (sourceId: string): Promise<ArchitectureSourceResponse> => {
+    const response = await makeRequest(
+      `/api/architecture/sources/${sourceId}/sync`,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
+    return handleApiResponse<ArchitectureSourceResponse>(response);
+  },
+
+  listEntries: async (
+    sourceId?: string
+  ): Promise<ArchitectureEntrySummaryResponse[]> => {
+    const query = sourceId ? `?sourceId=${encodeURIComponent(sourceId)}` : '';
+    const response = await makeRequest(`/api/architecture/entries${query}`);
+    return handleApiResponse<ArchitectureEntrySummaryResponse[]>(response);
   },
 };
 

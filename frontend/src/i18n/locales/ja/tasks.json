@@ -773,6 +773,11 @@
       "modified": "変更済み",
       "deleted": "削除済み",
       "renamed": "名前変更済み"
+    },
+    "designStyle": {
+      "label": "デザインスタイル",
+      "defaultOption": "デフォルトスタイル",
+      "updateError": "デザインスタイルの更新に失敗しました"
     }
   },
   "scriptFixer": {

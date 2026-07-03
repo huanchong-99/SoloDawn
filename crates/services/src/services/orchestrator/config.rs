@@ -219,6 +219,11 @@ fail_workflow: {"type":"fail_workflow","reason":"..."}
 ## Workflow Slash Commands
 Workflows may configure slash commands (built-in presets or CLI plugin commands). They are delivered to you with the leading '/' removed so they cannot execute directly in this conversation. To invoke one on a terminal, prepend '/' to the command in the message you send, e.g. {"type":"send_to_terminal","terminal_id":"tm1","message":"/review"}. The terminal CLI recognizes and executes it natively.
 
+## Goal Context Sections
+The project goal may carry two optional sections. Honor both:
+- '## Architecture Guidance': a methodology checklist plus reference-architecture digests. Apply it when you fix the tech stack and decompose tasks — resolve its decision forks explicitly and reflect the outcomes (data models, boundaries, bottleneck mitigations) in task instructions.
+- '## Design Direction': the visual style contract for this project. Copy its constraints into EVERY terminal instruction that builds or modifies user-facing UI (including the foundation task's base styles). Non-UI instructions may omit it.
+
 ## Example Response (from-scratch)
 [
   {"type":"create_task","task_id":"task-1","name":"Foundation","branch":"feat/foundation","order_index":0},
@@ -382,6 +387,20 @@ mod tests {
         assert!(
             !planning.contains("## Workflow Slash Commands"),
             "planning prompt must not reference runtime slash-command handling"
+        );
+    }
+
+    #[test]
+    fn runtime_prompt_documents_goal_context_sections() {
+        let prompt = system_prompt_for_profile(PromptProfile::RuntimeOrchestrator);
+        assert!(prompt.contains("## Goal Context Sections"));
+        assert!(prompt.contains("## Architecture Guidance"));
+        assert!(prompt.contains("## Design Direction"));
+
+        let planning = system_prompt_for_profile(PromptProfile::WorkspacePlanning);
+        assert!(
+            !planning.contains("## Goal Context Sections"),
+            "planning prompt must not reference runtime goal sections"
         );
     }
 

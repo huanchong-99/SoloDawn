@@ -310,6 +310,24 @@ async fn run_server() -> Result<(), SoloDawnError> {
         }
     }
 
+    // Architecture knowledge + design styles: seed builtin rows (fail-open —
+    // a seeding error must never block startup) and start the background
+    // knowledge sync loop.
+    {
+        let pool = &deployment.db().pool;
+        if let Err(e) =
+            services::services::architecture_knowledge::ensure_builtin_source(pool).await
+        {
+            tracing::warn!("Failed to seed builtin architecture source: {e}");
+        }
+        if let Err(e) = services::services::design_direction::ensure_builtin_styles(pool).await {
+            tracing::warn!("Failed to seed builtin design styles: {e}");
+        }
+        services::services::architecture_knowledge::spawn_background_sync(
+            deployment.db().pool.clone(),
+        );
+    }
+
     let cli_health_monitor = deployment.cli_health_monitor().clone();
     let app_router = routes::router(
         deployment.clone(),

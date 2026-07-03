@@ -386,6 +386,83 @@
         "discard": "破棄",
         "confirmSwitch": "未保存の変更があります。本当にリポジトリを切り替えますか？変更は失われます。"
       }
+    },
+    "designStyles": {
+      "title": "デザインスタイル",
+      "loadError": "デザインスタイルの読み込みに失敗しました",
+      "saveError": "デザインスタイルの保存に失敗しました",
+      "deleteError": "デザインスタイルの削除に失敗しました",
+      "copyName": "{{name}}（コピー）",
+      "defaultNone": "なし（デザイン指示を注入しない）",
+      "defaultCard": {
+        "title": "デフォルトのデザインスタイル",
+        "description": "スタイルを個別に選択しなかった新しいオーケストレーションラウンドに適用されます。",
+        "label": "デフォルトスタイル"
+      },
+      "listCard": {
+        "title": "スタイルライブラリ",
+        "description": "組み込みプリセットは高評価のオープンソースデザインスキルを改変したものです（LICENSE 参照）。複製してカスタマイズするか、独自に作成できます。"
+      },
+      "badge": {
+        "builtin": "組み込み",
+        "custom": "カスタム"
+      },
+      "sourceLabel": "出典：{{source}}",
+      "actions": {
+        "viewContent": "内容を表示",
+        "duplicate": "複製",
+        "edit": "編集",
+        "delete": "削除",
+        "create": "新規スタイル"
+      },
+      "editor": {
+        "createTitle": "デザインスタイルを作成",
+        "editTitle": "デザインスタイルを編集",
+        "nameLabel": "名前",
+        "descriptionLabel": "説明",
+        "contentLabel": "スタイル指示",
+        "contentHint": "UI 関連タスクに注入されるプロンプト：配色、タイポグラフィ、余白、モーションのルールなど。",
+        "requiredFields": "名前とスタイル指示は必須です"
+      }
+    },
+    "architecture": {
+      "title": "アーキテクチャ知識ベース",
+      "loadError": "アーキテクチャ設定の読み込みに失敗しました",
+      "saveError": "保存に失敗しました",
+      "syncError": "同期に失敗しました",
+      "deleteError": "ソースの削除に失敗しました",
+      "guidanceCard": {
+        "title": "プランニングガイダンス",
+        "description": "ラウンドの実体化時に、アーキテクチャ思考チェックリストとマッチした参照アーキテクチャの要約をプランナーに注入します。",
+        "toggleLabel": "アーキテクチャガイダンスを有効化",
+        "toggleDescription": "方法論は architecture-copilot を改変。参照テンプレートは下記の知識ソースから同期されます。"
+      },
+      "sourcesCard": {
+        "title": "知識ソース",
+        "description": "ローカル知識ベースに同期される GitHub リポジトリ。組み込みソースは awesome-architecture（MIT）です。独自のリポジトリも追加できます。"
+      },
+      "source": {
+        "builtinBadge": "組み込み",
+        "paths": "パス：{{paths}}",
+        "entryCount": "{{count}} 件のエントリ",
+        "lastSync": "最終同期：{{time}}",
+        "neverSynced": "未同期"
+      },
+      "actions": {
+        "syncNow": "今すぐ同期",
+        "delete": "削除",
+        "addSource": "ソースを追加"
+      },
+      "addDialog": {
+        "title": "知識ソースを追加",
+        "nameLabel": "表示名",
+        "ownerLabel": "GitHub オーナー",
+        "repoLabel": "リポジトリ",
+        "branchLabel": "ブランチ",
+        "includePathsLabel": "対象パス（カンマ区切り）",
+        "includePathsHint": "これらのディレクトリ接頭辞配下の Markdown ファイルのみ同期されます。例：\"templates/\"。",
+        "requiredFields": "表示名・オーナー・リポジトリは必須です"
+      }
     }
   },
   "integrations": {
@@ -438,7 +515,9 @@
       "mcp": "MCPサーバー",
       "feishu": "Feishu",
       "qualityGates": "Quality Gates",
-      "organizations": "組織"
+      "organizations": "組織",
+      "architecture": "アーキテクチャ",
+      "designStyles": "デザインスタイル"
     },
     "common": {
       "save": "変更を保存",

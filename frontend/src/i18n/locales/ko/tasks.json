@@ -773,6 +773,11 @@
       "modified": "수정됨",
       "deleted": "삭제됨",
       "renamed": "이름 변경됨"
+    },
+    "designStyle": {
+      "label": "디자인 스타일",
+      "defaultOption": "기본 스타일",
+      "updateError": "디자인 스타일 업데이트에 실패했습니다"
     }
   },
   "scriptFixer": {

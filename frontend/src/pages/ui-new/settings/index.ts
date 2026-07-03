@@ -8,3 +8,5 @@ export { FeishuSettingsNew } from './FeishuSettingsNew';
 export { OrganizationSettingsNew } from './OrganizationSettingsNew';
 export { RuntimeSettingsNew } from './RuntimeSettingsNew';
 export { QualityGateSettingsNew } from './QualityGateSettingsNew';
+export { ArchitectureSettingsNew } from './ArchitectureSettingsNew';
+export { DesignStylesSettingsNew } from './DesignStylesSettingsNew';

@@ -794,7 +794,12 @@
     "saveAsDefault": "设为默认",
     "updatedTodos": "更新的待办事项",
     "viewInChangesPanel": "在更改面板中查看",
-    "unableToRenderDiff": "无法显示差异。"
+    "unableToRenderDiff": "无法显示差异。",
+    "designStyle": {
+      "label": "设计风格",
+      "defaultOption": "默认风格",
+      "updateError": "更新设计风格失败"
+    }
   },
   "scriptFixer": {
     "title": "修复脚本",

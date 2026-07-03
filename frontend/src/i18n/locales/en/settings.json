@@ -470,6 +470,83 @@
         "saveError": "Failed to save Feishu configuration.",
         "requiredFields": "App ID and App Secret are required."
       }
+    },
+    "designStyles": {
+      "title": "Design Styles",
+      "loadError": "Failed to load design styles",
+      "saveError": "Failed to save design style",
+      "deleteError": "Failed to delete design style",
+      "copyName": "{{name}} (copy)",
+      "defaultNone": "None (no design direction)",
+      "defaultCard": {
+        "title": "Default design style",
+        "description": "Applied to new orchestration rounds that do not pick their own style.",
+        "label": "Default style"
+      },
+      "listCard": {
+        "title": "Style library",
+        "description": "Built-in presets are adapted from high-rated open-source design skills (see LICENSE). Duplicate one to customize it, or create your own."
+      },
+      "badge": {
+        "builtin": "Built-in",
+        "custom": "Custom"
+      },
+      "sourceLabel": "Source: {{source}}",
+      "actions": {
+        "viewContent": "View content",
+        "duplicate": "Duplicate",
+        "edit": "Edit",
+        "delete": "Delete",
+        "create": "New style"
+      },
+      "editor": {
+        "createTitle": "Create design style",
+        "editTitle": "Edit design style",
+        "nameLabel": "Name",
+        "descriptionLabel": "Description",
+        "contentLabel": "Style directives",
+        "contentHint": "Prompt text injected for UI-related work: palette, typography, spacing and motion rules.",
+        "requiredFields": "Name and style directives are required"
+      }
+    },
+    "architecture": {
+      "title": "Architecture Knowledge",
+      "loadError": "Failed to load architecture settings",
+      "saveError": "Failed to save changes",
+      "syncError": "Sync failed",
+      "deleteError": "Failed to delete source",
+      "guidanceCard": {
+        "title": "Planning guidance",
+        "description": "Injects an architecture-thinking checklist plus matched reference-architecture digests into the planner when a round is materialized.",
+        "toggleLabel": "Enable architecture guidance",
+        "toggleDescription": "Methodology adapted from architecture-copilot; reference templates sync from the knowledge sources below."
+      },
+      "sourcesCard": {
+        "title": "Knowledge sources",
+        "description": "GitHub repositories synced into the local knowledge base. The built-in source is awesome-architecture (MIT); you can add your own."
+      },
+      "source": {
+        "builtinBadge": "Built-in",
+        "paths": "Paths: {{paths}}",
+        "entryCount": "{{count}} entries",
+        "lastSync": "Last sync: {{time}}",
+        "neverSynced": "Never synced"
+      },
+      "actions": {
+        "syncNow": "Sync now",
+        "delete": "Delete",
+        "addSource": "Add source"
+      },
+      "addDialog": {
+        "title": "Add knowledge source",
+        "nameLabel": "Display name",
+        "ownerLabel": "GitHub owner",
+        "repoLabel": "Repository",
+        "branchLabel": "Branch",
+        "includePathsLabel": "Include paths (comma-separated)",
+        "includePathsHint": "Only markdown files under these directory prefixes are synced, e.g. \"templates/\".",
+        "requiredFields": "Name, owner and repository are required"
+      }
     }
   },
   "integrations": {
@@ -523,7 +600,9 @@
       "feishu": "Feishu",
       "runtime": "Runtime",
       "qualityGates": "Quality Gates",
-      "organizations": "Organizations"
+      "organizations": "Organizations",
+      "architecture": "Architecture",
+      "designStyles": "Design Styles"
     },
     "common": {
       "save": "Save Changes",

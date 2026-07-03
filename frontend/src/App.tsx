@@ -20,6 +20,8 @@ import {
   FeishuSettingsNew,
   OrganizationSettingsNew,
   RuntimeSettingsNew,
+  ArchitectureSettingsNew,
+  DesignStylesSettingsNew,
 } from '@/pages/ui-new/settings';
 import { QualityGateSettingsNew } from '@/pages/ui-new/settings/QualityGateSettingsNew';
 import { UserSystemProvider, useUserSystem } from '@/components/ConfigProvider';
@@ -172,6 +174,14 @@ function AppContent() {
               <Route path="models" element={<ModelsSettingsNew />} />
               <Route path="mcp" element={<McpSettingsNew />} />
               <Route path="feishu" element={<FeishuSettingsNew />} />
+              <Route
+                path="architecture"
+                element={<ArchitectureSettingsNew />}
+              />
+              <Route
+                path="design-styles"
+                element={<DesignStylesSettingsNew />}
+              />
               <Route path="organizations" element={<OrganizationSettingsNew />} />
               <Route path="runtime" element={<RuntimeSettingsNew />} />
               <Route

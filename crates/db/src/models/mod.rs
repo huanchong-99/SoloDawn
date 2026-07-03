@@ -15,8 +15,11 @@ pub mod workspace;
 pub mod workspace_repo;
 
 // SoloDawn Workflow models
+pub mod architecture_entry;
+pub mod architecture_source;
 pub mod cli_install_history;
 pub mod cli_type;
+pub mod design_style;
 pub mod concierge;
 pub mod custom_rule;
 pub mod custom_rule_audit;

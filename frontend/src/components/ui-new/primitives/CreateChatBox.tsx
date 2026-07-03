@@ -40,6 +40,18 @@ export interface SaveAsDefaultProps {
   visible: boolean;
 }
 
+export interface DesignStyleOption {
+  slug: string;
+  name: string;
+}
+
+export interface DesignStyleProps {
+  options: DesignStyleOption[];
+  /** null = follow the system default style. */
+  selectedSlug: string | null;
+  onChange: (slug: string | null) => void;
+}
+
 interface CreateChatBoxProps {
   readonly editor: EditorProps;
   readonly onSend: () => void;
@@ -48,6 +60,7 @@ interface CreateChatBoxProps {
   readonly placeholder?: string;
   readonly executor: ExecutorProps;
   readonly modelConfig?: ModelConfigProps;
+  readonly designStyle?: DesignStyleProps;
   readonly variant?: VariantProps;
   readonly saveAsDefault?: SaveAsDefaultProps;
   readonly error?: string | null;
@@ -72,6 +85,7 @@ export function CreateChatBox({
   placeholder,
   executor,
   modelConfig,
+  designStyle,
   variant,
   saveAsDefault,
   error,
@@ -198,6 +212,39 @@ export function CreateChatBox({
                   ))}
                 </>
               )}
+            </ToolbarDropdown>
+          )}
+          {designStyle && designStyle.options.length > 0 && (
+            <ToolbarDropdown
+              label={
+                designStyle.options.find(
+                  (s) => s.slug === designStyle.selectedSlug
+                )?.name ?? t('conversation.designStyle.defaultOption')
+              }
+            >
+              <DropdownMenuLabel>
+                {t('conversation.designStyle.label')}
+              </DropdownMenuLabel>
+              <DropdownMenuItem
+                icon={designStyle.selectedSlug === null ? CheckIcon : undefined}
+                onClick={() => designStyle.onChange(null)}
+              >
+                {t('conversation.designStyle.defaultOption')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {designStyle.options.map((style) => (
+                <DropdownMenuItem
+                  key={style.slug}
+                  icon={
+                    designStyle.selectedSlug === style.slug
+                      ? CheckIcon
+                      : undefined
+                  }
+                  onClick={() => designStyle.onChange(style.slug)}
+                >
+                  {style.name}
+                </DropdownMenuItem>
+              ))}
             </ToolbarDropdown>
           )}
           {saveAsDefault?.visible && (

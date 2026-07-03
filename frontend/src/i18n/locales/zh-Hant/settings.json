@@ -244,7 +244,7 @@
       "installAiCli": "一鍵安裝 AI CLI",
       "refreshAvailability": "重新整理可用性",
       "installAiCliSuccess": "AI CLI 安裝完成。",
-      "installAiCliInstalledList": "\u5df2\u5b89\u88dd\u6210\u529f\uff1a{{names}}",
+      "installAiCliInstalledList": "已安裝成功：{{names}}",
       "installAiCliFailed": "AI CLI 安裝失敗。",
       "installAiCliExitCode": "退出碼：{{code}}",
       "installAiCliInProgress": "正在安裝 AI CLI，已耗時 {{seconds}} 秒",
@@ -397,6 +397,83 @@
         "discard": "放棄",
         "confirmSwitch": "您有未儲存的變更。確定要切換儲存庫嗎？您的變更將會遺失。"
       }
+    },
+    "designStyles": {
+      "title": "設計風格",
+      "loadError": "載入設計風格失敗",
+      "saveError": "儲存設計風格失敗",
+      "deleteError": "刪除設計風格失敗",
+      "copyName": "{{name}}（副本）",
+      "defaultNone": "無（不注入設計方向）",
+      "defaultCard": {
+        "title": "預設設計風格",
+        "description": "新的編排回合未單獨選擇風格時，將採用此預設風格。",
+        "label": "預設風格"
+      },
+      "listCard": {
+        "title": "風格庫",
+        "description": "內建預設改編自高星開源設計 Skill（見 LICENSE）。可複製後自訂，也可以建立自己的風格。"
+      },
+      "badge": {
+        "builtin": "內建",
+        "custom": "自訂"
+      },
+      "sourceLabel": "來源：{{source}}",
+      "actions": {
+        "viewContent": "檢視內容",
+        "duplicate": "複製",
+        "edit": "編輯",
+        "delete": "刪除",
+        "create": "新增風格"
+      },
+      "editor": {
+        "createTitle": "新增設計風格",
+        "editTitle": "編輯設計風格",
+        "nameLabel": "名稱",
+        "descriptionLabel": "描述",
+        "contentLabel": "風格指令",
+        "contentHint": "注入到 UI 相關任務的提示詞：配色、字體、間距與動效規則等。",
+        "requiredFields": "名稱和風格指令為必填項"
+      }
+    },
+    "architecture": {
+      "title": "架構知識庫",
+      "loadError": "載入架構設定失敗",
+      "saveError": "儲存失敗",
+      "syncError": "同步失敗",
+      "deleteError": "刪除知識來源失敗",
+      "guidanceCard": {
+        "title": "規劃引導",
+        "description": "在回合物化時，將架構思維清單與匹配到的參考架構摘要注入給規劃器。",
+        "toggleLabel": "啟用架構引導",
+        "toggleDescription": "方法論改編自 architecture-copilot；參考範本從下方知識來源同步。"
+      },
+      "sourcesCard": {
+        "title": "知識來源",
+        "description": "同步到本地知識庫的 GitHub 儲存庫。內建來源為 awesome-architecture（MIT），也可以新增自己的儲存庫。"
+      },
+      "source": {
+        "builtinBadge": "內建",
+        "paths": "路徑：{{paths}}",
+        "entryCount": "{{count}} 個條目",
+        "lastSync": "上次同步：{{time}}",
+        "neverSynced": "尚未同步"
+      },
+      "actions": {
+        "syncNow": "立即同步",
+        "delete": "刪除",
+        "addSource": "新增知識來源"
+      },
+      "addDialog": {
+        "title": "新增知識來源",
+        "nameLabel": "顯示名稱",
+        "ownerLabel": "GitHub 擁有者",
+        "repoLabel": "儲存庫名稱",
+        "branchLabel": "分支",
+        "includePathsLabel": "包含路徑（逗號分隔）",
+        "includePathsHint": "僅同步這些目錄前綴下的 Markdown 檔案，例如 \"templates/\"。",
+        "requiredFields": "名稱、擁有者和儲存庫名稱為必填項"
+      }
     }
   },
   "integrations": {
@@ -449,7 +526,9 @@
       "mcp": "MCP 伺服器",
       "feishu": "飛書",
       "qualityGates": "品質門禁",
-      "organizations": "組織"
+      "organizations": "組織",
+      "architecture": "架構知識",
+      "designStyles": "設計風格"
     },
     "common": {
       "save": "儲存變更",

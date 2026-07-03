@@ -12,6 +12,8 @@ import {
   BuildingsIcon,
   HardDrivesIcon,
   ShieldCheckIcon,
+  TreeStructureIcon,
+  PaletteIcon,
 } from '@phosphor-icons/react';
 import { useUserSystem } from '@/components/ConfigProvider';
 import { SettingsLayout, type SettingsNavItem } from '../views/SettingsLayout';
@@ -58,6 +60,16 @@ export function SettingsLayoutContainer() {
         path: 'feishu',
         label: t('settings:newDesign.nav.feishu'),
         icon: ChatTeardropDotsIcon,
+      },
+      {
+        path: 'architecture',
+        label: t('settings:newDesign.nav.architecture'),
+        icon: TreeStructureIcon,
+      },
+      {
+        path: 'design-styles',
+        label: t('settings:newDesign.nav.designStyles'),
+        icon: PaletteIcon,
       },
       {
         path: 'runtime',

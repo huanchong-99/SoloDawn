@@ -14,6 +14,7 @@ import type { ModelConfig as WorkflowModelConfig } from '@/components/workflow/t
 import { useModelConfigForExecutor } from '@/hooks/useModelConfigForExecutor';
 import {
   planningDraftsApi,
+  designStylesApi,
   feishuApi,
   type PlanningMessageResponse,
 } from '@/lib/api';
@@ -28,7 +29,10 @@ import {
   useMaterializeDraft,
   useTogglePlanningFeishuSync,
 } from '@/hooks/usePlanningDraft';
-import { CreateChatBox } from '../primitives/CreateChatBox';
+import {
+  CreateChatBox,
+  type DesignStyleOption,
+} from '../primitives/CreateChatBox';
 import { WelcomeHero } from '../primitives/WelcomeHero';
 import { AuditDocPanel } from './AuditDocPanel';
 import { AuditPlanCard } from './AuditPlanCard';
@@ -641,6 +645,60 @@ export function CreateChatBoxContainer() {
     [effectiveProfile?.executor, profiles]
   );
 
+  // Design style selection: null = follow the system default. Applied at
+  // draft creation; changing it later PUTs to the draft (pre-materialize).
+  const [designStyleSlug, setDesignStyleSlug] = useState<string | null>(null);
+  const [designStyleOptions, setDesignStyleOptions] = useState<
+    DesignStyleOption[]
+  >([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    designStylesApi
+      .list()
+      .then((styles) => {
+        if (cancelled) return;
+        setDesignStyleOptions(
+          styles
+            .filter((s) => s.enabled)
+            .map((s) => ({ slug: s.slug, name: s.name }))
+        );
+      })
+      .catch(() => {
+        // Selector simply stays hidden when styles can't be loaded.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Adopt the persisted selection when a draft loads or switches.
+  useEffect(() => {
+    setDesignStyleSlug(planningDraft?.designStyleSlug ?? null);
+  }, [planningDraft?.id, planningDraft?.designStyleSlug]);
+
+  const handleDesignStyleChange = useCallback(
+    async (slug: string | null) => {
+      const previous = designStyleSlug;
+      setDesignStyleSlug(slug);
+      if (!planningDraftId) return;
+      try {
+        await planningDraftsApi.updateDesignStyle(planningDraftId, slug);
+        queryClient.invalidateQueries({
+          queryKey: planningDraftKeys.byId(planningDraftId),
+        });
+      } catch (e) {
+        setDesignStyleSlug(previous);
+        const err = e as { message?: string };
+        showToast(
+          err.message ?? tTasks('conversation.designStyle.updateError'),
+          'error'
+        );
+      }
+    },
+    [designStyleSlug, planningDraftId, queryClient, showToast, tTasks]
+  );
+
   const hasChangedFromDefault = useMemo(
     () => checkProfileChanged(effectiveProfile, config?.executor_profile),
     [effectiveProfile, config?.executor_profile]
@@ -736,6 +794,7 @@ export function CreateChatBoxContainer() {
         plannerApiType: modelConfig?.apiType,
         plannerBaseUrl: modelConfig?.baseUrl,
         plannerApiKey: modelConfig?.apiKey,
+        designStyleSlug: designStyleSlug ?? undefined,
       });
       setPlanningDraftId(draft.id);
 
@@ -768,6 +827,7 @@ export function CreateChatBoxContainer() {
     effectiveProfile,
     updateAndSaveConfig,
     selectedPlannerModelConfig,
+    designStyleSlug,
     setPlanningDraftId,
     setMessage,
     clearAttachments,
@@ -994,6 +1054,11 @@ export function CreateChatBoxContainer() {
                         }
                       : undefined
                   }
+                  designStyle={{
+                    options: designStyleOptions,
+                    selectedSlug: designStyleSlug,
+                    onChange: handleDesignStyleChange,
+                  }}
                   variant={
                     effectiveProfile
                       ? {
@@ -1045,6 +1110,11 @@ export function CreateChatBoxContainer() {
                     }
                   : undefined
               }
+              designStyle={{
+                options: designStyleOptions,
+                selectedSlug: designStyleSlug,
+                onChange: handleDesignStyleChange,
+              }}
               variant={
                 effectiveProfile
                   ? {

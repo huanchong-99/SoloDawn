@@ -773,6 +773,11 @@
       "modified": "已修改",
       "deleted": "已刪除",
       "renamed": "已重新命名"
+    },
+    "designStyle": {
+      "label": "設計風格",
+      "defaultOption": "預設風格",
+      "updateError": "更新設計風格失敗"
     }
   },
   "scriptFixer": {

@@ -73,6 +73,8 @@ SoloDawn 的最终设计目标是**通过社交平台的简单对话，完成复
 - ✅ Planning Draft 生命周期：gathering → spec_ready → confirmed → materialized
 - ✅ **多轮继续开发**（1.0 后落地）：已交付的对话可原地开下一轮——新一轮只规划增量，旧轮次折叠进同一会话，每个项目同时只跑一轮
 - ✅ **评分点账本**：验收标准登记为项目级评分点（`RP-001`…），评分即结算——已交付点写入压缩上下文纸条，回退逐点标记
+- ✅ **架构感知规划**（1.0 后落地）：一份架构思维清单 + 从本地同步知识库按关键词匹配出的参考架构摘要（内置源：awesome-architecture），在轮次物化时注入编排器；知识源是用户可扩展的 GitHub 仓库，后台自动刷新
+- ✅ **设计风格**（1.0 后落地）：在工作区按轮选择视觉方向，或在系统设置里设全局默认——内置 6 套改编自高分开源设计 skill 的预设，另支持自定义风格的完整增删改；所选风格会带入每一条 UI 相关的终端指令
 - ✅ 跨终端上下文传递（前序终端的成果传给下一个）
 - ✅ 自动分支合并 + 指定冲突解决终端；可选"合并前跑测试""冲突时暂停"
 
@@ -408,6 +410,8 @@ docker-compose -f docker-compose.split.yml up -d
 - **程序员**：直接扔一个非常准确的任务目标。系统把你的输入直接当技术规范用，不追问，只在后台生成验收评分规范。
 - **非技术人员**：别用任何技术术语，用大白话从用户角度说需求——"我想做一个本地备忘录，我希望在浏览器里看它；或者它是一个软件，显示在桌面上、能置顶……"系统会用大白话追问补全模糊点（比如你说了 3 个功能，它可能追问"还有两个要不要加？"），最终需求确认后自动生成技术规范 + 验收评分规范。
 
+要做带界面的东西？在模型选择器旁边的工具栏里挑一个**设计风格**——不挑就走系统设置 → 设计风格里的全局默认（见[架构知识与设计风格](#架构知识与设计风格)）。
+
 想用自己的验收标准？在确认**之前**上传审计文档（Builtin / Merged / Custom 三种模式，见[验收评审与评分规范](#验收评审与评分规范)）；确认后评分规范面板变为只读。
 
 **第 4 步：点右上角的确认。** 确认分两步：先确认技术规范（此刻生成并锁定评分规范），再确认质量门配置。生成的评分规范会立刻以卡片形式出现在对话里——每条验收标准都带着自己的评分点编号（`RP-001`…）——需求清单也会作为侧边栏出现在审计文档面板旁边。**对话完成后记得点确认，不点不会执行**——这是代码层的硬性拦截：两步确认都完成后，工作流才会物化并自动启动。
@@ -431,6 +435,36 @@ docker-compose -f docker-compose.split.yml up -d
 > **进阶玩法：UltraCode。** 手动工作流启动的是你的原生终端，因此除了你的 skill / MCP / 插件，CLI 的官方内置命令也全部继承——包括 UltraCode 模式。为任务配置专用提示词即可启用（任务描述会原样输入到该任务的终端）：UltraCode 会生成标准化的工作流脚本，为每个 Agent 硬编码清晰的能力边界，之后直接调用该脚本即可复用整套工作流。
 
 手动工作流视频演示（2026 年 2 月录制，当时项目还叫 GitCortex，仅演示了手动工作流，界面与现版本已有差异）：[GitCortex 最小 MVP 演示视频 - bilibili](https://www.bilibili.com/video/BV1yxfMBCEFh/)
+
+## 架构知识与设计风格
+
+两项影响编排工作区"怎么规划、怎么做"的新增能力。
+
+### 架构感知规划
+
+轮次物化时，规划目标会追加一段**架构指引（Architecture Guidance）**，由两部分组成：
+
+- **自答式架构思维清单**（改编自 [study8677/architecture-copilot](https://github.com/study8677/architecture-copilot)，MIT）：系统边界 → 数据模型 → 同步/异步流 → 容量诚实。编排器在拆解任务时逐项作答，让方案把架构假设摆到明面上，而不是藏在实现里。
+- **匹配到的参考架构摘要**：SoloDawn 维护一个从 GitHub 同步的本地知识库——内置源是 [study8677/awesome-architecture](https://github.com/study8677/awesome-architecture)（MIT），一组结构统一的参考架构模板。确认时用需求文本对条目做关键词匹配，把得分最高的摘要（关键决策 / 权衡 / 规模化 / 反模式）附进去。
+
+**系统设置 → 架构知识**里可以开关指引、把你自己的 GitHub 仓库加为知识源（按路径前缀同步其中的 markdown 文件）、手动触发同步、查看每个源的同步状态。后台同步约每 6 小时检查一次，超过 24 小时未同步的源会自动刷新；只拉取有变化的文件（blob-SHA 差量）。设置 `SOLODAWN_GITHUB_TOKEN`（或 `GITHUB_TOKEN`）可提高 GitHub API 速率上限。
+
+### 设计风格
+
+在工作区对话工具栏里按轮选择**设计风格**，或在**系统设置 → 设计风格**里设全局默认。带风格的轮次物化时，风格指令会以**设计方向（Design Direction）**段落追加进目标，且编排器契约要求把它带进**每一条 UI 相关的终端指令**——包括铺设基础样式的地基任务，保证并行终端之间视觉语言一致。
+
+内置 6 套预设，浓缩自高分开源设计 skill（每个文件都带来源与许可证署名，详见 `LICENSE`）：
+
+| 预设 | 改编自 | 许可证 |
+|---|---|---|
+| Anthropic Frontend Design | anthropics/skills — frontend-design | Apache-2.0 |
+| Minimalist Editorial | Leonxlnx/taste-skill — minimalist-ui | MIT |
+| Industrial Brutalist | Leonxlnx/taste-skill — industrial-brutalist-ui | MIT |
+| Soft Premium | Leonxlnx/taste-skill — soft-skill | MIT |
+| Impeccable Design Language | pbakaus/impeccable | Apache-2.0 |
+| Emil Design Engineering | emilkowalski/skills — emil-design-eng | MIT |
+
+内置预设只读——复制一份即可改成自己的；自定义风格支持完整的新建 / 编辑 / 删除，停用的风格不会注入。
 
 ## 质量体系详解
 
@@ -672,7 +706,9 @@ cd frontend && pnpm test:run && pnpm run lint && pnpm run check && cd ..
 - Vibe Kanban 衍生部分：Apache-2.0
 - CC-Switch 衍生部分：MIT
 - 质量门模型（移植自 SonarQube）：LGPL-3.0
-- 详见 `LICENSE`
+- shadcn/ui 组件：MIT
+- 设计风格预设与架构方法论（改编自开源 skill）：MIT / Apache-2.0
+- 完整条款与逐源署名详见 `LICENSE`
 
 ## 友链
 

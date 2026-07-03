@@ -773,6 +773,11 @@
       "modified": "Modificado",
       "deleted": "Eliminado",
       "renamed": "Renombrado"
+    },
+    "designStyle": {
+      "label": "Estilo de diseño",
+      "defaultOption": "Estilo predeterminado",
+      "updateError": "No se pudo actualizar el estilo de diseño"
     }
   },
   "scriptFixer": {

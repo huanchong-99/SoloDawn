@@ -37,6 +37,15 @@ pub struct CreateDraftRequest {
     pub planner_api_type: Option<String>,
     pub planner_base_url: Option<String>,
     pub planner_api_key: Option<String>,
+    pub design_style_slug: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDesignStyleRequest {
+    /// Style slug to apply; `None`/empty clears the selection so the system
+    /// default (or none) applies at materialization.
+    pub design_style_slug: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,6 +84,7 @@ pub struct DraftResponse {
     pub audit_plan: Option<String>,
     pub audit_mode: String,
     pub audit_doc_path: Option<String>,
+    pub design_style_slug: Option<String>,
     pub gates_confirmed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -100,6 +110,7 @@ impl From<PlanningDraft> for DraftResponse {
             audit_plan: d.audit_plan,
             audit_mode: d.audit_mode,
             audit_doc_path: d.audit_doc_path,
+            design_style_slug: d.design_style_slug,
             gates_confirmed_at: d.gates_confirmed_at.map(|t| t.to_rfc3339()),
             created_at: d.created_at.to_rfc3339(),
             updated_at: d.updated_at.to_rfc3339(),
@@ -167,6 +178,7 @@ pub fn planning_draft_routes() -> Router<DeploymentImpl> {
         .route("/{draft_id}/confirm", post(confirm_draft))
         .route("/{draft_id}/confirm-gates", post(confirm_gates))
         .route("/{draft_id}/continue", post(continue_draft))
+        .route("/{draft_id}/design-style", put(update_design_style))
         .route("/{draft_id}/materialize", post(materialize_draft))
         .route("/{draft_id}/feishu-sync", post(toggle_feishu_sync))
         .route(
@@ -192,6 +204,10 @@ async fn create_draft(
     draft.planner_model_id = req.planner_model_id;
     draft.planner_api_type = req.planner_api_type;
     draft.planner_base_url = req.planner_base_url;
+    draft.design_style_slug = req
+        .design_style_slug
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     if let Some(ref api_key) = req.planner_api_key {
         draft
             .set_api_key(api_key)
@@ -550,6 +566,51 @@ async fn confirm_gates(
 /// - the parent's workflow must be in a terminal state — one active round at
 ///   a time on a repository;
 /// - the parent must not already have a continuation (linear chain).
+async fn update_design_style(
+    State(deployment): State<DeploymentImpl>,
+    Path(draft_id): Path<String>,
+    Json(req): Json<UpdateDesignStyleRequest>,
+) -> Result<ResponseJson<ApiResponse<DraftResponse>>, ApiError> {
+    let pool = &deployment.db().pool;
+    let draft = PlanningDraft::find_by_id(pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("Planning draft {draft_id} not found")))?;
+
+    if draft.status == "materialized" || draft.status == "cancelled" {
+        return Err(ApiError::BadRequest(format!(
+            "Cannot change the design style of a draft in status '{}'",
+            draft.status
+        )));
+    }
+
+    let slug = req
+        .design_style_slug
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(ref slug) = slug {
+        let style = db::models::design_style::DesignStyle::find_by_slug(pool, slug)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+            .ok_or_else(|| ApiError::BadRequest(format!("Unknown design style '{slug}'")))?;
+        if !style.enabled {
+            return Err(ApiError::BadRequest(format!(
+                "Design style '{slug}' is disabled"
+            )));
+        }
+    }
+
+    PlanningDraft::update_design_style(pool, &draft_id, slug.as_deref())
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to update design style: {e}")))?;
+
+    let updated = PlanningDraft::find_by_id(pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| ApiError::Internal("Draft vanished during update".to_string()))?;
+    Ok(Json(ApiResponse::success(DraftResponse::from(updated))))
+}
+
 async fn continue_draft(
     State(deployment): State<DeploymentImpl>,
     Path(draft_id): Path<String>,
@@ -603,6 +664,8 @@ async fn continue_draft(
     child.planner_api_type = parent.planner_api_type.clone();
     child.planner_base_url = parent.planner_base_url.clone();
     child.planner_api_key = parent.planner_api_key.clone();
+    // Rounds keep a consistent visual direction unless the user changes it.
+    child.design_style_slug = parent.design_style_slug.clone();
 
     PlanningDraft::insert(&deployment.db().pool, &child)
         .await
@@ -1208,6 +1271,42 @@ async fn materialize_draft(
         }
     } else {
         initial_goal
+    };
+
+    // Architecture guidance rides inside the goal like the ledger background:
+    // a self-answered methodology checklist plus digests of the reference
+    // templates matched against the requirement text. Fail-open — a missing
+    // knowledge base degrades to methodology-only or no section at all.
+    let matching_text = format!(
+        "{requirement_summary} {}",
+        draft.technical_spec.as_deref().unwrap_or("")
+    );
+    let initial_goal = match services::services::architecture_knowledge::build_architecture_context(
+        &deployment.db().pool,
+        &matching_text,
+    )
+    .await
+    {
+        Some(section) => initial_goal
+            .map(|g| format!("{g}\n\n---\n\n{section}"))
+            .or(Some(section)),
+        None => initial_goal,
+    };
+
+    // Design direction: the draft's selected style, else the system default.
+    let initial_goal = match services::services::design_direction::resolve_style(
+        &deployment.db().pool,
+        draft.design_style_slug.as_deref(),
+    )
+    .await
+    {
+        Some(style) => {
+            let section = services::services::design_direction::build_design_direction_section(&style);
+            initial_goal
+                .map(|g| format!("{g}\n\n---\n\n{section}"))
+                .or(Some(section))
+        }
+        None => initial_goal,
     };
 
     // Use the first user-configured model for merge terminal defaults.

@@ -401,7 +401,12 @@
     },
     "updatedTodos": "Updated Todos",
     "viewInChangesPanel": "View in changes panel",
-    "unableToRenderDiff": "Unable to render diff."
+    "unableToRenderDiff": "Unable to render diff.",
+    "designStyle": {
+      "label": "Design style",
+      "defaultOption": "Default style",
+      "updateError": "Failed to update design style"
+    }
   },
   "attempt": {
     "actions": {

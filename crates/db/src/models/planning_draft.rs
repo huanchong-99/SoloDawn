@@ -44,6 +44,9 @@ pub struct PlanningDraft {
     pub audit_mode: String,
     /// Path to user-uploaded audit document on disk.
     pub audit_doc_path: Option<String>,
+    /// Selected design style slug; NULL falls back to the system default
+    /// (`system_settings` key `default_design_style`), then to none.
+    pub design_style_slug: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -107,6 +110,7 @@ impl PlanningDraft {
             audit_plan: None,
             audit_mode: "builtin".to_string(),
             audit_doc_path: None,
+            design_style_slug: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -122,9 +126,9 @@ impl PlanningDraft {
                 confirmed_at, gates_confirmed_at, materialized_workflow_id, parent_draft_id,
                 feishu_sync, feishu_chat_id,
                 sync_tools, sync_terminal, sync_progress, notify_on_completion,
-                audit_plan, audit_mode, audit_doc_path,
+                audit_plan, audit_mode, audit_doc_path, design_style_slug,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
             ",
         )
         .bind(&draft.id)
@@ -151,6 +155,7 @@ impl PlanningDraft {
         .bind(&draft.audit_plan)
         .bind(&draft.audit_mode)
         .bind(&draft.audit_doc_path)
+        .bind(&draft.design_style_slug)
         .bind(draft.created_at)
         .bind(draft.updated_at)
         .execute(pool)
@@ -235,6 +240,27 @@ impl PlanningDraft {
         .bind(requirement_summary)
         .bind(technical_spec)
         .bind(workflow_seed)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Set or clear the draft's design style selection.
+    pub async fn update_design_style(
+        pool: &SqlitePool,
+        id: &str,
+        design_style_slug: Option<&str>,
+    ) -> sqlx::Result<()> {
+        sqlx::query(
+            r"
+            UPDATE planning_draft SET
+                design_style_slug = ?2,
+                updated_at = datetime('now')
+            WHERE id = ?1
+            ",
+        )
+        .bind(id)
+        .bind(design_style_slug)
         .execute(pool)
         .await?;
         Ok(())

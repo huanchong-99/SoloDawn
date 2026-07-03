@@ -63,6 +63,7 @@ fn build_cors_layer() -> CorsLayer {
 }
 
 pub mod approvals;
+pub mod architecture_knowledge;
 pub mod chat_integrations;
 pub mod ci_webhook;
 pub mod cli_status_sse;
@@ -72,6 +73,7 @@ pub mod concierge_ws;
 pub mod config;
 pub mod containers;
 pub mod custom_rules;
+pub mod design_styles;
 pub mod filesystem;
 pub mod event_bridge;
 pub mod events;
@@ -164,6 +166,11 @@ pub fn build_router(
         .nest("/cli_types", cli_types::cli_types_routes())
         .nest("/cli_types", cli_status_sse::cli_status_sse_routes())
         .nest("/planning-drafts", planning_drafts::planning_draft_routes())
+        .nest(
+            "/architecture",
+            architecture_knowledge::architecture_routes(),
+        )
+        .nest("/design-styles", design_styles::design_style_routes())
         .nest("/workflows", workflows::workflows_routes())
         .nest("/workflows", slash_commands::slash_commands_routes())
         .nest("/workflows", provider_health::provider_health_routes())

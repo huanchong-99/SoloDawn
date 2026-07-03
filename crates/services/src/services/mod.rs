@@ -1,5 +1,6 @@
 pub mod analytics;
 pub mod approvals;
+pub mod architecture_knowledge;
 pub mod auth;
 pub mod cc_switch;
 pub mod claude_models;
@@ -7,6 +8,7 @@ pub mod cli_health_monitor;
 pub mod cli_installer;
 pub mod config;
 pub mod container;
+pub mod design_direction;
 pub mod diff_stream;
 pub mod events;
 pub mod file_ranker;

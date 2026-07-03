@@ -12,8 +12,17 @@ use crate::{
 };
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UpdateSettings {
+    // Accept the historical snake_case field name alongside camelCase so
+    // existing callers keep working.
+    #[serde(alias = "feishu_enabled")]
     feishu_enabled: Option<bool>,
+    /// Toggles the architecture-guidance section injected at materialization.
+    architecture_guidance_enabled: Option<bool>,
+    /// Fallback design style slug applied when a draft has no selection;
+    /// empty string clears the default.
+    default_design_style: Option<String>,
 }
 
 pub fn router() -> Router<DeploymentImpl> {
@@ -68,6 +77,26 @@ async fn update_settings(
         )
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to update feishu_enabled: {e}")))?;
+    }
+    if let Some(enabled) = body.architecture_guidance_enabled {
+        SystemSetting::set(
+            pool,
+            services::services::architecture_knowledge::SETTING_GUIDANCE_ENABLED,
+            if enabled { "true" } else { "false" },
+        )
+        .await
+        .map_err(|e| {
+            ApiError::Internal(format!("Failed to update architecture_guidance_enabled: {e}"))
+        })?;
+    }
+    if let Some(slug) = body.default_design_style {
+        SystemSetting::set(
+            pool,
+            services::services::design_direction::SETTING_DEFAULT_STYLE,
+            slug.trim(),
+        )
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to update default_design_style: {e}")))?;
     }
     // Return updated settings
     get_settings(State(deployment)).await

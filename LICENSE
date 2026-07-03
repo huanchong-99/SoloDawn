@@ -102,6 +102,78 @@ For the full LGPL-3.0 text, see: https://www.gnu.org/licenses/lgpl-3.0.html
 
 ---
 
+## 5. shadcn/ui (MIT License)
+
+Copyright (c) 2023 shadcn
+
+The reusable UI components under `frontend/src/components/ui/` are based on
+shadcn/ui (https://github.com/shadcn-ui/ui), which distributes components by
+copying source code into the consuming project (configured via
+`frontend/components.json`). These components were inherited from the Vibe
+Kanban upstream and extended in SoloDawn. They are licensed under the MIT
+License; the full MIT license text reproduced in Section 3 applies with the
+copyright notice above.
+
+---
+
+## 6. Design Style Presets (Adapted Content)
+
+The built-in design style presets under
+`crates/services/assets/design_styles/` are condensed adaptations of
+open-source design skills. Each file carries an attribution header marking
+the source, license, and the changes made (condensed and adapted for
+automated prompt injection). The upstream sources are:
+
+| Preset file | Upstream project | License |
+|---|---|---|
+| `anthropic-frontend-design.md` | `frontend-design` skill in anthropics/skills (https://github.com/anthropics/skills) | Apache-2.0 |
+| `taste-minimalist-editorial.md` | `minimalist-ui` skill in Leonxlnx/taste-skill (https://github.com/Leonxlnx/taste-skill) | MIT |
+| `taste-industrial-brutalist.md` | `industrial-brutalist-ui` skill in Leonxlnx/taste-skill (https://github.com/Leonxlnx/taste-skill) | MIT |
+| `taste-soft-premium.md` | `soft-skill` skill in Leonxlnx/taste-skill (https://github.com/Leonxlnx/taste-skill) | MIT |
+| `impeccable-design-language.md` | pbakaus/impeccable (https://github.com/pbakaus/impeccable) | Apache-2.0 |
+| `emil-design-engineering.md` | `emil-design-eng` skill in emilkowalski/skills (https://github.com/emilkowalski/skills) | MIT |
+
+Apache-2.0 sources (anthropics/skills, pbakaus/impeccable): used under the
+Apache License 2.0; modifications are marked in each file's attribution
+header as required by Section 4(b) of the license.
+
+MIT sources — the following upstream copyright notices are reproduced
+verbatim; the full MIT license text in Section 3 applies to each:
+
+- Copyright (c) 2026 Leonxlnx (Leonxlnx/taste-skill)
+- Copyright (c) 2026 Matt Pocock (as stated in the LICENSE of
+  emilkowalski/skills, the repository maintained by Emil Kowalski)
+
+---
+
+## 7. Architecture Methodology & Knowledge Sources
+
+**architecture-copilot (MIT License)**
+
+Copyright (c) 2026 JingWen Fan (study8677)
+
+The architecture-thinking checklist at
+`crates/services/assets/architecture/methodology.md` is a condensed
+adaptation of the architecture-copilot skill
+(https://github.com/study8677/architecture-copilot). Changes are marked in
+the file's attribution header. The full MIT license text in Section 3
+applies with the copyright notice above.
+
+**awesome-architecture (MIT License)**
+
+Copyright (c) 2026 JingWen Fan (study8677)
+
+SoloDawn's architecture knowledge base syncs reference-architecture
+templates at runtime from GitHub repositories configured as knowledge
+sources. The built-in default source is
+https://github.com/study8677/awesome-architecture (MIT). Synced content is
+stored in the user's local database and injected into planning prompts;
+it is not redistributed with SoloDawn releases. Content from knowledge
+sources added by users is governed by those sources' own licenses and is
+the responsibility of the user who adds them.
+
+---
+
 ## Summary
 
 | Component | License | Location |
@@ -110,6 +182,10 @@ For the full LGPL-3.0 text, see: https://www.gnu.org/licenses/lgpl-3.0.html
 | Vibe Kanban (upstream) | Apache-2.0 | Inherited throughout the codebase |
 | CC-Switch | MIT | `crates/cc-switch/` |
 | SonarQube Quality Gate Models | LGPL-3.0 | `crates/quality/src/gate/` |
+| shadcn/ui | MIT | `frontend/src/components/ui/` |
+| Design style presets (anthropics/skills, Leonxlnx/taste-skill, pbakaus/impeccable, emilkowalski/skills) | Apache-2.0 / MIT | `crates/services/assets/design_styles/` |
+| Architecture methodology (study8677/architecture-copilot) | MIT | `crates/services/assets/architecture/` |
+| Architecture knowledge sync (study8677/awesome-architecture, default source) | MIT | Runtime-synced into the local database |
 
 For the full Apache License 2.0 text, see: http://www.apache.org/licenses/LICENSE-2.0
 For the full MIT License text, see: https://opensource.org/licenses/MIT

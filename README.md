@@ -73,6 +73,8 @@ Step-by-step instructions for both modes are at the bottom of this file: [Usage 
 - ✅ Planning Draft lifecycle: gathering → spec_ready → confirmed → materialized
 - ✅ **Continuation rounds** (landed post-1.0): a delivered conversation continues in place — round N+1 plans only the delta, prior rounds fold into the same thread, one active round per project
 - ✅ **Requirement ledger (评分点)**: acceptance criteria become project-scoped points (`RP-001`, …) settled at scoring time — delivered points store a compressed context capsule, regressions are flagged per point
+- ✅ **Architecture-aware planning** (landed post-1.0): an architecture-thinking checklist plus reference-architecture digests, keyword-matched from a locally synced knowledge base (built-in source: awesome-architecture), are injected into the orchestrator when a round materializes; sources are user-extensible GitHub repos with automatic background refresh
+- ✅ **Design styles** (landed post-1.0): pick a visual direction per round in the workspace, or set a global default in Settings — 6 built-in presets adapted from high-rated open-source design skills, plus full custom style create / edit / delete; the chosen style is carried into every UI-related terminal instruction
 - ✅ Cross-terminal context handoff (each terminal's work passed to the next)
 - ✅ Automatic branch merging + a designated conflict-resolution terminal; optional "run tests before merge" and "pause on conflict"
 
@@ -410,6 +412,8 @@ The flow in one sentence: configure a model → bind a Git repository → (optio
 - **Programmer**: throw in a precise, specific task goal. The system uses your input directly as the technical spec, asks nothing, and only generates the acceptance scoring rubric in the background.
 - **Non-technical user**: skip the jargon entirely; describe the need in plain language from a user's perspective — "I want a local memo app; I'd like to view it in my browser, or have it be a desktop app that stays pinned on top…" The system asks plain-language follow-ups to close the gaps (you mention 3 features, it may ask "want to add these other two?"), and once the final requirement is confirmed it generates a technical spec + acceptance scoring rubric.
 
+Building something with a UI? Pick a **design style** from the toolbar next to the model selector — or leave it on the system default from Settings → Design Styles (see [Architecture Knowledge & Design Styles](#architecture-knowledge--design-styles)).
+
 Want your own acceptance criteria? Upload an audit document **before** confirming (Builtin / Merged / Custom modes — see [Acceptance Review & Scoring Rubric](#acceptance-review--scoring-rubric)); after confirmation the rubric panel becomes read-only.
 
 **Step 4: Click Confirm in the top-right.** Confirmation is two-step: first confirm the technical spec (the scoring rubric is generated and locked at that instant), then confirm the quality gate configuration. The generated rubric immediately appears as a card in the conversation — every acceptance criterion tagged with its requirement-point code (`RP-001`, …) — and the requirement ledger opens as a side panel next to the audit-doc panel. **Remember to click Confirm when the conversation is done — nothing executes otherwise.** This is a hard block in the code: only after both confirmations does the workflow materialize and start automatically.
@@ -433,6 +437,36 @@ For users who want full control over the workflow graph. The creation wizard has
 > **Power move: UltraCode.** A manual workflow launches your native terminal, so beyond your skills / MCP servers / plugins, the CLI's official built-in commands are inherited too — including UltraCode mode. Enable it by configuring a dedicated prompt for a task (the task description is typed into that task's terminal verbatim): UltraCode generates standardized workflow scripts that hardcode clear capability boundaries for each Agent, and invoking that script afterwards reuses the entire workflow.
 
 Manual workflow video demo (recorded February 2026 when the project was still called GitCortex; it covers only the manual workflow and the UI has since changed): [GitCortex minimal MVP demo — bilibili](https://www.bilibili.com/video/BV1yxfMBCEFh/)
+
+## Architecture Knowledge & Design Styles
+
+Two additions that shape *how* the orchestrated workspace plans and builds.
+
+### Architecture-aware planning
+
+When a round materializes, the planner's goal is enriched with an **Architecture Guidance** section built from two parts:
+
+- **A self-answered architecture checklist** (adapted from [study8677/architecture-copilot](https://github.com/study8677/architecture-copilot), MIT): system boundaries → data model → sync/async flows → capacity honesty. The orchestrator answers it while decomposing, so the plan states its architecture assumptions instead of hiding them.
+- **Matched reference digests**: SoloDawn keeps a local knowledge base synced from GitHub — the built-in source is [study8677/awesome-architecture](https://github.com/study8677/awesome-architecture) (MIT), a set of uniformly structured reference architectures. At confirm time, the requirement text is keyword-matched against the entries and the top digests (key decisions / tradeoffs / scaling / anti-patterns) are attached.
+
+**Settings → Architecture Knowledge** lets you toggle the guidance, add your own GitHub repositories as knowledge sources (markdown files under chosen path prefixes), trigger a manual sync, and see per-source sync status. Background sync checks roughly every 6 hours and refreshes any source more than 24 hours stale; only changed files are fetched (blob-SHA diff). Setting `SOLODAWN_GITHUB_TOKEN` (or `GITHUB_TOKEN`) raises the GitHub API rate limit for private or heavily synced sources.
+
+### Design styles
+
+Pick a **design style** in the workspace conversation toolbar (per round), or set a global default in **Settings → Design Styles**. When a round materializes with a style, its directives are appended to the goal as a **Design Direction** section, and the orchestrator contract requires carrying it into **every UI-related terminal instruction** — including the foundation task that lays down base styles, so the visual language stays consistent across parallel terminals.
+
+Six presets ship built-in, condensed from high-rated open-source design skills (each file carries source and license attribution — see `LICENSE`):
+
+| Preset | Adapted from | License |
+|---|---|---|
+| Anthropic Frontend Design | anthropics/skills — frontend-design | Apache-2.0 |
+| Minimalist Editorial | Leonxlnx/taste-skill — minimalist-ui | MIT |
+| Industrial Brutalist | Leonxlnx/taste-skill — industrial-brutalist-ui | MIT |
+| Soft Premium | Leonxlnx/taste-skill — soft-skill | MIT |
+| Impeccable Design Language | pbakaus/impeccable | Apache-2.0 |
+| Emil Design Engineering | emilkowalski/skills — emil-design-eng | MIT |
+
+Built-in presets are read-only — duplicate one to make it yours; custom styles support full create / edit / delete, and disabled styles are never injected.
 
 ## Quality System in Depth
 
@@ -679,7 +713,9 @@ cd frontend && pnpm test:run && pnpm run lint && pnpm run check && cd ..
 - Vibe Kanban derived parts: Apache-2.0
 - CC-Switch derived parts: MIT
 - Quality Gate models (ported from SonarQube): LGPL-3.0
-- See `LICENSE` for full details.
+- shadcn/ui components: MIT
+- Design style presets & architecture methodology (adapted from open-source skills): MIT / Apache-2.0
+- See `LICENSE` for full details and per-source attribution.
 
 ## Blogroll
 

@@ -386,6 +386,83 @@
         "discard": "취소",
         "confirmSwitch": "저장되지 않은 변경사항이 있습니다. 정말 저장소를 전환하시겠습니까? 변경사항이 손실됩니다."
       }
+    },
+    "designStyles": {
+      "title": "디자인 스타일",
+      "loadError": "디자인 스타일을 불러오지 못했습니다",
+      "saveError": "디자인 스타일 저장에 실패했습니다",
+      "deleteError": "디자인 스타일 삭제에 실패했습니다",
+      "copyName": "{{name}} (복사본)",
+      "defaultNone": "없음 (디자인 지시 미주입)",
+      "defaultCard": {
+        "title": "기본 디자인 스타일",
+        "description": "스타일을 따로 선택하지 않은 새 오케스트레이션 라운드에 적용됩니다.",
+        "label": "기본 스타일"
+      },
+      "listCard": {
+        "title": "스타일 라이브러리",
+        "description": "기본 프리셋은 높은 평가를 받은 오픈소스 디자인 스킬을 각색한 것입니다(LICENSE 참조). 복제하여 수정하거나 직접 만들 수 있습니다."
+      },
+      "badge": {
+        "builtin": "기본 제공",
+        "custom": "사용자 정의"
+      },
+      "sourceLabel": "출처: {{source}}",
+      "actions": {
+        "viewContent": "내용 보기",
+        "duplicate": "복제",
+        "edit": "편집",
+        "delete": "삭제",
+        "create": "새 스타일"
+      },
+      "editor": {
+        "createTitle": "디자인 스타일 만들기",
+        "editTitle": "디자인 스타일 편집",
+        "nameLabel": "이름",
+        "descriptionLabel": "설명",
+        "contentLabel": "스타일 지시문",
+        "contentHint": "UI 관련 작업에 주입되는 프롬프트: 색상, 타이포그래피, 간격, 모션 규칙 등.",
+        "requiredFields": "이름과 스타일 지시문은 필수입니다"
+      }
+    },
+    "architecture": {
+      "title": "아키텍처 지식 베이스",
+      "loadError": "아키텍처 설정을 불러오지 못했습니다",
+      "saveError": "저장에 실패했습니다",
+      "syncError": "동기화에 실패했습니다",
+      "deleteError": "소스 삭제에 실패했습니다",
+      "guidanceCard": {
+        "title": "플래닝 가이드",
+        "description": "라운드 구체화 시 아키텍처 사고 체크리스트와 매칭된 참조 아키텍처 요약을 플래너에 주입합니다.",
+        "toggleLabel": "아키텍처 가이드 사용",
+        "toggleDescription": "방법론은 architecture-copilot을 각색했습니다. 참조 템플릿은 아래 지식 소스에서 동기화됩니다."
+      },
+      "sourcesCard": {
+        "title": "지식 소스",
+        "description": "로컬 지식 베이스로 동기화되는 GitHub 저장소입니다. 기본 소스는 awesome-architecture(MIT)이며, 직접 추가할 수도 있습니다."
+      },
+      "source": {
+        "builtinBadge": "기본 제공",
+        "paths": "경로: {{paths}}",
+        "entryCount": "{{count}}개 항목",
+        "lastSync": "마지막 동기화: {{time}}",
+        "neverSynced": "동기화된 적 없음"
+      },
+      "actions": {
+        "syncNow": "지금 동기화",
+        "delete": "삭제",
+        "addSource": "소스 추가"
+      },
+      "addDialog": {
+        "title": "지식 소스 추가",
+        "nameLabel": "표시 이름",
+        "ownerLabel": "GitHub 소유자",
+        "repoLabel": "저장소",
+        "branchLabel": "브랜치",
+        "includePathsLabel": "포함 경로 (쉼표로 구분)",
+        "includePathsHint": "이 디렉터리 접두사 아래의 Markdown 파일만 동기화됩니다. 예: \"templates/\".",
+        "requiredFields": "표시 이름, 소유자, 저장소는 필수입니다"
+      }
     }
   },
   "integrations": {
@@ -438,7 +515,9 @@
       "mcp": "MCP 서버",
       "feishu": "Feishu",
       "qualityGates": "Quality Gates",
-      "organizations": "조직"
+      "organizations": "조직",
+      "architecture": "아키텍처",
+      "designStyles": "디자인 스타일"
     },
     "common": {
       "save": "변경사항 저장",
