@@ -274,7 +274,39 @@
       "refineOrConfirm": "Refine requirements or confirm the plan...",
       "thinking": "Planner is thinking...",
       "startPlanning": "Start Planning",
-      "confirmButton": "Confirm Plan",
+      "confirmButton": "Confirm Plan & Acceptance Criteria",
+      "generatingRubric": "Generating acceptance rubric...",
+      "rounds": {
+        "badge": "Round {{round}}",
+        "divider": "Round {{round}}",
+        "continueButton": "Continue Requirements"
+      },
+      "auditPlan": {
+        "cardTitle": "Acceptance Rubric",
+        "cardSummary": "{{points}} scoring points · pass at {{threshold}}",
+        "maxScore": "{{max}} pts"
+      },
+      "ledger": {
+        "panelTab": "Requirement Ledger",
+        "panelTitle": "Requirement Ledger",
+        "progress": "{{delivered}}/{{total}} delivered",
+        "status": {
+          "pending": "Pending",
+          "delivered": "Delivered",
+          "regressed": "Regressed"
+        },
+        "capsuleBuilt": "What was built",
+        "capsuleLivesWhere": "Where it lives",
+        "capsuleDecisions": "Key decisions",
+        "capsuleExtensionNotes": "How to extend",
+        "capsuleProvenance": "Commits",
+        "showCapsule": "Show context",
+        "hideCapsule": "Hide context",
+        "edit": "Edit",
+        "save": "Save",
+        "cancel": "Cancel",
+        "delete": "Delete"
+      },
       "refineButton": "Refine",
       "materializeButton": "Create Workflow",
       "materialized": "Workflow Created",

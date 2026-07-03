@@ -1,4 +1,10 @@
 {
+  "qualityGates": {
+    "confirmTitle": "Confirm Engineering Quality Gates",
+    "confirmDescription": "Review the quality-gate rules and AI-authored custom rules enforced for this run. Confirmation is mandatory — the workflow cannot be created until you Save & Confirm.",
+    "saveAndConfirm": "Save & Confirm",
+    "confirmError": "Failed to confirm quality gates."
+  },
   "settings": {
     "layout": {
       "nav": {

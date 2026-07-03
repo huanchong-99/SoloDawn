@@ -97,6 +97,21 @@ export function useConfirmDraft() {
   });
 }
 
+/** Rounds: create the follow-up round (child draft) of a delivered round */
+export function useContinueDraft() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (draftId: string): Promise<PlanningDraftResponse> => {
+      return planningDraftsApi.continueDraft(draftId);
+    },
+    onSuccess: () => {
+      // The new round appears in the cross-project draft list (sidebar).
+      queryClient.invalidateQueries({ queryKey: planningDraftKeys.all });
+    },
+  });
+}
+
 /** Upload an audit document for a planning draft */
 export function useUploadAuditDoc() {
   const queryClient = useQueryClient();

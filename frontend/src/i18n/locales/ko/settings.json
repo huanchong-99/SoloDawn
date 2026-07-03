@@ -1,4 +1,10 @@
 {
+  "qualityGates": {
+    "confirmTitle": "엔지니어링 품질 게이트 확인",
+    "confirmDescription": "이번 실행에 적용되는 품질 게이트 규칙과 AI 작성 사용자 지정 규칙을 검토하세요. 확인은 필수이며, 저장 및 확인 전에는 워크플로우를 생성할 수 없습니다.",
+    "saveAndConfirm": "저장 및 확인",
+    "confirmError": "품질 게이트 확인에 실패했습니다."
+  },
   "settings": {
     "layout": {
       "nav": {

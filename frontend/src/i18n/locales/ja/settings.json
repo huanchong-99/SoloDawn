@@ -1,4 +1,10 @@
 {
+  "qualityGates": {
+    "confirmTitle": "エンジニアリング品質ゲートの確認",
+    "confirmDescription": "この実行で強制される品質ゲートルールと AI 作成のカスタムルールを確認してください。確認は必須です——保存して確認するまでワークフローは作成できません。",
+    "saveAndConfirm": "保存して確認",
+    "confirmError": "品質ゲートの確認に失敗しました。"
+  },
   "settings": {
     "layout": {
       "nav": {

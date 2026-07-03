@@ -538,6 +538,8 @@ export interface PlanningDraftResponse {
   technicalSpec: string | null;
   workflowSeed: string | null;
   materializedWorkflowId: string | null;
+  /** Rounds: the draft this one continues (null for round 1 / standalone). */
+  parentDraftId: string | null;
   feishuSync: boolean;
   syncTools: boolean;
   syncTerminal: boolean;
@@ -564,6 +566,60 @@ export interface MaterializeResponse {
   workflowId: string;
   status: string;
 }
+
+// Requirement ledger (评分点账本) — project-scoped acceptance points.
+export interface RequirementItemResponse {
+  id: string;
+  projectId: string;
+  pointCode: string;
+  text: string;
+  status: 'pending' | 'delivered' | 'regressed';
+  originDraftId: string | null;
+  /** JSON-serialized context capsule (map, not encyclopedia). */
+  contextCapsule: string | null;
+  provenanceWorkflowId: string | null;
+  provenanceCommits: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deliveredAt: string | null;
+}
+
+/** Parsed shape of RequirementItemResponse.contextCapsule. */
+export interface RequirementCapsule {
+  built: string;
+  livesWhere: string;
+  decisions: string;
+  extensionNotes: string;
+}
+
+export const requirementItemsApi = {
+  list: async (projectId: string): Promise<RequirementItemResponse[]> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/requirement-items`
+    );
+    return handleApiResponse<RequirementItemResponse[]>(response);
+  },
+
+  update: async (
+    projectId: string,
+    itemId: string,
+    text: string
+  ): Promise<RequirementItemResponse> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/requirement-items/${itemId}`,
+      { method: 'PUT', body: JSON.stringify({ text }) }
+    );
+    return handleApiResponse<RequirementItemResponse>(response);
+  },
+
+  remove: async (projectId: string, itemId: string): Promise<boolean> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/requirement-items/${itemId}`,
+      { method: 'DELETE' }
+    );
+    return handleApiResponse<boolean>(response);
+  },
+};
 
 export const planningDraftsApi = {
   list: async (): Promise<PlanningDraftResponse[]> => {
@@ -618,6 +674,15 @@ export const planningDraftsApi = {
     const response = await makeRequest(
       `/api/planning-drafts/${draftId}/confirm`,
       { method: 'POST', body: JSON.stringify({ retainBuiltin: retainBuiltin ?? true }) }
+    );
+    return handleApiResponse<PlanningDraftResponse>(response);
+  },
+
+  /** Rounds: create the follow-up round (child draft) of a delivered round. */
+  continueDraft: async (draftId: string): Promise<PlanningDraftResponse> => {
+    const response = await makeRequest(
+      `/api/planning-drafts/${draftId}/continue`,
+      { method: 'POST', body: JSON.stringify({}) }
     );
     return handleApiResponse<PlanningDraftResponse>(response);
   },

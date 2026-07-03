@@ -691,7 +691,39 @@
       "refineOrConfirm": "요구사항을 수정하거나 계획을 확인...",
       "thinking": "플래너가 생각하는 중...",
       "startPlanning": "계획 시작",
-      "confirmButton": "계획 확인",
+      "confirmButton": "계획 및 수락 기준 확인",
+      "generatingRubric": "수락 기준 생성 중...",
+      "rounds": {
+        "badge": "{{round}}라운드",
+        "divider": "{{round}}라운드",
+        "continueButton": "요구사항 계속하기"
+      },
+      "auditPlan": {
+        "cardTitle": "수락 평가 기준",
+        "cardSummary": "평가 포인트 {{points}}개 · 통과 기준 {{threshold}}점",
+        "maxScore": "{{max}}점"
+      },
+      "ledger": {
+        "panelTab": "요구사항 장부",
+        "panelTitle": "요구사항 장부",
+        "progress": "완료 {{delivered}}/{{total}}",
+        "status": {
+          "pending": "대기",
+          "delivered": "완료",
+          "regressed": "회귀"
+        },
+        "capsuleBuilt": "구현 내용",
+        "capsuleLivesWhere": "코드 위치",
+        "capsuleDecisions": "주요 결정",
+        "capsuleExtensionNotes": "확장 힌트",
+        "capsuleProvenance": "관련 커밋",
+        "showCapsule": "컨텍스트 보기",
+        "hideCapsule": "컨텍스트 숨기기",
+        "edit": "편집",
+        "save": "저장",
+        "cancel": "취소",
+        "delete": "삭제"
+      },
       "refineButton": "수정하기",
       "materializeButton": "워크플로우 생성",
       "materialized": "워크플로우 생성됨",

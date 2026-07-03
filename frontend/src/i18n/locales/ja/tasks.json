@@ -691,7 +691,39 @@
       "refineOrConfirm": "要件を改善するか、プランを確認...",
       "thinking": "プランナーが考えています...",
       "startPlanning": "計画開始",
-      "confirmButton": "プランを確認",
+      "confirmButton": "計画と受け入れ基準を確認",
+      "generatingRubric": "受け入れ基準を生成中...",
+      "rounds": {
+        "badge": "ラウンド {{round}}",
+        "divider": "ラウンド {{round}}",
+        "continueButton": "要件を続ける"
+      },
+      "auditPlan": {
+        "cardTitle": "受け入れ評価基準",
+        "cardSummary": "評価ポイント {{points}} 件 · 合格ライン {{threshold}} 点",
+        "maxScore": "{{max}} 点"
+      },
+      "ledger": {
+        "panelTab": "要件台帳",
+        "panelTitle": "要件台帳",
+        "progress": "納品済み {{delivered}}/{{total}}",
+        "status": {
+          "pending": "未納品",
+          "delivered": "納品済み",
+          "regressed": "リグレッション"
+        },
+        "capsuleBuilt": "実装内容",
+        "capsuleLivesWhere": "コードの場所",
+        "capsuleDecisions": "主要な決定",
+        "capsuleExtensionNotes": "拡張のヒント",
+        "capsuleProvenance": "関連コミット",
+        "showCapsule": "コンテキストを表示",
+        "hideCapsule": "コンテキストを隠す",
+        "edit": "編集",
+        "save": "保存",
+        "cancel": "キャンセル",
+        "delete": "削除"
+      },
       "refineButton": "改善する",
       "materializeButton": "ワークフローを作成",
       "materialized": "ワークフロー作成済み",

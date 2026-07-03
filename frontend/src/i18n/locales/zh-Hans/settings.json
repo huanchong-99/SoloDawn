@@ -1,4 +1,10 @@
 {
+  "qualityGates": {
+    "confirmTitle": "确认工程质量门槛",
+    "confirmDescription": "请查看本次运行将强制执行的质量门禁规则与 AI 生成的自定义规则。确认是必需的——在保存并确认之前无法创建工作流。",
+    "saveAndConfirm": "保存并确认",
+    "confirmError": "确认质量门禁失败。"
+  },
   "settings": {
     "layout": {
       "nav": {

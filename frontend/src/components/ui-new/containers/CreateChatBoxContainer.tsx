@@ -20,15 +20,19 @@ import {
 import {
   planningDraftKeys,
   usePlanningDraft,
+  usePlanningDrafts,
   usePlanningDraftMessages,
   useSendPlanningMessage,
   useConfirmDraft,
+  useContinueDraft,
   useMaterializeDraft,
   useTogglePlanningFeishuSync,
 } from '@/hooks/usePlanningDraft';
 import { CreateChatBox } from '../primitives/CreateChatBox';
 import { WelcomeHero } from '../primitives/WelcomeHero';
 import { AuditDocPanel } from './AuditDocPanel';
+import { AuditPlanCard } from './AuditPlanCard';
+import { RequirementLedgerPanel } from './RequirementLedgerPanel';
 import { QualityGateConfirmDialog } from '@/components/quality/QualityGateConfirmDialog';
 
 function WorkflowStatusBadge({
@@ -62,6 +66,67 @@ function WorkflowStatusBadge({
     >
       {label}
     </span>
+  );
+}
+
+/**
+ * One delivered round rendered above the active conversation: a divider line
+ * with the round number + status, expandable to that round's messages and its
+ * acceptance-rubric snapshot. Messages are fetched only when opened.
+ */
+function AncestorRound({
+  draftId,
+  roundNumber,
+}: Readonly<{ draftId: string; roundNumber: number }>) {
+  const { t: tTasks } = useTranslation('tasks');
+  const [open, setOpen] = useState(false);
+  const { data: draft } = usePlanningDraft(draftId);
+  const { data: messages } = usePlanningDraftMessages(open ? draftId : null);
+
+  if (!draft) return null;
+  return (
+    <div className="space-y-half">
+      <div className="flex items-center gap-half">
+        <div className="flex-1 border-t border-default" />
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-half text-xs text-low hover:text-normal transition-colors px-half"
+        >
+          <span>
+            {tTasks('conversation.planning.rounds.divider', {
+              round: roundNumber,
+            })}
+          </span>
+          <span className="px-1 py-px rounded bg-brand/10 text-brand">
+            {tTasks(`conversation.planning.status.${draft.status}`)}
+          </span>
+          <span>{open ? '▾' : '▸'}</span>
+        </button>
+        <div className="flex-1 border-t border-default" />
+      </div>
+      {open && (
+        <div className="space-y-base opacity-80">
+          {(messages ?? []).map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[80%] rounded-lg px-base py-half text-sm whitespace-pre-wrap ${
+                  msg.role === 'user'
+                    ? 'bg-brand/10 text-high'
+                    : 'bg-secondary text-normal'
+                }`}
+              >
+                {msg.content}
+              </div>
+            </div>
+          ))}
+          {draft.auditPlan && <AuditPlanCard auditPlanJson={draft.auditPlan} />}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -158,6 +223,29 @@ function resolveVariantForExecutor(
   return variants.includes('DEFAULT') ? 'DEFAULT' : (variants[0] ?? null);
 }
 
+/**
+ * Walk `parentDraftId` upward from the active draft and return its delivered
+ * ancestors oldest-first: [round 1, ..., round N-1]. Tolerates drafts missing
+ * from the list (chain truncates) and cycles (visited guard).
+ */
+export function buildAncestorChain<
+  T extends { id: string; parentDraftId: string | null },
+>(drafts: readonly T[] | undefined, parentDraftId: string | null | undefined): T[] {
+  if (!parentDraftId || !drafts) return [];
+  const byId = new Map(drafts.map((d) => [d.id, d]));
+  const visited = new Set<string>();
+  const chain: T[] = [];
+  let cursor: string | null = parentDraftId;
+  while (cursor && !visited.has(cursor)) {
+    visited.add(cursor);
+    const parent = byId.get(cursor);
+    if (!parent) break;
+    chain.unshift(parent);
+    cursor = parent.parentDraftId;
+  }
+  return chain;
+}
+
 interface PlanningStatusBarProps {
   readonly draftStatus: string | undefined;
   readonly feishuConnected: boolean;
@@ -166,10 +254,14 @@ interface PlanningStatusBarProps {
   readonly isConfirmed: boolean;
   readonly isMaterialized: boolean;
   readonly materializedWorkflowId: string | null;
+  readonly roundNumber: number;
+  readonly canContinue: boolean;
   readonly confirmMutation: ReturnType<typeof useConfirmDraft>;
   readonly materializeMutation: ReturnType<typeof useMaterializeDraft>;
+  readonly continueMutation: ReturnType<typeof useContinueDraft>;
   readonly handleConfirm: () => void;
   readonly handleMaterialize: () => void;
+  readonly handleContinue: () => void;
   readonly handleToggleFeishuSync: () => void;
   readonly handleSyncHistory: () => void;
 }
@@ -182,10 +274,14 @@ function PlanningStatusBar({
   isConfirmed,
   isMaterialized,
   materializedWorkflowId,
+  roundNumber,
+  canContinue,
   confirmMutation,
   materializeMutation,
+  continueMutation,
   handleConfirm,
   handleMaterialize,
+  handleContinue,
   handleToggleFeishuSync,
   handleSyncHistory,
 }: PlanningStatusBarProps) {
@@ -195,6 +291,11 @@ function PlanningStatusBar({
       <span className="text-xs text-low">
         {tTasks('conversation.planning.title')}
       </span>
+      {roundNumber > 1 && (
+        <span className="text-xs px-1 py-px rounded bg-secondary text-low">
+          {tTasks('conversation.planning.rounds.badge', { round: roundNumber })}
+        </span>
+      )}
       {draftStatus && (
         <span className="text-xs px-1 py-px rounded bg-brand/10 text-brand">
           {tTasks(`conversation.planning.status.${draftStatus}`)}
@@ -234,7 +335,7 @@ function PlanningStatusBar({
           className="ml-auto text-xs px-base py-half rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50"
         >
           {confirmMutation.isPending
-            ? '...'
+            ? tTasks('conversation.planning.generatingRubric')
             : tTasks('conversation.planning.confirmButton')}
         </button>
       )}
@@ -254,6 +355,17 @@ function PlanningStatusBar({
           key={materializedWorkflowId}
           workflowId={materializedWorkflowId}
         />
+      )}
+      {isMaterialized && canContinue && (
+        <button
+          onClick={handleContinue}
+          disabled={continueMutation.isPending}
+          className="text-xs px-base py-half rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50"
+        >
+          {continueMutation.isPending
+            ? '...'
+            : tTasks('conversation.planning.rounds.continueButton')}
+        </button>
       )}
     </div>
   );
@@ -453,6 +565,28 @@ export function CreateChatBoxContainer() {
   const feishuSyncMutation = useTogglePlanningFeishuSync();
 
   const feishuConnected = useFeishuConnectionStatus(planningDraftId);
+
+  // === Rounds (P1): ancestor chain, follow-up round creation ===
+  const { data: allDrafts } = usePlanningDrafts();
+  const continueMutation = useContinueDraft();
+  const { workflowStatus: liveWorkflowStatus } = useWorkflowLiveStatus(
+    materializedWorkflowId ?? ''
+  );
+
+  // Delivered prior rounds, oldest first: [round 1, ..., round N-1].
+  const ancestorChain = useMemo(
+    () => buildAncestorChain(allDrafts, planningDraft?.parentDraftId),
+    [allDrafts, planningDraft?.parentDraftId]
+  );
+
+  const roundNumber = ancestorChain.length + 1;
+
+  const hasChildRound = useMemo(
+    () =>
+      !!planningDraftId &&
+      (allDrafts ?? []).some((d) => d.parentDraftId === planningDraftId),
+    [allDrafts, planningDraftId]
+  );
 
   // Prefer serverMessages when available; fall back to localMessages during
   // the window between POST return and React Query cache invalidation.
@@ -674,6 +808,23 @@ export function CreateChatBoxContainer() {
     );
   }, [planningDraftId, feishuSyncMutation, showToast]);
 
+  // === Rounds (P1): open the follow-up round of a delivered draft ===
+  const handleContinue = useCallback(async () => {
+    if (!planningDraftId) return;
+    try {
+      const child = await continueMutation.mutateAsync(planningDraftId);
+      // Clear round-local state before switching; the child draft starts empty
+      // and useSyncDraftState only updates once its data loads.
+      setLocalMessages([]);
+      setMaterializedWorkflowId(null);
+      setPlanningDraftId(child.id);
+    } catch (e) {
+      console.error('Failed to start the next round:', e);
+      const err = e as { message?: string };
+      showToast(err.message ?? 'Failed to start the next round', 'error');
+    }
+  }, [planningDraftId, continueMutation, setPlanningDraftId, showToast]);
+
   // Determine error
   const displayError = (() => {
     if (submitError) return submitError;
@@ -708,6 +859,13 @@ export function CreateChatBoxContainer() {
     draftStatus === 'materialized' || !!materializedWorkflowId;
   const isSpecReady = draftStatus === 'spec_ready';
   const isConfirmed = draftStatus === 'confirmed' && !isMaterialized;
+  // Continue is offered only once this round's workflow is settled; the
+  // backend enforces the same guards (materialized + terminal + no child).
+  const workflowTerminal =
+    liveWorkflowStatus === 'completed' ||
+    liveWorkflowStatus === 'failed' ||
+    liveWorkflowStatus === 'cancelled';
+  const canContinue = isMaterialized && !hasChildRound && workflowTerminal;
 
   return (
     <div className="relative flex flex-1 h-full overflow-hidden">
@@ -725,16 +883,28 @@ export function CreateChatBoxContainer() {
               isConfirmed={isConfirmed}
               isMaterialized={isMaterialized}
               materializedWorkflowId={materializedWorkflowId}
+              roundNumber={roundNumber}
+              canContinue={canContinue}
               confirmMutation={confirmMutation}
               materializeMutation={materializeMutation}
+              continueMutation={continueMutation}
               handleConfirm={handleConfirm}
               handleMaterialize={handleMaterialize}
+              handleContinue={handleContinue}
               handleToggleFeishuSync={handleToggleFeishuSync}
               handleSyncHistory={handleSyncHistory}
             />
 
             {/* Scrollable message list */}
             <div className="flex-1 min-h-0 overflow-y-auto px-double py-base space-y-base">
+              {/* Delivered prior rounds, oldest first (P1 thread view) */}
+              {ancestorChain.map((ancestor, i) => (
+                <AncestorRound
+                  key={ancestor.id}
+                  draftId={ancestor.id}
+                  roundNumber={i + 1}
+                />
+              ))}
               {planningMessages.map((msg) => (
                 <div
                   key={msg.id}
@@ -751,6 +921,13 @@ export function CreateChatBoxContainer() {
                   </div>
                 </div>
               ))}
+              {/* P0: acceptance rubric (评分点) — visible from confirm onward */}
+              {planningDraft?.auditPlan && (
+                <AuditPlanCard
+                  auditPlanJson={planningDraft.auditPlan}
+                  defaultExpanded={isConfirmed}
+                />
+              )}
               {isThinking && (
                 <div className="flex justify-start">
                   <div className="bg-secondary rounded-lg px-base py-half text-sm text-low animate-pulse">
@@ -887,6 +1064,9 @@ export function CreateChatBoxContainer() {
           retainBuiltin={retainBuiltin}
         />
       )}
+
+      {/* Requirement ledger (评分点账本) — project-scoped, spans rounds */}
+      {isInPlanningMode && <RequirementLedgerPanel projectId={projectId} />}
 
       {/* G2 quality-gate confirmation — gates must be confirmed before materialize */}
       {isInPlanningMode && planningDraftId && projectId && (

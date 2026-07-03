@@ -1,4 +1,10 @@
 {
+  "qualityGates": {
+    "confirmTitle": "確認工程品質門檻",
+    "confirmDescription": "請查看本次執行將強制執行的品質門檻規則與 AI 產生的自訂規則。確認是必需的——在儲存並確認之前無法建立工作流。",
+    "saveAndConfirm": "儲存並確認",
+    "confirmError": "確認品質門檻失敗。"
+  },
   "settings": {
     "layout": {
       "nav": {

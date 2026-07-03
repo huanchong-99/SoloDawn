@@ -1,4 +1,10 @@
 {
+  "qualityGates": {
+    "confirmTitle": "Confirmar puertas de calidad de ingeniería",
+    "confirmDescription": "Revisa las reglas de puertas de calidad y las reglas personalizadas creadas por IA aplicadas en esta ejecución. La confirmación es obligatoria: el flujo de trabajo no puede crearse hasta que guardes y confirmes.",
+    "saveAndConfirm": "Guardar y confirmar",
+    "confirmError": "Error al confirmar las puertas de calidad."
+  },
   "settings": {
     "layout": {
       "nav": {

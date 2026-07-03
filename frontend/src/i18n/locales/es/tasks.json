@@ -691,7 +691,39 @@
       "refineOrConfirm": "Refinar requisitos o confirmar el plan...",
       "thinking": "El planificador está pensando...",
       "startPlanning": "Iniciar Planificación",
-      "confirmButton": "Confirmar Plan",
+      "confirmButton": "Confirmar plan y criterios de aceptación",
+      "generatingRubric": "Generando criterios de aceptación...",
+      "rounds": {
+        "badge": "Ronda {{round}}",
+        "divider": "Ronda {{round}}",
+        "continueButton": "Continuar requisitos"
+      },
+      "auditPlan": {
+        "cardTitle": "Criterios de aceptación",
+        "cardSummary": "{{points}} puntos de evaluación · aprobado con {{threshold}}",
+        "maxScore": "{{max}} pts"
+      },
+      "ledger": {
+        "panelTab": "Registro de requisitos",
+        "panelTitle": "Registro de requisitos",
+        "progress": "{{delivered}}/{{total}} entregados",
+        "status": {
+          "pending": "Pendiente",
+          "delivered": "Entregado",
+          "regressed": "Regresión"
+        },
+        "capsuleBuilt": "Qué se construyó",
+        "capsuleLivesWhere": "Dónde vive",
+        "capsuleDecisions": "Decisiones clave",
+        "capsuleExtensionNotes": "Cómo extender",
+        "capsuleProvenance": "Commits",
+        "showCapsule": "Ver contexto",
+        "hideCapsule": "Ocultar contexto",
+        "edit": "Editar",
+        "save": "Guardar",
+        "cancel": "Cancelar",
+        "delete": "Eliminar"
+      },
       "refineButton": "Refinar",
       "materializeButton": "Crear Flujo de Trabajo",
       "materialized": "Flujo de Trabajo Creado",

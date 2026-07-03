@@ -691,7 +691,39 @@
       "refineOrConfirm": "繼續完善需求或確認方案...",
       "thinking": "規劃師正在思考...",
       "startPlanning": "開始規劃",
-      "confirmButton": "確認方案",
+      "confirmButton": "確認計畫與驗收標準",
+      "generatingRubric": "正在產生驗收標準...",
+      "rounds": {
+        "badge": "第 {{round}} 輪",
+        "divider": "第 {{round}} 輪",
+        "continueButton": "繼續需求"
+      },
+      "auditPlan": {
+        "cardTitle": "驗收評分標準",
+        "cardSummary": "{{points}} 個評分點 · {{threshold}} 分及格",
+        "maxScore": "{{max}} 分"
+      },
+      "ledger": {
+        "panelTab": "需求清單",
+        "panelTitle": "需求清單",
+        "progress": "已交付 {{delivered}}/{{total}}",
+        "status": {
+          "pending": "待交付",
+          "delivered": "已交付",
+          "regressed": "已回退"
+        },
+        "capsuleBuilt": "做了什麼",
+        "capsuleLivesWhere": "程式碼位置",
+        "capsuleDecisions": "關鍵決策",
+        "capsuleExtensionNotes": "擴充提示",
+        "capsuleProvenance": "相關提交",
+        "showCapsule": "查看上下文",
+        "hideCapsule": "收起上下文",
+        "edit": "編輯",
+        "save": "儲存",
+        "cancel": "取消",
+        "delete": "刪除"
+      },
       "refineButton": "繼續完善",
       "materializeButton": "建立工作流",
       "materialized": "工作流已建立",
