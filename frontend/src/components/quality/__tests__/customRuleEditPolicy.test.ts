@@ -101,6 +101,8 @@ function modelOption(over: Partial<ModelOption> = {}): ModelOption {
     subtitle: null,
     isCustom: false,
     hasApiKey: true,
+    modelId: null,
+    isNative: false,
     ...over,
   };
 }

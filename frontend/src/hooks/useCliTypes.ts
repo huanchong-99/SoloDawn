@@ -88,7 +88,32 @@ const cliTypesApi = {
     }
     return response.json();
   },
+
+  /**
+   * Make a model the default for its CLI type. For Claude Code this is the
+   * model native-subscription runs use when nothing more specific is chosen.
+   */
+  setDefaultModel: async (
+    cliTypeId: string,
+    modelConfigId: string
+  ): Promise<void> => {
+    const response = await fetch(
+      `/api/cli_types/${encodeURIComponent(cliTypeId)}/models/${encodeURIComponent(modelConfigId)}/default`,
+      { method: 'PUT' }
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to set default model: ${response.status}`);
+    }
+  },
 };
+
+/** Set the default model for a CLI type (see cliTypesApi.setDefaultModel). */
+export function setDefaultModelForCli(
+  cliTypeId: string,
+  modelConfigId: string
+): Promise<void> {
+  return cliTypesApi.setDefaultModel(cliTypeId, modelConfigId);
+}
 
 // ============================================================================
 // Hooks

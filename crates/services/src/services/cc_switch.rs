@@ -23,7 +23,10 @@ use db::{
     models::{CliType, ModelConfig, Terminal, Workflow},
 };
 
-use crate::services::terminal::process::{SpawnCommand, SpawnEnv};
+use crate::services::{
+    claude_models,
+    terminal::process::{SpawnCommand, SpawnEnv},
+};
 
 // ============================================================================
 // Authentication Skip Helpers
@@ -211,10 +214,7 @@ fn create_claude_config(
 ///
 /// In the `using_native_auth` path this file is unused (claude reuses the
 /// already-onboarded global `~/.claude`), so writing it is harmless there.
-fn write_claude_onboarding_state(
-    claude_home: &Path,
-    working_dir: &Path,
-) -> anyhow::Result<()> {
+fn write_claude_onboarding_state(claude_home: &Path, working_dir: &Path) -> anyhow::Result<()> {
     // claude normalizes Windows paths to forward slashes in the projects map key.
     let project_key = working_dir.to_string_lossy().replace('\\', "/");
     let mut projects = serde_json::Map::new();
@@ -242,8 +242,9 @@ fn write_claude_onboarding_state(
         "projects": serde_json::Value::Object(projects)
     });
     let state_path = claude_home.join(".claude.json");
-    std::fs::write(&state_path, serde_json::to_string_pretty(&state)?)
-        .map_err(|e| anyhow::anyhow!("Failed to write claude .claude.json onboarding state: {e}"))?;
+    std::fs::write(&state_path, serde_json::to_string_pretty(&state)?).map_err(|e| {
+        anyhow::anyhow!("Failed to write claude .claude.json onboarding state: {e}")
+    })?;
     tracing::debug!(
         claude_home = %claude_home.display(),
         project_key = %project_key,
@@ -919,11 +920,9 @@ pub struct CCSwitchService {
 
 impl CCSwitchService {
     // Last-resort fallback when both the terminal's requested Claude model and
-    // the CLI's DB default are absent/invalid. Bumped alongside the matching
-    // strings in agent.rs and planning_drafts.rs after the
-    // `test_probe_subscription_model_acceptance` probe confirmed the
-    // subscription endpoint accepts the new ID.
-    const DEFAULT_CLAUDE_FALLBACK_MODEL: &'static str = "claude-sonnet-4-6";
+    // the CLI's DB default are absent/invalid. Shared with agent.rs and
+    // planning_drafts.rs via `claude_models`.
+    const DEFAULT_CLAUDE_FALLBACK_MODEL: &'static str = claude_models::DEFAULT_NATIVE_CLAUDE_MODEL;
 
     pub fn new(db: Arc<DBService>) -> Self {
         Self { db }
@@ -956,8 +955,16 @@ impl CCSwitchService {
     ) -> anyhow::Result<String> {
         let requested_model = Self::resolve_model_name(model_config);
 
+        // The frontend's native-subscription entry historically sends a
+        // "use the account default" sentinel; it must never reach the CLI as
+        // a literal model id, even when a base_url fallback is in play.
+        let is_native_sentinel =
+            requested_model.trim() == claude_models::NATIVE_SUBSCRIPTION_SENTINEL;
+
         // Custom Anthropic-compatible gateways may legitimately use non-Claude model names.
-        if effective_base_url.is_some() || Self::looks_like_claude_model(&requested_model) {
+        if !is_native_sentinel
+            && (effective_base_url.is_some() || Self::looks_like_claude_model(&requested_model))
+        {
             return Ok(requested_model);
         }
 
@@ -1636,10 +1643,16 @@ mod tests {
 
         let out: Value =
             serde_json::from_str(&std::fs::read_to_string(&dst).unwrap()).expect("valid json");
-        let env = out.get("env").and_then(Value::as_object).expect("env block");
+        let env = out
+            .get("env")
+            .and_then(Value::as_object)
+            .expect("env block");
         // Every billing-routing var stripped so native OAuth stays on the plan.
         for key in BILLING_ENV_KEYS {
-            assert!(!env.contains_key(key), "{key} must be stripped from native settings.json");
+            assert!(
+                !env.contains_key(key),
+                "{key} must be stripped from native settings.json"
+            );
         }
         // Non-billing env + top-level preferences preserved.
         assert_eq!(env.get("EDITOR").and_then(Value::as_str), Some("vim"));
@@ -2104,6 +2117,29 @@ mod tests {
         assert_eq!(resolved, "glm-5");
     }
 
+    #[tokio::test]
+    async fn test_resolve_claude_launch_model_never_returns_native_sentinel() {
+        let db = setup_test_db().await;
+        let service = CCSwitchService::new(db);
+        // Even with a custom endpoint (which normally passes the requested
+        // model through), the frontend's "subscription-default" sentinel must
+        // never reach the CLI as a literal model id.
+        let terminal = make_test_terminal(Some("https://custom-anthropic-compatible.example"));
+        let model_config = make_test_model(claude_models::NATIVE_SUBSCRIPTION_SENTINEL);
+
+        let resolved = service
+            .resolve_claude_launch_model(
+                &terminal,
+                &model_config,
+                Some("https://custom-anthropic-compatible.example"),
+            )
+            .await
+            .expect("resolve_claude_launch_model should succeed");
+
+        assert_ne!(resolved, claude_models::NATIVE_SUBSCRIPTION_SENTINEL);
+        assert!(CCSwitchService::looks_like_claude_model(&resolved));
+    }
+
     // ------------------------------------------------------------------------
     // S3 — interactive transport helpers
     // ------------------------------------------------------------------------
@@ -2130,7 +2166,9 @@ mod tests {
         let path = interactive_transcript_path(home, wd, "the-uuid");
         assert_eq!(
             path,
-            home.join("projects").join("-repo-proj").join("the-uuid.jsonl")
+            home.join("projects")
+                .join("-repo-proj")
+                .join("the-uuid.jsonl")
         );
     }
 

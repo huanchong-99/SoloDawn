@@ -2,6 +2,7 @@ pub mod analytics;
 pub mod approvals;
 pub mod auth;
 pub mod cc_switch;
+pub mod claude_models;
 pub mod cli_health_monitor;
 pub mod cli_installer;
 pub mod config;

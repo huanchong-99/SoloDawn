@@ -365,7 +365,7 @@ pub struct CreateWorkflowTaskRequest {
 pub struct InlineModelConfig {
     /// Display name for the model
     pub display_name: String,
-    /// API model ID (e.g., "glm-4-plus", "claude-sonnet-4")
+    /// API model ID (e.g., "glm-5", "claude-sonnet-5")
     pub model_id: String,
 }
 
@@ -1446,10 +1446,8 @@ mod encryption_tests {
         // With no env key set, encryption now self-provisions a stable
         // per-machine key file (set-once-persists). Point that file at a temp
         // path so the test stays hermetic and does not touch the real data dir.
-        let key_file = std::env::temp_dir().join(format!(
-            "solodawn-test-enckey-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let key_file =
+            std::env::temp_dir().join(format!("solodawn-test-enckey-{}", uuid::Uuid::new_v4()));
         let key_file_str = key_file.to_string_lossy().to_string();
         temp_env::with_vars(
             [
@@ -1461,7 +1459,9 @@ mod encryption_tests {
                 let mut workflow = test_workflow("test-workflow");
 
                 // Should succeed via the self-provisioned file key.
-                workflow.set_api_key("sk-test").expect("encryption should succeed");
+                workflow
+                    .set_api_key("sk-test")
+                    .expect("encryption should succeed");
                 let decrypted = workflow.get_api_key().unwrap().unwrap();
                 assert_eq!(decrypted, "sk-test");
                 assert!(key_file.exists(), "key file should have been generated");

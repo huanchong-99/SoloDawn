@@ -144,7 +144,7 @@
       "nativeTab": "訂閱登入",
       "manualTab": "API 金鑰",
       "nativeDetected": "已偵測到 Claude Code 訂閱",
-      "nativeModelLabel": "模型",
+      "nativeModelsLabel": "模型列表",
       "nativeVersionLabel": "CLI 版本",
       "nativeHint": "將直接使用您已登入的 Claude Code 帳號，無需填寫 API 金鑰。",
       "nativeAlreadyAdded": "訂閱模型已設定。切換到「API 金鑰」標籤頁可新增其他模型。"
@@ -167,7 +167,7 @@
       },
       "modelId": {
         "label": "Model ID",
-        "placeholder": "Enter model ID, e.g. claude-3-5-sonnet-20241022",
+        "placeholder": "Enter model ID, e.g. claude-sonnet-5",
         "selectPlaceholder": "Select a model"
       }
     },

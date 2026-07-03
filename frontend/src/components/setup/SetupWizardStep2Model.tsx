@@ -40,6 +40,16 @@ export interface SetupWizardStep2ModelProps {
   nativeAvailable: boolean;
   isNativeLoading: boolean;
   nativeCliVersion: string | null;
+  /** Official Claude models the subscription can switch between (default first). */
+  nativeModels: Array<{
+    id: string;
+    displayName: string;
+    apiModelId: string;
+    isDefault: boolean;
+  }>;
+  /** Selected default native model (model_config row id). */
+  nativeModelId: string;
+  onNativeModelIdChange: (v: string) => void;
   displayName: string;
   cliTypeId: string;
   onCliTypeIdChange: (v: string) => void;
@@ -74,6 +84,9 @@ export function SetupWizardStep2Model({
   nativeAvailable,
   isNativeLoading,
   nativeCliVersion,
+  nativeModels,
+  nativeModelId,
+  onNativeModelIdChange,
   displayName,
   cliTypeId,
   onCliTypeIdChange,
@@ -162,10 +175,39 @@ export function SetupWizardStep2Model({
                 </span>
               </div>
               <div className="space-y-half text-base text-normal">
-                <div className="flex justify-between">
-                  <span className="text-low">{t('setup:wizard.model.nativeModelLabel')}</span>
-                  <span className="font-mono text-high">{t('setup:wizard.model.nativeModelAuto')}</span>
-                </div>
+                {nativeModels.length > 0 ? (
+                  <div className="space-y-half">
+                    <label
+                      htmlFor="setup-native-model"
+                      className="text-low text-base"
+                    >
+                      {t('setup:wizard.model.nativeModelLabel')}
+                    </label>
+                    <select
+                      id="setup-native-model"
+                      value={nativeModelId}
+                      onChange={(e) => onNativeModelIdChange(e.target.value)}
+                      className="w-full px-base py-half bg-secondary rounded border text-base text-normal focus:outline-none focus:ring-1 focus:ring-brand"
+                    >
+                      {nativeModels.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.displayName} ({model.apiModelId})
+                          {model.isDefault
+                            ? ` — ${t('setup:wizard.model.nativeCurrentDefault')}`
+                            : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-sm text-low">
+                      {t('setup:wizard.model.nativeModelSwitchHint')}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex justify-between">
+                    <span className="text-low">{t('setup:wizard.model.nativeModelLabel')}</span>
+                    <span className="font-mono text-high">{t('setup:wizard.model.nativeModelAuto')}</span>
+                  </div>
+                )}
                 {nativeCliVersion && (
                   <div className="flex justify-between">
                     <span className="text-low">{t('setup:wizard.model.nativeVersionLabel')}</span>

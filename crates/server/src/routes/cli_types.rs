@@ -16,7 +16,10 @@ use axum::{
     routing::{get, post, put},
 };
 use chrono::{DateTime, Utc};
-use db::models::{CliDetectionStatus, CliType, CliType as CliTypeModel, ModelConfig};
+use db::models::{
+    CliDetectionStatus, CliType, CliType as CliTypeModel, ModelConfig,
+    cli_install_history::{CliDetectionCache, CliInstallHistory},
+};
 use deployment::Deployment;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -28,8 +31,6 @@ use services::services::{
 use tokio::sync::broadcast;
 
 use crate::{DeploymentImpl, error::ApiError};
-
-use db::models::cli_install_history::{CliDetectionCache, CliInstallHistory};
 
 /// A single line of install output streamed over WebSocket.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +111,10 @@ pub fn cli_types_routes() -> Router<DeploymentImpl> {
         .route(
             "/{cli_type_id}/models/{model_id}/credentials",
             put(update_model_credentials),
+        )
+        .route(
+            "/{cli_type_id}/models/{model_id}/default",
+            put(set_default_model),
         )
         .route(
             "/{cli_type_id}/install",
@@ -217,6 +222,37 @@ async fn update_model_credentials(
         cli_type_id = %cli_type_id,
         api_type = %payload.api_type,
         "Model credentials saved"
+    );
+
+    Ok(ResponseJson(json!({ "saved": true })))
+}
+
+/// PUT /api/cli_types/:cli_type_id/models/:model_id/default
+/// Make a model the default for its CLI type. For Claude Code this is the
+/// model that native-subscription (OAuth) runs use whenever no explicit
+/// per-terminal / per-workflow choice exists — in both DIY and
+/// agent-planned modes.
+async fn set_default_model(
+    State(deployment): State<DeploymentImpl>,
+    Path((cli_type_id, model_id)): Path<(String, String)>,
+) -> Result<ResponseJson<Value>, ApiError> {
+    // Validate model belongs to cli_type
+    let model = ModelConfig::find_by_id(&deployment.db().pool, &model_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("Model config not found: {model_id}")))?;
+
+    if model.cli_type_id != cli_type_id {
+        return Err(ApiError::BadRequest(format!(
+            "Model {model_id} does not belong to CLI type {cli_type_id}"
+        )));
+    }
+
+    ModelConfig::set_default_for_cli(&deployment.db().pool, &cli_type_id, &model_id).await?;
+
+    tracing::info!(
+        model_id = %model_id,
+        cli_type_id = %cli_type_id,
+        "Default model updated"
     );
 
     Ok(ResponseJson(json!({ "saved": true })))

@@ -43,23 +43,22 @@ pub mod types;
 #[cfg(test)]
 mod tests_pipeline;
 
-pub use pipeline::{
-    AuthoringAgents, MAX_AUTHORING_ROUNDS, author_rule, persist_run, revalidate_rule_body,
-    run_authoring,
-};
-pub use types::{
-    AdversaryFindings, AuthorOutcome, AuthorRunResult, AuthoredCandidate, AuthoringBackend,
-    EmpiricalReport, ExampleKind, ExampleResult, GeneratedRule, RoundTripVerdict, RuleBodyEnvelope,
-    RuleExample,
-};
-
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use db::models::ModelConfig;
 use once_cell::sync::Lazy;
+pub use pipeline::{
+    AuthoringAgents, MAX_AUTHORING_ROUNDS, author_rule, persist_run, revalidate_rule_body,
+    run_authoring,
+};
 use sqlx::SqlitePool;
 use tokio::sync::Semaphore;
+pub use types::{
+    AdversaryFindings, AuthorOutcome, AuthorRunResult, AuthoredCandidate, AuthoringBackend,
+    EmpiricalReport, ExampleKind, ExampleResult, GeneratedRule, RoundTripVerdict, RuleBodyEnvelope,
+    RuleExample,
+};
 
 use crate::services::{
     cc_switch::InteractiveAuthMode,
@@ -251,8 +250,15 @@ pub async fn build_authoring_client_with_backend(
         InteractiveAuthMode::NativeOauth => {
             // Subscription / native-OAuth: reuse the existing interactive
             // transport. `create_interactive_claude_client` returns `None` when
-            // no local subscription credentials exist.
-            let model_name = resolve_model_name(&model);
+            // no local subscription credentials exist. Resolve non-Claude ids
+            // (legacy "subscription-default" sentinel rows, stale entries) to
+            // the DB default official Claude model — the CLI cannot launch
+            // with them.
+            let model_name = crate::services::claude_models::resolve_native_claude_model(
+                pool,
+                Some(&resolve_model_name(&model)),
+            )
+            .await;
             let client = create_interactive_claude_client(&model_name).ok_or_else(|| {
                 anyhow::anyhow!(
                     "selected source has no usable subscription credentials \

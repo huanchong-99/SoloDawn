@@ -38,6 +38,8 @@
       "nativeDetected": "Suscripci\u00f3n de Claude Code detectada",
       "nativeModelLabel": "Modelo",
       "nativeModelAuto": "Auto (seg\u00fan suscripci\u00f3n)",
+      "nativeCurrentDefault": "predeterminado actual",
+      "nativeModelSwitchHint": "Establece el modelo predeterminado para las ejecuciones por suscripci\u00f3n \u2014 se aplica a los modos DIY y Agent Planned; cada terminal puede elegir otro modelo.",
       "nativeVersionLabel": "Versi\u00f3n del CLI",
       "nativeHint": "Se utilizar\u00e1 directamente tu cuenta de Claude Code ya iniciada \u2014 no se necesita clave de API.",
       "nativeNotFound": "No se detect\u00f3 una suscripci\u00f3n activa",

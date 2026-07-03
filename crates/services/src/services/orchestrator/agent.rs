@@ -25,13 +25,13 @@ use super::{
         COMPLETION_CONTEXT_DIFF_MAX_CHARS, COMPLETION_CONTEXT_LOG_LINES,
         COMPLETION_CONTEXT_LOG_MAX_CHARS, GIT_COMMIT_METADATA_SEPARATOR, HANDOFF_COMMIT_MAX_CHARS,
         HANDOFF_NOTES_MAX_CHARS, MAX_CONSECUTIVE_LLM_FAILURES, MAX_ENFORCE_DEADLOCK_BLOCKS,
-        MAX_REVIEW_REDRIVES, ORPHAN_PENDING_GRACE_SECS, QUALITY_GATE_MODE_ENFORCE, QUALITY_GATE_MODE_OFF,
-        QUALITY_GATE_MODE_SHADOW,
-        QUALITY_GATE_STATUS_SKIPPED, QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX,
-        QUALITY_REQUIREMENTS_SUFFIX, STATE_SAVE_DEBOUNCE_SECS, TASK_STATUS_CANCELLED,
-        TASK_STATUS_COMPLETED, TASK_STATUS_FAILED, TASK_STATUS_PENDING, TASK_STATUS_REVIEW_PENDING,
-        TASK_STATUS_RUNNING, TERMINAL_STATUS_CANCELLED, TERMINAL_STATUS_COMPLETED,
-        TERMINAL_STATUS_FAILED, TERMINAL_STATUS_NOT_STARTED, TERMINAL_STATUS_QUALITY_PENDING,
+        MAX_REVIEW_REDRIVES, ORPHAN_PENDING_GRACE_SECS, QUALITY_GATE_MODE_ENFORCE,
+        QUALITY_GATE_MODE_OFF, QUALITY_GATE_MODE_SHADOW, QUALITY_GATE_STATUS_SKIPPED,
+        QUALITY_REQUIREMENTS_INCREMENTAL_SUFFIX, QUALITY_REQUIREMENTS_SUFFIX,
+        STATE_SAVE_DEBOUNCE_SECS, TASK_STATUS_CANCELLED, TASK_STATUS_COMPLETED, TASK_STATUS_FAILED,
+        TASK_STATUS_PENDING, TASK_STATUS_REVIEW_PENDING, TASK_STATUS_RUNNING,
+        TERMINAL_STATUS_CANCELLED, TERMINAL_STATUS_COMPLETED, TERMINAL_STATUS_FAILED,
+        TERMINAL_STATUS_NOT_STARTED, TERMINAL_STATUS_QUALITY_PENDING,
         TERMINAL_STATUS_REVIEW_PASSED, TERMINAL_STATUS_REVIEW_REJECTED, TERMINAL_STATUS_STARTING,
         TERMINAL_STATUS_WAITING, TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_CANCELLED,
         WORKFLOW_STATUS_COMPLETED, WORKFLOW_STATUS_FAILED, WORKFLOW_STATUS_MERGE_PARTIAL_FAILED,
@@ -60,6 +60,7 @@ use super::{
     },
 };
 use crate::services::{
+    claude_models,
     concierge::{ConciergeBroadcaster, ConciergeEvent},
     template_renderer::{TemplateRenderer, WorkflowContext},
 };
@@ -93,9 +94,8 @@ static TASK_HINT_FROM_COMMIT_RE: Lazy<Regex> = Lazy::new(|| {
 /// (`ESC [ ... final-byte`); sufficient for the screen-redraw chunks claude
 /// emits — color/style escapes are removed while the underlying UI text stays
 /// contiguous.
-static TERMINAL_ANSI_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\x1b\[[0-9;?]*[a-zA-Z]").expect("terminal ansi regex must be valid")
-});
+static TERMINAL_ANSI_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\x1b\[[0-9;?]*[a-zA-Z]").expect("terminal ansi regex must be valid"));
 
 #[derive(Debug, Clone)]
 struct InferredNoMetadataCompletion {
@@ -208,23 +208,39 @@ impl OrchestratorAgent {
         message_bus: SharedMessageBus,
         db: Arc<DBService>,
     ) -> anyhow::Result<Self> {
+        Self::new_with_native_fallback(config, None, workflow_id, message_bus, db)
+    }
+
+    /// Like [`Self::new`], but with an explicit Claude model for the
+    /// native-credentials fallback path. Callers with async access should
+    /// pre-resolve it via `claude_models::resolve_native_claude_model`
+    /// (workflow choice → DB default official model); `None` uses the
+    /// shared last-resort constant. This is how subscription users switch
+    /// the orchestrator model — `new()` itself is sync and cannot query
+    /// the database.
+    pub fn new_with_native_fallback(
+        config: OrchestratorConfig,
+        native_fallback_model: Option<String>,
+        workflow_id: String,
+        message_bus: SharedMessageBus,
+        db: Arc<DBService>,
+    ) -> anyhow::Result<Self> {
+        let native_fallback = native_fallback_model
+            .unwrap_or_else(|| claude_models::DEFAULT_NATIVE_CLAUDE_MODEL.to_string());
         let llm_client = create_llm_client(&config).or_else(|e| {
             tracing::info!(
                 error = %e,
                 model = %config.model,
+                native_fallback = %native_fallback,
                 "Configured LLM client failed, trying Claude Code native credentials"
             );
             // Use a Claude model for native credentials — ignore non-Claude
-            // model names (e.g. "gpt-4o" from default config).
-            // Hardcoded fallback was bumped from `claude-sonnet-4-20250514`
-            // (Sonnet 4) to `claude-sonnet-4-6` (Sonnet 4.6) after the R8-C
-            // Task 1 retry delivered 92/100 on the older model — verified
-            // via the `test_probe_subscription_model_acceptance` probe that
-            // the subscription endpoint accepts the new ID.
-            let model = if config.model.starts_with("claude-") {
-                &config.model
+            // model names (e.g. "gpt-4o" from default config) and the
+            // frontend's "subscription-default" sentinel.
+            let model = if claude_models::is_concrete_claude_model(&config.model) {
+                config.model.as_str()
             } else {
-                "claude-sonnet-4-6"
+                native_fallback.as_str()
             };
             create_interactive_claude_client(model)
                 .ok_or_else(|| anyhow::anyhow!(
@@ -243,10 +259,10 @@ impl OrchestratorAgent {
         // selection prompts (e.g. the first-run model picker). Those terminals
         // then stall. Fall back to the same interactive native client.
         let prompt_llm_client = create_llm_client(&config).or_else(|_| {
-            let model = if config.model.starts_with("claude-") {
+            let model = if claude_models::is_concrete_claude_model(&config.model) {
                 config.model.as_str()
             } else {
-                "claude-sonnet-4-6"
+                native_fallback.as_str()
             };
             create_interactive_claude_client(model)
                 .ok_or_else(|| anyhow::anyhow!("no native client available for prompt LLM"))
@@ -703,13 +719,15 @@ impl OrchestratorAgent {
                 }
                 // Continue with the retry tasks for terminal dispatch check below
                 let tasks_after = tasks_retry;
-                self.dispatch_terminals_for_pending_tasks(&tasks_after).await;
+                self.dispatch_terminals_for_pending_tasks(&tasks_after)
+                    .await;
                 return Ok(());
             }
         }
 
         if !tasks_after.is_empty() {
-            self.dispatch_terminals_for_pending_tasks(&tasks_after).await;
+            self.dispatch_terminals_for_pending_tasks(&tasks_after)
+                .await;
         }
         Ok(())
     }
@@ -787,28 +805,46 @@ impl OrchestratorAgent {
         let terminals = db::models::Terminal::find_by_workflow(&self.db.pool, &workflow.id).await?;
         let cli_types = db::models::CliType::find_all(&self.db.pool).await?;
         // Show user-configured models with API keys to the agent.
-        // When none exist but native credentials are available, inject
-        // a synthetic Claude Code model so the agent can create terminals.
+        // When none exist but native credentials are available, expose the
+        // official Claude Code models (subscription-billed) so the agent can
+        // create terminals — and switch between Sonnet/Opus/Haiku/Fable per
+        // terminal. The DB default row stays first (ordered by the query).
         let mut model_configs =
             db::models::ModelConfig::find_user_configured(&self.db.pool).await?;
         if model_configs.is_empty()
-            && create_interactive_claude_client("claude-sonnet-4-6").is_some()
+            && create_interactive_claude_client(claude_models::DEFAULT_NATIVE_CLAUDE_MODEL)
+                .is_some()
         {
-            model_configs.push(db::models::ModelConfig {
-                id: "model-claude-sonnet".to_string(),
-                cli_type_id: "cli-claude-code".to_string(),
-                name: "sonnet".to_string(),
-                display_name: "Claude Sonnet (Native)".to_string(),
-                api_model_id: Some("claude-sonnet-4-6".to_string()),
-                is_default: true,
-                is_official: false,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-                encrypted_api_key: None,
-                base_url: None,
-                api_type: None,
-                has_api_key: false,
-            });
+            let mut native_models =
+                claude_models::official_native_claude_models(&self.db.pool).await;
+            for model in &mut native_models {
+                model.display_name = if model.is_default {
+                    format!("{} (Native, default)", model.display_name)
+                } else {
+                    format!("{} (Native)", model.display_name)
+                };
+            }
+            if native_models.is_empty() {
+                // DB rows missing (legacy/corrupt database): keep the old
+                // single synthetic entry so the agent can still work. The id
+                // matches the seeded official row so terminal FKs resolve.
+                native_models.push(db::models::ModelConfig {
+                    id: "model-claude-sonnet".to_string(),
+                    cli_type_id: claude_models::CLAUDE_CODE_CLI_TYPE_ID.to_string(),
+                    name: "sonnet".to_string(),
+                    display_name: "Claude Sonnet (Native)".to_string(),
+                    api_model_id: Some(claude_models::DEFAULT_NATIVE_CLAUDE_MODEL.to_string()),
+                    is_default: true,
+                    is_official: false,
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                    encrypted_api_key: None,
+                    base_url: None,
+                    api_type: None,
+                    has_api_key: false,
+                });
+            }
+            model_configs = native_models;
         }
         let workflow_commands =
             db::models::WorkflowCommand::find_by_workflow(&self.db.pool, &workflow.id).await?;
@@ -1237,21 +1273,18 @@ impl OrchestratorAgent {
                     // missing score instead of the task stalling forever.
                     let has_completed_commit = task_terminals.iter().any(|t| {
                         t.status == "completed"
-                            && t
-                                .last_commit_hash
+                            && t.last_commit_hash
                                 .as_deref()
                                 .map(|s| !s.is_empty())
                                 .unwrap_or(false)
                     });
-                    let all_done = task_terminals.iter().all(|t| {
-                        t.status == "completed" || t.status == "failed"
-                    }) || (has_completed_commit
-                        && task_terminals.iter().all(|t| {
-                            matches!(
-                                t.status.as_str(),
-                                "completed" | "failed" | "not_started"
-                            )
-                        }));
+                    let all_done = task_terminals
+                        .iter()
+                        .all(|t| t.status == "completed" || t.status == "failed")
+                        || (has_completed_commit
+                            && task_terminals.iter().all(|t| {
+                                matches!(t.status.as_str(), "completed" | "failed" | "not_started")
+                            }));
                     if all_done {
                         // R8-B3 guard #2: don't auto-complete a task whose
                         // terminals technically exited but whose enforce
@@ -1412,9 +1445,7 @@ impl OrchestratorAgent {
                         // auto-failed the SAME second they were created, so zero
                         // feature work ever ran and the workflow failed instantly.
                         // Give the dispatcher a fair window first.
-                        let age_secs = (chrono::Utc::now() - task.created_at)
-                            .num_seconds()
-                            .max(0);
+                        let age_secs = (chrono::Utc::now() - task.created_at).num_seconds().max(0);
                         if age_secs < ORPHAN_PENDING_GRACE_SECS {
                             tracing::info!(
                                 task_id = %task.id, task_name = %task.name,
@@ -1461,7 +1492,10 @@ impl OrchestratorAgent {
                     }
                     // A terminal with a live process means a coder is
                     // mid-flight — don't double-dispatch; let it finish.
-                    if task_terminals.iter().any(|t| t.execution_process_id.is_some()) {
+                    if task_terminals
+                        .iter()
+                        .any(|t| t.execution_process_id.is_some())
+                    {
                         continue;
                     }
                     match task.acceptance_verdict.as_deref() {
@@ -1557,9 +1591,7 @@ impl OrchestratorAgent {
                                 {
                                     let _ = self
                                         .dispatch_terminal_when_ready_or_queue(
-                                            &task.id,
-                                            &restarted,
-                                            &msg,
+                                            &task.id, &restarted, &msg,
                                         )
                                         .await;
                                 }
@@ -1780,9 +1812,7 @@ impl OrchestratorAgent {
                     // let it fall through to re-dispatch. Only the genuinely
                     // mid-generation case (recent output is response text)
                     // stays protected.
-                    if Self::is_terminal_at_idle_prompt(&self.db.pool, &terminal.id)
-                        .await
-                    {
+                    if Self::is_terminal_at_idle_prompt(&self.db.pool, &terminal.id).await {
                         // [G32-idle-flat-forcecomplete] idle-prompt signature
                         // alone is ambiguous: it can be (a) a freshly-spawned
                         // claude that swallowed the cold-start instruction and
@@ -1834,10 +1864,7 @@ impl OrchestratorAgent {
                         );
                         continue;
                     } else if self
-                        .remaining_terminal_quiet_duration(
-                            &terminal.id,
-                            Self::STALL_ALIVE_HARD_CAP,
-                        )
+                        .remaining_terminal_quiet_duration(&terminal.id, Self::STALL_ALIVE_HARD_CAP)
                         .await?
                         .is_some()
                     {
@@ -5704,20 +5731,17 @@ impl OrchestratorAgent {
         // review was invalidated → coders never received score feedback → no
         // convergence (observed 2026-06-27: Tags 38 / Markdown 44 / UI 78 all
         // invalidated in a tight storm).
-        let locked_commit_hash = match auto_commit_pending_changes_for_review(
-            &review_working_dir,
-            &event.task_id,
-        )
-        .await
-        {
-            Some(new_head) => new_head,
-            None => match event.commit_hash.clone() {
-                Some(commit_hash) => commit_hash,
-                None => current_git_head(&review_working_dir)
-                    .await
-                    .unwrap_or_else(|| "HEAD".to_string()),
-            },
-        };
+        let locked_commit_hash =
+            match auto_commit_pending_changes_for_review(&review_working_dir, &event.task_id).await
+            {
+                Some(new_head) => new_head,
+                None => match event.commit_hash.clone() {
+                    Some(commit_hash) => commit_hash,
+                    None => current_git_head(&review_working_dir)
+                        .await
+                        .unwrap_or_else(|| "HEAD".to_string()),
+                },
+            };
 
         let (task_branch, target_branch) =
             Self::load_branch_info_for_review(&self.db, &event.task_id, &event.workflow_id).await;
@@ -6058,8 +6082,8 @@ impl OrchestratorAgent {
         // (it re-runs on completion and creates the next repair round if blockers
         // remain, capped by FINAL_REPAIR_MAX_ROUNDS). See web-memo task 7
         // (workflow 99648da5, 2026-06-28).
-        let early_task = db::models::WorkflowTask::find_by_id(&self.db.pool, &event.task_id)
-            .await?;
+        let early_task =
+            db::models::WorkflowTask::find_by_id(&self.db.pool, &event.task_id).await?;
         if let Some(ref t) = early_task {
             if Self::is_final_repair_task(t) {
                 tracing::info!(
@@ -6123,9 +6147,8 @@ impl OrchestratorAgent {
         // feature tasks as foundation. The Foundation is always the first task
         // (order_index 0); feature tasks are order 1+, and are scored against their
         // own scope at the full product bar.
-        let is_foundation_phase = {
-            self.state.read().await.foundation_phase_only && task.order_index == 0
-        };
+        let is_foundation_phase =
+            { self.state.read().await.foundation_phase_only && task.order_index == 0 };
         let review_scope = if is_foundation_phase {
             "This task is the FOUNDATION / scaffolding phase of a from-scratch project. Its ONLY \
              responsibilities are the project skeleton: directory structure, shared types/models, data \
@@ -6183,7 +6206,10 @@ impl OrchestratorAgent {
             if attempt > 1 {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
-            match self.call_llm_stateless_nonfatal(&prompt, "acceptance_review").await {
+            match self
+                .call_llm_stateless_nonfatal(&prompt, "acceptance_review")
+                .await
+            {
                 Some(response) => {
                     if use_scoring {
                         let mut score_result = AuditScoreResult::parse(&response);
@@ -7276,10 +7302,7 @@ impl OrchestratorAgent {
                             // is predominantly non-ASCII (other guards — task
                             // count, acceptance verdicts — still validate
                             // relevance).
-                            let cjk_terms = goal_terms
-                                .iter()
-                                .filter(|t| !t.is_ascii())
-                                .count();
+                            let cjk_terms = goal_terms.iter().filter(|t| !t.is_ascii()).count();
                             let mostly_cjk = cjk_terms * 2 >= goal_terms.len();
                             if mostly_cjk {
                                 tracing::debug!(
@@ -8214,8 +8237,7 @@ impl OrchestratorAgent {
         }
         #[cfg(unix)]
         {
-            use nix::sys::signal;
-            use nix::unistd::Pid;
+            use nix::{sys::signal, unistd::Pid};
             // signal 0 = liveness probe (no signal actually delivered).
             signal::kill(Pid::from_raw(pid), None).is_ok()
         }
@@ -8356,10 +8378,7 @@ impl OrchestratorAgent {
     /// cold-start Welcome screen ("Tips for getting started" / "Welcome
     /// back") and the bypass-mode input footer ("shift+tab to cycle") only
     /// appear when claude is awaiting input, never mid-generation.
-    async fn is_terminal_at_idle_prompt(
-        pool: &sqlx::SqlitePool,
-        terminal_id: &str,
-    ) -> bool {
+    async fn is_terminal_at_idle_prompt(pool: &sqlx::SqlitePool, terminal_id: &str) -> bool {
         let rows: Vec<String> = match sqlx::query_scalar(
             r"
             SELECT content FROM terminal_log
@@ -9373,9 +9392,7 @@ impl OrchestratorAgent {
                             "secrets_detected",
                         ];
                         let provider_unavailable = result.value.is_none();
-                        let advisory = result
-                            .value
-                            .is_some()
+                        let advisory = result.value.is_some()
                             && FINAL_GATE_SOFT_METRICS.contains(&result.metric.as_str());
                         !(provider_unavailable || advisory)
                     })
@@ -9389,9 +9406,7 @@ impl OrchestratorAgent {
                         decision
                             .condition_results
                             .iter()
-                            .filter(|result| {
-                                result.level == quality::gate::status::Level::Error
-                            })
+                            .filter(|result| result.level == quality::gate::status::Level::Error)
                             .map(|result| {
                                 format!(
                                     "{} ({}): {}",
@@ -9401,10 +9416,7 @@ impl OrchestratorAgent {
                                         .as_ref()
                                         .map(|value| format!("{value}"))
                                         .unwrap_or_else(|| "no value".to_string()),
-                                    result
-                                        .message
-                                        .as_deref()
-                                        .unwrap_or("provider unavailable")
+                                    result.message.as_deref().unwrap_or("provider unavailable")
                                 )
                             })
                             .collect()
@@ -10031,9 +10043,7 @@ impl OrchestratorAgent {
                     t.id == terminal.workflow_task_id
                         && !matches!(
                             t.status.as_str(),
-                            TASK_STATUS_COMPLETED
-                                | TASK_STATUS_FAILED
-                                | TASK_STATUS_CANCELLED
+                            TASK_STATUS_COMPLETED | TASK_STATUS_FAILED | TASK_STATUS_CANCELLED
                         )
                 });
             in_flight || queued_on_active_task
@@ -11678,7 +11688,9 @@ task_id: {task_id}\n"
         .await
         .ok()?;
     if head_output.status.success() {
-        let hash = String::from_utf8_lossy(&head_output.stdout).trim().to_string();
+        let hash = String::from_utf8_lossy(&head_output.stdout)
+            .trim()
+            .to_string();
         if !hash.is_empty() {
             tracing::info!(
                 task_id = %task_id,
@@ -12059,9 +12071,7 @@ async fn collect_changed_files_content(
                 // #N1 parallel-interleave fix (see FOOTERLESS_WALKBACK note): skip
                 // interleaved other-task commits instead of stopping, so the
                 // cumulative diff re-captures this task's footerless earlier commits.
-                if ancestor_commit_belongs_to_other_task(working_dir, &ancestor, tid)
-                    .await
-                {
+                if ancestor_commit_belongs_to_other_task(working_dir, &ancestor, tid).await {
                     tracing::debug!(
                         target: "acceptance_review_scope",
                         depth,
@@ -13516,7 +13526,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(passed, "APPROVED review must survive a mid-review commit (§8 #4)");
+        assert!(
+            passed,
+            "APPROVED review must survive a mid-review commit (§8 #4)"
+        );
         // Precondition: the late commit really did land.
         assert_ne!(
             run_git(&fixture.repo_path, &["rev-parse", "HEAD"]),

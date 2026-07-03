@@ -9,7 +9,8 @@ import {
   getVisibleWizardStepIds,
   getVisibleWizardSteps,
   NATIVE_MODEL_ID,
-  createNativeModelConfig,
+  createNativeModelConfigs,
+  isNativeModelEntry,
 } from './types';
 import type { ModelConfig } from './types';
 import { useWizardNavigation } from './hooks/useWizardNavigation';
@@ -154,13 +155,25 @@ export function WorkflowWizard({
             ? globalModelLibrary
             : [];
 
-      // Inject native model when credentials are detected and not yet present
-      if (
-        nativeStatus?.available &&
-        !models.some((m) => m.id === NATIVE_MODEL_ID)
-      ) {
-        const nativeModel = createNativeModelConfig();
-        models = [nativeModel, ...models];
+      // Inject the native (subscription) models when credentials are
+      // detected — one entry per official Claude model so DIY terminals and
+      // the orchestrator/merge/error selectors can switch between them.
+      // Fresh entries from the status endpoint replace any stored native
+      // entries (including the legacy single sentinel) so a stale persisted
+      // model id can never shadow the current official lineup.
+      if (nativeStatus?.available) {
+        const nativeModels = createNativeModelConfigs(nativeStatus.models);
+        const withoutNative = models.filter(
+          (m) => !isNativeModelEntry(m) && !nativeModels.some((nm) => nm.id === m.id)
+        );
+        const alreadyCurrent =
+          models.length === nativeModels.length + withoutNative.length &&
+          nativeModels.every((nm) =>
+            models.some((m) => m.id === nm.id && m.modelId === nm.modelId)
+          );
+        if (!alreadyCurrent) {
+          models = [...nativeModels, ...withoutNative];
+        }
       }
 
       // No change needed

@@ -144,7 +144,7 @@
       "nativeTab": "구독 로그인",
       "manualTab": "API 키",
       "nativeDetected": "Claude Code 구독이 감지되었습니다",
-      "nativeModelLabel": "모델",
+      "nativeModelsLabel": "모델 목록",
       "nativeVersionLabel": "CLI 버전",
       "nativeHint": "이미 로그인된 Claude Code 계정을 바로 사용합니다. API 키를 입력할 필요가 없습니다.",
       "nativeAlreadyAdded": "구독 모델이 이미 구성되어 있습니다. \"API 키\" 탭으로 전환하여 다른 모델을 추가하세요."
@@ -167,7 +167,7 @@
       },
       "modelId": {
         "label": "Model ID",
-        "placeholder": "Enter model ID, e.g. claude-3-5-sonnet-20241022",
+        "placeholder": "Enter model ID, e.g. claude-sonnet-5",
         "selectPlaceholder": "Select a model"
       }
     },

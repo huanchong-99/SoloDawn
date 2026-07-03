@@ -38,6 +38,8 @@
       "nativeDetected": "Claude Code サブスクリプションを検出しました",
       "nativeModelLabel": "モデル",
       "nativeModelAuto": "自動（サブスクリプションに基づく）",
+      "nativeCurrentDefault": "現在のデフォルト",
+      "nativeModelSwitchHint": "サブスクリプション実行のデフォルトモデルを設定します（DIY・Agent Planned の両モードに適用）。各ターミナルで別のモデルを選択することもできます。",
       "nativeVersionLabel": "CLI バージョン",
       "nativeHint": "ログイン済みの Claude Code アカウントをそのまま使用します。API キーの入力は不要です。",
       "nativeNotFound": "有効なサブスクリプションが検出されませんでした",

@@ -62,7 +62,7 @@ pub struct ModelConfig {
     /// Display name, e.g., 'Claude Sonnet'
     pub display_name: String,
 
-    /// API model ID, e.g., 'claude-sonnet-4-20250514'
+    /// API model ID, e.g., 'claude-sonnet-5'
     pub api_model_id: Option<String>,
 
     /// Is default model
@@ -348,6 +348,30 @@ impl ModelConfig {
         Ok(row)
     }
 
+    /// Get the official preset models for a CLI type (default first).
+    ///
+    /// Official rows carry no API key — they ride the CLI's own auth
+    /// (e.g. the Claude Code native OAuth subscription).
+    pub async fn find_official_for_cli(
+        pool: &SqlitePool,
+        cli_type_id: &str,
+    ) -> sqlx::Result<Vec<Self>> {
+        let items = sqlx::query_as::<_, ModelConfig>(
+            r"
+            SELECT id, cli_type_id, name, display_name, api_model_id,
+                   is_default, is_official, created_at, updated_at,
+                   encrypted_api_key, base_url, api_type
+            FROM model_config
+            WHERE cli_type_id = ? AND is_official = 1
+            ORDER BY is_default DESC, name ASC
+            ",
+        )
+        .bind(cli_type_id)
+        .fetch_all(pool)
+        .await?;
+        Ok(Self::vec_with_has_api_key(items))
+    }
+
     /// Get all model configs
     ///
     /// Excludes configs owned by the retired Gemini CLI (see
@@ -390,6 +414,43 @@ impl ModelConfig {
         .bind(id)
         .execute(pool)
         .await?;
+        Ok(())
+    }
+
+    /// Make `id` the default model for its CLI type, clearing the previous
+    /// default. The caller must have validated that `id` belongs to
+    /// `cli_type_id`.
+    pub async fn set_default_for_cli(
+        pool: &SqlitePool,
+        cli_type_id: &str,
+        id: &str,
+    ) -> sqlx::Result<()> {
+        let now = chrono::Utc::now();
+        let mut tx = pool.begin().await?;
+        sqlx::query(
+            r"
+            UPDATE model_config
+            SET is_default = 0, updated_at = ?
+            WHERE cli_type_id = ? AND is_default = 1
+            ",
+        )
+        .bind(now)
+        .bind(cli_type_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            r"
+            UPDATE model_config
+            SET is_default = 1, updated_at = ?
+            WHERE id = ? AND cli_type_id = ?
+            ",
+        )
+        .bind(now)
+        .bind(id)
+        .bind(cli_type_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 

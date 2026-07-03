@@ -779,7 +779,7 @@ name: string,
  */
 displayName: string, 
 /**
- * API model ID, e.g., 'claude-sonnet-4-20250514'
+ * API model ID, e.g., 'claude-sonnet-5'
  */
 apiModelId: string | null, 
 /**

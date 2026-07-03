@@ -1,11 +1,16 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { useUserSystem } from '@/components/ConfigProvider';
 import { useModelVerification } from '@/hooks/useModelVerification';
 import { useNativeCredentials } from '@/hooks/useNativeCredentials';
+import { setDefaultModelForCli } from '@/hooks/useCliTypes';
 import type { ApiType, ModelConfig } from '@/components/workflow/types';
-import { createNativeModelConfig, NATIVE_MODEL_ID } from '@/components/workflow/types';
+import {
+  createNativeModelConfigs,
+  isNativeModelEntry,
+} from '@/components/workflow/types';
 import { SetupWizardStep2Model } from './SetupWizardStep2Model';
 
 export type SetupModelMode = 'native' | 'manual';
@@ -31,11 +36,22 @@ export function SetupWizardStep2ModelContainer({
   const { t } = useTranslation('workflow');
   const { config, updateAndSaveConfig } = useUserSystem();
   const { data: nativeStatus, isLoading: isNativeLoading } = useNativeCredentials();
+  const queryClient = useQueryClient();
 
   const nativeAvailable = nativeStatus?.available === true;
 
   // Default to native mode when subscription is detected
   const [mode, setMode] = useState<SetupModelMode>('native');
+
+  // Selected default Claude model for native (subscription) runs.
+  const [nativeModelId, setNativeModelId] = useState('');
+  useEffect(() => {
+    if (!nativeModelId && nativeStatus?.models?.length) {
+      const defaultModel =
+        nativeStatus.models.find((m) => m.isDefault) ?? nativeStatus.models[0];
+      setNativeModelId(defaultModel.id);
+    }
+  }, [nativeStatus, nativeModelId]);
 
   const [displayName, setDisplayName] = useState('');
   const [cliTypeId, setCliTypeId] = useState('cli-claude-code');
@@ -137,13 +153,37 @@ export function SetupWizardStep2ModelContainer({
     const currentModels = Array.isArray(existingModels) ? existingModels as ModelConfig[] : [];
 
     if (mode === 'native') {
-      // Add the native subscription model (skip if already present)
-      if (!currentModels.some((m) => m.id === NATIVE_MODEL_ID)) {
-        const nativeModel = createNativeModelConfig();
-        await updateAndSaveConfig({
-          workflow_model_library: [...currentModels, nativeModel],
-        } as Parameters<typeof updateAndSaveConfig>[0]);
+      const options = nativeStatus?.models ?? [];
+
+      // Persist the chosen model as the Claude Code default — this is the
+      // knob native (subscription) runs follow in both DIY and
+      // agent-planned modes when nothing more specific is chosen.
+      const currentDefaultId = options.find((m) => m.isDefault)?.id ?? '';
+      if (nativeModelId && nativeModelId !== currentDefaultId) {
+        try {
+          await setDefaultModelForCli('cli-claude-code', nativeModelId);
+          await queryClient.invalidateQueries({
+            queryKey: ['native-credentials-status'],
+          });
+        } catch (error) {
+          console.error('Failed to set default Claude model', error);
+        }
       }
+
+      // Store the native subscription models (chosen default first),
+      // replacing any stale native entries already in the library.
+      const picked = options.find((m) => m.id === nativeModelId);
+      const orderedOptions = picked
+        ? [picked, ...options.filter((m) => m.id !== picked.id)]
+        : options;
+      const nativeEntries = createNativeModelConfigs(orderedOptions);
+      const nativeIds = new Set(nativeEntries.map((m) => m.id));
+      const withoutNative = currentModels.filter(
+        (m) => !isNativeModelEntry(m) && !nativeIds.has(m.id)
+      );
+      await updateAndSaveConfig({
+        workflow_model_library: [...nativeEntries, ...withoutNative],
+      } as Parameters<typeof updateAndSaveConfig>[0]);
     } else {
       const trimmedKey = apiKey.trim();
       const trimmedUrl = baseUrl.trim();
@@ -166,6 +206,9 @@ export function SetupWizardStep2ModelContainer({
   }, [
     config,
     mode,
+    nativeStatus,
+    nativeModelId,
+    queryClient,
     displayName,
     cliTypeId,
     apiType,
@@ -184,6 +227,9 @@ export function SetupWizardStep2ModelContainer({
       nativeAvailable={nativeAvailable}
       isNativeLoading={isNativeLoading}
       nativeCliVersion={nativeStatus?.cliVersion ?? null}
+      nativeModels={nativeStatus?.models ?? []}
+      nativeModelId={nativeModelId}
+      onNativeModelIdChange={setNativeModelId}
       displayName={displayName}
       cliTypeId={cliTypeId}
       onCliTypeIdChange={setCliTypeId}

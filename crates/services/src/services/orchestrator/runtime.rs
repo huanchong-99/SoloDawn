@@ -458,10 +458,20 @@ impl OrchestratorRuntime {
             None
         };
 
-        // Create orchestrator agent FIRST before changing status
+        // Create orchestrator agent FIRST before changing status.
+        // Pre-resolve the native-credentials fallback model (workflow's own
+        // orchestrator_model when it is a concrete claude-* id → DB default
+        // official Claude model) so subscription users get the model they
+        // picked instead of a hardcoded one.
+        let native_fallback_model = crate::services::claude_models::resolve_native_claude_model(
+            &self.db.pool,
+            workflow.orchestrator_model.as_deref(),
+        )
+        .await;
         let config = orchestrator_config.unwrap_or_default();
-        let mut agent = match OrchestratorAgent::new(
+        let mut agent = match OrchestratorAgent::new_with_native_fallback(
             config,
+            Some(native_fallback_model),
             workflow_id.to_string(),
             self.message_bus.clone(),
             self.db.clone(),
@@ -1191,9 +1201,17 @@ impl OrchestratorRuntime {
             None
         };
 
+        // Mirror start_workflow_reserved: native fallback model follows the
+        // workflow's choice, then the DB default official Claude model.
+        let native_fallback_model = crate::services::claude_models::resolve_native_claude_model(
+            &self.db.pool,
+            workflow.orchestrator_model.as_deref(),
+        )
+        .await;
         let config = orchestrator_config.unwrap_or_default();
-        let mut agent = OrchestratorAgent::new(
+        let mut agent = OrchestratorAgent::new_with_native_fallback(
             config,
+            Some(native_fallback_model),
             workflow_id.to_string(),
             self.message_bus.clone(),
             self.db.clone(),
@@ -1374,9 +1392,7 @@ async fn resume_cursor_for_workflow(
 /// `resume_cursor_for_workflow`. Accept abbreviated (>=7) or full (40) hex
 /// object names; reject everything else so the watcher re-seeds from HEAD.
 fn is_real_commit_hash(hash: &str) -> bool {
-    (7..=40).contains(&hash.len())
-        && hash != "HEAD"
-        && hash.bytes().all(|b| b.is_ascii_hexdigit())
+    (7..=40).contains(&hash.len()) && hash != "HEAD" && hash.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 #[cfg(test)]

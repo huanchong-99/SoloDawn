@@ -689,11 +689,30 @@ export function CreateChatBoxContainer() {
     const lib = (config as Record<string, unknown>)?.workflow_model_library as
       | WorkflowModelConfig[]
       | undefined;
-    if (!lib) return plannerModelConfig;
-    return (
-      lib.find((m) => m.id === selectedModelConfigId) ?? plannerModelConfig
+    const fromLibrary = lib?.find((m) => m.id === selectedModelConfigId);
+    if (fromLibrary) return fromLibrary;
+    // Official native (subscription) options live in the DB, not the
+    // library. Send the concrete model id with empty credentials — the
+    // backend routes keyless Claude models to the native subscription
+    // client, so switching the planner model works without an API key.
+    const nativeOption = availableModels.find(
+      (m) => m.id === selectedModelConfigId && m.isNative && m.modelId
     );
-  }, [selectedModelConfigId, config, plannerModelConfig]);
+    if (nativeOption?.modelId) {
+      return {
+        id: nativeOption.id,
+        displayName: nativeOption.displayName,
+        cliTypeId: 'cli-claude-code',
+        apiType: 'anthropic',
+        baseUrl: '',
+        apiKey: '',
+        modelId: nativeOption.modelId,
+        isVerified: true,
+        isNative: true,
+      } satisfies WorkflowModelConfig;
+    }
+    return plannerModelConfig;
+  }, [selectedModelConfigId, config, plannerModelConfig, availableModels]);
 
   // === Phase 1: Initial submit — create planning draft ===
   const handleInitialSubmit = useCallback(async () => {

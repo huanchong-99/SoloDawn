@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import type { BaseCodingAgent, ModelConfig } from 'shared/types';
 import type { ModelConfig as WorkflowModelConfig } from '@/components/workflow/types';
 import { useModelsForCli } from './useCliTypes';
+import { useNativeCredentials } from './useNativeCredentials';
 
 /**
  * Derive cli_type_id from BaseCodingAgent enum value.
@@ -22,6 +23,10 @@ export interface ModelOption {
   subtitle: string | null;
   isCustom: boolean;
   hasApiKey: boolean;
+  /** Concrete API model id when known (e.g. 'claude-sonnet-5'). */
+  modelId: string | null;
+  /** True for keyless official Claude models usable via the native subscription. */
+  isNative: boolean;
 }
 
 const EMPTY_OPTIONS: ModelOption[] = [];
@@ -56,6 +61,10 @@ export function useModelConfigForExecutor(
 ): UseModelConfigForExecutorResult {
   const cliTypeId = executor ? executorToCliTypeId(executor) : '';
   const { data: apiModels, isLoading } = useModelsForCli(cliTypeId);
+  const { data: nativeStatus } = useNativeCredentials();
+  // Keyless official Claude models are usable via the native subscription.
+  const nativeUsable =
+    nativeStatus?.available === true && cliTypeId === 'cli-claude-code';
 
   const { customModels, officialModels, allModels } = useMemo(() => {
     // User-configured models from workflow_model_library
@@ -67,24 +76,34 @@ export function useModelConfigForExecutor(
         subtitle: [wm.apiType, wm.modelId].filter(Boolean).join(' · ') || null,
         isCustom: true,
         hasApiKey: true,
+        modelId: wm.modelId || null,
+        isNative: false,
       }));
 
     const customIds = new Set(custom.map((m) => m.id));
 
-    // Official models from DB — only show if they have API key (usable)
+    // Official models from DB — usable with an API key, or keyless via the
+    // native Claude Code subscription.
     const dbModels = apiModels
       ? (apiModels as unknown as ModelConfig[])
       : [];
-    // Only show truly official models (isOfficial=true) with API key/login.
-    // Non-official DB entries are credential copies of custom models — skip them.
+    // Only show truly official models (isOfficial=true). Non-official DB
+    // entries are credential copies of custom models — skip them.
     const official: ModelOption[] = dbModels
-      .filter((m) => !customIds.has(m.id) && m.isOfficial && m.hasApiKey)
+      .filter(
+        (m) =>
+          !customIds.has(m.id) &&
+          m.isOfficial &&
+          (m.hasApiKey || (nativeUsable && Boolean(m.apiModelId)))
+      )
       .map((m) => ({
         id: m.id,
         displayName: m.displayName,
-        subtitle: null,
+        subtitle: m.hasApiKey ? null : (m.apiModelId ?? null),
         isCustom: false,
         hasApiKey: m.hasApiKey,
+        modelId: m.apiModelId ?? null,
+        isNative: !m.hasApiKey,
       }));
 
     const all = [...custom, ...official];
@@ -93,7 +112,7 @@ export function useModelConfigForExecutor(
       officialModels: official.length > 0 ? official : EMPTY_OPTIONS,
       allModels: all.length > 0 ? all : EMPTY_OPTIONS,
     };
-  }, [apiModels, workflowModelLibrary, cliTypeId]);
+  }, [apiModels, workflowModelLibrary, cliTypeId, nativeUsable]);
 
   const [selectedModelConfigId, setSelectedModelConfigId] = useState<
     string | null

@@ -133,22 +133,74 @@ export interface ModelConfig {
   isNative?: boolean;
 }
 
-/** Native Claude Code subscription model ID sentinel. */
+/** Native Claude Code subscription model ID sentinel (legacy single entry). */
 export const NATIVE_MODEL_ID = 'native-claude-code';
 
-/** Create a native model entry for Claude Code with Max/Pro subscription. */
-export function createNativeModelConfig(): ModelConfig {
+/** Legacy modelId sentinel meaning "use the account/subscription default". */
+export const NATIVE_SUBSCRIPTION_SENTINEL = 'subscription-default';
+
+/** One switchable official Claude model reported by /api/native-credentials-status. */
+export interface NativeClaudeModelOption {
+  /** model_config row id, e.g. 'model-claude-sonnet'. */
+  id: string;
+  /** Display name, e.g. 'Claude Sonnet'. */
+  displayName: string;
+  /** Concrete API model id, e.g. 'claude-sonnet-5'. */
+  apiModelId: string;
+  /** Whether this is the DB default for Claude Code. */
+  isDefault: boolean;
+}
+
+/**
+ * Create a native model entry for Claude Code with Max/Pro subscription.
+ * Without an option this is the legacy sentinel entry whose modelId
+ * ('subscription-default') tells the backend to use the account default.
+ */
+export function createNativeModelConfig(option?: NativeClaudeModelOption): ModelConfig {
+  if (!option) {
+    return {
+      id: NATIVE_MODEL_ID,
+      displayName: 'Claude Code (Native Subscription)',
+      cliTypeId: 'cli-claude-code',
+      apiType: 'anthropic',
+      baseUrl: '',
+      apiKey: '',
+      modelId: NATIVE_SUBSCRIPTION_SENTINEL,
+      isVerified: true,
+      isNative: true,
+    };
+  }
   return {
-    id: NATIVE_MODEL_ID,
-    displayName: 'Claude Code (Native Subscription)',
+    // Real model_config row id so terminals reference the seeded official row.
+    id: option.id,
+    displayName: `${option.displayName} (Native Subscription)`,
     cliTypeId: 'cli-claude-code',
     apiType: 'anthropic',
     baseUrl: '',
     apiKey: '',
-    modelId: 'subscription-default',
+    modelId: option.apiModelId,
     isVerified: true,
     isNative: true,
   };
+}
+
+/**
+ * Native model entries for a subscription user — one per official Claude
+ * model (default first, as ordered by the backend). Falls back to the legacy
+ * single sentinel entry when the backend reports no model list.
+ */
+export function createNativeModelConfigs(
+  options?: NativeClaudeModelOption[] | null
+): ModelConfig[] {
+  if (!options || options.length === 0) {
+    return [createNativeModelConfig()];
+  }
+  return options.map((option) => createNativeModelConfig(option));
+}
+
+/** Whether a wizard model entry is a native-subscription entry. */
+export function isNativeModelEntry(model: ModelConfig): boolean {
+  return model.isNative === true || model.id === NATIVE_MODEL_ID;
 }
 
 /** Terminal config (Step 4) */

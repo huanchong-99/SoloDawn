@@ -144,7 +144,7 @@
       "nativeTab": "Subscription",
       "manualTab": "API Key",
       "nativeDetected": "Claude Code subscription detected",
-      "nativeModelLabel": "Model",
+      "nativeModelsLabel": "Models",
       "nativeVersionLabel": "CLI Version",
       "nativeHint": "Your existing Claude Code login will be used directly — no API key needed.",
       "nativeAlreadyAdded": "Subscription model is already configured. Switch to the API Key tab to add another model."
@@ -167,7 +167,7 @@
       },
       "modelId": {
         "label": "Model ID",
-        "placeholder": "Enter model ID, e.g. claude-3-5-sonnet-20241022",
+        "placeholder": "Enter model ID, e.g. claude-sonnet-5",
         "selectPlaceholder": "Select a model"
       }
     },

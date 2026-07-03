@@ -1,8 +1,6 @@
 //! Planning draft API for orchestrated workspace mode.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use axum::{
     Extension, Json, Router,
@@ -10,9 +8,12 @@ use axum::{
     response::Json as ResponseJson,
     routing::{get, post, put},
 };
-use db::models::ProjectQualityPolicy;
-use db::models::planning_draft::{PLANNING_DRAFT_STATUSES, PlanningDraft, PlanningDraftMessage};
+use db::models::{
+    ProjectQualityPolicy,
+    planning_draft::{PLANNING_DRAFT_STATUSES, PlanningDraft, PlanningDraftMessage},
+};
 use deployment::Deployment;
+use feishu_connector::messages::FeishuMessenger;
 use quality::config::QualityGateConfig;
 use serde::{Deserialize, Serialize};
 use services::services::orchestrator::{
@@ -24,8 +25,6 @@ use services::services::orchestrator::{
 };
 use utils::response::ApiResponse;
 use uuid::Uuid;
-
-use feishu_connector::messages::FeishuMessenger;
 
 use crate::{DeploymentImpl, error::ApiError, feishu_handle::SharedFeishuHandle};
 
@@ -138,7 +137,11 @@ async fn push_messages_to_feishu(
     messages: Vec<(String, String)>,
 ) {
     for (role, content) in messages {
-        let prefix = if role == "user" { "[User]" } else { "[Assistant]" };
+        let prefix = if role == "user" {
+            "[User]"
+        } else {
+            "[Assistant]"
+        };
         let text = format!("{prefix} {content}");
         let truncated = if text.len() > 4000 {
             // SAFETY: `text` is constructed from Rust `String`s via `format!`,
@@ -373,10 +376,17 @@ async fn confirm_draft(
         None
     };
 
-    // Build LLM client and generate audit plan
+    // Build LLM client and generate audit plan.
+    // Native fallback model: draft's planner choice → DB default official
+    // Claude model → shared constant.
+    let native_model = services::services::claude_models::resolve_native_claude_model(
+        &deployment.db().pool,
+        draft.planner_model_id.as_deref(),
+    )
+    .await;
     let llm_client = build_llm_client_from_draft(&draft).or_else(|| {
-        tracing::info!(draft_id = %draft_id, "No model configured for audit plan generation, trying Claude Code native");
-        create_interactive_claude_client("claude-sonnet-4-6")
+        tracing::info!(draft_id = %draft_id, native_model = %native_model, "No model configured for audit plan generation, trying Claude Code native");
+        create_interactive_claude_client(&native_model)
     });
 
     let mut audit_plan = if let Some(client) = llm_client {
@@ -571,8 +581,10 @@ async fn continue_draft(
             .await
             .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
         if let Some(workflow) = workflow {
-            let terminal =
-                matches!(workflow.status.as_str(), "completed" | "failed" | "cancelled");
+            let terminal = matches!(
+                workflow.status.as_str(),
+                "completed" | "failed" | "cancelled"
+            );
             if !terminal {
                 return Err(ApiError::BadRequest(format!(
                     "The current round's workflow is still '{}'. Wait for it to finish before \
@@ -706,13 +718,17 @@ async fn send_message(
     let mut result = vec![MessageResponse::from(user_msg)];
 
     // 3. Try to call LLM and store assistant reply
-    // Fallback chain: configured model → Claude Code native credentials
-    // Native fallback model bumped to `claude-sonnet-4-6` (Sonnet 4.6) —
-    // see the matching comment in agent.rs and the probe test
-    // `test_probe_subscription_model_acceptance` for upstream confirmation.
+    // Fallback chain: configured model → Claude Code native credentials.
+    // Native fallback model: draft's planner choice → DB default official
+    // Claude model → shared constant (`claude_models`).
+    let native_model = services::services::claude_models::resolve_native_claude_model(
+        &deployment.db().pool,
+        draft.planner_model_id.as_deref(),
+    )
+    .await;
     let llm_client = build_llm_client_from_draft(&draft).or_else(|| {
-        tracing::info!(draft_id = %draft_id, "No model configured, trying Claude Code native credentials");
-        create_interactive_claude_client("claude-sonnet-4-6")
+        tracing::info!(draft_id = %draft_id, native_model = %native_model, "No model configured, trying Claude Code native credentials");
+        create_interactive_claude_client(&native_model)
     });
     if let Some(llm_client) = llm_client {
         let all_messages = PlanningDraftMessage::list_by_draft(&deployment.db().pool, &draft_id)
@@ -1029,22 +1045,18 @@ async fn toggle_feishu_sync(
 
             if let Some(b) = binding {
                 b.conversation_id
-            } else if let Some(bot_chat) = messenger
-                .first_bot_chat_id()
-                .await
-                .unwrap_or_else(|e| {
-                    // E30-06: log fetch failures instead of silently treating them
-                    // as "no chat" so missing Feishu credentials / transport errors
-                    // are diagnosable in logs.
-                    tracing::warn!(
-                        draft_id = %draft_id,
-                        error = %e,
-                        "Failed to fetch first bot chat id from Feishu messenger; \
-                         falling back as if no chat was found"
-                    );
-                    None
-                })
-            {
+            } else if let Some(bot_chat) = messenger.first_bot_chat_id().await.unwrap_or_else(|e| {
+                // E30-06: log fetch failures instead of silently treating them
+                // as "no chat" so missing Feishu credentials / transport errors
+                // are diagnosable in logs.
+                tracing::warn!(
+                    draft_id = %draft_id,
+                    error = %e,
+                    "Failed to fetch first bot chat id from Feishu messenger; \
+                     falling back as if no chat was found"
+                );
+                None
+            }) {
                 bot_chat
             } else {
                 return Err(ApiError::BadRequest(
@@ -1220,13 +1232,11 @@ async fn materialize_draft(
     // project.default_agent_working_dir, else the first linked project repo.
     // Fall back to "main" only when neither resolves or branch detection fails.
     let target_branch = {
-        let project = db::models::project::Project::find_by_id(
-            &deployment.db().pool,
-            draft.project_id,
-        )
-        .await
-        .ok()
-        .flatten();
+        let project =
+            db::models::project::Project::find_by_id(&deployment.db().pool, draft.project_id)
+                .await
+                .ok()
+                .flatten();
         let primary = project
             .as_ref()
             .and_then(|p| p.default_agent_working_dir.as_deref())
@@ -1412,9 +1422,11 @@ async fn upload_audit_doc(
     }
 
     // Process multipart upload
-    while let Some(field) = multipart.next_field().await.map_err(|e| {
-        ApiError::BadRequest(format!("Failed to read multipart field: {e}"))
-    })? {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::BadRequest(format!("Failed to read multipart field: {e}")))?
+    {
         // Accept the field named "file" (or fall through to next field)
         let field_name = field.name().unwrap_or("").to_string();
         if field_name != "file" {
@@ -1430,9 +1442,10 @@ async fn upload_audit_doc(
         // component, so `..`/absolute-path payloads cannot escape the dir.
         let safe_name = safe_audit_doc_name(&filename)?;
 
-        let data = field.bytes().await.map_err(|e| {
-            ApiError::BadRequest(format!("Failed to read file data: {e}"))
-        })?;
+        let data = field
+            .bytes()
+            .await
+            .map_err(|e| ApiError::BadRequest(format!("Failed to read file data: {e}")))?;
 
         // Store file to disk under audit_docs/{draft_id}/{safe_name}
         let dir = audit_docs_dir().join(&draft_id);
@@ -1452,7 +1465,7 @@ async fn upload_audit_doc(
             &deployment.db().pool,
             &draft_id,
             draft.audit_plan.as_deref(), // preserve existing audit_plan
-            &draft.audit_mode,            // preserve existing mode
+            &draft.audit_mode,           // preserve existing mode
             Some(&relative_path),
         )
         .await

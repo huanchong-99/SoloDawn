@@ -1399,12 +1399,24 @@ export const configApi = {
     available: boolean;
     cliVersion: string | null;
     defaultModel: string | null;
+    models: {
+      id: string;
+      displayName: string;
+      apiModelId: string;
+      isDefault: boolean;
+    }[];
   }> => {
     const response = await makeRequest('/api/native-credentials-status');
     return handleApiResponse<{
       available: boolean;
       cliVersion: string | null;
       defaultModel: string | null;
+      models: {
+        id: string;
+        displayName: string;
+        apiModelId: string;
+        isDefault: boolean;
+      }[];
     }>(response);
   },
 };

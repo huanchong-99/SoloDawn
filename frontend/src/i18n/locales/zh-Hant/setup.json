@@ -38,6 +38,8 @@
       "nativeDetected": "已偵測到 Claude Code 訂閱",
       "nativeModelLabel": "模型",
       "nativeModelAuto": "自動（基於訂閱等級）",
+      "nativeCurrentDefault": "目前預設",
+      "nativeModelSwitchHint": "設定訂閱執行的預設模型——DIY 與 Agent Planned 兩種模式均生效；各終端仍可單獨選擇其他模型。",
       "nativeVersionLabel": "CLI 版本",
       "nativeHint": "將直接使用您已登入的 Claude Code 帳號，無需填寫 API 金鑰。",
       "nativeNotFound": "未偵測到有效訂閱",

@@ -24,7 +24,10 @@ import { IconButton } from '../../ui-new/primitives/IconButton';
 import { cn } from '@/lib/utils';
 import { CLI_TYPES } from '../constants';
 import type { WizardConfig, ModelConfig, ApiType } from '../types';
-import { NATIVE_MODEL_ID, createNativeModelConfig } from '../types';
+import {
+  createNativeModelConfigs,
+  NATIVE_SUBSCRIPTION_SENTINEL,
+} from '../types';
 import { useTranslation } from 'react-i18next';
 import { useNativeCredentials } from '@/hooks/useNativeCredentials';
 import { ConfirmDialog } from '@/components/ui-new/dialogs/ConfirmDialog';
@@ -41,7 +44,7 @@ const API_TYPES = {
   anthropic: {
     label: 'Anthropic',
     defaultBaseUrl: 'https://api.anthropic.com',
-    defaultModels: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+    defaultModels: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5'],
   },
   'anthropic-compatible': {
     label: 'Anthropic Compatible',
@@ -95,9 +98,16 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
   const { showToast } = useToast();
   const { data: nativeStatus } = useNativeCredentials();
   const nativeAvailable = nativeStatus?.available === true;
+  const nativeModelEntries = useMemo(
+    () => createNativeModelConfigs(nativeStatus?.models),
+    [nativeStatus]
+  );
   const nativeAlreadyAdded = useMemo(
-    () => config.models.some((m) => m.id === NATIVE_MODEL_ID),
-    [config.models]
+    () =>
+      nativeModelEntries.every((nm) =>
+        config.models.some((m) => m.id === nm.id && m.modelId === nm.modelId)
+      ),
+    [config.models, nativeModelEntries]
   );
   const [dialogMode, setDialogMode] = useState<'native' | 'manual'>('manual');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -284,12 +294,12 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
   };
 
   const handleSaveNative = () => {
-    const nativeModel = createNativeModelConfig();
-    // E11-11: Dedup by canonical id using a Set so native model cannot be
-    // inserted twice even if another code path already injected it.
+    // E11-11: Dedup by canonical id using a Set so native models cannot be
+    // inserted twice even if another code path already injected them. Fresh
+    // native entries lead so they replace stale stored copies.
     const seen = new Set<string>();
     const deduped: ModelConfig[] = [];
-    for (const m of [nativeModel, ...config.models]) {
+    for (const m of [...nativeModelEntries, ...config.models]) {
       if (seen.has(m.id)) continue;
       seen.add(m.id);
       deduped.push(m);
@@ -388,7 +398,12 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
                     )}
                   </div>
                   <div className="text-sm text-low mt-quarter">
-                    {API_TYPES[model.apiType]?.label ?? model.apiType} - {model.isNative ? t('step3.nativeModelAuto') : model.modelId}
+                    {API_TYPES[model.apiType]?.label ?? model.apiType} -{' '}
+                    {model.isNative &&
+                    (!model.modelId ||
+                      model.modelId === NATIVE_SUBSCRIPTION_SENTINEL)
+                      ? t('step3.nativeModelAuto')
+                      : model.modelId}
                     {model.cliTypeId
                       ? ` · ${(CLI_TYPES as Record<string, { label: string }>)[model.cliTypeId]?.label ?? model.cliTypeId}`
                       : ''}
@@ -486,16 +501,23 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
                   </span>
                 </div>
                 <div className="space-y-half text-base text-normal">
-                  <div className="flex justify-between">
-                    <span className="text-low">{t('step3.dialog.nativeModelLabel')}</span>
-                    <span className="font-mono text-high">{t('step3.nativeModelAuto')}</span>
-                  </div>
                   {nativeStatus?.cliVersion && (
                     <div className="flex justify-between">
                       <span className="text-low">{t('step3.dialog.nativeVersionLabel')}</span>
                       <span className="font-mono text-high">{nativeStatus.cliVersion}</span>
                     </div>
                   )}
+                  <div className="space-y-half">
+                    <span className="text-low">{t('step3.dialog.nativeModelsLabel')}</span>
+                    <ul className="space-y-half">
+                      {nativeModelEntries.map((model) => (
+                        <li key={model.id} className="flex justify-between gap-base">
+                          <span className="text-high">{model.displayName}</span>
+                          <span className="font-mono text-low">{model.modelId}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
                 <p className="text-sm text-low">
                   {nativeAlreadyAdded

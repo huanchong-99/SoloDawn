@@ -143,7 +143,7 @@
       "nativeTab": "订阅登录",
       "manualTab": "API 密钥",
       "nativeDetected": "已检测到 Claude Code 订阅",
-      "nativeModelLabel": "模型",
+      "nativeModelsLabel": "模型列表",
       "nativeVersionLabel": "CLI 版本",
       "nativeHint": "将直接使用您已登录的 Claude Code 账号，无需填写 API 密钥。",
       "nativeAlreadyAdded": "订阅模型已配置。切换到「API 密钥」标签页可添加其他模型。"
@@ -168,7 +168,7 @@
       },
       "modelId": {
         "label": "模型 ID",
-        "placeholder": "输入模型 ID，例如：claude-3-5-sonnet-20241022",
+        "placeholder": "输入模型 ID，例如：claude-sonnet-5",
         "selectPlaceholder": "请选择模型"
       }
     },

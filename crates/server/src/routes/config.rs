@@ -163,9 +163,9 @@ async fn update_config(
 ) -> Result<ResponseJson<ApiResponse<Config>>, ApiError> {
     // Defense-in-depth: opt-in admin gate. When SOLODAWN_ADMIN_TOKEN is unset,
     // this is a no-op. When set, require a matching X-Admin-Token header.
-    let ctx = ctx
-        .map(|Extension(c)| c)
-        .unwrap_or(RequestContext { authenticated: false });
+    let ctx = ctx.map(|Extension(c)| c).unwrap_or(RequestContext {
+        authenticated: false,
+    });
     if check_admin(&ctx, &headers).is_err() {
         return Err(ApiError::Forbidden("admin token required".to_string()));
     }
@@ -1039,16 +1039,38 @@ pub struct NativeCredentialsStatus {
     pub available: bool,
     /// Claude Code CLI version, if detected.
     pub cli_version: Option<String>,
-    /// Suggested model to use with native credentials.
+    /// The default Claude model for native (subscription) runs — the DB
+    /// default official Claude Code model.
     pub default_model: Option<String>,
+    /// Official Claude models a subscription user can switch between
+    /// (default first).
+    pub models: Vec<NativeClaudeModelOption>,
+}
+
+/// One switchable official Claude model for native-subscription users.
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeClaudeModelOption {
+    /// `model_config` row id (e.g. `model-claude-sonnet`).
+    pub id: String,
+    /// Display name (e.g. `Claude Sonnet`).
+    pub display_name: String,
+    /// Concrete API model id (e.g. `claude-sonnet-5`).
+    pub api_model_id: String,
+    /// Whether this is the DB default for Claude Code.
+    pub is_default: bool,
 }
 
 /// `GET /api/native-credentials-status`
 ///
 /// Checks whether the local Claude Code CLI has valid OAuth credentials
 /// in `~/.claude/.credentials.json`. This enables the "Native Subscription"
-/// model option in the frontend without requiring manual API key configuration.
-async fn get_native_credentials_status() -> ResponseJson<ApiResponse<NativeCredentialsStatus>> {
+/// model option in the frontend without requiring manual API key
+/// configuration, and lists the official Claude models the subscription
+/// user can switch between.
+async fn get_native_credentials_status(
+    State(deployment): State<DeploymentImpl>,
+) -> ResponseJson<ApiResponse<NativeCredentialsStatus>> {
     // V1 test mode: disable native credential detection so only
     // explicitly-configured models (e.g. GLM-5.1) are available.
     if std::env::var("DISABLE_NATIVE_CREDENTIALS").is_ok() {
@@ -1056,10 +1078,11 @@ async fn get_native_credentials_status() -> ResponseJson<ApiResponse<NativeCrede
             available: false,
             cli_version: None,
             default_model: None,
+            models: Vec::new(),
         }));
     }
 
-    let status = tokio::task::spawn_blocking(|| {
+    let mut status = tokio::task::spawn_blocking(|| {
         let home = dirs::home_dir();
         let creds_available = home
             .as_ref()
@@ -1093,6 +1116,7 @@ async fn get_native_credentials_status() -> ResponseJson<ApiResponse<NativeCrede
             available: creds_available,
             cli_version,
             default_model: None,
+            models: Vec::new(),
         }
     })
     .await
@@ -1100,7 +1124,28 @@ async fn get_native_credentials_status() -> ResponseJson<ApiResponse<NativeCrede
         available: false,
         cli_version: None,
         default_model: None,
+        models: Vec::new(),
     });
+
+    if status.available {
+        let pool = &deployment.db().pool;
+        status.models = services::services::claude_models::official_native_claude_models(pool)
+            .await
+            .into_iter()
+            .filter_map(|model| {
+                model
+                    .api_model_id
+                    .map(|api_model_id| NativeClaudeModelOption {
+                        id: model.id,
+                        display_name: model.display_name,
+                        api_model_id,
+                        is_default: model.is_default,
+                    })
+            })
+            .collect();
+        status.default_model =
+            Some(services::services::claude_models::default_native_claude_model(pool).await);
+    }
 
     ResponseJson(ApiResponse::success(status))
 }
