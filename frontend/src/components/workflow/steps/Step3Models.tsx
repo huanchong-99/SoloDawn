@@ -23,6 +23,7 @@ import {
 import { IconButton } from '../../ui-new/primitives/IconButton';
 import { cn } from '@/lib/utils';
 import { CLI_TYPES } from '../constants';
+import { OFFICIAL_MODELS, isCompatibleApiType } from '../modelCatalog';
 import type { WizardConfig, ModelConfig, ApiType } from '../types';
 import {
   createNativeModelConfigs,
@@ -44,27 +45,27 @@ const API_TYPES = {
   anthropic: {
     label: 'Anthropic',
     defaultBaseUrl: 'https://api.anthropic.com',
-    defaultModels: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5'],
+    defaultModels: OFFICIAL_MODELS.anthropic,
   },
   'anthropic-compatible': {
     label: 'Anthropic Compatible',
     defaultBaseUrl: '',
-    defaultModels: [],
+    defaultModels: OFFICIAL_MODELS['anthropic-compatible'],
   },
   google: {
     label: 'Google',
     defaultBaseUrl: 'https://generativelanguage.googleapis.com',
-    defaultModels: ['gemini-2.0-flash-exp', 'gemini-1.5-pro'],
+    defaultModels: OFFICIAL_MODELS.google,
   },
   openai: {
     label: 'OpenAI',
     defaultBaseUrl: 'https://api.openai.com',
-    defaultModels: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+    defaultModels: OFFICIAL_MODELS.openai,
   },
   'openai-compatible': {
     label: 'OpenAI Compatible',
     defaultBaseUrl: '',
-    defaultModels: [],
+    defaultModels: OFFICIAL_MODELS['openai-compatible'],
   },
 } as const;
 
@@ -151,7 +152,7 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
       apiKey: '',
       modelId: '',
     });
-    setAvailableModels([]);
+    setAvailableModels([...API_TYPES.anthropic.defaultModels]);
     setFormErrors({});
     setIsFormVerified(false);
     setIsDialogOpen(true);
@@ -674,69 +675,60 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
               {formErrors.apiKey && <FieldError>{formErrors.apiKey}</FieldError>}
             </Field>
 
-            {/* Fetch Models Button */}
-            <Field>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleFetchModels();
-                }}
-                disabled={isFetching || !formData.apiKey}
-                className={cn(
-                  'flex items-center justify-center gap-half w-full px-base py-half rounded-sm border text-base',
-                  'hover:border-brand hover:text-high transition-colors',
-                  'disabled:opacity-50 disabled:cursor-not-allowed',
-                  'bg-secondary text-normal'
-                )}
-              >
-                {isFetching && <ArrowsClockwiseIcon className="size-icon-sm animate-spin" />}
-                {isFetching ? t('step3.actions.fetching') : t('step3.actions.fetchModels')}
-              </button>
-              {formErrors.fetch && <FieldError>{formErrors.fetch}</FieldError>}
-            </Field>
-
-            {/* Model Selection/Input */}
-            <Field>
-              <FieldLabel htmlFor="modelId">{t('step3.fields.modelId.label')}</FieldLabel>
-              {availableModels.length > 0 ? (
-                <select
-                  id="modelId"
-                  value={formData.modelId}
-                  onChange={(e) => {
-                    setFormData({ ...formData, modelId: e.target.value });
-                    setIsFormVerified(false);
+            {/* Fetch Models Button — only compatible endpoints need a live
+                list; official APIs use the built-in catalog. */}
+            {isCompatibleApiType(formData.apiType) && (
+              <Field>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleFetchModels();
                   }}
+                  disabled={isFetching || !formData.apiKey || !formData.baseUrl.trim()}
                   className={cn(
-                    'w-full bg-secondary rounded-sm border px-base py-half text-base text-high',
-                    'focus:outline-none focus:ring-1 focus:ring-brand',
-                    formErrors.modelId && 'border-error'
+                    'flex items-center justify-center gap-half w-full px-base py-half rounded-sm border text-base',
+                    'hover:border-brand hover:text-high transition-colors',
+                    'disabled:opacity-50 disabled:cursor-not-allowed',
+                    'bg-secondary text-normal'
                   )}
                 >
-                  <option value="">{t('step3.fields.modelId.selectPlaceholder')}</option>
-                  {availableModels.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  id="modelId"
-                  type="text"
-                  value={formData.modelId}
-                  onChange={(e) => {
-                    setFormData({ ...formData, modelId: e.target.value });
-                    setIsFormVerified(false);
-                  }}
-                  placeholder={t('step3.fields.modelId.placeholder')}
-                  className={cn(
-                    'w-full bg-secondary rounded-sm border px-base py-half text-base text-high',
-                    'placeholder:text-low placeholder:opacity-80',
-                    'focus:outline-none focus:ring-1 focus:ring-brand',
-                    formErrors.modelId && 'border-error'
-                  )}
-                />
-              )}
+                  {isFetching && <ArrowsClockwiseIcon className="size-icon-sm animate-spin" />}
+                  {isFetching ? t('step3.actions.fetching') : t('step3.actions.fetchModels')}
+                </button>
+                {formErrors.fetch && <FieldError>{formErrors.fetch}</FieldError>}
+              </Field>
+            )}
+
+            {/* Model ID: free input with catalog/fetched suggestions */}
+            <Field>
+              <FieldLabel htmlFor="modelId">{t('step3.fields.modelId.label')}</FieldLabel>
+              <input
+                id="modelId"
+                type="text"
+                list="modelId-options"
+                value={formData.modelId}
+                onChange={(e) => {
+                  setFormData({ ...formData, modelId: e.target.value });
+                  setIsFormVerified(false);
+                }}
+                placeholder={t('step3.fields.modelId.placeholder')}
+                className={cn(
+                  'w-full bg-secondary rounded-sm border px-base py-half text-base text-high',
+                  'placeholder:text-low placeholder:opacity-80',
+                  'focus:outline-none focus:ring-1 focus:ring-brand',
+                  formErrors.modelId && 'border-error'
+                )}
+              />
+              <datalist id="modelId-options">
+                {availableModels.map((model) => (
+                  <option key={model} value={model} />
+                ))}
+              </datalist>
+              <p className="text-xs text-low mt-half">
+                {isCompatibleApiType(formData.apiType)
+                  ? t('step3.hints.compatibleModels')
+                  : t('step3.hints.officialModels')}
+              </p>
               {formErrors.modelId && <FieldError>{formErrors.modelId}</FieldError>}
             </Field>
 

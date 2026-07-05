@@ -51,7 +51,9 @@
         "openai": "OpenAI",
         "google": "Google AI",
         "openaiCompatible": "OpenAI 互換"
-      }
+      },
+      "officialModelsHint": "公式 API：組み込みのモデルリストを候補表示します。任意のモデル ID を直接入力することもできます。",
+      "compatibleModelsHint": "互換エンドポイント：エンドポイントからモデルリストを取得するか、モデル ID を手動で入力してください。"
     },
     "project": {
       "title": "プロジェクトを設定",

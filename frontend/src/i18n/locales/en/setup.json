@@ -53,7 +53,9 @@
         "openai": "OpenAI",
         "google": "Google AI",
         "openaiCompatible": "OpenAI Compatible"
-      }
+      },
+      "officialModelsHint": "Official API: built-in model list is suggested — you can also type any model ID.",
+      "compatibleModelsHint": "Compatible endpoint: fetch the model list from the endpoint, or type the model ID manually."
     },
     "project": {
       "title": "Set Up a Project",

@@ -198,6 +198,10 @@
       "zhipuaiOpenai": "偵測到智譜AI位址。建議將 API 類型更改為 \"openai-compatible\"。",
       "zhipuaiAnthropic": "偵測到智譜AI位址。建議將 API 類型更改為 \"anthropic-compatible\"。",
       "urlHint": "請輸入完整的基礎 URL，系統將原樣使用（例如 https://api.example.com/v1）。"
+    },
+    "hints": {
+      "officialModels": "官方 API：已內建模型列表，也可直接輸入任意模型 ID。",
+      "compatibleModels": "相容端點：可從端點取得模型列表，或手動輸入模型 ID。"
     }
   },
   "step4": {

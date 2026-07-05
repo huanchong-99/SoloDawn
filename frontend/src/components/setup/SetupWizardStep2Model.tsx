@@ -6,13 +6,13 @@ import {
   CircleNotchIcon,
   EyeIcon,
   EyeSlashIcon,
-  CaretDownIcon,
   LightningIcon,
   KeyIcon,
 } from '@phosphor-icons/react';
 
 import { cn } from '@/lib/utils';
 import { CLI_TYPES } from '@/components/workflow/constants';
+import { isCompatibleApiType } from '@/components/workflow/modelCatalog';
 import type { SetupModelMode } from './SetupWizardStep2ModelContainer';
 
 const API_TYPE_OPTIONS = [
@@ -382,30 +382,33 @@ export function SetupWizardStep2Model({
             </div>
           )}
 
-          {/* Fetch Models + Model Dropdown */}
-          <div className="space-y-half">
-            <button
-              type="button"
-              onClick={onFetchModels}
-              disabled={isLoadingModels || !apiKey.trim()}
-              className={cn(
-                'flex items-center justify-center gap-half w-full',
-                'px-base py-base rounded border border-border text-base',
-                'bg-secondary text-normal transition-colors',
-                'hover:border-brand hover:text-high',
-                'disabled:opacity-50 disabled:cursor-not-allowed'
-              )}
-            >
-              {isLoadingModels && (
-                <CircleNotchIcon className="size-icon-sm animate-spin" weight="bold" />
-              )}
-              {isLoadingModels
-                ? t('setup:wizard.model.fetchingModels')
-                : t('setup:wizard.model.fetchModelsButton')}
-            </button>
-          </div>
+          {/* Fetch Models — only compatible endpoints need a live list;
+              official APIs use the built-in catalog. */}
+          {isCompatibleApiType(apiType) && (
+            <div className="space-y-half">
+              <button
+                type="button"
+                onClick={onFetchModels}
+                disabled={isLoadingModels || !apiKey.trim() || !baseUrl.trim()}
+                className={cn(
+                  'flex items-center justify-center gap-half w-full',
+                  'px-base py-base rounded border border-border text-base',
+                  'bg-secondary text-normal transition-colors',
+                  'hover:border-brand hover:text-high',
+                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                )}
+              >
+                {isLoadingModels && (
+                  <CircleNotchIcon className="size-icon-sm animate-spin" weight="bold" />
+                )}
+                {isLoadingModels
+                  ? t('setup:wizard.model.fetchingModels')
+                  : t('setup:wizard.model.fetchModelsButton')}
+              </button>
+            </div>
+          )}
 
-          {/* Model Selector (dropdown if models fetched, manual input otherwise) */}
+          {/* Model ID: free input with catalog/fetched suggestions */}
           <div className="space-y-half">
             <label
               htmlFor="setup-model-id"
@@ -413,47 +416,32 @@ export function SetupWizardStep2Model({
             >
               {t('setup:wizard.model.modelIdLabel')}
             </label>
-            {models.length > 0 ? (
-              <div className="relative">
-                <select
-                  id="setup-model-id"
-                  value={modelId}
-                  onChange={(e) => onModelIdChange(e.target.value)}
-                  className={cn(
-                    'w-full appearance-none rounded border border-border bg-secondary',
-                    'px-base py-base pr-8 text-base text-normal',
-                    'focus:outline-none focus:ring-1 focus:ring-brand'
-                  )}
-                >
-                  <option key="empty" value="">
-                    {t('setup:wizard.model.modelIdPlaceholder')}
-                  </option>
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-                <CaretDownIcon
-                  className="size-icon-xs absolute right-2 top-1/2 -translate-y-1/2 text-low pointer-events-none"
-                  weight="bold"
-                />
-              </div>
-            ) : (
-              <input
-                id="setup-model-id"
-                type="text"
-                value={modelId}
-                onChange={(e) => onModelIdChange(e.target.value)}
-                placeholder={t('setup:wizard.model.modelIdManualPlaceholder', { defaultValue: t('setup:wizard.model.modelIdPlaceholder') })}
-                className={cn(
-                  'w-full rounded border border-border bg-secondary',
-                  'px-base py-base text-base text-normal',
-                  'placeholder:text-low placeholder:opacity-80',
-                  'focus:outline-none focus:ring-1 focus:ring-brand'
-                )}
-              />
-            )}
+            <input
+              id="setup-model-id"
+              type="text"
+              list="setup-model-id-options"
+              value={modelId}
+              onChange={(e) => onModelIdChange(e.target.value)}
+              placeholder={t('setup:wizard.model.modelIdManualPlaceholder', { defaultValue: t('setup:wizard.model.modelIdPlaceholder') })}
+              className={cn(
+                'w-full rounded border border-border bg-secondary',
+                'px-base py-base text-base text-normal',
+                'placeholder:text-low placeholder:opacity-80',
+                'focus:outline-none focus:ring-1 focus:ring-brand'
+              )}
+            />
+            <datalist id="setup-model-id-options">
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </datalist>
+            <p className="text-sm text-low">
+              {isCompatibleApiType(apiType)
+                ? t('setup:wizard.model.compatibleModelsHint')
+                : t('setup:wizard.model.officialModelsHint')}
+            </p>
           </div>
 
           {/* Verify Connection */}

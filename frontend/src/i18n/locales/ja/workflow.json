@@ -198,6 +198,10 @@
       "zhipuaiOpenai": "ZhipuAIが検出されました。APIタイプを \"openai-compatible\" に変更することを検討してください。",
       "zhipuaiAnthropic": "ZhipuAIが検出されました。APIタイプを \"anthropic-compatible\" に変更することを検討してください。",
       "urlHint": "完全なベースURLを入力してください。入力された通りに使用されます（例：https://api.example.com/v1）。"
+    },
+    "hints": {
+      "officialModels": "公式 API：組み込みのモデルリストを候補表示します。任意のモデル ID を直接入力することもできます。",
+      "compatibleModels": "互換エンドポイント：エンドポイントからモデルリストを取得するか、モデル ID を手動で入力してください。"
     }
   },
   "step4": {

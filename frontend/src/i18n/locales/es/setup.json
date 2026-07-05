@@ -9,14 +9,14 @@
     },
     "welcome": {
       "title": "Bienvenido a SoloDawn",
-      "subtitle": "Configuremos tu entorno en unos sencillos pasos. Puedes omitir este proceso y configurar todo m\u00e1s tarde en Ajustes.",
+      "subtitle": "Configuremos tu entorno en unos sencillos pasos. Puedes omitir este proceso y configurar todo más tarde en Ajustes.",
       "languageLabel": "Idioma",
       "continueButton": "Continuar",
-      "skipButton": "Omitir configuraci\u00f3n"
+      "skipButton": "Omitir configuración"
     },
     "model": {
       "title": "Configurar un modelo de IA",
-      "subtitle": "SoloDawn necesita al menos un modelo de IA para ejecutar flujos de trabajo. Puedes agregar m\u00e1s posteriormente en Ajustes.",
+      "subtitle": "SoloDawn necesita al menos un modelo de IA para ejecutar flujos de trabajo. Puedes agregar más posteriormente en Ajustes.",
       "displayNameLabel": "Nombre visible",
       "displayNamePlaceholder": "ej. Mi API de Claude",
       "apiTypeLabel": "Tipo de API",
@@ -28,43 +28,45 @@
       "modelIdPlaceholder": "Selecciona un modelo",
       "fetchModelsButton": "Obtener modelos",
       "fetchingModels": "Obteniendo modelos...",
-      "verifyButton": "Verificar conexi\u00f3n",
+      "verifyButton": "Verificar conexión",
       "verifying": "Verificando...",
-      "verified": "Conexi\u00f3n verificada",
-      "verifyFailed": "La verificaci\u00f3n fall\u00f3. Revisa tu clave de API y la configuraci\u00f3n.",
-      "nativeTab": "Suscripci\u00f3n",
+      "verified": "Conexión verificada",
+      "verifyFailed": "La verificación falló. Revisa tu clave de API y la configuración.",
+      "nativeTab": "Suscripción",
       "manualTab": "Clave de API",
-      "nativeDetecting": "Detectando suscripci\u00f3n local...",
-      "nativeDetected": "Suscripci\u00f3n de Claude Code detectada",
+      "nativeDetecting": "Detectando suscripción local...",
+      "nativeDetected": "Suscripción de Claude Code detectada",
       "nativeModelLabel": "Modelo",
-      "nativeModelAuto": "Auto (seg\u00fan suscripci\u00f3n)",
+      "nativeModelAuto": "Auto (según suscripción)",
       "nativeCurrentDefault": "predeterminado actual",
-      "nativeModelSwitchHint": "Establece el modelo predeterminado para las ejecuciones por suscripci\u00f3n \u2014 se aplica a los modos DIY y Agent Planned; cada terminal puede elegir otro modelo.",
-      "nativeVersionLabel": "Versi\u00f3n del CLI",
-      "nativeHint": "Se utilizar\u00e1 directamente tu cuenta de Claude Code ya iniciada \u2014 no se necesita clave de API.",
-      "nativeNotFound": "No se detect\u00f3 una suscripci\u00f3n activa",
-      "nativeNotFoundHint": "Primero inicia sesi\u00f3n en Claude Code (ejecuta \"claude\" en la terminal), o cambia a la pesta\u00f1a \"Clave de API\" para ingresar las credenciales manualmente.",
-      "skipHint": "Puedes omitir este paso y configurar modelos m\u00e1s tarde en Ajustes \u2192 Modelos.",
+      "nativeModelSwitchHint": "Establece el modelo predeterminado para las ejecuciones por suscripción — se aplica a los modos DIY y Agent Planned; cada terminal puede elegir otro modelo.",
+      "nativeVersionLabel": "Versión del CLI",
+      "nativeHint": "Se utilizará directamente tu cuenta de Claude Code ya iniciada — no se necesita clave de API.",
+      "nativeNotFound": "No se detectó una suscripción activa",
+      "nativeNotFoundHint": "Primero inicia sesión en Claude Code (ejecuta \"claude\" en la terminal), o cambia a la pestaña \"Clave de API\" para ingresar las credenciales manualmente.",
+      "skipHint": "Puedes omitir este paso y configurar modelos más tarde en Ajustes → Modelos.",
       "apiTypes": {
         "anthropic": "Anthropic",
         "anthropicCompatible": "Anthropic Compatible",
         "openai": "OpenAI",
         "google": "Google AI",
         "openaiCompatible": "Compatible con OpenAI"
-      }
+      },
+      "officialModelsHint": "API oficial: se sugiere la lista de modelos integrada; también puedes escribir cualquier ID de modelo.",
+      "compatibleModelsHint": "Endpoint compatible: obtén la lista de modelos desde el endpoint o escribe el ID del modelo manualmente."
     },
     "project": {
       "title": "Configurar un proyecto",
-      "subtitle": "Selecciona un directorio de trabajo para tu primer proyecto. SoloDawn gestionar\u00e1 tu c\u00f3digo en esta ubicaci\u00f3n.",
+      "subtitle": "Selecciona un directorio de trabajo para tu primer proyecto. SoloDawn gestionará tu código en esta ubicación.",
       "optionalBadge": "Opcional",
       "directoryLabel": "Directorio de trabajo",
       "directoryPlaceholder": "Selecciona un directorio...",
       "browseButton": "Explorar",
       "continueButton": "Continuar",
       "skipButton": "Omitir",
-      "skipHint": "Puedes omitir este paso y crear proyectos m\u00e1s tarde desde el tablero.",
+      "skipHint": "Puedes omitir este paso y crear proyectos más tarde desde el tablero.",
       "checking": "Verificando directorio...",
-      "validGitRepo": "Repositorio Git v\u00e1lido detectado",
+      "validGitRepo": "Repositorio Git válido detectado",
       "notGitRepo": "Este directorio no es un repositorio Git",
       "directoryNotFound": "Directorio no encontrado",
       "checkFailed": "Error al verificar el directorio",
@@ -75,7 +77,7 @@
       "subtitle": "Conecta SoloDawn con tus herramientas favoritas. Todas las integraciones son opcionales.",
       "feishu": {
         "label": "Feishu / Lark",
-        "description": "Recibe notificaciones de flujos de trabajo e interact\u00faa con SoloDawn a trav\u00e9s del bot de Feishu.",
+        "description": "Recibe notificaciones de flujos de trabajo e interactúa con SoloDawn a través del bot de Feishu.",
         "appIdLabel": "App ID",
         "appIdPlaceholder": "Introduce el App ID de Feishu",
         "appSecretLabel": "App Secret",
@@ -84,10 +86,10 @@
       "skipHint": "Puedes configurar integraciones en cualquier momento desde Ajustes."
     },
     "done": {
-      "title": "\u00a1Todo listo!",
-      "subtitle": "SoloDawn est\u00e1 preparado. Comienza creando tu primer flujo de trabajo.",
+      "title": "¡Todo listo!",
+      "subtitle": "SoloDawn está preparado. Comienza creando tu primer flujo de trabajo.",
       "getStartedButton": "Comenzar",
-      "rerunHint": "Puedes volver a ejecutar esta configuraci\u00f3n en cualquier momento desde Ajustes."
+      "rerunHint": "Puedes volver a ejecutar esta configuración en cualquier momento desde Ajustes."
     }
   }
 }

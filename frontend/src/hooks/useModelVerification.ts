@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { ApiType } from '@/components/workflow/types';
+import { OFFICIAL_MODELS } from '@/components/workflow/modelCatalog';
 
 interface ModelEntry {
   id: string;
@@ -21,20 +22,6 @@ export interface UseModelVerificationResult {
   }) => Promise<boolean>;
   reset: () => void;
 }
-
-const DEFAULT_MODELS: Record<ApiType, string[]> = {
-  anthropic: [
-    'claude-opus-4-8',
-    'claude-sonnet-5',
-    'claude-haiku-4-5',
-    'claude-opus-4-7',
-    'claude-sonnet-4-6',
-  ],
-  'anthropic-compatible': [],
-  google: ['gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash'],
-  openai: ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
-  'openai-compatible': [],
-};
 
 /**
  * Reusable hook for model fetching and verification.
@@ -73,8 +60,8 @@ export function useModelVerification(): UseModelVerificationResult {
         }));
         setModels(fetched);
       } catch (_err) {
-        // Fall back to default models for the provider
-        const defaults = DEFAULT_MODELS[apiType as ApiType] ?? [];
+        // Fall back to the built-in models for the provider
+        const defaults = OFFICIAL_MODELS[apiType as ApiType] ?? [];
         setModels(defaults.map((m) => ({ id: m, name: m })));
         setVerifyError(
           _err instanceof Error ? _err.message : 'Failed to fetch models'

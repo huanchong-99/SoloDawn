@@ -51,7 +51,9 @@
         "openai": "OpenAI",
         "google": "Google AI",
         "openaiCompatible": "OpenAI 호환"
-      }
+      },
+      "officialModelsHint": "공식 API: 내장 모델 목록이 제안됩니다. 모델 ID를 직접 입력할 수도 있습니다.",
+      "compatibleModelsHint": "호환 엔드포인트: 엔드포인트에서 모델 목록을 가져오거나 모델 ID를 직접 입력하세요."
     },
     "project": {
       "title": "프로젝트 설정",

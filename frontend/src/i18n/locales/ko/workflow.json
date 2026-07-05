@@ -198,6 +198,10 @@
       "zhipuaiOpenai": "ZhipuAI가 감지되었습니다. API 유형을 \"openai-compatible\"로 변경하는 것을 고려하세요.",
       "zhipuaiAnthropic": "ZhipuAI가 감지되었습니다. API 유형을 \"anthropic-compatible\"로 변경하는 것을 고려하세요.",
       "urlHint": "전체 기본 URL을 입력하세요. 입력한 그대로 사용됩니다 (예: https://api.example.com/v1)."
+    },
+    "hints": {
+      "officialModels": "공식 API: 내장 모델 목록이 제안됩니다. 모델 ID를 직접 입력할 수도 있습니다.",
+      "compatibleModels": "호환 엔드포인트: 엔드포인트에서 모델 목록을 가져오거나 모델 ID를 직접 입력하세요."
     }
   },
   "step4": {

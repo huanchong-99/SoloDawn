@@ -199,6 +199,10 @@
       "zhipuaiOpenai": "检测到智谱AI地址。建议将 API 类型更改为 \"openai-compatible\"。",
       "zhipuaiAnthropic": "检测到智谱AI地址。建议将 API 类型更改为 \"anthropic-compatible\"。",
       "urlHint": "请输入完整的基础 URL，系统将原样使用（例如 https://api.example.com/v1）。"
+    },
+    "hints": {
+      "officialModels": "官方 API：已内置模型列表，也可直接输入任意模型 ID。",
+      "compatibleModels": "兼容端点：可从端点获取模型列表，或手动输入模型 ID。"
     }
   },
   "step4": {

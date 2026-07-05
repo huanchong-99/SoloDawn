@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { Step3Models } from './Step3Models';
+import { OFFICIAL_MODELS } from '../modelCatalog';
 import type { WizardConfig } from '../types';
 import { renderWithI18n, setTestLanguage, i18n } from '@/test/renderWithI18n';
 
@@ -370,7 +371,7 @@ describe('Step3Models', () => {
     expect(screen.getByText('GPT-4')).toBeInTheDocument();
   });
 
-  it('should show fetch models button', () => {
+  it('should hide fetch models button for official API types', () => {
     renderWithI18n(
       <Step3Models
         config={defaultConfig}
@@ -380,6 +381,22 @@ describe('Step3Models', () => {
 
     const addButton = screen.getByRole('button', { name: i18n.t('workflow:step3.addModel') });
     fireEvent.click(addButton);
+
+    // Default apiType is the official "anthropic" — no live fetch needed.
+    expect(screen.queryByRole('button', { name: i18n.t('workflow:step3.actions.fetchModels') })).not.toBeInTheDocument();
+  });
+
+  it('should show fetch models button for compatible API types', () => {
+    renderWithI18n(
+      <Step3Models
+        config={defaultConfig}
+        onUpdate={mockOnUpdate}
+      />
+    );
+
+    const addButton = screen.getByRole('button', { name: i18n.t('workflow:step3.addModel') });
+    fireEvent.click(addButton);
+    fireEvent.click(screen.getByText('Anthropic Compatible'));
 
     expect(screen.getByRole('button', { name: i18n.t('workflow:step3.actions.fetchModels') })).toBeInTheDocument();
   });
@@ -398,7 +415,7 @@ describe('Step3Models', () => {
     expect(screen.getByRole('button', { name: i18n.t('workflow:step3.actions.verify') })).toBeInTheDocument();
   });
 
-  it('should display model selection dropdown when models are fetched', async () => {
+  it('should suggest built-in models for official API types without fetching', () => {
     renderWithI18n(
       <Step3Models
         config={defaultConfig}
@@ -409,18 +426,48 @@ describe('Step3Models', () => {
     const addButton = screen.getByRole('button', { name: i18n.t('workflow:step3.addModel') });
     fireEvent.click(addButton);
 
-    // Fill in API Key
+    const modelInput = screen.getByLabelText(i18n.t('workflow:step3.fields.modelId.label'));
+    expect(modelInput.tagName).toBe('INPUT');
+    expect(modelInput).toHaveAttribute('list', 'modelId-options');
+
+    const options = Array.from(
+      document.querySelectorAll('#modelId-options option')
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(options).toEqual([...OFFICIAL_MODELS.anthropic]);
+  });
+
+  it('should fetch models into suggestions for compatible endpoints', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ models: ['glm-5', 'glm-4.5'] }),
+    } as Response);
+
+    renderWithI18n(
+      <Step3Models
+        config={defaultConfig}
+        onUpdate={mockOnUpdate}
+      />
+    );
+
+    const addButton = screen.getByRole('button', { name: i18n.t('workflow:step3.addModel') });
+    fireEvent.click(addButton);
+    fireEvent.click(screen.getByText('Anthropic Compatible'));
+
+    fireEvent.change(screen.getByLabelText(i18n.t('workflow:step3.fields.baseUrl.label')), { target: { value: 'https://relay.example.com' } });
     fireEvent.change(screen.getByLabelText(i18n.t('workflow:step3.fields.apiKey.label')), { target: { value: 'sk-test-key' } });
 
-    // Click fetch models
     const fetchButton = screen.getByRole('button', { name: i18n.t('workflow:step3.actions.fetchModels') });
     fireEvent.click(fetchButton);
 
-    // After fetching, model selection should be available (dropdown with options)
     await waitFor(() => {
-      const modelIdSelect = screen.getByLabelText(i18n.t('workflow:step3.fields.modelId.label'));
-      expect(modelIdSelect).toBeInTheDocument();
-      expect(modelIdSelect.tagName).toBe('SELECT');
+      const options = Array.from(
+        document.querySelectorAll('#modelId-options option')
+      ).map((o) => (o as HTMLOptionElement).value);
+      expect(options).toEqual(['glm-5', 'glm-4.5']);
     });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/models/list?'),
+      expect.objectContaining({ headers: { 'X-API-Key': 'sk-test-key' } })
+    );
   });
 });

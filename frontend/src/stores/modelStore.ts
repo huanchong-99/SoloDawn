@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { create } from 'zustand';
 import type { ModelConfig, ApiType } from '@/components/workflow/types';
+import { OFFICIAL_MODELS } from '@/components/workflow/modelCatalog';
 
 /**
  * Model state management store
@@ -39,21 +40,6 @@ interface ModelStoreState {
   // Reset
   reset: () => void;
 }
-
-// Default models for each API type (fallback when API fetch fails)
-const DEFAULT_MODELS: Record<ApiType, string[]> = {
-  anthropic: [
-    'claude-opus-4-8',
-    'claude-sonnet-5',
-    'claude-haiku-4-5',
-    'claude-opus-4-7',
-    'claude-sonnet-4-6',
-  ],
-  'anthropic-compatible': [],
-  google: ['gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash'],
-  openai: ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
-  'openai-compatible': [],
-};
 
 export const useModelStore = create<ModelStoreState>((set, get) => ({
   // Initial state
@@ -124,8 +110,8 @@ export const useModelStore = create<ModelStoreState>((set, get) => ({
       const errorMessage = error instanceof Error ? error.message : 'Failed to fetch models';
       set({ error: errorMessage, isFetching: false });
 
-      // Return default models as fallback
-      const defaultModels = DEFAULT_MODELS[apiType] ?? [];
+      // Return the built-in models as fallback
+      const defaultModels = [...(OFFICIAL_MODELS[apiType] ?? [])];
       get().setAvailableModels(apiType, defaultModels);
       return defaultModels;
     }
@@ -177,7 +163,7 @@ export const useModelStore = create<ModelStoreState>((set, get) => ({
 
   getAvailableModels: (apiType) => {
     const models = get().availableModels.get(apiType);
-    return models ?? DEFAULT_MODELS[apiType as ApiType] ?? [];
+    return models ?? [...(OFFICIAL_MODELS[apiType as ApiType] ?? [])];
   },
 
   setLoading: (loading) => {
@@ -229,5 +215,7 @@ export function useVerifiedModels() {
  */
 export function useAvailableModels(apiType: string) {
   const availableModels = useModelStore((state) => state.availableModels);
-  return availableModels.get(apiType) ?? DEFAULT_MODELS[apiType as ApiType] ?? [];
+  return (
+    availableModels.get(apiType) ?? [...(OFFICIAL_MODELS[apiType as ApiType] ?? [])]
+  );
 }

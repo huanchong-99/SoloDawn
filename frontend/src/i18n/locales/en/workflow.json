@@ -198,6 +198,10 @@
       "zhipuaiOpenai": "ZhipuAI detected. Consider using \"openai-compatible\" as the API type.",
       "zhipuaiAnthropic": "ZhipuAI detected. Consider using \"anthropic-compatible\" as the API type.",
       "urlHint": "Enter the complete base URL. It will be used exactly as-is (e.g. https://api.example.com/v1)."
+    },
+    "hints": {
+      "officialModels": "Official API: built-in model list is suggested — you can also type any model ID.",
+      "compatibleModels": "Compatible endpoint: fetch the model list from the endpoint, or type the model ID manually."
     }
   },
   "step4": {

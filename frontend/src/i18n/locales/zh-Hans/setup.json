@@ -53,7 +53,9 @@
         "openai": "OpenAI",
         "google": "Google AI",
         "openaiCompatible": "OpenAI 兼容"
-      }
+      },
+      "officialModelsHint": "官方 API：已内置模型列表，也可直接输入任意模型 ID。",
+      "compatibleModelsHint": "兼容端点：可从端点获取模型列表，或手动输入模型 ID。"
     },
     "project": {
       "title": "设置项目",

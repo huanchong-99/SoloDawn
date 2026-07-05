@@ -6,6 +6,10 @@ import { useUserSystem } from '@/components/ConfigProvider';
 import { useModelVerification } from '@/hooks/useModelVerification';
 import { useNativeCredentials } from '@/hooks/useNativeCredentials';
 import { setDefaultModelForCli } from '@/hooks/useCliTypes';
+import {
+  OFFICIAL_MODELS,
+  isCompatibleApiType,
+} from '@/components/workflow/modelCatalog';
 import type { ApiType, ModelConfig } from '@/components/workflow/types';
 import {
   createNativeModelConfigs,
@@ -71,6 +75,19 @@ export function SetupWizardStep2ModelContainer({
     verifyModel,
     reset: resetVerification,
   } = useModelVerification();
+
+  // Official APIs suggest the built-in catalog; compatible endpoints suggest
+  // whatever the live fetch returned (empty until fetched).
+  const modelOptions = useMemo(
+    () =>
+      isCompatibleApiType(apiType)
+        ? models
+        : (OFFICIAL_MODELS[apiType as ApiType] ?? []).map((m) => ({
+            id: m,
+            name: m,
+          })),
+    [apiType, models]
+  );
 
   // Allow proceeding if model ID is manually entered, even without verification.
   // Third-party OpenAI-compatible endpoints may not support the verification API.
@@ -237,7 +254,7 @@ export function SetupWizardStep2ModelContainer({
       apiKey={apiKey}
       baseUrl={baseUrl}
       modelId={modelId}
-      models={models}
+      models={modelOptions}
       isLoadingModels={isLoadingModels}
       isVerified={isVerified}
       verifyError={verifyError}
