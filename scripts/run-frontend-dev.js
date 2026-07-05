@@ -1,20 +1,8 @@
 #!/usr/bin/env node
 
 const path = require("node:path");
+const fs = require("node:fs");
 const { spawn } = require("node:child_process");
-
-function resolveNpmCommand(args) {
-  if (process.platform !== "win32") {
-    return { command: "npm", args };
-  }
-
-  const npmExecPath = process.env.npm_execpath;
-  if (npmExecPath) {
-    return { command: process.execPath, args: [npmExecPath, ...args] };
-  }
-
-  return { command: "cmd.exe", args: ["/d", "/s", "/c", "npm", ...args] };
-}
 
 function main() {
   const port = String(process.env.FRONTEND_PORT || "23457");
@@ -22,11 +10,17 @@ function main() {
     ...process.env,
     FRONTEND_PORT: port,
   };
-  const npmArgs = ["run", "dev", "--", "--port", port, "--host"];
-  const resolved = resolveNpmCommand(npmArgs);
+  // Spawn Vite directly with the current Node executable — avoids re-entering
+  // the invoking package manager via npm_execpath (see scripts/run-dev.js).
+  const frontendDir = path.join(__dirname, "..", "frontend");
+  const viteBin = path.join(frontendDir, "node_modules", "vite", "bin", "vite.js");
+  if (!fs.existsSync(viteBin)) {
+    console.error(`[frontend:dev] Vite is not installed at ${viteBin}. Run \`pnpm install\` first.`);
+    process.exit(1);
+  }
 
-  const child = spawn(resolved.command, resolved.args, {
-    cwd: path.join(__dirname, "..", "frontend"),
+  const child = spawn(process.execPath, [viteBin, "--port", port, "--host"], {
+    cwd: frontendDir,
     stdio: "inherit",
     env,
   });

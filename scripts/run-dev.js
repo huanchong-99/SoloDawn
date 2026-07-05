@@ -295,7 +295,11 @@ function run(name, command, args, options) {
   const resolved = resolveCommand(command, args);
   ensureLogStreams();
   const spawnOptions = {
-    stdio: ["inherit", "pipe", "pipe"],
+    // stdin must NOT be inherited: run-dev itself reads its stdin (the Ctrl+C
+    // readline below), and two readers on one Windows console handle deadlock
+    // a child that installs stdin listeners (e.g. vite's CLI shortcuts) before
+    // it ever binds its port. No child needs stdin — drop it.
+    stdio: ["ignore", "pipe", "pipe"],
     ...options
   };
   const executable = resolveExecutable(resolved.command, spawnOptions.env ?? process.env);
@@ -599,15 +603,21 @@ async function main() {
   // terminating/stale previous vite processes.
   await ensurePortAvailable(ports.frontend, "Frontend");
 
-  // Start frontend
+  // Start frontend by spawning Vite directly with the current Node executable.
+  // Going through `npm run dev` re-enters the invoking package manager via
+  // npm_execpath (pnpm when launched as `pnpm run dev`); a broken pnpm
+  // self-managed install then hangs before Vite ever starts. Vite needs no
+  // package-manager layer, so skip it entirely.
+  const frontendDir = path.join(__dirname, "..", "frontend");
+  const viteBin = path.join(frontendDir, "node_modules", "vite", "bin", "vite.js");
+  if (!fs.existsSync(viteBin)) {
+    throw new Error(`Vite is not installed at ${viteBin}. Run \`pnpm install\` first.`);
+  }
   run(
     "frontend",
-    "npm",
-    ["run", "dev", "--", "--port", String(ports.frontend), "--host"],
-    {
-      env,
-      cwd: path.join(__dirname, "..", "frontend"),
-    }
+    process.execPath,
+    [viteBin, "--port", String(ports.frontend), "--host"],
+    { env, cwd: frontendDir }
   );
 
   console.log("[dev] Development servers started successfully");
