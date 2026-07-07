@@ -8593,31 +8593,26 @@ impl OrchestratorAgent {
     }
 
     fn needs_explicit_submit(terminal: &db::models::Terminal) -> bool {
-        terminal.cli_type_id.to_ascii_lowercase().contains("codex")
+        // Shared with the DIY/manual dispatch path so a CLI is driven identically
+        // regardless of execution mode. See `terminal::submit_policy`.
+        crate::services::terminal::submit_policy::cli_needs_explicit_submit(&terminal.cli_type_id)
     }
 
     fn is_claude_code_cli(terminal: &db::models::Terminal) -> bool {
-        terminal
-            .cli_type_id
-            .to_ascii_lowercase()
-            .contains("claude-code")
+        crate::services::terminal::submit_policy::cli_is_claude_code(&terminal.cli_type_id)
     }
 
     fn submit_keystroke_schedule_ms(
         terminal: &db::models::Terminal,
         is_initial_dispatch: bool,
     ) -> &'static [u64] {
-        if Self::needs_explicit_submit(terminal) {
-            &[120, 360, 900]
-        } else if is_initial_dispatch && Self::is_claude_code_cli(terminal) {
-            // Claude Code occasionally leaves the first pasted prompt in composer without
-            // submission on cold start; send one delayed Enter only for initial dispatch.
-            &[420]
+        // Delegates to the shared submit policy (single source of truth for how
+        // each CLI's TUI is coaxed into submitting a pasted instruction).
+        use crate::services::terminal::submit_policy;
+        if is_initial_dispatch {
+            submit_policy::initial_submit_keystroke_schedule_ms(&terminal.cli_type_id)
         } else {
-            // Non-Codex CLIs receive the instruction as a single message payload that already
-            // includes a submit key. Extra synthetic Enter keystrokes can race startup TUIs and
-            // accidentally submit partial/empty prompts.
-            &[]
+            submit_policy::followup_submit_keystroke_schedule_ms(&terminal.cli_type_id)
         }
     }
 

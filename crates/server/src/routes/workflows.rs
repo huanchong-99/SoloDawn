@@ -2193,6 +2193,7 @@ async fn start_workflow(
                 Vec::new()
             };
             tokio::spawn(async move {
+                use services::services::terminal::submit_policy;
                 for (task_id, task_name, task_description) in &dispatch_tasks {
                     let task_terminals = match Terminal::find_by_task(&dispatch_db, task_id).await {
                         Ok(t) => t,
@@ -2215,11 +2216,34 @@ async fn start_workflow(
                                         None,
                                     )
                                     .await;
-                                // Send submit keystroke after a brief delay
-                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                                dispatch_bus
-                                    .publish_terminal_input(&terminal.id, pty_session_id, "", None)
+                                // Submit keystrokes are CLI-specific: Codex keeps the
+                                // pasted instruction in its composer until it receives
+                                // several explicit Enters (cold-start TUI frames can
+                                // swallow the first one or two), whereas Claude Code and
+                                // others submit on the instruction's own trailing carriage
+                                // return. Mirrors the orchestrator's dispatch so DIY and
+                                // agent-planned modes drive each CLI identically; before
+                                // this fix DIY sent a single generic Enter, which left
+                                // Codex's prompt unsubmitted (terminal "initialised, then
+                                // did nothing").
+                                for &delay_ms in
+                                    submit_policy::initial_submit_keystroke_schedule_ms(
+                                        &terminal.cli_type_id,
+                                    )
+                                {
+                                    tokio::time::sleep(std::time::Duration::from_millis(
+                                        delay_ms,
+                                    ))
                                     .await;
+                                    dispatch_bus
+                                        .publish_terminal_input(
+                                            &terminal.id,
+                                            pty_session_id,
+                                            "",
+                                            None,
+                                        )
+                                        .await;
+                                }
                                 tracing::info!(
                                     terminal_id = %terminal.id,
                                     task_name = %task_name,
@@ -2236,10 +2260,24 @@ async fn start_workflow(
                                         None,
                                     )
                                     .await;
-                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                                dispatch_bus
-                                    .publish_terminal_input(&terminal.id, pty_session_id, "", None)
+                                for &delay_ms in
+                                    submit_policy::followup_submit_keystroke_schedule_ms(
+                                        &terminal.cli_type_id,
+                                    )
+                                {
+                                    tokio::time::sleep(std::time::Duration::from_millis(
+                                        delay_ms,
+                                    ))
                                     .await;
+                                    dispatch_bus
+                                        .publish_terminal_input(
+                                            &terminal.id,
+                                            pty_session_id,
+                                            "",
+                                            None,
+                                        )
+                                        .await;
+                                }
                                 tracing::info!(
                                     terminal_id = %terminal.id,
                                     command = %command_name,

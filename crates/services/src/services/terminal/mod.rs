@@ -16,6 +16,7 @@ pub mod output_fanout;
 pub mod process;
 pub mod prompt_detector;
 pub mod prompt_watcher;
+pub mod submit_policy;
 pub mod utf8_decoder;
 
 pub use bridge::TerminalBridge;
