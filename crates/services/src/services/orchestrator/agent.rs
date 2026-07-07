@@ -161,6 +161,35 @@ impl StallRecoveryTracker {
     }
 }
 
+/// Watchdog-driven re-drive budget for an agent_planned workflow whose initial
+/// planning produced zero tasks.
+///
+/// Initial planning runs only once, at `run()` startup. If that call errors on
+/// every startup retry — or returns unparseable output, in which case
+/// `run_initial_agent_planning_if_needed` returns `Ok` with zero tasks and the
+/// startup retry loop breaks — the workflow is left at `running` with no task
+/// and no terminal. No other watchdog handler re-drives planning, so it hangs
+/// there forever with no user-visible error. This tracker lets the watchdog
+/// re-attempt planning a bounded number of times (recovering the common
+/// transient failure) and, when the budget is exhausted, fail the workflow with
+/// a diagnostic instead of pinning it at `running`.
+#[derive(Debug, Default)]
+struct InitialPlanRecovery {
+    /// Number of re-drive attempts made so far.
+    attempts: u32,
+    /// Watchdog ticks elapsed since the last attempt (spacing between retries).
+    ticks_since_last: u32,
+    /// Set once the workflow has been failed so we never act on it twice.
+    gave_up: bool,
+}
+
+/// Maximum initial-planning re-drive attempts before the workflow is failed.
+/// 5 attempts spaced by [`INITIAL_PLAN_RECOVERY_TICK_GAP`] ≈ a few minutes of
+/// transient-failure tolerance before surfacing a diagnostic.
+const MAX_INITIAL_PLAN_RECOVERY_ATTEMPTS: u32 = 5;
+/// Watchdog ticks between re-drive attempts (≈30s at the 5s production tick).
+const INITIAL_PLAN_RECOVERY_TICK_GAP: u32 = 6;
+
 impl OrchestratorAgent {
     const NEXT_TERMINAL_WAIT_RETRY_ATTEMPTS: usize = 20;
     const NEXT_TERMINAL_WAIT_RETRY_INTERVAL: Duration = Duration::from_millis(500);
@@ -1080,6 +1109,10 @@ impl OrchestratorAgent {
 
         // Stall recovery: detect and recover stuck workflows
         let mut stall_recovery_tracker = StallRecoveryTracker::default();
+        // Initial-plan recovery: re-drive agent planning when it produced no
+        // tasks, so a transient planning failure doesn't pin the workflow at
+        // `running` with no terminal forever.
+        let mut initial_plan_recovery = InitialPlanRecovery::default();
         let mut watchdog = interval(Self::STALL_WATCHDOG_TICK);
         watchdog.set_missed_tick_behavior(MissedTickBehavior::Delay);
         watchdog.tick().await;
@@ -1096,6 +1129,18 @@ impl OrchestratorAgent {
                     }
                 }
                 _ = watchdog.tick() => {
+                    // Re-drive initial planning if it produced no tasks, so the
+                    // workflow doesn't hang at `running` with no terminal.
+                    if let Err(error) = self
+                        .recover_missing_initial_plan(&workflow_id, &mut initial_plan_recovery)
+                        .await
+                    {
+                        tracing::warn!(
+                            workflow_id = %workflow_id,
+                            error = %error,
+                            "Failed while re-driving missing initial plan"
+                        );
+                    }
                     if let Err(error) = self.dispatch_queued_terminals().await {
                         tracing::warn!(
                             workflow_id = %workflow_id,
@@ -1722,6 +1767,95 @@ impl OrchestratorAgent {
         {
             tracing::debug!(error = %e, "Failed to persist workflow event (table may not exist yet)");
         }
+    }
+
+    /// Re-drive initial agent planning for a running `agent_planned` workflow
+    /// that produced zero tasks, so a transient planning failure no longer pins
+    /// it at `running` forever with no terminal (auto-orchestration hang).
+    ///
+    /// Called on each watchdog tick. It is a no-op unless the workflow is
+    /// `agent_planned`, still `running`, and has no tasks — the exact state a
+    /// failed initial-planning call leaves behind. Attempts are bounded and
+    /// spaced; once the budget is exhausted the workflow is marked failed with a
+    /// diagnostic (and an `Error` event) instead of hanging silently.
+    async fn recover_missing_initial_plan(
+        &self,
+        workflow_id: &str,
+        recovery: &mut InitialPlanRecovery,
+    ) -> anyhow::Result<()> {
+        if recovery.gave_up {
+            return Ok(());
+        }
+
+        let Some(workflow) = db::models::Workflow::find_by_id(&self.db.pool, workflow_id).await?
+        else {
+            return Ok(());
+        };
+        // Only agent-planned workflows self-plan; only act while genuinely running.
+        if workflow.execution_mode != "agent_planned"
+            || workflow.status != WORKFLOW_STATUS_RUNNING
+        {
+            return Ok(());
+        }
+
+        // Any task means initial planning succeeded — nothing to recover. Reset
+        // the counters so a later regression starts from a clean budget.
+        let tasks = db::models::WorkflowTask::find_by_workflow(&self.db.pool, workflow_id)
+            .await
+            .unwrap_or_default();
+        if !tasks.is_empty() {
+            recovery.attempts = 0;
+            recovery.ticks_since_last = 0;
+            return Ok(());
+        }
+
+        // Never race a concurrent event handler that may itself be creating
+        // tasks (e.g. a chat message or synthetic completion mid-flight).
+        if self.state.read().await.run_state != OrchestratorRunState::Idle {
+            return Ok(());
+        }
+
+        // Budget exhausted → surface the failure rather than hang at `running`.
+        if recovery.attempts >= MAX_INITIAL_PLAN_RECOVERY_ATTEMPTS {
+            recovery.gave_up = true;
+            let reason = "Orchestrator could not produce an initial plan: no task was created \
+                          after multiple attempts, so no terminal can start. Check the \
+                          orchestrator model / API configuration and the project goal, then \
+                          retry the workflow.";
+            tracing::error!(
+                workflow_id = %workflow_id,
+                attempts = recovery.attempts,
+                "Initial agent planning produced zero tasks after all re-drive attempts; failing workflow"
+            );
+            self.message_bus
+                .publish_workflow_event(
+                    workflow_id,
+                    BusMessage::Error {
+                        workflow_id: workflow_id.to_string(),
+                        error: reason.to_string(),
+                    },
+                )
+                .await
+                .ok();
+            self.mark_workflow_failed(workflow_id, reason).await?;
+            return Ok(());
+        }
+
+        // Space attempts out so a provider hiccup has time to clear. The first
+        // attempt (attempts == 0) fires immediately on the tick that observes
+        // the empty workflow; subsequent ones wait the tick gap.
+        recovery.ticks_since_last += 1;
+        if recovery.attempts > 0 && recovery.ticks_since_last < INITIAL_PLAN_RECOVERY_TICK_GAP {
+            return Ok(());
+        }
+        recovery.ticks_since_last = 0;
+        recovery.attempts += 1;
+        tracing::warn!(
+            workflow_id = %workflow_id,
+            attempt = recovery.attempts,
+            "Agent-planned workflow is running with no tasks; re-attempting initial planning"
+        );
+        self.run_initial_agent_planning_if_needed().await
     }
 
     async fn recover_stalled_terminals(
@@ -12434,6 +12568,175 @@ mod tests {
         assert!(OrchestratorAgent::summarize_review_dimensions("{}").is_none());
         assert!(OrchestratorAgent::summarize_review_dimensions("not json").is_none());
         assert!(OrchestratorAgent::summarize_review_dimensions("").is_none());
+    }
+
+    /// Build an `agent_planned` workflow with NO tasks — the exact state a
+    /// failed initial-planning call leaves behind — plus an agent wired to
+    /// `mock`. Backs the initial-plan recovery tests.
+    async fn setup_agent_planned_no_tasks(
+        mock: Box<dyn LLMClient>,
+    ) -> (Arc<DBService>, String, OrchestratorAgent) {
+        let pool = SqlitePoolOptions::new().connect(":memory:").await.unwrap();
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let migration_dir = manifest_dir
+            .ancestors()
+            .nth(1)
+            .unwrap()
+            .join("db")
+            .join("migrations");
+        let migrator = sqlx::migrate::Migrator::new(migration_dir).await.unwrap();
+        migrator.run(&pool).await.unwrap();
+
+        let db = Arc::new(DBService { pool: pool.clone() });
+        let message_bus = Arc::new(MessageBus::new(100));
+
+        let project_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO projects (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(project_id)
+        .bind("recover-plan-project")
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let workflow = db::models::Workflow {
+            id: Uuid::new_v4().to_string(),
+            project_id,
+            name: "Recover Plan Workflow".to_string(),
+            description: Some("Initial-plan recovery test".to_string()),
+            status: "running".to_string(),
+            execution_mode: "agent_planned".to_string(),
+            initial_goal: Some("Build the thing".to_string()),
+            use_slash_commands: false,
+            orchestrator_enabled: false,
+            orchestrator_api_type: None,
+            orchestrator_base_url: None,
+            orchestrator_api_key: None,
+            orchestrator_model: None,
+            error_terminal_enabled: false,
+            error_terminal_cli_id: None,
+            error_terminal_model_id: None,
+            merge_terminal_cli_id: "cli-claude-code".to_string(),
+            merge_terminal_model_id: "model-claude-sonnet".to_string(),
+            target_branch: "main".to_string(),
+            git_watcher_enabled: false,
+            ready_at: Some(Utc::now()),
+            started_at: Some(Utc::now()),
+            completed_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            pause_reason: None,
+            audit_plan: None,
+        };
+        db::models::Workflow::create(&pool, &workflow).await.unwrap();
+
+        let mut agent = OrchestratorAgent::with_llm_client(
+            OrchestratorConfig {
+                api_key: "test-key".to_string(),
+                quality_gate_mode: "off".to_string(),
+                ..Default::default()
+            },
+            workflow.id.clone(),
+            message_bus.clone(),
+            db.clone(),
+            mock,
+        )
+        .expect("agent should be created");
+
+        let process_manager = Arc::new(crate::services::terminal::process::ProcessManager::new());
+        let prompt_watcher = crate::services::terminal::PromptWatcher::new(
+            message_bus.clone(),
+            process_manager.clone(),
+        );
+        agent.attach_runtime_actions(Arc::new(
+            crate::services::orchestrator::RuntimeActionService::new(
+                db.clone(),
+                message_bus.clone(),
+                process_manager,
+                prompt_watcher,
+            ),
+        ));
+
+        (db, workflow.id, agent)
+    }
+
+    // Regression: an agent_planned workflow whose initial planning produced no
+    // task must NOT stay pinned at `running` forever. When re-drive keeps
+    // failing, the workflow is failed with a diagnostic after a bounded budget.
+    #[tokio::test]
+    async fn recover_missing_initial_plan_fails_workflow_after_budget() {
+        let (db, workflow_id, agent) =
+            setup_agent_planned_no_tasks(Box::new(MockLLMClient::that_fails())).await;
+
+        let mut recovery = super::InitialPlanRecovery::default();
+        // Each attempt-performing call errors (LLM fails); force the tick gap so
+        // every call performs an attempt rather than waiting.
+        for _ in 0..super::MAX_INITIAL_PLAN_RECOVERY_ATTEMPTS {
+            recovery.ticks_since_last = super::INITIAL_PLAN_RECOVERY_TICK_GAP;
+            let _ = agent
+                .recover_missing_initial_plan(&workflow_id, &mut recovery)
+                .await;
+        }
+        assert_eq!(recovery.attempts, super::MAX_INITIAL_PLAN_RECOVERY_ATTEMPTS);
+        assert!(!recovery.gave_up, "not yet given up after last attempt");
+
+        // Budget exhausted → the next tick fails the workflow instead of hanging.
+        recovery.ticks_since_last = super::INITIAL_PLAN_RECOVERY_TICK_GAP;
+        agent
+            .recover_missing_initial_plan(&workflow_id, &mut recovery)
+            .await
+            .expect("give-up path should not error");
+        assert!(recovery.gave_up);
+
+        let workflow = db::models::Workflow::find_by_id(&db.pool, &workflow_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            workflow.status, "failed",
+            "workflow should leave `running` once planning is unrecoverable"
+        );
+    }
+
+    // A transient planning failure recovers: once re-drive produces a task the
+    // workflow keeps running and the recovery budget resets.
+    #[tokio::test]
+    async fn recover_missing_initial_plan_redrives_and_creates_task() {
+        let task_id = Uuid::new_v4().to_string();
+        let response = format!(
+            r#"[{{"type":"create_task","task_id":"{task_id}","name":"Recovered","description":"x","order_index":0}}]"#
+        );
+        let (db, workflow_id, agent) =
+            setup_agent_planned_no_tasks(Box::new(MockLLMClient::with_response(&response))).await;
+
+        let mut recovery = super::InitialPlanRecovery::default();
+        agent
+            .recover_missing_initial_plan(&workflow_id, &mut recovery)
+            .await
+            .expect("re-drive should succeed");
+
+        let tasks = db::models::WorkflowTask::find_by_workflow(&db.pool, &workflow_id)
+            .await
+            .unwrap();
+        assert!(!tasks.is_empty(), "re-drive should have created a task");
+
+        // With a task now present, the next tick resets the tracker and leaves
+        // the workflow running (never failed).
+        agent
+            .recover_missing_initial_plan(&workflow_id, &mut recovery)
+            .await
+            .unwrap();
+        assert_eq!(recovery.attempts, 0);
+        assert!(!recovery.gave_up);
+
+        let workflow = db::models::Workflow::find_by_id(&db.pool, &workflow_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(workflow.status, "running");
     }
 
     #[tokio::test]
