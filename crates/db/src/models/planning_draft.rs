@@ -323,6 +323,29 @@ impl PlanningDraft {
         Ok(())
     }
 
+    /// Hard-delete a planning draft (and its messages).
+    ///
+    /// `planning_draft_message` rows are removed automatically via
+    /// `ON DELETE CASCADE`. Child rounds that continue this draft via
+    /// `parent_draft_id` (a self-referential FK with no cascade) are detached
+    /// first so the constraint does not block the delete — those rounds become
+    /// standalone rather than being deleted. The `materialized_workflow_id`
+    /// pointer is `ON DELETE SET NULL` from the workflow side and is unaffected
+    /// here, so deleting a materialized draft leaves its workflow intact.
+    ///
+    /// Returns the number of draft rows deleted (0 if the id did not exist).
+    pub async fn delete(pool: &SqlitePool, id: &str) -> sqlx::Result<u64> {
+        sqlx::query("UPDATE planning_draft SET parent_draft_id = NULL WHERE parent_draft_id = ?1")
+            .bind(id)
+            .execute(pool)
+            .await?;
+        let result = sqlx::query("DELETE FROM planning_draft WHERE id = ?1")
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn update_feishu_sync(
         pool: &SqlitePool,
         id: &str,
@@ -511,5 +534,62 @@ mod tests {
             .unwrap()
             .expect("child draft should be discoverable from its parent");
         assert_eq!(found_child.id, child.id);
+    }
+
+    #[tokio::test]
+    async fn delete_cascades_messages_and_detaches_child_rounds() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        let project_id = Uuid::new_v4();
+        crate::models::project::Project::create(
+            &pool,
+            &crate::models::project::CreateProject {
+                name: "delete-test".to_string(),
+                repositories: vec![],
+            },
+            project_id,
+        )
+        .await
+        .unwrap();
+
+        // Parent draft with a message, plus a child round linked by parent_draft_id.
+        let parent = PlanningDraft::new(project_id, "memo app");
+        PlanningDraft::insert(&pool, &parent).await.unwrap();
+        PlanningDraftMessage::insert(
+            &pool,
+            &PlanningDraftMessage::new(&parent.id, "user", "Build a memo app"),
+        )
+        .await
+        .unwrap();
+
+        let mut child = PlanningDraft::new(project_id, "memo app v2");
+        child.parent_draft_id = Some(parent.id.clone());
+        PlanningDraft::insert(&pool, &child).await.unwrap();
+
+        // Delete the parent.
+        let rows = PlanningDraft::delete(&pool, &parent.id).await.unwrap();
+        assert_eq!(rows, 1, "exactly one draft row deleted");
+
+        // Parent is gone and its messages cascaded away.
+        assert!(PlanningDraft::find_by_id(&pool, &parent.id)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(PlanningDraftMessage::list_by_draft(&pool, &parent.id)
+            .await
+            .unwrap()
+            .is_empty());
+
+        // Child survives the delete but is detached from the removed parent, so
+        // the self-referential FK does not block the delete.
+        let surviving_child = PlanningDraft::find_by_id(&pool, &child.id)
+            .await
+            .unwrap()
+            .expect("child round should outlive its deleted parent");
+        assert!(surviving_child.parent_draft_id.is_none());
+
+        // Deleting an unknown id is a no-op that reports zero rows.
+        let rows = PlanningDraft::delete(&pool, "does-not-exist").await.unwrap();
+        assert_eq!(rows, 0);
     }
 }

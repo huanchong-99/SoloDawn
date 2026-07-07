@@ -732,6 +732,14 @@ export const planningDraftsApi = {
     return handleApiResponse<PlanningDraftResponse>(response);
   },
 
+  /** Hard-delete a planning draft (an orchestrated-workspace conversation). */
+  deleteDraft: async (draftId: string): Promise<void> => {
+    const response = await makeRequest(`/api/planning-drafts/${draftId}`, {
+      method: 'DELETE',
+    });
+    return handleApiResponse<void>(response);
+  },
+
   toggleFeishuSync: async (
     draftId: string,
     data: { enabled: boolean; syncHistory: boolean; chatId?: string }

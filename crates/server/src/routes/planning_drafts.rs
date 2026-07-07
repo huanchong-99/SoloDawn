@@ -173,7 +173,7 @@ async fn push_messages_to_feishu(
 pub fn planning_draft_routes() -> Router<DeploymentImpl> {
     Router::new()
         .route("/", post(create_draft).get(list_drafts))
-        .route("/{draft_id}", get(get_draft))
+        .route("/{draft_id}", get(get_draft).delete(delete_draft))
         .route("/{draft_id}/spec", put(update_spec))
         .route("/{draft_id}/confirm", post(confirm_draft))
         .route("/{draft_id}/confirm-gates", post(confirm_gates))
@@ -1647,6 +1647,52 @@ async fn delete_audit_doc(
         .ok_or_else(|| ApiError::Internal("Draft disappeared after update".to_string()))?;
 
     Ok(Json(ApiResponse::success(DraftResponse::from(updated))))
+}
+
+/// Delete a planning draft (an orchestrated-workspace conversation) and its
+/// messages. Best-effort removes any uploaded audit document from disk first,
+/// reusing the same path-safety guard as `delete_audit_doc` so a crafted stored
+/// path cannot delete an arbitrary file. Returns 404 if the draft is missing.
+async fn delete_draft(
+    State(deployment): State<DeploymentImpl>,
+    Path(draft_id): Path<String>,
+) -> Result<ResponseJson<ApiResponse<()>>, ApiError> {
+    let draft = PlanningDraft::find_by_id(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("Planning draft {draft_id} not found")))?;
+
+    // Best-effort disk cleanup for an uploaded audit doc. The DB delete below is
+    // the source of truth, so file-removal issues only warn. Skip disk removal
+    // for any legacy path that could traverse outside the audit-docs dir.
+    if let Some(ref doc_path) = draft.audit_doc_path {
+        if reject_unsafe_doc_path(doc_path).is_err() {
+            tracing::warn!(
+                draft_id = %draft_id,
+                "Refusing to remove audit doc with unsafe stored path during draft delete"
+            );
+        } else {
+            let full_path = audit_docs_dir().join(doc_path);
+            if let Err(e) = tokio::fs::remove_file(&full_path).await {
+                tracing::warn!(
+                    draft_id = %draft_id,
+                    path = %full_path.display(),
+                    error = %e,
+                    "Failed to remove audit doc file during draft delete"
+                );
+            }
+            let parent_dir = audit_docs_dir().join(&draft_id);
+            let _ = tokio::fs::remove_dir(&parent_dir).await; // ignore errors (may not be empty)
+        }
+    }
+
+    let deleted = PlanningDraft::delete(&deployment.db().pool, &draft_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to delete draft: {e}")))?;
+
+    tracing::info!(draft_id = %draft_id, rows = deleted, "Planning draft deleted");
+
+    Ok(Json(ApiResponse::success(())))
 }
 
 #[cfg(test)]

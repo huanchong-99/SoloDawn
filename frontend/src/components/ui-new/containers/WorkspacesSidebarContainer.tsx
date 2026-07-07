@@ -12,7 +12,8 @@ import { WorkspacesSidebar } from '@/components/ui-new/views/WorkspacesSidebar';
 import { useConciergeSessions, conciergeKeys } from '@/hooks/useConcierge';
 import { useQueryClient } from '@tanstack/react-query';
 import { conciergeApi } from '@/lib/conciergeApi';
-import { usePlanningDrafts } from '@/hooks/usePlanningDraft';
+import { planningDraftsApi } from '@/lib/api';
+import { usePlanningDrafts, planningDraftKeys } from '@/hooks/usePlanningDraft';
 import type { Workspace } from '@/components/ui-new/hooks/useWorkspaces';
 
 // Fixed UUID for the universal workspace draft (same as in useCreateModeState.ts)
@@ -105,6 +106,10 @@ export function WorkspacesSidebarContainer() {
       const sessionId = id.slice(10);
       await conciergeApi.deleteSession(sessionId);
       queryClient.invalidateQueries({ queryKey: conciergeKeys.sessions() });
+    } else if (id.startsWith('draft-')) {
+      const draftId = id.slice(6);
+      await planningDraftsApi.deleteDraft(draftId);
+      queryClient.invalidateQueries({ queryKey: planningDraftKeys.all });
     }
   }, [queryClient]);
 
