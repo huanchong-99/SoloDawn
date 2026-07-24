@@ -37,9 +37,9 @@ use services::services::{
         constants::{
             TASK_STATUS_CANCELLED, TASK_STATUS_COMPLETED, TASK_STATUS_FAILED,
             TERMINAL_STATUS_CANCELLED, TERMINAL_STATUS_COMPLETED, TERMINAL_STATUS_FAILED,
-            TERMINAL_STATUS_QUALITY_PENDING, TERMINAL_STATUS_STARTING, TERMINAL_STATUS_WAITING,
-            TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_RUNNING,
-            configured_max_concurrent_terminals,
+            TERMINAL_STATUS_NOT_STARTED, TERMINAL_STATUS_QUALITY_PENDING, TERMINAL_STATUS_STARTING,
+            TERMINAL_STATUS_WAITING, TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_PAUSED,
+            WORKFLOW_STATUS_RUNNING, configured_max_concurrent_terminals,
         },
     },
     terminal::TerminalLauncher,
@@ -214,6 +214,33 @@ fn is_known_workflow_status(status: &str) -> bool {
 
 fn can_merge_from_workflow_status(status: &str) -> bool {
     MERGE_ALLOWED_WORKFLOW_STATUSES.contains(&status)
+}
+
+/// Whether a workflow's terminals must be re-prepared before it can be
+/// (re)started.
+///
+/// Shared by `start_workflow` and `resume_workflow` so the two entry points
+/// cannot drift apart. The distinction that matters after a backend restart:
+/// `reconcile_terminal_statuses` resets every terminal to `not_started`, and a
+/// `not_started` terminal is *queued*, not broken — the orchestrator agent
+/// launches it through the global concurrency cap. Treating that state as
+/// "needs re-prepare" would force-launch every PTY here instead, duplicating
+/// the agent's own cap-aware dispatch.
+fn terminals_need_reprepare(terminals: &[Terminal]) -> bool {
+    terminals
+        .iter()
+        .any(|terminal| match terminal.status.as_str() {
+            // Queued terminals are valid under the global concurrency cap.
+            TERMINAL_STATUS_NOT_STARTED => false,
+            // Waiting terminals must have a live PTY/session binding.
+            TERMINAL_STATUS_WAITING => terminal
+                .pty_session_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|session| !session.is_empty())
+                .is_none(),
+            _ => true,
+        })
 }
 
 fn is_valid_workflow_status_transition(current: &str, next: &str) -> bool {
@@ -2016,22 +2043,7 @@ async fn start_workflow(
         let terminals =
             db::models::Terminal::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
 
-        let needs_reprepare = terminals
-            .iter()
-            .any(|terminal| match terminal.status.as_str() {
-                // Queued terminals are valid under the global concurrency cap.
-                "not_started" => false,
-                // Waiting terminals must have a live PTY/session binding.
-                "waiting" => terminal
-                    .pty_session_id
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|session| !session.is_empty())
-                    .is_none(),
-                _ => true,
-            });
-
-        if needs_reprepare {
+        if terminals_need_reprepare(&terminals) {
             tracing::warn!(
                 workflow_id = %workflow_id,
                 workflow_status = %workflow.status,
@@ -2657,6 +2669,12 @@ async fn pause_workflow(
 /// the orchestrator runtime. This endpoint provides a dedicated resume path
 /// rather than reusing the start endpoint, giving clearer semantics and
 /// enabling the frontend to show a distinct Resume button.
+///
+/// DIY (non-orchestrator) workflows are delegated to `start_workflow`: there is
+/// no orchestrator agent to recreate for them, and the start path is the only
+/// one that also re-activates their tasks/terminals and re-dispatches
+/// instructions. Routing them through the orchestrator runtime instead would
+/// spawn an agent the workflow must never have.
 async fn resume_workflow(
     State(deployment): State<DeploymentImpl>,
     Path(workflow_id): Path<Uuid>,
@@ -2675,22 +2693,27 @@ async fn resume_workflow(
         )));
     }
 
-    // Check terminal readiness before resuming (mirrors start_workflow self-heal logic)
+    if !workflow.orchestrator_enabled {
+        tracing::info!(
+            workflow_id = %workflow_id,
+            "Resuming DIY workflow via the start path (no orchestrator agent to recreate)"
+        );
+        return start_workflow(
+            State(deployment.clone()),
+            Path(
+                Uuid::parse_str(&workflow_id)
+                    .map_err(|e| ApiError::BadRequest(format!("Invalid workflow ID: {e}")))?,
+            ),
+        )
+        .await;
+    }
+
+    // Check terminal readiness before resuming (shares start_workflow's predicate)
     {
         let terminals =
             db::models::Terminal::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
 
-        let needs_reprepare = terminals.iter().any(|terminal| {
-            terminal.status != "waiting"
-                || terminal
-                    .pty_session_id
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|session| !session.is_empty())
-                    .is_none()
-        });
-
-        if needs_reprepare {
+        if terminals_need_reprepare(&terminals) {
             tracing::warn!(
                 workflow_id = %workflow_id,
                 "Workflow terminals are not launch-ready; re-preparing before resume"
@@ -4523,6 +4546,72 @@ mod workflow_guard_tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    fn build_terminal_with_session(task_id: &str, status: &str, session: Option<&str>) -> Terminal {
+        Terminal {
+            pty_session_id: session.map(str::to_string),
+            ..build_terminal_with_status(task_id, status)
+        }
+    }
+
+    // A backend restart resets every terminal to `not_started` (see
+    // `reconcile_terminal_statuses`). That is the *queued* state, not a broken
+    // one — the orchestrator agent launches those terminals through the global
+    // concurrency cap. Re-preparing them here would force-launch every PTY and
+    // duplicate the agent's own dispatch.
+    #[test]
+    fn reprepare_guard_treats_not_started_terminals_as_queued() {
+        let terminals = [
+            build_terminal_with_status("task-1", TERMINAL_STATUS_NOT_STARTED),
+            build_terminal_with_status("task-2", TERMINAL_STATUS_NOT_STARTED),
+        ];
+
+        assert!(!terminals_need_reprepare(&terminals));
+    }
+
+    #[test]
+    fn reprepare_guard_accepts_waiting_terminals_with_a_live_session() {
+        let terminals = [build_terminal_with_session(
+            "task-1",
+            TERMINAL_STATUS_WAITING,
+            Some("pty-session-1"),
+        )];
+
+        assert!(!terminals_need_reprepare(&terminals));
+    }
+
+    #[test]
+    fn reprepare_guard_rejects_waiting_terminals_without_a_live_session() {
+        for session in [None, Some(""), Some("   ")] {
+            let terminals = [build_terminal_with_session(
+                "task-1",
+                TERMINAL_STATUS_WAITING,
+                session,
+            )];
+
+            assert!(
+                terminals_need_reprepare(&terminals),
+                "waiting terminal with session {session:?} must be re-prepared"
+            );
+        }
+    }
+
+    #[test]
+    fn reprepare_guard_rejects_any_other_terminal_status() {
+        for status in [TERMINAL_STATUS_WORKING, TERMINAL_STATUS_COMPLETED] {
+            let terminals = [build_terminal_with_status("task-1", status)];
+
+            assert!(
+                terminals_need_reprepare(&terminals),
+                "terminal in status {status} must be re-prepared"
+            );
+        }
+    }
+
+    #[test]
+    fn reprepare_guard_ignores_empty_terminal_sets() {
+        assert!(!terminals_need_reprepare(&[]));
     }
 
     #[test]
