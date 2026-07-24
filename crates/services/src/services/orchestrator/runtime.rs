@@ -837,59 +837,6 @@ impl OrchestratorRuntime {
         Ok(())
     }
 
-    /// Resume a paused workflow (G05-002)
-    ///
-    /// Atomically transitions the workflow from `paused` to `ready` via CAS,
-    /// then delegates to `start_workflow` to create a fresh orchestrator agent.
-    ///
-    /// Returns `Err` if the workflow is not found, is not in `paused` state,
-    /// or if the CAS update races with a concurrent status change.
-    pub async fn resume_workflow(&self, workflow_id: &str) -> Result<()> {
-        let pool = &self.db.pool;
-
-        // Load workflow and verify it is paused
-        let workflow = db::models::Workflow::find_by_id(pool, workflow_id)
-            .await?
-            .ok_or_else(|| anyhow!("Workflow {workflow_id} not found"))?;
-
-        if workflow.status != WORKFLOW_STATUS_PAUSED {
-            return Err(anyhow!(
-                "Cannot resume workflow {workflow_id}: expected status '{}', got '{}'",
-                WORKFLOW_STATUS_PAUSED,
-                workflow.status
-            ));
-        }
-
-        // CAS: paused → ready
-        let now = chrono::Utc::now();
-        let result = sqlx::query(
-            r"
-            UPDATE workflow
-            SET status = 'ready', updated_at = ?
-            WHERE id = ? AND status = 'paused'
-            ",
-        )
-        .bind(now)
-        .bind(workflow_id)
-        .execute(pool)
-        .await
-        .map_err(|e| anyhow!("Failed to update workflow status during resume: {e}"))?;
-
-        if result.rows_affected() == 0 {
-            return Err(anyhow!(
-                "Cannot resume workflow {workflow_id}: status changed concurrently"
-            ));
-        }
-
-        info!(
-            workflow_id = %workflow_id,
-            "Workflow transitioned paused → ready for resume"
-        );
-
-        // Delegate to start_workflow which handles slot reservation and agent creation
-        self.start_workflow(workflow_id).await
-    }
-
     /// Check if a workflow is currently running
     pub async fn is_running(&self, workflow_id: &str) -> bool {
         let running = self.running_workflows.lock().await;

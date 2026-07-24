@@ -228,7 +228,6 @@ fn all_test_cases() -> Vec<TestCase> {
         test!("workflow_ops", "recover_workflows", test_recover_workflows),
         test!("workflow_ops", "start_workflow", test_start_workflow),
         test!("workflow_ops", "pause_workflow", test_pause_workflow),
-        test!("workflow_ops", "resume_workflow", test_resume_workflow),
         test!("workflow_ops", "stop_workflow", test_stop_workflow),
         test!("workflow_ops", "merge_workflow", test_merge_workflow),
         test!(
@@ -1407,18 +1406,6 @@ async fn test_pause_workflow(ctx: &mut TestContext) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     assert_not_500(resp, "pause_workflow").await?;
-    Ok(())
-}
-
-async fn test_resume_workflow(ctx: &mut TestContext) -> Result<(), String> {
-    let id = ctx.workflow_id.as_ref().ok_or("No workflow_id")?;
-    let resp = ctx
-        .client
-        .post(ctx.api(&format!("/workflows/{id}/resume")))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    assert_not_500(resp, "resume_workflow").await?;
     Ok(())
 }
 

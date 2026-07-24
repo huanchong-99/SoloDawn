@@ -710,30 +710,6 @@ impl Workflow {
         Ok(())
     }
 
-    /// Atomically transition workflow from 'paused' to 'created' (CAS).
-    ///
-    /// CORE-019: Used by the resume-flow re-prepare path. Returning `Ok(false)`
-    /// (rather than an error) signals that the workflow was no longer in the
-    /// 'paused' state when the UPDATE executed — e.g. a concurrent stop/cancel
-    /// raced ahead. The caller MUST treat `false` as a conflict and abort the
-    /// re-prepare instead of proceeding with a non-CAS write.
-    pub async fn set_created_from_paused(pool: &SqlitePool, id: &str) -> sqlx::Result<bool> {
-        let now = Utc::now();
-        let result = sqlx::query(
-            r"
-            UPDATE workflow
-            SET status = 'created', updated_at = ?
-            WHERE id = ? AND status = 'paused'
-            ",
-        )
-        .bind(now)
-        .bind(id)
-        .execute(pool)
-        .await?;
-
-        Ok(result.rows_affected() > 0)
-    }
-
     /// Set workflow to ready (only from 'starting' state).
     ///
     /// Uses CAS to ensure workflow is in 'starting' state before transitioning

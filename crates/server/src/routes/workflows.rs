@@ -175,7 +175,6 @@ pub fn workflows_routes() -> Router<DeploymentImpl> {
         .route("/{workflow_id}/prepare", post(prepare_workflow))
         .route("/{workflow_id}/start", post(start_workflow))
         .route("/{workflow_id}/pause", post(pause_workflow))
-        .route("/{workflow_id}/resume", post(resume_workflow))
         .route("/{workflow_id}/stop", post(stop_workflow))
         .route(
             "/{workflow_id}/prompts/respond",
@@ -2646,129 +2645,6 @@ async fn pause_workflow(
         workflow_id = %workflow_id,
         "Workflow paused with terminal cleanup and cascaded status updates"
     );
-
-    Ok(ResponseJson(ApiResponse::success(())))
-}
-
-/// POST /api/workflows/:workflow_id/resume
-/// Resume a paused workflow (G05-002)
-///
-/// Transitions the workflow from paused to ready via CAS and then starts
-/// the orchestrator runtime. This endpoint provides a dedicated resume path
-/// rather than reusing the start endpoint, giving clearer semantics and
-/// enabling the frontend to show a distinct Resume button.
-async fn resume_workflow(
-    State(deployment): State<DeploymentImpl>,
-    Path(workflow_id): Path<Uuid>,
-) -> Result<ResponseJson<ApiResponse<()>>, ApiError> {
-    let workflow_id = workflow_id.to_string();
-
-    // Verify workflow exists and is in paused state
-    let workflow = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("Workflow not found".to_string()))?;
-
-    if workflow.status != WORKFLOW_STATUS_PAUSED {
-        return Err(ApiError::BadRequest(format!(
-            "Cannot resume workflow: current status is '{}', expected 'paused'",
-            workflow.status
-        )));
-    }
-
-    // Check terminal readiness before resuming (mirrors start_workflow self-heal logic)
-    {
-        let terminals =
-            db::models::Terminal::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
-
-        let needs_reprepare = terminals.iter().any(|terminal| {
-            terminal.status != "waiting"
-                || terminal
-                    .pty_session_id
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|session| !session.is_empty())
-                    .is_none()
-        });
-
-        if needs_reprepare {
-            tracing::warn!(
-                workflow_id = %workflow_id,
-                "Workflow terminals are not launch-ready; re-preparing before resume"
-            );
-
-            // CORE-019: Use a CAS update (paused -> created) so a concurrent
-            // stop/cancel that changed the status away from 'paused' is
-            // detected here instead of being silently overwritten. If 0 rows
-            // were affected, the workflow is no longer 'paused' — return a
-            // Conflict error and do NOT call prepare_workflow, which would
-            // otherwise act on stale state.
-            let cas_succeeded = Workflow::set_created_from_paused(
-                &deployment.db().pool,
-                &workflow_id,
-            )
-            .await
-            .map_err(|e| {
-                ApiError::Internal(format!(
-                    "Resume-phase CAS status update failed for workflow {workflow_id}: {e}"
-                ))
-            })?;
-
-            if !cas_succeeded {
-                return Err(ApiError::Conflict(format!(
-                    "Workflow {workflow_id} is no longer 'paused' (likely modified by a concurrent \
-                     stop/cancel); aborting resume re-prepare"
-                )));
-            }
-
-            let _ = prepare_workflow(
-                State(deployment.clone()),
-                Path(
-                    Uuid::parse_str(&workflow_id)
-                        .map_err(|e| ApiError::BadRequest(format!("Invalid workflow ID: {e}")))?,
-                ),
-            )
-            .await
-            .map_err(|e| {
-                ApiError::Internal(format!(
-                    "Resume-phase re-prepare failed for workflow {workflow_id}: {e}"
-                ))
-            })?;
-
-            // Verify workflow status is back to "ready" after re-prepare, then
-            // transition to paused so the runtime resume CAS (paused -> ready) succeeds.
-            let refreshed = Workflow::find_by_id(&deployment.db().pool, &workflow_id)
-                .await?
-                .ok_or_else(|| ApiError::NotFound("Workflow not found".to_string()))?;
-
-            if refreshed.status != "ready" {
-                return Err(ApiError::Internal(format!(
-                    "Re-prepare did not restore workflow to 'ready' status (current: '{}')",
-                    refreshed.status
-                )));
-            }
-
-            Workflow::update_status(&deployment.db().pool, &workflow_id, WORKFLOW_STATUS_PAUSED)
-                .await?;
-        }
-    }
-
-    // Delegate to the runtime which performs paused -> ready CAS and agent creation
-    deployment
-        .orchestrator_runtime()
-        .resume_workflow(&workflow_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(
-                workflow_id = %workflow_id,
-                error = ?e,
-                "Failed to resume workflow"
-            );
-            ApiError::Internal("Failed to resume workflow".to_string())
-        })?;
-
-    refresh_prompt_watcher_registrations(&deployment, &workflow_id).await;
-
-    tracing::info!(workflow_id = %workflow_id, "Workflow resumed successfully");
 
     Ok(ResponseJson(ApiResponse::success(())))
 }
