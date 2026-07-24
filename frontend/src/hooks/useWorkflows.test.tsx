@@ -28,8 +28,10 @@ import {
   useDeleteWorkflow,
   getWorkflowActions,
   workflowKeys,
+  WORKFLOW_STATUS_TRANSITIONS,
   type Workflow,
   type CreateWorkflowRequest,
+  type WorkflowStatusEnum,
 } from './useWorkflows';
 
 // ============================================================================
@@ -541,5 +543,39 @@ describe('getWorkflowActions', () => {
     expect(getWorkflowActions('running').canMerge).toBe(false);
     expect(getWorkflowActions('cancelled').canMerge).toBe(false);
     expect(getWorkflowActions('draft').canMerge).toBe(false);
+  });
+
+  // A workflow reaches `paused` either from an explicit user pause or from
+  // restart recovery auto-pausing an interrupted run. Both need a resume entry
+  // in the UI, and neither should be presented as a fresh "start".
+  it('should offer resume, not start, for paused workflows', () => {
+    const actions = getWorkflowActions('paused');
+
+    expect(actions.canResume).toBe(true);
+    expect(actions.canStart).toBe(false);
+    expect(actions.canPrepare).toBe(false);
+  });
+
+  it('should keep paused workflows stoppable and deletable', () => {
+    const actions = getWorkflowActions('paused');
+
+    expect(actions.canStop).toBe(true);
+    expect(actions.canDelete).toBe(true);
+    expect(actions.canPause).toBe(false);
+  });
+
+  it('should offer start, not resume, for ready workflows', () => {
+    const actions = getWorkflowActions('ready');
+
+    expect(actions.canStart).toBe(true);
+    expect(actions.canResume).toBe(false);
+  });
+
+  it('should expose resume for the paused status only', () => {
+    const resumable = (
+      Object.keys(WORKFLOW_STATUS_TRANSITIONS) as WorkflowStatusEnum[]
+    ).filter((status) => WORKFLOW_STATUS_TRANSITIONS[status].canResume);
+
+    expect(resumable).toEqual(['paused']);
   });
 });

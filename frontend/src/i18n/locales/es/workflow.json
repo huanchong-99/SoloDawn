@@ -404,7 +404,10 @@
     "hint": "Click on a terminal to view details",
     "orchestrator": {
       "statusLabel": "Status:",
-      "modelLabel": "Model:"
+      "modelLabel": "Model:",
+      "resume": "Resume",
+      "resuming": "Resuming...",
+      "pausedHint": "Execution is paused — resume to continue."
     }
   },
   "terminalCard": {
@@ -505,6 +508,8 @@
       "prepare": "Prepare Workflow",
       "preparing": "Preparing...",
       "start": "Start Workflow",
+      "resume": "Resume Workflow",
+      "resuming": "Resuming...",
       "pause": "Pause",
       "stop": "Stop",
       "merge": "Merge Workflow",

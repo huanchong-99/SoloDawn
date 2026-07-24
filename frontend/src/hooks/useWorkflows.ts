@@ -51,6 +51,7 @@ export type WorkflowStatusEnum = BackendWorkflowStatus | 'draft';
 export interface WorkflowActions {
   canPrepare: boolean; // created → starting → ready (启动终端)
   canStart: boolean; // ready → running (开始任务)
+  canResume: boolean; // paused → running (恢复执行)
   canPause: boolean;
   canStop: boolean;
   canMerge: boolean;
@@ -64,6 +65,7 @@ export const WORKFLOW_STATUS_TRANSITIONS: Record<
   draft: {
     canPrepare: false,
     canStart: false,
+    canResume: false,
     canPause: false,
     canStop: false,
     canMerge: false,
@@ -72,6 +74,7 @@ export const WORKFLOW_STATUS_TRANSITIONS: Record<
   created: {
     canPrepare: true,
     canStart: false,
+    canResume: false,
     canPause: false,
     canStop: false,
     canMerge: false,
@@ -80,6 +83,7 @@ export const WORKFLOW_STATUS_TRANSITIONS: Record<
   ready: {
     canPrepare: false,
     canStart: true,
+    canResume: false,
     canPause: false,
     canStop: false,
     canMerge: false,
@@ -88,6 +92,7 @@ export const WORKFLOW_STATUS_TRANSITIONS: Record<
   starting: {
     canPrepare: false,
     canStart: false,
+    canResume: false,
     canPause: false,
     canStop: true,
     canMerge: false,
@@ -96,14 +101,21 @@ export const WORKFLOW_STATUS_TRANSITIONS: Record<
   running: {
     canPrepare: false,
     canStart: false,
+    canResume: false,
     canPause: true,
     canStop: true,
     canMerge: false,
     canDelete: false,
   },
+  // A paused workflow (user-initiated pause, or auto-paused by restart
+  // recovery — see `recover_running_workflows`) is resumable, not startable:
+  // it already has tasks/terminals, so the UI must offer "Resume", never
+  // "Start". Both funnel into POST /api/workflows/{id}/start, which accepts
+  // `paused` and CASes it back to `ready` before re-driving the agent.
   paused: {
     canPrepare: false,
-    canStart: true,
+    canStart: false,
+    canResume: true,
     canPause: false,
     canStop: true,
     canMerge: false,
@@ -112,6 +124,7 @@ export const WORKFLOW_STATUS_TRANSITIONS: Record<
   merging: {
     canPrepare: false,
     canStart: false,
+    canResume: false,
     canPause: false,
     canStop: false,
     canMerge: false,
@@ -120,6 +133,7 @@ export const WORKFLOW_STATUS_TRANSITIONS: Record<
   completed: {
     canPrepare: false,
     canStart: false,
+    canResume: false,
     canPause: false,
     canStop: false,
     canMerge: true,
@@ -128,6 +142,7 @@ export const WORKFLOW_STATUS_TRANSITIONS: Record<
   failed: {
     canPrepare: true,
     canStart: false,
+    canResume: false,
     canPause: false,
     canStop: false,
     canMerge: false,
@@ -136,6 +151,7 @@ export const WORKFLOW_STATUS_TRANSITIONS: Record<
   cancelled: {
     canPrepare: false,
     canStart: false,
+    canResume: false,
     canPause: false,
     canStop: false,
     canMerge: false,

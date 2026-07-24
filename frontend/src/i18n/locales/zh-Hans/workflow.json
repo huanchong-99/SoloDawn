@@ -407,7 +407,10 @@
     "hint": "点击终端查看详情",
     "orchestrator": {
       "statusLabel": "状态：",
-      "modelLabel": "模型："
+      "modelLabel": "模型：",
+      "resume": "恢复执行",
+      "resuming": "恢复中...",
+      "pausedHint": "工作流已暂停，点击恢复执行以继续。"
     }
   },
   "terminalCard": {
@@ -508,6 +511,8 @@
       "prepare": "预处理工作流",
       "preparing": "预处理中...",
       "start": "启动工作流",
+      "resume": "恢复执行",
+      "resuming": "恢复中...",
       "pause": "暂停",
       "stop": "停止",
       "merge": "合并工作流",

@@ -275,6 +275,20 @@ function WorkflowDetailActions({
           {t('management.actions.start')}
         </Button>
       )}
+      {/* Paused workflows resume through the same start endpoint, but must be
+          labelled as a resume: the run already has tasks/terminals and may have
+          been auto-paused by restart recovery rather than by the user. */}
+      {actions.canResume && (
+        <Button
+          onClick={() => handlers.onStart(workflowId)}
+          disabled={mutations.anyPending}
+        >
+          <Play className="w-4 h-4 mr-2" />
+          {mutations.startPending
+            ? t('management.actions.resuming')
+            : t('management.actions.resume')}
+        </Button>
+      )}
       {actions.canPause && (
         <Button
           variant="outline"
