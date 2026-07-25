@@ -710,6 +710,31 @@ impl Workflow {
         Ok(())
     }
 
+    /// Atomically transition a relaunchable workflow to 'created' (CAS).
+    ///
+    /// CORE-019: Used by the start-flow re-prepare path, which is reachable from
+    /// both 'ready' and 'paused'. Returning `Ok(false)` (rather than an error)
+    /// signals that the workflow was in neither state when the UPDATE executed —
+    /// e.g. a concurrent stop/pause raced ahead of the caller's earlier status
+    /// read. The caller MUST treat `false` as a conflict and abort the re-prepare
+    /// instead of proceeding with a non-CAS write.
+    pub async fn set_created_from_relaunchable(pool: &SqlitePool, id: &str) -> sqlx::Result<bool> {
+        let now = Utc::now();
+        let result = sqlx::query(
+            r"
+            UPDATE workflow
+            SET status = 'created', updated_at = ?
+            WHERE id = ? AND status IN ('ready', 'paused')
+            ",
+        )
+        .bind(now)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Set workflow to ready (only from 'starting' state).
     ///
     /// Uses CAS to ensure workflow is in 'starting' state before transitioning
@@ -1492,5 +1517,94 @@ mod encryption_tests {
                 assert!(!json.contains("sk-test"));
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod status_cas_tests {
+    use super::*;
+
+    const WORKFLOW_ID: &str = "workflow-cas";
+
+    /// Minimal `workflow` table holding a single row in `status`.
+    async fn pool_with_workflow(status: &str) -> SqlitePool {
+        let pool = SqlitePool::connect(":memory:").await.unwrap();
+        sqlx::query(
+            r"
+            CREATE TABLE workflow (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                updated_at TEXT
+            )
+            ",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query("INSERT INTO workflow (id, status) VALUES (?1, ?2)")
+            .bind(WORKFLOW_ID)
+            .bind(status)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        pool
+    }
+
+    async fn current_status(pool: &SqlitePool) -> String {
+        sqlx::query_scalar("SELECT status FROM workflow WHERE id = ?1")
+            .bind(WORKFLOW_ID)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn set_created_from_relaunchable_accepts_both_relaunchable_states() {
+        for source in ["ready", "paused"] {
+            let pool = pool_with_workflow(source).await;
+
+            assert!(
+                Workflow::set_created_from_relaunchable(&pool, WORKFLOW_ID)
+                    .await
+                    .unwrap(),
+                "CAS should succeed from '{source}'"
+            );
+            assert_eq!(current_status(&pool).await, "created");
+        }
+    }
+
+    #[tokio::test]
+    async fn set_created_from_relaunchable_rejects_concurrently_changed_status() {
+        // CORE-019: a stop/pause landing between the caller's status read and this
+        // write must be reported as a miss, never silently overwritten.
+        for source in ["cancelled", "running", "starting", "created", "completed", "failed"] {
+            let pool = pool_with_workflow(source).await;
+
+            assert!(
+                !Workflow::set_created_from_relaunchable(&pool, WORKFLOW_ID)
+                    .await
+                    .unwrap(),
+                "CAS should miss from '{source}'"
+            );
+            assert_eq!(
+                current_status(&pool).await,
+                source,
+                "a CAS miss must leave status '{source}' untouched"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn set_created_from_relaunchable_reports_miss_for_unknown_workflow() {
+        let pool = pool_with_workflow("ready").await;
+
+        assert!(
+            !Workflow::set_created_from_relaunchable(&pool, "no-such-workflow")
+                .await
+                .unwrap()
+        );
+        assert_eq!(current_status(&pool).await, "ready");
     }
 }

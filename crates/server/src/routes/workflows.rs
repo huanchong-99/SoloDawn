@@ -37,8 +37,9 @@ use services::services::{
         constants::{
             TASK_STATUS_CANCELLED, TASK_STATUS_COMPLETED, TASK_STATUS_FAILED,
             TERMINAL_STATUS_CANCELLED, TERMINAL_STATUS_COMPLETED, TERMINAL_STATUS_FAILED,
-            TERMINAL_STATUS_QUALITY_PENDING, TERMINAL_STATUS_STARTING, TERMINAL_STATUS_WAITING,
-            TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_RUNNING,
+            TERMINAL_STATUS_NOT_STARTED, TERMINAL_STATUS_QUALITY_PENDING, TERMINAL_STATUS_STARTING,
+            TERMINAL_STATUS_WAITING, TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_PAUSED,
+            WORKFLOW_STATUS_RUNNING,
             configured_max_concurrent_terminals,
         },
     },
@@ -1960,6 +1961,29 @@ async fn render_workflow_commands(
     Ok(rendered)
 }
 
+/// Whether a `ready`/`paused` workflow's terminals must be re-prepared before start.
+///
+/// A restarted backend reconciles every terminal to `not_started`; those are queued
+/// and launch normally under the global concurrency cap, so they must NOT force a
+/// re-prepare — treating them as broken force-launches every PTY and duplicates the
+/// work the cap-aware dispatch path already does. A `waiting` terminal is only
+/// launch-ready while it still holds a live PTY/session binding. Any other status
+/// means the terminal is not in a startable shape and the workflow needs re-preparing.
+fn workflow_terminals_need_reprepare(terminals: &[Terminal]) -> bool {
+    terminals
+        .iter()
+        .any(|terminal| match terminal.status.as_str() {
+            TERMINAL_STATUS_NOT_STARTED => false,
+            TERMINAL_STATUS_WAITING => terminal
+                .pty_session_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|session| !session.is_empty())
+                .is_none(),
+            _ => true,
+        })
+}
+
 /// POST /api/workflows/:workflow_id/start
 /// Start workflow (user confirmed) or resume from paused state
 async fn start_workflow(
@@ -2009,35 +2033,41 @@ async fn start_workflow(
 
     // Self-heal for restarted backend: a workflow may still be `ready` while terminals were
     // reconciled to `not_started` (missing active PTY/session). Re-prepare before starting.
-    // TODO(G16-008): Extract this re-prepare block into a dedicated `re_prepare_if_needed()`
-    // function to reduce start_workflow complexity and improve testability.
+    // TODO(G16-008): The readiness predicate is extracted and unit-tested as
+    // `workflow_terminals_need_reprepare`; the surrounding block still needs lifting into a
+    // dedicated `re_prepare_if_needed()` to reduce start_workflow complexity.
     if workflow.status == "ready" || workflow.status == WORKFLOW_STATUS_PAUSED {
         let terminals =
             db::models::Terminal::find_by_workflow(&deployment.db().pool, &workflow_id).await?;
 
-        let needs_reprepare = terminals
-            .iter()
-            .any(|terminal| match terminal.status.as_str() {
-                // Queued terminals are valid under the global concurrency cap.
-                "not_started" => false,
-                // Waiting terminals must have a live PTY/session binding.
-                "waiting" => terminal
-                    .pty_session_id
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|session| !session.is_empty())
-                    .is_none(),
-                _ => true,
-            });
-
-        if needs_reprepare {
+        if workflow_terminals_need_reprepare(&terminals) {
             tracing::warn!(
                 workflow_id = %workflow_id,
                 workflow_status = %workflow.status,
                 "Workflow terminals are not launch-ready; re-preparing before start"
             );
 
-            Workflow::update_status(&deployment.db().pool, &workflow_id, "created").await?;
+            // CORE-019: Use a CAS update (ready|paused -> created) so a concurrent
+            // stop/pause landing between the status read above and this write is
+            // detected here instead of being silently clobbered. If 0 rows were
+            // affected, the workflow is no longer relaunchable — return a Conflict
+            // error and do NOT call prepare_workflow, which would otherwise act on
+            // stale state.
+            let cas_succeeded =
+                Workflow::set_created_from_relaunchable(&deployment.db().pool, &workflow_id)
+                    .await
+                    .map_err(|e| {
+                        ApiError::Internal(format!(
+                            "Start-phase CAS status update failed for workflow {workflow_id}: {e}"
+                        ))
+                    })?;
+
+            if !cas_succeeded {
+                return Err(ApiError::Conflict(format!(
+                    "Workflow {workflow_id} is no longer 'ready' or 'paused' (likely modified by a \
+                     concurrent stop/pause); aborting start re-prepare"
+                )));
+            }
 
             // G03-002: Wrap re-prepare error with descriptive context
             let _ = prepare_workflow(
@@ -4399,6 +4429,80 @@ mod workflow_guard_tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    fn build_waiting_terminal(pty_session_id: Option<&str>) -> Terminal {
+        let mut terminal = build_terminal_with_status("task-test", TERMINAL_STATUS_WAITING);
+        terminal.pty_session_id = pty_session_id.map(ToString::to_string);
+        terminal
+    }
+
+    #[test]
+    fn reprepare_guard_ignores_empty_terminal_set() {
+        assert!(!workflow_terminals_need_reprepare(&[]));
+    }
+
+    #[test]
+    fn reprepare_guard_tolerates_queued_not_started_terminals() {
+        let terminals = [
+            build_terminal_with_status("task-test", TERMINAL_STATUS_NOT_STARTED),
+            build_terminal_with_status("task-test", TERMINAL_STATUS_NOT_STARTED),
+        ];
+
+        assert!(
+            !workflow_terminals_need_reprepare(&terminals),
+            "queued not_started terminals launch under the concurrency cap and must not \
+             trigger re-prepare"
+        );
+    }
+
+    #[test]
+    fn reprepare_guard_requires_live_session_for_waiting_terminals() {
+        assert!(!workflow_terminals_need_reprepare(&[build_waiting_terminal(
+            Some("pty-42")
+        )]));
+
+        for missing in [None, Some(""), Some("   ")] {
+            assert!(
+                workflow_terminals_need_reprepare(&[build_waiting_terminal(missing)]),
+                "waiting terminal with pty_session_id {missing:?} should force re-prepare"
+            );
+        }
+    }
+
+    #[test]
+    fn reprepare_guard_flags_every_other_terminal_status() {
+        let broken_statuses = [
+            TERMINAL_STATUS_STARTING,
+            TERMINAL_STATUS_WORKING,
+            TERMINAL_STATUS_COMPLETED,
+            TERMINAL_STATUS_FAILED,
+            TERMINAL_STATUS_CANCELLED,
+            TERMINAL_STATUS_QUALITY_PENDING,
+            "review_passed",
+            "some_unknown_status",
+        ];
+
+        for status in broken_statuses {
+            assert!(
+                workflow_terminals_need_reprepare(&[build_terminal_with_status(
+                    "task-test",
+                    status
+                )]),
+                "terminal status '{status}' should force re-prepare"
+            );
+        }
+    }
+
+    #[test]
+    fn reprepare_guard_flags_mixed_set_containing_one_broken_terminal() {
+        let terminals = [
+            build_terminal_with_status("task-test", TERMINAL_STATUS_NOT_STARTED),
+            build_waiting_terminal(Some("pty-1")),
+            build_terminal_with_status("task-test", TERMINAL_STATUS_FAILED),
+        ];
+
+        assert!(workflow_terminals_need_reprepare(&terminals));
     }
 
     #[test]
