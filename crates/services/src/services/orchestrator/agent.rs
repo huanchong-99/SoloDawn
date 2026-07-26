@@ -6029,11 +6029,18 @@ impl OrchestratorAgent {
             tracing::warn!(error = %e, "Failed to publish review_pending task status");
         }
 
-        let session_id_opt = db::models::Terminal::find_by_id(&self.db.pool, &event.terminal_id)
+        let terminal_opt = db::models::Terminal::find_by_id(&self.db.pool, &event.terminal_id)
             .await
             .ok()
-            .flatten()
-            .and_then(|t| t.pty_session_id.or(t.session_id))
+            .flatten();
+        let session_id_opt = terminal_opt
+            .as_ref()
+            .and_then(|terminal| {
+                terminal
+                    .pty_session_id
+                    .as_ref()
+                    .or(terminal.session_id.as_ref())
+            })
             .filter(|s| !s.trim().is_empty());
 
         if let Some(session_id) = session_id_opt {
@@ -6041,13 +6048,42 @@ impl OrchestratorAgent {
                 .publish_terminal_input_checked(
                     &event.workflow_id,
                     &event.terminal_id,
-                    &session_id,
+                    session_id,
                     &fix_message,
                     "acceptance_review_rejection",
                     false,
                 )
                 .await;
-            if !delivered {
+            if delivered {
+                if let Some(terminal) = terminal_opt.as_ref() {
+                    // Codex keeps a pasted follow-up in its composer until it receives
+                    // a separate Enter. Reuse the same follow-up policy as ordinary
+                    // SendToTerminal dispatches instead of leaving review feedback
+                    // visibly pasted but unsubmitted.
+                    for (attempt, delay_ms) in Self::submit_keystroke_schedule_ms(terminal, false)
+                        .iter()
+                        .enumerate()
+                    {
+                        sleep(Duration::from_millis(*delay_ms)).await;
+                        self.publish_terminal_input_checked(
+                            &event.workflow_id,
+                            &event.terminal_id,
+                            session_id,
+                            "",
+                            "acceptance_review_rejection_submit",
+                            false,
+                        )
+                        .await;
+                        tracing::debug!(
+                            terminal_id = %event.terminal_id,
+                            cli_type_id = %terminal.cli_type_id,
+                            attempt = attempt + 1,
+                            delay_ms,
+                            "Sent submit keystroke after acceptance review rejection"
+                        );
+                    }
+                }
+            } else {
                 tracing::warn!(
                     terminal_id = %event.terminal_id,
                     "Acceptance review feedback could not be delivered to existing session; relaunching clean context"
@@ -13554,6 +13590,58 @@ mod tests {
                 .unwrap();
         assert_eq!(workflow.status, WORKFLOW_STATUS_RUNNING);
         assert_eq!(fixture.agent.state.read().await.error_count, 0);
+    }
+
+    #[tokio::test]
+    async fn run_acceptance_review_gate_rejection_submits_codex_feedback() {
+        let fixture = setup_acceptance_review_gate_fixture(|_| {
+            Box::new(MockLLMClient::with_response(
+                r#"{"verdict":"REJECTED","fix_instructions":"Add missing tests."}"#,
+            ))
+        })
+        .await;
+        let session_id = "pty-review-codex";
+
+        sqlx::query("UPDATE terminal SET cli_type_id = ?1, pty_session_id = ?2 WHERE id = ?3")
+            .bind("cli-codex")
+            .bind(session_id)
+            .bind(&fixture.event.terminal_id)
+            .execute(&fixture.db.pool)
+            .await
+            .unwrap();
+
+        let topic = format!("terminal.input.{}", fixture.event.terminal_id);
+        let mut terminal_rx = fixture.agent.message_bus.subscribe(&topic).await;
+
+        let passed = fixture
+            .agent
+            .run_acceptance_review_gate(&fixture.event)
+            .await
+            .unwrap();
+        assert!(!passed);
+
+        let feedback = terminal_rx.recv().await.expect("expected review feedback");
+        assert!(matches!(
+            feedback,
+            BusMessage::TerminalInput {
+                ref terminal_id,
+                ref session_id,
+                ref input,
+                ..
+            } if terminal_id == &fixture.event.terminal_id
+                && session_id == "pty-review-codex"
+                && input.contains("Add missing tests.")
+        ));
+
+        let submit =
+            tokio::time::timeout(std::time::Duration::from_millis(100), terminal_rx.recv())
+                .await
+                .expect("Codex review feedback should be followed by a submit keystroke")
+                .expect("terminal input channel should remain open");
+        assert!(matches!(
+            submit,
+            BusMessage::TerminalInput { ref input, .. } if input.is_empty()
+        ));
     }
 
     #[tokio::test]
