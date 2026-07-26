@@ -99,7 +99,7 @@ runs:
         mkdir -p "${HOME}/.cargo/bin"
         # Tarball contains `cargo-nextest` (cargo-nextest.exe on Windows),
         # extracted straight onto PATH so `cargo nextest` resolves it.
-        curl -LsSf --retry 5 --retry-connrefused "${URL}" | tar zxf - -C "${HOME}/.cargo/bin"
+        curl -LsSf --retry 5 --retry-connrefused --proto '=https' --proto-redir '=https' "${URL}" | tar zxf - -C "${HOME}/.cargo/bin"
         cargo-nextest --version
 
     - name: Cache Rust build outputs (registry, git, target)

@@ -55,8 +55,8 @@ jobs:
         push: false
         tags: solodawn:ci-test
         cache-from: type=gha,scope=docker-build
-        # Scoped cache with version tag; GHA cache has a 7-day inactivity TTL enforced by GitHub
-        cache-to: type=gha,mode=max,scope=docker-build
+        # Keep cache-export outages non-fatal; image build failures still fail this job.
+        cache-to: type=gha,mode=max,scope=docker-build,ignore-error=true
 
     - name: Report build duration
       if: always()

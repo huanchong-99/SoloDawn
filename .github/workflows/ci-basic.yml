@@ -84,10 +84,10 @@ jobs:
     # no incremental) so clippy and nextest can share the same build
     # artifacts instead of rebuilding twice.
     - name: Prime build artifacts (shared by clippy + nextest)
-      run: cargo build $CARGO_SELECT --profile ci --tests --quiet
+      run: cargo build $CARGO_SELECT --profile ci --tests --quiet --locked
 
     - name: Run cargo clippy
-      run: cargo clippy $CARGO_SELECT --all-targets --all-features --profile ci -- -D warnings
+      run: cargo clippy $CARGO_SELECT --all-targets --all-features --profile ci --locked -- -D warnings
 
     # Performance: removed `--test-threads=1`. The original single-threaded
     # setting was an extremely broad hammer that forced the entire test
@@ -106,10 +106,10 @@ jobs:
       # win). NOTE: nextest's `--profile` is its own run-config profile (from
       # .config/nextest.toml), NOT a Cargo profile — there is no `ci` nextest
       # profile, so `--profile ci` errored with "profile `ci` not found".
-      run: cargo nextest run $CARGO_SELECT --cargo-profile ci --lib
+      run: cargo nextest run $CARGO_SELECT --cargo-profile ci --lib --locked
 
     - name: Check generated types are up-to-date
-      run: cargo run --bin generate_types --profile ci -- --check
+      run: cargo run --locked --bin generate_types --profile ci -- --check
 
     - name: Show sccache statistics
       if: always()
