@@ -356,7 +356,12 @@ export function wizardConfigToCreateRequest(
   ): InlineModelConfig | undefined => {
     const model = config.models.find((candidate) => candidate.id === modelConfigId);
     return model
-      ? { displayName: model.displayName, modelId: model.modelId }
+      ? {
+          displayName: model.displayName,
+          modelId: model.modelId,
+          apiType: model.apiType,
+          baseUrl: model.baseUrl || null,
+        }
       : undefined;
   };
 
@@ -393,6 +398,8 @@ export function wizardConfigToCreateRequest(
               modelConfig: {
                 displayName: model.displayName,
                 modelId: model.modelId,
+                apiType: model.apiType,
+                baseUrl: model.baseUrl || null,
               },
               // Native models use CLI's own auth — don't send API key
               customBaseUrl: model.isNative ? null : (model.baseUrl || null),

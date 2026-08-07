@@ -194,10 +194,10 @@
       "modelIdRequired": "Model ID is required"
     },
     "warnings": {
-      "urlV1Compatible": "La URL termina en /v1. La URL se usará tal como se ingresó; no se agregarán rutas automáticamente. Si la API requiere /v1, déjela; de lo contrario, puede eliminarla.",
+      "urlV1Compatible": "La URL termina en /v1. SoloDawn prueba primero la URL tal como se ingresó y luego la misma sin /v1, así que ambas formas funcionan.",
       "zhipuaiOpenai": "Se detectó ZhipuAI. Considere usar \"openai-compatible\" como tipo de API.",
       "zhipuaiAnthropic": "Se detectó ZhipuAI. Considere usar \"anthropic-compatible\" como tipo de API.",
-      "urlHint": "Ingrese la URL base completa. Se usará tal cual (ej. https://api.example.com/v1)."
+      "urlHint": "Ingrese la URL base del proveedor (por ejemplo https://api.example.com o https://api.example.com/v1). SoloDawn prueba con y sin el segmento /v1."
     },
     "hints": {
       "officialModels": "API oficial: se sugiere la lista de modelos integrada; también puedes escribir cualquier ID de modelo.",

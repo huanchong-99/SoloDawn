@@ -37,9 +37,10 @@ use services::services::{
         constants::{
             TASK_STATUS_CANCELLED, TASK_STATUS_COMPLETED, TASK_STATUS_FAILED,
             TERMINAL_STATUS_CANCELLED, TERMINAL_STATUS_COMPLETED, TERMINAL_STATUS_FAILED,
-            TERMINAL_STATUS_NOT_STARTED, TERMINAL_STATUS_QUALITY_PENDING, TERMINAL_STATUS_STARTING,
-            TERMINAL_STATUS_WAITING, TERMINAL_STATUS_WORKING, WORKFLOW_STATUS_PAUSED,
-            WORKFLOW_STATUS_RUNNING,
+            TERMINAL_STATUS_NOT_STARTED, TERMINAL_STATUS_QUALITY_PENDING,
+            TERMINAL_STATUS_REVIEW_PASSED, TERMINAL_STATUS_REVIEW_REJECTED,
+            TERMINAL_STATUS_STARTING, TERMINAL_STATUS_WAITING, TERMINAL_STATUS_WORKING,
+            WORKFLOW_STATUS_PAUSED, WORKFLOW_STATUS_RUNNING,
             configured_max_concurrent_terminals,
         },
     },
@@ -861,24 +862,29 @@ async fn validate_cli_and_model_configs(
             .await
             .map_err(|e| ApiError::Internal(format!("Database error: {e}")))?;
 
-        let model_config = if let Some(mc) = model_config {
-            mc
-        } else {
-            // Model config not found - try to create from inline data
-            let inline = inline.ok_or_else(|| ApiError::BadRequest(format!(
-                "Model config not found: {model_config_id}. Provide inline modelConfig to auto-create."
-            )))?;
-
-            // Create custom model config from inline data
-            ModelConfig::create_custom(
+        // When the wizard supplies inline data, always upsert: an existing row
+        // created before provider routing was recorded would otherwise keep a
+        // NULL `api_type`, and the launcher would have to guess which provider
+        // wire family the terminal's model speaks. `create_custom` COALESCEs, so
+        // a request that omits those fields never erases them.
+        let model_config = match (model_config, inline) {
+            (_, Some(inline)) => ModelConfig::create_custom(
                 pool,
                 &model_config_id,
                 &cli_type_id,
                 &inline.display_name,
                 &inline.model_id,
+                inline.api_type.as_deref(),
+                inline.base_url.as_deref(),
             )
             .await
-            .map_err(|e| ApiError::Internal(format!("Failed to create model config: {e}")))?
+            .map_err(|e| ApiError::Internal(format!("Failed to create model config: {e}")))?,
+            (Some(mc), None) => mc,
+            (None, None) => {
+                return Err(ApiError::BadRequest(format!(
+                    "Model config not found: {model_config_id}. Provide inline modelConfig to auto-create."
+                )));
+            }
         };
 
         // Validate model config belongs to the CLI type
@@ -1984,6 +1990,84 @@ fn workflow_terminals_need_reprepare(terminals: &[Terminal]) -> bool {
         })
 }
 
+/// Terminal statuses that mean a DIY stage has finished and the next stage in
+/// the same task may start.
+const DIY_TERMINAL_FINISHED_STATUSES: [&str; 5] = [
+    TERMINAL_STATUS_COMPLETED,
+    TERMINAL_STATUS_FAILED,
+    TERMINAL_STATUS_CANCELLED,
+    TERMINAL_STATUS_REVIEW_PASSED,
+    TERMINAL_STATUS_REVIEW_REJECTED,
+];
+
+/// Whether a terminal status means the stage is done (successfully or not).
+fn is_diy_terminal_finished(status: &str) -> bool {
+    DIY_TERMINAL_FINISHED_STATUSES.contains(&status)
+}
+
+/// Poll interval while waiting for a DIY stage to finish.
+const DIY_STAGE_POLL_INTERVAL_SECS: u64 = 5;
+
+/// Upper bound on how long one DIY stage may block the next one.
+///
+/// A stage that never reports completion must not wedge the rest of the
+/// pipeline forever; after this budget the next stage starts anyway and the
+/// stall is logged. The DIY quiet-window monitor normally settles a terminal
+/// long before this.
+const DIY_STAGE_MAX_WAIT_SECS: u64 = 6 * 60 * 60;
+
+/// Block until `terminal_id` reaches a finished status, the terminal
+/// disappears, or the wait budget is exhausted.
+///
+/// Used to serialise a task's terminals: stage N+1 is only instructed once
+/// stage N has stopped working, so a configured pipeline
+/// (frontend -> backend -> audit) actually runs in that order.
+async fn wait_for_terminal_to_finish(pool: &sqlx::SqlitePool, terminal_id: &str) {
+    let deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_secs(DIY_STAGE_MAX_WAIT_SECS);
+
+    loop {
+        match Terminal::find_by_id(pool, terminal_id).await {
+            Ok(Some(terminal)) => {
+                if is_diy_terminal_finished(&terminal.status) {
+                    tracing::info!(
+                        terminal_id = %terminal_id,
+                        status = %terminal.status,
+                        "DIY: stage finished; releasing the next stage in the task"
+                    );
+                    return;
+                }
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    "DIY: stage terminal no longer exists; releasing the next stage"
+                );
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    error = %e,
+                    "DIY: failed to read stage status; releasing the next stage"
+                );
+                return;
+            }
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            tracing::warn!(
+                terminal_id = %terminal_id,
+                max_wait_secs = DIY_STAGE_MAX_WAIT_SECS,
+                "DIY: stage did not finish within the wait budget; starting the next stage anyway"
+            );
+            return;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(DIY_STAGE_POLL_INTERVAL_SECS)).await;
+    }
+}
+
 /// POST /api/workflows/:workflow_id/start
 /// Start workflow (user confirmed) or resume from paused state
 async fn start_workflow(
@@ -2189,6 +2273,15 @@ async fn start_workflow(
         // auto-confirm can handle any permission prompts that appear immediately.
         refresh_prompt_watcher_registrations(&deployment, &workflow_id).await;
 
+        // Terminals that have actually been handed their instruction.
+        //
+        // Stages later in a task's pipeline are launched up-front but stay idle
+        // until their turn, so they look "quiet" from the moment they start. The
+        // quiet-window monitor below must not mistake that for completed work —
+        // it only judges terminals present in this set.
+        let dispatched_terminals: Arc<tokio::sync::RwLock<std::collections::HashSet<String>>> =
+            Arc::new(tokio::sync::RwLock::new(std::collections::HashSet::new()));
+
         // Auto-dispatch task descriptions as initial instructions to each terminal.
         // This makes DIY mode fully automated — terminals receive their instructions
         // without manual user intervention via WebSocket.
@@ -2197,6 +2290,7 @@ async fn start_workflow(
         {
             let dispatch_bus = deployment.message_bus().clone();
             let dispatch_db = deployment.db().pool.clone();
+            let dispatched_terminals = Arc::clone(&dispatched_terminals);
             let dispatch_tasks: Vec<_> = tasks
                 .iter()
                 .map(|t| (t.id.clone(), t.name.clone(), t.description.clone()))
@@ -2231,12 +2325,59 @@ async fn start_workflow(
                             continue;
                         }
                     };
-                    for terminal in &task_terminals {
+                    // A task's terminals are an ordered pipeline (`order_index`
+                    // ascending — e.g. frontend -> backend -> audit), not a fan-out
+                    // group. Each stage must observe the previous stage's work, so
+                    // hold the instruction back until the preceding terminal has
+                    // reached a terminal state. Previously every terminal in the
+                    // task was fed ~2s apart regardless, which made a configured
+                    // serial pipeline behave as if it ran in parallel.
+                    let mut previous_terminal_id: Option<String> = None;
+                    for snapshot in &task_terminals {
+                        if let Some(previous_terminal_id) = previous_terminal_id.take() {
+                            wait_for_terminal_to_finish(&dispatch_db, &previous_terminal_id).await;
+                        }
+
+                        // Re-read the row: waiting for the previous stage can take
+                        // hours, and a terminal relaunched in the meantime has a
+                        // different PTY session. Dispatching to the stale session id
+                        // from the snapshot taken before the wait would send the
+                        // instruction into a dead PTY.
+                        let terminal = match Terminal::find_by_id(&dispatch_db, &snapshot.id).await {
+                            Ok(Some(fresh)) => fresh,
+                            Ok(None) => {
+                                tracing::warn!(
+                                    terminal_id = %snapshot.id,
+                                    "DIY: terminal disappeared before its turn; skipping dispatch"
+                                );
+                                continue;
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    terminal_id = %snapshot.id,
+                                    error = %e,
+                                    "DIY: failed to refresh terminal before dispatch; skipping"
+                                );
+                                continue;
+                            }
+                        };
+                        let terminal = &terminal;
+
                         if let Some(ref pty_session_id) = terminal.pty_session_id {
+                            // Only a stage that was actually instructed gates the
+                            // next one; a terminal we skipped would never reach a
+                            // finished status and would stall the whole pipeline.
+                            previous_terminal_id = Some(terminal.id.clone());
                             let instruction = task_description.as_deref().unwrap_or(task_name);
                             if !instruction.is_empty() {
                                 // Small delay to ensure Claude Code has initialized
                                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                                // Arm the quiet-window monitor only now: before
+                                // this point the terminal is idle by design.
+                                dispatched_terminals
+                                    .write()
+                                    .await
+                                    .insert(terminal.id.clone());
                                 dispatch_bus
                                     .publish_terminal_input(
                                         &terminal.id,
@@ -2331,6 +2472,7 @@ async fn start_workflow(
         // completed after 60s of silence, then completes tasks/workflow.
         let diy_db = deployment.db().pool.clone();
         let diy_wf_id = workflow_id.clone();
+        let diy_dispatched_terminals = Arc::clone(&dispatched_terminals);
         let diy_process_manager = deployment.process_manager().clone();
         let diy_message_bus = deployment.message_bus().clone();
         tokio::spawn(async move {
@@ -2394,6 +2536,13 @@ async fn start_workflow(
 
                     for terminal in &terminals {
                         if terminal.status != "working" {
+                            continue;
+                        }
+                        // A stage that has not been instructed yet is idle by
+                        // design (it is waiting its turn in the task's serial
+                        // pipeline). Judging it by silence would mark every
+                        // later stage completed before it ever ran.
+                        if !diy_dispatched_terminals.read().await.contains(&terminal.id) {
                             continue;
                         }
                         // Check if terminal has been quiet
@@ -4285,6 +4434,62 @@ async fn merge_workflow(
 // ============================================================================
 // Contract Tests
 // ============================================================================
+
+#[cfg(test)]
+mod diy_stage_gate_tests {
+    use super::*;
+
+    /// A task's terminals form an ordered pipeline (frontend -> backend ->
+    /// audit). Stage N+1 is released only once stage N reaches one of these
+    /// statuses; previously every stage was fed ~2s apart, so a configured
+    /// serial pipeline behaved as if it ran in parallel.
+    #[test]
+    fn finished_statuses_release_the_next_stage() {
+        for status in [
+            TERMINAL_STATUS_COMPLETED,
+            TERMINAL_STATUS_FAILED,
+            TERMINAL_STATUS_CANCELLED,
+            TERMINAL_STATUS_REVIEW_PASSED,
+            TERMINAL_STATUS_REVIEW_REJECTED,
+        ] {
+            assert!(
+                is_diy_terminal_finished(status),
+                "{status} must release the next stage"
+            );
+        }
+    }
+
+    #[test]
+    fn in_flight_statuses_hold_the_next_stage_back() {
+        for status in [
+            TERMINAL_STATUS_NOT_STARTED,
+            TERMINAL_STATUS_STARTING,
+            TERMINAL_STATUS_WAITING,
+            TERMINAL_STATUS_WORKING,
+            TERMINAL_STATUS_QUALITY_PENDING,
+        ] {
+            assert!(
+                !is_diy_terminal_finished(status),
+                "{status} must NOT release the next stage"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failed_stage_still_releases_the_pipeline() {
+        // Holding the pipeline on failure would wedge it until the wait budget
+        // expires; the failure is already visible on the terminal's status.
+        assert!(is_diy_terminal_finished(TERMINAL_STATUS_FAILED));
+    }
+
+    /// A stage must never be able to block the pipeline forever, and the poll
+    /// interval must fit inside the wait budget. Enforced at compile time.
+    const _: () = {
+        assert!(DIY_STAGE_MAX_WAIT_SECS > 0);
+        assert!(DIY_STAGE_POLL_INTERVAL_SECS > 0);
+        assert!(DIY_STAGE_POLL_INTERVAL_SECS < DIY_STAGE_MAX_WAIT_SECS);
+    };
+}
 
 #[cfg(test)]
 mod dto_tests {

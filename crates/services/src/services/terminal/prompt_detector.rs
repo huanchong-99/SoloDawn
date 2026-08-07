@@ -203,19 +203,64 @@ impl DetectedPrompt {
 // Regex Patterns
 // ============================================================================
 
-/// Password/sensitive input detection
-static PASSWORD_RE: Lazy<Option<Regex>> = Lazy::new(|| {
+/// Sensitive keywords that *may* indicate a credential prompt.
+///
+/// A bare keyword match is NOT sufficient — see [`PASSWORD_PROMPT_RE`] and
+/// `PromptDetector::detect_password`. Kept separate so `detect_input` can use
+/// the same vocabulary when deciding whether a free-form input prompt is
+/// actually asking for a secret.
+static PASSWORD_KEYWORD_RE: Lazy<Option<Regex>> = Lazy::new(|| {
     compile_regex(
-        r"(?i)\b(password|passphrase|token|secret|api[_\s]?key|credential|private[_\s]?key)\b",
-        "PASSWORD_RE",
+        r"(?i)\b(password|passphrase|token|secret|api[_\-\s]?key|credential|private[_\-\s]?key)\b",
+        "PASSWORD_KEYWORD_RE",
     )
 });
 
+/// Genuine interactive credential prompt.
+///
+/// A real prompt is a short line that *ends* at the point where the CLI waits
+/// for input: the sensitive keyword is followed by a small amount of text and
+/// then a terminator (`:`, `：`, `?`, `？`, `>`) at end-of-line. This is what
+/// distinguishes `Enter your API key:` (a prompt) from `API key: sk-***`
+/// (a value display) or `- never hardcode an API key or token` (prose).
+///
+/// Bare-keyword matching was the cause of manual workflows pausing on a
+/// nameless "password" dialog: DIY workflows inject task instructions and
+/// quality-contract text mentioning `token`/`secret`/`credential`, the CLI TUI
+/// echoes that text back through the PTY, and every echoed line was classified
+/// as a password request requiring user intervention.
+static PASSWORD_PROMPT_RE: Lazy<Option<Regex>> = Lazy::new(|| {
+    compile_regex(
+        r"(?i)\b(password|passphrase|token|secret|api[_\-\s]?key|credential|private[_\-\s]?key)\b[^:：?？\n]{0,40}[:：?？>]\s*$",
+        "PASSWORD_PROMPT_RE",
+    )
+});
+
+/// Lines that carry document/checklist/prose structure rather than a prompt.
+///
+/// Markdown bullets, numbered lists, headings, quotes and table rows routinely
+/// end in a colon while merely *describing* credentials.
+static NON_PROMPT_PREFIX_RE: Lazy<Option<Regex>> = Lazy::new(|| {
+    compile_regex(
+        r"^\s*([-*+•·>#|]|\d+[.)]|\[[ x]\]|\(\d+\))\s",
+        "NON_PROMPT_PREFIX_RE",
+    )
+});
+
+/// Maximum length of a line that can still plausibly be an interactive prompt.
+///
+/// Real credential prompts are short. Long lines ending in a colon are prose
+/// (requirement contracts, documentation, log messages).
+const MAX_PASSWORD_PROMPT_LEN: usize = 120;
+
 /// Input field detection (free-form text input)
-/// [G07-009] TODO: Add negative lookahead to exclude password-like prompts
-/// (e.g., `(?!.*password)`) directly in the regex instead of relying on the
-/// two-step check in `detect_input()`. This would simplify the detection logic
-/// and prevent edge cases where password prompts slip through.
+///
+/// Credential exclusion deliberately stays a separate step in `detect_input()`
+/// rather than a negative lookahead here: `Input` and `Password` now apply
+/// *different* thresholds — `Input` is suppressed by the mere presence of a
+/// sensitive keyword ([`PASSWORD_KEYWORD_RE`], so the LLM can never auto-answer
+/// a secret), while `Password` additionally requires genuine prompt shape
+/// ([`PASSWORD_PROMPT_RE`]). One inline lookahead cannot express both.
 static INPUT_FIELD_RE: Lazy<Option<Regex>> = Lazy::new(|| {
     compile_regex(
         r"(?i)\b(enter|provide|input|type|specify)\b\s+.{0,30}(:|>\s*$)",
@@ -417,15 +462,35 @@ impl PromptDetector {
         None
     }
 
-    /// Detect password/sensitive input prompt
+    /// Detect a genuine interactive credential prompt.
+    ///
+    /// Requires all of:
+    /// 1. a sensitive keyword,
+    /// 2. prompt shape — keyword followed by a terminator at end-of-line,
+    /// 3. a short line (prompts are terse; prose is not),
+    /// 4. no document/checklist prefix (bullets, numbering, headings).
+    ///
+    /// Anything that fails these checks is left to the lower-priority
+    /// detectors, so instruction text that merely *mentions* credentials no
+    /// longer pauses the workflow on an unexplained password dialog.
     fn detect_password(&self, text: &str) -> bool {
-        regex_is_match(PASSWORD_RE.as_ref(), text)
+        let trimmed = text.trim();
+        if trimmed.chars().count() > MAX_PASSWORD_PROMPT_LEN {
+            return false;
+        }
+        if regex_is_match(NON_PROMPT_PREFIX_RE.as_ref(), trimmed) {
+            return false;
+        }
+        regex_is_match(PASSWORD_PROMPT_RE.as_ref(), trimmed)
     }
 
     /// Detect free-form input prompt
     fn detect_input(&self, text: &str) -> bool {
-        // Must match input pattern but NOT be a password prompt
-        regex_is_match(INPUT_FIELD_RE.as_ref(), text) && !regex_is_match(PASSWORD_RE.as_ref(), text)
+        // Must match input pattern but NOT be a credential prompt. The keyword
+        // check (not the stricter prompt check) is deliberate here: an input
+        // prompt that mentions a secret must never be auto-answered by the LLM.
+        regex_is_match(INPUT_FIELD_RE.as_ref(), text)
+            && !regex_is_match(PASSWORD_KEYWORD_RE.as_ref(), text)
     }
 
     /// Detect arrow select prompt from buffer
@@ -602,6 +667,81 @@ mod tests {
         // Verify it's classified as Password
         let prompt = detector.detect("Enter password:").unwrap();
         assert_eq!(prompt.kind, PromptKind::Password);
+    }
+
+    #[test]
+    fn test_detect_password_accepts_real_world_prompt_shapes() {
+        let detector = PromptDetector::new();
+
+        for text in [
+            "Password:",
+            "Enter password: ",
+            "[sudo] password for runner:",
+            "Please paste your API key:",
+            "Enter your Anthropic API key >",
+            "What is your access token?",
+            "Provide the private key：",
+        ] {
+            let prompt = detector
+                .detect(text)
+                .unwrap_or_else(|| panic!("expected a prompt for {text:?}"));
+            assert_eq!(
+                prompt.kind,
+                PromptKind::Password,
+                "{text:?} should be a Password prompt"
+            );
+        }
+    }
+
+    #[test]
+    fn test_detect_password_ignores_instruction_text_mentioning_secrets() {
+        let detector = PromptDetector::new();
+
+        // Regression: manual (DIY) workflows inject task instructions and
+        // quality-contract text that name credentials. The CLI TUI echoes them
+        // back through the PTY; before this fix each echoed line was classified
+        // as a Password prompt and paused the workflow on a bare "password"
+        // dialog the user could not answer.
+        for text in [
+            "- Never hardcode an API key or token in source files:",
+            "* Secrets must be read from environment variables:",
+            "1. Store the credential in a .env file:",
+            "# Security: no password, token or secret may be committed",
+            "Quality contract: the agent must not print any credential value to logs, \
+             must not write a token to disk, and must not echo a password:",
+            "API key: sk-ant-***",
+            "Token usage: 12345",
+            "Reading credentials from the environment",
+            "> The reviewer checks that no private key is embedded:",
+        ] {
+            let prompt = detector.detect(text);
+            assert!(
+                prompt.is_none_or(|p| p.kind != PromptKind::Password),
+                "{text:?} must not be classified as a Password prompt"
+            );
+        }
+    }
+
+    #[test]
+    fn test_detect_input_still_refuses_to_auto_answer_secret_requests() {
+        let detector = PromptDetector::new();
+
+        // An input-shaped line that names a secret must not fall through to
+        // Input (which is LLM-answerable) even when it is not prompt-shaped.
+        assert!(!detector.detect_input("Enter the api_key value here"));
+    }
+
+    #[test]
+    fn test_detect_password_ignores_overlong_prose_ending_in_colon() {
+        let detector = PromptDetector::new();
+        let long_line = format!("{} password:", "context ".repeat(20));
+        assert!(long_line.chars().count() > MAX_PASSWORD_PROMPT_LEN);
+        assert!(
+            detector
+                .detect(&long_line)
+                .is_none_or(|p| p.kind != PromptKind::Password),
+            "prose longer than a plausible prompt must not be a Password prompt"
+        );
     }
 
     #[test]

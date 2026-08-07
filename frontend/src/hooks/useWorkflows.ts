@@ -174,6 +174,14 @@ export function getWorkflowActions(
 export interface InlineModelConfig {
   displayName: string;
   modelId: string;
+  /**
+   * Provider API type picked in the model dialog. Persisted with the model so
+   * the backend launcher knows which provider wire family the model speaks
+   * instead of guessing from the base URL.
+   */
+  apiType?: string;
+  /** Base URL picked in the model dialog, persisted alongside `apiType`. */
+  baseUrl?: string | null;
 }
 
 export interface CreateWorkflowRequest {

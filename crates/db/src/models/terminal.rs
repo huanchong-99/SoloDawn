@@ -118,10 +118,12 @@ pub struct Terminal {
     /// Associated solodawn session ID
     pub vk_session_id: Option<Uuid>,
 
-    /// Auto-confirm mode: skip CLI permission prompts
-    /// When enabled, CLI will be launched with auto-confirm flags:
-    /// - Claude Code: --dangerously-skip-permissions
-    /// - Codex: --yolo
+    /// Auto-confirm mode: skip CLI permission prompts.
+    ///
+    /// How it is applied depends on the CLI:
+    /// - Claude Code: `--dangerously-skip-permissions` (plus `--bare`)
+    /// - Codex: `approval_policy = "never"` in the generated `config.toml`.
+    ///   Codex has no `--yolo` flag; approval is configuration-driven.
     pub auto_confirm: bool,
 
     /// Last Git commit hash

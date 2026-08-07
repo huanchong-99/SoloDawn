@@ -95,7 +95,15 @@ export const useModelStore = create<ModelStoreState>((set, get) => ({
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch models: ${response.statusText}`);
+        // Surface the backend's explanation (which endpoints were tried and why
+        // each failed) instead of a bare status line — a compatible endpoint has
+        // no built-in catalog to fall back on, so an opaque failure leaves the
+        // model dropdown simply empty.
+        const detail = await response
+          .json()
+          .then((body: { message?: string; error?: string }) => body.message ?? body.error)
+          .catch(() => undefined);
+        throw new Error(detail ?? `Failed to fetch models: ${response.statusText}`);
       }
 
       const data = await response.json();
@@ -131,6 +139,9 @@ export const useModelStore = create<ModelStoreState>((set, get) => ({
           baseUrl: model.baseUrl,
           apiKey: model.apiKey,
           modelId: model.modelId,
+          // Verification must exercise the API surface the bound CLI really
+          // calls (Codex speaks the OpenAI Responses API, not Chat Completions).
+          cliTypeId: model.cliTypeId,
         }),
       });
 
@@ -144,7 +155,7 @@ export const useModelStore = create<ModelStoreState>((set, get) => ({
       // Update model verification status
       get().setVerified(model.id, verified);
 
-      set({ isVerifying: null });
+      set({ error: verified ? null : ((data.detail as string) ?? null), isVerifying: null });
       return verified;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Verification failed';

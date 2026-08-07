@@ -87,17 +87,31 @@ fn resolve_codex_wire_api() -> String {
     "responses".to_string()
 }
 
-/// Creates Codex config.toml in CODEX_HOME to skip authentication
+/// Creates Codex config.toml in CODEX_HOME to skip authentication.
 ///
-/// [G22-010] TODO: The `api_key` field appears both in `[model_providers.<key>]` and
-/// is also injected via `OPENAI_API_KEY` env var. If Codex reads both, the config.toml
-/// key may shadow or conflict with the env var. Verify Codex precedence rules and
-/// consider removing the duplicate to avoid confusion.
+/// # TOML table scoping
+///
+/// `approval_policy` and `sandbox_mode` are **top-level** Codex settings and
+/// must be emitted before the `[model_providers.<key>]` header. Everything
+/// written after that header belongs to the provider table, so the previous
+/// layout silently nested them under `model_providers.<key>`. Probed against
+/// codex-cli 0.144.5: `codex --strict-config` reports
+/// `unknown configuration field model_providers.custom.approval_policy`, and
+/// without `--strict-config` the keys are simply ignored. The effect was a Codex
+/// terminal that never received the intended approval policy or sandbox
+/// permissions — it could not write project files and stalled on approvals.
+///
+/// The legacy `sandbox_permissions` key was also dropped by Codex; the
+/// supported replacement is `sandbox_mode`
+/// (`read-only` | `workspace-write` | `danger-full-access`).
+///
+/// The API key is injected through `OPENAI_API_KEY` and `auth.json` only, never
+/// duplicated into the provider table, so there is no precedence ambiguity.
 fn create_codex_config(
     codex_home: &Path,
     base_url: Option<&str>,
     model: &str,
-    _api_key: &str,
+    auto_confirm: bool,
 ) -> anyhow::Result<()> {
     let config_path = codex_home.join("config.toml");
 
@@ -110,20 +124,28 @@ fn create_codex_config(
     };
     let wire_api = resolve_codex_wire_api();
 
-    let mut config_content = format!(
+    // `workspace-write` in both modes: an agent that cannot write its workspace
+    // produces a repository containing nothing but `.git`. The approval policy
+    // is what auto-confirm actually controls.
+    let approval_policy = if auto_confirm {
+        "never"
+    } else {
+        "on-request"
+    };
+    let sandbox_mode = "workspace-write";
+
+    let config_content = format!(
         r#"model_provider = "{provider_key}"
 model = "{model}"
+approval_policy = "{approval_policy}"
+sandbox_mode = "{sandbox_mode}"
 
 [model_providers.{provider_key}]
 name = "{provider_key}"
 base_url = "{base_url_str}"
+wire_api = "{wire_api}"
 "#
     );
-
-    config_content.push_str(&format!("wire_api = \"{wire_api}\"\n"));
-    config_content.push_str("approval_policy = \"on-request\"\n");
-    config_content
-        .push_str("sandbox_permissions = [\"disk-full-read-access\", \"disk-write-folder\"]\n");
 
     std::fs::write(&config_path, config_content)
         .map_err(|e| anyhow::anyhow!("Failed to write Codex config.toml: {e}"))?;
@@ -134,6 +156,8 @@ base_url = "{base_url_str}"
         model_provider = %provider_key,
         base_url = %base_url_str,
         wire_api = %wire_api,
+        approval_policy,
+        sandbox_mode,
         "Created Codex config.toml for authentication skip (api_key via env var only)"
     );
 
@@ -381,6 +405,156 @@ fn create_claude_settings(
 /// * `cli` - The CLI type
 /// * `args` - Mutable reference to the arguments vector
 /// * `auto_confirm` - Whether to add auto-confirm flags
+/// Which provider wire family a terminal's model speaks.
+///
+/// Decides which set of standard provider environment variables to inject for
+/// CLIs that SoloDawn does not configure through a bespoke config file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderFamily {
+    Anthropic,
+    OpenAi,
+    Google,
+}
+
+/// Resolve the provider family for a terminal launch.
+///
+/// Priority: the `api_type` recorded on the model config (the exact value the
+/// user picked in the model dialog) → heuristics over the base URL and model
+/// id → Anthropic, which is the project's default provider.
+pub fn resolve_provider_family(
+    api_type: Option<&str>,
+    base_url: Option<&str>,
+    model_id: &str,
+) -> ProviderFamily {
+    if let Some(api_type) = api_type.map(str::trim).filter(|value| !value.is_empty()) {
+        let lower = api_type.to_ascii_lowercase();
+        if lower.starts_with("anthropic") {
+            return ProviderFamily::Anthropic;
+        }
+        if lower.starts_with("openai") {
+            return ProviderFamily::OpenAi;
+        }
+        if lower.starts_with("google") || lower.starts_with("gemini") {
+            return ProviderFamily::Google;
+        }
+    }
+
+    let haystack = format!(
+        "{} {}",
+        base_url.unwrap_or_default().to_ascii_lowercase(),
+        model_id.to_ascii_lowercase()
+    );
+    if haystack.contains("anthropic") || haystack.contains("claude") {
+        return ProviderFamily::Anthropic;
+    }
+    if haystack.contains("openai") || haystack.contains("gpt-") || haystack.contains("/v1/chat") {
+        return ProviderFamily::OpenAi;
+    }
+    if haystack.contains("googleapis") || haystack.contains("gemini") {
+        return ProviderFamily::Google;
+    }
+
+    ProviderFamily::Anthropic
+}
+
+/// Inject the provider-standard credential/model environment for a CLI that
+/// SoloDawn has no bespoke config writer for.
+///
+/// Claude Code and Codex are configured exactly, through their own config files
+/// (`settings.json` / `config.toml`). The remaining supported CLIs
+/// (amp, cursor-agent, qwen-code, copilot, droid, opencode) previously received
+/// a completely empty config: the CLI, model and credentials the user selected
+/// in the wizard were stored, displayed in the UI, and then silently discarded
+/// at spawn time, so the terminal ran against whatever the CLI's own global
+/// configuration happened to point at. That is the "configured CLI/LLM does not
+/// match what actually runs" report.
+///
+/// These are the provider SDKs' documented variable names rather than
+/// CLI-specific ones, so any CLI built on the official Anthropic/OpenAI/Google
+/// clients picks them up. A CLI that reads none of them still gets a clear
+/// warning in its terminal log (see `provider_env_warning`) instead of silently
+/// diverging.
+fn apply_generic_provider_env(
+    env: &mut SpawnEnv,
+    family: ProviderFamily,
+    base_url: Option<&str>,
+    api_key: Option<&str>,
+    model_id: &str,
+) {
+    let model_id = model_id.trim();
+
+    match family {
+        ProviderFamily::Anthropic => {
+            if let Some(key) = api_key {
+                // Mirrors the Claude Code branch: a relay endpoint is
+                // authenticated with a raw bearer token, the official endpoint
+                // with the API key.
+                if base_url.is_some() {
+                    env.set
+                        .insert("ANTHROPIC_AUTH_TOKEN".to_string(), key.to_string());
+                    env.unset.push("ANTHROPIC_API_KEY".to_string());
+                } else {
+                    env.set
+                        .insert("ANTHROPIC_API_KEY".to_string(), key.to_string());
+                }
+            }
+            if let Some(url) = base_url {
+                env.set
+                    .insert("ANTHROPIC_BASE_URL".to_string(), url.to_string());
+            }
+            if !model_id.is_empty() {
+                env.set
+                    .insert("ANTHROPIC_MODEL".to_string(), model_id.to_string());
+            }
+        }
+        ProviderFamily::OpenAi => {
+            if let Some(key) = api_key {
+                env.set
+                    .insert("OPENAI_API_KEY".to_string(), key.to_string());
+            }
+            if let Some(url) = base_url {
+                env.set.insert("OPENAI_BASE_URL".to_string(), url.to_string());
+            }
+            if !model_id.is_empty() {
+                env.set
+                    .insert("OPENAI_MODEL".to_string(), model_id.to_string());
+            }
+        }
+        ProviderFamily::Google => {
+            if let Some(key) = api_key {
+                env.set
+                    .insert("GEMINI_API_KEY".to_string(), key.to_string());
+                env.set
+                    .insert("GOOGLE_API_KEY".to_string(), key.to_string());
+            }
+            if let Some(url) = base_url {
+                env.set
+                    .insert("GOOGLE_GEMINI_BASE_URL".to_string(), url.to_string());
+            }
+            if !model_id.is_empty() {
+                env.set
+                    .insert("GEMINI_MODEL".to_string(), model_id.to_string());
+            }
+        }
+    }
+}
+
+/// Human-readable warning describing what SoloDawn could and could not pin for
+/// a generically-configured CLI, so a mismatch is visible instead of silent.
+pub fn provider_env_warning(cli_name: &str, model_id: &str, has_api_key: bool) -> String {
+    let credential = if has_api_key {
+        "the configured API key"
+    } else {
+        "no API key (the CLI will use its own stored credentials)"
+    };
+    format!(
+        "SoloDawn configured '{cli_name}' through standard provider environment variables \
+         (model '{model_id}', {credential}). '{cli_name}' has no dedicated SoloDawn config writer: \
+         if this CLI does not read those variables it will fall back to its own global \
+         configuration, and the model it actually uses may differ from the one selected here."
+    )
+}
+
 fn apply_auto_confirm_args(cli: &CcCliType, args: &mut Vec<String>, auto_confirm: bool) {
     if !auto_confirm {
         return;
@@ -1108,20 +1282,10 @@ impl CCSwitchService {
             tracing::warn!(
                 cli_name = %cli_type.name,
                 terminal_id = %terminal.id,
-                "CLI does not support config switching, using empty config"
+                "Unknown CLI name; launching with no SoloDawn-managed configuration"
             );
             return Ok(empty_config());
         };
-
-        // Only Claude Code and Codex support environment-based configuration
-        if !matches!(cli, CcCliType::ClaudeCode | CcCliType::Codex) {
-            tracing::warn!(
-                cli_name = %cli_type.name,
-                terminal_id = %terminal.id,
-                "CLI does not support config switching, using empty config"
-            );
-            return Ok(empty_config());
-        }
 
         // Fetch model configuration
         let model_config = ModelConfig::find_by_id(&self.db.pool, &terminal.model_config_id)
@@ -1485,9 +1649,14 @@ impl CCSwitchService {
                     anyhow::anyhow!("Failed to create Codex auth.json for authentication skip: {e}")
                 })?;
 
-                // Create config.toml with explicit provider/api_key
-                create_codex_config(&codex_home, effective_base_url.as_deref(), &model, &api_key)
-                    .map_err(|e| {
+                // Create config.toml with explicit provider + approval/sandbox policy
+                create_codex_config(
+                    &codex_home,
+                    effective_base_url.as_deref(),
+                    &model,
+                    auto_confirm,
+                )
+                .map_err(|e| {
                     anyhow::anyhow!("Failed to create Codex config for authentication skip: {e}")
                 })?;
 
@@ -1507,14 +1676,45 @@ impl CCSwitchService {
                     "Built launch config for Codex with authentication skip"
                 );
             }
+            // Every other supported CLI (amp, cursor-agent, qwen-code, copilot,
+            // droid, opencode). SoloDawn has no bespoke config writer for these,
+            // but it must still honour the CLI/model/credentials the user chose
+            // instead of dropping them on the floor — see `apply_generic_provider_env`.
             _ => {
-                // Should not reach here due to earlier check, but handle gracefully
+                let api_key = terminal
+                    .get_custom_api_key()?
+                    .filter(|key| !key.trim().is_empty());
+                let base_url = terminal
+                    .custom_base_url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|url| !url.is_empty())
+                    .map(str::to_string);
+                let model_id = Self::resolve_model_name(&model_config);
+                let family = resolve_provider_family(
+                    model_config.api_type.as_deref(),
+                    base_url.as_deref(),
+                    &model_id,
+                );
+
+                apply_generic_provider_env(
+                    &mut env,
+                    family,
+                    base_url.as_deref(),
+                    api_key.as_deref(),
+                    &model_id,
+                );
+
                 tracing::warn!(
                     cli_name = %cli_type.name,
                     terminal_id = %terminal.id,
-                    "CLI does not support config switching, using empty config"
+                    model_id = %model_id,
+                    provider_family = ?family,
+                    has_api_key = api_key.is_some(),
+                    has_base_url = base_url.is_some(),
+                    "{}",
+                    provider_env_warning(&cli_type.name, &model_id, api_key.is_some())
                 );
-                return Ok(empty_config());
             }
         }
 
@@ -1853,6 +2053,227 @@ mod tests {
         assert!(settings["env"]["ANTHROPIC_AUTH_TOKEN"].is_null());
         assert!(settings["env"].get("ANTHROPIC_BASE_URL").is_none());
         assert_eq!(settings["primaryApiKey"], "sk-ant-official-1234567890");
+    }
+
+    /// Codex's `approval_policy` / `sandbox_mode` are TOP-LEVEL settings.
+    /// Emitting them after `[model_providers.<key>]` nests them inside the
+    /// provider table, where Codex ignores them (`codex --strict-config` on
+    /// codex-cli 0.144.5 rejects them as
+    /// `unknown configuration field model_providers.custom.approval_policy`).
+    /// The visible symptom was a Codex terminal that could not write project
+    /// files and stalled on approvals.
+    #[test]
+    fn test_create_codex_config_emits_policy_keys_at_top_level() {
+        let dir = tempfile::tempdir().unwrap();
+        create_codex_config(dir.path(), Some("https://relay.example.com/v1"), "gpt-x", true)
+            .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        let provider_header_at = content
+            .find("[model_providers.")
+            .expect("provider table header must be present");
+        let approval_at = content
+            .find("approval_policy")
+            .expect("approval_policy must be present");
+        let sandbox_at = content
+            .find("sandbox_mode")
+            .expect("sandbox_mode must be present");
+
+        assert!(
+            approval_at < provider_header_at,
+            "approval_policy must precede the provider table:\n{content}"
+        );
+        assert!(
+            sandbox_at < provider_header_at,
+            "sandbox_mode must precede the provider table:\n{content}"
+        );
+    }
+
+    #[test]
+    fn test_create_codex_config_drops_the_removed_sandbox_permissions_key() {
+        let dir = tempfile::tempdir().unwrap();
+        create_codex_config(dir.path(), None, "gpt-x", true).unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(
+            !content.contains("sandbox_permissions"),
+            "`sandbox_permissions` was removed from Codex; it is rejected under \
+             --strict-config and ignored otherwise:\n{content}"
+        );
+        // An agent that cannot write its workspace leaves a repo containing
+        // nothing but `.git`.
+        assert!(content.contains(r#"sandbox_mode = "workspace-write""#), "{content}");
+    }
+
+    #[test]
+    fn test_create_codex_config_approval_policy_follows_auto_confirm() {
+        let auto = tempfile::tempdir().unwrap();
+        create_codex_config(auto.path(), None, "gpt-x", true).unwrap();
+        assert!(
+            std::fs::read_to_string(auto.path().join("config.toml"))
+                .unwrap()
+                .contains(r#"approval_policy = "never""#)
+        );
+
+        let manual = tempfile::tempdir().unwrap();
+        create_codex_config(manual.path(), None, "gpt-x", false).unwrap();
+        assert!(
+            std::fs::read_to_string(manual.path().join("config.toml"))
+                .unwrap()
+                .contains(r#"approval_policy = "on-request""#)
+        );
+    }
+
+    #[test]
+    fn test_create_codex_config_is_valid_toml_with_keys_in_the_right_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        create_codex_config(dir.path(), Some("https://relay.example.com/v1"), "gpt-x", true)
+            .unwrap();
+        let content = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+
+        let parsed: toml::Value = toml::from_str(&content).expect("config.toml must parse");
+        assert_eq!(parsed.get("approval_policy").and_then(toml::Value::as_str), Some("never"));
+        assert_eq!(
+            parsed.get("sandbox_mode").and_then(toml::Value::as_str),
+            Some("workspace-write")
+        );
+
+        let provider = parsed
+            .get("model_providers")
+            .and_then(|v| v.get("custom"))
+            .expect("custom provider table");
+        assert_eq!(
+            provider.get("base_url").and_then(toml::Value::as_str),
+            Some("https://relay.example.com/v1")
+        );
+        assert!(
+            provider.get("approval_policy").is_none(),
+            "approval_policy must not land inside the provider table: {content}"
+        );
+        assert!(
+            provider.get("sandbox_mode").is_none(),
+            "sandbox_mode must not land inside the provider table: {content}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_provider_family_prefers_the_recorded_api_type() {
+        assert_eq!(
+            resolve_provider_family(Some("openai-compatible"), Some("https://relay"), "glm-5"),
+            ProviderFamily::OpenAi
+        );
+        assert_eq!(
+            resolve_provider_family(Some("anthropic-compatible"), Some("https://relay"), "glm-5"),
+            ProviderFamily::Anthropic
+        );
+        assert_eq!(
+            resolve_provider_family(Some("google"), None, "gemini-3.5-flash"),
+            ProviderFamily::Google
+        );
+    }
+
+    #[test]
+    fn test_resolve_provider_family_falls_back_to_url_and_model_heuristics() {
+        assert_eq!(
+            resolve_provider_family(None, Some("https://api.anthropic.com"), "unknown"),
+            ProviderFamily::Anthropic
+        );
+        assert_eq!(
+            resolve_provider_family(None, Some("https://api.openai.com/v1"), "unknown"),
+            ProviderFamily::OpenAi
+        );
+        assert_eq!(
+            resolve_provider_family(None, None, "gpt-5.5"),
+            ProviderFamily::OpenAi
+        );
+        // Unknown everything: the project's default provider.
+        assert_eq!(
+            resolve_provider_family(None, None, "mystery"),
+            ProviderFamily::Anthropic
+        );
+    }
+
+    /// Regression: CLIs other than Claude Code / Codex used to receive a
+    /// completely empty spawn config, so the model and credentials chosen in the
+    /// wizard were silently discarded and the CLI ran against its own global
+    /// configuration — the "configured CLI/LLM does not match what runs" report.
+    #[test]
+    fn test_apply_generic_provider_env_pins_model_and_credentials() {
+        let mut env = SpawnEnv {
+            set: Default::default(),
+            unset: Vec::new(),
+        };
+        apply_generic_provider_env(
+            &mut env,
+            ProviderFamily::OpenAi,
+            Some("https://relay.example.com/v1"),
+            Some("sk-test"),
+            "glm-5",
+        );
+
+        assert_eq!(env.set.get("OPENAI_API_KEY").map(String::as_str), Some("sk-test"));
+        assert_eq!(
+            env.set.get("OPENAI_BASE_URL").map(String::as_str),
+            Some("https://relay.example.com/v1")
+        );
+        assert_eq!(env.set.get("OPENAI_MODEL").map(String::as_str), Some("glm-5"));
+    }
+
+    #[test]
+    fn test_apply_generic_provider_env_uses_bearer_token_for_anthropic_relays() {
+        let mut env = SpawnEnv {
+            set: Default::default(),
+            unset: Vec::new(),
+        };
+        apply_generic_provider_env(
+            &mut env,
+            ProviderFamily::Anthropic,
+            Some("https://relay.example.com"),
+            Some("sk-relay"),
+            "claude-sonnet-5",
+        );
+
+        // Mirrors the Claude Code branch: a relay endpoint authenticates with a
+        // raw bearer token, and ANTHROPIC_API_KEY must not shadow it.
+        assert_eq!(
+            env.set.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("sk-relay")
+        );
+        assert!(!env.set.contains_key("ANTHROPIC_API_KEY"));
+        assert!(env.unset.iter().any(|k| k == "ANTHROPIC_API_KEY"));
+        assert_eq!(
+            env.set.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("claude-sonnet-5")
+        );
+    }
+
+    #[test]
+    fn test_apply_generic_provider_env_official_endpoint_uses_api_key() {
+        let mut env = SpawnEnv {
+            set: Default::default(),
+            unset: Vec::new(),
+        };
+        apply_generic_provider_env(
+            &mut env,
+            ProviderFamily::Anthropic,
+            None,
+            Some("sk-official"),
+            "claude-sonnet-5",
+        );
+
+        assert_eq!(
+            env.set.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some("sk-official")
+        );
+        assert!(!env.set.contains_key("ANTHROPIC_AUTH_TOKEN"));
+        assert!(!env.set.contains_key("ANTHROPIC_BASE_URL"));
+    }
+
+    #[test]
+    fn test_provider_env_warning_names_the_cli_and_model() {
+        let warning = provider_env_warning("opencode", "glm-5", true);
+        assert!(warning.contains("opencode"), "{warning}");
+        assert!(warning.contains("glm-5"), "{warning}");
     }
 
     #[test]

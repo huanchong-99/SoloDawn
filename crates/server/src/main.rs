@@ -271,6 +271,8 @@ async fn run_server() -> Result<(), SoloDawnError> {
                 cli_type_id,
                 &item.display_name,
                 &item.model_id,
+                Some(&item.api_type),
+                Some(&item.base_url),
             )
             .await
             {

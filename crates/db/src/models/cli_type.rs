@@ -254,24 +254,35 @@ impl ModelConfig {
         cli_type_id: &str,
         display_name: &str,
         api_model_id: &str,
+        api_type: Option<&str>,
+        base_url: Option<&str>,
     ) -> sqlx::Result<Self> {
         let now = chrono::Utc::now();
         // Use the ID as the name for custom configs
         let name = id.to_string();
 
+        let api_type = api_type.map(str::trim).filter(|value| !value.is_empty());
+        let base_url = base_url.map(str::trim).filter(|value| !value.is_empty());
+
         // Insert or update model fields on conflict (ensures latest model ID is always stored)
         // Also update cli_type_id on conflict to fix mismatches from startup sync
         // (e.g., sync defaulted to "cli-codex" but wizard uses "cli-claude-code").
+        //
+        // `api_type`/`base_url` use COALESCE so a later write that omits them
+        // (an older client, or a caller that only knows the model id) cannot
+        // erase provider routing that was already recorded.
         let item = sqlx::query_as::<_, ModelConfig>(
             r"
             INSERT INTO model_config (
                 id, cli_type_id, name, display_name, api_model_id,
-                is_default, is_official, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7)
+                is_default, is_official, created_at, updated_at, api_type, base_url
+            ) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7, ?8, ?9)
             ON CONFLICT(id) DO UPDATE SET
                 cli_type_id = excluded.cli_type_id,
                 display_name = excluded.display_name,
                 api_model_id = excluded.api_model_id,
+                api_type = COALESCE(excluded.api_type, model_config.api_type),
+                base_url = COALESCE(excluded.base_url, model_config.base_url),
                 updated_at = excluded.updated_at
             RETURNING id, cli_type_id, name, display_name, api_model_id,
                       is_default, is_official, created_at, updated_at,
@@ -285,6 +296,8 @@ impl ModelConfig {
         .bind(api_model_id)
         .bind(now)
         .bind(now)
+        .bind(api_type)
+        .bind(base_url)
         .fetch_one(pool)
         .await?;
         Ok(item.with_has_api_key())

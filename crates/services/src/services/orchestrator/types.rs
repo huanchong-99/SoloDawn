@@ -227,10 +227,20 @@ impl PromptDecision {
         }
     }
 
-    /// Create an ask-user decision for Password prompts
-    pub fn ask_password() -> Self {
+    /// Create an ask-user decision for Password prompts.
+    ///
+    /// `prompt_text` is the terminal line that triggered detection. It is
+    /// embedded in the reason so the UI can answer the user's first question —
+    /// "which password is this?" — instead of showing a nameless input box.
+    pub fn ask_password(prompt_text: &str) -> Self {
+        let asked_for: String = prompt_text.trim().chars().take(160).collect();
+        let reason = if asked_for.is_empty() {
+            "The CLI is requesting a credential and cannot continue without it".to_string()
+        } else {
+            format!("The CLI is requesting a credential: \"{asked_for}\"")
+        };
         Self::AskUser {
-            reason: "Password/sensitive input detected - requires user intervention".to_string(),
+            reason,
             suggestions: None,
         }
     }
@@ -1149,7 +1159,7 @@ mod tests {
         let mut sm = TerminalPromptStateMachine::new();
 
         sm.on_prompt_detected(prompt.clone());
-        sm.on_waiting_for_approval(PromptDecision::ask_password());
+        sm.on_waiting_for_approval(PromptDecision::ask_password("Password:"));
         sm.last_state_change =
             chrono::Utc::now() - chrono::Duration::seconds(SAME_PROMPT_RETRY_WINDOW_SECS + 10);
 

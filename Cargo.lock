@@ -6550,6 +6550,7 @@ dependencies = [
  "tokio-stream",
  "tokio-test",
  "tokio-util",
+ "toml 0.8.2",
  "tonic",
  "tonic-build",
  "tracing",

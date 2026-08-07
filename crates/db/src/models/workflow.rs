@@ -367,6 +367,15 @@ pub struct InlineModelConfig {
     pub display_name: String,
     /// API model ID (e.g., "glm-5", "claude-sonnet-5")
     pub model_id: String,
+    /// API type chosen in the model dialog (`anthropic`, `openai-compatible`, ...).
+    ///
+    /// Persisted so the launcher knows which provider wire family a terminal's
+    /// model speaks without having to guess from the base URL.
+    #[serde(default)]
+    pub api_type: Option<String>,
+    /// Base URL chosen in the model dialog, persisted alongside `api_type`.
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 /// Default function for auto_confirm field - defaults to true for safety

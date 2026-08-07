@@ -80,5 +80,8 @@ security-framework = "2"
 [dev-dependencies]
 wiremock = "0.6"
 tokio-test = "0.4"
+# Parses the generated Codex config.toml so tests assert which TOML table each
+# key actually lands in, not just that the text is present.
+toml = "0.8"
 rustls = { workspace = true }
 serde_yaml = "0.9"

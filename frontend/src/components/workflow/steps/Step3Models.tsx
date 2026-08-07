@@ -218,10 +218,17 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
       setAvailableModels(models);
     } catch (error) {
       console.debug('Failed to fetch models, using defaults', error);
-      // Fallback to default models on error
+      // Fallback to default models on error. Compatible endpoints have no
+      // built-in catalog, so show the real reason rather than a generic
+      // "check your API key" beside an empty list.
       const defaultModels = API_TYPES[formData.apiType].defaultModels;
       setAvailableModels([...defaultModels]);
-      setFormErrors({ fetch: t('step3.errors.fetchFailed') });
+      setFormErrors({
+        fetch:
+          error instanceof Error && error.message
+            ? error.message
+            : t('step3.errors.fetchFailed'),
+      });
     } finally {
       setIsFetching(false);
     }
@@ -260,7 +267,8 @@ export const Step3Models: React.FC<Step3ModelsProps> = ({
         showToast(t('step3.messages.verifySuccess'), 'success');
       } else {
         setIsFormVerified(false);
-        setFormErrors({ verify: t('step3.errors.verifyFailed') });
+        const detail = useModelStore.getState().error;
+        setFormErrors({ verify: detail ?? t('step3.errors.verifyFailed') });
       }
     } catch (error) {
       console.error('Model verification failed', error);

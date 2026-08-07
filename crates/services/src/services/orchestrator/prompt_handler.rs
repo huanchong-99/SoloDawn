@@ -332,7 +332,7 @@ impl PromptHandler {
                 prompt_kind = ?prompt.kind,
                 "Password prompt detected - requiring user intervention"
             );
-            return PromptDecision::ask_password();
+            return PromptDecision::ask_password(&prompt.raw_text);
         }
 
         // Rule 2: auto_confirm disabled means always ask user
@@ -554,7 +554,7 @@ impl PromptHandler {
 
             PromptKind::Password => {
                 // Should not reach here (handled above), but be safe
-                PromptDecision::ask_password()
+                PromptDecision::ask_password(&prompt.raw_text)
             }
         }
     }
@@ -697,7 +697,27 @@ mod tests {
 
         match decision {
             PromptDecision::AskUser { reason, .. } => {
-                assert!(reason.contains("Password") || reason.contains("sensitive"));
+                // The reason must quote the line the CLI actually printed. A
+                // generic "sensitive input detected" left users staring at a
+                // nameless password box with no way to tell what was being
+                // asked for, or by which terminal.
+                assert!(
+                    reason.contains("Enter password:"),
+                    "the reason must name what the CLI asked for, got: {reason}"
+                );
+            }
+            _ => panic!("Expected AskUser decision for password prompt"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_password_reason_survives_an_empty_prompt_line() {
+        let handler = create_test_handler();
+        let prompt = create_test_prompt(PromptKind::Password, "   ", 0.95);
+
+        match handler.make_decision(&prompt, true).await {
+            PromptDecision::AskUser { reason, .. } => {
+                assert!(!reason.trim().is_empty());
             }
             _ => panic!("Expected AskUser decision for password prompt"),
         }

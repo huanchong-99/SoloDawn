@@ -465,6 +465,8 @@ async fn execute_create_workflow(
                         cli_type_id,
                         &item.display_name,
                         &item.model_id,
+                        Some(&item.api_type),
+                        Some(&item.base_url),
                     )
                     .await?;
                     // Set credentials (base_url, api_type, encrypted_api_key)
