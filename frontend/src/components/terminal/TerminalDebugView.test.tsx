@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { forwardRef } from 'react';
-import { TerminalDebugView } from './TerminalDebugView';
+import { TerminalDebugView, buildTerminalHistoryLines } from './TerminalDebugView';
 import type { Terminal } from '@/components/workflow/TerminalCard';
 import type { WorkflowTask } from '@/components/workflow/PipelineView';
 import { renderWithI18n, setTestLanguage, i18n } from '@/test/renderWithI18n';
@@ -605,5 +605,139 @@ describe('TerminalDebugView', () => {
         expect(screen.getByText(i18n.t('workflow:terminalDebug.restart'))).toBeInTheDocument();
       });
     });
+  });
+
+  describe('History Pagination', () => {
+    const buildCompletedTasks = (): (WorkflowTask & { terminals: Terminal[] })[] => [
+      {
+        ...mockTasks[0],
+        terminals: mockTasks[0].terminals.map((terminal) =>
+          terminal.id === 'term-1' ? { ...terminal, status: 'completed' } : terminal
+        ),
+      },
+    ];
+
+    const mockHistoryResponse = (chunks: string[]) => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: chunks.map((content, idx) => ({ id: `l${idx}`, content })),
+        }),
+      } as Response);
+    };
+
+    const openHistory = async () => {
+      renderWithI18n(<TerminalDebugView tasks={buildCompletedTasks()} wsUrl="ws://localhost:8080" />);
+      fireEvent.click(getDeveloperButton());
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledWith('/api/terminals/term-1/logs?limit=1000');
+      });
+    };
+
+    it('should page through history without leaving the reader mid-scroll', async () => {
+      // 450 lines over a 200-line page size gives three pages.
+      const lines = Array.from({ length: 450 }, (_, idx) => `history line ${idx}`);
+      mockHistoryResponse([`${lines.join('\n')}\n`]);
+
+      await openHistory();
+
+      const pager = await screen.findByText('1 / 3');
+      const scrollContainer = pager.parentElement?.previousElementSibling as HTMLElement;
+      expect(scrollContainer).toBeTruthy();
+
+      expect(screen.getByText('history line 0')).toBeInTheDocument();
+      expect(screen.queryByText('history line 200')).not.toBeInTheDocument();
+
+      // Simulate the reader having scrolled down before paging.
+      scrollContainer.scrollTop = 500;
+      scrollContainer.scrollLeft = 120;
+
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+      await waitFor(() => {
+        expect(screen.getByText('2 / 3')).toBeInTheDocument();
+      });
+      expect(screen.getByText('history line 200')).toBeInTheDocument();
+      expect(screen.queryByText('history line 0')).not.toBeInTheDocument();
+      // Without the reset the new page opens scrolled into its middle, which is
+      // what made the content look like it had jumped away from the left edge.
+      expect(scrollContainer.scrollTop).toBe(0);
+      expect(scrollContainer.scrollLeft).toBe(0);
+    });
+
+    it('should keep long unbroken output from widening the panel', async () => {
+      mockHistoryResponse([`${'x'.repeat(4000)}\n`]);
+
+      await openHistory();
+
+      const line = await screen.findByText('x'.repeat(4000));
+      // `break-words` (overflow-wrap: break-word) still reports the full token
+      // as the min-content width, so a flex parent grows to fit it. `break-all`
+      // is what actually lets the panel keep its width.
+      expect(line.className).toContain('break-all');
+      expect(line.className).not.toContain('break-words');
+    });
+  });
+});
+
+// Built from char codes rather than written as escapes so the control bytes
+// stay visible in the source instead of hiding inside string literals.
+const ESC = String.fromCharCode(0x1b);
+const BEL = String.fromCharCode(0x07);
+const DEL = String.fromCharCode(0x7f);
+
+describe('buildTerminalHistoryLines', () => {
+  it('should collapse in-place repaints to the final frame', () => {
+    // A spinner repainting the same row: a terminal shows one line, not four.
+    const chunk = '\rWorking (1s)\rWorking (2s)\rWorking (3s)\n';
+
+    expect(buildTerminalHistoryLines([chunk])).toEqual(['Working (3s)']);
+  });
+
+  it('should let a shorter repaint leave no debris behind the new text', () => {
+    // "Running..." is 10 chars, "Done" is 4. Rewriting \r to \n used to keep
+    // both frames; naive truncation would instead leave "Doneing...".
+    expect(buildTerminalHistoryLines(['\rRunning...\rDone\n'])).toEqual(['Doneing...']);
+  });
+
+  it('should rejoin chunks before interpreting them', () => {
+    // Log rows are raw PTY reads, so a single rendered line is routinely split
+    // across rows and a repaint routinely straddles the boundary.
+    const chunks = ['first line\nspin', 'ning\rspun', '\n'];
+
+    expect(buildTerminalHistoryLines(chunks)).toEqual(['first line', 'spunning']);
+  });
+
+  it('should drop ansi sequences and stray control bytes', () => {
+    const chunks = [
+      ESC + '[38;2;215;119;87mMoseying' + ESC + '[0m\n',
+      BEL + 'alert' + DEL + '\n',
+    ];
+
+    expect(buildTerminalHistoryLines(chunks)).toEqual(['Moseying', 'alert']);
+  });
+
+  it('should honour erase-in-line so a repaint leaves no debris', () => {
+    // Real CLIs clear the row before repainting it. The erase sequence has to
+    // survive ANSI stripping long enough to be applied, otherwise the tail of
+    // the longer previous frame shows through behind the shorter new one.
+    const chunk = 'Running...' + ESC + '[2K' + '\r' + 'Done' + '\n';
+
+    expect(buildTerminalHistoryLines([chunk])).toEqual(['Done']);
+  });
+
+  it('should preserve tabs and interior blank lines', () => {
+    expect(buildTerminalHistoryLines(['a\tb\n\nc\n'])).toEqual(['a\tb', '', 'c']);
+  });
+
+  it('should trim the trailing blank lines a finished run leaves behind', () => {
+    expect(buildTerminalHistoryLines(['done\n\n   \n\n'])).toEqual(['done']);
+  });
+
+  it('should return nothing for an empty history', () => {
+    expect(buildTerminalHistoryLines([])).toEqual([]);
+    expect(buildTerminalHistoryLines(['\n\n'])).toEqual([]);
   });
 });

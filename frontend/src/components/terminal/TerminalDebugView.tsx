@@ -31,26 +31,107 @@ interface TerminalHistoryState {
 const TERMINAL_HISTORY_LIMIT = 1000;
 const HISTORY_PAGE_SIZE = 200;
 
-// E15-03: preserve tab (0x09), LF (0x0a), CR (0x0d), ESC (0x1b) and printable
-// characters; drop DEL (0x7f) and other C0 controls. ESC is preserved so any
-// residual ANSI sequence (e.g. partial sequence not matched by stripAnsi) is
-// not rendered as a blank character.
-const stripControlCharacters = (value: string): string =>
-  Array.from(value)
-    .filter((char) => {
-      const code = char.codePointAt(0);
-      if (code === undefined) {
-        return false;
+// E15-03: preserve tab (0x09) and LF (0x0a) plus printable characters; drop
+// DEL (0x7f) and every other C0 control.
+//
+// CR (0x0d) is resolved earlier by `layOutTerminalLines`, and ESC (0x1b) is
+// dropped rather than kept: `stripAnsi` has already removed every complete
+// escape sequence by this point, so a surviving ESC is a truncated sequence
+// whose payload was already discarded, and keeping it only renders an
+// invisible gap mid-line.
+const CHAR_TAB = 0x09;
+const CHAR_LF = 0x0a;
+const CHAR_SPACE = 0x20;
+const CHAR_DEL = 0x7f;
+
+const stripControlCharacters = (value: string): string => {
+  const kept: string[] = [];
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code === CHAR_TAB || code === CHAR_LF || (code >= CHAR_SPACE && code !== CHAR_DEL)) {
+      kept.push(char);
+    }
+  }
+  return kept.join('');
+};
+
+const ESCAPE = String.fromCharCode(0x1b);
+// CSI n K — "erase in line". A repainting CLI emits it to wipe the previous
+// frame before drawing the next one; stripAnsi would delete it along with
+// every other escape, so it is swapped for a marker that survives stripping
+// and is then applied while the line is laid out. Losing the erase is what
+// leaves the tail of a longer previous frame trailing behind a shorter one.
+const ERASE_IN_LINE_RE = new RegExp(`${ESCAPE}\\[([0-2]?)K`, 'g');
+// C0 controls make safe markers: stripAnsi leaves them alone and
+// stripControlCharacters removes any that somehow reaches the output, so they
+// cannot collide with real terminal text.
+const ERASE_TO_END = String.fromCharCode(0);
+const ERASE_TO_START = String.fromCharCode(1);
+const ERASE_WHOLE_LINE = String.fromCharCode(2);
+
+const markEraseInLine = (content: string): string =>
+  content.replaceAll(ERASE_IN_LINE_RE, (_match, mode: string) => {
+    if (mode === '1') {
+      return ERASE_TO_START;
+    }
+    if (mode === '2') {
+      return ERASE_WHOLE_LINE;
+    }
+    return ERASE_TO_END;
+  });
+
+/**
+ * Lay a raw line out the way a terminal does: `\r` returns the cursor to
+ * column 0, subsequent characters overwrite whatever is already there, and an
+ * erase marker blanks the range it names without moving the cursor.
+ *
+ * Rewriting `\r` to `\n` instead — as this module used to — turns every
+ * intermediate frame of an in-place animation into its own line. CLIs repaint
+ * a spinner many times per second, which is why the history view filled up
+ * with near-duplicate lines ("Running…", "Gesticulating…") plus the ragged
+ * leftovers of frames that a shorter frame only partially overwrote.
+ */
+const layOutTerminalLine = (line: string): string => {
+  // Column-indexed buffer rather than string slicing: a spinner line can
+  // accumulate thousands of repaints, and rebuilding the string on every
+  // character would make this quadratic.
+  const columns: string[] = [];
+  let cursor = 0;
+  for (const char of line) {
+    if (char === '\r') {
+      cursor = 0;
+    } else if (char === ERASE_TO_END) {
+      columns.length = Math.min(columns.length, cursor);
+    } else if (char === ERASE_TO_START) {
+      for (let column = 0; column <= cursor && column < columns.length; column += 1) {
+        columns[column] = ' ';
       }
-      return (
-        code === 0x09 ||
-        code === 0x0a ||
-        code === 0x0d ||
-        code === 0x1b ||
-        (code >= 0x20 && code !== 0x7f)
-      );
-    })
-    .join('');
+    } else if (char === ERASE_WHOLE_LINE) {
+      columns.length = 0;
+    } else {
+      // Erasing can leave the cursor beyond the end of the buffer; pad so the
+      // text lands in the column the CLI addressed instead of sliding left.
+      while (columns.length < cursor) {
+        columns.push(' ');
+      }
+      columns[cursor] = char;
+      cursor += 1;
+    }
+  }
+  return columns.join('');
+};
+
+const needsLayout = (line: string): boolean =>
+  line.includes('\r') ||
+  line.includes(ERASE_TO_END) ||
+  line.includes(ERASE_TO_START) ||
+  line.includes(ERASE_WHOLE_LINE);
+
+const layOutTerminalLines = (value: string): string =>
+  value
+    .split('\n')
+    .map((line) => (needsLayout(line) ? layOutTerminalLine(line) : line))
+    .join('\n');
 
 // E15-05: ANSI-aware stripping MUST run before the generic control-character
 // filter. If order is swapped, stripControlCharacters would remove the 0x1b
@@ -58,10 +139,30 @@ const stripControlCharacters = (value: string): string =>
 // the sequence's trailing bytes as visible garbage (e.g. "[31m").
 const sanitizeTerminalHistoryContent = (content: string) =>
   stripControlCharacters(
-    stripAnsi(content)
-    .replaceAll('\r\n', '\n')
-    .replaceAll('\r', '\n')
+    layOutTerminalLines(stripAnsi(markEraseInLine(content)).replaceAll('\r\n', '\n'))
   );
+
+/**
+ * Turn the persisted log rows into the lines to render.
+ *
+ * Rows are raw PTY chunks, so their boundaries are arbitrary: one rendered
+ * line is often split across several rows and one row often carries many
+ * lines. Rejoining the stream before interpreting it is what lets a
+ * carriage-return repaint that straddles a chunk boundary collapse the way a
+ * terminal would show it.
+ */
+export const buildTerminalHistoryLines = (chunks: readonly string[]): string[] => {
+  if (chunks.length === 0) {
+    return [];
+  }
+  const lines = sanitizeTerminalHistoryContent(chunks.join('')).split('\n');
+  // A run always ends with newlines and cleared spinner lines; rendering those
+  // as blank rows just pads the last page.
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+    lines.pop();
+  }
+  return lines;
+};
 
 /**
  * Renders the terminal debugging UI with a terminal list and active emulator.
@@ -83,6 +184,7 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
   const autoStartedRef = useRef<Set<string>>(new Set());
   const restartAttemptsRef = useRef<Map<string, number>>(new Map());
   const [historyPage, setHistoryPage] = useState(0);
+  const historyScrollRef = useRef<HTMLDivElement | null>(null);
   // E15-07: transitioning flag inserted between terminal key changes so the
   // previous TerminalEmulator fully unmounts (and its WS closes gracefully)
   // before the next one mounts with a new key.
@@ -512,17 +614,31 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
   const currentHistory = selectedTerminalId ? historyByTerminalId[selectedTerminalId] : undefined;
 
   // G09-012 / G28-007: Paginate history lines instead of rendering all at once.
-  // Sanitize each line individually for segmented rendering.
-  const sanitizedHistoryLines = useMemo(() => {
-    if (!currentHistory?.lines.length) return [];
-    return currentHistory.lines.map((line) => sanitizeTerminalHistoryContent(line));
-  }, [currentHistory?.lines]);
+  const sanitizedHistoryLines = useMemo(
+    () => buildTerminalHistoryLines(currentHistory?.lines ?? []),
+    [currentHistory?.lines]
+  );
 
   const totalHistoryPages = Math.max(1, Math.ceil(sanitizedHistoryLines.length / HISTORY_PAGE_SIZE));
+  // Reloading history can shrink the page count (e.g. the tail was trimmed).
+  // Without clamping, a page index left over from the longer listing renders an
+  // empty view with both pager buttons disabled.
+  const safeHistoryPage = Math.min(historyPage, totalHistoryPages - 1);
   const pagedHistoryLines = useMemo(() => {
-    const start = historyPage * HISTORY_PAGE_SIZE;
+    const start = safeHistoryPage * HISTORY_PAGE_SIZE;
     return sanitizedHistoryLines.slice(start, start + HISTORY_PAGE_SIZE);
-  }, [sanitizedHistoryLines, historyPage]);
+  }, [sanitizedHistoryLines, safeHistoryPage]);
+
+  // Each page is a fresh slice of output, so keep the reader at its top-left
+  // corner. Leaving the scroll offsets untouched drops them into the middle of
+  // the new page — the "content jumped away from the left" the report describes.
+  useEffect(() => {
+    const container = historyScrollRef.current;
+    if (container) {
+      container.scrollTop = 0;
+      container.scrollLeft = 0;
+    }
+  }, [safeHistoryPage, selectedTerminalId]);
 
   const handleHistoryPrev = useCallback(() => setHistoryPage((p) => Math.max(0, p - 1)), []);
   const handleHistoryNext = useCallback(() => setHistoryPage((p) => Math.min(totalHistoryPages - 1, p + 1)), [totalHistoryPages]);
@@ -561,26 +677,43 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
     if (currentHistory?.lines.length) {
       // G09-012 / G28-007: Render paginated segments instead of a single <pre>
       return (
-        <div className="flex-1 min-h-0 flex flex-col">
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto pr-1">
+        // `min-w-0` on every level: a flex item defaults to `min-width: auto`,
+        // which refuses to shrink below its content's min-content width. One
+        // long unbroken token on the current page would otherwise widen the
+        // whole panel, and since each page has a different longest token the
+        // panel resized on every pager click.
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+          <div
+            ref={historyScrollRef}
+            className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden pr-1"
+          >
             {pagedHistoryLines.map((line, idx) => (
               <pre
-                key={historyPage * HISTORY_PAGE_SIZE + idx}
-                className="text-xs leading-5 whitespace-pre-wrap break-words text-foreground"
+                key={safeHistoryPage * HISTORY_PAGE_SIZE + idx}
+                // `break-all` rather than `break-words`: `overflow-wrap:
+                // break-word` only wraps at render time and still reports the
+                // full token width as min-content, so it does not stop the
+                // stretching described above.
+                className="text-xs leading-5 whitespace-pre-wrap break-all text-foreground"
               >
                 {line}
               </pre>
             ))}
           </div>
           {totalHistoryPages > 1 && (
-            <div className="flex items-center justify-between pt-2 border-t mt-2">
-              <Button variant="outline" size="sm" disabled={historyPage === 0} onClick={handleHistoryPrev}>
+            <div className="flex items-center justify-between gap-2 pt-2 border-t mt-2 shrink-0">
+              <Button variant="outline" size="sm" disabled={safeHistoryPage === 0} onClick={handleHistoryPrev}>
                 {t('terminalDebug.historyPrev', { defaultValue: 'Previous' })}
               </Button>
               <span className="text-xs text-muted-foreground">
-                {historyPage + 1} / {totalHistoryPages}
+                {safeHistoryPage + 1} / {totalHistoryPages}
               </span>
-              <Button variant="outline" size="sm" disabled={historyPage >= totalHistoryPages - 1} onClick={handleHistoryNext}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={safeHistoryPage >= totalHistoryPages - 1}
+                onClick={handleHistoryNext}
+              >
                 {t('terminalDebug.historyNext', { defaultValue: 'Next' })}
               </Button>
             </div>
@@ -598,8 +731,8 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
   };
 
   return (
-    <div className="flex h-full">
-      <div className="w-64 border-r bg-muted/30 overflow-y-auto">
+    <div className="flex h-full min-w-0 overflow-hidden">
+      <div className="w-64 shrink-0 border-r bg-muted/30 overflow-y-auto">
         <div className="p-4 border-b">
           <h3 className="font-semibold">{t('terminalDebug.listTitle')}</h3>
         </div>
@@ -650,20 +783,20 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
         )}
       </div>
 
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col">
         {selectedTerminal ? (
           <>
-            <div className="p-4 border-b flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div>
-                  <h3 className="font-semibold flex items-center gap-2">
+            <div className="p-4 border-b flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="min-w-0">
+                  <h3 className="font-semibold flex items-center gap-2 truncate">
                     {getTerminalLabel(selectedTerminal)}
                   </h3>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm text-muted-foreground truncate">
                     {selectedTerminal.cliTypeId} - {selectedTerminal.modelConfigId}
                   </p>
                 </div>
-                <div>
+                <div className="shrink-0">
                   <button type="button" className="appearance-none bg-transparent border-none p-0 m-0" onClick={() => setIsQualityPanelOpen(true)}>
                     <TerminalQualityBadgeInline terminalId={selectedTerminal.id} className="cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" />
                   </button>
@@ -674,7 +807,7 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
                   </Dialog>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 shrink-0">
                 <Button variant="outline" size="sm" onClick={handleClear}>
                   {t('terminalDebug.clear')}
                 </Button>
@@ -683,7 +816,7 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
                 </Button>
               </div>
             </div>
-            <div className="flex-1 min-h-0 p-4">
+            <div className="flex-1 min-h-0 min-w-0 p-4">
               {(() => {
                 // E15-07: during a terminal switch, render a placeholder for
                 // one tick so the previous TerminalEmulator unmounts (and its
@@ -707,8 +840,8 @@ export function TerminalDebugView({ tasks, wsUrl }: Readonly<Props>) {
                   );
                 } else if (isHistoricalTerminal) {
                   return (
-                    <div className="h-full min-h-0 rounded-lg border bg-background p-4 flex flex-col">
-                      <div className="text-sm text-muted-foreground mb-3">
+                    <div className="h-full min-h-0 min-w-0 rounded-lg border bg-background p-4 flex flex-col">
+                      <div className="text-sm text-muted-foreground mb-3 shrink-0">
                         {t('terminalDebug.historyTitle', {
                           defaultValue: 'Terminal history',
                         })}
