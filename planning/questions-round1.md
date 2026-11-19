@@ -5,6 +5,12 @@ answer in `planning/reviews/gpt-6.2-round-1.md`, in the format given in
 `README.md`. Open a pull request against `rebuild` from a branch named
 `devin/planning-review-1`.
 
+> Written for commit `355da9e`. After it was sent, the coordinator settled
+> Q-1 to Q-14 of `risks.md` and the plan was updated. Findings about those
+> points are still welcome; read them against the "Settled" table in
+> `risks.md`. Questions B4, C3, C4 and F3 below are answered there. Three
+> new open points, Q-15 to Q-17, are in the same file.
+
 ## Ground rules for this review
 
 1. `product-rules.md` and `architecture.md` section 1 are decided. Do not

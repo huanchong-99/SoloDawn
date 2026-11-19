@@ -23,6 +23,12 @@ does what and why. Step-by-step sequences are in `flows/`.
 - **C-7** The server stores no data and the system must keep working without
   it (rules R-130 to R-133).
 - **C-8** Validation happens at system boundaries only (README rule 3).
+- **C-9** The web client runs on browsers with native Ed25519 in WebCrypto.
+  The exact minimum versions are fixed by spike S-7. No signature library is
+  bundled (R-164).
+- **C-10** The node never inspects shell commands to decide whether they are
+  safe (R-41). Permission questions come from the CLI; the node's only
+  content check is the outbound secret check of R-137.
 
 ## 2. Components
 
@@ -68,6 +74,8 @@ for the groups it is home to.
   inbox.
 - Runs the task state machine and the group-level limits (rounds, wake-ups,
   failure counts, review rounds, pause).
+- When checks and review have passed, tells the assignee's host to merge. No
+  AI decides that (R-24).
 - Single writer. There is no merge logic and no conflict resolution: clients
   propose, the home orders.
 
@@ -84,8 +92,11 @@ for the groups it is home to.
   home, signed with the node's device key on behalf of the AI.
 - Enforces owner authority: acts only on envelopes signed by one of its
   owner's devices (R-136), whatever the home says.
-- Prepares workspaces: clone, worktree and branch per task, check commands,
-  merge commands.
+- Refuses to send to the group anything from an AI that looks like a secret
+  (R-137).
+- Prepares workspaces and runs the fixed Git steps: clone, worktree and
+  branch per task, the project's check commands, pushing the task's own
+  branch, opening the pull request, the merge.
 - Bridges the pseudo-terminal during takeover.
 - Keeps the local audit record and runs retention.
 
@@ -114,7 +125,9 @@ that knows a node's address can signal to it without any server (R-133).
 
 ### 2.4 AI session
 
-- An unmodified vendor CLI process, one per active (AI, group) pair.
+- An unmodified vendor CLI process, one per open session. Three kinds of
+  session exist (section 6): the group session of an AI, a task session, a
+  review session.
 - Sees the node only as an MCP server (the tools in
   `contracts/mcp-tools.md`) and, for Claude Code, as its permission prompt
   tool.
@@ -177,9 +190,25 @@ Clients keep caches, not replicas. A browser holds recent rows in memory; a
 host holds only cursors. Losing a client loses nothing. Losing a home loses
 that group's history (see `risks.md`).
 
-## 6. Session states
+## 6. Sessions
 
-One state per (AI, group) session, kept by the host and reported to the home.
+An AI in a group has several sessions over time (R-12):
+
+| Session | Exists | Working folder | Level | Receives |
+| --- | --- | --- | --- | --- |
+| group session | one per AI per group, long-lived. For the secretary this is its only session. | the project clone | 1, read only | main-line mentions, direct questions (R-70), calls from threads where the AI has no role; for the secretary, everything addressed to it |
+| task session | one per task the AI is assigned, from first delivery until the task is merged or cancelled | the task's worktree | the level the owner set for this AI in this project | everything about that task |
+| review session | one per task the AI reviews, until that task is merged or cancelled | a read-only checkout of the submitted commit | 1, read only | review requests for that task |
+
+- A working AI cannot change code in its group session: the session is read
+  only. To change code it calls `start_task`, which creates a task and moves
+  the work to a new task session (R-71).
+- An AI runs **one turn at a time per group**, whichever session it is in.
+  Items for its other sessions wait. That is what "busy" means in R-72.
+- Nothing carries from one task session to the next except what is in the
+  group: the brief, the thread, the ledger and the notes.
+
+Each session has one state, kept by the host.
 
 ```
             deliver                    turn ends
@@ -200,6 +229,11 @@ Exactly one process owns the session in `working`, `waiting` and `takeover`;
 none in `dormant`. A switch closes the old process and waits for it to exit
 before starting the new one.
 
+What the home and the web client see is one state per AI per group, derived
+by the host: the state of the session that is running a turn or is taken
+over, otherwise `waiting` if any session is open, otherwise `dormant`; and
+the task of that session.
+
 ## 7. Choices made here, and what was not chosen
 
 | Choice | Not chosen | Reason |
@@ -208,7 +242,10 @@ before starting the new one.
 | Rows carry a group sequence number; sync is "rows after n" | a separate event log plus reducers in Go and TypeScript | one mechanism; the browser needs no group logic |
 | Cards are messages with a mutable `state` | a table per card type | four card types share one row shape and one command |
 | The home fills AI inboxes; hosts deliver | hosts derive wake-ups from the row stream | limits are group-wide and must be decided in one place |
-| One CLI process per active session, for both CLIs | one shared Codex app-server for many threads | the MCP shim then knows its caller; hibernate is "kill"; costs memory, bounded by the concurrency cap |
+| One CLI process per open session, for both CLIs | one shared Codex app-server for many threads | the MCP shim then knows its caller; hibernate is "kill"; costs memory, bounded by the concurrency cap |
+| A working AI has one session per task, in the task's worktree | one session per AI per group in the project folder | the sandbox scope is exactly the task; context is clean; "push my own branch" is well defined; decided by the coordinator (Q-8) |
+| The home triggers the merge when review passes | the secretary calls a merge tool | deterministic, no turn spent; decided by the coordinator (Q-7) |
+| The node pushes the task branch and opens the pull request through tools | the AI runs `git push` and `gh` itself | no approval card for the task's own branch and no command inspection (Q-10) |
 | stdio MCP shim per session | HTTP MCP server in the node | stdio has the longest idle timeout in Claude Code `[documented]`; caller identity comes from the shim's arguments |
 | Signed signalling, ephemeral DTLS certificates | long-lived certificates as identity | one key per device; browsers cannot sign with a certificate key |
 | Non-relay probe connection, then move | ICE restart on the live connection | make-before-break; a failed probe costs nothing |

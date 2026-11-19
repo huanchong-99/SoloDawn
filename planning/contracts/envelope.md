@@ -15,9 +15,10 @@ the pairing exchange that introduces two devices that have never met.
 - A device is one node installation or one browser profile on one origin.
 - It owns an Ed25519 key pair, generated on first run.
   - Node: stored in the node's data directory, readable by the user only.
-  - Browser: a non-extractable WebCrypto key stored in IndexedDB.
-    `[unverified]` Ed25519 in WebCrypto needs recent browsers; see
-    `risks.md` Q-3.
+  - Browser: a non-extractable WebCrypto key stored in IndexedDB. Only
+    browsers with native Ed25519 in WebCrypto are supported; no signature
+    library is bundled (R-164). `[unverified]` The exact minimum versions;
+    spike S-7 fixes them.
 - **Device id** = the 32-byte public key, base64url (43 characters).
 - **Fingerprint** (shown to people) = first 6 bytes of SHA-256 of the public
   key, as 12 upper-case hex digits in groups of four: `3F9A 0C21 77BE`.
@@ -147,8 +148,9 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   belongs to a person (first run), the browser writes the genesis entry for
   itself and then the `add` for the node.
 
-The mock-up shows an 8-character code. Eight characters are not enough
-without a password-authenticated key exchange; see `risks.md` Q-2.
+The code has 16 characters by decision (R-152, `risks.md` Q-2). Eight would
+need a password-authenticated key exchange, which is not added. Any text
+that still shows an 8-character sample is out of date.
 
 ## 7. What is deliberately absent
 

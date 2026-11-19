@@ -68,11 +68,18 @@ twice and nothing goes through WebRTC, but the envelope is still built and
 stored, because other hosts and, later, other people's devices will verify
 it.
 
-## G. Retention
+## G. Retention and deletion
 
 - Once a day H deletes messages older than the retention period, and tasks
-  that reached a final state before it (R-135). Deletions are not announced;
-  caches are short-lived.
+  that reached a final state before it (R-135). These deletions are not
+  announced; caches are short-lived.
+- Exempt (R-102): notes, and `review` messages, which are the ledger. They
+  stay until a person deletes them.
+- A row removed on purpose (a member leaves, a person deletes a note or a
+  ledger entry) is announced: H pushes the row with the same `r` and `id`, a
+  new `seq`, and `gone: true`. Clients drop it from their cache. H keeps
+  this marker so that "rows after n" includes it, and the daily run removes
+  markers older than the retention period.
 - A browser cache lives in memory and is rebuilt on reload.
 
 ## H. When the home is unreachable

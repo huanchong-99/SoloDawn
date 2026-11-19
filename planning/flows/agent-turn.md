@@ -2,12 +2,26 @@
 
 Contracts: `contracts/datachannel.md` section 6 (inbox),
 `contracts/local.md` (CLI invocations, turn format),
-`contracts/mcp-tools.md`. Rules: R-33, R-120 to R-124, R-60 to R-63.
+`contracts/mcp-tools.md`. Rules: R-12, R-33, R-120 to R-124, R-60 to R-63,
+R-70 to R-72. Session kinds are defined in `architecture.md` section 6.
 
-Actors: H, the group home; N, the host node of the AI; S, the CLI session of
-(AI, group); the AI itself.
+Actors: H, the group home; N, the host node of the AI; S, a CLI session; the
+AI itself.
 
-## A. From message to turn
+## A. Which session gets an item
+
+H addresses items to an AI. N chooses the session.
+
+| Item | Session |
+| --- | --- |
+| `assign`, `checks`, `resume`, and `review` or `decided` addressed to the assignee | the AI's task session for `task`; N creates it on the first `assign` |
+| `review` addressed to the reviewer | the AI's review session for `task`; N creates it on the first `review` |
+| `mention` or `reply` whose message is in the thread of a task for which the AI has a task or review session | that session |
+| any other `mention` or `reply`; `decided` for a decision asked from the group session | the AI's group session |
+| everything addressed to the secretary | the secretary's group session |
+| `merge` | no session: N runs the merge itself (`flows/task.md` E) |
+
+## B. From item to turn
 
 1. Something happens in the group that concerns the AI (table in
    `contracts/commands.md` section 3). H writes an inbox item and, if N is
@@ -16,69 +30,87 @@ Actors: H, the group home; N, the host node of the AI; S, the CLI session of
    of `msg` is signed by a device in the log of N's owner. Otherwise N drops
    the item, acknowledges it, and writes an audit row `refused`.
 3. N holds the item while any of these is true: the group is paused; N is
-   offline by the owner's command; the AI is `limited`; S is in `takeover`;
-   S is `working`.
-4. If S is `dormant`, N wakes it:
-   1. if the number of open sessions equals `max_open`, N closes the open
-      session that has been `waiting` longest (close stdin, wait for exit);
-   2. N starts the CLI in the project folder of the group with the stored
-      session id (`contracts/local.md`), or with a fresh id the first time;
+   offline by the owner's command; the AI is `limited`; the target session is
+   in `takeover`; the AI is already running a turn in this group, in any of
+   its sessions.
+4. If the target session does not exist yet, N creates it: prepares the
+   folder (worktree for a task session, read-only checkout for a review
+   session, `flows/task.md`), and records a new session row with a fresh
+   session id.
+5. If S is `dormant`, N wakes it:
+   1. if the number of open sessions on this node equals `max_open`, N
+      closes the open session that has been `waiting` longest (close stdin,
+      wait for exit);
+   2. N starts the CLI in the session's folder with the session id and the
+      level of the session kind (`contracts/local.md` section 4);
    3. state becomes `working`; N reports `member status`.
-5. N takes **all** held items for S, in order, and composes one turn
+6. N takes **all** held items for S, in order, and composes one turn
    (`contracts/local.md` section 5). Each item is labelled with who wrote it
-   and whether it is an instruction or information (R-52).
-6. N stores the highest item id as delivered, acknowledges the items to H,
-   then writes the turn to S. An item is delivered at most once; if N stops
-   between storing and writing, the turn is lost and the secretary's
-   follow-up covers it (R-22). There is no redelivery logic.
-7. The AI works. Whatever it wants the group to see it sends with tools
+   and whether it is an instruction or information (R-52). The first turn of
+   a task session also carries the brief, the acceptance criteria and the
+   group's notes.
+7. N acknowledges the items to H, then writes the turn to S. An item is
+   delivered at most once: if N stops between the two, the turn is lost and
+   the secretary's follow-up covers it (R-22). N remembers delivered ids in
+   memory while it runs, so an item that H sends again after a reconnect is
+   ignored. There is no other redelivery logic.
+8. The AI works. Whatever it wants the group to see it sends with tools
    (`post`, `ask`, …). Text the AI prints outside tool calls is not posted.
-8. The CLI signals the end of the turn. N records usage from that event,
+9. The CLI signals the end of the turn. N records usage from that event,
    sets state `waiting`, reports `member status`.
-9. If items arrived meanwhile, continue at 5.
+10. N looks at all held items of this AI in this group, across its sessions,
+    and continues at 4 with the session of the oldest one.
 
-## B. Jumping the queue (R-72)
+## C. Jumping the queue (R-72)
 
-10. An item with `jump: true` arrives while S is `working`.
-11. N interrupts the running turn (the CLI's interrupt request), waits for
-    the turn-end event, and continues at 5 with that item first.
-12. H has already paused the interrupted task (`wait.kind = preempted`).
-    When S next becomes `waiting`, H makes it active again and queues a
-    `resume` item.
+11. An item with `jump: true` arrives while the AI is running a turn in the
+    group.
+12. N interrupts the running turn (the CLI's interrupt request), waits for
+    the turn-end event, and continues at 4 with that item first.
+13. H has already paused the interrupted task (`wait.kind = preempted`).
+    When the AI is next `waiting`, H makes that task active again and queues
+    a `resume` item for its task session.
 
-## C. Going dormant
+## D. Going dormant, and ending
 
-13. S has been `waiting` for `idle_minutes` (default 15), or the session cap
-    needs a slot (step 4.1).
-14. N closes the CLI's stdin and waits for the process to exit. Only the
-    session id remains. State `dormant`; N reports it.
+14. S has been `waiting` for `idle_minutes` (default 15), or the session cap
+    needs a slot (step 5.1).
+15. N closes the CLI's stdin and waits for the process to exit. Only the
+    session id remains. State `dormant`.
+16. A task session and a review session end when their task is merged or
+    cancelled: N closes the process if open, removes the session row and the
+    folder. A group session ends when the AI leaves the group.
 
-## D. When things go wrong
+## E. When things go wrong
 
 Each case has one outcome. None of them retries by itself.
 
 | Event | What N does |
 | --- | --- |
-| the CLI exits or closes its output during a turn | posts `system` `turn_interrupted` (`crash`); if a task was in progress sends `task fail`; state `dormant`; the next item starts the CLI again with the same session id |
-| a turn lasts longer than `limits.turn_minutes` | interrupts it; posts `turn_interrupted` (`timeout`); sends `task fail` |
-| the CLI cannot resume the session id | starts a fresh session; the first turn carries the task card, the notes of the group and the last 20 thread messages (R-123); posts `system` `session_replaced` |
+| the CLI exits or closes its output during a turn | posts `system` `turn_interrupted` (`crash`); in a task session also sends `task fail`; state `dormant`; the next item starts the CLI again with the same session id |
+| a turn lasts longer than `limits.turn_minutes` | interrupts it; posts `turn_interrupted` (`timeout`); in a task session also sends `task fail` |
+| the CLI cannot resume the session id | starts a fresh session in the same folder; its first turn carries what the first turn of that session kind carries, plus the last 20 messages of the thread (R-123); posts `system` `session_replaced` |
 | the CLI reports a vendor rate limit | state `limited` with `usage.window_resets`; items are held until then |
 | the owner's cap is reached (R-61) | state `limited`; items are held until the owner raises the cap or the day rolls over |
 | the CLI reports that sign-in is not valid in this mode | state `limited`; posts `system` `login_invalid`; N never changes how the CLI authenticates (R-56) |
 | group paused, or owner's "all offline" | interrupts running turns of the affected sessions and closes them; items are held |
 
-## E. Who the AI is talking to
+## F. Who the AI is talking to
 
 - The AI never addresses the home or other nodes. It calls tools on its own
   node. N turns each call into a signed command to H and returns H's answer
   as the tool result.
 - N signs with its device key and sets `as` to the AI's member id.
+- Before sending anything an AI wrote, N runs the outbound secret check
+  (`contracts/local.md` section 8). On a match the tool fails with `secret`
+  and nothing leaves the machine (R-137).
 - If H is not connected, the tool returns the error text
   `home_unreachable`.
 
-## F. One process, one session
+## G. One process, one session
 
-- N keeps one row per (AI, group) with the CLI's session id and the state.
+- N keeps one row per session with the CLI's session id, the folder and the
+  state.
 - Exactly one process is attached to a session id while the state is
   `working`, `waiting` or `takeover`. Every switch (dormant, takeover,
   hand-back, restart) closes the current process and waits for its exit

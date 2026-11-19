@@ -93,7 +93,7 @@ connection until it closes. Semantics in `flows/sync.md`.
 ```
 
 Rows are in increasing `seq`. A row replaces any cached row with the same
-`r` and `id`.
+`r` and `id`; a row with `gone: true` removes it.
 
 ### `fetch` (request)
 
@@ -102,6 +102,8 @@ Rows are in increasing `seq`. A row replaces any cached row with the same
 ```
 
 `thread` is a task id, or `null` for the main line. `limit` is at most 100.
+With `"kind":"review"` in place of `thread`, the answer holds the `review`
+messages of all threads: the ledger (R-102).
 
 ```json
 {"t":"fetched","re":3,"ok":true,"rows":[ … newest first … ],"more":true}
@@ -142,7 +144,7 @@ The home decides which AI must see which message and queues an item per AI.
 
 | Field | Meaning |
 | --- | --- |
-| `id` | increasing per group; the host stores the highest it has taken |
+| `id` | increasing; names the item in `ack` |
 | `why` | `mention`, `assign`, `review`, `reply`, `decided`, `confirmed`, `checks`, `resume`, `notice`, `merge` (table in `contracts/commands.md` section 3) |
 | `jump` | optional, true when the owner chose to jump the queue (R-72) |
 | `msg` | the message row that caused the item, with its original envelope |
@@ -189,7 +191,10 @@ object:
 ```
 
 `agents` lists every supported CLI found on the machine; `account` is `null`
-until the owner has declared it.
+until the owner has declared it. In `groups`, `state` and `task` are the
+derived state of the AI in that group (`contracts/rows.md` section 2),
+`level` is the level of its task sessions, and `queued` counts held inbox
+items.
 
 ### `audit` (request)
 
@@ -240,6 +245,7 @@ Closing the channel is hand-back. The host refuses `takeover.start` with
 | `paused` | the group or task is paused |
 | `limit` | a runaway limit refused it; `msg` names the limit |
 | `relay` | not available on a relayed path |
+| `secret` | host only: text from an AI matched the outbound secret check and was not sent (R-137) |
 | `busy` | the session cannot do this now (for example takeover during a switch) |
 | `home_unreachable` | host only: the home of that group is not connected |
 

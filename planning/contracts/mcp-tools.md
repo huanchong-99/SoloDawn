@@ -10,14 +10,19 @@ Conventions:
 - Members are named by their display name, unique in the group (`"Codex"`).
   Tasks are named `"T-12"`. An unknown name returns an error that lists the
   valid ones.
-- `task` is optional everywhere: when omitted it is the task of the turn in
-  progress.
+- In a task or review session the task is the session's own and is not an
+  argument. Where a tool takes `task` it is optional and defaults to that
+  task; in a group session it must be given.
 - A result is one text block containing JSON. A failure is a tool error
   whose text is `<code>: <sentence>`, with the codes of
   `contracts/datachannel.md` section 9.
 - Text arguments are at most 16 KiB.
-- Each tool maps to one command or one read on the home. The node adds
-  nothing but the signature.
+- Each tool maps to one command or one read on the home. The node adds the
+  signature and one check: text that an AI sends to the group is refused
+  with `secret` when it matches the outbound secret patterns
+  (`contracts/local.md` section 8, R-137).
+- Which tools a session sees depends on its kind (`architecture.md` section
+  6); the last column of each table says so.
 
 ## 1. Tools for every AI
 
@@ -31,10 +36,11 @@ Conventions:
 | `list_tasks` | `state` (optional filter) | `{"tasks":[{"task":"T-12","title","state","step","assignee","reviewer","wait","idle_minutes"}]}` | state rows |
 | `note_put` | `text`; `task` (optional) | `{"id":"…"}` | `note put` |
 | `note_list` | `task` (optional) | `{"notes":[{"id","task","text","by","at"}]}` | state rows |
-| `start_task` | `title` | `{"task":"T-14","worktree":"wt/14-fix-typo","branch":"task/14-fix-typo"}` | `task start`; the node prepares the worktree first |
-| `run_checks` | `task` | `{"ok":false,"items":[{"name":"go test ./...","ok":false,"tail":"…last 4 KiB of output…"}]}` | runs locally, then `task checked` |
-| `submit_task` | `summary`; `pr` (number, required when the group has a remote) | `{"ok":true}` | `post` kind `report`, `task submitted` |
-| `submit_review` | `task`; `score` (0 to 100); `items`: list of `{text, file, line, veto}` | `{"passed":false,"round":1}` | `post` kind `review` |
+| `start_task` | `title`; `plan` (what is to be done, for the task session) | `{"task":"T-14","moved":true}`: the work continues in a new task session; end this turn | `task start`. Group sessions of working AIs only |
+| `push_branch` | — | `{"ok":true,"commit":"9f2c1ab"}` | none on the home: the node pushes the task's own branch, never forced. Task sessions only, with a remote |
+| `run_checks` | — | `{"ok":false,"items":[{"name":"go test ./...","ok":false,"tail":"…last 4 KiB of output…"}]}` | runs locally, then `task checked`. Task sessions only |
+| `submit_task` | `summary` | `{"ok":true,"pr":31}` | the node pushes the branch and opens the pull request if there is none (with a remote), then `post` kind `report` and `task submitted`. Task sessions only |
+| `submit_review` | `score` (0 to 100); `items`: list of `{text, file, line, veto}` | `{"passed":false,"round":1}` | `post` kind `review`. Review sessions only |
 | `request_decision` | `question`; `options`: list of `{label, effect}`; `recommended` (index); `context`; `to` (names of people, default the requester of the task's brief) | `{"id":"…"}`; the answer arrives later as a turn | `post` kind `decision` |
 | `handback_summary` | `text` | `{"ok":true}` | `post` kind `handback`; only meaningful in a hand-back turn |
 | `net_status` | — | `{"paths":[{"peer":"…","path":"relay","rtt_ms":210}],"nat":{"udp":true,"mapped_ports":false,"ipv6":false},"rendezvous":[{"url":"…","ok":true}]}` | local |
@@ -60,11 +66,14 @@ Listed by the server only when the calling session is the group's secretary.
 | --- | --- | --- | --- |
 | `propose_brief` | `title`; `goal`; `criteria` (list); `scope_in`, `scope_out` (lists); `tasks`: list of `{title, assignee, reviewer, foundation, depends}`; `requester` (name, default the author of the request); `replaces` (id of an earlier brief) | `{"id":"…"}`; confirmation arrives later as a turn | `post` kind `brief` |
 | `set_task` | `task`; any of `assignee`, `reviewer`; `action` = `pause`, `resume`, `cancel` | `{"ok":true}` | `task assign`, `task pause`, `task resume`, `task cancel` |
-| `merge_task` | `task` | `{"ok":true}`; the outcome arrives later as a turn | `task merge` |
 | `post_summary` | `task`; `text` | `{"id":"…"}` | `post` kind `summary` |
 
 The secretary has the tools of section 1 too, except `start_task`,
-`run_checks` and `submit_task` (R-21).
+`push_branch`, `run_checks`, `submit_task` and `submit_review` (R-21).
+
+There is no merge tool. When checks and review have passed, the home has the
+assignee's node merge, and tells the secretary afterwards (R-24). After a
+merge conflict the secretary uses `set_task` to say which AI resolves it.
 
 ## 3. The permission prompt tool (Claude Code only)
 
@@ -92,17 +101,19 @@ connection and are handled by the same code in the node.
 
 ## 4. What the tools deliberately do not do
 
-- No tool reads or writes files, runs arbitrary commands, or touches Git
-  history on the AI's behalf, except `start_task` (worktree), `run_checks`
-  (the project's fixed commands) and the merge the home requests. The AI
-  uses its own CLI tools for everything else, under its own permission
-  level.
+- No tool reads or writes files or runs arbitrary commands on the AI's
+  behalf. The only commands the node runs are the fixed steps of the task
+  flow: the project's check commands (`run_checks`), pushing the task's own
+  branch and opening its pull request (`push_branch`, `submit_task`), and
+  the merge the home requests. The AI uses its own CLI tools for everything
+  else, under its session's permission level.
 - No tool waits for a person. Decisions, confirmations and late approvals
   arrive as new turns.
 - No tool returns another AI's private session content.
 
 ## 5. Tool list as the contract test sees it
 
-`internal/proto/testdata/tools.json` holds the MCP `tools/list` result for a
-worker session and for a secretary session. The names and argument schemas
-in that file are the contract; this document explains them.
+`internal/proto/testdata/tools.json` holds the MCP `tools/list` result for
+each kind of session: the secretary's, a working AI's group session, a task
+session, a review session. The names and argument schemas in that file are
+the contract; this document explains them.

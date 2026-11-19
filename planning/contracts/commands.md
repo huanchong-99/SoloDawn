@@ -29,7 +29,7 @@ device, unless a device is named.
 | `add_ai` | `id`, `cli`, `name`, `account`, `secretary` | a node of a person who is a member; that node becomes the AI's `host` | member row; `secretary: true` is accepted when the group has no secretary or the person is `owner`/`admin`, and sets `group.secretary` |
 | `status` | `id`, `state`, `task`, `path`, `usage` | the member's `host` | member row updated; see 1.9 for what the home derives |
 | `set` | `id`, any of `name`, `account`, `allow`, `approvers` | the AI's owner | member row updated |
-| `remove` | `id` | the AI's owner, or role `owner`/`admin` | member row removed; its active tasks become `queued` with `wait.kind = busy` and the secretary gets an inbox item |
+| `remove` | `id` | the AI's owner, or role `owner`/`admin` | member row replaced by a `gone` marker; its unfinished tasks get `wait.kind = assignee` and the secretary a `notice` |
 
 Adding people is step 2.
 
@@ -63,6 +63,10 @@ Rules applied to every `post` by an AI in a thread (R-60):
 - If an AI already received `limits.wakes_per_hour` inbox items in the last
   hour, a new item is held until the window allows it.
 
+The outbound secret check (R-137) runs on the AI's host before a `post` is
+signed. A refused message never reaches the home, so the home has no rule
+for it (`contracts/local.md` section 8).
+
 ### 1.4 `act`
 
 Fields: `msg` (the card), `action`, `arg`, `text`.
@@ -81,27 +85,31 @@ Acting on a card whose `state.status` is not `pending` returns `conflict`.
 
 | `op` | Fields | Signer | Effect |
 | --- | --- | --- | --- |
-| `start` | `id`, `title`, `as` | an AI's host | direct work (R-71): task row with `origin = direct`, `state = active`, `step = branch`; a `task` message; inbox item `notice` for the secretary |
+| `start` | `id`, `title`, `plan`, `re`, `origin`, `as` | an AI's host | direct work (R-71) or takeover (R-83): task row with `origin` = `direct` or `takeover`, `state = active`, `step = branch`, assignee `as`; a `task` message; inbox item `notice` for the secretary; inbox item `assign` for the AI, carrying message `re` and the `plan` text |
 | `branch` | `id`, `branch` | assignee's host | `step = local_check` |
 | `checked` | `id`, `ok`, `items`, `commit` | assignee's host | `checks.local` set; a `checks` message in the thread |
 | `submitted` | `id`, `pr`, `pr_url`, `stats` | assignee's host | accepted only if `checks.local.ok` and `checks.local.commit` equals the submitted head; `step = cloud_check` (forge `github`) or `review` (forge `none`, with an inbox item `review` for the reviewer) |
 | `cloud` | `id`, `ok`, `items` | assignee's host | `checks.cloud` set; a `checks` message; if ok, `step = review` and an inbox item `review` for the reviewer; if not, as `fail` |
-| `fail` | `id`, `reason` (`cloud`, `crash`, `timeout`, `conflict`), `detail` | assignee's host | `failures` + 1; inbox item `checks` for the assignee with the detail; reason `conflict` also sets `step = local_check` and gives the secretary a `notice`; at `limits.failures` the task becomes `failed`, with a `system` message `task_failed` mentioning the requester and the AI's owner |
-| `assign` | `id`, `assignee`, `reviewer` | the secretary's host, or role `owner`/`admin` | fields updated; a pending approval card of the task gets `state.status = reassigned`; inbox item `assign` |
-| `pause`, `resume`, `cancel` | `id` | the secretary's host, or role `owner`/`admin` | state updated; `resume` creates an inbox item `resume` for the assignee |
-| `merge` | `id` | the secretary's host | accepted only if `step = merge`; inbox item `merge` for the assignee's host |
-| `merged` | `id`, `commit`, `stats` | assignee's host | `state = merged`; dependants that become unblocked turn `active` with an inbox item `assign`; inbox item `notice` for the secretary |
+| `fail` | `id`, `reason` (`cloud`, `crash`, `timeout`), `detail` | assignee's host | `failures` + 1; inbox item `checks` for the assignee with the detail; at `limits.failures` the task becomes `failed`, with a `system` message `task_failed` mentioning the requester and the AI's owner |
+| `assign` | `id`, `assignee`, `reviewer` | the secretary's host, or role `owner`/`admin` | fields updated; `wait.kind` of `assignee`, `reviewer` or `conflict` cleared; a pending approval card of the task gets `state.status = reassigned`; inbox item `assign` for the assignee, carrying the latest `checks` or `review` message of the thread if there is one |
+| `pause`, `resume`, `cancel` | `id` | the secretary's host, role `owner`/`admin`, or for `cancel` the assignee's host when the task has `origin = takeover` | state updated; `resume` creates an inbox item `resume` for the assignee |
+| `merged` | `id`, `commit`, `stats` | assignee's host | accepted only at `step = merge`; `state = merged`; a `system` message `task_merged` in the thread; dependants that become unblocked turn `active` with an inbox item `assign`; inbox item `notice` for the secretary |
+| `conflict` | `id`, `detail` | assignee's host | accepted only at `step = merge`; a `checks` message with `stage = merge`; `step = local_check`; `wait.kind = conflict`; inbox item `notice` for the secretary. Not counted in `failures` |
 
 `failures` returns to zero whenever the task advances a step. A task that
 reaches `review` without a reviewer gets `wait.kind = reviewer` and the
 secretary a `notice`; `assign` with a reviewer clears it.
 
-### 1.6 `note`
+### 1.6 `note` and `forget`
 
-| `op` | Fields | Signer | Effect |
-| --- | --- | --- | --- |
-| `put` | `id`, `task`, `text` | any member (a host for its AI) | note row written |
-| `del` | `id` | the note's author, or role `owner`/`admin` | note row removed |
+| `t` | `op` | Fields | Signer | Effect |
+| --- | --- | --- | --- | --- |
+| `note` | `put` | `id`, `task`, `text` | any member (a host for its AI) | note row written |
+| `note` | `del` | `id` | the note's author | note row replaced by a `gone` marker |
+| `forget` | — | `r` (`note` or `msg`), `id` | role `owner` or `admin` | a note, or a `review` message, is replaced by a `gone` marker |
+
+Notes and `review` messages are not removed by retention (R-102). `forget`
+is how a person deletes one by hand.
 
 ### 1.7 `device` and `push`
 
@@ -112,15 +120,21 @@ secretary a `notice`; `assign` with a reviewer clears it.
   "auth":"…"},"vapid":{"pub":"…","priv":"…"},"on":["mention","approval",
   "decision","done"]}`, or `{"off":true}`. The browser creates the VAPID key
   pair and hands it to each home it wants reminders from; the home stores it
-  and sends an encrypted reminder when an event in `on` concerns that
-  person and none of their devices is connected. See `risks.md` Q-5.
+  and sends a reminder when an event in `on` concerns that person and none
+  of their devices is connected.
+  The reminder goes through the browser vendor's push service, encrypted
+  for that browser (R-163). Its whole content is `{"g":"<group id>"}`: no
+  text, no names, no card id. The browser shows "something is waiting for
+  you" with the group's name, which it knows locally, and opens that group.
 
 ### 1.8 Review outcome
 
 On `post` with `kind = review` the home computes `ok`:
 `score` ≥ `task.pass` and no item has `veto`. A veto sets `score` to 0.
 
-- ok: `task.step = merge`; inbox item `review` for the secretary.
+- ok: `task.step = merge`; inbox item `merge` for the assignee's host. No AI
+  is asked; the host merges and answers `task merged` or `task conflict`
+  (R-24).
 - not ok: `task.review.round` + 1 and `step = local_check`; inbox item
   `review` for the assignee. When the round exceeds `limits.review_rounds`
   the task becomes `failed` with `task_failed` and reason `review_rounds`.
@@ -146,11 +160,11 @@ device id.
 | `t` | Fields | Effect |
 | --- | --- | --- |
 | `agent.set` | `agent`, `account` | declares the account type of a CLI found on this machine (R-50); required before the AI can join a group |
-| `perm.set` | `agent`, `g` (a group id or `"*"`), `level` (1, 2, 3), `repo_config` (bool) | permission level for that AI in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45); takes effect at the next session start |
+| `perm.set` | `agent`, `g` (a group id or `"*"`), `level` (1, 2, 3), `repo_config` (bool) | permission level for that AI's task sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45); takes effect the next time a session's process starts. Group and review sessions are always level 1 |
 | `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `approvers`, `caps` | node settings; `approvers` is copied to the member rows of this node's AIs |
 | `host.join` | `g`, `home`, `agent`, `name`, `secretary` | the node connects to `home`, clones the project (R-11), and sends `member add_ai` |
 | `host.leave` | `g`, `agent` | the session is closed; the node sends `member remove` |
-| `takeover.start` | `g`, `member` | `flows/takeover.md`; refused with `relay` or `busy` |
+| `takeover.start` | `g`, `member`, `task` (optional) | `flows/takeover.md`; refused with `relay` or `busy` |
 | `takeover.end` | `g`, `member` | hand-back |
 | `host.offline`, `host.online` | — | R-64: every session is interrupted and closed, every home is told `offline`, and deliveries are refused until `host.online` |
 | `pair.browser` | — | the response carries `link` and `expires` (`flows/pairing.md` C) |
@@ -163,16 +177,16 @@ Except for `pair.browser`, results are observed through `host.info`.
 | Trigger | Item for | `why` |
 | --- | --- | --- |
 | a message mentions an AI | that AI | `mention` |
-| a task becomes active for its assignee | assignee | `assign` |
+| a task becomes active for its assignee, or is assigned again | assignee | `assign` |
 | a task reaches `review` | reviewer | `review` |
-| a review is posted | secretary (ok) or assignee (not ok) | `review` |
+| a review does not pass | assignee | `review` |
 | a call is answered | caller | `reply` |
 | an approval or decision is decided | the asking AI; the assignee | `decided` |
 | a brief is confirmed or sent back | secretary | `confirmed` |
 | checks failed | assignee | `checks` |
 | a paused or pre-empted task continues | assignee | `resume` |
-| the secretary asked for a merge | assignee's host (not the session) | `merge` |
-| a direct task started, a task merged, a hand-back summary posted, an AI limited or removed | secretary | `notice` |
+| a review passes | assignee's host (not a session) | `merge` |
+| a direct task started, a task merged, a merge conflict, a task without reviewer or assignee, a hand-back summary posted, an AI limited or removed | secretary | `notice` |
 
 While a group is paused, items are still queued; hosts do not deliver them
 until the group resumes.

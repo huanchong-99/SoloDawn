@@ -42,7 +42,7 @@ flow each task names. Milestones and acceptance tests are in
 | B-00 | Scaffold: Go module, the layout of `architecture.md` section 8, `go vet` and tests in CI, cross-compile job for six targets with cgo off, Apache-2.0 licence file | — | CI green on an empty `solodawn version` |
 | B-01 | `internal/proto`: structs for the envelope, signalling payloads, every `ctl` message, every row, every command; one golden JSON file per example in the contracts under `testdata/` | B-00 | round-trip tests pass; a test fails if a struct and its golden file disagree |
 | B-02 | `internal/identity`: key creation and loading, envelope sign and verify, device-log apply and replay, fingerprint, pairing `mac` and room id; `testdata/crypto.json` with fixed vectors for the frontend | B-01 | unit tests cover every rule of `contracts/envelope.md` sections 3, 4, 6 |
-| B-03 | Spikes S-1, S-6, S-8 | B-00 | answers written in the pull request |
+| B-03 | Spikes S-1, S-6, S-8, S-9 | B-00 | answers written in the pull request |
 | B-04 | Spikes S-2, S-3, S-4 on macOS; S-5 on Windows | B-00 | answers written in the pull request; `contracts/local.md` markers can be updated from them |
 | B-05 | `internal/store`: open, migrations, the tables of `contracts/storage.md`, row put / after-seq / thread page, sequence counter, inbox, retention | B-01 | unit tests with an in-memory database |
 
@@ -61,42 +61,44 @@ before the code that depends on them: B-03 before B-07, B-04 before B-11.
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
-| B-09 | `internal/home`, part 1: in-memory state per group with write-through; `group`, `member`, `post` (kind `text`), `note`, `device`; the permission checks of `contracts/commands.md`; `sync`, `rows`, `fetch`; daily retention | B-08 | A2.1 to A2.6 |
+| B-09 | `internal/home`, part 1: in-memory state per group with write-through; `group`, `member`, `post` (kind `text`), `note`, `device`; the permission checks of `contracts/commands.md`; `sync`, `rows`, `fetch`; `gone` markers and `forget`; daily retention with the `keep` exemption | B-08 | A2.1 to A2.6 |
 
 ### M3 sessions
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-10 | Fake CLIs for tests: `claude` and `codex` stand-ins that speak the structured protocols from a script file (emit events, call MCP tools, ask permission, exit mid-turn, sleep) | B-04 | used by the B-11 tests |
-| B-11 | `internal/host`: driver interface with Claude Code and Codex drivers per `contracts/local.md` section 4; CLI detection, `agent.set`; `host.join`, `host.leave`, clone; session table and the state machine of `architecture.md` section 6; MCP server and shim with `post`, `read_thread`, `list_members`, `list_tasks`, `note_put`, `note_list`; inbox handling, turn composition, `ack`; `member status`; dormancy and `max_open`; crash and resume-failure handling; instructions text | B-09, B-10 | A3.1 to A3.8 |
+| B-11 | `internal/host`: driver interface with Claude Code and Codex drivers per `contracts/local.md` section 4; CLI detection, `agent.set`; `host.join`, `host.leave`, clone; the session table, the group session kind and the state machine of `architecture.md` section 6, one turn at a time per AI per group; MCP server and shim with `post`, `read_thread`, `list_members`, `list_tasks`, `note_put`, `note_list`; the outbound secret check of `contracts/local.md` section 8; inbox handling, routing of items to sessions, turn composition, `ack`; `member status`; dormancy and `max_open`; crash and resume-failure handling; instructions text | B-09, B-10 | A3.1 to A3.9 |
 
 ### M4 permissions
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
-| B-12 | Level mapping for both CLIs; `perm.set`; the `approve` tool and Codex approval requests behind one handler; `post` kind `approval`, `act approve`/`deny` on the home; wait, one-shot grant, `decided` handling with envelope check on the host; audit table and `audit` request; usage recording and caps; `group pause`/`resume`; `host.offline`/`online`; turn time limit | B-11 | A4.1 to A4.9 |
+| B-12 | Level mapping for both CLIs by session kind; `perm.set`; the `approve` tool and Codex approval requests behind one handler; `post` kind `approval`, `act approve`/`deny` on the home; wait, one-shot grant, `decided` handling with envelope check on the host; audit table and `audit` request; usage recording and caps; `group pause`/`resume`; `host.offline`/`online`; turn time limit | B-11 | A4.1 to A4.9 |
 
 ### M5 tasks
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
-| B-13 | Home: `brief` and `act confirm`/`revise`; task rows and `task` messages; every `task` operation; review outcome; failure and review-round counters; round limit and wake-up cap; `jump` and pre-emption; `decision` and `act choose`; `summary` | B-12 | unit tests for every transition of `contracts/commands.md` section 1 |
-| B-14 | Host: worktree and branch per task; `run_checks` with the project's commands and the two hard checks; `submit_task` with the head-commit rule; hosted-check polling; review checkout; merge with and without a remote; tools `start_task`, `run_checks`, `submit_task`, `submit_review`, `request_decision`, and the four secretary tools; secretary instructions | B-13 | A5.1 to A5.11 |
+| B-13 | Home: `brief` and `act confirm`/`revise`; task rows and `task` messages; every `task` operation, `start` and `conflict` included; review outcome, with the `merge` item queued by the home itself; `task_merged`; failure and review-round counters; round limit and wake-up cap; `jump` and pre-emption; `decision` and `act choose`; `summary` | B-12 | unit tests for every transition of `contracts/commands.md` section 1 |
+| B-14 | Host: task sessions (worktree and branch created with the session, notes in the first turn, session and folder removed on merge, cancel or reassignment); review sessions with the diff file; `push_branch`; `run_checks` with the project's commands and the two hard checks; `submit_task` with the head-commit rule, the push and the pull request; hosted-check polling; the merge on a `merge` item, with and without a remote, and `task conflict`; tools `start_task`, `push_branch`, `run_checks`, `submit_task`, `submit_review`, `request_decision`, and the three secretary tools; instructions per session kind | B-13 | A5.1 to A5.14 |
 
 ### M6, M7
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-15 | `ask` and `reply`: call depth per turn, open-call table on the host, wait and receipt, `reply` item handling | B-14 | A6.1 to A6.4 |
-| B-16 | Takeover: pseudo-terminal start for both CLIs, state switch under C-6, `pty` channel bridge with back-pressure, `pty.resize`, hand-back facts from Git, `handback` turn and `handback_summary`, refusal on a relayed path | B-11 | A7.1 to A7.6 |
+| B-16 | Takeover: choice of session (`flows/takeover.md` A), a task created for an AI without one and cancelled when nothing changed; pseudo-terminal start for both CLIs, state switch under C-6, `pty` channel bridge with back-pressure, `pty.resize`, hand-back facts from Git, `handback` turn and `handback_summary`, refusal on a relayed path | B-14 | A7.1 to A7.7 |
 
-B-16 depends only on B-11 and can be done alongside B-12 to B-15.
+The pseudo-terminal bridge of B-16 needs only B-11 and can be built and
+tested on a group session alongside B-12 to B-14; the session choice and
+A7.7 need task sessions (B-14).
 
 ### M8 shipping
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
-| B-17 | `service install`/`remove` on three systems; self-update with checksum; release workflow producing six binaries, `SHA256SUMS` and `install.md`; `net_status`; Web Push sender; embedding the built web client | B-14 | A8.1, A8.2, A8.3 (backend half), A8.4 |
+| B-17 | `service install`/`remove` on three systems; self-update with checksum; release workflow producing six binaries, `SHA256SUMS` and `install.md`; `net_status`; Web Push sender whose content is the group id only; embedding the built web client | B-14 | A8.1, A8.2, A8.3 (backend half), A8.4 |
 | B-18 | Full pass on Windows and Linux; measurements of A8.6 | all | A8.5, A8.6 |
 
 ## Notes on the hard parts
@@ -108,6 +110,9 @@ B-16 depends only on B-11 and can be done alongside B-12 to B-15.
   exposes: send a turn, a channel of events (turn ended with usage, approval
   request, exited), interrupt, close. Parse only the events the node uses;
   ignore every other event type without logging it as an error.
+- **Sessions (B-11, B-14).** The home knows nothing about sessions. The
+  host maps an item to a session by the table in `flows/agent-turn.md` A
+  and never runs two turns of one AI in one group at the same time.
 - **Home rules (B-13).** Write each command handler as a function from
   (state, command) to (changed rows, inbox items, error). Pure, and tested
   without a database or a network.

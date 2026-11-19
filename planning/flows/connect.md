@@ -19,9 +19,11 @@ answering node; RV, any signalling path.
    the same `conn` are ignored.
 4. Both sides trickle candidates as signed `ice` payloads on that path.
 5. ICE checks every candidate pair in parallel: IPv6 and IPv4 host
-   addresses, server-reflexive (UDP hole punching), ICE-TCP to the node's
-   listening or mapped port, and relay. The highest-priority pair that works
-   is selected; relay has the lowest priority.
+   addresses, server-reflexive (UDP hole punching), ICE-TCP to a port the
+   node has open, forwarded or mapped on its router, and relay (UDP, and TLS
+   on port 443). The highest-priority pair that works is selected; relay has
+   the lowest priority. TCP simultaneous open between two nodes behind NAT is
+   not part of step 1 (R-131, spike S-9).
 6. DTLS completes. Each side compares the remote certificate fingerprint
    with the one in the signed description it accepted; the WebRTC stack does
    this. `ctl` opens.

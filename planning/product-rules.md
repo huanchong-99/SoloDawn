@@ -4,6 +4,9 @@ These are decisions already made by the owner. They are restated here so that
 implementers who cannot see the decision log have one place to read them.
 They are not open for redesign; see `README.md` rule 1.
 
+Where a rule cites `Q-n`, the coordinator settled an open point under the
+owner's delegation; the question and the decision are in `risks.md`.
+
 Tags: `[S1]` applies from step 1 (one person, several machines), `[S2]` from
 step 2 (teams), `[S3]` from step 3 (extensions).
 
@@ -26,8 +29,12 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   Git repository address.
 - **R-11** `[S1]` When an AI joins a project group, its node clones the
   project into a fixed folder on that machine.
-- **R-12** `[S1]` An AI may be in several project groups. It has one session
-  per group, each kept alive separately. Contexts never mix across groups.
+- **R-12** `[S1]` An AI may be in several project groups. Contexts never mix
+  across groups. Session granularity (settled by the coordinator, Q-8): the
+  secretary has one long session per group; a working AI has one session per
+  task, whose working folder is that task's worktree and which ends when the
+  task ends. What carries over between tasks is the ledger and the notes
+  (R-102), not a session.
 - **R-13** `[S1]` Every task gets its own branch and its own worktree.
 - **R-14** `[S2]` A team may also have one team-wide group for notices and
   cross-project talk. No work happens there. AIs speak only in their own
@@ -45,9 +52,10 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   questions of direction, trade-off, money, permission or safety to a person;
   accept through checks plus scored review; post a summary.
 - **R-23** `[S1]` Nothing starts before the brief is confirmed.
-- **R-24** `[S1]` When checks and review both pass, the secretary merges
-  without a human click. Conflicts and task dependencies are the secretary's
-  job; it may assign an AI to resolve them.
+- **R-24** `[S1]` When checks and review both pass, the merge happens without
+  a human click. The platform performs it deterministically and shows it
+  under the secretary's name (Q-7). On a conflict the secretary assigns an AI
+  to resolve it.
 
 ## Main line and threads
 
@@ -68,11 +76,20 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   (3) unrestricted. The owner may set level 3 for all projects at once.
 - **R-41** `[S1]` At level 2 these need approval: touching files outside the
   workspace, installing software, bulk deletion, pushing code, using secrets.
+  As settled by the coordinator:
+  - pushing the task's own branch is inside the workspace and needs no
+    approval; pushing any other branch, or force-pushing, needs approval
+    (Q-10);
+  - the platform never inspects commands. Bulk deletion inside the
+    workspace is covered by Git and by the CLI's own sandbox, not by a
+    card (Q-11);
+  - secrets are guarded where they would leave the machine (R-137).
 - **R-42** `[S1]` Approval flow: the AI stops and asks; an approval card
-  appears in the main line and mentions the machine owner; the owner approves
-  or refuses from any of their devices; only the owner or someone the owner
-  named may decide; while unanswered the task is suspended and the secretary
-  may reassign it.
+  appears in the main line under the secretary's name and mentions the
+  machine owner; the platform writes the card itself, no AI turn is spent
+  (Q-6); the owner approves or refuses from any of their devices; only the
+  owner or someone the owner named may decide; while unanswered the task is
+  suspended and the secretary may reassign it.
 - **R-43** `[S1]` Approval requests come from the CLI's own permission
   interface. The platform never reads terminal output to detect them.
 - **R-44** `[S2]` Work a colleague assigns to my AI runs at level 2 at most.
@@ -147,7 +164,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-91** `[S1]` Same flow on a single machine without a remote: no push, no
   pull request.
 - **R-92** `[S1]` Hosting defaults to GitHub; other hosts can be configured.
-  Several machines or several people require a hosted remote.
+  Several machines or several people require a hosted remote. Step 1
+  supports GitHub and "no remote"; other hosts come in step 2 (Q-9).
 
 ## Quality
 
@@ -155,7 +173,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-101** `[S1]` Acceptance criteria are generated per project and scored:
   pass at 90, foundation tasks at 70, a veto item scores zero.
 - **R-102** `[S1]` A ledger of scored points and a set of context notes form
-  the group's long-term memory.
+  the group's long-term memory. They are exempt from the retention period of
+  R-135 and stay until a person deletes them (Q-13).
 - **R-103** `[S1]` Quality gates are each project's own check commands
   (build, test, lint), plus universal hard checks: leaked secrets, fake
   tests, missing tests. No built-in rule engine.
@@ -196,6 +215,11 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   and the rendezvous service.
 - **R-131** `[S1]` Several paths are tried at once (UDP hole punching, TCP,
   IPv6); the first to work is used; a better one found later replaces it.
+  In step 1, TCP means a direct connection to a port the other node has
+  open, forwarded or mapped on its router (UPnP, NAT-PMP), plus the relay on
+  port 443. TCP simultaneous open between two nodes that are both behind NAT
+  is an experiment (spike S-9) and is built in step 3 only if it shows a
+  clear benefit (Q-1).
 - **R-132** `[S1]` Relay is a bridge and a last resort. While relayed, direct
   attempts continue; on success the connection moves and the relay is
   dropped. Relay carries small data only (chat, tasks); terminal streams are
@@ -209,10 +233,15 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   is the secretary's machine. The user is told plainly that this machine must
   stay on. A user's own machine forwarding for its own group is not "relay".
 - **R-135** `[S1]` All data stays on users' machines. Default retention is
-  three months, rolling daily; adjustable.
+  three months, rolling daily; adjustable. The ledger and the notes are
+  exempt (R-102). Moving a group to another home, and copies for
+  safekeeping, come in step 2 (Q-12).
 - **R-136** `[S1]` A node acts only on instructions signed by its owner.
 - **R-137** `[S1]` Secrets never leave the machine. The node does not read AI
-  credentials. Project secret files are never posted to a group.
+  credentials. Project secret files are never posted to a group. One small
+  outbound check enforces this: whatever an AI sends to the group is refused
+  when it matches common secret formats or looks like the content of an
+  environment file (Q-11).
 - **R-138** `[S1]` Every computer and every browser has its own identity key.
   A lost device can be revoked from another device.
 - **R-139** `[S1]` Each node keeps a local audit record of who made its AIs
@@ -227,7 +256,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   Windows, macOS and Linux with SHA-256 sums, verified on install and on
   self-update.
 - **R-152** `[S1]` Onboarding: the website shows a prompt; the user gives it
-  to their AI; the AI installs the node and pairs it.
+  to their AI; the AI installs the node and pairs it. The pairing code in
+  the prompt has 16 characters (Q-2).
 - **R-153** `[S1]` Self-hosting is documented: the rendezvous service is one
   program file.
 
@@ -240,7 +270,12 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   terminal), my computers and AIs, settings.
 - **R-162** `[S1]` Chinese and English. Dark and light themes.
 - **R-163** `[S1]` Notifications use the browser's permission prompt; the
-  user chooses.
+  user chooses. Reminders while the page is closed go through the browser
+  vendor's push channel, encrypted, carrying as little as possible: the
+  group id and the fact that something is new (Q-5, Q-14).
+- **R-164** `[S1]` Supported browsers are those with native Ed25519 in
+  WebCrypto; older ones see an upgrade notice. No signature library is
+  bundled (Q-3).
 
 ## Not rebuilt
 

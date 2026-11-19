@@ -16,7 +16,8 @@ other people's requests, watching a terminal, the team-wide group, forges
 other than GitHub, CLIs other than Claude Code and Codex, phone app.
 
 Step 1 is done when every acceptance test below passes on macOS, Windows and
-Linux, with Chrome, Safari and Firefox at the design's baseline versions.
+Linux, with Chrome, Safari and Firefox at the baseline versions that spike
+S-7 fixes (C-9).
 
 ## How acceptance is tested
 
@@ -46,11 +47,12 @@ built on it.
 | S-1 transport | Does a pion node connect with Chrome, Firefox and Safari through signalling only? Are 60 KiB messages accepted both ways? Does a browser reach the node's ICE-TCP port? Are `.local` candidates a problem? Do both sides read the selected pair's type? Does a second, relay-free connection opened while the first is relayed work, and can the session move without loss? |
 | S-2 Claude Code driver | Do the flags of `contracts/local.md` 4.1 behave as marked: `--setting-sources user` keeps project hooks out; `--append-system-prompt` works with stream-json; which flags express levels 1 and 2? How long can an `approve` call stay open, with and without progress notifications? What happens to a tool call that runs 10 minutes? Which usage and rate-limit figures appear in events? Can a session be resumed from another working folder? |
 | S-3 Codex driver | Does `-c mcp_servers.…` work on `app-server`? Exact parameter names for folder, sandbox, approval policy, instructions. Which approval request types exist? How long can one stay open? Tool timeout setting. Usage and rate-limit notifications. Memory of one process per session. |
-| S-4 Claude Code takeover | Structured, then interactive in a pseudo-terminal in a trusted folder, then structured again, on one session id, history intact. |
+| S-4 takeover | Claude Code: structured, then interactive in a pseudo-terminal in a trusted folder, then structured again, on one session id, history intact. Both CLIs: can a brand-new session be started directly in interactive mode with an id the node chose? |
 | S-5 Windows | ConPTY with both CLIs. Unix socket. Interrupt without signals. What level 2 can mean for Claude Code without its sandbox. |
 | S-6 one port | HTTPS and TURN over TLS on 443 chosen by server name; automatic certificates for two names. |
-| S-7 browser keys | Ed25519 in WebCrypto with a non-extractable key kept in IndexedDB, on the three baseline browsers. |
+| S-7 browser keys | The lowest version of Chrome, Safari and Firefox (desktop and mobile) in which Ed25519 in WebCrypto works with a non-extractable key kept in IndexedDB. Those versions, or the design's baseline where it is higher, become the supported baseline. |
 | S-8 port mapping | UPnP and NAT-PMP mapping, and advertising the mapped address as an ICE candidate in pion. |
+| S-9 TCP simultaneous open | Between two nodes behind different NATs with UDP blocked and no mapped port: does a simultaneous-open TCP connection succeed, on which router types, and how much code outside pion does it take? This decides whether step 3 builds it. Nothing in step 1 depends on the answer. |
 
 ## M1. Identity and connectivity
 
@@ -112,12 +114,14 @@ Acceptance:
 - **A3.8** A repository hook that would create a marker file does not run by
   default, and runs after the owner enables repository configuration.
   (`live`)
+- **A3.9** A `post` from an AI that contains a test secret pattern fails
+  with `secret`; no row for it exists on the home.
 
 ## M4. Permissions and approvals
 
-- **A4.1** At level 2 an AI that needs to push produces a card with the
-  exact command. Approving from a second device lets it run. The audit shows
-  the request and the decision with the deciding device.
+- **A4.1** At level 2 an AI that needs to install a package produces a card
+  with the exact command. Approving from a second device lets it run. The
+  audit shows the request and the decision with the deciding device.
 - **A4.2** Denying tells the AI; the command does not run.
 - **A4.3** With the wait set to 20 seconds and no answer, the turn ends and
   the task waits. Approving afterwards makes the AI retry and the command
@@ -140,8 +144,9 @@ Acceptance:
 Run once with a scratch GitHub repository and once with `forge: none`.
 
 - **A5.1** Request, brief, confirm, two tasks reviewed by each other's AI,
-  both merged, two summary cards. The only human action is the confirm
-  (level 3).
+  both merged, two summary cards. The only human action is the confirm, at
+  level 2, and no approval card appears. Each task ran in its own session
+  in its own worktree; after the merge those sessions and folders are gone.
 - **A5.2** Before the confirm no worktree exists and no `assign` item was
   created.
 - **A5.3** `submit_task` is refused after failing checks, accepted after
@@ -151,15 +156,25 @@ Run once with a scratch GitHub repository and once with `forge: none`.
 - **A5.5** Three consecutive `fail` reports make the task `failed` and
   mention the owner.
 - **A5.6** A task that depends on another starts only after that one merged.
-- **A5.7** An owner's direct request that changes code creates a task card
-  and notifies the secretary.
+- **A5.7** An owner's direct request that needs a code change: the AI's
+  group session cannot modify a file; after `start_task` a task card exists,
+  the secretary is notified, and the change is made in a new task session.
 - **A5.8** Two AIs made to answer each other are paused at 10 rounds; a
   person's message in the thread resumes them.
 - **A5.9** A diff containing a test secret pattern fails the hard check.
-- **A5.10** A merge conflict returns the task to `local_check` with the
-  detail.
+- **A5.10** A merge conflict returns the task to `local_check` with
+  `wait.kind = conflict` and notifies the secretary. After the secretary
+  names an AI, the task goes through checks and review again and merges.
 - **A5.11** "Jump the queue" on a direct request interrupts the running
   turn; the interrupted task continues afterwards by itself.
+- **A5.12** When a review passes, the merge follows with no AI turn in
+  between, and the thread shows it under the secretary's name.
+- **A5.13** At level 2, `push_branch` pushes the task's branch and no card
+  appears. A `git push` of another branch that the AI runs itself produces
+  a card.
+- **A5.14** With retention set to 7 days and the clock advanced, notes and
+  review messages remain. `forget` removes one, and a connected browser
+  drops it within 1 second.
 
 ## M6. AI calls AI
 
@@ -172,10 +187,10 @@ Run once with a scratch GitHub repository and once with `forge: none`.
 
 ## M7. Terminal takeover
 
-- **A7.1** "Open terminal" on a Claude Code member shows its native
-  interface; a typed prompt is answered; hand-back produces the summary
-  with files and commits; a later mention shows the AI remembers the
-  terminal exchange. (`live`)
+- **A7.1** "Open terminal" on a Claude Code member that has a task shows
+  its native interface in that task's worktree; a typed prompt is answered;
+  hand-back produces the summary with files and commits; a later mention in
+  the task's thread shows the AI remembers the terminal exchange. (`live`)
 - **A7.2** The same with Codex. (`live`)
 - **A7.3** Mentions during takeover are held and delivered in order after
   hand-back.
@@ -184,6 +199,9 @@ Run once with a scratch GitHub repository and once with `forge: none`.
 - **A7.5** On a relayed path the button is disabled and `takeover.start`
   returns `relay`.
 - **A7.6** Closing the browser tab hands back within 5 seconds.
+- **A7.7** Opening the terminal of an AI that has no task creates a task
+  card. Handing back with nothing changed cancels it. Handing back after a
+  commit keeps it, and the summary lists the commit.
 
 ## M8. Shipping
 
@@ -193,8 +211,9 @@ Run once with a scratch GitHub repository and once with `forge: none`.
 - **A8.2** Self-update replaces version n with n + 1 when the sum matches,
   and replaces nothing when it does not.
 - **A8.3** With the page closed, an approval request produces a browser
-  notification that opens the card (desktop Chrome, Android Chrome, iOS
-  after adding to the home screen).
+  notification that names the group and opens it (desktop Chrome, Android
+  Chrome, iOS after adding to the home screen). The pushed content,
+  inspected in the test, is the group id and nothing else.
 - **A8.4** A rendezvous started with one command on a fresh server passes
   A1.1 to A1.3.
 - **A8.5** Every test above passes on Windows and Linux.
@@ -205,7 +224,7 @@ Run once with a scratch GitHub repository and once with `forge: none`.
 
 ```
 M0 ─ M1 ─ M2 ─ M3 ─ M4 ─ M5 ─ M6
-                └──── M7 (needs M3)
+                └──── M7 (the terminal bridge needs M3; A7.1 and A7.7 need M5)
 M8 after M5; Windows and Linux checks run from M1 on, not only at the end.
 ```
 

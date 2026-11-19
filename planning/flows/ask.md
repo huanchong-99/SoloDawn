@@ -16,8 +16,10 @@ home. NA and NB may be the same node; nothing below changes.
 3. H checks depth ≤ `limits.ask_depth` (4) and the round limit of the
    thread, stores the call with `state.status = waiting`, and queues a
    `mention` item for B. Everyone watching the thread sees the call.
-4. NB delivers it to B as a turn (waking B if dormant, after B's current
-   turn if B is working).
+4. NB delivers it to B as a turn, after B's current turn if B is working.
+   The turn goes to B's session for that task if B is its assignee or
+   reviewer, otherwise to B's group session, which is read only
+   (`flows/agent-turn.md` A).
 5. B calls `reply` with the call's id and the answer. NB sends `post` with
    `kind: reply`.
 6. H stores the reply, sets the call's `state` to `answered` with the

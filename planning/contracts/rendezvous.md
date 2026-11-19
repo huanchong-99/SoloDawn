@@ -141,9 +141,15 @@ connection drops the TURN entry.
 What ICE gives without more code: all candidate pairs are checked in
 parallel and the best working pair is used (R-131).
 
-`[unverified]` pion does not perform TCP simultaneous-open, so two nodes that
-are both behind NAT with UDP blocked have no direct TCP path unless one of
-them has a mapped or forwarded port. See `risks.md` Q-1.
+Step 1 offers these direct paths, all tried together: UDP hole punching,
+IPv6, and TCP to a port that the other node has open, forwarded, or mapped
+on its router. The relay on port 443 is the last resort (R-131).
+
+Two nodes that are both behind NAT with UDP blocked, and no mapped or
+forwarded port on either side, have no direct TCP path in step 1: that
+would need TCP simultaneous open, which pion does not perform
+`[unverified]`. Spike S-9 measures what it would gain; it is built in step
+3 only if the gain is clear (`risks.md` Q-1).
 
 ## 6. Self-hosting
 

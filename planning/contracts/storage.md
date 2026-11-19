@@ -26,6 +26,8 @@ CREATE TABLE row (
   thread  TEXT,               -- msg: task id, NULL for main line
   in_main INTEGER NOT NULL DEFAULT 0,  -- msg: 1 if shown in the main line
   final   INTEGER NOT NULL DEFAULT 0,  -- task: 1 if merged, cancelled or failed
+  keep    INTEGER NOT NULL DEFAULT 0,  -- 1 for notes and review messages: exempt from retention
+  gone    INTEGER NOT NULL DEFAULT 0,  -- 1 for the marker of a row removed on purpose
   data    TEXT    NOT NULL,   -- the row as JSON, exactly as pushed
   PRIMARY KEY (g, r, id)
 ) STRICT;
@@ -141,20 +143,21 @@ CREATE TABLE perm (               -- R-40, R-45
   PRIMARY KEY (agent, g)
 ) STRICT;
 
-CREATE TABLE session (            -- one per (AI, group)
+CREATE TABLE session (            -- one per session (architecture.md section 6)
   g           TEXT    NOT NULL,
   member      TEXT    NOT NULL,   -- member id of the AI in that group
+  task        TEXT    NOT NULL DEFAULT '',  -- '' for the group session
+  kind        TEXT    NOT NULL,   -- group | task | review
+  folder      TEXT    NOT NULL,   -- working folder, relative to projects/<group>/
   agent       TEXT    NOT NULL,
   home        TEXT    NOT NULL,   -- device id of the group home
   name        TEXT    NOT NULL,
   secretary   INTEGER NOT NULL DEFAULT 0,
   cli_session TEXT,               -- the CLI's session or thread id
   state       TEXT    NOT NULL,   -- dormant | working | waiting | takeover
-  task        TEXT,               -- task of the last delivered turn
-  inbox_done  INTEGER NOT NULL DEFAULT 0,   -- highest inbox id delivered
   last_active INTEGER NOT NULL DEFAULT 0,
   takeover_at TEXT,               -- commit noted at takeover start
-  PRIMARY KEY (g, member)
+  PRIMARY KEY (g, member, task)
 ) STRICT;
 
 CREATE TABLE grant_once (         -- late approvals (flows/approval.md D)
@@ -193,18 +196,20 @@ CREATE TABLE peer (               -- remembered signalling addresses (R-133)
 ) STRICT;
 ```
 
-Not stored: pending approval requests (they live in the waiting CLI process
-and in the card on the home), session tokens, relay credentials, the pairing
-secret, and anything from a terminal.
+Not stored: which inbox items were delivered (the host acknowledges an item
+just before writing it to a session and remembers delivered ids in memory
+for the life of the process); pending approval requests (they live in the
+waiting CLI process and in the card on the home); session tokens; relay
+credentials; the pairing secret; anything from a terminal.
 
 ## 4. Retention (R-135)
 
 Once a day, with `cutoff = now − retention_days`:
 
 ```sql
-DELETE FROM row   WHERE r = 'msg'  AND ts < :cutoff;
+DELETE FROM row   WHERE r = 'msg'  AND keep = 0 AND ts < :cutoff;
 DELETE FROM row   WHERE r = 'task' AND final = 1 AND ts < :cutoff;
-DELETE FROM row   WHERE r = 'note' AND ts < :cutoff;
+DELETE FROM row   WHERE gone = 1 AND ts < :cutoff;
 DELETE FROM inbox WHERE created < :cutoff;
 DELETE FROM audit WHERE ts < :cutoff;
 DELETE FROM usage WHERE day < :cutoff_day;
@@ -214,13 +219,15 @@ DELETE FROM peer  WHERE ok_at < :cutoff;
 Lowering `retention_days` takes effect at the next daily run, after one
 confirmation in the web client.
 
-`[unverified]` Whether notes should outlive the retention period, since they
-are the group's long-term memory. Asked in `questions-round1.md`.
+Notes and `review` messages have `keep = 1` and are never deleted by this
+run (R-102). A person removes one with `forget`; the row then becomes a
+`gone` marker whose `ts` is the time of removal.
 
 ## 5. What is on a browser
 
 - IndexedDB: the device key (non-extractable), the owner's device log, the
   list of the owner's nodes and group homes with their signalling URLs, the
+  id and name of each group (so that a reminder can name its group), the
   VAPID key pair, interface preferences.
 - Memory only: group rows.
 

@@ -17,13 +17,13 @@ Several people in one group, each with their own computers and AIs.
 | Whose instructions | A new card kind `confirm`: when someone mentions another person's personal-subscription AI, the home asks that owner. The owner's signed confirmation travels in the inbox item (`authz.by = confirm`). No auto-accept switch. | R-51 |
 | After a task started | Messages from others in the thread are delivered labelled `information`. A change of direction needs a new confirmation. | R-52 |
 | Allow lists | For team-plan and API-key AIs the owner lists who may direct them (`member.allow`); inbox items carry `authz.by = list`. | R-53 |
-| Level cap | A turn caused by someone other than the owner runs at level 2 at most. | R-44 |
+| Level cap | A task caused by someone other than the owner gets a task session at level 2 at most. | R-44 |
 | Calls across owners | `ask` to someone else's AI follows the same confirmation or allow list. | R-115 |
 | Approver delegates | The owner names people who may decide approvals for their AIs. | R-42 |
 | Watching | A member asks to watch a terminal; the owner confirms; a receive-only terminal channel. | R-81 |
 | Team-wide group | Group kind `team`: no repository, no tasks. Secretaries post cross-project notices there. | R-14 |
-| Other forges | The forge commands of `contracts/local.md` section 7 become per-group templates. | R-92 |
-| Home changes | Moving a group to another home; a copy of the group for safekeeping. | R-134 |
+| Other forges | The forge commands of `contracts/local.md` section 7 become per-group templates (`risks.md` Q-9). | R-92 |
+| Home changes | Moving a group to another home; a copy of the group for safekeeping (`risks.md` Q-12). | R-134, R-135 |
 
 ### What step 1 already provides for it
 
@@ -35,10 +35,10 @@ Several people in one group, each with their own computers and AIs.
 
 ### Known design points to settle at the start of step 2
 
-1. **Level per turn.** Level is fixed when a CLI process starts. A turn at a
-   lower level than the session's needs either a per-turn override (Codex
-   has one `[unverified]`) or a restart of the process with other flags
-   (Claude Code).
+1. **Level of a task session.** Each task has its own session, so the
+   level cap of R-44 is set when that session is created. What remains to
+   settle is who counts as having caused a task: the person who confirmed
+   the brief, or the owner who confirmed the request for their AI.
 2. **Check commands on other people's machines.** `group.checks` is set by
    a group admin and executed by every assignee's node. Each machine owner
    must accept the list, and any change to it, before their node runs it.
@@ -63,7 +63,8 @@ Several people in one group, each with their own computers and AIs.
 
 ## Step 3: extensions
 
-Three items, nothing else (the owner's decision).
+Three items decided by the owner, and one conditional item added by the
+coordinator (3.4).
 
 ### 3.1 More CLIs, one at a time
 
@@ -100,6 +101,13 @@ per group as notes of a new type; chosen in the brief.
 Long-lived, searchable documents per group that outlast message retention:
 decisions, module contracts, conventions. Two tools, `kb_put` and
 `kb_search`; stored on the home.
+
+### 3.4 TCP simultaneous open between two NATed nodes (conditional)
+
+Built only if spike S-9 of step 1 shows a clear benefit: a measurable
+share of real networks where UDP is blocked on both sides, neither router
+maps a port, and simultaneous open succeeds. It would be a transport beside
+pion's ICE, so the bar is high (`risks.md` Q-1).
 
 ## Not in the first version
 
