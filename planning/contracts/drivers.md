@@ -128,7 +128,10 @@ permission interface, so the level decides whether they are offered at all.
   listed. A level-1 task session can read and report; it cannot produce a
   submission.
 - The check commands run as the owner, outside the CLI's sandbox, on the
-  task's tree. See `risks.md` Q-19.
+  task's tree, with a minimal environment (`contracts/local.md` section 7).
+  Level 2 limits what the AI itself does, not what the project's checks
+  execute. Decided for step 1 (`risks.md` Q-19); step 2 runs checks in an
+  operating-system sandbox.
 
 ## 3. Turn format
 

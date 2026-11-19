@@ -97,7 +97,7 @@ and B-11, and S-2, S-3, S-5 before B-13.
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-19 | Brief and assignment: `brief`, `act confirm`/`revise` with the `cause` on `assign` items; dependencies; `propose_brief`, `set_task`, `request_decision`; `decision` and `act choose`; `task assign`, `pause`, `resume`, `cancel`; secretary instructions | B-18 | A5.2, A5.6, A5.15; unit tests for task-machine rows 1, 11 to 14, 18 to 21 |
-| B-20 | Checks and review: `run_checks` on a clean tree with the project's commands and both hard checks; `submit_task` without a remote; review sessions with the diff file; `submit_review`, the outcome and the six-review stop; failures; `reviewed`; the round limit; `jump`, `task preempted` and `continued`; the quiet-task timer | B-19 | A5.3 (first two sentences), A5.4, A5.5, A5.8, A5.9, A5.11, A5.16; `forge: none` half of A5.1 |
+| B-20 | Checks and review: `run_checks` on a clean tree with the project's commands, in the minimal environment, and both hard checks; `submit_task` without a remote; review sessions with the diff file; `submit_review`, the outcome and the six-review stop; failures; `reviewed`; the round limit; `jump`, `task preempted` and `continued`; the quiet-task timer | B-19 | A5.3 (first two sentences), A5.4, A5.5, A5.8, A5.9, A5.11, A5.16, A5.17; `forge: none` half of A5.1 |
 | B-21 | Remote and merge: `push_branch`; pull request on submit; hosted checks by commit; the merge of the reviewed commit, with and without a remote; `task conflict`; reassignment; `task_merged`; `post` kind `summary` | B-20 | A5.1, A5.3, A5.10, A5.12 to A5.14 |
 
 ### M6, M7

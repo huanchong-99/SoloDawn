@@ -24,6 +24,7 @@ Several people in one group, each with their own computers and AIs.
 | Team-wide group | Group kind `team`: no repository, no tasks. Secretaries post cross-project notices there. | R-14 |
 | Other forges | The forge commands of `contracts/local.md` section 7 become per-group templates (`risks.md` Q-9). | R-92 |
 | Home changes | Moving a group to another home; a copy of the group for safekeeping (`risks.md` Q-12). | R-134, R-135 |
+| Checks in a sandbox | Project checks, which in a team may be triggered by someone else's request, run inside an existing operating-system sandbox, not one written here: on macOS and Linux preferably Anthropic's open-source sandbox-runtime, otherwise bubblewrap or sandbox-exec. Windows is stated as a known limit. `[unverified]` To be shown feasible by an experiment before it is planned (`risks.md` Q-19). | R-40, R-44 |
 
 ### What step 1 already provides for it
 

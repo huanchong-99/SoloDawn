@@ -229,7 +229,10 @@ Files: `contracts/drivers.md` 1.3 and 2; `flows/approval.md` G;
 - **Q-19** (from F-11): where the project's checks run at level 2.
 - **Q-20** (from F-10): the secretary's terminal is read only.
 
-Both are in `risks.md`, for the coordinator.
+Both were decided by the coordinator after this file was first written:
+Q-19 as "keep it in step 1, with a minimal environment and a plain
+statement; an operating-system sandbox in step 2", Q-20 as accepted. See
+`risks.md`.
 
 ## For round 2
 
@@ -247,5 +250,6 @@ In order of how much a mistake would cost:
    a device be made to adopt the wrong person?
 5. `contracts/drivers.md` 1.3 and 2: the interactive start and the level-1
    tool set.
-6. Q-19: which of the four options, or a fifth.
+6. The environment allow list for check commands (`contracts/local.md`
+   section 7), now that Q-19 is decided.
 7. `steps/step-1-backend.md`: the new slicing and its order.

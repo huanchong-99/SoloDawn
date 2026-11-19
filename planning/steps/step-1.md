@@ -206,6 +206,8 @@ Run once with a scratch GitHub repository and once with `forge: none`.
   once and is answered `ok` twice; `task fail` sent twice counts once.
 - **A5.16** With `idle_notice_minutes` 1, an active task with no thread
   message produces one `notice` for the secretary.
+- **A5.17** A check command sees `PATH` and `HOME`, and does not see a test
+  token variable that is set in the node's own environment.
 
 ## M6. AI calls AI
 

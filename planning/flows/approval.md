@@ -111,9 +111,10 @@ text, who decided (device id), result.
   level (checks, push, pull request, merge), are in `contracts/drivers.md`
   sections 1 and 2.
 - The project's check commands are run by the node, outside the CLI's
-  sandbox, on code the AI wrote. Level 2 confines what the AI does; it does
-  not confine what the project's own checks execute. Open point: `risks.md`
-  Q-19.
+  sandbox, on code the AI wrote, with a minimal environment. Level 2
+  confines what the AI does; it does not confine what the project's own
+  checks execute, and the web client says so next to the level control
+  (decided, `risks.md` Q-19).
 - Work that someone other than the owner triggered never runs above level 2
   (R-44, step 2).
 

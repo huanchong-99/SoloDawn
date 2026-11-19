@@ -8,7 +8,7 @@ a pull request against `rebuild` from a branch named
 `devin/planning-review-2`.
 
 The ground rules of `questions-round1.md` apply unchanged: decided points
-stay decided (Q-1 to Q-18 in `risks.md`), no defensive programming beyond
+stay decided (Q-1 to Q-20 in `risks.md`), no defensive programming beyond
 system boundaries, prefer deletion, say what you verified and how, and end
 with `## Unverified`.
 
@@ -49,9 +49,14 @@ with `## Unverified`.
 6. **Levels.** `contracts/drivers.md` 1.3 and 2: starting the interactive
    CLI with the session's level, and the level-1 tool set. What is missing
    to make this testable in spike S-4?
-7. **Checks at level 2** (`risks.md` Q-19). Which of the listed options
-   would you choose, or is there a fifth that costs less code? The
-   coordinator decides; your view is input.
+7. **Checks at level 2.** Decided (`risks.md` Q-19): in step 1 they run
+   outside the sandbox with a minimal environment, and the product says
+   so; in step 2 they move into an existing operating-system sandbox. The
+   read-only terminal of the secretary is decided too (Q-20). Not open for
+   redesign. Two narrow questions remain: is the environment allow list in
+   `contracts/local.md` section 7 missing a variable that ordinary build
+   and test tools cannot work without, and what should the step 2
+   experiment measure first?
 8. **Order.** `steps/step-1-backend.md`: is any task still too large, or in
    the wrong place? Is slice (c) of B-01 specified well enough by
    `flows/trace-task.md` to be frozen?

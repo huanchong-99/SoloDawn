@@ -106,7 +106,15 @@ group has no remote.
   checked is the commit that is submitted, reviewed and merged
   (`contracts/task-machine.md` section 3).
 - The node runs exactly the strings in `group.checks`, as the owner, outside
-  the CLI's sandbox (`risks.md` Q-19).
+  the CLI's sandbox (decided, `risks.md` Q-19). Level 2 limits the AI's own
+  actions, not what the project's checks execute.
+- **Environment of a check command**: only an allow list of variables is
+  passed on, nothing else from the node's environment. The list: `PATH`,
+  `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, every `LC_*`, `TZ`, `TMPDIR`,
+  `TEMP`, `TMP`; on Windows also `SystemRoot`, `ComSpec`, `PATHEXT`,
+  `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA`. No key
+  or token variable of any AI tool or forge reaches a check. A project that
+  needs another variable sets it inside its own check command.
 - "Fake tests" has no command; it is a veto item in review.
 - Both hard checks always run (R-103). There is no setting to turn one off.
 

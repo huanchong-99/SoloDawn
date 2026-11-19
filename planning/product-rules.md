@@ -48,7 +48,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-20** `[S1]` Each group has exactly one secretary. It is an AI member
   kept alive by some node, with the secretary instructions loaded. Secretary
   contexts of different groups never mix.
-- **R-21** `[S1]` The secretary coordinates and never writes code.
+- **R-21** `[S1]` The secretary coordinates and never writes code, in its
+  terminal either: to change code the owner takes over a working AI (Q-20).
 - **R-22** `[S1]` Workflow: take the request; ask only if unclear; post a
   task brief and wait for the requester to confirm; split and assign; AIs
   work and report; follow up on silence and reassign on failure; bring
@@ -77,6 +78,9 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-40** `[S1]` Three levels, set per project and per AI by the owner of the
   machine: (1) read only; (2) work inside the workspace, the default;
   (3) unrestricted. The owner may set level 3 for all projects at once.
+  Level 2 limits what the AI itself does. The project's own check commands
+  run outside the sandbox; the product says so where levels are chosen
+  (Q-19).
 - **R-41** `[S1]` At level 2 these need approval: touching files outside the
   workspace, installing software, bulk deletion, pushing code, using secrets.
   As settled by the coordinator:

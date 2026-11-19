@@ -2,8 +2,8 @@
 
 Status: **v0.2 draft.** Round 1 is answered: the review is
 `reviews/gpt-6.2-round-1.md`, the answers and the list of changes are
-`reviews/fable-round-1.md`. The coordinator has settled Q-1 to Q-18
-(`risks.md`); Q-19 and Q-20 are open. Round 2 can start.
+`reviews/fable-round-1.md`. The coordinator has settled Q-1 to Q-20
+(`risks.md`). Round 2 can start.
 
 SoloDawn is being rebuilt from an empty tree. This directory holds the plan
 that the implementation will follow. It is written for two readers: the
