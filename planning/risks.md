@@ -30,12 +30,12 @@ decision now lives.
 | Q-15 | Q-8 gives a working AI one session per task. Where does a turn go that belongs to no task: a direct question (R-70), a main-line mention, a call from another task's thread? | Accepted as proposed: each working AI has one read-only **group session** per group, in the project clone, for exactly those turns. To change code it calls `start_task`, and the work moves to a new task session. | `product-rules.md` R-12; `architecture.md` 6; `flows/agent-turn.md` A; `flows/task.md` G; `flows/ask.md` step 4; `contracts/local.md` 4, 6 |
 | Q-16 | Q-10 and Q-11 together: pushing the task's branch without approval, without inspecting commands. | Accepted as proposed: the node pushes (`push_branch`) and, in `submit_task`, pushes and opens the pull request. The node only runs the owner's installed and signed-in `git` and `gh`; it never reads a token or a credential, and the contract says so. | `product-rules.md` R-41, R-137; `architecture.md` C-11; `contracts/local.md` 7; `contracts/mcp-tools.md` 1; `flows/task.md` steps 8, 10 |
 | Q-17 | No screen for project memory; what a closed-page reminder may say. | (1) Deleting memory by hand lives in the **group info panel, under "Project memory"**: memory belongs to the project, so it goes with the group, not with global settings. (2) A reminder **may carry a short card summary**: group name, card type, one-line title. The payload is encrypted end to end for the browser (RFC 8291), so the push vendor sees ciphertext only. No message text, no code. The frontend supplies the missing designs. | `product-rules.md` R-102, R-163; `contracts/commands.md` 1.7; `steps/step-1.md` A8.3; `steps/step-1-frontend.md` F-13, F-15; `steps/step-1-backend.md` B-17 |
+| Q-18 | The mock-up labels an approval card with what the command does ("install software", "push code"). Telling those apart means reading the command, which C-10 forbids. | The card shows the kind of request the CLI made (`command`, `file`, `network`, `other`) and the one-line description the CLI attached. The reminder's title is that same description. No label that needs the command to be read. The reminder may also carry the opaque group and card ids and the member's display name. | `product-rules.md` R-41; `contracts/rows.md` 5 (approval body); `contracts/commands.md` 1.7; `steps/step-1-frontend.md` F-09 |
 
 ## Q. Open
 
-| Id | Point | What the plan currently does | Why it needs a look |
-| --- | --- | --- | --- |
-| Q-18 | The mock-up labels an approval card with what the command does ("install software", "push code"). Telling those apart means reading the command, which C-10 forbids. | The card shows the kind of request the CLI made (`command`, `file`, `network`, `other`), the exact request text, and the one-line justification the CLI attached. The reminder uses that justification as its title. | The card's label in the design changes from "what it does" to "what kind of request it is". A design point, not a mechanism. |
+None at present. Q-4 is settled as "wait for spike S-5" and comes back when
+that spike has an answer.
 
 ## K. Known limits
 

@@ -203,8 +203,9 @@ Approval:
 `command` is the request exactly as the CLI presented it. `why` is the
 justification the CLI attached, if any. `category` is the kind of request
 the CLI made (`command`, `file`, `network`, `other`), taken from the type of
-the request and never from the text of a command (C-10). It is a display
-hint and decides nothing.
+the request and never from the text of a command (C-10, `risks.md` Q-18).
+It is a display hint and decides nothing. The card's label is this kind
+plus `why`.
 
 Decision:
 

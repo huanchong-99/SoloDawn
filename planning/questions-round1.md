@@ -6,7 +6,7 @@ answer in `planning/reviews/gpt-6.2-round-1.md`, in the format given in
 `devin/planning-review-1`.
 
 > Written for commit `355da9e`. After it was sent, the coordinator settled
-> Q-1 to Q-17 of `risks.md` and the plan was updated. Findings about those
+> Q-1 to Q-18 of `risks.md` and the plan was updated. Findings about those
 > points are still welcome; read them against the "Settled" table in
 > `risks.md`. Questions B4, C3, C4 and F3 below are answered there.
 

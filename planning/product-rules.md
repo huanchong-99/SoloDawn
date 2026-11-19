@@ -86,7 +86,9 @@ step 2 (teams), `[S3]` from step 3 (extensions).
     (Q-16);
   - the platform never inspects commands. Bulk deletion inside the
     workspace is covered by Git and by the CLI's own sandbox, not by a
-    card (Q-11);
+    card (Q-11). An approval card shows the kind of request and the
+    CLI's own one-line description, never a label derived from reading
+    the command (Q-18);
   - secrets are guarded where they would leave the machine (R-137).
 - **R-42** `[S1]` Approval flow: the AI stops and asks; an approval card
   appears in the main line under the secretary's name and mentions the

@@ -2,7 +2,7 @@
 
 Status: **v0.1 draft.** Round 1 review is in progress on the first commit
 of this directory. Since then the coordinator settled the open points Q-1 to
-Q-17 and the plan was updated accordingly; see `risks.md`.
+Q-18 and the plan was updated accordingly; see `risks.md`.
 
 SoloDawn is being rebuilt from an empty tree. This directory holds the plan
 that the implementation will follow. It is written for two readers: the
