@@ -60,9 +60,10 @@ task through hosted checks and review again.
 
 ## C. Hosted checks
 
-11. With `forge: github`, the step is `cloud_check`. NA polls the pull
-    request every 30 seconds until its checks have finished **for that
-    commit**, and reports `task cloud` with the commit. A repository
+11. With `forge: github`, the step is `cloud_check`. Every 30 seconds NA
+    reads, in one request, the pull request's head commit and the state of
+    its checks. It reports `task cloud` only from an answer whose head is
+    the submitted commit and whose checks have all finished. A repository
     without hosted checks passes at once. A failure returns the task to
     `local_check`, counts as one failure, and A gets the detail.
 12. With `forge: none` this step and the pull request are skipped.
@@ -84,14 +85,19 @@ task through hosted checks and review again.
     the review, in its task session. Continue at 8. The sixth failed review
     of a task makes it `failed` instead (R-63).
 17. Passed: the step is `merge`, and H queues a `merge` item for NA, naming
-    the commit.
+    the commit and the pull request. From here until NA reports, nothing
+    else changes the task: no pause, no reassignment, no new submission
+    (`contracts/task-machine.md` section 4).
 
 ## E. Merge and summary
 
-18. NA merges exactly that commit: with a remote, through the forge (squash,
-    delete the branch), told to refuse if the pull request's head is not
-    that commit; without, a squash merge of that commit into the base branch
-    of the local clone. NA reports `task merged`.
+18. NA takes the item only if the task, as NA sees it now, is still at
+    `merge` for that commit. It merges exactly that commit: with a remote,
+    through the forge (squash, delete the branch), told to refuse if the
+    pull request's head is not that commit; without, only if the task
+    branch's head is that commit, by a squash merge into the base branch of
+    the local clone. NA reports `task merged`. There is no retry and no
+    rollback.
 19. H marks the task `merged`, writes `system` `task_merged` in the thread
     (the web client shows it under the secretary's name, R-24), activates
     tasks that depended on it, and gives SEC a `notice`.
@@ -119,23 +125,26 @@ first pushes the task branch, then ends its task session and removes its
 worktree. The new assignee's node creates its worktree from the published
 branch, or from the base branch if nothing was ever published; without a
 remote both AIs are on the same node and use the same local branch.
-Committed work carries over; uncommitted changes do not.
+Committed work carries over; uncommitted changes do not. The new node
+reports `task branch` only if the task is still at step `branch`; a task
+that is further along keeps its step.
+
+A task cannot be reassigned, paused or resubmitted while it is at step
+`merge`, and an AI cannot leave the group while it is assignee or reviewer
+of an unfinished task.
 
 ## F. Failures
 
-| What happens | Result |
-| --- | --- |
-| `run_checks` fails | returned to A in the same turn; not counted |
-| hosted checks fail | `task cloud` not passed: `failures` + 1; back to `local_check`; A gets the detail |
-| a turn crashes or times out in the task session | `task fail`: `failures` + 1; SEC gets a `notice` |
-| merge conflict | section E, "Conflict"; not counted |
-| `failures` reaches 3 | task `failed`; `system` message mentions P and A's owner (R-63) |
-| a sixth review does not pass | task `failed` |
-| approval not answered | task waits; SEC may reassign (R-42) |
+Every outcome is a row of `contracts/task-machine.md`; this is only the map.
 
-`failures` counts consecutive failures and returns to zero when hosted
-checks pass (without a remote: when a submission is accepted). A `failed`
-task moves again only on `task resume`, `task assign` or `task cancel`.
+| What happens | Row |
+| --- | --- |
+| `run_checks` fails | none: returned to A in the same turn, not counted |
+| hosted checks fail | 6 |
+| a turn crashes or times out in the task session | 10 |
+| the merge does not apply, or the branch has moved | 9 |
+| three consecutive failures; a sixth failed review | 14: only a person resumes or reassigns the task (R-63) |
+| approval not answered | 17: the task waits; SEC may reassign (row 11, R-42) |
 
 ## G. Direct work (R-70, R-71)
 
@@ -152,7 +161,7 @@ task moves again only on `task resume`, `task assign` or `task cancel`.
 
 ## H. Follow-up by the secretary (R-22)
 
-SEC is woken by events (`contracts/task-machine.md` section 4), and by one
+SEC is woken by events (`contracts/task-machine.md` section 5), and by one
 timer in the home: an active task that waits for nothing and has had no
 thread message for `limits.idle_notice_minutes` (default 30) produces one
 `notice` for SEC. That is also what recovers a turn lost on the way to a

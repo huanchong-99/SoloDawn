@@ -40,8 +40,13 @@ hands the previous node pushes the branch before removing its worktree.
 
 ## Q. Open
 
-None at present. Q-4 is settled as "wait for spike S-5" and comes back when
-that spike has an answer.
+Both points below are already written into the plan the way the second
+column says; they are listed because they are choices, not consequences.
+
+| Id | Point | What the plan does | Why it needs a look |
+| --- | --- | --- | --- |
+| Q-21 | Round 2, F-1. What happens to the tasks of an AI that leaves a group. | `member remove` (and so `host.leave`) is refused while the AI is assignee or reviewer of a task that is not final; the tasks are reassigned or cancelled first. This removed a transition and a wait kind. | The alternative is to let the AI go and leave its tasks waiting for an assignee, which needs both back. |
+| Q-22 | Round 2, F-2. Between a passed review and the host's report of the merge, what may still change the task. | Nothing, except a person's cancel: no pause, reassignment, resubmission or round limit. A host that takes a `merge` item first checks that the task is still at `merge` for that commit. The cancel exists for a host that never comes back. | If a person cancels in the seconds in which the host is merging, the change is merged under a cancelled task (K-14). The alternative that closes even that window is one more command, by which the host claims the merge before it starts, and one more wait kind. |
 
 ## K. Known limits
 
@@ -60,6 +65,7 @@ that spike has an answer.
 | K-11 | When a task is given to another AI, uncommitted changes of the previous one are discarded with its worktree. | Committed (and pushed) work carries over. |
 | K-12 | The outbound secret check is a short pattern list. It catches accidents, not intent. | Stated as such; no configuration. |
 | K-13 | A new task session knows nothing of earlier tasks except the notes it is given and what it reads in the group. | The secretary is instructed to write lessons as notes (R-102). |
+| K-14 | A merge is an action outside the system and cannot be taken back. A person's cancel that arrives while the host is merging leaves the change merged under a cancelled task. A node that stops in the middle of a merge reports, when it restarts, what it finds: merged, or a conflict. | Stated on the cancel confirmation for a task at step `merge`. No retry, no rollback (R-24). |
 
 ## T. Technical risks
 
@@ -76,7 +82,7 @@ that spike has an answer.
 | T-9 | Unsigned binaries trigger warnings when downloaded by hand. | The AI installs from the command line; documentation covers the manual case (R-151). |
 | T-10 | Plan size against "least code". A desk estimate before this plan was 7,000 to 12,000 lines for node, rendezvous and web client together. | Every pull request is reviewed for code that can be deleted. The backend list names what not to build. |
 | T-11 | Port 443 shared by HTTPS and TURN. | Spike S-6; fallback is a second address or port for TURN. |
-| T-12 | (Settled in round 1: the home's quiet-task timer, `contracts/task-machine.md` row 25.) | — |
+| T-12 | (Settled in round 1: the home's quiet-task timer, `contracts/task-machine.md` row 23.) | — |
 | T-13 | Starting a brand-new session directly in interactive mode with a chosen id (takeover of an AI without a task) is untested on both CLIs. | Spike S-4. |
 
 ## Assumptions that would change the design if false

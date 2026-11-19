@@ -117,6 +117,7 @@ connection and are handled by the same code in the node.
 ## 5. Tool list as the contract test sees it
 
 `internal/proto/testdata/tools.json` holds the MCP `tools/list` result for
-each kind of session: the secretary's, a working AI's group session, a task
-session, a review session. The names and argument schemas in that file are
+each kind of session: the secretary's, a working AI's group session, a
+review session, and a task session twice, at level 1 and at level 2 or 3,
+because the two differ. The names and argument schemas in that file are
 the contract; this document explains them.

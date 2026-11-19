@@ -54,8 +54,12 @@ home. NA and NB may be the same node; nothing below changes.
 
 ## E. Authority
 
-- Step 1: every AI in the group belongs to the same person; the `mention`
-  item for B is signed by NA, a device of that person, and NB accepts it.
+- The call is a message signed by NA for A. The `mention` item that carries
+  it to B is signed by the home, like every item. NB accepts the item
+  because the home is a device of its owner (`contracts/datachannel.md`
+  section 6); the call's own signature tells NB who is asking.
+- Step 1: every AI in the group belongs to the same person, so nothing more
+  is needed.
 - Step 2: a call to someone else's personal-subscription AI waits for that
   owner's confirmation; team and API-key AIs follow their allow lists
   (R-115).

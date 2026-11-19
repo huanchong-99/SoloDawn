@@ -9,7 +9,7 @@ Every row has:
 | `r` | row type: `group`, `member`, `device`, `task`, `msg`, `note` |
 | `id` | unique within its type and group |
 | `seq` | group sequence number at the row's last change |
-| `gone` | present and `true` only on a row that was removed on purpose; it then carries nothing else but `r`, `id`, `seq` (`flows/sync.md` G) |
+| `gone` | present and `true` only on a row that was removed on purpose; it then carries nothing else but `r`, `id`, `seq`. A client keeps it as a marker and shows nothing for it (`flows/sync.md` G) |
 
 Optional fields are omitted when empty. Ids of members, tasks and messages
 are random ids unless stated.
@@ -112,7 +112,7 @@ One row per accepted device-log entry of a person in the group.
 | `step` | `branch`, `local_check`, `cloud_check`, `review`, `merge`. The card draws six positions; "pull request" is done when `pr` is set (`contracts/task-machine.md` section 1) |
 | `commit` | the submitted commit: what hosted checks, the review and the merge are about |
 | `wait` | `null`, or `{"kind":…,"msg":"<msg id>","who":["<user id>"],"since":<time>}`: the latest reason the task is not moving |
-| `wait.kind` | while `queued`: `depends`; while `active`: `approval`, `decision`, `reviewer`, `assignee`, `conflict`; while `paused`: `manual`, `rounds`, `preempted` |
+| `wait.kind` | while `queued`: `depends`; while `active`: `approval`, `decision`, `reviewer`, `conflict`; while `paused`: `manual`, `rounds`, `preempted` |
 | `failures` | consecutive failures (R-63) |
 | `thread.rounds` | AI-to-AI exchanges since the last human message in the thread (R-60) |
 
@@ -149,7 +149,7 @@ What the mock-up badges map to:
 | `mentions` | member ids |
 | `re` | the message this one answers |
 | `body` | fixed after creation; shape depends on `kind` |
-| `state` | the only mutable part; changed by `act` commands and by the home |
+| `state` | the only mutable part; changed by `act` commands and by the home. A decided card keeps the signed `act` that decided it in `state.act` |
 | `env` | the author's envelope; absent on `system` rows |
 
 ### Kinds
@@ -191,8 +191,9 @@ Brief:
  "pass":90,"requester":"<member id>","replaces":null}
 ```
 
-`depends` holds indexes into `tasks`. Confirming the brief creates exactly
-these tasks.
+`depends` holds indexes into `tasks`, each lower than the entry's own, so a
+cycle cannot be written. Assignee and reviewer are working AIs, not the
+secretary, and differ. Confirming the brief creates exactly these tasks.
 
 Approval:
 

@@ -49,10 +49,10 @@ are in `steps/step-1.md`.
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-00 | Scaffold: Go module; the layout of `architecture.md` section 8 with `cmd/solodawn` parsing arguments only and `internal/node` as the assembly package; a test that fails on an import outside the table of 8.2; `go vet` and tests in CI; cross-compile job for six targets with cgo off; Apache-2.0 licence file | — | CI green on an empty `solodawn version` |
-| B-01 | `internal/proto`, **frozen in three slices**, each with its golden files: (a) envelope, signalling payloads, `pair`, device-log entries, `hello`, `welcome`, `devlog`; (b) `sync`, `reset`, `rows`, `fetch`, `cmd` and its answers, every row type; (c) one confirmed task from brief to merge: the signed inbox items with their causes, the task commands with one commit, review, merge | B-00 | round-trip tests pass; a test fails if a struct and its golden file disagree. Slice (a) before B-06, (b) before B-09, (c) before B-12 |
+| B-01 | `internal/proto`, **frozen in three slices**, each with its golden files: (a) envelope, signalling payloads, `pair`, device-log entries, `hello`, `welcome`, `devlog`; (b) `sync`, `reset`, `rows`, `fetch`, `cmd` and its answers, every row type; (c) one confirmed task from brief to merge as a complete signed vector, with and without a remote, as `flows/trace-task.md` describes it: nothing abridged, every response with its request id | B-00 | round-trip tests pass; a test fails if a struct and its golden file disagree. Slice (a) before B-06, (b) before B-11, (c) before B-19 and only after the plan's round 3 |
 | B-02 | `internal/identity`: key creation and loading, envelope sign and verify, device-log apply and replay, fingerprint, the canonical bytes of the pairing secret, `mac` and room id; `testdata/crypto.json` with fixed vectors for the frontend | B-01a | unit tests cover every rule of `contracts/envelope.md` sections 3, 4, 6 |
 | B-03 | Spikes S-1, S-6, S-8, S-9 | B-00 | answers written in the pull request, which is not merged |
-| B-04 | Spikes S-2, S-3, S-4 on macOS; S-5 on Windows | B-00 | answers written in the pull request, which is not merged; the messages the real CLIs sent are kept as files for B-10 |
+| B-04 | Spikes S-2, S-3, S-4 on macOS; S-5 on Windows | B-00 | answers written in the pull request, which is not merged; the messages the real CLIs sent are kept as files for B-13 |
 | B-05 | `internal/store`: open, migrations, the tables of `contracts/storage.md`, row put / after-seq-up-to / page by `pos`, counters, inbox, receipts, retention with the purge mark | B-01b | unit tests with an in-memory database |
 
 B-03 and B-04 run in parallel with B-01, B-02, B-05. Their answers come
@@ -66,15 +66,15 @@ and B-11, and S-2, S-3, S-5 before B-13.
 | B-06 | `internal/rendezvous`, signalling: handshake, `to`/`from`, `watch`, rooms; static file handler; `solodawn rendezvous` | B-02, B-03 | A1.5 against a local instance |
 | B-07 | `internal/rendezvous`, relay: STUN and TURN, credentials, the daily byte quota counted on relayed data, `quota`; TLS by flags | B-06 | A1.7 |
 | B-08 | `internal/peer`, connections: signalling client with fan-out of every payload over every path; pion setup per `contracts/rendezvous.md` section 5; acceptance hook; `ctl` framing with requests, responses and pushes; one inbound connection per client device; path classification from the selected pair; reconnect | B-06 | A1.3 up to "the path is `relay`" |
-| B-09 | `internal/peer`, paths: the relay-free probe and the move as a reconnect (or renomination, if S-1 says so); local-network beacon; remembered addresses; port mapping | B-08 | A1.3, A1.4 |
-| B-10 | `internal/node`, the assembly package: start-up and wiring; local socket; pairing with the bootstrap rule; `devlog` in both directions and forwarding; `hello`/`welcome`, `groups`; routing of `ctl` messages to the home and host surfaces; receipts for host commands; the node-level part of the host surface (`settings.set`, `pair.browser`, `host.info`). `cmd/solodawn`: `node`, `pair`, `pair-browser`, `open`, `status` as argument parsing | B-05, B-08 | A1.1, A1.2, A1.6, A1.8 |
+| B-09 | `internal/peer`, paths: the relay-free probe and the move as a reconnect (or renomination, if S-1 says so); local-network beacon; remembered addresses; port mapping | B-07, B-08 | A1.3, A1.4 |
+| B-10 | `internal/node`, the assembly package: start-up and wiring; local socket; pairing with the bootstrap rule; `devlog` in both directions and forwarding; `hello`/`welcome`, `groups`; routing of `ctl` messages to the home and host surfaces; receipts for host commands; the node-level part of the host surface (`settings.set`, `pair.browser`, `host.info`). `cmd/solodawn`: `node`, `pair`, `pair-browser`, `open`, `status` as argument parsing | B-05, B-08 | A1.1, A1.2, A1.6, A1.8, A1.9 |
 
 ### M2 home
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-11 | `internal/home`, reads: in-memory state per group with write-through; `sync` with the cut, `reset`, delta or cold content, pending cards; live pushes, `state_only`; `fetch` by `pos` and by `kind`, bounded by bytes; retention | B-10 | A2.2, A2.5, A2.6 |
-| B-12 | `internal/home`, first mutations: `group`, `member` (with unique names and the secretary rules), `post` kind `text`, `note`, `forget` with `gone` markers; the principal checks of `contracts/commands.md`; receipts | B-11 | A2.1, A2.3, A2.4 |
+| B-12 | `internal/home`, first mutations: `group`, `member` (with unique names and the secretary rules), `post` kind `text`, `note`, `forget` with `gone` markers; the principal checks of `contracts/commands.md`; receipts | B-11, B-09 | A2.1, A2.3, A2.4, A2.7 |
 
 ### M3 sessions
 
@@ -88,7 +88,7 @@ and B-11, and S-2, S-3, S-5 before B-13.
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
-| B-16 | A task session, minimal: `task start` and `task branch` on the home with the task row and `task` message; `start_task`; worktree and branch; the session created on `assign`, ended on `task cancel` | B-15 | A5.7 |
+| B-16 | A task session, minimal: `task start` and `task branch` on the home with the task row and `task` message; `start_task`; worktree and branch; the session created on `assign`; `task cancel` in its smallest form, ending the session | B-15 | A5.7 |
 | B-17 | Permissions: level by session kind for both CLIs; what the node itself offers at each level; `perm.set`; the `approve` tool and Codex approval requests behind one handler; approval records; `post` kind `approval` and `act approve`/`deny`; the wait and the late decision; the check of `cause` on the host; audit and the `audit` request | B-16, answers of S-2, S-3, S-5 | A4.1 to A4.6, A4.10 |
 | B-18 | Limits and stops: usage recording and caps; turn time limit; wake-up cap; `group pause`/`resume`; `host.offline`/`online` | B-17 | A4.7 to A4.9 |
 
@@ -96,16 +96,17 @@ and B-11, and S-2, S-3, S-5 before B-13.
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
-| B-19 | Brief and assignment: `brief`, `act confirm`/`revise` with the `cause` on `assign` items; dependencies; `propose_brief`, `set_task`, `request_decision`; `decision` and `act choose`; `task assign`, `pause`, `resume`, `cancel`; secretary instructions | B-18 | A5.2, A5.6, A5.15; unit tests for task-machine rows 1, 11 to 14, 18 to 21 |
-| B-20 | Checks and review: `run_checks` on a clean tree with the project's commands, in the minimal environment, and both hard checks; `submit_task` without a remote; review sessions with the diff file; `submit_review`, the outcome and the six-review stop; failures; `reviewed`; the round limit; `jump`, `task preempted` and `continued`; the quiet-task timer | B-19 | A5.3 (first two sentences), A5.4, A5.5, A5.8, A5.9, A5.11, A5.16, A5.17; `forge: none` half of A5.1 |
-| B-21 | Remote and merge: `push_branch`; pull request on submit; hosted checks by commit; the merge of the reviewed commit, with and without a remote; `task conflict`; reassignment; `task_merged`; `post` kind `summary` | B-20 | A5.1, A5.3, A5.10, A5.12 to A5.14 |
+| B-19 | Brief and assignment: `brief`, `act confirm`/`revise` with the `cause` on `assign` items; dependencies; `propose_brief`, `set_task`, `request_decision`; `decision` and `act choose`; `task assign`, `pause`, `resume`, `cancel`; secretary instructions | B-18 | A5.2, A5.6, A5.15; unit tests for task-machine rows 1, 11 to 15 and 17 to 20, and for the rules of its section 2 |
+| B-20 | Checks and review: `run_checks` on a clean tree with the project's commands, in the minimal environment, and both hard checks; `submit_task` without a remote; review sessions with the diff file; `submit_review`, the outcome and the six-review stop; failures; `reviewed` | B-19 | A5.3 (first two sentences), A5.4, A5.5, A5.9, A5.17 |
+| B-27 | Scheduling in threads: the round limit and its held mentions; `jump`, `task preempted` and the host's `task resume`; the quiet-task timer | B-20 | A5.8, A5.11, A5.16 |
+| B-21 | Remote and merge: `push_branch`; pull request on submit; hosted checks read with the head in one answer; the `merge` item with commit and pull request, taken only if still current; no change of the task between a passed review and the report; the merge of the reviewed commit, with and without a remote; `task conflict`; a restart in the middle of a merge; reassignment; `task_merged`; `post` kind `summary` | B-20 | A5.1 (both variants), A5.3, A5.10, A5.12 to A5.14, A5.18, A5.19 |
 
 ### M6, M7
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-22 | `ask` and `reply`: call depth per turn, open-call table on the host, the answer to an open call ahead of the queue, wait and receipt | B-20 | A6.1 to A6.4 |
-| B-23 | Takeover: choice of session, a task created for a working AI without one and cancelled when nothing changed; interactive start with the session's level; state switch under C-6; `pty` channel bridge with back-pressure, `pty.resize`; hand-back facts and turn; refusal on a relayed path | B-17 | A7.1 to A7.8 |
+| B-23 | Takeover: choice of session, a task created for a working AI without one and cancelled when nothing changed; interactive start with the session's level; state switch under C-6; `pty` channel bridge with back-pressure, `pty.resize`; hand-back facts and turn; refusal on a relayed path; a repeated `takeover.start` | B-17 | A7.1 to A7.8 |
 
 ### M8 shipping
 

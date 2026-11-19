@@ -19,11 +19,19 @@ member id.
 `group.secretary` names.
 
 **Once only.** The receiver stores a receipt for every command it accepts,
-keyed by signer and `n`, together with the answer it gave, in the same
-transaction as the change. A command that arrives again gets the stored
-answer and has no second effect. A command whose `ts` is more than 24 hours
-from the receiver's clock is refused with `stale`; receipts are kept for
-that long (`contracts/storage.md`).
+keyed by signer and `n`, with the outcome (ok and its result fields, or the
+error code), in the same transaction as the change. A command that arrives
+again gets that outcome, under the request id of the new request, and has
+no second effect. A command whose `ts` is more than 24 hours from the
+receiver's clock is refused with `stale`; receipts are kept for that long
+(`contracts/storage.md`).
+
+Two results name something that lives only in memory: the link of
+`pair.browser` and the terminal of `takeover.start`. Their receipts record
+that the command succeeded, not the link or the terminal. A repeat is
+answered `ok` with the original link while that link is still valid, or
+`ok` while that terminal is still open on this connection; otherwise
+`conflict`. A repeat never creates a new link or a new terminal.
 
 **Results.** Effects are read from rows. A few commands also answer with
 named fields, listed in the tables as "Result".
@@ -37,7 +45,7 @@ named fields, listed in the tables as "Result".
 | `create` | `name`, `kind`, `repo`, `base`, `forge`, `checks` | a person: a device of the receiving node's owner | the node becomes home of group `g` = `n`; group row; a `member` row for that person with role `owner`; a `groups` push to that person's connected devices |
 | `set` | any of `name`, `checks`, `pass`, `pass_foundation`, `limits`, `secretary` | an admin | group row updated. `secretary` must name an AI member; the previous secretary's member row loses the flag |
 | `pause` | — | an admin | `group.paused` set; `system` `group_paused`; hosts interrupt running turns of the group and hold items |
-| `resume` | — | an admin | `group.paused` cleared; `system` `group_resumed`; task-machine row 26 |
+| `resume` | — | an admin | `group.paused` cleared; `system` `group_resumed`; task-machine row 24 |
 
 A group has one secretary (R-20). While it has none, main-line messages
 that mention nobody reach no AI and no brief can be posted; the client asks
@@ -50,7 +58,7 @@ for one when the group is created.
 | `add_ai` | `id`, `cli`, `name`, `account`, `secretary` | a host whose owner is a member | member row with `host` = the signer. `name` must be unused in the group, else `conflict`. `secretary: true` is accepted when the group has none or the owner is an admin, and sets `group.secretary` |
 | `status` | `id`, `state`, `task`, `path`, `usage`, `event` | the member's host | member row updated; `event`, when present, becomes a `system` row (1.9) |
 | `set` | `id`, any of `name`, `account`, `allow`, `approvers` | the AI's owner | member row updated |
-| `remove` | `id` | the AI's owner, or an admin | member row replaced by a `gone` marker; task-machine row 24. Removing the secretary clears `group.secretary` and writes `system` `no_secretary` |
+| `remove` | `id` | the AI's owner, or an admin | refused with `conflict` while the AI is assignee or reviewer of a task that is not final: reassign or cancel first. Otherwise the member row is replaced by a `gone` marker. Removing the secretary clears `group.secretary` and writes `system` `no_secretary` |
 
 Adding people is step 2.
 
@@ -64,10 +72,10 @@ The message id is `n`.
 | `text` | a person, or an AI | — | item `mention` for each mentioned AI; a main-line message from a person that mentions no AI produces one for the secretary |
 | `progress`, `question` | an AI | `progress` only in a thread | item `mention` for each mentioned AI |
 | `report` | an AI | `thread` is a task whose assignee is `as` | — |
-| `brief` | the secretary | `body.requester` is a member | `state.status = pending`; the brief named in `body.replaces` becomes `superseded` |
+| `brief` | the secretary | `body.requester` is a member; every assignee and reviewer is a working AI of the group, the two differ, and `depends` names only earlier entries of the same brief | `state.status = pending`; the brief named in `body.replaces` becomes `superseded` |
 | `summary` | the secretary | `thread` is a `merged` task | the home fills `score`, `rounds`, `minutes`, `added`, `removed`, `pr` in `body` from the task row; `main = true` |
-| `approval` | an AI | `as` is the task's assignee | `state.status = pending`; `main = true`; task-machine row 18 |
-| `decision` | an AI | — | `state.status = pending`; `main = true`; task-machine row 20 |
+| `approval` | an AI | `as` is the task's assignee | `state.status = pending`; `main = true`; task-machine row 17 |
+| `decision` | an AI | — | `state.status = pending`; `main = true`; task-machine row 19 |
 | `call` | an AI | the callee is another AI member; `body.depth` ≤ `limits.ask_depth` | `state.status = waiting`; item `mention` for the callee |
 | `reply` | an AI | `re` is a `call` addressed to `as` | the call's `state` becomes `answered` with `reply` and `ms`; item `reply` for the caller |
 | `review` | an AI | task-machine row 7 | Result: `passed`, `round` |
@@ -76,7 +84,7 @@ The message id is `n`.
 Rules for every `post` by an AI:
 
 - A message in a thread that mentions an AI counts a round (task-machine
-  rows 22 and 23).
+  rows 21 and 22).
 - If an AI has been sent `limits.wakes_per_hour` items in the last hour, a
   new item for it is held until the hour allows it. The count is kept in
   memory by the home and starts again when the home restarts.
@@ -90,15 +98,19 @@ Rules for every `post` by an AI:
 | Card | `action` | By | Effect |
 | --- | --- | --- | --- |
 | `brief` | `confirm` | its requester, or an admin | `state.status = confirmed`; one task row and one `task` message per entry of `body.tasks`; task-machine row 1 |
-| `brief` | `revise` | same | `state.status = revise`, `state.note = text`; item `confirmed` for the secretary |
-| `approval` | `approve`, `deny` | a person in `body.approvers` | `state` updated; task-machine row 19 |
-| `decision` | `choose` | a person in `body.to`, or an admin | `state.status = decided` with `choice = arg` and `text`; task-machine row 21 |
+| `brief` | `revise` | same | `state.status = revise`, `state.note = text`; item `confirmed` for the secretary, with this `act` as cause |
+| `approval` | `approve`, `deny` | a person in `body.approvers` | `state` updated; task-machine row 18 |
+| `decision` | `choose` | a person in `body.to`, or an admin | `state.status = decided` with `choice = arg` and `text`; task-machine row 20 |
 
 Acting on a card whose `state.status` is not `pending` returns `conflict`.
+A decided card keeps the signed `act` in `state.act`; it is the `cause` of
+the items that follow from it, also of those created later (a dependent
+task that becomes active after a merge).
 
 `jump` (R-72), fields: `msg`. By the person who wrote message `msg`. The
-item that `msg` produced for an AI, if still unacknowledged, is sent again
-with `jump: true`. The host does the rest (`flows/agent-turn.md` C).
+item that `msg` produced for an AI, if still unacknowledged, is signed
+again with `jump: true` and sent again. The host does the rest
+(`flows/agent-turn.md` C).
 
 ### 1.5 `task`
 
@@ -112,11 +124,13 @@ When each is allowed, and what it does, is `contracts/task-machine.md`.
 | `submitted` | `id`, `commit`, `pr`, `pr_url`, `stats` | host of the assignee | — |
 | `cloud` | `id`, `commit`, `ok`, `items` | host of the assignee | — |
 | `merged` | `id`, `commit` (the reviewed commit that was merged), `merge_commit`, `stats` | host of the assignee | — |
-| `conflict` | `id`, `detail` | host of the assignee | — |
+| `conflict` | `id`, `commit`, `detail` | host of the assignee | — |
 | `fail` | `id`, `reason` (`crash`, `timeout`), `detail` | host of the assignee | — |
-| `preempted`, `continued` | `id` | host of the assignee | — |
-| `assign` | `id`, `assignee`, `reviewer` | the secretary, or an admin | — |
-| `pause`, `resume`, `cancel` | `id` | the secretary, or an admin; `cancel` also by the host of the assignee when `origin` is `takeover` | — |
+| `preempted` | `id` | host of the assignee | — |
+| `assign` | `id`, `assignee`, `reviewer` | the secretary, or an admin; for a `failed` task an admin only | — |
+| `pause` | `id` | the secretary, or an admin | — |
+| `resume` | `id` | the secretary, or an admin (for a `failed` task an admin only); the host of the assignee, for its own pre-empted task | — |
+| `cancel` | `id` | the secretary, or an admin (at step `merge` an admin only); the host of the assignee when `origin` is `takeover` | — |
 
 ### 1.6 `note` and `forget`
 
@@ -194,7 +208,7 @@ device id. Receipts apply as for home commands.
 | `perm.set` | `agent`, `g`, `level` (1, 2, 3), `repo_config` (bool) | permission level for that AI's task sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45); takes effect the next time a session's process starts |
 | `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | node settings; `approvers` is copied to the member rows of this node's AIs |
 | `host.join` | `g`, `home`, `agent`, `name`, `secretary` | the node connects to `home`, clones the project if this node has no clone of it yet (R-11), and sends `member add_ai` |
-| `host.leave` | `g`, `agent` | the AI's sessions in that group are closed; the node sends `member remove` |
+| `host.leave` | `g`, `agent` | the node sends `member remove`; if the home accepts it, the AI's sessions in that group are closed (it is refused while the AI has unfinished tasks) |
 | `takeover.start` | `g`, `member`, `task` (optional) | `flows/takeover.md`; refused with `relay`, `busy` or `cli` |
 | `takeover.end` | `g`, `member` | hand-back |
 | `host.offline`, `host.online` | — | R-64: `offline` interrupts and closes every session and tells every home; items stay on the homes, unacknowledged, until `online` |
@@ -228,8 +242,9 @@ authority is the item's signature (`contracts/datachannel.md` section 6).
 | `decided` | the asking AI | an approval or a decision was decided |
 | `confirmed` | secretary | a brief was confirmed or sent back |
 | `resume` | assignee | a paused task continues; a group resumes |
-| `notice` | secretary | the cases of task-machine section 4; a hand-back summary; an AI limited or removed |
-| `merge` | the assignee's host, not a session | a review passed |
+| `notice` | secretary | the cases of task-machine section 5; a hand-back summary; an AI limited |
+| `merge` | the assignee's host, not a session | a review passed; the item names the commit and the pull request |
 
 While a group is paused, items are still queued; hosts do not deliver them
-until the group resumes.
+until the group resumes. An item that a later change has made pointless is
+deleted by the home (`contracts/task-machine.md` section 2).

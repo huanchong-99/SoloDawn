@@ -1,9 +1,8 @@
 # SoloDawn rebuild: planning
 
-Status: **v0.2 draft.** Round 1 is answered: the review is
-`reviews/gpt-6.2-round-1.md`, the answers and the list of changes are
-`reviews/fable-round-1.md`. The coordinator has settled Q-1 to Q-20
-(`risks.md`). Round 2 can start.
+Status: **v0.3 draft.** Rounds 1 and 2 are answered (`reviews/`). The
+coordinator has settled Q-1 to Q-20 (`risks.md`); Q-21 and Q-22 are open.
+The scaffold and the spikes can start. Round 3 is the final check.
 
 SoloDawn is being rebuilt from an empty tree. This directory holds the plan
 that the implementation will follow. It is written for two readers: the
@@ -131,6 +130,7 @@ Change: <files and sections edited, or the reason for rejecting>
 | `risks.md` | risks, open questions, items needing coordinator confirmation |
 | `questions-round1.md` | review questions for round 1 |
 | `questions-round2.md` | review questions for round 2 |
+| `questions-round3.md` | review questions for round 3, the final check |
 | `reviews/` | review rounds |
 
 ## Vocabulary

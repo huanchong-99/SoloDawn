@@ -34,9 +34,12 @@ that is waiting for them.
    and, if N is connected, pushes it.
 2. N checks the item at its boundary (R-136): the item's envelope is signed
    by the home of that group, that device is in the log of N's owner, the
-   item is addressed to N and names an AI that runs here. Otherwise N
-   refuses it: audit row `refused`, then `ack`. Rows inside the item that
-   carry no signature are content for the turn, not authority.
+   item is addressed to N and names an AI that runs here. For an item
+   about a task, the task as N sees it now must still fit the item: not
+   final, the AI still in that role, and for `review` and `merge` the same
+   commit (`contracts/datachannel.md` section 6). Otherwise N refuses the
+   item: audit row `refused`, then `ack`. Rows inside the item that carry
+   no signature are content for the turn, not authority.
 3. N holds the item, unacknowledged, while any of these is true: the group
    is paused; the task of the target session is `paused`; N is offline by
    the owner's command; the AI is `limited`; the target session is in
@@ -77,12 +80,16 @@ that is waiting for them.
 11. The owner chooses "jump the queue" on their message (`jump`). H sends
     the item again with `jump: true`.
 12. If the AI is running a turn in the group, N interrupts it (the CLI's
-    interrupt request) and waits for the turn-end event. If that turn
-    belonged to a task session, N reports `task preempted`.
+    interrupt request) and waits for the turn-end event.
+    - The jump item is for the **same** session: nothing is reported; the
+      item simply goes first, and the task is not paused.
+    - It is for another session, and the interrupted one is a task session:
+      N reports `task preempted`.
 13. N delivers the jump item as in steps 4 to 9.
-14. When that turn has ended, N reports `task continued` and gives the
-    interrupted session one turn of its own: "You were interrupted by a
-    direct request from your owner. Continue the task."
+14. If a task was pre-empted: when the jump turn has ended, N reports
+    `task resume` for it and gives the interrupted session one turn of its
+    own: "You were interrupted by a direct request from your owner.
+    Continue the task." No inbox item is involved.
 
 ## D. Going dormant, and ending
 

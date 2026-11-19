@@ -31,8 +31,10 @@ rendezvous.
 10. Until the next step is done the connection carries only `hello` and
     `devlog`. The browser writes log entry 1 (genesis, itself) and entry 2
     (`add` the node) and sends both in a `devlog` frame. The node, which
-    belongs to nobody yet, checks the log and adopts that person. Both now
-    belong to the same person, and the connection has the owner's rights.
+    belongs to nobody yet, adopts that person because the log is valid and
+    the entry that adds the node is signed by the browser at the other end
+    of this pairing connection (`contracts/envelope.md` section 6). The
+    browser sends `hello` again and the new `welcome` says `owner: true`.
 11. The node registers itself to start at login, then reports over `ctl` the
     AI CLIs it found on the machine.
 12. For each CLI the owner picks an account type (R-50); the browser sends
@@ -69,8 +71,9 @@ Used for a phone, a second browser, or after site data was cleared.
    opens.
 4. The node appends an `add` entry for the browser, signed by the node, and
    sends the whole log to the browser in a `devlog` frame. The browser,
-   which belongs to nobody yet, checks the log and adopts that person. It
-   now knows the owner's other nodes.
+   which belongs to nobody yet, adopts that person because the entry that
+   adds it is signed by the node it paired with. It sends `hello` again,
+   reads `owner: true`, and now knows the owner's other nodes.
 5. The node sends the new entry, the same way, to the homes it is connected
    to.
 

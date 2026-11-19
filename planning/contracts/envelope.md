@@ -158,10 +158,17 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   `devlog` frame. If neither side belongs to a person (first run), the
   browser writes the genesis entry for itself and then the `add` for the
   node.
-- A device that belongs to no person adopts the person of a log that
-  arrives on a connection it paired on, if the log is valid and one of its
-  entries adds this device. A device that already belongs to a person
-  never adopts another.
+- **Adoption.** A device that belongs to no person adopts the person of a
+  log that arrives on the connection it paired on, if all of this holds:
+  the log is valid; it contains an `add` for this device that is signed by
+  the device at the other end of that connection; and at the end of the
+  log both that device and this one are valid. It then stores the owner
+  and the log in one step. A device that already belongs to a person never
+  adopts another, and a pairing between devices of two different people
+  changes neither log. Pairing trusts whoever holds the secret; it does not
+  verify a human identity.
+- When the newcomer has been enrolled, the client side sends `hello` again
+  and reads `owner: true` from the new `welcome`.
 - `internal/proto/testdata/crypto.json` holds a fixed secret with its room
   id and both `mac` values, for the Go and the browser implementation.
 

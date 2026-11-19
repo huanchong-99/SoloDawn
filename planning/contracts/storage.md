@@ -41,8 +41,10 @@ CREATE INDEX        row_pending   ON row (g) WHERE pending = 1;
 CREATE INDEX        row_keep      ON row (g, r, pos) WHERE keep = 1;
 ```
 
-- "Rows after n": `SELECT data FROM row WHERE g = ? AND seq > ? AND seq <= ?
-  ORDER BY seq`, with the upper bound S taken when the read was requested.
+- "Rows after n": `SELECT data FROM row WHERE g = ? AND seq > ? ORDER BY
+  seq`, run in a read transaction opened by the writer at the moment it
+  takes S. The snapshot of that transaction is the cut: later writes do not
+  appear in it and cannot replace a row it contains.
 - A thread page: `… WHERE g = ? AND r = 'msg' AND thread = ? AND pos < ?
   ORDER BY pos DESC LIMIT ?`. The ledger and the notes are read through
   `row_keep`.
@@ -77,6 +79,8 @@ CREATE TABLE inbox (
   why        TEXT    NOT NULL,
   msg        TEXT,               -- message id
   task       TEXT,               -- task id
+  commit_id  TEXT,               -- review, merge: the commit the item is about
+  env        TEXT    NOT NULL,   -- JSON: the item's envelope, signed when the item was queued
   cause      TEXT,               -- JSON: the signed act that led to the item
   not_before INTEGER NOT NULL DEFAULT 0,  -- wake-up cap, round limit hold
   created    INTEGER NOT NULL
@@ -84,8 +88,10 @@ CREATE TABLE inbox (
 CREATE INDEX inbox_by_host ON inbox (host, id);
 ```
 
-The signed item envelope is built when the item is sent. A row is deleted
-when its host acknowledges it.
+The item's envelope is built and signed in the transaction that queues the
+item, so it says what was decided then. A row is deleted when its host
+acknowledges it, or when a later change of the task makes it pointless
+(`contracts/task-machine.md` section 2).
 
 ### `push_sub`: reminders for browsers
 
@@ -113,7 +119,7 @@ CREATE TABLE receipt (          -- one per accepted command (commands.md, "Once 
   k      TEXT    NOT NULL,      -- signer device id
   n      TEXT    NOT NULL,      -- the command's nonce
   ts     INTEGER NOT NULL,      -- the command's own ts
-  answer TEXT    NOT NULL,      -- JSON: the response that was sent
+  answer TEXT    NOT NULL,      -- JSON: the outcome (ok and result fields, or the error code); no request id, no secret
   PRIMARY KEY (k, n)
 ) STRICT;
 
@@ -128,7 +134,9 @@ CREATE TABLE setting (
   at start and kept in memory. A `device` row in `row` is the same entry,
   written once per group so that it gets a group sequence number.
 - `receipt` is written in the transaction of the command it belongs to, for
-  home commands and host commands alike.
+  home commands and host commands alike. For `pair.browser` and
+  `takeover.start` it records only that the command succeeded
+  (`contracts/commands.md`, "Once only").
 - `setting` keys: `name`, `owner` (user id), `rendezvous` (list of URLs),
   `retention_days` (90), `idle_minutes` (15), `max_open` (4),
   `default_level` (2), `all_level3` (false), `approvers` (list of user ids),
@@ -229,7 +237,7 @@ Once a day, with `cutoff = now − retention_days`:
 UPDATE grp SET purged = MAX(purged, (SELECT COALESCE(MAX(seq), 0) FROM row
                                      WHERE row.g = grp.g AND gone = 1 AND mt < :cutoff));
 DELETE FROM row   WHERE gone = 1 AND mt < :cutoff;
-DELETE FROM row   WHERE r = 'msg'  AND keep = 0 AND ts < :cutoff;
+DELETE FROM row   WHERE r = 'msg'  AND keep = 0 AND pending = 0 AND ts < :cutoff;
 DELETE FROM row   WHERE r = 'task' AND final = 1 AND mt < :cutoff;
 DELETE FROM inbox WHERE created < :cutoff;
 DELETE FROM audit WHERE ts < :cutoff;
@@ -240,6 +248,8 @@ DELETE FROM receipt WHERE ts < :now - 86400000;
 
 - A finished task is aged from the day it finished (`mt`), not from the day
   it was created.
+- A card that is still pending is never deleted, however old: someone still
+  has to act on it. It goes with the next run after it is decided.
 - Notes and `review` messages have `keep = 1` and are never deleted by this
   run (R-102). A person removes one with `forget`; the row then becomes a
   `gone` marker.

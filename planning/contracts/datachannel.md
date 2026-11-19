@@ -69,6 +69,9 @@ Node to client:
   one. Nothing is carried over: the client reads again with `sync`
   (`flows/connect.md` B). A connection the node itself opened as a client
   of that device's home is separate and unaffected.
+- A `hello` on a connection that has already had one is answered with a
+  fresh `welcome`. A client sends it again when pairing has put it in the
+  owner's log, and reads `owner: true` from the answer.
 - Each side decides what its path is from the candidate pair its own stack
   selected. Nothing a peer says about the path is used for a rule.
 
@@ -93,12 +96,15 @@ when each side sends the logs the other may be missing.
 {"t":"sync","id":2,"g":"Qm1…","since":0,"state_only":false}
 ```
 
-The home takes the group's current sequence number S, subscribes this
-connection to every change after S, and then sends, in this order:
+The home takes the group's current sequence number S together with a read
+view of the database as it is at S, subscribes this connection to every
+change after S, and then sends, in this order:
 
 1. `{"t":"reset","g":"Qm1…"}`, only if the client must drop its cache
    (`flows/sync.md` C);
-2. `rows` pushes with what the client is missing, up to S;
+2. `rows` pushes with what the client is missing, read from that view, so
+   that a write made while they are being sent neither hides nor changes
+   any of them;
 3. the response `{"t":"synced","re":2,"ok":true,"g":"Qm1…","seq":S}`;
 4. from then on, every change after S, as `rows` pushes.
 
@@ -112,8 +118,15 @@ With `state_only: true`, steps 2 and 4 carry only `group`, `member`,
 ```
 
 Rows are in increasing `seq`. A row replaces any cached row with the same
-`r` and `id`, unless the cached one has a higher `seq`; a row with
-`gone: true` removes it.
+`r` and `id`, unless the cached one has a higher `seq`. A row with
+`gone: true` replaces it too and stays in the cache as a marker that is
+not shown, so that an older copy arriving later (a `fetch` page asked for
+earlier) cannot bring the row back.
+
+The client's cursor for a group, the `since` of its next `sync`, is 0 until
+the first `synced`; it becomes S at `synced`, and then the `seq` of each
+live row it applies. Rows received before `synced` and rows from `fetch`
+never move it.
 
 ### `fetch` (request)
 
@@ -150,8 +163,9 @@ limit; `more` says whether older rows exist.
   (`contracts/commands.md`).
 - The signer `env.k` must be the device that this connection was
   authenticated for.
-- A command that the receiver has already accepted gets the same answer
-  again and has no second effect (`contracts/commands.md`, "Once only").
+- A command that the receiver has already accepted gets the same outcome
+  again, under the `re` of the new request, and has no second effect
+  (`contracts/commands.md`, "Once only").
 - A home command has `g`. A host command has `to` equal to the node's device
   id.
 
@@ -170,9 +184,9 @@ item is an instruction to a host, so every item is signed by the home.
 
 | Part | Meaning |
 | --- | --- |
-| `env` | the item itself: which AI, why, which task and message, and for `review` and `merge` which commit; `jump: true` when the owner jumped the queue. Signed by the home's device |
-| `msg`, `task` | copies of the rows the turn is built from. `msg.env`, when present, is the author's own envelope |
-| `cause` | the signed decision that led to the item, unchanged: the `act` of the person who decided an approval or a decision, or who confirmed the brief |
+| `env` | the item itself: which AI, why, which task and message; for `review` and `merge` which commit, and for `merge` which pull request (`pr`); `jump: true` when the owner jumped the queue. Built and signed by the home in the transaction that queued the item, and stored: what is sent later is what was decided then, whatever the task has become |
+| `msg`, `task` | copies, taken when the item is sent, of the rows the turn is built from. `msg.env`, when present, is the author's own envelope |
+| `cause` | the signed decision that led to the item, unchanged: the `act` of the person who decided an approval or a decision, or who confirmed or sent back the brief. Absent where there is none: direct work starts from the owner's own message, which is `msg` |
 
 - **What a host accepts (step 1).** The item's envelope is signed by the
   home of that group, that device is in the log of the host's owner, `to`
@@ -181,6 +195,12 @@ item is an instruction to a host, so every item is signed by the home.
   the request it holds (`flows/approval.md`). Rows without a signature are
   content, never authority. From step 2 a home may belong to someone else,
   and an item will also need the owner's own signature for that task.
+- **Still current.** An item may wait a long time before it is used. For an
+  item about a task the host looks at the task row it holds now: the task
+  is not final, the AI still has the role the item is for, and for
+  `review` and `merge` the task is at that step with the item's commit.
+  If not, the host refuses the item (audit `refused`, then `ack`). The
+  home, for its part, deletes items that a later change made pointless.
 - The host answers `{"t":"ack","g":"…","item":4411}` when it delivers the
   item to the session or refuses it. The home deletes an acknowledged item
   only if the acknowledging connection is the item's host. On every `hello`

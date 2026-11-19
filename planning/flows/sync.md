@@ -17,11 +17,12 @@ Actors: C, a client (browser or host); H, the group home.
 2. C sends `sync {g, since}`, where `since` is the last sequence number C
    **applied** for that group, or 0 if it holds nothing.
 3. H, in the order in which it writes, takes the group's current sequence
-   number S and subscribes this connection to every change after S.
+   number S, opens a read view of the database as it is at S, and
+   subscribes this connection to every change after S.
 4. H decides between a delta and a reset (section C). For a reset it first
    pushes `reset`, and C drops its cache for that group.
-5. H pushes `rows`:
-   - delta: every row with `since` < `seq` ≤ S, in order;
+5. H pushes `rows`, read from that view:
+   - delta: every row with `seq` above `since`, in order;
    - reset, or `since` = 0: every **state row** (the group row, members,
      device log entries, tasks), every message whose card is still pending,
      and the newest 50 main-line messages.
@@ -29,9 +30,15 @@ Actors: C, a client (browser or host); H, the group home.
 7. From now on H pushes a `rows` frame to C for every change after S, in
    `seq` order, thread messages included.
 
-Because the subscription starts at S and the rows sent in step 5 end at S,
-nothing written while H was sending is lost or sent twice. C applies a row
-only if its `seq` is higher than the one it holds for that row.
+Because the rows of step 5 come from the view at S and the subscription
+starts after S, nothing written while H was sending is lost, hidden or sent
+twice. C applies a row only if its `seq` is higher than the one it holds
+for that row.
+
+**C's cursor**, the `since` of its next `sync`: 0 until the first `synced`
+(so a read that broke off half-way starts again from nothing); S at
+`synced`; after that the `seq` of each live row C applies. Pages from
+`fetch` never move it.
 
 A task row carries a summary of its thread (count, last message, AI round
 counter), so the collapsed thread line needs no thread messages. Pending
@@ -103,9 +110,13 @@ verify them.
   stay until a person deletes them.
 - A row removed on purpose (a member leaves, a person deletes a note or a
   ledger entry) is announced: H pushes the row with the same `r` and `id`, a
-  new `seq`, and `gone: true`. Clients drop it from their cache. H keeps
-  this marker so that "rows after n" includes it; the daily run removes
-  markers older than the retention period and raises the purge mark.
+  new `seq`, and `gone: true`. A client keeps the marker in place of the
+  row and shows nothing for it; an older copy of the row that arrives
+  afterwards, in a `fetch` page asked for earlier, has a lower `seq` and is
+  ignored. H keeps the marker so that "rows after n" includes it; the daily
+  run removes markers older than the retention period and raises the purge
+  mark.
+- A card that is still pending is not deleted by the daily run.
 - A browser cache lives in memory and is rebuilt on reload.
 
 ## H. When the home is unreachable

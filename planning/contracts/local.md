@@ -92,10 +92,11 @@ group has no remote.
 | hard check: secrets | the patterns of section 8 over the added lines of `git diff <base-ref>...HEAD` |
 | hard check: tests | fails when the diff changes source files and no test file |
 | `submit_task` | refused unless the tree is clean and HEAD is the checked commit. With a remote: the push above, then `gh pr view <br> --json number,headRefOid`, or if there is none `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
-| hosted checks | every 30 s: `gh pr view <pr> --json headRefOid` must still be the submitted commit, and `gh pr checks <pr> --json name,state` |
+| hosted checks | every 30 s, one request: `gh pr view <pr> --json headRefOid,statusCheckRollup`. A result is reported only from an answer whose `headRefOid` is the submitted commit `[unverified]` that both fields come back in one answer; else `gh api` for the check runs of that commit |
 | review session created or reused | with a remote `git -C repo fetch origin`; first round `git -C repo worktree add --detach ../review/<num> <commit>`, later `git -C review/<num> checkout --detach <commit>`; then `git diff <base-ref>...<commit>` written to `review/<num>/.solodawn-review.diff` |
 | merge, with a remote | `gh pr merge <pr> --squash --delete-branch --match-head-commit <commit>` `[documented, round 1]` |
-| merge, no remote | `git -C repo merge --squash <commit>` and a commit on `<base>`; on failure `git -C repo reset --merge` |
+| merge, no remote | only if `git -C repo rev-parse <br>` is `<commit>`: `git -C repo merge --squash <commit>` and a commit on `<base>` whose message names the task and the commit; on failure `git -C repo reset --merge` |
+| node restarts with a merge it took and did not report | no second attempt. It looks: `gh pr view <pr> --json state,mergeCommit`, or without a remote the last commit message on `<base>`. Merged: `task merged`. Not merged: `task conflict` |
 | merge failed, or the head is not the reviewed commit | `task conflict` with the command's output |
 | task given to another AI | with a remote, first `git -C <wt> push origin <br>`; then as the next row |
 | task merged, cancelled, or given away | `git -C repo worktree remove ../<wt>`; the reviewer's node removes `review/<num>` |
@@ -104,7 +105,7 @@ group has no remote.
 
 - Checks are about a commit, so they need a clean tree: the commit that is
   checked is the commit that is submitted, reviewed and merged
-  (`contracts/task-machine.md` section 3).
+  (`contracts/task-machine.md` section 4).
 - The node runs exactly the strings in `group.checks`, as the owner, outside
   the CLI's sandbox (decided, `risks.md` Q-19). Level 2 limits the AI's own
   actions, not what the project's checks execute.
@@ -114,7 +115,9 @@ group has no remote.
   `TEMP`, `TMP`; on Windows also `SystemRoot`, `ComSpec`, `PATHEXT`,
   `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA`. No key
   or token variable of any AI tool or forge reaches a check. A project that
-  needs another variable sets it inside its own check command.
+  needs another variable sets it inside its own check command; a toolchain
+  that needs a prepared environment (a Windows C or C++ build, for
+  instance) is initialised by that command too.
 - "Fake tests" has no command; it is a veto item in review.
 - Both hard checks always run (R-103). There is no setting to turn one off.
 

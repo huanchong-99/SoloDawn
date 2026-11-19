@@ -1,9 +1,15 @@
 # Trace: one confirmed task on the wire
 
 One task from request to merge, message by message, with who signs what and
-which commit each step is about. It is the reference for slice (c) of the
-golden examples (`steps/step-1-backend.md` B-01) and it follows
-`contracts/task-machine.md` rows 1, 3 to 8.
+which commit each step is about. It follows `contracts/task-machine.md`
+rows 1, 3 to 8.
+
+This file is documentation: payloads are abridged. The golden vector is
+slice (c) of `steps/step-1-backend.md` B-01: complete payloads with group,
+nonce and time on each, real ids and signatures, the exact bytes of the
+decisions, every response with its request id, and the variant without a
+remote. Once it exists, this file links to it instead of repeating
+payloads.
 
 Cast: the owner's browser, device `OB`. Node A, device `HA`: home of group
 `G`; hosts the secretary `mS` and the AI `mX`. Node B, device `HB`: hosts
@@ -51,12 +57,14 @@ Item 4, the review request (after step 8), to host B, naming the commit:
 Item 5, the merge (after step 9), to host A itself, naming the commit:
 
 ```json
-{"env":{"p":"{\"t\":\"item\",\"g\":\"G\",\"to\":\"HA\",\"item\":5,\"ai\":\"mX\",\"why\":\"merge\",\"task\":\"t1\",\"commit\":\"c1\"}","k":"HA","s":"…"},
+{"env":{"p":"{\"t\":\"item\",\"g\":\"G\",\"to\":\"HA\",\"item\":5,\"ai\":\"mX\",\"why\":\"merge\",\"task\":\"t1\",\"commit\":\"c1\",\"pr\":31}","k":"HA","s":"…"},
  "task":{"r":"task","id":"t1","num":12,"step":"merge","commit":"c1","pr":31}}
 ```
 
 Items 1, 3 and 6 are `mention`, `confirmed` and `notice` for the secretary,
-with the same envelope shape and the message that caused them.
+with the same envelope shape and the message that caused them; item 3 also
+carries the confirmation of step 3 as its `cause`. Every envelope is built
+and signed when its item is queued, and sent as it was signed.
 
 ## What each host checks before acting
 
@@ -64,7 +72,7 @@ with the same envelope shape and the message that caused them.
 | --- | --- | --- |
 | 2 | the envelope is signed by `HA`, the home of `G`; `HA` is in the owner's log; `to` is this host; `mX` runs here | creates the worktree and the task session; step 4 |
 | 4 | the same, for `HB` and `mY` | checks out exactly `c1` for the review session |
-| 5 | the same | runs `gh pr merge 31 --squash --delete-branch --match-head-commit c1` |
+| 5 | the same; and the task, as the host sees it now, is still at `merge` for `c1` | runs `gh pr merge 31 --squash --delete-branch --match-head-commit c1`, with the pull request number from the signed item |
 
 The `task` and `msg` rows inside an item are what the turn is written from.
 They carry no authority: a host never acts because a row says so.
@@ -75,9 +83,9 @@ They carry no authority: a host never acts because a row says so.
 | --- | --- | --- |
 | 6 | the worktree is clean; the commit is its head | host A |
 | 7 | the head is still the checked commit `c1` | host A, then the home (`checks.local.commit` = `commit`) |
-| 8 | the pull request's head is `c1` | host A; the home refuses a result for another commit |
+| 8 | head and checks are read in one answer, and the head is `c1` | host A; the home refuses a result for another commit |
 | 9 | the review checkout is `c1`; `body.commit` = the task's `commit` | host B, then the home |
-| 10 | the forge merges only if the head is `c1` | the forge, asked by host A |
+| 10 | the forge merges only if the head is `c1`; nothing else may change the task between steps 9 and 10 | the forge, asked by host A; the home |
 
 If the assignee submits again before the merge, steps 7 to 10 repeat with
 the new commit, and anything still about `c1` is refused.
@@ -87,4 +95,5 @@ the new commit, and anything still about `c1` is refused.
 Steps 7 and 8 collapse: `submitted` carries no `pr`, there is no `cloud`
 step, and the home goes straight to `review`. Host B is then necessarily
 host A, the review checkout is taken from the local clone, and step 10 is a
-squash merge of `c1` into `main` in that clone.
+squash merge of `c1` into `main` in that clone, done only if the task
+branch's head is still `c1`.
