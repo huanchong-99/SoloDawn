@@ -1,0 +1,36 @@
+{
+  "r": "task",
+  "id": "R0gyAncJnBJT8iCk5-s78A",
+  "seq": 817,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "num": 13,
+  "title": "Choose a label",
+  "origin": "direct",
+  "state": "active",
+  "step": "branch",
+  "assignee": "1PC8WineBrUQ-apCjx7tug",
+  "foundation": true,
+  "pass": 70,
+  "depends": [],
+  "checks": {},
+  "wait": {
+    "kind": "decision",
+    "msg": "TDRDfXwvOO-iOegSUoyidg",
+    "who": [
+      "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
+    ],
+    "since": 1763600000000
+  },
+  "failures": 0,
+  "thread": {
+    "count": 0,
+    "rounds": 0
+  },
+  "stats": {
+    "added": 0,
+    "removed": 0,
+    "started": 1763600000000,
+    "ended": null
+  },
+  "created": 1763600000000
+}

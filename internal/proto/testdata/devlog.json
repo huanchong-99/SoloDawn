@@ -1,0 +1,16 @@
+{
+  "t": "devlog",
+  "user": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+  "entries": [
+    {
+      "p": "{\"t\":\"device\",\"n\":\"ruutSnlvzC4V3ExgYbRe2Q\",\"ts\":1763599999998,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":1,\"op\":\"add\",\"dev\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"kind\":\"browser\",\"name\":\"phone browser\"}",
+      "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+      "s": "uNK9Nhkz2hKAFLayunD8LAN0QfQMWipj5jGhU1cEZdDVOp-qXYaBR8dgmHOHiaUqFMLf3_5GtntP4Ch8jnhVBg"
+    },
+    {
+      "p": " {\"t\":\"device\",\"n\":\"fp5aww8iFv0P1vX67TFvLQ\",\"ts\":1763599999999,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":2,\"op\":\"add\",\"dev\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\",\"kind\":\"node\",\"name\":\"workstation\"}",
+      "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+      "s": "Noa9myQIY3SoscXXeDevPqccOpgdip-VvDDLaR3cnJ_3ardUnIZTX_zWqgo9y_l35KhdQrBfZfGUyV0Pt34DAA"
+    }
+  ]
+}

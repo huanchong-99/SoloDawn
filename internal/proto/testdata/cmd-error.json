@@ -1,0 +1,7 @@
+{
+  "re": 8,
+  "err": {
+    "code": "conflict",
+    "msg": "This card has already been decided."
+  }
+}

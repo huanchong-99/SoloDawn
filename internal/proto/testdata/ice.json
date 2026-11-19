@@ -1,0 +1,9 @@
+{
+  "t": "ice",
+  "n": "TLCyUMYlDVKPPmHQfZcIkg",
+  "ts": 1763600000000,
+  "to": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "conn": "s42dFow67fFW9PJJuBra7w",
+  "cand": "candidate:1 1 UDP 2130706431 192.0.2.1 47800 typ host",
+  "mid": "0"
+}

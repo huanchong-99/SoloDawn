@@ -1,0 +1,8 @@
+{
+  "t": "answer",
+  "n": "DbUvQHbAglGEEq_T3TV24g",
+  "ts": 1763600000000,
+  "to": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+  "conn": "s42dFow67fFW9PJJuBra7w",
+  "sdp": "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\na=sctp-port:5000\r\na=ice-ufrag:abc2\r\na=ice-pwd:abcdefghijklmnopqrstuv02\r\na=setup:active\r\na=fingerprint:sha-256 AB:9F:14:A9:1B:0B:71:6F:BF:BE:34:DA:42:E0:68:EF:14:36:E4:A6:04:0C:15:22:31:E8:0A:E3:89:92:50:2A\r\n"
+}

@@ -13,7 +13,7 @@ import (
 	"github.com/cucumber/godog"
 )
 
-// TestFeatures runs every scenario in this directory against a freshly built solodawn binary.
+// TestFeatures runs the CLI and protocol scenarios in this directory.
 func TestFeatures(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "solodawn.exe")
 	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/solodawn").CombinedOutput(); err != nil {
@@ -21,6 +21,7 @@ func TestFeatures(t *testing.T) {
 	}
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(sc *godog.ScenarioContext) {
+			protocolSteps(sc)
 			var stdout, stderr bytes.Buffer
 			var code int
 			sc.Step(`^I run "solodawn ?(.*)"$`, func(args string) {
