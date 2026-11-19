@@ -1,0 +1,6 @@
+/solodawn
+/solodawn.exe
+/bin/
+*.test
+*.test.exe
+/coverage.out
