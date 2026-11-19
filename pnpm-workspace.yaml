@@ -1,7 +1,0 @@
-packages:
-  - frontend
-
-onlyBuiltDependencies:
-  - '@sentry/cli'
-  - core-js
-  - esbuild

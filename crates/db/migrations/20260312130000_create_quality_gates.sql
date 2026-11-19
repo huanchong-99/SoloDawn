@@ -1,5 +1,0 @@
--- Intentionally left empty.
--- Original content created quality_runs / quality_issues tables with wrong
--- FK references (workflows, terminals instead of workflow, terminal).
--- The correct tables (quality_run, quality_issue) are created by
--- 20260312140000_create_quality_tables.sql.
