@@ -42,6 +42,9 @@ Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-l
   Every change is written to `<html data-theme lang>` and to `localStorage` (`sd-theme`,
   `sd-lang`). `tokens.css` turns `data-theme` into `color-scheme`; every colour is a
   `light-dark()` pair.
+- **Fonts.** Geist and Geist Mono 1.9.2, one variable `woff2` each, are served from
+  `public/fonts/` with their licence (OFL-1.1); the page requests nothing from a third party. A
+  browser downloads a face only when text uses it and shows the system fonts until it arrives.
 - **Texts.** Every interface string is a key in both `src/messages/zh-CN.json` and
   `src/messages/en.json` and is read with `t(key)`; a test fails when the key sets differ. Chat
   content is never translated.
@@ -62,7 +65,7 @@ Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-l
 | `src/routes/`               | one component per page                                       |
 | `src/components/`           | shared parts; `Icon.svelte` holds the line icons             |
 | `src/styles/`               | `tokens.css` (design tokens) and `base.css` (shared classes) |
-| `public/`                   | `manifest.webmanifest` and `icon.svg`, copied as they are    |
+| `public/`                   | manifest, icon and `fonts/`, copied as they are              |
 | `features/web.spec.ts`      | steps of `../features/web.feature`                           |
 
 Below 768 px the navigation is the bottom bar and the theme and language buttons of the top bar
@@ -70,12 +73,11 @@ are hidden; both choices are on the settings page at every width.
 
 ## Known limitations
 
-- Geist and Geist Mono are loaded from Google Fonts, as in the design. Without that request the
-  page falls back to system fonts.
 - The theme is applied by the module script, so a browser forced to the theme opposite to its
-  system setting can paint one frame in the system theme while loading.
+  system setting can paint one frame in the system theme while loading (`issues.md`).
 - The upgrade notice uses the same tokens as the application. A browser without `light-dark()` or
-  CSS nesting shows it with default colours; a browser too old to run the bundle shows nothing.
+  CSS nesting shows it with default colours; a browser too old to run the bundle shows nothing
+  (`issues.md`).
 - The manifest has an SVG icon only and there is no service worker yet.
 
 ## Verification and sources

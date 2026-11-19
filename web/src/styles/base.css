@@ -3,6 +3,20 @@
    Styles of one component (badges, avatars, chat, thread, terminal, dialog) arrive with it. */
 
 /* 1 base */
+/* Geist and Geist Mono 1.9.2, variable, self-hosted under the OFL (public/fonts/OFL.txt).
+   Until a file arrives, and without it, the text uses the system fonts after it in tokens.css. */
+@font-face {
+  font-family: 'Geist';
+  src: url('/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
 *,
 *::before,
 *::after {
