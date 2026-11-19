@@ -63,6 +63,8 @@ Nightly: full gremlins and full Stryker runs; they never block.
 
 `engine = "command"`, because one rules file has one engine and the gremlins engine would hand TypeScript directories to gremlins. The command takes the task branch's merge-base with `rebuild` (every pull request targets it), runs `gremlins unleash --diff <base> --exclude-files "internal/host/fakecli/" --threshold-efficacy 100 --threshold-mcover 100 .` when Go files outside tests, test data and the fake CLIs changed (gremlins exits 10 or 11 below a threshold; NOT COVERED counts against the mutant-coverage threshold), and runs `stryker run --mutate <changed files>` in `web/` for added or modified `.ts` files outside tests, routes, components and the mock. `web/stryker.config.json` (created with F-00) sets the vitest runner and `thresholds.break = 100`. Zero survivors is the default limit.
 
+Superseded in part on 2026-11-20: gremlins v0.6.0 ignores `--threshold-*` on the command line, so the Go verdict is now read from its output; see `2026-11-20-rules-go-mutation.md`.
+
 ### `[dup]`
 
 Built-in line-window detector, any language, no dependency.
