@@ -68,7 +68,7 @@ AI:
 `state` and `task` describe the AI in this group as a whole. The host
 derives them from the AI's sessions: the session that is running a turn or
 is taken over, otherwise `waiting` if any session is open, otherwise
-`dormant` (`architecture.md` section 6).
+`dormant` (`sessions.md`).
 
 `[unverified]` Which usage figures each CLI exposes in structured mode.
 Spikes S-2 and S-3 record them; the card shows what exists.

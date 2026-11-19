@@ -21,8 +21,7 @@ Conventions:
   signature and one check: text that an AI sends to the group is refused
   with `secret` when it matches the outbound secret patterns
   (`contracts/local.md` section 8, R-137).
-- Which tools a session sees depends on its kind (`architecture.md` section
-  6); the last column of each table says so.
+- Which tools a session sees depends on its kind (`sessions.md`); the last column of each table says so.
 
 ## 1. Tools for every AI
 

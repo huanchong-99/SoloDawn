@@ -25,8 +25,9 @@ S-7 fixes (C-9).
   state machine, limits.
 - **Integration tests** run real nodes and a real rendezvous in one test
   process or on one machine, with **fake CLIs**: two small test programs
-  named `claude` and `codex`, first on PATH, that speak the structured
-  protocols and follow a script (post this, ask for that permission, exit
+  (`internal/host/fakecli/claude` and `.../codex`), built as `claude` and
+  `codex` and put first on PATH, that speak the structured protocols and
+  follow a script (post this, ask for that permission, exit
   mid-turn). These tests cost no model usage and run in CI.
 - **End-to-end tests** drive the web client in a browser against those
   nodes.
@@ -38,9 +39,10 @@ seconds" is measured by the test.
 
 ## M0. Spikes
 
-Throwaway code. Each spike answers its questions with observed facts, in the
-pull request that adds it. A "no" answer changes the plan before code is
-built on it.
+Throwaway code. Each spike is a pull request whose description answers its
+questions with observed facts. Spike code is never merged into `rebuild`;
+the planning lead records the answers in the plan. A "no" answer changes
+the plan before code is built on it.
 
 | Spike | Questions |
 | --- | --- |

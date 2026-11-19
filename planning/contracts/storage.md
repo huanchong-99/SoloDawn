@@ -143,7 +143,7 @@ CREATE TABLE perm (               -- R-40, R-45
   PRIMARY KEY (agent, g)
 ) STRICT;
 
-CREATE TABLE session (            -- one per session (architecture.md section 6)
+CREATE TABLE session (            -- one per session (sessions.md)
   g           TEXT    NOT NULL,
   member      TEXT    NOT NULL,   -- member id of the AI in that group
   task        TEXT    NOT NULL DEFAULT '',  -- '' for the group session

@@ -90,7 +90,8 @@ for the groups it is home to.
 - Starts, resumes, hibernates and stops CLI sessions; guarantees C-6.
 - Connects to each home where one of its AIs is a member, as a client. For a
   group homed on the same node the connection is an in-process call with the
-  same message types.
+  same message types, through an interface: `host` does not import `home`
+  (section 8).
 - Takes inbox items from homes and writes them to sessions as turns.
 - Serves MCP tools to its sessions and turns tool calls into commands to the
   home, signed with the node's device key on behalf of the AI.
@@ -130,7 +131,7 @@ that knows a node's address can signal to it without any server (R-133).
 ### 2.4 AI session
 
 - An unmodified vendor CLI process, one per open session. Three kinds of
-  session exist (section 6): the group session of an AI, a task session, a
+  session exist (`sessions.md`): the group session of an AI, a task session, a
   review session.
 - Sees the node only as an MCP server (the tools in
   `contracts/mcp-tools.md`) and, for Claude Code, as its permission prompt
@@ -196,48 +197,10 @@ that group's history (see `risks.md`).
 
 ## 6. Sessions
 
-An AI in a group has several sessions over time (R-12; decided by the
-coordinator, `risks.md` Q-8 and Q-15):
-
-| Session | Exists | Working folder | Level | Receives |
-| --- | --- | --- | --- | --- |
-| group session | one per AI per group, long-lived. For the secretary this is its only session. | the project clone | 1, read only | main-line mentions, direct questions (R-70), calls from threads where the AI has no role; for the secretary, everything addressed to it |
-| task session | one per task the AI is assigned, from first delivery until the task is merged or cancelled | the task's worktree | the level the owner set for this AI in this project | everything about that task |
-| review session | one per task the AI reviews, until that task is merged or cancelled | a read-only checkout of the submitted commit | 1, read only | review requests for that task |
-
-- A working AI cannot change code in its group session: the session is read
-  only. To change code it calls `start_task`, which creates a task and moves
-  the work to a new task session (R-71).
-- An AI runs **one turn at a time per group**, whichever session it is in.
-  Items for its other sessions wait. That is what "busy" means in R-72.
-- Nothing carries from one task session to the next except what is in the
-  group: the brief, the thread, the ledger and the notes.
-
-Each session has one state, kept by the host.
-
-```
-            deliver                    turn ends
- dormant ------------> working <------------------> waiting
-    ^                    |  ^                          |
-    | idle timeout       |  | hand-back                | idle timeout
-    +--------------------+--+--------------------------+
-                         |  |
-        owner takes over v  |
-                      takeover
-```
-
-Overlays, each of which holds deliveries: `paused` (group pause, round limit,
-pre-empted), `limited` (usage cap or vendor rate limit), `offline` (host not
-connected, or the owner took all AIs offline).
-
-Exactly one process owns the session in `working`, `waiting` and `takeover`;
-none in `dormant`. A switch closes the old process and waits for it to exit
-before starting the new one.
-
-What the home and the web client see is one state per AI per group, derived
-by the host: the state of the session that is running a turn or is taken
-over, otherwise `waiting` if any session is open, otherwise `dormant`; and
-the task of that session.
+In `sessions.md`: the kinds of session, their folders and levels, and the
+states. In short: the secretary has one session per group; a working AI has
+one session per task and one read-only group session; one process owns a
+session at any time (C-6); an AI runs one turn at a time per group.
 
 ## 7. Choices made here, and what was not chosen
 
@@ -257,24 +220,76 @@ the task of that session.
 | Native CLI sandbox for level 2 | a command classifier in the node | a classifier is not a boundary and is a lot of code |
 | One binary with subcommands | separate node and rendezvous binaries | one release matrix; a node already embeds the signalling handler |
 
-## 8. Repository layout (proposed)
+## 8. Repository layout and import rules
+
+The local quality gates enforce this section. The backend implementer cannot
+see the gate configuration, so this section is the statement of record.
+
+### 8.1 Layout
 
 ```
-cmd/solodawn/          entry point; subcommands node, rendezvous, mcp, pair, open, version
-internal/proto/        wire structs for every contract, with golden JSON examples
-internal/identity/     keys, envelope sign and verify, device log
-internal/store/        SQLite schema and queries
-internal/peer/         signalling client, pion connections, path detection, probe-and-move
-internal/rendezvous/   signalling handler, STUN, TURN, static files
-internal/home/         command handling, task state machine, limits, inbox
-internal/host/         sessions, CLI drivers, MCP tools, workspaces, pty, audit
-web/                   Svelte 5 client
-planning/              this plan
+cmd/solodawn/           argument parsing only; subcommands as in contracts/local.md section 1
+internal/node/          assembly: starts and wires everything below; pairing, local socket,
+                        device-log forwarding, retention schedule, self-update, start at login;
+                        embeds the built web client from webdist/ (ignored by Git)
+internal/host/          sessions, CLI drivers, MCP tools, workspaces, pty, audit
+  fakecli/claude/, fakecli/codex/   the two fake CLIs for tests (main packages)
+  instructions/         instruction texts per session kind
+internal/home/          command handling, task state machine, limits, inbox
+internal/rendezvous/    signalling handler, STUN, TURN, static file handler
+internal/peer/          signalling client, pion connections, path detection, probe-and-move
+internal/store/         SQLite schema and queries
+internal/identity/      keys, envelope sign and verify, device log
+internal/proto/         wire structs for every contract; testdata/ holds the golden JSON
+web/                    Svelte 5 client; no Go files
+planning/               this plan
 ```
 
-`internal/proto/testdata/*.json` holds one golden example per message type.
-Go tests produce and check them; the web client's tests parse the same files.
-That is the contract test between backend and frontend.
+- `internal/proto/testdata/*.json` holds one golden example per message
+  type. Go tests produce and check them; the web client's tests parse the
+  same files. That is the contract test between backend and frontend.
+- Vite builds the web client straight into `internal/node/webdist/`.
+  `internal/node` embeds it and hands the file system to the static file
+  handler of `internal/rendezvous`, for a node's local page and for
+  `solodawn rendezvous` alike. A committed placeholder keeps the Go build
+  working when the web client has not been built.
+- Spike code (M0) is never merged into `rebuild`. A spike is a pull request
+  whose description holds the answers; the planning lead records them here.
+
+### 8.2 Layers and allowed imports
+
+Top to bottom: `cmd` > `node` > `host` > `home` > `rendezvous` > `peer` >
+`store` > `identity` > `proto`. A package imports only packages below it,
+and of those only the ones in this table:
+
+| Package | May import, of the internal packages |
+| --- | --- |
+| `proto` | none |
+| `identity` | `proto` |
+| `store` | `proto` |
+| `peer` | `proto`, `identity`, `store` |
+| `rendezvous` | `proto`, `identity` |
+| `home` | `proto`, `identity`, `store` |
+| `host` | `proto`, `identity`, `store` |
+| `node` | every package above |
+| `cmd` | `node` |
+
+So these are forbidden although the order alone would allow them:
+`host → home`, `host → rendezvous`, `host → peer`, `home → rendezvous`,
+`home → peer`, `rendezvous → peer`, `rendezvous → store`.
+
+### 8.3 How the packages meet without importing each other
+
+- `home` and `host` each declare the few small interfaces through which they
+  see the outside (a client to push to; a connection to a home; the owner's
+  connection; a byte stream for the terminal), using only `proto` and
+  standard-library types. `peer`'s types have exactly those methods, so
+  `node` passes them in as they are: no adapter code.
+- For a group homed on the same node, `node` gives `host` the local `home`
+  behind the same interface. `host` is a client of `home` in both cases and
+  never imports it.
+- `rendezvous` is the signalling server, `peer` the signalling client. A
+  node runs both; `node` connects the handler's local delivery to `peer`.
 
 ## 9. Flows
 

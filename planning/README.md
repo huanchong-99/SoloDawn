@@ -102,7 +102,8 @@ Change: <files and sections edited, or the reason for rejecting>
 | --- | --- |
 | `README.md` | this file |
 | `product-rules.md` | product behaviour already decided, numbered `R-n` |
-| `architecture.md` | fixed constraints, components, responsibilities, diagram, trust model |
+| `architecture.md` | fixed constraints, components, responsibilities, diagram, trust model, repository layout and import rules |
+| `sessions.md` | kinds of CLI session, their folders, levels and states |
 | `flows/pairing.md` | first run: browser and node pair, device list |
 | `flows/connect.md` | finding a peer, racing paths, relay fallback, switching back |
 | `flows/sync.md` | how a client catches up with a group home |

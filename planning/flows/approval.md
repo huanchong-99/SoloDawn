@@ -12,8 +12,7 @@ B, a browser of the AI's owner.
 The node does not decide what is dangerous and does not inspect commands
 (C-10). Each CLI session runs with the permission and sandbox settings of
 its level: the level the owner set for this AI in this project for a task
-session, level 1 for group and review sessions (`architecture.md` section
-6). The CLI itself stops when an action exceeds them and asks through its
+session, level 1 for group and review sessions (`sessions.md`). The CLI itself stops when an action exceeds them and asks through its
 permission interface:
 
 - Claude Code calls the node's MCP tool `approve` (its permission prompt

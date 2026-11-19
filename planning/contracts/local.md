@@ -60,7 +60,7 @@ process and forgotten when that process exits.
 ## 4. Starting the CLIs
 
 One process per open session. Folder and level come from the session kind
-(`architecture.md` section 6):
+(`sessions.md`):
 
 | Session kind | Folder | Level |
 | --- | --- | --- |

@@ -62,11 +62,13 @@ counter), so the collapsed thread line needs no thread messages.
 
 ## F. Home on the same node
 
-When the host role and the home role are in one process, the host calls the
-home's handler directly with the same message structs. Nothing is signed
-twice and nothing goes through WebRTC, but the envelope is still built and
-stored, because other hosts and, later, other people's devices will verify
-it.
+When the host role and the home role are in one process, the host reaches
+the home through the same interface it uses for a remote home, with the same
+message structs. The assembly package `internal/node` plugs the local home
+in; `host` does not import `home` (`architecture.md` section 8). Nothing is
+signed twice and nothing goes through WebRTC, but the envelope is still
+built and stored, because other hosts and, later, other people's devices
+will verify it.
 
 ## G. Retention and deletion
 

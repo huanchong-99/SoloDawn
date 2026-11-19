@@ -163,7 +163,10 @@ The home decides which AI must see which message and queues an item per AI.
 
 ## 7. Host surface
 
-Available when `welcome.owner` is true.
+Available when `welcome.owner` is true. The name describes the wire. In the
+code, node-level requests (`device`, `pair.browser`, node settings, putting
+`host.info` together) are handled by `internal/node`, and everything about
+AIs and sessions by `internal/host` (`architecture.md` section 8).
 
 ### `host.info` (request, then pushes)
 

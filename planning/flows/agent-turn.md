@@ -3,7 +3,7 @@
 Contracts: `contracts/datachannel.md` section 6 (inbox),
 `contracts/local.md` (CLI invocations, turn format),
 `contracts/mcp-tools.md`. Rules: R-12, R-33, R-120 to R-124, R-60 to R-63,
-R-70 to R-72. Session kinds are defined in `architecture.md` section 6.
+R-70 to R-72. Session kinds are defined in `sessions.md`.
 
 Actors: H, the group home; N, the host node of the AI; S, a CLI session; the
 AI itself.
