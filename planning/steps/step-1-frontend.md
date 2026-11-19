@@ -1,0 +1,90 @@
+# Step 1: frontend task list
+
+For the frontend implementers (local agents). Read first: `README.md`,
+`architecture.md` sections 2 to 4, `contracts/envelope.md`,
+`contracts/rendezvous.md`, `contracts/datachannel.md`, `contracts/rows.md`,
+`contracts/commands.md`, the flows, and the design mock-ups with their
+design notes. Milestones and acceptance tests are in `steps/step-1.md`.
+
+## Working rules
+
+- The web client contains **no group logic**. It renders rows and sends
+  commands. If a screen seems to need a rule (who may approve, when a task
+  is blocked), the answer is a field in a row; if the field is missing, the
+  contract is incomplete: report it, do not compute it in the client.
+- Types come from the contracts. `web/src/lib/proto.ts` mirrors
+  `internal/proto`; a test parses every golden file in
+  `internal/proto/testdata/` and fails on an unknown or missing field.
+- Validate only at boundaries: messages from a data channel or WebSocket,
+  and what a person types. Components trust their props.
+- Least code. Svelte 5 runes for state; no state library; no component
+  library unless a component is hard to make accessible by hand (dialog and
+  details are native elements in the design).
+- Dependencies allowed without asking: `svelte`, `vite`, `@xterm/xterm` with
+  its fit add-on, an i18n library that compiles messages, a PWA plugin, a
+  test runner, Playwright. Anything else: ask the coordinator.
+- Design tokens, layout breakpoints, component states and accessibility
+  rules are the design's. This list does not repeat them.
+
+## Structure (proposed)
+
+```
+web/src/lib/proto.ts        wire types
+web/src/lib/identity.ts     device key, envelope, device log, pairing
+web/src/lib/rendezvous.ts   signalling client
+web/src/lib/peer.ts         connections, path, reconnect, probe-and-move, ctl requests
+web/src/lib/groups.svelte.ts   per-group row cache and derived views
+web/src/lib/nodes.svelte.ts    host.info per node
+web/src/lib/mock.ts         mock transport fed by golden files
+web/src/routes/…            onboarding, groups, chat, terminal, nodes, settings
+web/src/components/…        cards, thread, member card, indicator, base parts
+```
+
+## Tasks
+
+`→` means "depends on". Backend ids refer to `steps/step-1-backend.md`.
+
+| Id | Task | → | Done when |
+| --- | --- | --- | --- |
+| F-00 | Scaffold: Vite, Svelte 5, TypeScript; design tokens and base styles from the mock-ups; theme switch; Chinese and English message files; application shell (navigation, top bar, bottom bar on phones); hash routing for static hosting; web manifest | — | the shell renders at 375, 820, 1100, 1440 px in both themes and both languages |
+| F-01 | Spike S-7 and `identity.ts`: device key in WebCrypto kept in IndexedDB; envelope sign and verify; device-log replay; fingerprint; pairing `mac` and room id | — | S-7 answered for the three baseline browsers; `identity.ts` passes the vectors of `testdata/crypto.json` (after B-02) |
+| F-02 | `proto.ts` and the golden-file test; `mock.ts`, a transport that answers `hello`, `sync`, `fetch`, `host.info` from golden files and accepts commands | B-01 | every golden file parses; components can be developed with no node |
+| F-03 | `rendezvous.ts` and `peer.ts`: handshake, signed offer and trickle, `ctl` requests and pushes, path classification from connection statistics, reconnect with back-off, re-sending unanswered commands, probe-and-move | F-01, B-06, B-07 | A1.3 from the browser side |
+| F-04 | Onboarding page: prompt with pairing secret and countdown, live pairing steps, fingerprint, account type per found CLI | F-03, B-08 | A1.1 |
+| F-05 | Connection indicator in the top bar with its four states; "my computers and AIs" page, part 1: computers, path, version, add a computer, add a browser, revoke a device | F-03, B-08 | A1.2, A1.6 |
+| F-06 | `groups.svelte.ts`: apply `rows`, `synced`, reset, `fetch` pages; derived lists (main line, thread, members, "waiting for you"); group list page; create-group dialog | F-02, B-09 | A2.1, A2.2, A2.6 |
+| F-07 | Chat main line: row layout, text messages, composer with mention completion, date separators, scroll-back | F-06 | A2.1 |
+| F-08 | AI member panel and cards: state shape and sentence, computer and path, account type, usage bar; add an AI to a group; registered AIs on the computers page | F-06, B-11 | A3.1, A3.4 as seen in the client |
+| F-09 | Approval card in all states; "waiting for you" bar; permission three-way control per project and AI; emergency stop dialog and paused banner; audit list; in-page notifications | F-08, B-12 | A4.1, A4.2, A4.7, A4.8 |
+| F-10 | Brief card; task card with the six-step bar, badges, checks and review lines; thread with every message kind; decision card; summary card; review block; "jump the queue" prompt | F-09, B-13 | A5.1 as seen in the client; every state in the design's component sheet is reachable from golden files |
+| F-11 | Call block in threads | F-10, B-15 | A6.1 as seen in the client |
+| F-12 | Terminal page: xterm.js on the `pty` channel, resize, takeover bar with queued count and hand-back, key row on phones, disabled state on a relayed path | F-08, B-16 | A7.1, A7.5, A7.6 |
+| F-13 | Settings page: permissions defaults, retention with confirmation, notifications, appearance, this browser; service worker and Web Push subscription; add-to-home-screen hint for iOS | F-09, B-17 | A8.3 |
+| F-14 | End-to-end suite in Playwright against real nodes with fake CLIs; accessibility pass (keyboard, focus, contrast, reduced motion, screen-reader names) at the design's widths | all | the browser-side checks of every acceptance test run in CI on Chrome, Firefox and WebKit |
+
+## What each screen reads
+
+| Screen | Source |
+| --- | --- |
+| group list | `welcome.groups` of every connected home; last main-line `msg` row and the count of pending cards per group |
+| main line | `msg` rows with `thread = null` or `main = true`, ordered by `seq`; `task` rows for task cards |
+| thread | `fetch` with the task id, plus live `msg` rows of that thread |
+| "waiting for you" | pending `brief` where the viewer is the requester; pending `approval` with the viewer in `body.approvers`; pending `decision` with the viewer in `body.to` |
+| AI member card | `member` row; "open terminal" enabled when the viewer owns the AI and the browser's own path to that node is not `relay` |
+| computers and AIs | the owner's device log; `host.info` of each connected node; the browser's own path to each node |
+| settings | `host.info.settings` of each node; browser preferences |
+| connection indicator | the browser's path to the home of the open group |
+
+## Texts
+
+- Interface strings are in message files, both languages complete.
+- `system` rows carry a `code` and fields; the client owns their wording.
+- Error `code`s from responses map to client wording; `msg` is for the
+  console only.
+- Chat content written by people and AIs is shown as written.
+
+## Not in step 1
+
+Invitations and member management for other people, the confirmation card
+for other people's requests, watching a terminal, team-wide group screens.
+The components should not anticipate them.
