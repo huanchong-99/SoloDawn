@@ -35,10 +35,11 @@ starts after S, nothing written while H was sending is lost, hidden or sent
 twice. C applies a row only if its `seq` is higher than the one it holds
 for that row.
 
-**C's cursor**, the `since` of its next `sync`: 0 until the first `synced`
-(so a read that broke off half-way starts again from nothing); S at
-`synced`; after that the `seq` of each live row C applies. Pages from
-`fetch` never move it.
+**C's cursor**, the `since` of its next `sync`: 0 at the start, and 0 again
+from the moment a `reset` makes C drop its cache; S at the `synced` that
+follows; after that the `seq` of each live row C applies. Pages from
+`fetch` never move it. So a reset that breaks off half-way starts again
+from nothing, and a delta that breaks off keeps the cursor it had.
 
 A task row carries a summary of its thread (count, last message, AI round
 counter), so the collapsed thread line needs no thread messages. Pending

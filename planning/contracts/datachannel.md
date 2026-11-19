@@ -123,10 +123,10 @@ Rows are in increasing `seq`. A row replaces any cached row with the same
 not shown, so that an older copy arriving later (a `fetch` page asked for
 earlier) cannot bring the row back.
 
-The client's cursor for a group, the `since` of its next `sync`, is 0 until
-the first `synced`; it becomes S at `synced`, and then the `seq` of each
-live row it applies. Rows received before `synced` and rows from `fetch`
-never move it.
+The client's cursor for a group, the `since` of its next `sync`, is 0 at the
+start and again from every `reset`; it becomes S at the `synced` that
+follows, and then the `seq` of each live row it applies. Rows received
+before `synced` and rows from `fetch` never move it.
 
 ### `fetch` (request)
 
@@ -195,12 +195,16 @@ item is an instruction to a host, so every item is signed by the home.
   the request it holds (`flows/approval.md`). Rows without a signature are
   content, never authority. From step 2 a home may belong to someone else,
   and an item will also need the owner's own signature for that task.
-- **Still current.** An item may wait a long time before it is used. For an
-  item about a task the host looks at the task row it holds now: the task
-  is not final, the AI still has the role the item is for, and for
-  `review` and `merge` the task is at that step with the item's commit.
-  If not, the host refuses the item (audit `refused`, then `ack`). The
-  home, for its part, deletes items that a later change made pointless.
+- **Still current.** The signature is checked when an item arrives; whether
+  it is still true is checked when the host **uses** it, after it has read
+  the group's state on this connection. For an item that asks for work on a
+  task (`assign`, `checks`, `reviewed`, `review`, `resume`, `merge`): the
+  task is active, the AI still has that role, and for `review` and `merge`
+  the task is at that step with the item's commit. If not, the host
+  refuses it (audit `refused`, then `ack`). A `notice` is information for
+  the secretary and is delivered whatever the task has become. The home
+  pushes a row change before the items it produces, and deletes items that
+  a later change made pointless.
 - The host answers `{"t":"ack","g":"…","item":4411}` when it delivers the
   item to the session or refuses it. The home deletes an acknowledged item
   only if the acknowledging connection is the item's host. On every `hello`

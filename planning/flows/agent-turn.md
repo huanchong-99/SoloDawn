@@ -34,12 +34,9 @@ that is waiting for them.
    and, if N is connected, pushes it.
 2. N checks the item at its boundary (R-136): the item's envelope is signed
    by the home of that group, that device is in the log of N's owner, the
-   item is addressed to N and names an AI that runs here. For an item
-   about a task, the task as N sees it now must still fit the item: not
-   final, the AI still in that role, and for `review` and `merge` the same
-   commit (`contracts/datachannel.md` section 6). Otherwise N refuses the
-   item: audit row `refused`, then `ack`. Rows inside the item that carry
-   no signature are content for the turn, not authority.
+   item is addressed to N and names an AI that runs here. Otherwise N
+   refuses the item: audit row `refused`, then `ack`. Rows inside the item
+   that carry no signature are content for the turn, not authority.
 3. N holds the item, unacknowledged, while any of these is true: the group
    is paused; the task of the target session is `paused`; N is offline by
    the owner's command; the AI is `limited`; the target session is in
@@ -56,7 +53,12 @@ that is waiting for them.
    2. N starts the CLI in the session's folder with the session id and the
       level of the session kind (`contracts/drivers.md`);
    3. state becomes `working`; N reports `member status`.
-6. N takes **all** held items for S, in order, and composes one turn
+6. N takes **all** held items for S, in order. Each item that asks for work
+   on a task is checked now against the task as N holds it after reading
+   the group's state: still active, the AI still in that role, and for
+   `review` and `merge` the same step and commit; one that no longer fits
+   is refused (`contracts/datachannel.md` section 6). A `notice` is always
+   delivered. From the rest N composes one turn
    (`contracts/drivers.md` section 3). Each item is labelled with who wrote
    it and whether it is an instruction or information (R-52). The first turn
    of a task session also carries the brief, the acceptance criteria and the

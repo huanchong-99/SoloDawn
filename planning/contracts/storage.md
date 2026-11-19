@@ -250,6 +250,9 @@ DELETE FROM receipt WHERE ts < :now - 86400000;
   it was created.
 - A card that is still pending is never deleted, however old: someone still
   has to act on it. It goes with the next run after it is decided.
+- A confirmed brief is not deleted while a task made from it is still
+  queued: that task's first `assign` item must carry the confirmation the
+  brief holds.
 - Notes and `review` messages have `keep = 1` and are never deleted by this
   run (R-102). A person removes one with `forget`; the row then becomes a
   `gone` marker.

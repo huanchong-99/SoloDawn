@@ -116,6 +116,39 @@ and B-11, and S-2, S-3, S-5 before B-13.
 | B-25 | Web Push in `home`: `push`, eligibility per browser, the short summary | B-21 | A8.3 (backend half) |
 | B-26 | Full pass on Windows and Linux; measurements of A8.6 | all | A8.5, A8.6 |
 
+## Fix in the task (round 3)
+
+The last review found five points and judged each to belong in the pull
+request of the task that implements it (`reviews/gpt-6.2-round-3.md`,
+`reviews/fable-round-3.md`). The contracts already say what is right; the
+task must make it so and test it.
+
+| Point | Task | What to do in that pull request | Test to add |
+| --- | --- | --- | --- |
+| R3-1: deciding a card must not erase why a task is paused | B-17 (approvals), B-19 (decisions, pause, resume); the test in B-27 | when a card of a `paused` task is decided, change the card and keep the paused wait; recompute card waits only when the task becomes active (`contracts/task-machine.md` section 2) | decide the last pending card of a pre-empted task, then the host resumes it (row 13b) and the task is `active` with no wait |
+| R3-2: a reviewer named while the task is paused must still get the review | B-19 (the activation rule); the test in B-20 | on becoming active at step `review`, queue `review` for the current reviewer and commit unless one is queued or was delivered; with no reviewer set wait `reviewer` | pause a task that waits for a reviewer, name one, resume: the reviewer gets the item with no second reassignment |
+| R3-3: check held work when it is used | B-15 | check the signature when an item arrives; check that it is still true when it is taken for a turn or a merge, after the state read on that connection; a `notice` is always delivered; the home pushes a row change before the items it produces (`contracts/datachannel.md` section 6) | a `review` held for one commit is refused after the task moved to another (A5.19, in B-21); a host that starts cold takes a current item; the secretary still gets the `notice` of a merged task (A5.1, in B-21) |
+| R3-4: retention must not delete the confirmation a queued task still needs | B-19 | keep a confirmed brief while a task made from it is queued (`contracts/storage.md` section 4) | advance the clock past retention, run the daily job, merge the dependency: the dependent's `assign` carries the original bytes of the confirmation |
+| R3-5: a reset clears the cursor | B-15 for the host's own reads; F-06 for the web client | set the cursor to 0 with the cache on every `reset`, and to S only at the `synced` that follows | break the connection after the first batch of a reset: the next `sync` has `since` 0; break it during a delta: the cursor is unchanged |
+
+Also from that review, with no finding attached:
+
+- **B-18.** `group resume` queues `resume` only for tasks that are `active`
+  with no wait and not at step `merge`; it never causes a turn in order to
+  merge.
+- **B-19, B-21.** Test A5.18 against every write to a task at step `merge`,
+  the card rows (17 to 20) and the round rows (21, 22) included: none of
+  them changes state, step, wait, commit, assignee or reviewer there.
+- **B-01.** Slices (a) and (b) can be frozen as the contracts stand. Slice
+  (c) is two complete transcripts, one with a remote and one without, each
+  parseable on its own, with the contents listed in section 6 of
+  `reviews/gpt-6.2-round-3.md`: fixed initial group, members, keys, task
+  counter and sequence; every command with its full payload, signature,
+  request id and answer; the resulting rows; all six signed inbox items
+  with their acknowledgements, items 2 and 3 carrying the same original
+  confirmation; one submitted commit through to a merged report with its
+  own resulting commit.
+
 ## Notes on the hard parts
 
 - **A move is a reconnect (B-09).** No subscription is moved and `ctl` has

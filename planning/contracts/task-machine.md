@@ -30,16 +30,25 @@ R-60, R-63, R-72, R-90.
 - **Roles.** Assignee and reviewer are working AIs of the group, never the
   secretary, and never the same AI.
 - **Items go to active tasks only.** A queued or paused task gets no item.
-  It gets the item for its current step when it becomes active.
+  It gets the item for its current step when it becomes active: at step
+  `review` that is `review` for the current reviewer and commit, unless one
+  is already queued or was delivered for them; with no reviewer the wait
+  becomes `reviewer` again.
 - **Superseded items are retired.** When a row makes a queued inbox item
   pointless (another assignee, another reviewer, another commit, a cancelled
   task), the home deletes that item in the same transaction.
 - **"Wait cleared" means recomputed.** The wait becomes the task's oldest
   pending approval card, else its pending decision card, else `null`. So a
-  card that is still open is never forgotten by a pause and a resume.
+  card that is still open is never forgotten by a pause and a resume. This
+  happens only for an `active` task: deciding a card of a `paused` task
+  changes the card and leaves the paused wait as it is; the card waits are
+  recomputed when the task becomes active.
 - **Step `merge` is the point of no return.** From the moment a review
-  passes until the host reports, the only things accepted for the task are
-  rows 8 and 9 for the same commit, and row 15 by an admin.
+  passes until the host reports, the only things that change the task's
+  state, step, wait, commit, assignee or reviewer are rows 8 and 9 for the
+  same commit, and row 15 by an admin. This rule comes before every row
+  below; rows 17 to 22 are no exception. The thread summary still follows
+  the thread.
 
 ## 3. Transitions
 
@@ -61,7 +70,7 @@ is a person with role `owner` or `admin`. Items are inbox items
 | 10 | `task fail` (reason `crash` or `timeout`), by host | `active`, not at step `merge` | unchanged, or row 14 if the limit is reached | below the limit: `notice` [SEC] with the detail | `failures` + 1 |
 | 11 | `task assign`, by SEC or an admin; from `failed`, by an admin only | not final; not at step `merge` | fields set. Assignee changed: every pending approval card of the task becomes `reassigned`; the old assignee's queued items for the task are retired; `failed` becomes `active`. Reviewer changed: the old reviewer's queued `review` item is retired. Then, if the task is `active`: wait `conflict` cleared; at step `review`, wait `reviewer` cleared | if `active`: `assign` [assignee] with the latest `checks` or `review` message, when the assignee changed or the wait was `conflict`; `review` [reviewer], when the reviewer changed at step `review` | from `failed`: `failures` = 0 |
 | 12 | `task pause`, by SEC or an admin | `active`, not at step `merge` | `paused`, wait `manual` | — | — |
-| 13 | `task resume`, by SEC or an admin; from `failed`, by an admin only | `paused`, or `failed` | `active`, wait cleared | `resume` [assignee] | from `failed`: `failures` = 0 |
+| 13 | `task resume`, by SEC or an admin; from `failed`, by an admin only | `paused`, or `failed` | `active`, wait cleared | `resume` [assignee]; at step `review`, what section 2 says about activation | from `failed`: `failures` = 0 |
 | 13b | `task resume`, by host | `paused` with wait `preempted` | `active`, wait cleared | — (the host continues the session itself) | — |
 | 14 | (inside rows 6, 7 and 10) | `failures` reaches `limits.failures`, or a review fails above `limits.review_rounds` | `failed`; a `system` message `task_failed` mentioning the brief's requester and the assignee's owner | `notice` [SEC], once; no other item | — |
 | 15 | `task cancel`, by SEC or an admin; by host if `origin` is `takeover`; at step `merge`, by an admin only | not final | `cancelled`; pending cards of the task become `expired`; every queued item of the task is retired | — | — |
@@ -73,7 +82,7 @@ is a person with role `owner` or `admin`. Items are inbox items
 | 21 | any `post` by an AI in the thread that mentions an AI | — | `thread.rounds` + 1; at `limits.rounds`, if `active` and not at step `merge`: `paused`, wait `rounds`, a `system` message `rounds_limit` in the main line | at the limit: `notice` [SEC] | — |
 | 22 | `post` kind `text` by a person in the thread | — | `thread.rounds` = 0; if wait was `rounds`: `active`, wait cleared | — | — |
 | 23 | timer in the home | `active`, wait `null`, not at step `merge`, no thread message for `limits.idle_notice_minutes` | unchanged | `notice` [SEC], once per quiet period | — |
-| 24 | `group resume` | — | unchanged | `resume` [assignee] for each task that is `active` with wait `null` | — |
+| 24 | `group resume` | — | unchanged | `resume` [assignee] for each task that is `active` with wait `null` and not at step `merge` | — |
 
 ## 4. What follows from the table
 

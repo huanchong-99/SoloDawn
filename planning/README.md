@@ -1,8 +1,21 @@
 # SoloDawn rebuild: planning
 
-Status: **v0.3 draft.** Rounds 1 and 2 are answered (`reviews/`). The
-coordinator has settled Q-1 to Q-22 (`risks.md`); nothing is open. The
-scaffold and the spikes can start. Round 3 is the final check.
+Status: **plan converged after three review rounds; implementation
+started.**
+
+Three review rounds are answered in `reviews/`; the last ended with "ready
+to start". The coordinator has settled Q-1 to Q-22 (`risks.md`). Next:
+
+1. Work proceeds by `steps/step-1.md`: the backend by
+   `steps/step-1-backend.md`, starting with B-00; the frontend by
+   `steps/step-1-frontend.md`, starting with F-00.
+2. Five points from the last review are fixed inside the tasks that
+   implement them (`steps/step-1-backend.md`, "Fix in the task (round 3)").
+3. The files in `contracts/` are the statement of record. A pull request
+   that needs a contract changed says so in its description; the planning
+   lead changes the contract. Code does not silently depart from it.
+4. The answers of the spikes (M0) are recorded here by the planning lead.
+   Q-4 waits for spike S-5.
 
 SoloDawn is being rebuilt from an empty tree. This directory holds the plan
 that the implementation will follow. It is written for two readers: the
@@ -131,6 +144,7 @@ Change: <files and sections edited, or the reason for rejecting>
 | `questions-round1.md` | review questions for round 1 |
 | `questions-round2.md` | review questions for round 2 |
 | `questions-round3.md` | review questions for round 3, the final check |
+| `reviews/fable-round-3.md` | the outcome of the three rounds, and where the last five points are fixed |
 | `reviews/` | review rounds |
 
 ## Vocabulary
