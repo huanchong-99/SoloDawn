@@ -45,7 +45,8 @@ findings that make it so.
    `steps/step-1-backend.md` B-01 be frozen as the contracts stand? What,
    precisely, must slice (c) contain that `flows/trace-task.md` does not
    yet say?
-7. **Two choices** (`risks.md` Q-21, Q-22), for the coordinator: an AI
-   cannot leave a group while it holds an unfinished task; and a person may
-   cancel a task at step `merge`. Is either wrong, as opposed to merely a
-   choice?
+7. **Two choices, now decided** (`risks.md` Q-21, Q-22): an AI cannot leave
+   a group while it holds an unfinished task; and between a passed review
+   and the host's report only a person's cancel changes a task. They are
+   not open for redesign. Say so only if one of them breaks a rule or an
+   acceptance test.

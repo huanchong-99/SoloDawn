@@ -1,8 +1,8 @@
 # SoloDawn rebuild: planning
 
 Status: **v0.3 draft.** Rounds 1 and 2 are answered (`reviews/`). The
-coordinator has settled Q-1 to Q-20 (`risks.md`); Q-21 and Q-22 are open.
-The scaffold and the spikes can start. Round 3 is the final check.
+coordinator has settled Q-1 to Q-22 (`risks.md`); nothing is open. The
+scaffold and the spikes can start. Round 3 is the final check.
 
 SoloDawn is being rebuilt from an empty tree. This directory holds the plan
 that the implementation will follow. It is written for two readers: the

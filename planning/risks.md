@@ -33,20 +33,20 @@ decision now lives.
 | Q-18 | The mock-up labels an approval card with what the command does ("install software", "push code"). Telling those apart means reading the command, which C-10 forbids. | The card shows the kind of request the CLI made (`command`, `file`, `network`, `other`) and the one-line description the CLI attached. The reminder's title is that same description. No label that needs the command to be read. The reminder may also carry the opaque group and card ids and the member's display name. | `product-rules.md` R-41; `contracts/rows.md` 5 (approval body); `contracts/commands.md` 1.7; `steps/step-1-frontend.md` F-09 |
 | Q-19 | Round 1, F-11. The project's check commands are run by the node, as the owner, outside the CLI's sandbox, on code the AI wrote. | Step 1: keep it, with two additions. Check commands get a minimal environment (an allow list: `PATH`, `HOME`, locale and the like), so no key or token variable reaches them. The plan and the interface say plainly that level 2 limits the AI's own actions and that project checks run outside the sandbox. Step 2: checks run in an existing operating-system sandbox (sandbox-runtime, bubblewrap or sandbox-exec; Windows a stated limit), to be verified by an experiment first. | `product-rules.md` R-40; `contracts/local.md` 7; `contracts/drivers.md` 2; `flows/approval.md` G; `steps/step-1.md` A5.17; `steps/step-1-frontend.md` F-09; `steps/step-2-3.md` |
 | Q-20 | Round 1, F-10. During a takeover the secretary could be made to edit files outside any task branch. | Accepted: the secretary's terminal keeps its read-only level. The secretary writes no code; to change code the owner takes over a working AI. | `product-rules.md` R-21; `flows/takeover.md` A, B; `contracts/drivers.md` 1.3; `steps/step-1.md` A7.8 |
+| Q-21 | Round 2, F-1. What happens to the tasks of an AI that leaves a group. | Accepted: an AI cannot leave a group while it is assignee or reviewer of a task that is not final; the tasks are reassigned or cancelled first. | `contracts/commands.md` 1.2, 2 (`host.leave`); `contracts/task-machine.md` 4; `steps/step-1.md` A5.18 |
+| Q-22 | Round 2, F-2. What may change a task between a passed review and the host's report of the merge. | Accepted: nothing but a person's cancel. No extra command for the host to claim the merge. K-14 stays as written. | `contracts/task-machine.md` 2, row 15, section 4; `flows/task.md` steps 17, 18; `risks.md` K-14; `steps/step-1.md` A5.18 |
 
 Also confirmed by the coordinator, as defaults: a quiet task wakes the
 secretary after 30 minutes; receipts are kept 24 hours; when a task changes
 hands the previous node pushes the branch before removing its worktree.
+And, as a reading of R-63: after a task has stopped (three failures, or a
+sixth failed review) only a person may resume or reassign it; the secretary
+may cancel it.
 
 ## Q. Open
 
-Both points below are already written into the plan the way the second
-column says; they are listed because they are choices, not consequences.
-
-| Id | Point | What the plan does | Why it needs a look |
-| --- | --- | --- | --- |
-| Q-21 | Round 2, F-1. What happens to the tasks of an AI that leaves a group. | `member remove` (and so `host.leave`) is refused while the AI is assignee or reviewer of a task that is not final; the tasks are reassigned or cancelled first. This removed a transition and a wait kind. | The alternative is to let the AI go and leave its tasks waiting for an assignee, which needs both back. |
-| Q-22 | Round 2, F-2. Between a passed review and the host's report of the merge, what may still change the task. | Nothing, except a person's cancel: no pause, reassignment, resubmission or round limit. A host that takes a `merge` item first checks that the task is still at `merge` for that commit. The cancel exists for a host that never comes back. | If a person cancels in the seconds in which the host is merging, the change is merged under a cancelled task (K-14). The alternative that closes even that window is one more command, by which the host claims the merge before it starts, and one more wait kind. |
+None at present. Q-4 is settled as "wait for spike S-5" and comes back when
+that spike has an answer.
 
 ## K. Known limits
 

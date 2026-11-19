@@ -145,8 +145,8 @@ A1.1.
 - **Q-22** (from F-2): nothing changes a task between a passed review and
   the host's report, except a person's cancel.
 
-Both are written into the plan as described and listed in `risks.md` for
-the coordinator.
+Both are written into the plan as described. The coordinator accepted both
+after this file was first written; see `risks.md`.
 
 ## For round 3
 
