@@ -2,15 +2,21 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/huanchong-99/SoloDawn/internal/node"
 )
 
 func main() {
-	if len(os.Args) != 2 || os.Args[1] != "version" {
-		fmt.Fprintln(os.Stderr, "usage: solodawn version")
-		os.Exit(2)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 || args[0] != "version" {
+		fmt.Fprintln(stderr, "usage: solodawn version")
+		return 2
 	}
-	fmt.Println(node.Version)
+	fmt.Fprintln(stdout, node.Version)
+	return 0
 }

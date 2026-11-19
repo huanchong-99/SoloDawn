@@ -17,7 +17,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: false
       - run: go vet ./...
       - run: go test ./...
 
@@ -32,7 +31,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: false
       - run: go build ./cmd/solodawn
         env:
           CGO_ENABLED: "0"

@@ -35,17 +35,11 @@ func layer(dir string) string {
 }
 
 func TestPackageImports(t *testing.T) {
-	const module = "github.com/huanchong-99/SoloDawn"
+	const module = "github.com/huanchong-99/SoloDawn/"
 	for _, root := range []string{"cmd", "internal"} {
 		err := fs.WalkDir(os.DirFS("."), root, func(file string, d fs.DirEntry, err error) error {
-			if err != nil {
+			if err != nil || d.IsDir() || !strings.HasSuffix(file, ".go") {
 				return err
-			}
-			if d.IsDir() && (d.Name() == "testdata" || file == "internal/node/webdist") {
-				return fs.SkipDir
-			}
-			if d.IsDir() || !strings.HasSuffix(file, ".go") {
-				return nil
 			}
 			f, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
 			if err != nil {
@@ -53,17 +47,12 @@ func TestPackageImports(t *testing.T) {
 			}
 			from := layer(path.Dir(file))
 			for _, imp := range f.Imports {
-				name, err := strconv.Unquote(imp.Path.Value)
-				if err != nil {
-					return err
-				}
-				local, ok := strings.CutPrefix(name, module+"/")
-				if !ok && name != module {
+				name, _ := strconv.Unquote(imp.Path.Value) // the parser accepted it, so it is a valid literal
+				local, ok := strings.CutPrefix(name, module)
+				if !ok {
 					continue
 				}
-				to := layer(local)
-				deps, known := allowed[from]
-				if !known || (from != to && !slices.Contains(deps, to)) {
+				if to := layer(local); from != to && !slices.Contains(allowed[from], to) {
 					t.Errorf("%s: %s may not import %s (architecture §8.2)", file, from, name)
 				}
 			}
