@@ -57,6 +57,10 @@ Notes:
   the result arrives as a `checks` turn.
 - `submit_task` fails with `conflict` if the last `run_checks` did not pass
   on the current head commit.
+- `push_branch` and `submit_task` are the only way a task's branch is
+  pushed and its pull request opened without a card. The node does both by
+  running the owner's signed-in `git` and `gh`; it never reads a token or a
+  credential (`contracts/local.md` section 7).
 
 ## 2. Tools for the secretary only
 

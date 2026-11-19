@@ -211,9 +211,10 @@ Run once with a scratch GitHub repository and once with `forge: none`.
 - **A8.2** Self-update replaces version n with n + 1 when the sum matches,
   and replaces nothing when it does not.
 - **A8.3** With the page closed, an approval request produces a browser
-  notification that names the group and opens it (desktop Chrome, Android
-  Chrome, iOS after adding to the home screen). The pushed content,
-  inspected in the test, is the group id and nothing else.
+  notification that shows the group, the card type and a one-line title,
+  and opens the card (desktop Chrome, Android Chrome, iOS after adding to
+  the home screen). The pushed content, inspected in the test, holds no
+  message text and no command.
 - **A8.4** A rendezvous started with one command on a fresh server passes
   A1.1 to A1.3.
 - **A8.5** Every test above passes on Windows and Linux.

@@ -29,7 +29,8 @@ justification the CLI attached, if any.
 2. Level 1 (read only): N answers "deny" at once. No card.
 3. N looks for a one-shot grant for (AI, group, tool, exact input). If there
    is one, N deletes it, answers "allow", writes an audit row, done.
-4. N runs the outbound secret check on the request text (R-137). On a match
+4. N runs the outbound secret check on the request text and on the
+   justification (R-137). On a match
    N answers "deny" with the text "This request contains a secret and
    cannot be shown for approval", writes an audit row, and stops here. No
    card.

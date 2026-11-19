@@ -1,8 +1,8 @@
 # Risks, limits and open questions
 
 Four lists. **Q, settled**: points where the plan had to interpret or narrow
-a fixed decision, with the coordinator's decision. **Q, open**: new points
-that came up while applying those decisions. **K**: limits the design
+a fixed decision, with the coordinator's decision. **Q, open**: points still
+waiting for one. **K**: limits the design
 accepts knowingly. **T**: technical risks, each tied to the spike or test
 that settles it.
 
@@ -17,7 +17,7 @@ decision now lives.
 | Q-2 | The mock-up shows an 8-character pairing code. | 16 characters. No extra key-exchange algorithm for the sake of 8. The onboarding copy changes to 16. | `product-rules.md` R-152; `contracts/envelope.md` 6; `steps/step-1-frontend.md` F-04 |
 | Q-3 | Ed25519 in WebCrypto is newer than the design's browser baseline `[unverified]`. | Raise the baseline to versions with native support; a spike finds the exact versions; no signature library is bundled. | `product-rules.md` R-164; `architecture.md` C-9; `contracts/envelope.md` 2; `steps/step-1.md` S-7; `steps/step-1-frontend.md` F-00, F-01 |
 | Q-4 | Level 2 on Claude Code for native Windows, where the CLI has no sandbox. | Wait for spike S-5, then decide. | `contracts/local.md` 4.1; `flows/approval.md` H; `steps/step-1.md` S-5 |
-| Q-5 | Reminders while the page is closed pass through the browser vendor's push service. | Accepted: ciphertext only, and as little content as possible (the group id and "something is new"). | `product-rules.md` R-163; `contracts/commands.md` 1.7; `steps/step-1.md` A8.3 |
+| Q-5 | Reminders while the page is closed pass through the browser vendor's push service. | Accepted: ciphertext only, and little content. What the content may be was then fixed in Q-17. | `product-rules.md` R-163; `contracts/commands.md` 1.7; `steps/step-1.md` A8.3 |
 | Q-6 | R-42 says the secretary posts the approval card. | The platform writes the card and shows it under the secretary's name. No AI turn. | `product-rules.md` R-42; `flows/approval.md` step 6; `contracts/rows.md` 5 |
 | Q-7 | R-24 says the secretary merges. | When checks and review pass, the platform merges deterministically and shows it as the secretary's merge. On a conflict the secretary assigns an AI to resolve it. | `product-rules.md` R-24; `contracts/commands.md` 1.5, 1.8; `contracts/mcp-tools.md` 2; `flows/task.md` E; `steps/step-1.md` A5.10, A5.12 |
 | Q-8 | Session granularity. | The secretary has one long session per group. A working AI has one session per task, in the task's worktree, ending with the task. Project memory is the ledger and the notes. | `product-rules.md` R-12; `architecture.md` 6; `flows/agent-turn.md`; `flows/task.md` B, D, I; `flows/takeover.md` A; `contracts/local.md` 2, 4; `contracts/storage.md` 3 |
@@ -27,14 +27,15 @@ decision now lives.
 | Q-12 | The home holds the only copy of a group. | No move and no copy in step 1; both in step 2. | `product-rules.md` R-135; `steps/step-2-3.md` |
 | Q-13 | Notes are long-term memory but retention is three months. | The ledger and the notes are exempt from retention and kept until a person deletes them. | `product-rules.md` R-102, R-135; `contracts/storage.md` 1, 4; `contracts/commands.md` 1.6; `flows/sync.md` G; `steps/step-1.md` A5.14 |
 | Q-14 | Notifications. | Follows Q-5. | `product-rules.md` R-163 |
+| Q-15 | Q-8 gives a working AI one session per task. Where does a turn go that belongs to no task: a direct question (R-70), a main-line mention, a call from another task's thread? | Accepted as proposed: each working AI has one read-only **group session** per group, in the project clone, for exactly those turns. To change code it calls `start_task`, and the work moves to a new task session. | `product-rules.md` R-12; `architecture.md` 6; `flows/agent-turn.md` A; `flows/task.md` G; `flows/ask.md` step 4; `contracts/local.md` 4, 6 |
+| Q-16 | Q-10 and Q-11 together: pushing the task's branch without approval, without inspecting commands. | Accepted as proposed: the node pushes (`push_branch`) and, in `submit_task`, pushes and opens the pull request. The node only runs the owner's installed and signed-in `git` and `gh`; it never reads a token or a credential, and the contract says so. | `product-rules.md` R-41, R-137; `architecture.md` C-11; `contracts/local.md` 7; `contracts/mcp-tools.md` 1; `flows/task.md` steps 8, 10 |
+| Q-17 | No screen for project memory; what a closed-page reminder may say. | (1) Deleting memory by hand lives in the **group info panel, under "Project memory"**: memory belongs to the project, so it goes with the group, not with global settings. (2) A reminder **may carry a short card summary**: group name, card type, one-line title. The payload is encrypted end to end for the browser (RFC 8291), so the push vendor sees ciphertext only. No message text, no code. The frontend supplies the missing designs. | `product-rules.md` R-102, R-163; `contracts/commands.md` 1.7; `steps/step-1.md` A8.3; `steps/step-1-frontend.md` F-13, F-15; `steps/step-1-backend.md` B-17 |
 
-## Q. Open: raised while applying the decisions
+## Q. Open
 
 | Id | Point | What the plan currently does | Why it needs a look |
 | --- | --- | --- | --- |
-| Q-15 | Q-8 gives a working AI one session per task. It does not say where a turn goes that belongs to no task: a direct question from the owner (R-70), a main-line mention, a call from a thread where the AI has no role. | Each working AI also has one long **group session** per group, read only, in the project clone. It cannot change code; `start_task` moves the work into a new task session. | Without it, either every question becomes a task (against R-70) or every message starts cold (against R-120). The cost is one more session per AI per group, dormant most of the time. |
-| Q-16 | Q-10 makes pushing the task's branch free of approval without inspecting commands. | The node does the push itself (`push_branch`, and inside `submit_task`). `submit_task` also opens the pull request. AIs are told not to push or open pull requests by themselves; if one runs `git push` itself at level 2, the CLI asks and a card appears, even for its own branch. | It moves "open the pull request" from the AI to the platform. It is the only way found to honour Q-10 and Q-11 together. |
-| Q-17 | The design has no screen for the project memory, and Q-13 says a person can delete entries. Q-5 makes a reminder unable to say what is waiting. | A plain list of notes and ledger entries per group with a delete action, placed in settings (F-13). A reminder names the group only; the "waiting for you" bar shows the item after opening. | Both need a design decision before the frontend builds them. |
+| Q-18 | The mock-up labels an approval card with what the command does ("install software", "push code"). Telling those apart means reading the command, which C-10 forbids. | The card shows the kind of request the CLI made (`command`, `file`, `network`, `other`), the exact request text, and the one-line justification the CLI attached. The reminder uses that justification as its title. | The card's label in the design changes from "what it does" to "what kind of request it is". A design point, not a mechanism. |
 
 ## K. Known limits
 

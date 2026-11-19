@@ -59,7 +59,8 @@ web/src/components/…        cards, thread, member card, indicator, base parts
 | F-10 | Brief card; task card with the six-step bar, badges, checks and review lines; thread with every message kind; decision card; summary card; review block; `task_merged` and approval cards shown under the secretary's name; the conflict and no-reviewer waits; "jump the queue" prompt | F-09, B-13 | A5.1 as seen in the client; every state in the design's component sheet is reachable from golden files |
 | F-11 | Call block in threads | F-10, B-15 | A6.1 as seen in the client |
 | F-12 | Terminal page: xterm.js on the `pty` channel, resize, takeover bar with queued count and hand-back, key row on phones, disabled state on a relayed path; `takeover.start` carries the task when opened from a task card; a line telling the owner that opening the terminal of an AI without a task creates one | F-08, B-16 | A7.1, A7.5, A7.6, A7.7 |
-| F-13 | Settings page: permissions defaults, retention with confirmation, notifications, appearance, this browser; service worker and Web Push subscription (the pushed content is a group id; the worker shows a fixed sentence with the group's name from local storage and opens the group); add-to-home-screen hint for iOS; project memory list per group (notes and ledger entries) with delete through `forget` | F-09, B-17 | A8.3, A5.14 as seen in the client |
+| F-13 | Settings page: permissions defaults, retention with confirmation, notifications, appearance, this browser; service worker and Web Push subscription; a reminder shows `group · card type · who: title` from the pushed summary, worded in the user's language, and opens the card (**no mock-up yet; the frontend supplies the design**); add-to-home-screen hint for iOS | F-09, B-17 | A8.3 |
+| F-15 | Group info panel with a "Project memory" section: the group's notes and its ledger entries (`fetch` with `kind: review`), each with a delete action that sends `forget` after a confirmation. Memory belongs to the project, so it lives with the group and not in the global settings (**no mock-up yet; the frontend supplies the design**) | F-10, B-13 | A5.14 as seen in the client |
 | F-14 | End-to-end suite in Playwright against real nodes with fake CLIs; accessibility pass (keyboard, focus, contrast, reduced motion, screen-reader names) at the design's widths | all | the browser-side checks of every acceptance test run in CI on Chrome, Firefox and WebKit |
 
 ## What each screen reads
@@ -73,7 +74,7 @@ web/src/components/…        cards, thread, member card, indicator, base parts
 | AI member card | `member` row; "open terminal" enabled when the viewer owns the AI and the browser's own path to that node is not `relay` |
 | computers and AIs | the owner's device log; `host.info` of each connected node; the browser's own path to each node |
 | settings | `host.info.settings` of each node; browser preferences |
-| project memory | `note` rows and `msg` rows of kind `review` of a group |
+| project memory, in the group info panel | `note` rows and `msg` rows of kind `review` of a group |
 | connection indicator | the browser's path to the home of the open group |
 
 ## Texts

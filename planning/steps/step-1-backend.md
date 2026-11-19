@@ -98,7 +98,7 @@ A7.7 need task sessions (B-14).
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
-| B-17 | `service install`/`remove` on three systems; self-update with checksum; release workflow producing six binaries, `SHA256SUMS` and `install.md`; `net_status`; Web Push sender whose content is the group id only; embedding the built web client | B-14 | A8.1, A8.2, A8.3 (backend half), A8.4 |
+| B-17 | `service install`/`remove` on three systems; self-update with checksum; release workflow producing six binaries, `SHA256SUMS` and `install.md`; `net_status`; Web Push sender with the short summary of `contracts/commands.md` 1.7; embedding the built web client | B-14 | A8.1, A8.2, A8.3 (backend half), A8.4 |
 | B-18 | Full pass on Windows and Linux; measurements of A8.6 | all | A8.5, A8.6 |
 
 ## Notes on the hard parts

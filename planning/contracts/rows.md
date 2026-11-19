@@ -197,13 +197,14 @@ Approval:
 {"task":"t13…","ai":"<member id>","tool":"Bash",
  "command":"pnpm add -D @playwright/test\npnpm exec playwright install chromium",
  "why":"Criteria 1 and 3 must be timed in a real browser.",
- "category":"install","approvers":["<user id>"]}
+ "category":"command","approvers":["<user id>"]}
 ```
 
 `command` is the request exactly as the CLI presented it. `why` is the
-justification the CLI attached, if any. `category` is a display hint
-(`install`, `push`, `outside`, `network`, `secret`, `delete`, `other`) and
-is never used to decide anything.
+justification the CLI attached, if any. `category` is the kind of request
+the CLI made (`command`, `file`, `network`, `other`), taken from the type of
+the request and never from the text of a command (C-10). It is a display
+hint and decides nothing.
 
 Decision:
 

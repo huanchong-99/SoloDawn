@@ -29,6 +29,10 @@ does what and why. Step-by-step sequences are in `flows/`.
 - **C-10** The node never inspects shell commands to decide whether they are
   safe (R-41). Permission questions come from the CLI; the node's only
   content check is the outbound secret check of R-137.
+- **C-11** For Git and the forge the node runs only the `git` and `gh`
+  command-line programs that the owner installed and signed in on that
+  machine. It never reads, stores or passes on a token or credential, and
+  never calls a forge API itself (R-137).
 
 ## 2. Components
 
@@ -192,7 +196,8 @@ that group's history (see `risks.md`).
 
 ## 6. Sessions
 
-An AI in a group has several sessions over time (R-12):
+An AI in a group has several sessions over time (R-12; decided by the
+coordinator, `risks.md` Q-8 and Q-15):
 
 | Session | Exists | Working folder | Level | Receives |
 | --- | --- | --- | --- | --- |

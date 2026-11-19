@@ -122,10 +122,25 @@ is how a person deletes one by hand.
   pair and hands it to each home it wants reminders from; the home stores it
   and sends a reminder when an event in `on` concerns that person and none
   of their devices is connected.
-  The reminder goes through the browser vendor's push service, encrypted
-  for that browser (R-163). Its whole content is `{"g":"<group id>"}`: no
-  text, no names, no card id. The browser shows "something is waiting for
-  you" with the group's name, which it knows locally, and opens that group.
+
+A reminder goes through the browser vendor's push service, encrypted end to
+end for that browser (RFC 8291); the vendor sees ciphertext only (R-163).
+Its content is a short summary:
+
+```json
+{"g":"<group id>","msg":"<id of the card or message>","group":"Website",
+ "kind":"approval","who":"Codex","title":"Install the browser test dependencies"}
+```
+
+| Field | Content |
+| --- | --- |
+| `kind` | `approval`, `decision`, `brief`, `mention`, `done` |
+| `who` | display name of the member it is about: the AI asking, the secretary, the author of the mention |
+| `title` | one line, at most 80 characters. `approval`: the first line of the justification the CLI attached (`body.why`), empty if there is none. `decision`: the question. `brief`, `done`: the brief or task title. `mention`: absent |
+
+Never included: message text, the command of an approval, code, file
+names. The browser shows `group · kind · who: title` in the user's language
+and opens the card `msg`.
 
 ### 1.8 Review outcome
 

@@ -34,7 +34,10 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   secretary has one long session per group; a working AI has one session per
   task, whose working folder is that task's worktree and which ends when the
   task ends. What carries over between tasks is the ledger and the notes
-  (R-102), not a session.
+  (R-102), not a session. A working AI also has one read-only group
+  session per group, in the project clone, for what belongs to no task:
+  questions, main-line mentions, calls from other tasks. To change code it
+  starts a task, which gets its own session (Q-15).
 - **R-13** `[S1]` Every task gets its own branch and its own worktree.
 - **R-14** `[S2]` A team may also have one team-wide group for notices and
   cross-project talk. No work happens there. AIs speak only in their own
@@ -79,7 +82,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   As settled by the coordinator:
   - pushing the task's own branch is inside the workspace and needs no
     approval; pushing any other branch, or force-pushing, needs approval
-    (Q-10);
+    (Q-10). The node itself pushes that branch and opens the pull request
+    (Q-16);
   - the platform never inspects commands. Bulk deletion inside the
     workspace is covered by Git and by the CLI's own sandbox, not by a
     card (Q-11);
@@ -174,7 +178,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   pass at 90, foundation tasks at 70, a veto item scores zero.
 - **R-102** `[S1]` A ledger of scored points and a set of context notes form
   the group's long-term memory. They are exempt from the retention period of
-  R-135 and stay until a person deletes them (Q-13).
+  R-135 and stay until a person deletes them (Q-13), which is done in the
+  group's own panel under "Project memory" (Q-17).
 - **R-103** `[S1]` Quality gates are each project's own check commands
   (build, test, lint), plus universal hard checks: leaked secrets, fake
   tests, missing tests. No built-in rule engine.
@@ -241,7 +246,9 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   credentials. Project secret files are never posted to a group. One small
   outbound check enforces this: whatever an AI sends to the group is refused
   when it matches common secret formats or looks like the content of an
-  environment file (Q-11).
+  environment file (Q-11). For Git and the forge the node only runs the
+  `git` and `gh` programs the owner has installed and signed in; it never
+  reads a token or a credential (Q-16).
 - **R-138** `[S1]` Every computer and every browser has its own identity key.
   A lost device can be revoked from another device.
 - **R-139** `[S1]` Each node keeps a local audit record of who made its AIs
@@ -271,8 +278,9 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-162** `[S1]` Chinese and English. Dark and light themes.
 - **R-163** `[S1]` Notifications use the browser's permission prompt; the
   user chooses. Reminders while the page is closed go through the browser
-  vendor's push channel, encrypted, carrying as little as possible: the
-  group id and the fact that something is new (Q-5, Q-14).
+  vendor's push channel, encrypted end to end for the browser, carrying a
+  short summary only: group name, card type, a one-line title. Never
+  message text, never code (Q-5, Q-14, Q-17).
 - **R-164** `[S1]` Supported browsers are those with native Ed25519 in
   WebCrypto; older ones see an upgrade notice. No signature library is
   bundled (Q-3).

@@ -217,8 +217,15 @@ and are reviewed like code. Contents:
 
 ## 7. Git and check commands
 
-Run by the node with the owner's own Git and `gh` configuration. The node
-stores no token. `<wt>` is `wt/<num>-<slug>`, `<br>` is
+**Credentials.** The node runs only the `git` and `gh` command-line
+programs that the owner has installed and signed in on this machine, as the
+owner's own user. It never reads, stores, copies or forwards a token or a
+credential: it opens no credential file, sets no token in an environment
+variable or an argument, and calls no forge API directly. If `git` or `gh`
+is not signed in, the command fails and its error text is what the AI and
+the owner see (R-137, C-11).
+
+The commands: `<wt>` is `wt/<num>-<slug>`, `<br>` is
 `task/<num>-<slug>`, and `<base>` is `origin/<base branch>` with a remote
 and the local base branch without one.
 

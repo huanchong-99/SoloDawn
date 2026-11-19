@@ -227,7 +227,6 @@ run (R-102). A person removes one with `forget`; the row then becomes a
 
 - IndexedDB: the device key (non-extractable), the owner's device log, the
   list of the owner's nodes and group homes with their signalling URLs, the
-  id and name of each group (so that a reminder can name its group), the
   VAPID key pair, interface preferences.
 - Memory only: group rows.
 
