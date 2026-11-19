@@ -3,8 +3,8 @@
 Which CLI sessions exist, where each one works, what it may do, and the
 states it goes through. Rules: R-12, R-70 to R-72, R-120 to R-124; settled
 by the coordinator in `risks.md` Q-8 and Q-15. Delivery of items to sessions
-is in `flows/agent-turn.md`; folders and CLI flags are in
-`contracts/local.md`.
+is in `flows/agent-turn.md`; CLI flags are in `contracts/drivers.md`,
+folders in `contracts/local.md`.
 
 ## 1. Kinds
 

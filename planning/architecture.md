@@ -74,8 +74,8 @@ for the groups it is home to.
 - Accepts signed commands from clients, checks who may do what, applies them,
   and assigns each changed row the next sequence number of the group.
 - Pushes changed rows to connected clients and answers history queries.
-- Decides which AI must be woken by which message and queues it in that AI's
-  inbox.
+- Decides which AI must be woken by which message and queues a signed item
+  in that AI's inbox.
 - Runs the task state machine and the group-level limits (rounds, wake-ups,
   failure counts, review rounds, pause).
 - When checks and review have passed, tells the assignee's host to merge. No
@@ -167,11 +167,12 @@ AI calling an AI on another machine is two ordinary messages through the home
   set it up was signed by the expected device. The DTLS fingerprint inside
   the signed description ties the encrypted channel to that device, so the
   rendezvous server cannot sit in the middle.
-- **Home**: trusted to order and store, not to speak for anyone. A home
-  cannot forge an approval or a message, because hosts check the original
-  author's envelope before acting. In step 1 every home belongs to the same
-  person as every host, so this matters from step 2; the mechanism is in
-  place from the start because it is the same envelope.
+- **Home**: trusted to order and store. Whatever it tells a host to do is an
+  inbox item that it signs. In step 1 the home is one of the owner's own
+  devices, so that signature is the owner's instruction (R-136). The
+  decision of an approval is checked end to end as well: the host verifies
+  the approver's own signature. From step 2 a home may belong to someone
+  else, and an item will also need the owner's signature for that task.
 - **AI**: has no key. Its host signs for it. A message "from an AI" is
   signed by the device that runs it, which belongs to the AI's owner.
 - **The CLI's own sandbox is the security boundary for level 2.** The node

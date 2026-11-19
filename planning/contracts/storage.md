@@ -21,43 +21,50 @@ CREATE TABLE row (
   g       TEXT    NOT NULL,   -- group id
   r       TEXT    NOT NULL,   -- group | member | device | task | msg | note
   id      TEXT    NOT NULL,
-  seq     INTEGER NOT NULL,   -- group sequence at last change
-  ts      INTEGER NOT NULL,   -- creation time, for retention
+  seq     INTEGER NOT NULL,   -- group sequence at last change: the sync cursor
+  pos     INTEGER NOT NULL,   -- group sequence at creation: display and paging order
+  ts      INTEGER NOT NULL,   -- creation time
+  mt      INTEGER NOT NULL,   -- time of last change
   thread  TEXT,               -- msg: task id, NULL for main line
   in_main INTEGER NOT NULL DEFAULT 0,  -- msg: 1 if shown in the main line
-  final   INTEGER NOT NULL DEFAULT 0,  -- task: 1 if merged, cancelled or failed
+  pending INTEGER NOT NULL DEFAULT 0,  -- msg: 1 while its card state is pending
+  final   INTEGER NOT NULL DEFAULT 0,  -- task: 1 if merged or cancelled
   keep    INTEGER NOT NULL DEFAULT 0,  -- 1 for notes and review messages: exempt from retention
   gone    INTEGER NOT NULL DEFAULT 0,  -- 1 for the marker of a row removed on purpose
   data    TEXT    NOT NULL,   -- the row as JSON, exactly as pushed
   PRIMARY KEY (g, r, id)
 ) STRICT;
 CREATE UNIQUE INDEX row_by_seq    ON row (g, seq);
-CREATE INDEX        row_by_thread ON row (g, thread, seq) WHERE r = 'msg';
-CREATE INDEX        row_main      ON row (g, seq) WHERE r = 'msg' AND in_main = 1;
+CREATE INDEX        row_by_thread ON row (g, thread, pos) WHERE r = 'msg';
+CREATE INDEX        row_main      ON row (g, pos) WHERE r = 'msg' AND in_main = 1;
+CREATE INDEX        row_pending   ON row (g) WHERE pending = 1;
+CREATE INDEX        row_keep      ON row (g, r, pos) WHERE keep = 1;
 ```
 
-- "Rows after n": `SELECT data FROM row WHERE g = ? AND seq > ? ORDER BY seq`.
-- A thread page: `… WHERE g = ? AND r = 'msg' AND thread = ? AND seq < ?
-  ORDER BY seq DESC LIMIT ?`.
-- State rows (`group`, `member`, `device`, `task`, `note`) of a group are
-  also held in memory by the home while the node runs; they are small. The
-  rule code reads memory and writes through to this table. Messages are read
+- "Rows after n": `SELECT data FROM row WHERE g = ? AND seq > ? AND seq <= ?
+  ORDER BY seq`, with the upper bound S taken when the read was requested.
+- A thread page: `… WHERE g = ? AND r = 'msg' AND thread = ? AND pos < ?
+  ORDER BY pos DESC LIMIT ?`. The ledger and the notes are read through
+  `row_keep`.
+- State rows (`group`, `member`, `device`, `task`) of a group are also held
+  in memory by the home while the node runs; they are small. The rule code
+  reads memory and writes through to this table. Messages and notes are read
   from disk.
-- The message id is the nonce of the command that created it, so a repeated
-  command hits the primary key and is answered `ok` without effect.
 
-### `grp`: sequence counter
+### `grp`: counters
 
 ```sql
 CREATE TABLE grp (
-  g    TEXT PRIMARY KEY,
-  seq  INTEGER NOT NULL,      -- last sequence number given out
-  num  INTEGER NOT NULL       -- last task number given out (T-n)
+  g      TEXT PRIMARY KEY,
+  seq    INTEGER NOT NULL,     -- last sequence number given out
+  num    INTEGER NOT NULL,     -- last task number given out (T-n)
+  purged INTEGER NOT NULL DEFAULT 0   -- highest seq of a gone marker that retention removed
 ) STRICT;
 ```
 
 Each command runs in one transaction: bump `seq` once per changed row, write
-the rows, write inbox items, commit, then push.
+the rows, the inbox items and the receipt, commit, then push. A `sync` whose
+`since` is below `purged` is answered with a reset.
 
 ### `inbox`: items waiting for AIs
 
@@ -70,15 +77,15 @@ CREATE TABLE inbox (
   why        TEXT    NOT NULL,
   msg        TEXT,               -- message id
   task       TEXT,               -- task id
-  jump       INTEGER NOT NULL DEFAULT 0,
+  cause      TEXT,               -- JSON: the signed act that led to the item
   not_before INTEGER NOT NULL DEFAULT 0,  -- wake-up cap, round limit hold
-  extra      TEXT,               -- JSON, e.g. the approver's envelope
   created    INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX inbox_by_host ON inbox (host, id);
 ```
 
-A row is deleted when the host acknowledges it.
+The signed item envelope is built when the item is sent. A row is deleted
+when its host acknowledges it.
 
 ### `push_sub`: reminders for browsers
 
@@ -94,35 +101,38 @@ CREATE TABLE push_sub (
 
 ## 2. Tables used by both roles
 
-### `device_log`: verified device logs
-
 ```sql
-CREATE TABLE device_log (
-  user TEXT    NOT NULL,       -- user id
+CREATE TABLE device_log (       -- verified device logs
+  user TEXT    NOT NULL,        -- user id
   ver  INTEGER NOT NULL,
-  env  TEXT    NOT NULL,       -- the entry's envelope, JSON
+  env  TEXT    NOT NULL,        -- the entry's envelope, JSON
   PRIMARY KEY (user, ver)
 ) STRICT;
-```
 
-Holds the log of the node's owner and of every person in a group homed here.
-The valid device set of each person is rebuilt from it at start and kept in
-memory. A `device` row in `row` is the same entry, written once per group so
-that it gets a group sequence number.
+CREATE TABLE receipt (          -- one per accepted command (commands.md, "Once only")
+  k      TEXT    NOT NULL,      -- signer device id
+  n      TEXT    NOT NULL,      -- the command's nonce
+  ts     INTEGER NOT NULL,      -- the command's own ts
+  answer TEXT    NOT NULL,      -- JSON: the response that was sent
+  PRIMARY KEY (k, n)
+) STRICT;
 
-### `setting`: key and value
-
-```sql
 CREATE TABLE setting (
   key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL          -- JSON
+  value TEXT NOT NULL           -- JSON
 ) STRICT;
 ```
 
-Keys: `name`, `owner` (user id), `rendezvous` (list of URLs),
-`retention_days` (90), `idle_minutes` (15), `max_open` (4),
-`default_level` (2), `all_level3` (false), `approvers` (list of user ids),
-`offline` (false).
+- `device_log` holds the log of the node's owner and of every person in a
+  group homed here. The valid device set of each person is rebuilt from it
+  at start and kept in memory. A `device` row in `row` is the same entry,
+  written once per group so that it gets a group sequence number.
+- `receipt` is written in the transaction of the command it belongs to, for
+  home commands and host commands alike.
+- `setting` keys: `name`, `owner` (user id), `rendezvous` (list of URLs),
+  `retention_days` (90), `idle_minutes` (15), `max_open` (4),
+  `default_level` (2), `all_level3` (false), `approvers` (list of user ids),
+  `offline` (false).
 
 ## 3. Host tables
 
@@ -132,12 +142,12 @@ CREATE TABLE agent (              -- AI CLIs registered on this machine
   cli_version TEXT NOT NULL,
   account     TEXT,               -- personal | team | api_key; NULL until declared
   model       TEXT,
-  caps        TEXT NOT NULL DEFAULT '{}'   -- JSON: day_pct, per-task limits
+  caps        TEXT NOT NULL DEFAULT '{}'   -- JSON, as in commands.md section 2
 ) STRICT;
 
 CREATE TABLE perm (               -- R-40, R-45
   agent       TEXT    NOT NULL,
-  g           TEXT    NOT NULL,   -- group id, or '*' for the default
+  g           TEXT    NOT NULL,   -- group id
   level       INTEGER NOT NULL,   -- 1 | 2 | 3
   repo_config INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (agent, g)
@@ -160,13 +170,14 @@ CREATE TABLE session (            -- one per session (sessions.md)
   PRIMARY KEY (g, member, task)
 ) STRICT;
 
-CREATE TABLE grant_once (         -- late approvals (flows/approval.md D)
+CREATE TABLE approval (           -- one per approval request (flows/approval.md)
+  card   TEXT PRIMARY KEY,        -- id of the approval card
   g      TEXT NOT NULL,
   member TEXT NOT NULL,
+  task   TEXT NOT NULL,
   tool   TEXT NOT NULL,
-  input  TEXT NOT NULL,           -- SHA-256 of the exact request input
-  task   TEXT,
-  PRIMARY KEY (g, member, tool, input)
+  input  TEXT NOT NULL,           -- SHA-256 of the request input as the CLI sent it
+  state  TEXT NOT NULL            -- pending | granted
 ) STRICT;
 
 CREATE TABLE audit (              -- R-139
@@ -175,11 +186,14 @@ CREATE TABLE audit (              -- R-139
   g      TEXT,
   agent  TEXT,
   what   TEXT NOT NULL,           -- delivered | refused | requested | approval | takeover | handback | merge | setting
+  item   INTEGER,                 -- delivered, refused: the inbox item id
+  home   TEXT,                    -- delivered, refused: device id of the home
   detail TEXT NOT NULL,
   by     TEXT,                    -- device id that caused it
   result TEXT
 ) STRICT;
 CREATE INDEX audit_by_ts ON audit (ts);
+CREATE UNIQUE INDEX audit_item ON audit (home, item) WHERE item IS NOT NULL;
 
 CREATE TABLE usage (              -- R-61
   agent TEXT NOT NULL,
@@ -196,32 +210,41 @@ CREATE TABLE peer (               -- remembered signalling addresses (R-133)
 ) STRICT;
 ```
 
-Not stored: which inbox items were delivered (the host acknowledges an item
-just before writing it to a session and remembers delivered ids in memory
-for the life of the process); pending approval requests (they live in the
-waiting CLI process and in the card on the home); session tokens; relay
-credentials; the pairing secret; anything from a terminal.
+- **Delivered once.** Before a host acknowledges an inbox item it writes the
+  audit row `delivered` (or `refused`) with the home and the item id. An
+  item that is already there is acknowledged again and not delivered again.
+  The audit the owner reads (R-139) is the same record.
+- **Approvals.** A row is written when the request is posted and removed
+  when the request is denied, when the grant is used, and when the task is
+  reassigned or ends.
+
+Not stored: session tokens, relay credentials, the pairing secret, the
+hourly wake-up counts, and anything from a terminal.
 
 ## 4. Retention (R-135)
 
 Once a day, with `cutoff = now − retention_days`:
 
 ```sql
+UPDATE grp SET purged = MAX(purged, (SELECT COALESCE(MAX(seq), 0) FROM row
+                                     WHERE row.g = grp.g AND gone = 1 AND mt < :cutoff));
+DELETE FROM row   WHERE gone = 1 AND mt < :cutoff;
 DELETE FROM row   WHERE r = 'msg'  AND keep = 0 AND ts < :cutoff;
-DELETE FROM row   WHERE r = 'task' AND final = 1 AND ts < :cutoff;
-DELETE FROM row   WHERE gone = 1 AND ts < :cutoff;
+DELETE FROM row   WHERE r = 'task' AND final = 1 AND mt < :cutoff;
 DELETE FROM inbox WHERE created < :cutoff;
 DELETE FROM audit WHERE ts < :cutoff;
 DELETE FROM usage WHERE day < :cutoff_day;
 DELETE FROM peer  WHERE ok_at < :cutoff;
+DELETE FROM receipt WHERE ts < :now - 86400000;
 ```
 
-Lowering `retention_days` takes effect at the next daily run, after one
-confirmation in the web client.
-
-Notes and `review` messages have `keep = 1` and are never deleted by this
-run (R-102). A person removes one with `forget`; the row then becomes a
-`gone` marker whose `ts` is the time of removal.
+- A finished task is aged from the day it finished (`mt`), not from the day
+  it was created.
+- Notes and `review` messages have `keep = 1` and are never deleted by this
+  run (R-102). A person removes one with `forget`; the row then becomes a
+  `gone` marker.
+- Lowering `retention_days` takes effect at the next daily run, after one
+  confirmation in the web client.
 
 ## 5. What is on a browser
 
@@ -232,6 +255,6 @@ run (R-102). A person removes one with `forget`; the row then becomes a
 
 ## 6. Sizes to expect
 
-A message row is about 0.5 to 2 KiB. A busy project group may write a few
-thousand rows a day; ninety days stay well under a gigabyte. No sharding, no
-archive tables, no compaction beyond SQLite's own.
+A message row is about 0.5 to 2 KiB, at most about 50 KiB. A busy project
+group may write a few thousand rows a day; ninety days stay well under a
+gigabyte. No sharding, no archive tables, no compaction beyond SQLite's own.

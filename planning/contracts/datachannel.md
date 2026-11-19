@@ -1,8 +1,8 @@
 # Contract: data-channel protocol
 
 What travels on a WebRTC connection between a client and a node. This file
-covers channels, framing, the session, reading, the command transport, the
-inbox for hosts, and the terminal channel. Row shapes are in
+covers channels, framing, the session, device logs, reading, the command
+transport, the inbox for hosts, and the terminal channel. Row shapes are in
 `contracts/rows.md`. The commands themselves are in `contracts/commands.md`.
 
 Two surfaces share the same channel and the same framing:
@@ -23,51 +23,67 @@ peer is (section 8).
 ## 2. Framing on `ctl`
 
 - One JSON object per message. Field `t` is the type.
-- A message is at most 60 KiB. Larger results are split into several
-  messages by the sender (`rows` batches, `fetch` pages).
+- A message is at most 60 KiB. The payload `p` of an envelope is at most
+  24 KiB, so a row with its envelope always fits one message. Larger results
+  are split by the sender (`rows` batches, `fetch` pages).
 - **Request**: has `id` (integer, unique per connection, chosen by the
   sender). **Response**: has `re` equal to that `id`, and either `ok: true`
   plus result fields or `err: {code, msg}`. `msg` is an English sentence for
   logs; clients show their own text for `code`.
 - **Push**: has no `id` and no `re`.
 
-`[unverified]` 60 KiB assumes both stacks accept SCTP messages of that size
-(pion's default limit and current browsers). Spike S-1 measures it; the
-number is one constant.
+`[unverified]` 60 KiB assumes both stacks accept SCTP messages of that size.
+Spike S-1 measures it; the two numbers are constants.
 
 ## 3. Session
 
 Client to node, first message:
 
 ```json
-{"t":"hello","id":1,"v":1,"kind":"browser","name":"phone browser",
- "addrs":[],"path":"direct"}
+{"t":"hello","id":1,"v":1,"kind":"browser","name":"phone browser","addrs":[]}
 ```
 
 | Field | Meaning |
 | --- | --- |
 | `v` | protocol version; a node answers `err.code = "version"` if it cannot speak it |
 | `kind` | `browser` or `host` |
-| `addrs` | hosts only: signalling URLs at which this node may be reachable (local address, mapped ports) |
-| `path` | the sender's classification of the path: `lan`, `direct`, `relay` |
+| `addrs` | hosts only: signalling URLs at which this node may be reachable |
 
 Node to client:
 
 ```json
 {"t":"welcome","re":1,"ok":true,"v":1,"device":"<node device id>",
  "name":"workstation","version":"0.3.1","time":1763600000000,
- "groups":[{"g":"Qm1…","name":"Website","seq":812}],
- "owner":true}
+ "groups":[{"g":"Qm1…","name":"Website","seq":812}],"owner":true}
 ```
 
 | Field | Meaning |
 | --- | --- |
 | `groups` | groups homed on this node that the peer's person may read |
 | `owner` | true if the peer is a device of this node's owner; the host surface is then available |
-| `time` | the node's clock, for display of relative times |
 
-A `hello` from a device that already has a connection to this node replaces
-the older connection (`flows/connect.md` step 11).
+- When the list of groups for a connected peer changes, the node pushes
+  `{"t":"groups","groups":[…]}` with the whole list.
+- A node keeps one inbound connection per client device. A `hello` on a new
+  inbound connection from a device that already has one closes the older
+  one. Nothing is carried over: the client reads again with `sync`
+  (`flows/connect.md` B). A connection the node itself opened as a client
+  of that device's home is separate and unaffected.
+- Each side decides what its path is from the candidate pair its own stack
+  selected. Nothing a peer says about the path is used for a rule.
+
+### 3.1 Device logs
+
+```json
+{"t":"devlog","user":"<user id>","entries":[{"p":"…","k":"…","s":"…"}]}
+```
+
+A push, in either direction, with entries of one person's device log in
+order (`contracts/envelope.md` section 4). The receiver applies each entry
+by the log's own rules; who sent the frame does not matter, because every
+entry carries its own signature. It is the only way log entries travel:
+during pairing, when a device forwards a new entry, and after `welcome`,
+when each side sends the logs the other may be missing.
 
 ## 4. Reading a group (home surface)
 
@@ -77,14 +93,17 @@ the older connection (`flows/connect.md` step 11).
 {"t":"sync","id":2,"g":"Qm1…","since":0,"state_only":false}
 ```
 
-The node sends zero or more `rows` pushes, then the response:
+The home takes the group's current sequence number S, subscribes this
+connection to every change after S, and then sends, in this order:
 
-```json
-{"t":"synced","re":2,"ok":true,"g":"Qm1…","seq":812,"reset":false}
-```
+1. `{"t":"reset","g":"Qm1…"}`, only if the client must drop its cache
+   (`flows/sync.md` C);
+2. `rows` pushes with what the client is missing, up to S;
+3. the response `{"t":"synced","re":2,"ok":true,"g":"Qm1…","seq":S}`;
+4. from then on, every change after S, as `rows` pushes.
 
-After `synced`, the node pushes every later change of that group to this
-connection until it closes. Semantics in `flows/sync.md`.
+With `state_only: true`, steps 2 and 4 carry only `group`, `member`,
+`device` and `task` rows.
 
 ### `rows` (push)
 
@@ -93,7 +112,8 @@ connection until it closes. Semantics in `flows/sync.md`.
 ```
 
 Rows are in increasing `seq`. A row replaces any cached row with the same
-`r` and `id`; a row with `gone: true` removes it.
+`r` and `id`, unless the cached one has a higher `seq`; a row with
+`gone: true` removes it.
 
 ### `fetch` (request)
 
@@ -101,13 +121,18 @@ Rows are in increasing `seq`. A row replaces any cached row with the same
 {"t":"fetch","id":3,"g":"Qm1…","thread":"<task id>","before":700,"limit":50}
 ```
 
-`thread` is a task id, or `null` for the main line. `limit` is at most 100.
-With `"kind":"review"` in place of `thread`, the answer holds the `review`
-messages of all threads: the ledger (R-102).
+- `thread` is a task id, or `null` for the main line. In its place,
+  `"kind":"review"` asks for the review messages of all threads (the
+  ledger) and `"kind":"note"` for the notes (R-102).
+- `before` is a `pos` (`contracts/rows.md`): the answer holds rows with a
+  lower `pos`, newest first. `limit` is at most 100.
 
 ```json
-{"t":"fetched","re":3,"ok":true,"rows":[ … newest first … ],"more":true}
+{"t":"fetched","re":3,"ok":true,"rows":[ … ],"more":true}
 ```
+
+The home stops filling the answer when the next row would exceed the message
+limit; `more` says whether older rows exist.
 
 ## 5. Commands
 
@@ -117,75 +142,73 @@ messages of all threads: the ledger (R-102).
 
 ```json
 {"re":4,"ok":true}
+{"re":4,"ok":true,"num":14}
 {"re":4,"err":{"code":"forbidden","msg":"only the AI's owner may decide this approval"}}
 ```
 
 - The payload inside `env` names the command in its own `t`
   (`contracts/commands.md`).
 - The signer `env.k` must be the device that this connection was
-  authenticated for. Nobody can submit another device's envelope, so a
-  repeated command can only come from its own signer.
+  authenticated for.
+- A command that the receiver has already accepted gets the same answer
+  again and has no second effect (`contracts/commands.md`, "Once only").
 - A home command has `g`. A host command has `to` equal to the node's device
-  id and no `g`, or a `g` where noted.
-- Effects are observed through `rows` (home surface) or `host.info` (host
-  surface), never through the response.
+  id.
 
 ## 6. Inbox (home to host)
 
-The home decides which AI must see which message and queues an item per AI.
+The home decides which AI must see what and queues an item per AI. Every
+item is an instruction to a host, so every item is signed by the home.
 
 ```json
 {"t":"inbox","g":"Qm1…","items":[
-  {"id":4411,"ai":"<member id>","why":"mention",
-   "msg":{"r":"msg", …},"task":{"r":"task", …},
-   "authz":{"by":"author"}}
+  {"env":{"p":"{\"t\":\"item\",\"n\":\"…\",\"ts\":1763600000000,\"g\":\"Qm1…\",\"to\":\"<host device>\",\"item\":4411,\"ai\":\"<member id>\",\"why\":\"review\",\"task\":\"t12…\",\"msg\":\"Zk3…\",\"commit\":\"9f2c1ab\"}",
+          "k":"<home device>","s":"…"},
+   "msg":{"r":"msg", …},"task":{"r":"task", …},"cause":{"p":"…","k":"…","s":"…"}}
 ]}
 ```
 
-| Field | Meaning |
+| Part | Meaning |
 | --- | --- |
-| `id` | increasing; names the item in `ack` |
-| `why` | `mention`, `assign`, `review`, `reply`, `decided`, `confirmed`, `checks`, `resume`, `notice`, `merge` (table in `contracts/commands.md` section 3) |
-| `jump` | optional, true when the owner chose to jump the queue (R-72) |
-| `msg` | the message row that caused the item, with its original envelope |
-| `task` | the task row, when the item is about a task |
-| `authz` | why the host may act on it: `author` (the message is signed by a device of the AI's owner), `task` (it belongs to a task the owner authorised), `confirm` and `list` (step 2) |
+| `env` | the item itself: which AI, why, which task and message, and for `review` and `merge` which commit; `jump: true` when the owner jumped the queue. Signed by the home's device |
+| `msg`, `task` | copies of the rows the turn is built from. `msg.env`, when present, is the author's own envelope |
+| `cause` | the signed decision that led to the item, unchanged: the `act` of the person who decided an approval or a decision, or who confirmed the brief |
 
-- The host answers each item with `{"t":"ack","g":"…","id":4411}` when it
-  delivers the item to the session or refuses it. Until then the item stays
-  on the home; the host keeps undelivered items in memory only. The home
-  deletes acknowledged items.
-- On every `hello` from a host the home re-sends unacknowledged items for
-  that host's AIs.
-- An item with `why: "merge"` is for the host itself, not for the session:
-  the host runs the merge for `task` and reports with a `task` command.
+- **What a host accepts (step 1).** The item's envelope is signed by the
+  home of that group, that device is in the log of the host's owner, `to`
+  is this host and `ai` runs here. For `decided` on an approval the host
+  also checks `cause` itself: signed by its owner or a named approver, about
+  the request it holds (`flows/approval.md`). Rows without a signature are
+  content, never authority. From step 2 a home may belong to someone else,
+  and an item will also need the owner's own signature for that task.
+- The host answers `{"t":"ack","g":"…","item":4411}` when it delivers the
+  item to the session or refuses it. The home deletes an acknowledged item
+  only if the acknowledging connection is the item's host. On every `hello`
+  from a host the home sends its unacknowledged items again.
+- An item with `why: "merge"` is for the host itself, not for a session.
 - What the host does with an item is in `flows/agent-turn.md`.
 
 ## 7. Host surface
 
 Available when `welcome.owner` is true. The name describes the wire. In the
-code, node-level requests (`device`, `pair.browser`, node settings, putting
+code, node-level requests (`pair.browser`, node settings, putting
 `host.info` together) are handled by `internal/node`, and everything about
 AIs and sessions by `internal/host` (`architecture.md` section 8).
 
 ### `host.info` (request, then pushes)
 
-```json
-{"t":"host.info","id":5}
-```
-
-The response and every later push with `"t":"host.info"` carry the whole
-object:
+The response to `{"t":"host.info","id":5}` and every later push of that type
+carry the whole object:
 
 ```json
 {"t":"host.info","re":5,"ok":true,
  "device":"…","name":"workstation","os":"macOS 15.2","version":"0.3.1",
- "open":2,"max_open":4,"offline":false,
+ "open":2,"max_open":4,"offline":false,"update":null,
  "homes":[{"g":"Qm1…","name":"Website"}],
  "relay":{"used":3250000,"limit":52428800},
  "agents":[
    {"agent":"claude","cli_version":"2.1.311","account":"personal",
-    "login_ok":true,"caps":{"day_pct":80},
+    "login_ok":true,"caps":{"day":{"unit":"turns","max":200}},
     "groups":[{"g":"Qm1…","member":"<member id>","level":2,
                "repo_config":false,"state":"working","task":"<task id>",
                "queued":0}]}],
@@ -196,43 +219,37 @@ object:
 `agents` lists every supported CLI found on the machine; `account` is `null`
 until the owner has declared it. In `groups`, `state` and `task` are the
 derived state of the AI in that group (`contracts/rows.md` section 2),
-`level` is the level of its task sessions, and `queued` counts held inbox
-items.
+`level` is the level of its task sessions, and `queued` counts held items.
 
 ### `audit` (request)
 
-```json
-{"t":"audit","id":6,"before":1763600000000,"limit":50}
-```
+`{"t":"audit","id":6,"before":1763600000000,"limit":50}` is answered with
 
 ```json
 {"re":6,"ok":true,"rows":[
   {"ts":1763599000000,"g":"Qm1…","ai":"claude","what":"approval",
-   "detail":"git push origin task/11-docs","by":"<device id>","result":"approved"}]}
+   "detail":"git push origin other-branch","by":"<device id>","result":"approved"}]}
 ```
 
-### `pty.resize` (push, browser to node)
+### Terminal
 
-```json
-{"t":"pty.resize","g":"Qm1…","ai":"<member id>","cols":120,"rows":32}
-```
-
-### Terminal channel
-
-After the host accepted `takeover.start` for (g, member), the browser opens
-a data channel labelled `pty:<g>:<member>`. Each message is a chunk of raw
-bytes: keystrokes one way, terminal output the other. The host stops reading
-from the pseudo-terminal while the channel's send buffer is above 1 MiB.
-Closing the channel is hand-back. The host refuses `takeover.start` with
-`err.code = "relay"` when the path to this browser is `relay`.
+- `{"t":"pty.resize","g":"Qm1…","ai":"<member id>","cols":120,"rows":32}`
+  is a push from the browser.
+- After the host accepted `takeover.start`, the browser opens a data channel
+  labelled `pty:<g>:<member>`. Each message is a chunk of raw bytes. The
+  host stops reading from the pseudo-terminal while the channel's send
+  buffer is above 1 MiB. The channel closing, for any reason, is hand-back.
+- The host refuses `takeover.start` with `relay` when the pair its own
+  stack selected for this connection is relayed.
 
 ## 8. What a node accepts from whom
 
 | Peer is | Accepted |
 | --- | --- |
 | a device of the node's owner | everything: host surface, and home surface for groups homed here |
+| a device that passed the pairing exchange and is not yet in the owner's log | `hello` and `devlog` only, until a log entry makes it an owner device (`flows/pairing.md`) |
 | a device of another member of a group homed here (step 2) | home surface for that group only |
-| the host of an AI member of a group homed here | home surface for that group, `ack` |
+| the host of an AI member of a group homed here | home surface for that group, `ack` for its own items |
 | anything else | the connection is not accepted (signalling was dropped) |
 
 ## 9. Error codes
@@ -242,14 +259,15 @@ Closing the channel is hand-back. The host refuses `takeover.start` with
 | `version` | protocol version not supported |
 | `bad_request` | payload does not match the contract |
 | `bad_sig`, `unknown_device`, `not_for_me`, `stale` | envelope checks (`contracts/envelope.md`) |
-| `forbidden` | this member may not do this |
+| `forbidden` | this principal may not do this |
 | `not_found` | the group, task or message does not exist |
-| `conflict` | the target is not in a state that allows this (already decided, already merged) |
+| `conflict` | the target is not in a state that allows this |
 | `paused` | the group or task is paused |
 | `limit` | a runaway limit refused it; `msg` names the limit |
 | `relay` | not available on a relayed path |
+| `busy` | the session cannot do this now |
+| `cli` | the CLI program failed; `msg` carries its error text |
 | `secret` | host only: text from an AI matched the outbound secret check and was not sent (R-137) |
-| `busy` | the session cannot do this now (for example takeover during a switch) |
 | `home_unreachable` | host only: the home of that group is not connected |
 
 Every boundary failure maps to exactly one of these. Internal failures are

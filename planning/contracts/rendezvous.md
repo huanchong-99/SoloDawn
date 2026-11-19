@@ -80,10 +80,18 @@ Rules:
 - **Who offers.** The client side always offers: a browser to a node
   (pairing included), a host to a home. Homes never offer. There is no glare
   handling because there is no glare.
-- **Fan-out.** The offering side sends the same offer over every signalling
-  path it has for the target (section 4) at once. The receiver handles the
-  first copy of a given `conn` and ignores the rest; it answers on the path
-  the first copy arrived on.
+- **Fan-out.** The offering side sends its offer and its candidates on
+  every signalling path it has for the target (section 4). The answering
+  side sends its answer on every path on which a copy of the offer arrives,
+  and its candidates on every path. Everything is told apart by sender and
+  `conn`; a copy of something already handled is ignored. No path is ever
+  "the" path, so nothing depends on which copy arrived first.
+- **Two directions.** Two nodes may each be a client of the other (each
+  hosts an AI in a group homed on the other). Each offers its own
+  connection; the two do not replace each other.
+- Spike S-1 also measures whether complete descriptions, gathered before
+  sending, are fast and small enough (16 KiB per frame). If so the `ice`
+  payload is removed.
 - **Acceptance.** The receiver applies an offer only if the envelope passes
   the checks in `contracts/envelope.md` section 3. Anything else is dropped
   without an answer.
@@ -91,12 +99,18 @@ Rules:
 
 ## 3. Relay
 
-- Standard TURN. Credentials: `username` = expiry (Unix seconds) + `:` +
-  device id; `credential` = base64 HMAC-SHA256(server secret, username). The
-  secret is random per process start.
-- **Quota**: bytes relayed for allocations of a device, both directions, per
-  UTC day. Default 50 MB, set by a flag. Over quota the allocation stops
-  forwarding until the next day. Counters live in memory.
+- Standard TURN with time-limited credentials in the usual form:
+  `username` = expiry (Unix seconds) + `:` + device id; `credential` =
+  base64 HMAC-SHA1(server secret, username). Issuer and verifier are the
+  same pair of functions; the library's own are used if they accept the
+  device id in the username `[unverified]`, spike S-6. The secret is random
+  per process start. To the client the credential is an opaque password.
+- **Quota**: bytes relayed for a device, both directions, summed over all
+  its allocations, per UTC day. Default 50 MB, set by a flag. The count is
+  taken where relayed data is read and written, so an allocation that is
+  already open stops forwarding once the quota is used; refusing new
+  allocations is not enough. Counters live in memory and start again when
+  the service restarts: the quota limits a resource, it is not a budget.
 - The relay sees DTLS ciphertext only.
 - Clients treat the relay as the lowest-priority path and leave it as soon as
   a direct path works (`flows/connect.md`).
@@ -120,20 +134,29 @@ A node keeps, per known device, a short list of signalling addresses:
 Browsers cannot use 1, and can use 2 only for `localhost`: a page served over
 HTTPS may not open `ws://` to another machine. A browser with no reachable
 rendezvous can therefore start only through a node on the same machine,
-which then signals on its behalf. See `risks.md` K-2.
+which then signals on its behalf. A self-hoster who puts a node's port
+behind a `wss://` address with a trusted certificate has, by that, a
+rendezvous a browser can use: it is the same handler. See `risks.md` K-2.
 
 ## 5. ICE configuration
 
-Node (pion):
+Node (pion; setting names `[documented, round 1]`, to be shown working in
+spikes S-1 and S-8):
 
-- UDP on one fixed port (default 47800) for all connections.
-- ICE-TCP passive listener on 47801.
+- UDP on one fixed port (default 47800) for all connections
+  (`SetICEUDPMux`).
+- ICE-TCP passive listener on 47801 (`SetICETCPMux`).
 - IPv4 and IPv6 host candidates, server-reflexive through STUN, relay
   through TURN.
 - Asks the router (UPnP, NAT-PMP) to map 47800/udp, 47800/tcp and 47801/tcp,
-  and advertises mapped addresses as candidates and as signalling addresses.
-- Resolves `.local` candidates from browsers.
+  and advertises mapped addresses as candidates
+  (`SetICEAddressRewriteRules`) and as signalling addresses. Obtaining the
+  mapping is the node's own work; pion only publishes it.
+- Resolves `.local` candidates from browsers (`SetICEMulticastDNSMode`).
 - A `probe` connection is created with STUN only, no TURN.
+- Spike S-1 also tries pion's opt-in renomination: if a live relayed
+  connection moves to a direct pair by itself with every supported browser,
+  the probe connection is not needed.
 
 Browser: `RTCPeerConnection` with the `ice` list from `ready`; a `probe`
 connection drops the TURN entry.

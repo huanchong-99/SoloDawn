@@ -24,9 +24,10 @@ home. NA and NB may be the same node; nothing below changes.
    `kind: reply`.
 6. H stores the reply, sets the call's `state` to `answered` with the
    elapsed milliseconds, and queues a `reply` item for A.
-7. NA receives the item while A's `ask` call is still open, returns the
-   answer as the tool result, and acknowledges the item. A continues its
-   turn with the answer.
+7. NA receives the item while A's `ask` call is still open. The item is
+   not held behind A's running turn: it is the answer that turn is waiting
+   for. NA returns it as the tool result and acknowledges the item. A
+   continues its turn with the answer.
 
 ## B. No answer within the wait
 

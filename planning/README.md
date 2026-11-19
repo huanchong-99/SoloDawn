@@ -1,8 +1,9 @@
 # SoloDawn rebuild: planning
 
-Status: **v0.1 draft.** Round 1 review is in progress on the first commit
-of this directory. Since then the coordinator settled the open points Q-1 to
-Q-18 and the plan was updated accordingly; see `risks.md`.
+Status: **v0.2 draft.** Round 1 is answered: the review is
+`reviews/gpt-6.2-round-1.md`, the answers and the list of changes are
+`reviews/fable-round-1.md`. The coordinator has settled Q-1 to Q-18
+(`risks.md`); Q-19 and Q-20 are open. Round 2 can start.
 
 SoloDawn is being rebuilt from an empty tree. This directory holds the plan
 that the implementation will follow. It is written for two readers: the
@@ -110,6 +111,7 @@ Change: <files and sections edited, or the reason for rejecting>
 | `flows/agent-turn.md` | delivering a message to an AI and getting its reply |
 | `flows/approval.md` | an AI asks for permission, the owner decides |
 | `flows/task.md` | brief, confirm, work, checks, review, merge |
+| `flows/trace-task.md` | one confirmed task on the wire: who signs what, which commit |
 | `flows/ask.md` | one AI calls another, same machine or not |
 | `flows/takeover.md` | the owner takes the terminal and hands it back |
 | `contracts/envelope.md` | identities, signed envelope, device log |
@@ -119,13 +121,16 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/commands.md` | every signed command, who may send it, what it does |
 | `contracts/mcp-tools.md` | tools the node offers to AI sessions |
 | `contracts/storage.md` | SQLite schema draft |
-| `contracts/local.md` | local interfaces: CLI, MCP shim socket, CLI driver invocations |
+| `contracts/task-machine.md` | the one table of task transitions |
+| `contracts/drivers.md` | how each CLI is started, levels, turn format, instructions |
+| `contracts/local.md` | local interfaces: command line, MCP shim socket, Git commands, outbound secret check, self-update |
 | `steps/step-1.md` | step 1 scope, spikes, milestones, acceptance tests |
 | `steps/step-1-backend.md` | step 1 backend task list |
 | `steps/step-1-frontend.md` | step 1 frontend task list |
 | `steps/step-2-3.md` | outline of steps 2 and 3 |
 | `risks.md` | risks, open questions, items needing coordinator confirmation |
 | `questions-round1.md` | review questions for round 1 |
+| `questions-round2.md` | review questions for round 2 |
 | `reviews/` | review rounds |
 
 ## Vocabulary

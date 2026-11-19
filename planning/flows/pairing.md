@@ -28,9 +28,11 @@ rendezvous.
    page shows the node's label, system, version and fingerprint.
 9. The browser sends a signed `offer` to the node; the node answers; ICE
    runs (`flows/connect.md`); the `ctl` channel opens.
-10. The browser writes log entry 1 (genesis, itself) and entry 2 (`add` the
-    node) and sends both to the node as `device` commands. The node stores
-    them. Both now belong to the same person.
+10. Until the next step is done the connection carries only `hello` and
+    `devlog`. The browser writes log entry 1 (genesis, itself) and entry 2
+    (`add` the node) and sends both in a `devlog` frame. The node, which
+    belongs to nobody yet, checks the log and adopts that person. Both now
+    belong to the same person, and the connection has the owner's rights.
 11. The node registers itself to start at login, then reports over `ctl` the
     AI CLIs it found on the machine.
 12. For each CLI the owner picks an account type (R-50); the browser sends
@@ -46,8 +48,12 @@ times out.
 
 Same as A from step 2, started from "add a computer" in the web client. At
 step 10 the browser appends one `add` entry for the new node and sends the
-whole log. The browser then forwards the new entry to the owner's other nodes
-and to the homes it is connected to.
+whole log in a `devlog` frame. The browser then sends the new entry, the
+same way, to the owner's other nodes and to the homes it is connected to.
+
+Add one device at a time. Two devices of the same person that each add a
+device at the same moment write two different entries for the same version
+(`contracts/envelope.md` section 4).
 
 ## C. Adding another browser
 
@@ -62,9 +68,11 @@ Used for a phone, a second browser, or after site data was cleared.
 3. `pair` messages are exchanged and verified. The browser offers; `ctl`
    opens.
 4. The node appends an `add` entry for the browser, signed by the node, and
-   sends the whole log to the browser. The browser now knows its person and
-   the owner's other nodes.
-5. The node forwards the new entry to the homes it is connected to.
+   sends the whole log to the browser in a `devlog` frame. The browser,
+   which belongs to nobody yet, checks the log and adopts that person. It
+   now knows the owner's other nodes.
+5. The node sends the new entry, the same way, to the homes it is connected
+   to.
 
 `solodawn open` on a node does the same for the local browser in one step: it
 creates a secret and opens `http://localhost:47800/#pair=<secret>`.
@@ -72,8 +80,8 @@ creates a secret and opens `http://localhost:47800/#pair=<secret>`.
 ## D. Revoking a device
 
 1. From any device, the owner chooses a device and confirms.
-2. That device appends a `revoke` entry and sends it to every node of the
-   owner and every home it is connected to.
+2. That device appends a `revoke` entry and sends it in a `devlog` frame to
+   every node of the owner and every home it is connected to.
 3. Each receiver that accepts the entry closes any connection from the
    revoked device and refuses new ones (`unknown_device`).
 4. Receivers that were offline get the entry when they next connect to a

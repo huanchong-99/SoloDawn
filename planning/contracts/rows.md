@@ -22,7 +22,8 @@ are random ids unless stated.
  "home":"<device id>","secretary":"<member id>",
  "checks":["go vet ./...","go test ./..."],"pass":90,"pass_foundation":70,
  "limits":{"rounds":10,"wakes_per_hour":20,"turn_minutes":60,"failures":3,
-           "review_rounds":5,"ask_depth":4,"ask_wait_s":45,"approval_wait_s":600},
+           "review_rounds":5,"ask_depth":4,"ask_wait_s":45,"approval_wait_s":600,
+           "idle_notice_minutes":30},
  "paused":null,"created":1763500000000}
 ```
 
@@ -89,13 +90,13 @@ One row per accepted device-log entry of a person in the group.
 {"r":"task","id":"t12…","seq":805,"g":"Qm1…","num":12,
  "title":"Node: report connection path changes",
  "origin":"brief","brief":"<msg id>",
- "state":"active","step":"review",
+ "state":"active","step":"review","commit":"9f2c1ab",
  "assignee":"<member id>","reviewer":"<member id>",
  "foundation":false,"pass":90,"depends":[],
  "branch":"task/12-conn-events","pr":31,"pr_url":"https://…/pull/31",
  "checks":{"local":{"ok":true,"at":1763598000000,"commit":"9f2c1ab"},
-           "cloud":{"ok":true,"at":1763598300000}},
- "review":{"round":1,"score":86,"ok":false,"by":"<member id>","at":1763598900000},
+           "cloud":{"ok":true,"at":1763598300000,"commit":"9f2c1ab"}},
+ "review":{"round":1,"score":86,"ok":false,"by":"<member id>","commit":"9f2c1ab","at":1763598900000},
  "wait":null,"failures":0,
  "thread":{"count":7,"rounds":3,
            "last":{"by":"<member id>","kind":"progress","text":"Adding the event after switch-back","ts":1763599000000}},
@@ -108,9 +109,10 @@ One row per accepted device-log entry of a person in the group.
 | `num` | per-group counter, shown as `T-12` |
 | `origin` | `brief` (from a confirmed brief), `direct` (R-71), `takeover` (R-83) |
 | `state` | `queued`, `active`, `paused`, `failed`, `merged`, `cancelled` |
-| `step` | `branch`, `local_check`, `pr`, `cloud_check`, `review`, `merge`; with `forge: none` the steps `pr` and `cloud_check` are skipped |
-| `wait` | `null`, or `{"kind":…,"msg":"<msg id>","who":["<user id>"],"since":<time>}` |
-| `wait.kind` | while `active`: `approval`, `decision`, `reviewer`, `assignee`, `conflict`; while `paused`: `rounds`, `preempted`, `cap`, `rate_limit`, `group`; while `queued`: `depends` |
+| `step` | `branch`, `local_check`, `cloud_check`, `review`, `merge`. The card draws six positions; "pull request" is done when `pr` is set (`contracts/task-machine.md` section 1) |
+| `commit` | the submitted commit: what hosted checks, the review and the merge are about |
+| `wait` | `null`, or `{"kind":…,"msg":"<msg id>","who":["<user id>"],"since":<time>}`: the latest reason the task is not moving |
+| `wait.kind` | while `queued`: `depends`; while `active`: `approval`, `decision`, `reviewer`, `assignee`, `conflict`; while `paused`: `manual`, `rounds`, `preempted` |
 | `failures` | consecutive failures (R-63) |
 | `thread.rounds` | AI-to-AI exchanges since the last human message in the thread (R-60) |
 
@@ -130,7 +132,7 @@ What the mock-up badges map to:
 ## 5. `msg`
 
 ```json
-{"r":"msg","id":"Zk3…","seq":814,"g":"Qm1…","thread":"t12…","main":false,
+{"r":"msg","id":"Zk3…","seq":814,"pos":790,"g":"Qm1…","thread":"t12…","main":false,
  "by":"<member id>","kind":"progress","ts":1763599000000,
  "text":"Branch created. Plan: add the event, emit on switch-back, write tests.",
  "mentions":[],"re":null,"body":{},"state":null,
@@ -139,6 +141,7 @@ What the mock-up badges map to:
 
 | Field | Meaning |
 | --- | --- |
+| `pos` | the group sequence number when the message was created. It never changes. Messages are shown and paged in `pos` order; `seq` moves when a card's `state` changes and is only for sync |
 | `thread` | task id, or `null` for a main-line message |
 | `main` | `true` if it also appears in the main line (cards raised from a thread) |
 | `by` | member id, or `"system"` for rows written by the home |
@@ -158,15 +161,15 @@ What the mock-up badges map to:
 | `task` | main | system | `{"task":"<task id>"}` (the card is drawn from the task row) | — |
 | `approval` | thread + main | the AI's host | approval body | `{status, by, at}`; status `pending`, `approved`, `denied`, `expired`, `reassigned` |
 | `decision` | main, or thread + main | an AI | decision body | `{status, choice, text, by, at}`; status `pending`, `decided` |
-| `summary` | main | secretary | summary body | — |
+| `summary` | thread + main | secretary | summary body, completed by the home | — |
 | `progress` | thread | AI | — | — |
-| `question` | thread | AI | — | — |
+| `question` | main, thread | AI | — | — |
 | `call` | thread, or main when the caller has no task | AI | `{"to":"<member id>","depth":1,"wait":true}` | `{status, reply, ms}`; status `waiting`, `answered` |
 | `reply` | thread | AI | — (`re` is the call) | — |
 | `report` | thread | AI | `{"pr":31,"files":4,"added":212,"removed":18}` | — |
 | `checks` | thread | system | `{"stage":"local","ok":true,"items":[{"name":"go test ./...","ok":true,"detail":"42 tests"}]}`; `stage` is `local`, `cloud` or `merge` | — |
 | `review` | thread | reviewer AI | review body | — |
-| `handback` | thread | system, with the AI's text | `{"files":["a.go"],"commits":[{"sha":"9f2c1ab","subject":"…"}],"added":40,"removed":3}` | — |
+| `handback` | thread (main for the secretary) | the AI, with facts its host adds to `body` | `{"files":["a.go"],"commits":[{"sha":"9f2c1ab","subject":"…"}],"added":40,"removed":3}` | — |
 | `system` | main, thread | system | `{"code":"…", …}` | — |
 
 Approval cards are written by the AI's host and presented in the main line
@@ -223,7 +226,7 @@ Review:
 
 ```json
 {"task":"t12…","num":12,"title":"Node: report connection path changes",
- "round":1,"score":86,"pass":90,"ok":false,
+ "commit":"9f2c1ab","round":1,"score":86,"pass":90,"ok":false,
  "items":[{"text":"No event after switching back to direct","file":"conn/switch.go","line":88,"veto":false}]}
 ```
 
@@ -237,19 +240,23 @@ Summary:
 {"task":"t9…","score":94,"rounds":2,"minutes":72,"added":318,"removed":42,"pr":28}
 ```
 
-System codes (the client localises them):
+System codes (the client localises them). `turn_interrupted`,
+`session_replaced`, `login_invalid`, `cap_reached` and `rate_limited` are
+facts a host reported (`contracts/commands.md` 1.9); the others are written
+by the home itself:
 
 | `code` | Other fields |
 | --- | --- |
 | `rounds_limit` | `task`, `n` |
-| `turn_interrupted` | `ai`, `reason` (`crash`, `timeout`, `stop`) |
+| `turn_interrupted` | `ai`, `task`, `reason` (`crash`, `timeout`, `stop`), `detail` |
 | `group_paused`, `group_resumed` | `by` |
 | `preempted` | `task`, `by` |
-| `cap_reached` | `ai`, `cap` |
+| `cap_reached` | `ai`, `cap` (`day`, `task`), `task` |
 | `rate_limited` | `ai`, `resets` |
 | `login_invalid` | `ai` (R-56) |
 | `task_failed` | `task`, `reason` |
-| `task_merged` | `task`, `commit`; shown under the secretary's name (R-24) |
+| `task_merged` | `task`, `commit`, `merge_commit`; shown under the secretary's name (R-24) |
+| `no_secretary` | — |
 | `session_replaced` | `ai` (a new session took over from notes, R-123) |
 
 ## 6. `note`
@@ -260,7 +267,9 @@ System codes (the client localises them):
  "by":"<member id>","ts":1763590000000}
 ```
 
-Notes are the group's long-term memory (R-102). The ledger of scored points
+Notes are the group's long-term memory (R-102). They are not part of
+`sync`; a client reads them with `fetch`, and changes are pushed like any
+row. The ledger of scored points
 is the set of `review` messages; it needs no separate row. Notes and
 `review` messages are exempt from retention and stay until a person deletes
 them (`forget` in `contracts/commands.md`).

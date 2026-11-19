@@ -1,7 +1,7 @@
 # Flow: the owner takes the terminal and hands it back
 
 Contracts: `contracts/commands.md` (`takeover.start`, `takeover.end`),
-`contracts/datachannel.md` (terminal channel), `contracts/local.md`
+`contracts/datachannel.md` (terminal channel), `contracts/drivers.md` 1.3
 (interactive commands). Rules: R-80 to R-85, R-124, R-12.
 
 Actors: O, the owner; B, O's browser; N, the host node; S, the session that
@@ -17,7 +17,7 @@ already live in a task's worktree, so the rule is:
 | a working AI, and `takeover.start` names a task it is assigned | that task session |
 | a working AI, no task named, with an unfinished task | the task session it used last |
 | a working AI with no unfinished task | a new task session: N first sends `task start` with `origin: takeover`, and creates the session as in `flows/task.md` step 6 |
-| the secretary | its group session, in the project clone |
+| the secretary | its group session, in the project clone, still read only: the secretary changes no file, in the terminal either (R-21) |
 
 ## B. Taking over
 
@@ -31,7 +31,10 @@ already live in a task's worktree, so the rule is:
 5. N notes, for the hand-back summary, the current commit and the list of
    uncommitted files in S's folder.
 6. N starts the vendor's interactive CLI in a pseudo-terminal, in S's
-   folder, with S's session id. State `takeover`; N reports
+   folder, with S's session id and with the same level, the same setting
+   sources and the same MCP configuration as the structured session
+   (`contracts/drivers.md` 1.3). What the CLI would have asked through a
+   card it now asks O in the terminal. State `takeover`; N reports
    `member status`; the task card shows "owner is operating directly".
 7. N answers `ok`. B opens the data channel `pty:<g>:<member>` and sends
    `pty.resize`. From here bytes flow both ways untouched.
@@ -48,7 +51,9 @@ already live in a task's worktree, so the rule is:
 ## D. Handing back
 
 12. O taps "hand back" (`takeover.end`), or closes the terminal, or the
-    channel closes for any reason. All three are the same event.
+    channel closes for any reason. All three are the same event. A closed
+    tab is seen at once when the browser closes the channel in order, and
+    otherwise when N's own stack reports the connection lost.
 13. N ends the interactive CLI and waits for it to exit.
 14. N computes the facts: commits made since step 5, files changed, lines
     added and removed.
@@ -57,18 +62,16 @@ already live in a task's worktree, so the rule is:
     nothing is posted. The flow stops here.
 16. N starts the structured CLI again with the same session id and delivers
     one `handback` turn: "Your owner worked with you directly in the
-    terminal. Call `handback_summary` with a short account of what was
-    asked and what was done. Then continue the task: if the work is
+    terminal. Post a short account of what was asked and what was done
+    (`post`, kind `handback`). Then continue the task: if the work is
     complete, run the checks and submit; otherwise post what remains."
-17. The AI calls `handback_summary`. N sends `post` with `kind: handback`,
-    the AI's text, and the facts from step 14 in `body`. H stores it in the
-    thread and notifies the secretary.
+17. The AI posts it. N adds the facts from step 14 to `body` before
+    signing. H stores the message in the thread and notifies the secretary.
 18. State `waiting`. Held items are delivered next.
 
 For the secretary, steps 16 to 18 apply without the sentence about the task,
-and the summary goes to the main line. If the facts show changed files in
-the project clone, they are listed in the summary and nothing else happens;
-see `risks.md` K-10.
+and the summary goes to the main line. Its session is read only in the
+terminal as well, so there are no changed files to report.
 
 ## E. Failure cases
 
@@ -84,6 +87,9 @@ see `risks.md` K-10.
   id, history intact both ways.
 - `[documented]`, not tested: the same for Claude Code. The test was
   stopped by the workspace trust prompt. Spike S-4.
+- `[unverified]` That the interactive CLI accepts the same level settings
+  as the structured one (read only for the secretary; sandbox and
+  repository-configuration rules for a task session). Spike S-4.
 - `[unverified]` Starting a brand-new session directly in interactive mode
   with an id chosen by the node, for both CLIs (section A, third row).
   Spike S-4. If a CLI cannot, N creates the session with one empty

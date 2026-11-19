@@ -27,21 +27,20 @@ Conventions:
 
 | Tool | Arguments | Returns | Maps to |
 | --- | --- | --- | --- |
-| `post` | `text`; `kind` = `text` (default), `progress`, `question`; `mentions` (names); `where` = `thread` (default when the turn has a task) or `main` | `{"id":"…"}` | `post` |
+| `post` | `text`; `kind` = `text` (default), `progress`, `question`; also `handback` in a hand-back turn (the node adds the Git facts), and `summary` with `task` for the secretary after a merge; `mentions` (names); `where` = `thread` (default when the turn has a task) or `main` | `{"id":"…"}` | `post` |
 | `ask` | `to` (an AI's name); `text`; `wait` = true (default) or false | `{"answer":"…"}`, or `{"pending":true,"receipt":"…"}` | `post` kind `call`; `flows/ask.md` |
 | `reply` | `call` (the id shown in the turn); `text` | `{"ok":true}` | `post` kind `reply` |
-| `read_thread` | `task` or `"main"`; `limit` (default 30, at most 100); `before` (id) | `{"messages":[{"id","by","kind","at","text"}],"more":true}` | `fetch` |
+| `read_thread` | `task` or `"main"`; `limit` (default 30, at most 100); `before` (the `pos` of a message from an earlier result) | `{"messages":[{"id","pos","by","kind","at","text"}],"more":true}` | `fetch` |
 | `list_members` | — | `{"members":[{"name","kind","state","host","account","task","usage"}]}` | state rows |
 | `list_tasks` | `state` (optional filter) | `{"tasks":[{"task":"T-12","title","state","step","assignee","reviewer","wait","idle_minutes"}]}` | state rows |
-| `note_put` | `text`; `task` (optional) | `{"id":"…"}` | `note put` |
-| `note_list` | `task` (optional) | `{"notes":[{"id","task","text","by","at"}]}` | state rows |
-| `start_task` | `title`; `plan` (what is to be done, for the task session) | `{"task":"T-14","moved":true}`: the work continues in a new task session; end this turn | `task start`. Group sessions of working AIs only |
+| `note_put` | `text`; `task` (optional) | `{"id":"…"}` | `note` |
+| `note_list` | `task` (optional) | `{"notes":[{"id","task","text","by","at"}]}` | `fetch` with `kind: note` |
+| `start_task` | `title`; `plan` (what is to be done, for the task session) | `{"task":"T-14","moved":true}`, the number being the command's result: the work continues in a new task session; end this turn | `task start`. Group sessions of working AIs only |
 | `push_branch` | — | `{"ok":true,"commit":"9f2c1ab"}` | none on the home: the node pushes the task's own branch, never forced. Task sessions only, with a remote |
-| `run_checks` | — | `{"ok":false,"items":[{"name":"go test ./...","ok":false,"tail":"…last 4 KiB of output…"}]}` | runs locally, then `task checked`. Task sessions only |
-| `submit_task` | `summary` | `{"ok":true,"pr":31}` | the node pushes the branch and opens the pull request if there is none (with a remote), then `post` kind `report` and `task submitted`. Task sessions only |
-| `submit_review` | `score` (0 to 100); `items`: list of `{text, file, line, veto}` | `{"passed":false,"round":1}` | `post` kind `review`. Review sessions only |
+| `run_checks` | — | `{"ok":false,"commit":"9f2c1ab","items":[{"name":"go test ./...","ok":false,"tail":"…last 4 KiB of output…"}]}` | runs locally on the head commit, then `task checked`. Fails with `conflict` if the worktree has uncommitted changes. Task sessions only |
+| `submit_task` | `summary` | `{"ok":true,"commit":"9f2c1ab","pr":31}` | the node pushes the branch and opens the pull request if there is none (with a remote), then `post` kind `report` and `task submitted` with the commit. Task sessions only |
+| `submit_review` | `score` (0 to 100); `items`: list of `{text, file, line, veto}` | `{"passed":false,"round":1}`, the command's result | `post` kind `review`; the node adds the commit of the review checkout. Review sessions only |
 | `request_decision` | `question`; `options`: list of `{label, effect}`; `recommended` (index); `context`; `to` (names of people, default the requester of the task's brief) | `{"id":"…"}`; the answer arrives later as a turn | `post` kind `decision` |
-| `handback_summary` | `text` | `{"ok":true}` | `post` kind `handback`; only meaningful in a hand-back turn |
 | `net_status` | — | `{"paths":[{"peer":"…","path":"relay","rtt_ms":210}],"nat":{"udp":true,"mapped_ports":false,"ipv6":false},"rendezvous":[{"url":"…","ok":true}]}` | local |
 
 Notes:
@@ -54,8 +53,10 @@ Notes:
   keeps a tool call in the foreground past each CLI's default limit; spike
   S-2 and S-3. If it does not, `run_checks` returns `{"pending":true}` and
   the result arrives as a `checks` turn.
-- `submit_task` fails with `conflict` if the last `run_checks` did not pass
-  on the current head commit.
+- `submit_task` fails with `conflict` if the worktree has uncommitted
+  changes or the last `run_checks` did not pass on the head commit.
+- A task session at level 1 is not offered `push_branch`, `run_checks` or
+  `submit_task` (`contracts/drivers.md` section 2).
 - `push_branch` and `submit_task` are the only way a task's branch is
   pushed and its pull request opened without a card. The node does both by
   running the owner's signed-in `git` and `gh`; it never reads a token or a
@@ -69,7 +70,6 @@ Listed by the server only when the calling session is the group's secretary.
 | --- | --- | --- | --- |
 | `propose_brief` | `title`; `goal`; `criteria` (list); `scope_in`, `scope_out` (lists); `tasks`: list of `{title, assignee, reviewer, foundation, depends}`; `requester` (name, default the author of the request); `replaces` (id of an earlier brief) | `{"id":"…"}`; confirmation arrives later as a turn | `post` kind `brief` |
 | `set_task` | `task`; any of `assignee`, `reviewer`; `action` = `pause`, `resume`, `cancel` | `{"ok":true}` | `task assign`, `task pause`, `task resume`, `task cancel` |
-| `post_summary` | `task`; `text` | `{"id":"…"}` | `post` kind `summary` |
 
 The secretary has the tools of section 1 too, except `start_task`,
 `push_branch`, `run_checks`, `submit_task` and `submit_review` (R-21).

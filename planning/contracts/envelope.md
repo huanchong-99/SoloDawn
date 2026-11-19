@@ -56,13 +56,15 @@ failure with one error code:
    homes; the home of a group it participates in; or a pairing peer, section
    6).
 3. `not_for_me`: if `to` is present, it equals the receiver's device id.
-4. `stale`: for signalling payloads only, `ts` is within two minutes of the
-   receiver's clock.
-5. `replay`: a repeated (`k`, `n`) has no second effect. A home takes a
-   command only from the connection of its signer and uses `n` as the id of
-   the row it creates, so a repeat is answered `ok` and changes nothing. A
-   host acting on a forwarded envelope checks that it names the exact
-   pending thing (an approval id, an inbox item above its cursor).
+4. `stale`: `ts` is close enough to the receiver's clock: within two
+   minutes for signalling payloads, within 24 hours for commands.
+
+A command that passes these checks and was already accepted is not an
+error: the receiver answers what it answered the first time, from its
+receipt, and does nothing else (`contracts/commands.md`, "Once only"). A
+host acting on an envelope that was forwarded to it (an inbox item, the
+decision of an approval) checks that it names the exact thing the host is
+holding, and records what it has acted on.
 
 After that the payload is parsed and handled according to its type.
 
@@ -101,16 +103,20 @@ Rules:
 Where logs live and how they spread:
 
 - Every node stores the log of its owner.
-- Every home stores the log of each person in its groups and pushes entries
-  to clients as `device` rows (`contracts/datachannel.md`).
-- A device that creates an entry sends it to every one of the owner's nodes
-  it is connected to and to every home it is connected to. Nodes and homes
-  pass on entries they accept to their own connected peers of that person.
-- A device that was offline receives missing entries when it next connects.
+- Every home stores the log of each person in its groups and shows entries
+  to clients as `device` rows.
+- Entries travel in one frame, `devlog` (`contracts/datachannel.md` 3.1),
+  always as the original signed entries. A device that creates an entry
+  sends it to every one of the owner's nodes and every home it is connected
+  to; nodes and homes pass on what they accept; after every `welcome` each
+  side sends the logs the other may be missing.
 
-Known limit: if a stolen device and its owner create conflicting entries for
-the same version, receivers may accept different ones. Recovery from that
-race is manual and is not designed in step 1. Listed in `risks.md` K-4.
+Known limit: two entries for the same version make a fork, and receivers
+may accept different ones. It happens when a stolen device and its owner
+race to revoke each other, and also, innocently, when two devices of the
+same person each add a device at the same moment. Step 1 does not resolve
+forks: the guidance is to add one device at a time, and recovery is manual
+(`risks.md` K-4).
 
 ## 5. AI members have no key
 
@@ -127,8 +133,10 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   characters in four groups (`7K2M-9QXD-4F8T-WB3N`). Created by either side,
   valid for 10 minutes, used once. It travels inside the onboarding prompt
   that the person copies, or as a link that the node prints.
-- **Room id** = first 16 bytes of SHA-256(`"solodawn/room/1\n"` + secret),
-  hex.
+- **Secret bytes**, wherever the secret is hashed or used as a key: the 16
+  characters in upper case, without the hyphens, as ASCII.
+- **Room id** = first 16 bytes of SHA-256(`"solodawn/room/1\n"` + secret
+  bytes), hex.
 - Each side sends through the room one message:
 
 ```json
@@ -143,10 +151,19 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   device id is authentic for the next 10 minutes and accepts signed
   signalling from it. The rendezvous service sees the room id and both
   device ids, and cannot forge a `mac` without the secret.
+- Until the newcomer is in the log, the connection carries `hello` and
+  `devlog` and nothing else.
 - Once the data channel is open, the side that already belongs to a person
-  appends an `add` entry for the newcomer and sends the log. If neither side
-  belongs to a person (first run), the browser writes the genesis entry for
-  itself and then the `add` for the node.
+  appends an `add` entry for the newcomer and sends the whole log in a
+  `devlog` frame. If neither side belongs to a person (first run), the
+  browser writes the genesis entry for itself and then the `add` for the
+  node.
+- A device that belongs to no person adopts the person of a log that
+  arrives on a connection it paired on, if the log is valid and one of its
+  entries adds this device. A device that already belongs to a person
+  never adopts another.
+- `internal/proto/testdata/crypto.json` holds a fixed secret with its room
+  id and both `mac` values, for the Go and the browser implementation.
 
 The code has 16 characters by decision (R-152, `risks.md` Q-2). Eight would
 need a password-authenticated key exchange, which is not added. Any text

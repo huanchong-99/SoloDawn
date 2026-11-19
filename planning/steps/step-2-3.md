@@ -14,9 +14,9 @@ Several people in one group, each with their own computers and AIs.
 | --- | --- | --- |
 | People | Invitation link carrying the group id, the home's device id and fingerprint, and a one-time secret. The joiner's browser checks the fingerprint, presents its device log, and becomes a member. Roles `owner`, `admin`, `member`; removing a member. | R-140 |
 | Other people's hosts | A member's node joins its AI to a group homed on someone else's node. Nothing new on the wire: it is the `host.join` and `member add_ai` of step 1. | R-134 |
-| Whose instructions | A new card kind `confirm`: when someone mentions another person's personal-subscription AI, the home asks that owner. The owner's signed confirmation travels in the inbox item (`authz.by = confirm`). No auto-accept switch. | R-51 |
+| Whose instructions | A new card kind `confirm`: when someone mentions another person's personal-subscription AI, the home asks that owner. The owner's signed confirmation travels in the inbox item as its `cause`, and the host requires it. No auto-accept switch. | R-51 |
 | After a task started | Messages from others in the thread are delivered labelled `information`. A change of direction needs a new confirmation. | R-52 |
-| Allow lists | For team-plan and API-key AIs the owner lists who may direct them (`member.allow`); inbox items carry `authz.by = list`. | R-53 |
+| Allow lists | For team-plan and API-key AIs the owner lists who may direct them (`member.allow`), in a list the owner signs, which the host checks. | R-53 |
 | Level cap | A task caused by someone other than the owner gets a task session at level 2 at most. | R-44 |
 | Calls across owners | `ask` to someone else's AI follows the same confirmation or allow list. | R-115 |
 | Approver delegates | The owner names people who may decide approvals for their AIs. | R-42 |
@@ -27,9 +27,13 @@ Several people in one group, each with their own computers and AIs.
 
 ### What step 1 already provides for it
 
-- Every command is a signed envelope, and hosts verify the author before
-  acting. A home run by someone else cannot forge an instruction.
-- Inbox items already carry `authz`.
+- Every command is a signed envelope, and every inbox item is signed by the
+  home and carries the signed decision that caused it. In step 1 the home's
+  signature is enough, because the home is the owner's device. In step 2 a
+  host must also find its owner's signature for the task: the confirmation
+  of the brief or of the request, or the owner's allow list. That rule is
+  designed at the start of step 2; the fields it needs are already on the
+  wire.
 - Member rows already carry `account`, `allow`, `approvers`.
 - Device logs are already distributed through homes.
 
