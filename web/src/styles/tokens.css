@@ -1,0 +1,113 @@
+/* SoloDawn design tokens.
+   Every colour is one line: light-dark(light value, dark value). The theme only changes
+   color-scheme: <html data-theme="light|dark"> forces one, anything else follows the system. */
+
+:root {
+  color-scheme: light dark;
+
+  /* Neutrals: light is paper in morning light, dark is the ink blue before dawn. */
+  --bg: light-dark(#f6f4ef, #0c0f16); /* page */
+  --surface: light-dark(#ffffff, #141822); /* cards, panels */
+  --surface-2: light-dark(#efece5, #1c212d); /* inset blocks, hover */
+  --surface-3: light-dark(#e5e1d8, #262c3a); /* pressed, tracks */
+  --line: light-dark(#e2ded5, #272c39); /* dividers, card borders */
+  --line-strong: light-dark(#8c8982, #646c7e); /* input borders, contrast >= 3:1 */
+  --text: light-dark(#171a21, #eceef3); /* body */
+  --text-2: light-dark(#4a505c, #b3b9c6); /* secondary */
+  --text-3: light-dark(#5f646f, #8e95a5); /* auxiliary, still >= 4.5:1 */
+
+  /* Semantic colours: five roles in the whole system. */
+  /* Sky: an AI is working, links, keyboard focus. */
+  --sky: light-dark(#2a55d6, #8cabff);
+  --on-sky: light-dark(#ffffff, #0b1430);
+  /* Dawn: something needs a person. The only warm colour. */
+  --dawn: light-dark(#f2a036, #f6b152); /* fill */
+  --on-dawn: #2a1a00; /* text on the fill */
+  --dawn-text: light-dark(#8a4b00, #f6b152); /* dawn-coloured text on a normal surface */
+  --ok: light-dark(#146f44, #62cc91);
+  --on-ok: light-dark(#ffffff, #06210f);
+  --danger: light-dark(#b92e27, #ff857d);
+  --on-danger: light-dark(#ffffff, #2a0806);
+
+  /* Soft fills are mixed from the semantic colour and the card colour, never set by hand. */
+  --sky-soft: color-mix(in srgb, var(--sky) 12%, var(--surface));
+  --dawn-soft: color-mix(in srgb, var(--dawn) 14%, var(--surface));
+  --ok-soft: color-mix(in srgb, var(--ok) 12%, var(--surface));
+  --danger-soft: color-mix(in srgb, var(--danger) 12%, var(--surface));
+
+  /* Brand: the line of first light. For the mark and one thin horizon, never a large gradient. */
+  --horizon: linear-gradient(
+    90deg,
+    transparent,
+    #4a5fe0 18%,
+    #c7609a 52%,
+    #f6b152 78%,
+    transparent
+  );
+
+  /* Terminal: dark in both themes. */
+  --term-bg: #0a0c11;
+  --term-fg: #d5d9e3;
+  --term-dim: #8089a0;
+  --term-green: #7bd88f;
+  --term-yellow: #f6b152;
+  --term-blue: #8cabff;
+  --term-red: #ff857d;
+  --term-line: #232733;
+  --term-key: #161a23;
+
+  --font-sans:
+    'Geist', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC',
+    'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  --fs-xs: 12px; /* labels, times, badges */
+  --fs-sm: 13px; /* thread messages, secondary card text */
+  --fs-md: 15px; /* body, main-line messages */
+  --fs-lg: 17px; /* card titles */
+  --fs-xl: 21px; /* page titles */
+  --fs-2xl: 28px; /* section headings */
+  --fs-3xl: clamp(30px, 5.2vw, 46px); /* onboarding headline */
+  --lh-tight: 1.25;
+  --lh-body: 1.6; /* Chinese body text needs the room */
+
+  /* Spacing on a 4px base. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  --r-sm: 6px; /* badges, code */
+  --r-md: 10px; /* buttons, inputs */
+  --r-lg: 14px; /* cards */
+  --r-xl: 20px; /* dialogs */
+  --r-full: 999px;
+
+  /* Cards are told apart by a 1px border; only floating layers cast a shadow. */
+  --shadow-pop:
+    0 8px 28px light-dark(rgb(23 26 33 / 0.14), rgb(0 0 0 / 0.55)), 0 0 0 1px var(--line);
+  --focus: 2px solid var(--sky);
+
+  --dur-1: 120ms; /* hover, press */
+  --dur-2: 200ms; /* expand, switch */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  --rail-w: 64px; /* side navigation */
+  --list-w: 300px; /* group list column */
+  --side-w: 340px; /* member column */
+  --bar-h: 52px; /* top bar */
+  --tab-h: 56px; /* bottom navigation on phones */
+  --measure: 760px; /* widest chat content */
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}

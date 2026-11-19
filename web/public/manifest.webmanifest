@@ -1,0 +1,9 @@
+{
+  "name": "SoloDawn",
+  "short_name": "SoloDawn",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0c0f16",
+  "theme_color": "#0c0f16",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
