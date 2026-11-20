@@ -44,11 +44,8 @@ func (c *Connection) Done() <-chan struct{}  { return c.ctx.Done() }
 func (c *Connection) Close() error           { return c.close() }
 func (c *Connection) isClosed() bool         { return c.ctx.Err() != nil }
 
+// acceptCtl takes the channel labelled ctl; dispatch has checked the label.
 func (c *Connection) acceptCtl(dc *webrtc.DataChannel, onOpen func(*Connection)) {
-	if dc.Label() != "ctl" {
-		dc.Close()
-		return
-	}
 	if !dc.Ordered() || dc.MaxRetransmits() != nil || dc.MaxPacketLifeTime() != nil {
 		go c.Close()
 		return
