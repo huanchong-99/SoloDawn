@@ -1,27 +1,35 @@
 package host
 
 import (
-	"bytes"
-	"errors"
+	"context"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 )
 
-// cloneLocks holds one lock per clone, keyed by its cleaned path. Every Git
-// command that changes a clone runs under it: clone, fetch, merge (the
-// task merge of merge.go included), worktree add and remove.
+// cloneLocks holds one lock per clone. Every Git command that changes a clone
+// or one of its worktrees runs under it: clone, fetch, merge (the task merge
+// of merge.go included), worktree add and remove (local.md section 7).
 var cloneLocks sync.Map
 
+// cloneLock returns the lock of the clone at repo. It is keyed by the clone's
+// real path, so two spellings of one clone share one lock.
 func cloneLock(repo string) *sync.Mutex {
-	lock, _ := cloneLocks.LoadOrStore(filepath.Clean(repo), new(sync.Mutex))
+	lock, _ := cloneLocks.LoadOrStore(realPath(repo), new(sync.Mutex))
 	return lock.(*sync.Mutex)
+}
+
+// realPath resolves the symbolic links of the longest existing prefix of
+// path, so a folder has the same key before and after it exists.
+func realPath(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return filepath.Join(realPath(filepath.Dir(path)), filepath.Base(path))
 }
 
 // lockClone locks the clone of projectDir and returns its path.
@@ -32,133 +40,134 @@ func lockClone(projectDir string) (string, func()) {
 	return repo, lock.Unlock
 }
 
+// cloneTemp is the sibling folder a clone is made in before it becomes repo.
+const cloneTemp = ".repo-clone"
+
 // EnsureGroupWorkspace returns the group's clone under projectDir
-// (projects/<group>), cloning the base branch only if the folder does not
-// exist yet.
-func EnsureGroupWorkspace(projectDir, source, base string) (string, error) {
+// (projects/<group>), cloning the base branch only if repo does not exist
+// yet. The clone is made in a temporary sibling folder and renamed to repo
+// once complete; a folder left by a stopped clone is removed first. An
+// existing repo that is not a Git repository is an error, never deleted.
+func EnsureGroupWorkspace(ctx context.Context, projectDir, source, base string) (string, error) {
 	repo, unlock := lockClone(projectDir)
 	defer unlock()
 	if _, err := os.Stat(repo); err == nil {
-		return repo, nil
+		return repo, isClone(repo)
 	}
-	return repo, workspaceGit("", nil, "clone", "--branch", base, "--", source, repo)
+	temp := filepath.Join(projectDir, cloneTemp)
+	if err := os.RemoveAll(temp); err != nil {
+		return "", err
+	}
+	if _, err := workspaceGit(ctx, "", "clone", "--branch", base, "--", source, temp); err != nil {
+		return "", err
+	}
+	return repo, os.Rename(temp, repo)
 }
 
-func workspaceGit(dir string, stdout io.Writer, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	var stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git: %w: %s", err, strings.TrimSpace(stderr.String()))
+func isClone(repo string) error {
+	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+		return fmt.Errorf("%s is not a Git repository", repo)
 	}
 	return nil
 }
 
+// workspaceGit runs git through the host's command runner and returns its
+// standard output, or an error that carries its standard error.
+func workspaceGit(ctx context.Context, dir string, args ...string) (string, error) {
+	out, stderr, err := runIn(ctx, dir, "git", args...)
+	if err != nil {
+		return "", fmt.Errorf("git: %w: %s", err, strings.TrimSpace(stderr))
+	}
+	return out, nil
+}
+
 // workspaceBase returns <base-ref>, fetching first when the group has a remote.
-func workspaceBase(repo, base string, remote bool) (string, error) {
+func workspaceBase(ctx context.Context, repo, base string, remote bool) (string, error) {
 	if !remote {
 		return "refs/heads/" + base, nil
 	}
-	return "refs/remotes/origin/" + base, workspaceGit(repo, nil, "fetch", "origin")
+	_, err := workspaceGit(ctx, repo, "fetch", "origin")
+	return "refs/remotes/origin/" + base, err
 }
 
 // RefreshGroupWorkspace fast-forwards the group session's clone on a remote project.
-func RefreshGroupWorkspace(projectDir, base string, remote bool) error {
+func RefreshGroupWorkspace(ctx context.Context, projectDir, base string, remote bool) error {
 	if !remote {
 		return nil
 	}
 	repo, unlock := lockClone(projectDir)
 	defer unlock()
-	ref, err := workspaceBase(repo, base, remote)
+	ref, err := workspaceBase(ctx, repo, base, remote)
 	if err != nil {
 		return err
 	}
-	return workspaceGit(repo, nil, "merge", "--ff-only", ref)
+	_, err = workspaceGit(ctx, repo, "merge", "--ff-only", ref)
+	return err
 }
 
-// CreateTaskWorkspace adds wt/<num>-<slug> on branch task/<num>-<slug>. A new
-// task starts from the base; a task taken over from another AI continues its
-// branch (local.md section 7). A worktree left behind by a crash is reused
-// as it is.
-func CreateTaskWorkspace(projectDir string, num int, slug, base string, remote, takeover bool) (string, error) {
-	repo, unlock := lockClone(projectDir)
-	defer unlock()
-	name := strconv.Itoa(num) + "-" + slug
-	tree := filepath.Join(projectDir, "wt", name)
-	if _, err := os.Stat(tree); err == nil {
-		return tree, nil
+// slugRule is the form of a slug the home produces (local.md section 7, "Slug").
+var slugRule = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// taskName is <num>-<slug>. A slug the home cannot produce, or a num below 1,
+// is refused before any path or branch is built from it.
+func taskName(num int, slug string) (string, error) {
+	if num < 1 || len(slug) > 40 || !slugRule.MatchString(slug) {
+		return "", fmt.Errorf("invalid task %d-%q: a task number is at least 1 and a slug matches %s in at most 40 characters", num, slug, slugRule)
 	}
-	start, err := workspaceBase(repo, base, remote)
+	return strconv.Itoa(num) + "-" + slug, nil
+}
+
+// CreateTaskWorkspace gives the AI ai the folder wt/<num>-<slug> on branch
+// task/<num>-<slug> (local.md section 7). A worktree the same AI holds is
+// reused as it is. Otherwise the folder is added again: on the branch if
+// this node has it, fast-forwarded to origin/<br> when that exists; else as
+// a new branch from origin/<br> if that exists, or from the base.
+func CreateTaskWorkspace(ctx context.Context, projectDir string, num int, slug, ai, base string, remote bool) (string, error) {
+	name, err := taskName(num, slug)
 	if err != nil {
 		return "", err
 	}
-	return tree, addTaskWorktree(repo, filepath.Join("..", "wt", name), "task/"+name, start, remote, takeover)
+	_, unlock := lockClone(projectDir)
+	defer unlock()
+	s := newSlot(projectDir, "wt", name, "refs/heads/task/"+name, ai)
+	reuse, force, err := s.claim(ctx)
+	if reuse || err != nil {
+		return s.path, err
+	}
+	start, err := workspaceBase(ctx, s.repo, base, remote)
+	if err != nil {
+		return s.path, err
+	}
+	if err := s.addTask(ctx, start, remote, force); err != nil {
+		return s.path, err
+	}
+	return s.path, s.record(ctx)
 }
 
-func addTaskWorktree(repo, path, branch, base string, remote, takeover bool) error {
-	if !takeover {
-		return newTaskWorktree(repo, path, branch, base)
-	}
-	if !remote {
-		return workspaceGit(repo, nil, "worktree", "add", path, branch)
-	}
-	local, published := "refs/heads/"+branch, "refs/remotes/origin/"+branch
-	var out bytes.Buffer
-	if err := workspaceGit(repo, &out, "for-each-ref", "--format=%(refname)", local, published); err != nil {
-		return err
-	}
-	refs := strings.Split(out.String(), "\n")
-	if slices.Contains(refs, local) {
-		return resumeTaskWorktree(repo, path, branch, published, slices.Contains(refs, published))
-	}
-	if slices.Contains(refs, published) {
-		base = published
-	}
-	return newTaskWorktree(repo, path, branch, base)
-}
-
-func newTaskWorktree(repo, path, branch, base string) error {
-	return workspaceGit(repo, nil, "worktree", "add", "-b", branch, path, base)
-}
-
-// resumeTaskWorktree reuses the branch this node kept and fast-forwards it to
-// the published one if there is one; a diverged branch fails with Git's
-// output and leaves no worktree behind.
-func resumeTaskWorktree(repo, path, branch, published string, isPublished bool) error {
-	if err := workspaceGit(repo, nil, "worktree", "add", path, branch); err != nil || !isPublished {
-		return err
-	}
-	if err := workspaceGit(filepath.Join(repo, path), nil, "merge", "--ff-only", published); err != nil {
-		return errors.Join(err, workspaceGit(repo, nil, "worktree", "remove", path))
-	}
-	return nil
-}
-
+// reviewDiff is a reserved name in a review checkout (local.md section 7).
 const reviewDiff = ".solodawn-review.diff"
 
-// PrepareReviewWorkspace checks out the submitted commit detached in
-// review/<num> and writes the diff against the base next to it. The review
-// session opens this folder at permission level 1.
-func PrepareReviewWorkspace(projectDir string, num int, commit, base string, remote bool) (string, error) {
-	repo, unlock := lockClone(projectDir)
-	defer unlock()
-	ref, err := workspaceBase(repo, base, remote)
+// PrepareReviewWorkspace gives the reviewer ai review/<num>, checked out
+// detached at the submitted commit, with the diff against the base written
+// to .solodawn-review.diff. The review session opens this folder at
+// permission level 1. A checkout the same reviewer holds is moved to the
+// commit; any other is added again.
+func PrepareReviewWorkspace(ctx context.Context, projectDir string, num int, ai, commit, base string, remote bool) (string, error) {
+	s, err := reviewSlot(projectDir, num, ai)
 	if err != nil {
 		return "", err
 	}
-	review := filepath.Join(projectDir, "review", strconv.Itoa(num))
-	if err := checkoutReview(repo, review, num, commit); err != nil {
-		return "", err
+	_, unlock := lockClone(projectDir)
+	defer unlock()
+	ref, err := workspaceBase(ctx, s.repo, base, remote)
+	if err != nil {
+		return s.path, err
 	}
-	return review, workspaceGit(repo, nil, "diff", "--no-color", "--output="+filepath.Join(review, reviewDiff), ref+"..."+commit)
-}
-
-func checkoutReview(repo, review string, num int, commit string) error {
-	if _, err := os.Stat(review); err != nil {
-		return workspaceGit(repo, nil, "worktree", "add", "--detach", filepath.Join("..", "review", strconv.Itoa(num)), commit)
+	if err := s.checkoutReview(ctx, commit); err != nil {
+		return s.path, err
 	}
-	return workspaceGit(review, nil, "checkout", "--detach", commit)
+	_, err = workspaceGit(ctx, s.repo, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--output="+filepath.Join(s.path, reviewDiff), ref+"..."+commit)
+	return s.path, err
 }
 
 // TaskRelease is why a node removes a task's worktree (local.md section 7).
@@ -170,24 +179,42 @@ const (
 	TaskGivenAway
 )
 
-// RemoveTaskWorkspace removes the assignee's worktree and keeps its branch,
-// which a later takeover on this node continues. A cancelled or given-away
-// task's worktree is removed with --force: only commits carry over.
-func RemoveTaskWorkspace(projectDir string, num int, slug string, why TaskRelease) error {
-	repo, unlock := lockClone(projectDir)
-	defer unlock()
-	args := []string{"worktree", "remove"}
-	if why != TaskMerged {
-		args = append(args, "--force")
+// RemoveTaskWorkspace removes the worktree that ai holds and keeps its
+// branch, which a later takeover on this node continues. A folder another
+// AI holds is left untouched. A cancelled or given-away task's worktree is
+// removed even when it has changes or a lock: only commits carry over.
+func RemoveTaskWorkspace(ctx context.Context, projectDir string, num int, slug, ai string, why TaskRelease) error {
+	name, err := taskName(num, slug)
+	if err != nil {
+		return err
 	}
-	return workspaceGit(repo, nil, append(args, filepath.Join("..", "wt", strconv.Itoa(num)+"-"+slug))...)
+	_, unlock := lockClone(projectDir)
+	defer unlock()
+	var force []string
+	if why != TaskMerged {
+		force = []string{"--force", "--force"}
+	}
+	return newSlot(projectDir, "wt", name, "", ai).remove(ctx, force...)
 }
 
-// RemoveReviewWorkspace removes the reviewer's checkout review/<num>, on a
-// merge, a cancel, a task given away or a change of reviewer alone. It is
-// removed with --force: it holds only the diff, which may not be written yet.
-func RemoveReviewWorkspace(projectDir string, num int) error {
-	repo, unlock := lockClone(projectDir)
+// RemoveReviewWorkspace removes review/<num> that the reviewer ai holds, on a
+// merge, a cancel, a task given away or a change of reviewer alone; a
+// checkout another AI holds is left untouched. It holds no one's work, so it
+// is removed with --force --force.
+func RemoveReviewWorkspace(ctx context.Context, projectDir string, num int, ai string) error {
+	s, err := reviewSlot(projectDir, num, ai)
+	if err != nil {
+		return err
+	}
+	_, unlock := lockClone(projectDir)
 	defer unlock()
-	return workspaceGit(repo, nil, "worktree", "remove", "--force", filepath.Join("..", "review", strconv.Itoa(num)))
+	return s.remove(ctx, "--force", "--force")
+}
+
+// reviewSlot is review/<num>; a num below 1 is refused.
+func reviewSlot(projectDir string, num int, ai string) (slot, error) {
+	if num < 1 {
+		return slot{}, fmt.Errorf("invalid task number %d", num)
+	}
+	return newSlot(projectDir, "review", strconv.Itoa(num), "", ai), nil
 }

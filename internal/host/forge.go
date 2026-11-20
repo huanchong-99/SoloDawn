@@ -1,7 +1,6 @@
 package host
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,17 +18,6 @@ import (
 type TaskForge struct {
 	Worktree string
 	Branch   string
-}
-
-// runIn runs the git or gh command name in dir and returns what it wrote to
-// standard output and to standard error. Forge and merge share it.
-func runIn(ctx context.Context, dir, name string, args ...string) (stdout, stderr string, err error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = dir
-	var errOut bytes.Buffer
-	cmd.Stderr = &errOut
-	out, err := cmd.Output()
-	return string(out), errOut.String(), err
 }
 
 func (f TaskForge) command(ctx context.Context, name string, args ...string) (string, error) {
