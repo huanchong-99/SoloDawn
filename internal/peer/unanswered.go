@@ -2,8 +2,6 @@ package peer
 
 import "time"
 
-const answerTimeout = 10 * time.Second
-
 // pending is set only on an outbound offer, under the peer lock.
 type answerWait struct {
 	until time.Time
@@ -17,7 +15,7 @@ func (p *Peer) waitForAnswer(c *Connection, paths []Route) {
 		w.paths[path.ID] = true
 	}
 	c.pending = w
-	w.until = time.Now().Add(answerTimeout)
+	w.until = time.Now().Add(10 * time.Second)
 	w.timer = time.AfterFunc(time.Until(w.until), func() { p.retirePending(c) })
 }
 
