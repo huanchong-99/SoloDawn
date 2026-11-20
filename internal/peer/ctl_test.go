@@ -107,26 +107,17 @@ func TestRejectedCtlChannels(t *testing.T) {
 	t.Cleanup(func() { pc.Close() })
 	unordered := false
 	limit := uint16(1)
-	for _, tc := range []struct {
-		label  string
-		init   *webrtc.DataChannelInit
-		closes bool
-	}{
-		{"unrelated", nil, false},
-		{"ctl", &webrtc.DataChannelInit{Ordered: &unordered}, true},
-		{"ctl", &webrtc.DataChannelInit{MaxRetransmits: &limit}, true},
-		{"ctl", &webrtc.DataChannelInit{MaxPacketLifeTime: &limit}, true},
+	for _, init := range []*webrtc.DataChannelInit{
+		{Ordered: &unordered},
+		{MaxRetransmits: &limit},
+		{MaxPacketLifeTime: &limit},
 	} {
-		dc, err := pc.CreateDataChannel(tc.label, tc.init)
+		dc, err := pc.CreateDataChannel("ctl", init)
 		check(t, err)
 		closed := make(chan struct{})
 		c := &Connection{close: func() error { close(closed); return nil }}
 		c.acceptCtl(dc, func(*Connection) { t.Error("opened rejected channel") })
-		if tc.closes {
-			recv(t, closed)
-		} else {
-			eq(t, dc.ReadyState(), webrtc.DataChannelStateClosing)
-		}
+		recv(t, closed)
 		eq(t, c.dc, (*webrtc.DataChannel)(nil))
 	}
 	c := &Connection{close: func() error { return nil }}

@@ -122,7 +122,11 @@ func (p *Peer) prune(now int64) {
 
 func (p *Peer) receiveOffer(k link, data []byte, now int64) (*proto.Envelope, error) {
 	var o proto.Offer
-	if proto.Decode(data, &o) != nil || o.Probe {
+	if proto.Decode(data, &o) != nil {
+		return nil, identity.BadRequest
+	}
+	kind := offerKinds[kindOf(o)]
+	if kind == nil {
 		return nil, identity.BadRequest
 	}
 	if c := p.live[k]; c != nil {
@@ -131,9 +135,9 @@ func (p *Peer) receiveOffer(k link, data []byte, now int64) (*proto.Envelope, er
 		}
 		return c.answer, nil
 	}
-	return p.firstOffer(k, o, now)
+	return p.firstOffer(k, o, now, kind)
 }
-func (p *Peer) firstOffer(k link, o proto.Offer, now int64) (*proto.Envelope, error) {
+func (p *Peer) firstOffer(k link, o proto.Offer, now int64, kind offerKind) (*proto.Envelope, error) {
 	desc := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: o.SDP}
 	if _, err := desc.Unmarshal(); err != nil {
 		return nil, identity.BadRequest
@@ -142,6 +146,14 @@ func (p *Peer) firstOffer(k link, o proto.Offer, now int64) (*proto.Envelope, er
 	if err != nil || !first {
 		return nil, err
 	}
+	return kind(p, k, desc)
+}
+
+func init() { offerKinds["ordinary"] = (*Peer).ordinaryOffer }
+
+// ordinaryOffer closes the signer's earlier inbound connection before the new
+// checks start (contracts/rendezvous.md section 2.3).
+func (p *Peer) ordinaryOffer(k link, desc webrtc.SessionDescription) (*proto.Envelope, error) {
 	if old := p.slot[k.device]; old != nil {
 		// Close returns once pion has released the old mux registration; its
 		// error concerns only the old connection.
@@ -155,7 +167,7 @@ func (p *Peer) answer(k link, desc webrtc.SessionDescription) (*proto.Envelope, 
 		return nil, err
 	}
 	p.slot[k.device] = c
-	c.pc.OnDataChannel(func(dc *webrtc.DataChannel) { c.acceptCtl(dc, p.inbound) })
+	c.pc.OnDataChannel(func(dc *webrtc.DataChannel) { p.dispatch(c, dc) })
 	answer, err := c.makeAnswer(desc)
 	if err != nil {
 		c.Close()
