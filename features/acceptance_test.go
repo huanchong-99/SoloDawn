@@ -23,6 +23,7 @@ func TestFeatures(t *testing.T) {
 		ScenarioInitializer: func(sc *godog.ScenarioContext) {
 			protocolSteps(sc)
 			identitySteps(sc)
+			storeSteps(sc)
 			var stdout, stderr bytes.Buffer
 			var code int
 			sc.Step(`^I run "solodawn ?(.*)"$`, func(args string) {
