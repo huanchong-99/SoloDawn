@@ -8,8 +8,10 @@ peers, apply rows or execute commands. The source of truth is
 An envelope's `p` is a **string**: its original UTF-8 bytes are signed. A batch
 can mix row types, so its elements stay as JSON until the consumer reads `r`
 (and `gone` for a deletion). Message bodies depend on `kind`. For a known
-shape, e.g. an answered call, use `MessageRow[CallBody, CallAnsweredState]`.
-The body is fixed at creation; only the card state changes.
+shape, e.g. an answered call, use `MessageRow[CallBody, CallAnsweredState]`;
+a card's state is never `null`. A message that is not a card has the state
+`NoCard`, which is `null` and nothing else. The body is fixed at creation; only
+the card state changes.
 
 Sender tests pass what their code encoded to `UnexpectedNulls`, with the JSON
 Pointers that may be null for that shape (e.g. `/thread`, `/re` and `/state` for

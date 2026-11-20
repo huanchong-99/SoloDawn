@@ -6,6 +6,8 @@
 import * as v from 'valibot';
 
 const str = v.string();
+// A number on the wire is an integer, as a Go integer field reads it (contracts/conventions.md
+// section 2), except the few fields that the contracts give as a fraction.
 const num = v.number();
 const int = v.pipe(num, v.safeInteger());
 const bool = v.boolean();
@@ -72,7 +74,7 @@ export type DeviceEntry = v.InferOutput<typeof DeviceEntry>;
 // WebSocket signalling (rendezvous.md section 2)
 
 const iceServer = v.object({ urls: strs, username: v.optional(str), credential: v.optional(str) });
-const iceConfig = { ice: v.array(iceServer), ttl: v.pipe(num, v.safeInteger()) };
+const iceConfig = { ice: v.array(iceServer), ttl: int };
 
 export const RVChallenge = v.object({ t: v.literal('challenge'), nonce: str });
 export type RVChallenge = v.InferOutput<typeof RVChallenge>;
@@ -118,28 +120,28 @@ export type RVRoom = v.InferOutput<typeof RVRoom>;
 
 // Session (datachannel.md section 3)
 
-const Success = { re: num, ok: v.literal(true) };
+const Success = { re: int, ok: v.literal(true) };
 
 export const Hello = v.object({
   t: v.literal('hello'),
-  id: num,
-  v: num,
+  id: int,
+  v: int,
   kind: str,
   name: str,
   addrs: strs,
 });
 export type Hello = v.InferOutput<typeof Hello>;
 
-const GroupSummary = v.object({ g: str, name: str, seq: num });
+const GroupSummary = v.object({ g: str, name: str, seq: int });
 
 export const Welcome = v.object({
   t: v.literal('welcome'),
   ...Success,
-  v: num,
+  v: int,
   device: str,
   name: str,
   version: str,
-  time: num,
+  time: int,
   groups: v.array(GroupSummary),
   owner: bool,
 });
@@ -158,7 +160,7 @@ export type Devlog = v.InferOutput<typeof Devlog>;
 
 // Rows (rows.md)
 
-const RowHeader = { id: str, seq: num };
+const RowHeader = { id: str, seq: int };
 
 export const GoneRow = v.object({ r: str, ...RowHeader, gone: v.literal(true) });
 export type GoneRow = v.InferOutput<typeof GoneRow>;
@@ -174,21 +176,21 @@ export const GroupRow = v.object({
   home: str,
   secretary: v.optional(str),
   checks: strs,
-  pass: num,
-  pass_foundation: num,
+  pass: int,
+  pass_foundation: int,
   limits: v.object({
-    rounds: num,
-    wakes_per_hour: num,
-    turn_minutes: num,
-    failures: num,
-    review_rounds: num,
-    ask_depth: num,
-    ask_wait_s: num,
-    approval_wait_s: num,
-    idle_notice_minutes: num,
+    rounds: int,
+    wakes_per_hour: int,
+    turn_minutes: int,
+    failures: int,
+    review_rounds: int,
+    ask_depth: int,
+    ask_wait_s: int,
+    approval_wait_s: int,
+    idle_notice_minutes: int,
   }),
-  paused: v.nullable(v.object({ by: str, at: num })),
-  created: num,
+  paused: v.nullable(v.object({ by: str, at: int })),
+  created: int,
 });
 export type GroupRow = v.InferOutput<typeof GroupRow>;
 
@@ -198,7 +200,7 @@ const MemberRow = {
   g: str,
   user: str,
   name: str,
-  last_seen: num,
+  last_seen: int,
 };
 
 export const HumanMemberRow = v.object({
@@ -221,15 +223,15 @@ export const AIMemberRow = v.object({
   approvers: strs,
   state: str,
   task: v.optional(str),
-  since: num,
+  since: int,
   path: str,
   usage: v.object({
     window_pct: v.optional(num),
-    window_resets: v.optional(num),
+    window_resets: v.optional(int),
     day_cap_pct: v.optional(num),
     spend_today: v.optional(num),
     spend_cap: v.optional(num),
-    turns_today: v.optional(num),
+    turns_today: v.optional(int),
   }),
 });
 export type AIMemberRow = v.InferOutput<typeof AIMemberRow>;
@@ -242,13 +244,13 @@ export const DeviceRow = v.object({
 });
 export type DeviceRow = v.InferOutput<typeof DeviceRow>;
 
-const Check = v.object({ ok: bool, at: num, commit: str });
+const Check = v.object({ ok: bool, at: int, commit: str });
 
 export const TaskRow = v.object({
   r: v.literal('task'),
   ...RowHeader,
   g: str,
-  num: num,
+  num: int,
   title: str,
   origin: str,
   brief: v.optional(str),
@@ -258,24 +260,24 @@ export const TaskRow = v.object({
   assignee: str,
   reviewer: v.optional(str),
   foundation: bool,
-  pass: num,
+  pass: int,
   depends: strs,
   branch: v.optional(str),
-  pr: v.optional(num),
+  pr: v.optional(int),
   pr_url: v.optional(str),
   checks: v.object({ local: v.optional(Check), cloud: v.optional(Check) }),
-  review: v.optional(v.object({ round: num, score: num, ok: bool, by: str, commit: str, at: num })),
+  review: v.optional(v.object({ round: int, score: int, ok: bool, by: str, commit: str, at: int })),
   wait: v.nullable(
-    v.object({ kind: str, msg: v.optional(str), who: v.optional(strs), since: num }),
+    v.object({ kind: str, msg: v.optional(str), who: v.optional(strs), since: int }),
   ),
-  failures: num,
+  failures: int,
   thread: v.object({
-    count: num,
-    rounds: num,
-    last: v.optional(v.object({ by: str, kind: str, text: str, ts: num })),
+    count: int,
+    rounds: int,
+    last: v.optional(v.object({ by: str, kind: str, text: str, ts: int })),
   }),
-  stats: v.object({ added: num, removed: num, started: num, ended: v.nullable(num) }),
-  created: num,
+  stats: v.object({ added: int, removed: int, started: int, ended: v.nullable(int) }),
+  created: int,
 });
 export type TaskRow = v.InferOutput<typeof TaskRow>;
 
@@ -312,6 +314,7 @@ const ApprovalBody = v.object({
   ai: str,
   tool: str,
   command: str,
+  full: optionalInt,
   why: optionalText,
   category: str,
   approvers: strs,
@@ -477,7 +480,7 @@ export const NoteRow = v.object({
   task: v.nullable(str),
   text: str,
   by: str,
-  ts: num,
+  ts: int,
 });
 export type NoteRow = v.InferOutput<typeof NoteRow>;
 
@@ -497,9 +500,9 @@ export type Row = v.InferOutput<typeof Row>;
 
 export const Sync = v.object({
   t: v.literal('sync'),
-  id: num,
+  id: int,
   g: str,
-  since: num,
+  since: int,
   state_only: bool,
 });
 export type Sync = v.InferOutput<typeof Sync>;
@@ -507,13 +510,13 @@ export type Sync = v.InferOutput<typeof Sync>;
 export const Reset = v.object({ t: v.literal('reset'), g: str });
 export type Reset = v.InferOutput<typeof Reset>;
 
-export const Synced = v.object({ t: v.literal('synced'), ...Success, g: str, seq: num });
+export const Synced = v.object({ t: v.literal('synced'), ...Success, g: str, seq: int });
 export type Synced = v.InferOutput<typeof Synced>;
 
 export const Rows = v.object({ t: v.literal('rows'), g: str, rows: v.array(Row) });
 export type Rows = v.InferOutput<typeof Rows>;
 
-const FetchPage = { t: v.literal('fetch'), id: num, g: str, before: num, limit: num };
+const FetchPage = { t: v.literal('fetch'), id: int, g: str, before: int, limit: int };
 
 /** A page of a thread, or of the main line when `thread` is null. */
 export const FetchThread = v.object({ ...FetchPage, thread: v.nullable(str) });
@@ -533,33 +536,37 @@ export type Fetched = v.InferOutput<typeof Fetched>;
 
 // Commands (datachannel.md section 5)
 
-export const Cmd = v.object({ t: v.literal('cmd'), id: num, env: Envelope });
+export const Cmd = v.object({ t: v.literal('cmd'), id: int, env: Envelope });
 export type Cmd = v.InferOutput<typeof Cmd>;
 
 export const CmdResult = v.object({
   ...Success,
-  num: v.optional(num),
+  num: v.optional(int),
   passed: v.optional(bool),
-  round: v.optional(num),
+  round: v.optional(int),
   link: v.optional(str),
-  expires: v.optional(num),
+  expires: v.optional(int),
 });
 export type CmdResult = v.InferOutput<typeof CmdResult>;
 
 export const ErrorResponse = v.object({
-  re: num,
+  re: int,
   err: v.object({ code: str, msg: str }),
 });
 export type ErrorResponse = v.InferOutput<typeof ErrorResponse>;
 
 // The ctl channel (datachannel.md section 2)
 
+/** The answer to `cmd`, which has no `t`: a frame with a `t` is read by the schema it names, and
+ *  refused when that schema refuses it (contracts/conventions.md section 3). */
+const CmdAnswer = v.object({ t: v.optional(v.never()), ...CmdResult.entries });
+
 /** Every frame a client can receive on `ctl`: a response (it has `re`) or a push. */
 export const Frame = v.union([
   Welcome,
   Synced,
   Fetched,
-  CmdResult,
+  CmdAnswer,
   ErrorResponse,
   Rows,
   Reset,
