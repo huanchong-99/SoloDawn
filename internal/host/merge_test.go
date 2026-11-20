@@ -229,13 +229,33 @@ func TestMergeReviewedPR(t *testing.T) {
 	checkMergeCalls(t, m.Repo, mergeInvocation+viewInvocation+viewInvocation)
 }
 
-func TestMergePRRefused(t *testing.T) {
+func TestMergePRCommandFailure(t *testing.T) {
 	m := mergeForgeFixture(t)
 	t.Setenv("FAIL_GH_COMMAND", "merge")
+	t.Setenv("GH_FIXTURE_OUTPUT", `{"state":"OPEN"}`)
 	result, err := m.Apply(t.Context())
 	mergeOK(t, err)
 	mergeEqual(t, result, host.MergeResult{Conflict: "gh pr merge 32 --squash --delete-branch --match-head-commit abc: exit status 1: forge refused"})
-	checkMergeCalls(t, m.Repo, mergeInvocation)
+	checkMergeCalls(t, m.Repo, mergeInvocation+viewInvocation)
+}
+
+func TestMergePRBranchDeletionFailure(t *testing.T) {
+	m := mergeForgeFixture(t)
+	t.Setenv("FAIL_GH_COMMAND", "merge")
+	t.Setenv("GH_FIXTURE_OUTPUT", `{"state":"MERGED","mergeCommit":{"oid":"def"}}`)
+	result, err := m.Apply(t.Context())
+	mergeOK(t, err)
+	mergeEqual(t, result, host.MergeResult{MergeCommit: "def"})
+	checkMergeCalls(t, m.Repo, mergeInvocation+viewInvocation)
+}
+
+func TestMergePRUnknownOutcome(t *testing.T) {
+	m := mergeForgeFixture(t)
+	t.Setenv("FAIL_GH_COMMAND", "view")
+	result, err := m.Apply(t.Context())
+	mergeEqual(t, result, host.MergeResult{})
+	mergeEqual(t, err.Error(), "gh pr view 32 --json state,mergeCommit: exit status 1: forge refused")
+	checkMergeCalls(t, m.Repo, mergeInvocation+viewInvocation)
 }
 
 func TestMergePRInspection(t *testing.T) {

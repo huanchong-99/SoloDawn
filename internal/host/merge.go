@@ -40,14 +40,20 @@ func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 		if err := m.squashLocal(ctx); err != nil {
 			return MergeResult{Conflict: err.Error()}, nil
 		}
-	} else {
-		_, err := m.run(ctx, "gh", "pr", "merge", strconv.Itoa(m.PR),
-			"--squash", "--delete-branch", "--match-head-commit", m.Commit)
-		if err != nil {
-			return MergeResult{Conflict: err.Error()}, nil
-		}
+		return m.Inspect(ctx)
 	}
-	return m.Inspect(ctx)
+	// gh can exit unsuccessfully deleting the branch after the server has
+	// already merged the PR. Inspect its state even on a command error.
+	_, mergeErr := m.run(ctx, "gh", "pr", "merge", strconv.Itoa(m.PR),
+		"--squash", "--delete-branch", "--match-head-commit", m.Commit)
+	result, err := m.inspectPR(ctx)
+	if err != nil {
+		return MergeResult{}, errors.Join(mergeErr, err)
+	}
+	if result.Conflict != "" && mergeErr != nil {
+		result.Conflict = mergeErr.Error()
+	}
+	return result, nil
 }
 
 func (m ReviewedMerge) message() string {
