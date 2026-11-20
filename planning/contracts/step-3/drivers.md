@@ -60,7 +60,7 @@ step 1 drivers:
   session can take its next turn or be resumed;
 - the instructions of `contracts/drivers.md` section 4 passed at session
   start, and the turn text of its section 3, unchanged but for the one
-  sentence of section 5;
+  sentence that section 5 of this file replaces;
 - model, permission and sandbox settings passed explicitly at every start;
 - detection by the program's own version command and sign-in failure
   reported as `login_invalid`, as in `contracts/drivers.md` 1.4;
@@ -86,10 +86,10 @@ node was built for. The table holds only what a switch of section 5 reads.
 
 Rules for a declaration:
 
-- `levels` holds `2` only with a sandbox. Whether permission rules without
-  a sandbox can stand for level 2 is `risks.md` Q-4, open for Claude Code
-  on native Windows; it is not decided here, and until it is, such a
-  driver leaves `2` out.
+- `levels` holds `2` only with a sandbox; permission rules without one do
+  not stand for level 2. Decided for Claude Code on native Windows, where
+  the vendor provides no sandbox (`risks.md` Q-4): the node refuses level 2
+  there and says why. WSL2 is a later option.
 - With `approvals` `none`, `levels` holds `2` only if the CLI can be
   started so that an action its sandbox stops fails by itself: no prompt,
   and no wait for one.
@@ -162,8 +162,10 @@ The name is not `caps`: that field holds the owner's usage caps.
 - Other members see nothing of the declaration. An AI that cannot do
   something says so in the group, like any member.
 - `driver` is a wire shape, so lane PROTO freezes it in both languages in
-  one pull request (`contracts/conventions.md` section 5). The parallel
-  plan names no unit for it yet: section 9, point 1.
+  one pull request (`contracts/conventions.md` section 5): unit P-5, as
+  the coordinator decided on 2026-11-20. The Fable interface unit U3-3
+  shows it: the account choice, the level control, the cap units and the
+  terminal button. The tables of the parallel plan do not list either yet.
 
 ## 7. Acceptance
 
@@ -174,7 +176,8 @@ the test of the switch takes their place:
 
 | Declaration | Step 1 tests that do not run for this CLI |
 | --- | --- |
-| no level 2, or `approvals` `none` | A4.1, A4.2, A4.3, A4.6, A4.10 |
+| no level 2 | A4.1, A4.2, A4.3, A4.6, A4.10 |
+| level 2 with `approvals` `none` | A4.1, A4.2, A4.3, A4.6. A4.10 runs with the outcome of section 4: no card, the write fails within the turn, and no file exists |
 | no level 3 | A4.5 |
 | `takeover` `none` | A7.1 to A7.9 |
 | `takeover` `resume` | A7.7 runs with the structured `assign` turn first |
@@ -193,7 +196,7 @@ The two step 1 drivers, from `contracts/drivers.md`
 
 | `agent` | `accounts` | `levels` | `approvals` | `takeover` | `usage` |
 | --- | --- | --- | --- | --- | --- |
-| `claude` | all three | `1`, `2`, `3`; on native Windows `2` waits for `risks.md` Q-4 | `tool` | `new` | `[unverified]` |
+| `claude` | all three | `1`, `2`, `3`; on native Windows `1`, `3` (`risks.md` Q-4) | `tool` | `new` | `[unverified]` |
 | `codex` | all three | `1`, `2`, `3` | `conn` | `resume` | `[unverified]` |
 
 `usage` of both waits for what the usage unit of step 1 reads from the
@@ -207,22 +210,15 @@ driver is started, and the candidates of `steps/step-2-3.md` 3.1 stay
 
 ## 9. Open points and what is not verified
 
-1. **Who freezes `driver`, and who shows it.** The parallel plan gives
-   step 3 one wire unit, P-5, which lists only the note types and the two
-   knowledge tools; its interface units U3-1 and U3-2 cover presets and
-   the knowledge base, not the places of section 6. Needs the
-   coordinator's word. Recommended: P-5 also freezes `driver`, and one
-   further interface unit takes the account choice, the level control, the
-   cap units and the terminal button. Without section 6 the switches still
-   hold; the owner then meets them as refusals.
+1. Decided: P-5 freezes `driver` and U3-3 shows it (section 6).
 2. `[unverified]` Every capability of every candidate CLI.
 3. `[unverified]` That any CLI without an approval channel can be started
    so that a stopped action fails by itself (section 4). If none can,
    `approvals` `none` always comes with no level 2.
 4. `[unverified]` The values on Windows, for the step 1 drivers too
    (spike S-5).
-5. `steps/step-2-3-acceptance.md` is written at the same time as this
-   file (unit C2-0); its test numbers were not read.
+5. The capability tests are A10.1 to A10.4 of
+   `steps/step-2-3-acceptance.md` (unit C2-0).
 6. The answers of `steps/parallel-plan-step-2-3.md` section 1 that this
    file rests on: D-16 only. The level cap of D-1 is used as R-44 states
    it.
