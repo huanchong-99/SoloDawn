@@ -60,10 +60,11 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   future-dated offer that passed check 5 on receipt. At exactly `ts + 120000`,
   replaying the retired offer still leaves the newer connection answering
   `host.info`.
-- **A1.11** With a test rendezvous that delivers candidates before the
-  offer and before the answer they belong to, each side holds them and
-  applies them once the description is set: the connection opens, and no
-  candidate is sent a second time.
+- **A1.11** Deliver two copies of an offerer candidate before the offer and
+  two copies of an answerer candidate before the answer. Each receiver makes
+  zero calls to add that candidate before setting the corresponding remote
+  description and exactly one afterward. Deliver another copy after the
+  connection opens. The count stays one and `host.info` succeeds.
 - **A1.12** A second tab of one browser, which has the same device key, shows
   that SoloDawn is open in another tab and offers no connection. After "Use
   here" in it, it connects, and the first tab closes its connections and shows
