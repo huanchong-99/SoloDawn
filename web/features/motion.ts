@@ -11,19 +11,23 @@ let server: PreviewServer;
 let outDir: string;
 let page: Page;
 
+// Vitest gives a hook 10 s. On a machine whose cores are all busy, browser.close() alone took
+// 10.0 s (20 to 60 ms when idle), and the file failed although every test passed.
+const browserHookTimeout = 60_000;
+
 beforeAll(async () => {
   outDir = await mkdtemp(join(tmpdir(), 'solodawn-web-'));
   const config = { build: { outDir }, logLevel: 'silent' } as const;
   await build(config);
   server = await preview({ ...config, preview: { host: '127.0.0.1', port: 0 } });
   browser = await chromium.launch();
-});
+}, browserHookTimeout);
 
 afterAll(async () => {
   await browser?.close();
   await server?.close();
   await rm(outDir, { recursive: true, force: true });
-});
+}, browserHookTimeout);
 
 export async function newPage() {
   await page?.close();
