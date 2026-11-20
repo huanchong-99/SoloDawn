@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -14,7 +15,8 @@ import (
 type ReviewedMerge struct {
 	Repo, Base, Branch string
 	Task, Commit       string
-	PR                 int // zero for a local-only group
+	PR                 int    // zero for a local-only group
+	GitHubRepo         string // <owner>/<repo> of the group's GitHub repository
 }
 
 // MergeResult supplies the squash commit for task merged, or the detail for
@@ -39,10 +41,9 @@ func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 		}
 		return m.inspectLocal(ctx)
 	}
-	// gh can exit unsuccessfully deleting the branch after the server has
-	// already merged the PR. Inspect its state even on a command error.
-	_, mergeErr := m.run(ctx, "gh", "pr", "merge", strconv.Itoa(m.PR),
-		"--squash", "--delete-branch", "--match-head-commit", m.Commit)
+	// gh can exit unsuccessfully deleting the remote branch after the server
+	// has already merged the PR. Inspect its state even on a command error.
+	_, mergeErr := m.mergePR(ctx)
 	result, err := m.inspectPR(ctx)
 	if err != nil {
 		return MergeResult{}, errors.Join(mergeErr, err)
@@ -157,8 +158,23 @@ func (m ReviewedMerge) inspectPR(ctx context.Context) (MergeResult, error) {
 	return MergeResult{MergeCommit: pr.MergeCommit.OID}, nil
 }
 
+// mergePR runs gh with --repo from the folder that holds the clone, not
+// inside it: gh then merges and deletes the remote branch only, whatever its
+// version, and leaves the worktree and the local branch to the node, which
+// removes them itself (RemoveTaskWorkspace, DeleteBranch).
+func (m ReviewedMerge) mergePR(ctx context.Context) (string, error) {
+	return commandText(ctx, filepath.Dir(m.Repo), "gh", "pr", "merge", strconv.Itoa(m.PR), "--repo", m.GitHubRepo,
+		"--squash", "--delete-branch", "--match-head-commit", m.Commit)
+}
+
 func (m ReviewedMerge) run(ctx context.Context, name string, args ...string) (string, error) {
-	out, stderr, err := runIn(ctx, m.Repo, name, args...)
+	return commandText(ctx, m.Repo, name, args...)
+}
+
+// commandText runs name in dir and returns its output without the final
+// line break; an error names the command and carries its whole output.
+func commandText(ctx context.Context, dir, name string, args ...string) (string, error) {
+	out, stderr, err := runIn(ctx, dir, name, args...)
 	if err != nil {
 		detail := strings.TrimSpace(out + stderr)
 		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, detail)

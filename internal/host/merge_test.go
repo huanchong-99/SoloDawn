@@ -211,17 +211,23 @@ func TestMergeMissingRefs(t *testing.T) {
 	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "log", "-1", "--no-show-signature", "--format=%H%n%B", "refs/heads/absent", "--"))
 }
 
-// Re-execute this test binary as gh. Each invocation records its argv in
-// its working directory, so the tests cover both the command and the clone.
+// Re-execute this test binary as gh. Each invocation records the folder it
+// runs in and its argv in the log the variable names, so the tests cover
+// both the command and where it runs.
 func init() {
-	if os.Getenv("SOLODAWN_TEST_MERGE_GH") != "1" {
+	log := os.Getenv("SOLODAWN_TEST_MERGE_GH")
+	if log == "" {
 		return
 	}
-	f, err := os.OpenFile("gh-calls", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Fprintln(f, strings.Join(os.Args[1:], " "))
+	dir, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Fprintln(f, dir+" | "+strings.Join(os.Args[1:], " "))
 	f.Close()
 	if os.Args[2] == os.Getenv("FAIL_GH_COMMAND") {
 		fmt.Fprintln(os.Stderr, "forge refused")
@@ -243,22 +249,29 @@ func mergeForgeFixture(t *testing.T) host.ReviewedMerge {
 	data, err := os.ReadFile(exe)
 	mergeOK(t, err)
 	mergeOK(t, os.WriteFile(filepath.Join(bin, name), data, 0700))
-	t.Setenv("SOLODAWN_TEST_MERGE_GH", "1")
+	t.Setenv("SOLODAWN_TEST_MERGE_GH", filepath.Join(bin, "calls"))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return host.ReviewedMerge{Repo: t.TempDir(), Task: "t7", Commit: "abc", PR: 32}
+	repo := filepath.Join(t.TempDir(), "repo")
+	mergeOK(t, os.Mkdir(repo, 0700))
+	return host.ReviewedMerge{Repo: repo, Task: "t7", Commit: "abc", PR: 32, GitHubRepo: "team/website"}
 }
 
-func checkMergeCalls(t *testing.T, repo, want string) {
+// checkMergeCalls compares the gh calls with want, a list of "merge" (run
+// with --repo from the folder that holds the clone) and "view" (in the clone).
+func checkMergeCalls(t *testing.T, m host.ReviewedMerge, want ...string) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(repo, "gh-calls"))
+	data, err := os.ReadFile(os.Getenv("SOLODAWN_TEST_MERGE_GH"))
 	mergeOK(t, err)
-	mergeEqual(t, string(data), want)
+	calls := map[string]string{
+		"merge": filepath.Dir(m.Repo) + " | pr merge 32 --repo team/website --squash --delete-branch --match-head-commit abc\n",
+		"view":  m.Repo + " | pr view 32 --json state,mergeCommit,headRefOid\n",
+	}
+	var expected string
+	for _, call := range want {
+		expected += calls[call]
+	}
+	mergeEqual(t, string(data), expected)
 }
-
-const (
-	mergeInvocation = "pr merge 32 --squash --delete-branch --match-head-commit abc\n"
-	viewInvocation  = "pr view 32 --json state,mergeCommit,headRefOid\n"
-)
 
 func TestMergeReviewedPR(t *testing.T) {
 	m := mergeForgeFixture(t)
@@ -266,11 +279,11 @@ func TestMergeReviewedPR(t *testing.T) {
 	result, err := m.Apply(t.Context())
 	mergeOK(t, err)
 	mergeEqual(t, result, host.MergeResult{MergeCommit: "def"})
-	checkMergeCalls(t, m.Repo, mergeInvocation+viewInvocation)
+	checkMergeCalls(t, m, "merge", "view")
 	observed, err := m.Inspect(t.Context())
 	mergeOK(t, err)
 	mergeEqual(t, observed, result)
-	checkMergeCalls(t, m.Repo, mergeInvocation+viewInvocation+viewInvocation)
+	checkMergeCalls(t, m, "merge", "view", "view")
 }
 
 func TestMergePRCommandFailure(t *testing.T) {
@@ -279,8 +292,8 @@ func TestMergePRCommandFailure(t *testing.T) {
 	t.Setenv("GH_FIXTURE_OUTPUT", `{"state":"OPEN"}`)
 	result, err := m.Apply(t.Context())
 	mergeOK(t, err)
-	mergeEqual(t, result, host.MergeResult{Conflict: "gh pr merge 32 --squash --delete-branch --match-head-commit abc: exit status 1: forge refused"})
-	checkMergeCalls(t, m.Repo, mergeInvocation+viewInvocation)
+	mergeEqual(t, result, host.MergeResult{Conflict: "gh pr merge 32 --repo team/website --squash --delete-branch --match-head-commit abc: exit status 1: forge refused"})
+	checkMergeCalls(t, m, "merge", "view")
 }
 
 func TestMergePRBranchDeletionFailure(t *testing.T) {
@@ -290,7 +303,7 @@ func TestMergePRBranchDeletionFailure(t *testing.T) {
 	result, err := m.Apply(t.Context())
 	mergeOK(t, err)
 	mergeEqual(t, result, host.MergeResult{MergeCommit: "def"})
-	checkMergeCalls(t, m.Repo, mergeInvocation+viewInvocation)
+	checkMergeCalls(t, m, "merge", "view")
 }
 
 func TestMergePRUnknownOutcome(t *testing.T) {
@@ -299,7 +312,7 @@ func TestMergePRUnknownOutcome(t *testing.T) {
 	result, err := m.Apply(t.Context())
 	mergeEqual(t, result, host.MergeResult{})
 	mergeEqual(t, err.Error(), "gh pr view 32 --json state,mergeCommit,headRefOid: exit status 1: forge refused")
-	checkMergeCalls(t, m.Repo, mergeInvocation+viewInvocation)
+	checkMergeCalls(t, m, "merge", "view")
 }
 
 func TestMergePRInspection(t *testing.T) {
@@ -321,7 +334,7 @@ func TestMergePRInspection(t *testing.T) {
 			} else {
 				mergeEqual(t, err.Error(), tc.problem)
 			}
-			checkMergeCalls(t, m.Repo, viewInvocation)
+			checkMergeCalls(t, m, "view")
 		})
 	}
 }
