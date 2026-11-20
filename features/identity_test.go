@@ -65,11 +65,11 @@ func identitySteps(sc *godog.ScenarioContext) {
 
 	var dir string
 	var first, second identity.Key
-	sc.After(func(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if dir != "" {
 			os.RemoveAll(dir)
 		}
-		return ctx, err
+		return ctx, nil
 	})
 	sc.Step(`^a node that started for the first time in an empty data directory$`, func() (err error) {
 		if dir, err = os.MkdirTemp("", "solodawn-identity"); err != nil {

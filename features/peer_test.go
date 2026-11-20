@@ -54,11 +54,11 @@ func init() {
 
 func peerSteps(sc *godog.ScenarioContext) {
 	w := &peersWorld{dated: map[string]proto.Envelope{}}
-	sc.After(func(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		for _, undo := range slices.Backward(w.cleanup) {
 			undo()
 		}
-		return ctx, err
+		return ctx, nil
 	})
 	sc.Step("^two authorized nodes signed in on two local signalling paths$", w.signedIn)
 	sc.Step("^two authorized nodes whose signalling the test delivers$", w.delivered)
