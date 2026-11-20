@@ -665,25 +665,39 @@ func TestCommitAppliesTheEntryOfADeviceRow(t *testing.T) {
 	equal(t, send(stranger, 4), store.Outcome{Code: "forbidden"})
 	equal(t, s.Seq, int64(14))
 
-	// A row out of the order of its log is a mistake of whoever wrote it.
-	defer func() {
-		equal(t, recover(), any("home: the entry of device row "+browser.ID()+":9 is refused by its log: device log: the version does not follow the log"))
-	}()
-	commit(deviceRow(browser, browser, 9, "add", device(12)))
+	// An entry that its log refuses is skipped: it makes no device known,
+	// leaves the log as it was, and starts no log.
+	late, other := device(12), device(13)
+	commit(deviceRow(browser, browser, 9, "add", late), deviceRow(other, other, 2, "add", other), deviceRow(nobody, browser, 6, "add", late))
+	equal(t, len(s.Logs[browser.ID()].Entries), 5)
+	equal(t, []bool{s.Serves(late.ID()), s.Logs[other.ID()] == nil, len(s.Logs) == 3}, []bool{false, true, true})
+	equal(t, send(late, 5), store.Outcome{Code: "unknown_device"})
+	equal(t, send(tablet, 6), store.Outcome{OK: true, Num: 7})
+	equal(t, s.Seq, int64(17))
 }
 
 // A hook runs after a result is committed, and sees the state that holds it.
 func TestAHookGetsACommittedResult(t *testing.T) {
 	var seen []int64
+	var away []string
 	after := home.Rules[home.Hook]{}
-	after.Add("push", func(s *home.State, res home.Result) { seen = append(seen, s.Seq, int64(len(res.Rows))) })
+	after.Add("push", func(s *home.State, res home.Result) {
+		seen = append(seen, s.Seq, int64(len(res.Rows)))
+		for _, dev := range []identity.Key{browser, laptop} {
+			if !s.Online[dev.ID()] {
+				away = append(away, dev.ID())
+			}
+		}
+	})
 	s, calls := group(t), 0
+	s.Online[browser.ID()] = true
 	res := apply(t, home.Table{"note": writeNote(&calls)}, s, receipts{}, browser, signed(browser, "note", 1, `,"text":"x"`))
 	s.Commit(res)
 	for _, hook := range after {
 		hook(s, res)
 	}
 	equal(t, seen, []int64{11, 1})
+	equal(t, away, []string{laptop.ID()})
 	defer func() { equal(t, recover(), any("home: two functions under push")) }()
 	after.Add("push", nil)
 }
@@ -695,6 +709,7 @@ func TestTheTablesOfANodeAndTheWakesOfAState(t *testing.T) {
 	s := home.NewState(groupID, node.ID(), browser.ID())
 	s.Wakes[aiID] = append(s.Wakes[aiID], clock)
 	equal(t, s.Wakes, map[string][]int64{aiID: {clock}})
+	equal(t, s.Online, map[string]bool{})
 }
 
 // The answers are the frames of the wire examples.

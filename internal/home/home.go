@@ -40,7 +40,7 @@ type State struct {
 	// Logs holds, by user id, the device log of this node's owner and of
 	// every person in the group. The logs are this state's own values, which
 	// nothing else reads or writes: Commit applies the entry of each device
-	// row to them.
+	// row to them, when the log accepts it.
 	Logs map[string]*identity.Log
 
 	Group  proto.GroupRow                  // its ID is empty until the group is created
@@ -56,6 +56,11 @@ type State struct {
 	// (planning/contracts/commands.md section 1.3). Whoever sends the items
 	// keeps it, on the goroutine of the group.
 	Wakes map[string][]int64
+
+	// Online is the set of devices that have a connection to this home now.
+	// Whoever runs the home keeps it, on the goroutine of the group; a Hook
+	// reads it.
+	Online map[string]bool
 }
 
 // NewState returns the state of a group that does not exist yet, on the home
@@ -63,7 +68,7 @@ type State struct {
 func NewState(group, home, owner string) *State {
 	return &State{ID: group, Home: home, Owner: owner, Logs: map[string]*identity.Log{},
 		People: map[string]proto.HumanMemberRow{}, AIs: map[string]proto.AIMemberRow{}, Tasks: map[string]proto.TaskRow{},
-		Wakes: map[string][]int64{}}
+		Wakes: map[string][]int64{}, Online: map[string]bool{}}
 }
 
 // Disk is what the rules read of a group beyond its state rows: messages,
@@ -403,17 +408,16 @@ func (s *State) follow(row any) {
 
 // enrol applies the device-log entry of a device row to the log of its
 // person, so that the next command is judged by the devices the group has
-// just been shown. A log starts with the first row of a person. Whoever
-// writes a device row has had its entry accepted, in order: one that the
-// log refuses is a mistake in that code.
+// just been shown. A log starts with the first row of a person. An entry
+// that the log refuses is skipped and counts for nothing: it must never make
+// a device known, and a row that is stored is read again at every start.
 func (s *State) enrol(r proto.DeviceRow) {
 	log := s.Logs[r.User]
 	if log == nil {
 		log = &identity.Log{User: r.User}
-		s.Logs[r.User] = log
 	}
-	if _, err := log.Apply(r.Env); err != nil {
-		panic("home: the entry of device row " + r.ID + " is refused by its log: " + err.Error())
+	if added, _ := log.Apply(r.Env); added {
+		s.Logs[r.User] = log
 	}
 }
 
