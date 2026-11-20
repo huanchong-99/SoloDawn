@@ -84,6 +84,32 @@ func startTogether(t *testing.T, dir string, n int) []*Local {
 	return winners
 }
 
+// A file system that cannot lock is an error of its own, not a running node.
+func TestLockUnsupported(t *testing.T) {
+	saved := lockFile
+	t.Cleanup(func() { lockFile = saved })
+	lockFile = func(*os.File) error { return syscall.ENOTSUP }
+	dir := socketRoot(t)
+	want := "lock " + filepath.Join(dir, "lock") + ": " + syscall.ENOTSUP.Error()
+	if l, err := ListenLocal(dir); l != nil || !errors.Is(err, syscall.ENOTSUP) || err.Error() != want {
+		t.Fatalf("listener where locks are not supported = %v, %v; want %q", l, err, want)
+	}
+}
+
+// Close releases the lock: the next node starts at once.
+func TestRestartAfterClose(t *testing.T) {
+	dir := socketRoot(t)
+	for range 3 {
+		l, err := ListenLocal(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestLockPathError(t *testing.T) {
 	dir := socketRoot(t)
 	if err := os.Mkdir(filepath.Join(dir, "lock"), 0o700); err != nil {

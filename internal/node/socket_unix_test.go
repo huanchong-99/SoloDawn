@@ -51,8 +51,8 @@ func checkMode(t *testing.T, path string, want os.FileMode) {
 	}
 }
 
-// The socket is created mode 0600, before ownerOnly runs, and the process's
-// umask is put back.
+// The socket is created for its owner only, before ownerOnly runs, and the
+// process's umask is put back.
 func TestListenPrivateMode(t *testing.T) {
 	old := syscall.Umask(0o022)
 	defer syscall.Umask(old)
@@ -62,7 +62,7 @@ func TestListenPrivateMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer l.Close()
-	checkMode(t, path, 0o600)
+	checkMode(t, path, 0o700)
 	if got := syscall.Umask(0o022); got != 0o022 {
 		t.Fatalf("umask after the bind = %o, want 022", got)
 	}

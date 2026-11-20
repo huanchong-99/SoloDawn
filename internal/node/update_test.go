@@ -258,18 +258,62 @@ func TestUpdateSizeLimit(t *testing.T) {
 	checkImage(t, f.u.Binary, "old binary")
 }
 
-func TestUpdateTimeout(t *testing.T) {
+func setStall(t *testing.T, d time.Duration) {
+	saved := stallTimeout
+	t.Cleanup(func() { stallTimeout = saved })
+	stallTimeout = d
+}
+
+// No answer within the stall limit: the request is given up.
+func TestUpdateStallsWithoutAnswer(t *testing.T) {
 	f, mux := newUpdate(t)
 	mux.HandleFunc("/download/SHA256SUMS", func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
-	saved := updateTimeout
-	t.Cleanup(func() { updateTimeout = saved })
-	updateTimeout = 50 * time.Millisecond
-	var timeout interface{ Timeout() bool }
-	if err := f.u.Check(t.Context(), time.Now()); !errors.As(err, &timeout) || !timeout.Timeout() {
+	setStall(t, 50*time.Millisecond)
+	if err := f.u.Check(t.Context(), time.Now()); !errors.Is(err, errStalled) {
 		t.Fatalf("a server that never answers: %v", err)
 	}
 }
 
+// The body stops halfway: the download is given up and nothing is installed.
+func TestUpdateStallsInTheBody(t *testing.T) {
+	f, mux := newUpdate(t)
+	setStall(t, 50*time.Millisecond)
+	f.serveBinary(mux, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(f.image[:4]))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	if err := f.u.Check(t.Context(), time.Now()); !errors.Is(err, errStalled) {
+		t.Fatalf("a body that stops: %v", err)
+	}
+	checkImage(t, f.u.Binary, "old binary")
+	checkFolder(t, filepath.Dir(f.u.Binary), "solodawn")
+}
+
+// A slow download that keeps sending takes longer than the stall limit in all
+// and is installed.
+func TestUpdateSlowButSteady(t *testing.T) {
+	f, mux := newUpdate(t)
+	setStall(t, 200*time.Millisecond)
+	f.serveBinary(mux, func(w http.ResponseWriter, _ *http.Request) {
+		for i := range len(f.image) {
+			w.Write([]byte{f.image[i]})
+			w.(http.Flusher).Flush()
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
+	start := time.Now()
+	noErr(t, f.u.Check(t.Context(), start))
+	checkImage(t, f.u.Binary, newImage)
+	if took := time.Since(start); took < 3*stallTimeout {
+		t.Fatalf("the download took %v, not longer than the stall limit in all", took)
+	}
+}
+
+func (f *updateFixture) serveBinary(mux *http.ServeMux, binary http.HandlerFunc) {
+	mux.HandleFunc("/download/SHA256SUMS", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, f.manifest) })
+	mux.HandleFunc("/download/"+f.name, binary)
+}
 func TestUpdateRequestErrors(t *testing.T) {
 	u := Updater{ReleaseURL: "https://%zz"}
 	_, err := u.get(t.Context(), "file")

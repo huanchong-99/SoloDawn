@@ -33,14 +33,22 @@ func privateDir(dir string) error {
 	return os.Chmod(dir, 0o700)
 }
 
-func lockFile(f *os.File) error {
+// lockHeld is flock's answer when another process holds the lock (EAGAIN).
+const lockHeld = syscall.EWOULDBLOCK
+
+func lockExclusive(f *os.File) error {
 	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 }
 
-// listenPrivate binds under umask 0177, so the socket is never open to
-// others, not even before ownerOnly.
+func unlockFile(f *os.File) error {
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+}
+
+// listenPrivate binds under umask 0077, so the socket is never open to
+// others, not even before ownerOnly. The umask is the process's: 0077 keeps
+// the owner's bits for whatever another goroutine creates meanwhile.
 func listenPrivate(path string) (*net.UnixListener, error) {
-	defer syscall.Umask(syscall.Umask(0o177))
+	defer syscall.Umask(syscall.Umask(0o077))
 	return net.ListenUnix("unix", &net.UnixAddr{Net: "unix", Name: path})
 }
 

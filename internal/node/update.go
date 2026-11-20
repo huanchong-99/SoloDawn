@@ -106,20 +106,38 @@ func (u *Updater) pending() bool {
 	return u.Status != nil && u.Status.Status == "pending"
 }
 
-// Downloads are limited: a longer file is cut, and so fails its checksum.
+// A download longer than maxDownload is cut, and so fails its checksum. A
+// request with no data for stallTimeout (connecting, waiting for the answer
+// or reading the body) is given up; a slow link that keeps sending is not.
 var (
-	maxDownload   int64         = 256 << 20
-	updateTimeout time.Duration = 600e9 // 10 minutes
+	maxDownload  int64         = 256 << 20
+	stallTimeout time.Duration = 60e9 // 60 s
 )
 
 // maxRedirects allows GitHub's two (latest release, then its asset store).
 const maxRedirects = 5
 
-var errRedirect = errors.New("self-update: redirect to another scheme or too many redirects")
+var (
+	errRedirect = errors.New("self-update: redirect to another scheme or too many redirects")
+	errStalled  = errors.New("self-update: no data for 60 s")
+)
 
 // get fetches a file of the release over https only, following at most
-// maxRedirects redirects, each to https.
+// maxRedirects redirects, each to https. The request is canceled when no
+// data arrives for stallTimeout.
 func (u *Updater) get(ctx context.Context, name string) (io.ReadCloser, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	stall := time.AfterFunc(stallTimeout, func() { cancel(errStalled) })
+	body, err := u.fetch(ctx, name)
+	if err != nil {
+		stall.Stop()
+		cancel(nil)
+		return nil, err
+	}
+	return &progressBody{body: body, limited: io.LimitReader(body, maxDownload), stall: stall, cancel: cancel}, nil
+}
+
+func (u *Updater) fetch(ctx context.Context, name string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.ReleaseURL+"/"+name, nil)
 	if err != nil {
 		return nil, err
@@ -127,7 +145,7 @@ func (u *Updater) get(ctx context.Context, name string) (io.ReadCloser, error) {
 	if req.URL.Scheme != "https" {
 		return nil, fmt.Errorf("self-update: %s is not https", u.ReleaseURL)
 	}
-	client := &http.Client{Transport: u.Transport, Timeout: updateTimeout, CheckRedirect: httpsRedirect}
+	client := &http.Client{Transport: u.Transport, CheckRedirect: httpsRedirect}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -136,10 +154,28 @@ func (u *Updater) get(ctx context.Context, name string) (io.ReadCloser, error) {
 		resp.Body.Close()
 		return nil, fmt.Errorf("self-update: %s: %s", name, resp.Status)
 	}
-	return struct {
-		io.Reader
-		io.Closer
-	}{io.LimitReader(resp.Body, maxDownload), resp.Body}, nil
+	return resp.Body, nil
+}
+
+// progressBody restarts the stall timer whenever data arrives. net/http
+// reports a request canceled for a stall with errStalled, the cancel cause.
+type progressBody struct {
+	body    io.ReadCloser
+	limited io.Reader
+	stall   *time.Timer
+	cancel  context.CancelCauseFunc
+}
+
+func (b *progressBody) Read(p []byte) (int, error) {
+	n, err := b.limited.Read(p)
+	b.stall.Reset(stallTimeout) // a read returns only with data or at the end
+	return n, err
+}
+
+func (b *progressBody) Close() error {
+	b.stall.Stop()
+	b.cancel(nil)
+	return b.body.Close()
 }
 
 func httpsRedirect(req *http.Request, via []*http.Request) error {

@@ -53,8 +53,8 @@ in the group. `host.join` clones only if the folder does not exist yet.
 A Unix domain socket at `sock`, mode 0600, in the data directory. On Unix
 the node creates that directory with mode 0700; an existing one must be a
 directory owned by the current user, and its mode is set to 0700, or the
-node refuses to start. The socket is bound under umask 0177, so it is never
-open to others, not even before its mode is set. On Windows, where a mode
+node refuses to start. The socket is bound under umask 0077, so it is never
+open to others, not even before its mode is set to 0600. On Windows, where a mode
 does not limit who connects, the directory (when the node creates it) and
 the socket have instead a protected DACL with one entry: full access for
 the owner. The test there is that another account cannot connect.
@@ -69,10 +69,12 @@ account, not an administrator, is refused with "access denied".
 
 **One node per data directory.** Before it touches `sock`, a starting node
 takes an exclusive lock on the file `lock` in the data directory (`flock`
-on Unix, `LockFileEx` on Windows) and holds it until it closes its socket;
-the system releases it when the process ends. Without the lock, a node is
-already running: the new one says `a node is already running` in one line
-and exits without binding. With the lock, a `sock` that exists was left by
+on Unix, `LockFileEx` on Windows) and holds it until it closes its socket,
+when it releases it before closing the file; the system releases it when
+the process ends. When another process holds the lock, a node is already
+running: the new one says `a node is already running` in one line and exits
+without binding. Any other failure to lock, such as a file system without
+locks, is reported as that error, with the path of `lock`. With the lock, a `sock` that exists was left by
 a node that stopped: the node removes it and binds.
 
 One JSON line opens a connection:

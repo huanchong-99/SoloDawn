@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"os"
@@ -24,9 +25,10 @@ type Local struct {
 	lock *os.File
 }
 
-// Close closes the listener, which removes the socket, then releases the lock.
+// Close closes the listener, which removes the socket, then releases the
+// lock before it closes the lock file: a node restarted at once finds it free.
 func (l *Local) Close() error {
-	return errors.Join(l.UnixListener.Close(), l.lock.Close())
+	return errors.Join(l.UnixListener.Close(), unlockFile(l.lock), l.lock.Close())
 }
 
 // ListenLocal creates the node's private directory, takes its lock and
@@ -49,16 +51,24 @@ func ListenLocal(dir string) (*Local, error) {
 	return &Local{l, lock}, nil
 }
 
+// lockFile takes the lock without waiting; a test replaces it.
+var lockFile = lockExclusive
+
 // lockData takes an exclusive lock on the lock file of the data directory;
-// the system releases it when the process ends.
+// the system releases it when the process ends. Only a lock held by another
+// process means a node is running; a file system that cannot lock is an
+// error of its own.
 func lockData(dir string) (*os.File, error) {
 	f, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	if lockFile(f) != nil {
+	if err := lockFile(f); err != nil {
 		f.Close()
-		return nil, errRunning
+		if errors.Is(err, lockHeld) {
+			return nil, errRunning
+		}
+		return nil, fmt.Errorf("lock %s: %w", f.Name(), err)
 	}
 	return f, nil
 }
