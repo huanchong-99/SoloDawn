@@ -376,6 +376,10 @@ describe('decode', () => {
     },
   );
 
+  it('reads a node version as the release tag it was built from (contracts/local.md)', () => {
+    expect(p.decode(p.Welcome, goldens.welcome).version).toMatch(/^v\d+\.\d+\.\d+$/);
+  });
+
   it('refuses a frame a node does not send', () => {
     expect(() => p.decode(p.Frame, goldens.hello)).toThrow(v.ValiError);
   });
