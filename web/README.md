@@ -11,8 +11,9 @@ One responsive Svelte 5 page, built by Vite into `internal/node/webdist/`, from 
 embeds it and the rendezvous serves it as static files. It holds no group logic: it renders rows
 and sends commands (`planning/steps/step-1-frontend.md`). What exists today is the frame every
 screen lives in: navigation, top bar, themes, languages, hash routing, the web manifest and the
-notice for browsers that cannot run the client; the wire types with their decoding; and a mock
-connection that answers from the node's wire examples.
+notices for browsers that cannot run the client or that block its storage; this browser's device
+key with signed envelopes, the device log and pairing; the wire types with their decoding; and a
+mock connection that answers from the node's wire examples.
 
 ## Use this capability
 
@@ -28,7 +29,9 @@ Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-l
 | `pnpm format`      | Prettier                                                           |
 | `pnpm stryker run` | mutation tests of every `.ts` module outside routes and components |
 
-The one runtime dependency is `valibot`, for the wire types.
+The one runtime dependency is `valibot`, for the wire types. Signatures, hashes and macs use the
+browser's WebCrypto only; no signature library is bundled (R-164). `fake-indexeddb` is a
+development dependency, an IndexedDB for the tests.
 
 ## Contract
 
@@ -43,7 +46,28 @@ The one runtime dependency is `valibot`, for the wire types.
   asks WebCrypto for a non-extractable Ed25519 key pair, signs a message with a structured clone of
   the private key (how IndexedDB stores it) and verifies it with the public key, and asks CSS for
   `light-dark()`. When any step fails, or the page has no WebCrypto, the upgrade notice is mounted
-  in place of the application. `boot` does not open IndexedDB.
+  in place of the application. Only then does `boot` load the device key (next item); when
+  IndexedDB fails it mounts the storage notice instead, which is not an old browser.
+- **Device key.** `loadDevice` keeps this browser's non-extractable Ed25519 key pair in IndexedDB
+  (database `solodawn`, store `device`, key `key`) and creates it on first run. Each call makes a
+  candidate key and stores it only when none is stored, in one transaction, so two pages opened at
+  once keep one key. After storing a new key it asks once for persistent storage
+  (`navigator.storage.persist()`) and ignores the answer. When IndexedDB cannot be reached, opened,
+  read or written it rejects with `StorageBlocked`. A `Device` has the `id` (the public key,
+  base64url, 43 characters) and the `fingerprint` of `contracts/envelope.md` section 2, and signs
+  envelopes and rendezvous answers. `boot` loads it and drops it; the connection code will load it
+  again.
+- **Envelopes, device log, pairing.** `src/lib/identity.ts`, `devlog.ts` and `pairing.ts`
+  implement sections 1 to 4 and 6 of `contracts/envelope.md` as settled in PR #58, where it differs
+  from `internal/identity` (`issues.md`): canonical base64url only; the fourteen weak keys are never
+  a device id and a signature whose R is one, or whose S is not below L, fails before WebCrypto is
+  asked; `openSignal` and `openCommand` answer the first failing check (`bad_sig`,
+  `unknown_device`, `bad_request`, `not_for_me`, `stale`), with both ends of the window accepted;
+  `DeviceLog.apply` accepts or refuses an entry by section 4 and leaves the log unchanged when it
+  refuses; `adopts` is the log's half of adoption; a pairing secret is read by removing hyphens and
+  upper-casing a to z only. `src/lib/payload.ts` reads the fields those checks need, with
+  `JSON.parse`: exact names, the last of a repeated name, integers as safe integers by value, and
+  no `null`. Signing is left to WebCrypto, so in Safari two signatures of one payload differ.
 - **Preferences.** `prefs.theme` is `auto`, `light` or `dark`; `prefs.lang` is `zh-CN` or `en`.
   A first visit follows the system theme and the browser language (any `zh` locale opens Chinese).
   Every change is written to `<html data-theme lang>` and to `localStorage` (`sd-theme`,
@@ -80,21 +104,25 @@ The one runtime dependency is `valibot`, for the wire types.
 
 ## Understand the implementation
 
-| Path                        | Role                                                         |
-| --------------------------- | ------------------------------------------------------------ |
-| `index.html`, `src/main.ts` | entry: styles, then `boot(document.body, crypto, CSS)`       |
-| `src/lib/boot.ts`           | browser check; mounts `App` or `Upgrade`                     |
-| `src/lib/prefs.svelte.ts`   | theme and language state, their persistence, `t`             |
-| `src/lib/route.svelte.ts`   | current page from the address fragment                       |
-| `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface        |
-| `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`              |
-| `src/App.svelte`            | shell: skip link, navigation, top bar, the current route     |
-| `src/Upgrade.svelte`        | the upgrade notice                                           |
-| `src/routes/`               | one component per page                                       |
-| `src/components/`           | shared parts; `Icon.svelte` holds the line icons             |
-| `src/styles/`               | `tokens.css` (design tokens) and `base.css` (shared classes) |
-| `public/`                   | manifest, icon and `fonts/`, copied as they are              |
-| `features/web.spec.ts`      | steps of `../features/web.feature`                           |
+| Path                        | Role                                                            |
+| --------------------------- | --------------------------------------------------------------- |
+| `index.html`, `src/main.ts` | entry: styles, then `boot` with the page's crypto, CSS, storage |
+| `src/lib/boot.ts`           | browser check, device key; mounts `App` or `Notice`             |
+| `src/lib/identity.ts`       | device key in IndexedDB, base64url, sign, verify, open          |
+| `src/lib/devlog.ts`         | `DeviceLog`: apply, replay, valid devices, adoption             |
+| `src/lib/pairing.ts`        | pairing secret, room id, mac, pair message check                |
+| `src/lib/payload.ts`        | the payload fields the envelope and log checks read             |
+| `src/lib/prefs.svelte.ts`   | theme and language state, their persistence, `t`                |
+| `src/lib/route.svelte.ts`   | current page from the address fragment                          |
+| `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface           |
+| `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`                 |
+| `src/App.svelte`            | shell: skip link, navigation, top bar, the current route        |
+| `src/Notice.svelte`         | the upgrade notice and the storage notice                       |
+| `src/routes/`               | one component per page                                          |
+| `src/components/`           | shared parts; `Icon.svelte` holds the line icons                |
+| `src/styles/`               | `tokens.css` (design tokens) and `base.css` (shared classes)    |
+| `public/`                   | manifest, icon and `fonts/`, copied as they are                 |
+| `features/web.spec.ts`      | steps of `../features/web.feature`                              |
 
 Below 768 px the navigation is the bottom bar and the theme and language buttons of the top bar
 are hidden; both choices are on the settings page at every width.
@@ -106,8 +134,10 @@ are hidden; both choices are on the settings page at every width.
 - The upgrade notice uses the same tokens as the application. A browser without `light-dark()` or
   CSS nesting shows it with default colours; a browser too old to run the bundle shows nothing
   (`issues.md`).
-- Safari deletes the site's storage after seven days of use without a visit, unless the client was
-  added to the home screen (`issues.md`).
+- Safari deletes the site's storage, and with it the device key, after seven days of use without
+  a visit, unless the client was added to the home screen (`issues.md`).
+- Nothing yet stores a device log or uses the device key beyond `boot`; the connection code
+  (F-03) and onboarding (F-04) will.
 - The manifest has an SVG icon only and there is no service worker yet.
 
 ## Verification and sources
@@ -122,6 +152,11 @@ are hidden; both choices are on the settings page at every width.
   to every object, which is dropped (so a golden file with a field the schema lacks fails the exact
   comparison), and removes every field in turn. Fields that appear in no example are not
   covered by those variants.
+- `src/lib/vectors.test.ts` holds the client to `internal/proto/testdata/crypto.json`. Where
+  WebCrypto signs deterministically, as Node does, it also compares signature bytes; elsewhere
+  (Safari) it checks that the new signature verifies. The vectors, and every other identity test,
+  have run in Node only; IndexedDB has run as `fake-indexeddb` only. Running them in the three
+  browsers is task F-01c.
 - Importing `decode` and `Frame` adds about 7.6 KiB to the bundle, 2.6 KiB gzipped (measured
   with `valibot` 1.5.0 on 2026-11-20). Nothing in the application imports them yet.
 - Rules: `planning/architecture.md` section 8, `planning/product-rules.md` R-160 to R-164.

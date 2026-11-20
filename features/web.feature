@@ -93,3 +93,46 @@ Feature: Web client
     Then the page holds the message "Choose a location."
     When the client sends a command
     Then the command is accepted
+
+  Scenario: A browser that blocks site storage gets the storage notice
+    Given the browser supports Ed25519 in WebCrypto but blocks site storage
+    When the person opens the client
+    Then the notice "站点存储被阻止" is shown
+    And the application is not shown
+
+  Scenario: The browser keeps its device key between visits
+    Given the browser supports Ed25519 in WebCrypto
+    And the person has opened the client once
+    When the person opens the client again
+    Then the browser is the same device as the first time
+    And the browser asked once for persistent site storage
+
+  Scenario Outline: A receiver answers a signed command with one code
+    Given a command that this browser signed for the owner's node
+    When <event>
+    Then the answer is "<answer>"
+
+    Examples:
+      | event                                          | answer         |
+      | it arrives unchanged                           | accepted       |
+      | one byte of its payload is changed on the way  | bad_sig        |
+      | the browser is revoked before it arrives       | unknown_device |
+      | it reaches another device                      | not_for_me     |
+      | it arrives 25 hours later                      | stale          |
+      | it is revoked, misdirected and late            | unknown_device |
+      | it is misdirected and late                     | not_for_me     |
+
+  Scenario: A revoked device is out of the log for good
+    Given the device log of a person with this browser, a tablet and a node
+    When the node revokes the tablet
+    Then the valid devices are this browser and the node
+    And an entry signed by the tablet is refused
+    And an entry that adds the tablet again is refused
+    And the same revoke arriving a second time changes nothing
+
+  Scenario: Two devices that share a pairing secret recognise each other
+    Given this browser created a pairing secret
+    When a node is given the secret as a person typed it, in lower case
+    Then both sides meet in the same room
+    And each side accepts the other's pair message
+    And neither side accepts its own pair message sent back

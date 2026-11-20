@@ -24,6 +24,7 @@
     "@stryker-mutator/vitest-runner": "10.1.1",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@vitest/coverage-v8": "5.1.1",
+    "fake-indexeddb": "6.2.7",
     "happy-dom": "21.0.4",
     "prettier": "3.10.1",
     "prettier-plugin-svelte": "4.2.0",
