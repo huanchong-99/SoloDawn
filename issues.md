@@ -23,7 +23,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: in Safari on macOS and iOS, when the person does not interact with the SoloDawn page during seven days of Safari use, Safari deletes the origin's IndexedDB, and with it the device key once the identity module keeps it there (F-01b). The browser then starts as a new device and has to be paired again. A web app added to the home screen keeps its own count and is not affected; Lockdown Mode disables IndexedDB altogether.
 - Cause: WebKit's tracking prevention deletes all script-writable storage of a site after seven days of browser use without interaction with it ([WebKit blog](https://webkit.org/blog/10218/full-third-party-cookie-blocking-and-more/)). Not a SoloDawn defect; [decision](docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md), Consequences.
-- Mitigation: F-13 shows the iOS add-to-home-screen hint. `loadDevice` asks for persistent storage once after it creates a key (`web/src/lib/identity.ts:247-250`); Safari grants it by heuristics such as being opened as a home screen web app ([WebKit blog](https://webkit.org/blog/14403/updates-to-storage-policy/)), and the answer is not checked.
+- Mitigation: F-13 shows the iOS add-to-home-screen hint. `loadDevice` asks for persistent storage once after it creates a key (`web/src/lib/identity.ts:247`); Safari grants it by heuristics such as being opened as a home screen web app ([WebKit blog](https://webkit.org/blog/14403/updates-to-storage-policy/)), and the answer is not checked.
 - Status: open, accepted as a limitation of the platform.
 
 ### 2026-11-20 · limitation · Safari's verify() fails every signature over an empty message

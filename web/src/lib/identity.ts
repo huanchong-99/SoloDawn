@@ -244,10 +244,7 @@ export async function loadDevice({ crypto, idb, storage }: KeyStore): Promise<De
   const kept = await keep(idb, fresh).catch((cause: unknown) => {
     throw new StorageBlocked(cause);
   });
-  if (kept === fresh)
-    Promise.resolve()
-      .then(() => storage.persist())
-      .catch(ignore);
+  if (kept === fresh) storage.persist().catch(ignore);
   return Device.of(crypto, kept);
 }
 
