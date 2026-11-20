@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"math"
@@ -31,18 +32,24 @@ var rawMessage = reflect.TypeFor[json.RawMessage]()
 //     fold to one; Decode drops those members first, at every depth.
 //   - A number is read as its nearest double, and an integer field takes it
 //     only if that is an integer of at most 2^53-1 either way: 2.0 is 2, and
-//     2^53 is refused.
+//     2^53 is refused. A number beyond the largest double, which a browser
+//     reads as Infinity, is refused only by a field that reads it.
 //   - A field without omitempty is always present, and only a pointer field
 //     without omitempty can be null. encoding/json leaves a field at its zero
 //     value for a missing member and for null alike.
 //
 // A json.RawMessage is not looked into: whoever decodes it later does that.
 func Decode(data []byte, v any) error {
-	var value any
-	if err := json.Unmarshal(data, &value); err != nil {
-		return err
+	if err := json.Unmarshal(data, new(json.RawMessage)); err != nil {
+		return err // not one JSON value
 	}
-	dropOtherCase(value)
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.UseNumber()
+	var value any
+	if err := d.Decode(&value); err != nil {
+		panic(err) // one JSON value decodes into any
+	}
+	value = exact(value)
 	if err := fits(value, reflect.TypeOf(v).Elem()); err != nil {
 		return err
 	}
@@ -53,20 +60,31 @@ func Decode(data []byte, v any) error {
 	return json.Unmarshal(exact, v)
 }
 
-func dropOtherCase(value any) {
+// exact drops the members whose name could match a field in another case, at
+// every depth, and reads each number as its nearest double. A number beyond
+// the largest double stays as written: encoding/json would refuse the whole
+// value for it, a browser reads it as Infinity, and only a field that reads it
+// refuses it.
+func exact(value any) any {
 	switch value := value.(type) {
 	case map[string]any:
 		for name, member := range value {
 			if strings.ContainsFunc(name, foldsToLower) {
 				delete(value, name)
+			} else {
+				value[name] = exact(member)
 			}
-			dropOtherCase(member)
 		}
 	case []any:
-		for _, element := range value {
-			dropOtherCase(element)
+		for i, element := range value {
+			value[i] = exact(element)
+		}
+	case json.Number:
+		if f, _ := value.Float64(); !math.IsInf(f, 0) {
+			return f
 		}
 	}
+	return value
 }
 
 // foldsToLower reports whether a character is matched to a lower-case ASCII

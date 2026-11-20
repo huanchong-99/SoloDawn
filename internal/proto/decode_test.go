@@ -252,6 +252,20 @@ func TestDecodeReadsAnIntegerByItsValue(t *testing.T) {
 	decoded(t, "a large number read as its nearest double", document(map[string]string{"share": "9007199254740993"}), wide)
 }
 
+// JSON.parse reads a number beyond the largest double as Infinity, and a
+// receiver ignores a member it does not read; encoding/json refuses the
+// whole value for it.
+func TestDecodeRefusesANumberBeyondADoubleOnlyInAField(t *testing.T) {
+	decoded(t, "members nobody reads", document(map[string]string{"+": `,"new":1e400,"more":[-1e999,{"x":1e400}]`}), whole())
+	body := whole()
+	body.Body = json.RawMessage(`{"n":1e400,"text":"hello"}`)
+	decoded(t, "a body kept as JSON", document(map[string]string{"body": `{"text":"hello","n":1e400}`}), body)
+	for _, name := range []string{"size", "at", "big", "share"} {
+		refused(t, name+" written -1e400", document(map[string]string{name: "-1e400"}), nil)
+	}
+	refused(t, "an optional integer written 1e400", document(map[string]string{"+": `,"turns":1e400`}), nil)
+}
+
 func TestDecodeLeavesWrongTypesToTheDecoder(t *testing.T) {
 	for what, change := range map[string]map[string]string{
 		"a text for a list":           {"list": `"a"`},

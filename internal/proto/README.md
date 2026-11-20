@@ -27,7 +27,9 @@ alone reads four things differently from a browser. An error from `Decode` is
 - **`null`.** Only a pointer field without `omitempty`, a field its contract marks
   "or `null`", takes it. Anywhere else, an optional field included, it is refused.
 - **Integers.** A number is read as its nearest double, and an integer field takes it
-  only if that is a whole number of at most 2^53 - 1 either way: `2.0` is 2.
+  only if that is a whole number of at most 2^53 - 1 either way: `2.0` is 2. A number
+  beyond the largest double, which a browser reads as `Infinity`, is refused only by a
+  field that reads it; elsewhere it is ignored like any member the receiver does not know.
 
 A `json.RawMessage` is not looked into; decode it with `Decode` when its type is
 known. So a wire type states the contract in its tags: `omitempty` for an optional
