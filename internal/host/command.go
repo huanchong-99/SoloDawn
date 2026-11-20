@@ -12,6 +12,10 @@ import (
 // commandUnit is the unit of the command limits: a minute. Tests shorten it.
 var commandUnit = time.Minute
 
+// commandWaitDelay is how long the output of a stopped command may stay
+// open, held by a child that left its session: 10 s. Tests shorten it.
+var commandWaitDelay = time.Duration(10e9)
+
 // noPrompt turns off every way git, gh, ssh and Git Credential Manager ask a
 // person. The owner's ssh command and ssh configuration are left alone.
 var noPrompt = []string{"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "SSH_ASKPASS_REQUIRE=never", "GCM_INTERACTIVE=never"}
@@ -38,7 +42,7 @@ func runInput(ctx context.Context, dir string, stdin io.Reader, name string, arg
 	}
 	detachTerminal(cmd)
 	// A child that outlives a stopped command cannot hold its output open.
-	cmd.WaitDelay = 10 * time.Second
+	cmd.WaitDelay = commandWaitDelay
 	var out, errOut bytes.Buffer
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, &out, &errOut
 	err = cmd.Run()
