@@ -190,7 +190,8 @@ func (m fields) object(name string) bool {
 
 func (s *server) route(c *client, m fields) bool {
 	key := m.text("k")
-	if !identity.IsDevice(key) || !m.object("env") {
+	_, valid := identity.ParseDeviceID(key)
+	if !valid || !m.object("env") {
 		return false
 	}
 	if target := s.online[key]; target != nil {
@@ -208,7 +209,7 @@ func (s *server) watch(c *client, m fields) bool {
 	}
 	c.watch = make(map[string]bool, len(keys))
 	for _, key := range keys {
-		if !identity.IsDevice(key) {
+		if _, valid := identity.ParseDeviceID(key); !valid {
 			return false
 		}
 		if !c.watch[key] {

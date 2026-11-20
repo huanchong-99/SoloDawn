@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func rendezvousGoldens(t *testing.T, envelope Envelope, pair Pair) {
+func rendezvousGoldens(t *testing.T, envelope Envelope) {
 	t.Helper()
 	nonce := id("challenge")
 	sig := ed25519.Sign(browser, []byte("solodawn/rv/1\n"+nonce))
@@ -28,5 +28,7 @@ func rendezvousGoldens(t *testing.T, envelope Envelope, pair Pair) {
 	const room = "23b3731de722f5b7425a41416cf5d30b"
 	golden(t, "rv-join", RoomID{"join", room})
 	golden(t, "rv-joined", RoomID{"joined", room})
+	// The room and pair MAC for the canonical secret in envelope.md section 6.
+	pair := Pair{"pair", user, "browser", "phone browser", "a", "LSa7ZkmFClacGrJ6bsUg1G3yTiycOY3RZf3rskaRwCo"}
 	golden(t, "rv-room", RoomData{RoomID{"room", room}, wireJSON(t, pair)})
 }

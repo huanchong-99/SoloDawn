@@ -66,7 +66,7 @@ export type DeviceEntry = v.InferOutput<typeof DeviceEntry>;
 // WebSocket signalling (rendezvous.md section 2)
 
 const iceServer = v.object({ urls: strs, username: v.optional(str), credential: v.optional(str) });
-const iceConfig = { ice: v.array(iceServer), ttl: num };
+const iceConfig = { ice: v.array(iceServer), ttl: v.pipe(num, v.safeInteger()) };
 
 export const RVChallenge = v.object({ t: v.literal('challenge'), nonce: str });
 export type RVChallenge = v.InferOutput<typeof RVChallenge>;
@@ -92,22 +92,26 @@ export type RVFrom = v.InferOutput<typeof RVFrom>;
 export const RVOffline = v.object({ t: v.literal('offline'), k: str });
 export type RVOffline = v.InferOutput<typeof RVOffline>;
 
-export const RVWatch = v.object({ t: v.literal('watch'), k: strs });
+export const RVWatch = v.object({ t: v.literal('watch'), k: v.pipe(strs, v.maxLength(64)) });
 export type RVWatch = v.InferOutput<typeof RVWatch>;
 
 export const RVPresence = v.object({ t: v.literal('presence'), k: str, on: bool });
 export type RVPresence = v.InferOutput<typeof RVPresence>;
 
-export const RVJoin = v.object({ t: v.literal('join'), room: str });
+const roomId = v.pipe(str, v.regex(/^[0-9a-f]{32}$/));
+
+export const RVJoin = v.object({ t: v.literal('join'), room: roomId });
 export type RVJoin = v.InferOutput<typeof RVJoin>;
 
-export const RVJoined = v.object({ t: v.literal('joined'), room: str });
+export const RVJoined = v.object({ t: v.literal('joined'), room: roomId });
 export type RVJoined = v.InferOutput<typeof RVJoined>;
 
 export const RVRoom = v.object({
   t: v.literal('room'),
-  room: str,
-  data: v.record(str, v.unknown()),
+  room: roomId,
+  data: v.custom<Record<string, unknown>>(
+    (value) => value !== null && typeof value === 'object' && !Array.isArray(value),
+  ),
 });
 export type RVRoom = v.InferOutput<typeof RVRoom>;
 

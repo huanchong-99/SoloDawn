@@ -223,6 +223,45 @@ describe('message contracts', () => {
   });
 });
 
+describe('rendezvous frames', () => {
+  it('preserves the entire room data object and refuses other JSON types', () => {
+    const room = JSON.parse(goldens['rv-room']);
+    room.data = JSON.parse('{"constructor":{"Unknown":null},"__proto__":["pair"]}');
+    expect(JSON.stringify(p.decode(p.RVRoom, JSON.stringify(room)))).toBe(JSON.stringify(room));
+    for (const data of [null, false, 2, 'pair', []]) {
+      expect(accepts('rv-room', { ...room, data })).toBe(false);
+    }
+  });
+
+  it.each(['rv-join', 'rv-joined', 'rv-room'])('%s takes a 32-digit lowercase hex room', (name) => {
+    const frame = JSON.parse(goldens[name]);
+    const room = '0123456789abcdef'.repeat(2);
+    expect(accepts(name, { ...frame, room })).toBe(true);
+    for (const invalid of [
+      room.slice(1),
+      'z' + room,
+      room + 'z',
+      room.toUpperCase(),
+      room.slice(1) + 'g',
+    ]) {
+      expect(accepts(name, { ...frame, room: invalid })).toBe(false);
+    }
+  });
+
+  it('limits watch to 64 ids', () => {
+    const watch = JSON.parse(goldens['rv-watch']);
+    expect(accepts('rv-watch', { ...watch, k: Array(64).fill(watch.k[0]) })).toBe(true);
+    expect(accepts('rv-watch', { ...watch, k: Array(65).fill(watch.k[0]) })).toBe(false);
+  });
+
+  it.each(['rv-ready', 'rv-ice-answer'])('%s reads ttl as a safe integer', (name) => {
+    const frame = JSON.parse(goldens[name]);
+    for (const ttl of [0.5, 2 ** 53]) {
+      expect(accepts(name, { ...frame, ttl })).toBe(false);
+    }
+  });
+});
+
 describe('decode', () => {
   const frames = ['welcome', 'synced', 'fetched', 'cmd-ok', 'cmd-pair-link', 'cmd-error'];
 

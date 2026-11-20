@@ -67,5 +67,5 @@ func (s Secret) MAC(role, device string) string {
 // that its sender holds the secret. A message in the receiver's own role is
 // its own message sent back, and proves nothing.
 func (s Secret) Verify(m proto.Pair, role string) bool {
-	return m.Role == role && IsDevice(m.Key) && hmac.Equal([]byte(m.MAC), []byte(s.MAC(role, m.Key)))
+	return m.Role == role && isDevice(m.Key) && hmac.Equal([]byte(m.MAC), []byte(s.MAC(role, m.Key)))
 }
