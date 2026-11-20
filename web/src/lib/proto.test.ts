@@ -398,6 +398,17 @@ describe('decode', () => {
     },
   );
 
+  // Only an object can be an error answer; any other JSON value is refused by the answer schema,
+  // a ValiError like any frame that does not match, never a TypeError of looking for `err` in it.
+  it.each(Object.keys(p.AnswerOf) as p.RequestType[])(
+    'refuses a JSON value that is no object as the answer to %s',
+    (t) => {
+      for (const text of ['null', '4', '"err"', '[]', '[{"err":{}}]', 'true']) {
+        expect(() => p.decodeAnswer(t, text), text).toThrow(v.ValiError);
+      }
+    },
+  );
+
   it.each([...pushes, 'cmd-error'])('reads the %s frame, which needs no request', (name) => {
     expect(p.decode(p.Frame, goldens[name])).toStrictEqual(JSON.parse(goldens[name]));
   });
