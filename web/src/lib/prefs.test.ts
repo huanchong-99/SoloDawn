@@ -114,6 +114,31 @@ describe('language', () => {
   });
 });
 
+it('applies successive toggles in the order their transition callbacks run', async () => {
+  const changes: (() => void)[] = [];
+  const { prefs, toggleTheme, toggleLang } = await load();
+  Object.assign(document, { startViewTransition: (change: () => void) => changes.push(change) });
+  try {
+    toggleTheme();
+    toggleTheme();
+    toggleLang();
+    toggleLang();
+    expect(changes).toHaveLength(4);
+    expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
+    for (const [i, [theme, lang]] of [
+      ['dark', 'en'],
+      ['light', 'en'],
+      ['light', 'zh-CN'],
+      ['light', 'en'],
+    ].entries()) {
+      changes[i]();
+      expect(prefs).toEqual({ theme, lang });
+    }
+  } finally {
+    Reflect.deleteProperty(document, 'startViewTransition');
+  }
+});
+
 describe('a browser that blocks site storage', () => {
   beforeEach(() => {
     vi.spyOn(globalThis, 'localStorage', 'get').mockImplementation(() => {

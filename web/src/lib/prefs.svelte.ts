@@ -58,8 +58,14 @@ export function choose<K extends keyof typeof prefs>(key: K, value: (typeof pref
   });
 }
 
-export const toggleTheme = () => choose('theme', isDark() ? 'light' : 'dark');
+export const toggleTheme = () =>
+  shift(() => {
+    prefs.theme = isDark() ? 'light' : 'dark';
+  });
 
-export const toggleLang = () => choose('lang', prefs.lang === 'en' ? 'zh-CN' : 'en');
+export const toggleLang = () =>
+  shift(() => {
+    prefs.lang = prefs.lang === 'en' ? 'zh-CN' : 'en';
+  });
 
 export const t = (key: Key) => messages[prefs.lang][key];
