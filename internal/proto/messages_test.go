@@ -2,7 +2,6 @@ package proto
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,35 +20,55 @@ type messageExample struct {
 	kind, author, text string
 	thread, replyTo    *string
 	main               bool
+	mentions           []string
 	signedBody         any // when the home adds fields to the posted body
 }
 
+func ids(texts []string) []ID {
+	list := []ID{}
+	for _, text := range texts {
+		list = append(list, ID(text))
+	}
+	return list
+}
+
+// exampleRow is a message row with the post that its author signed, which is
+// also the example of a post of that kind.
 func exampleRow[B, S any](t *testing.T, m messageExample, body B, state S, seq int64) MessageRow[B, S] {
 	t.Helper()
+	if m.mentions == nil {
+		m.mentions = []string{}
+	}
 	r := MessageRow[B, S]{
 		RowHeader: RowHeader{"msg", id(m.kind), seq}, Pos: 790, Group: group,
 		Thread: m.thread, Main: m.main, By: m.author, Kind: m.kind,
-		Timestamp: ts - 500, Text: m.text, Mentions: []string{}, Re: m.replyTo, Body: body, State: state,
+		Timestamp: ts - 500, Text: m.text, Mentions: m.mentions, Re: m.replyTo, Body: body, State: state,
 	}
 	if m.author != "system" {
 		if m.signedBody == nil {
 			m.signedBody = body
 		}
-		post := fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"as":%q,"kind":%q,"thread":%s,"main":%t,"text":%s,"mentions":[],"re":%s,"body":%s}`,
-			r.ID, r.Timestamp, group, r.By, r.Kind, wireJSON(t, r.Thread), r.Main, wireJSON(t, r.Text), wireJSON(t, r.Re), wireJSON(t, m.signedBody))
-		r.Env = new(signed(node, post))
+		post := wireJSON(t, Post[any]{
+			HomeCommand{"post", ID(r.ID), r.Timestamp, ID(group), ID(r.By)},
+			r.Kind, (*ID)(r.Thread), r.Main, r.Text, ids(r.Mentions), (*ID)(r.Re), m.signedBody,
+		})
+		goldenJSON(t, "post-"+m.kind, post)
+		r.Env = new(signed(node, string(post)))
 	}
 	return r
 }
 
-func actExample(kind, action, arg, text string) Envelope {
+// actExample is the act that decides the example card of that kind, signed by the person's browser.
+func actExample(t *testing.T, kind, action, arg, text string) Envelope {
+	t.Helper()
 	nonce := id("act " + kind + " " + action)
 	// Preserve the nonce of the original decided-decision vector.
 	if action == "choose" {
 		nonce = id("act")
 	}
-	payload := fmt.Sprintf(`{"t":"act","n":%q,"ts":%d,"g":%q,"msg":%q,"action":%q,"arg":%q,"text":%q}`, nonce, ts, group, id(kind), action, arg, text)
-	return signed(browser, payload)
+	act := Act{HomeCommand{Type: "act", Nonce: ID(nonce), Timestamp: ts, Group: ID(group)}, ID(id(kind)), action, arg, text}
+	golden(t, "act-"+action, act)
+	return signed(browser, string(wireJSON(t, act)))
 }
 
 func decisionExample() (messageExample, DecisionBody) {
@@ -60,7 +79,7 @@ func decisionExample() (messageExample, DecisionBody) {
 
 func decidedExample(t *testing.T) MessageRow[DecisionBody, DecisionDecidedState] {
 	m, body := decisionExample()
-	state := DecisionDecidedState{"decided", person, ts, new("A"), new("Header works."), actExample("decision", "choose", "A", "Header works.")}
+	state := DecisionDecidedState{"decided", person, ts, new("A"), new("Header works."), actExample(t, "decision", "choose", "A", "Header works.")}
 	return exampleRow(t, m, body, state, 814)
 }
 
@@ -68,6 +87,8 @@ func TestDecisionGoldens(t *testing.T) {
 	m, body := decisionExample()
 	golden(t, "row-msg-decision-pending", exampleRow(t, m, body, StatusOnly{"pending"}, 790))
 	golden(t, "row-msg-decision-decided", decidedExample(t))
+	// The task it names was merged or cancelled while it was pending (contracts/messages.md 3.3).
+	golden(t, "row-msg-decision-expired", exampleRow(t, m, body, TimedState{"expired", ts}, 814))
 }
 
 func TestBriefGoldens(t *testing.T) {
@@ -79,22 +100,23 @@ func TestBriefGoldens(t *testing.T) {
 		90, person, nil,
 	}
 	golden(t, "row-msg-brief-pending", exampleRow(t, m, body, StatusOnly{"pending"}, 790))
-	confirmed := ActedState{"confirmed", person, ts, actExample("brief", "confirm", "", "")}
+	confirmed := ActedState{"confirmed", person, ts, actExample(t, "brief", "confirm", "", "")}
 	golden(t, "row-msg-brief-confirmed", exampleRow(t, m, body, confirmed, 814))
 	note := "Include the relay path."
-	revise := BriefReviseState{"revise", person, ts, actExample("brief", "revise", "", note), &note}
+	revise := BriefReviseState{"revise", person, ts, actExample(t, "brief", "revise", "", note), &note}
 	golden(t, "row-msg-brief-revise", exampleRow(t, m, body, revise, 814))
 	superseded := CardState{Status: "superseded", By: &revise.By, At: &revise.At, Act: &revise.Act, Note: &note}
 	golden(t, "row-msg-brief-superseded", exampleRow(t, m, body, superseded, 815))
 }
 
 func TestApprovalGoldens(t *testing.T) {
-	m := messageExample{kind: "approval", author: agent, thread: &taskID, main: true}
+	// The host sets the mentions of an approval to the members who may decide it (contracts/messages.md section 1).
+	m := messageExample{kind: "approval", author: agent, thread: &taskID, main: true, mentions: []string{person}}
 	// The request was longer than what the card shows (contracts/messages.md 2.3).
 	body := ApprovalBody{taskID, agent, "Bash", "pnpm exec playwright install chromium", new(4096), new("Time the path change in a browser."), "command", []string{user}}
 	golden(t, "row-msg-approval-pending", exampleRow(t, m, body, StatusOnly{"pending"}, 790))
 	for _, a := range []struct{ status, action string }{{"approved", "approve"}, {"denied", "deny"}} {
-		state := ActedState{a.status, person, ts, actExample("approval", a.action, "", "")}
+		state := ActedState{a.status, person, ts, actExample(t, "approval", a.action, "", "")}
 		golden(t, "row-msg-approval-"+a.status, exampleRow(t, m, body, state, 814))
 	}
 	for _, status := range []string{"expired", "reassigned"} {

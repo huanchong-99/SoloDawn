@@ -172,10 +172,16 @@ item is an instruction to a host, so every item is signed by the home.
 queues it, and stored: what is sent later is what was decided then,
 whatever the task has become. Its payload always has `t` (`item`), `n`,
 `ts`, `g`, `to`, `item`, `ai` and `why`, and the fields the table gives its
-`why`, each there exactly when the table says. Beside `env`, `msg` and
+`why`, each there exactly when the table says. `item` is the number that
+`ack` names. In the payload, `task` and `msg` are the ids of those rows,
+and the optional fields are `task`, `msg`, `commit`, `pr`, `jump`, `code`
+and `detail`. Beside `env`, `msg` and
 `task` are copies of the rows `env` names, taken when the item is sent, to
 build the turn from (`msg.env` is the author's own envelope), and `cause`
-is the signed `act` that led to the item, unchanged.
+is the signed `act` that led to the item, unchanged. `cause` is beside
+`env` only, never in the payload: its own signature is its authority.
+Beside `env`, all three are optional, and `items` is `[]` when a frame has
+none.
 
 | `why` | `task` | `msg` | Other |
 | --- | --- | --- | --- |

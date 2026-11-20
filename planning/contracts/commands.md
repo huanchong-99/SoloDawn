@@ -41,10 +41,12 @@ result fields of its command.
 table lists for a command are all in its payload, except these optional
 ones:
 
-- where a table says "any of", only the fields being changed are sent;
+- where a table says "any of", only the fields being changed are sent, and
+  a command that sends none of them is `bad_request`;
 - `as`, there only when a host signs for one of its AIs;
 - in `act`: `arg` and `text` (which action has which: 1.4);
-- in `task assign`: `assignee` and `reviewer` (at least one of the two);
+- in `task assign`: `assignee` and `reviewer` (at least one of the two; with
+  neither it is `bad_request`);
 - in `member status`: `task` (the AI is on no task) and `event` (there is
   no fact to report);
 - in `task submitted`: `pr` and `pr_url` (the group has no remote);
@@ -62,8 +64,8 @@ that led to the task, or `null`; in `note`, `task` is a task id or `null`.
 
 | `op` | Fields | By | Effect |
 | --- | --- | --- | --- |
-| `create` | `name`, `kind`, `repo`, `base`, `forge`, `checks`, `member_name` | a person: a device of the receiving node's owner | the node becomes home of group `g` = `n`; group row with `pass` 90, `pass_foundation` 70 (R-101) and the `limits` of the example in `contracts/rows.md` section 1; a `member` row for that person with role `owner` and `member_name` as its `name`; a `groups` push to that person's connected devices |
-| `set` | any of `name`, `checks`, `pass`, `pass_foundation`, `limits`, `secretary` | an admin | group row updated. `secretary` must name an AI member that is not assignee or reviewer of a task that is not final, else `conflict`; the previous secretary's member row loses the flag |
+| `create` | `name`, `kind`, `repo`, `base`, `forge`, `checks`, `member_name` | a person: a device of the receiving node's owner | the node becomes home of group `g` = `n`: the payload carries `g` like every home command, and a `create` whose `g` is not its `n` is `bad_request`; group row with `pass` 90, `pass_foundation` 70 (R-101) and the `limits` of the example in `contracts/rows.md` section 1; a `member` row for that person with role `owner` and `member_name` as its `name`; a `groups` push to that person's connected devices |
+| `set` | any of `name`, `checks`, `pass`, `pass_foundation`, `limits`, `secretary` | an admin | group row updated. `limits`, when sent, is the whole object of `contracts/rows.md` section 1. `secretary` must name an AI member that is not assignee or reviewer of a task that is not final, else `conflict`; the previous secretary's member row loses the flag |
 | `pause` | — | an admin | `group.paused` set; `system` `group_paused`; hosts interrupt running turns of the group and hold items. A `pause` of a paused group is accepted and changes nothing |
 | `resume` | — | an admin | `group.paused` cleared; `system` `group_resumed`; task-machine row 24. A `resume` of a group that is not paused is accepted and changes nothing |
 
@@ -179,7 +181,9 @@ names only the project memory; every other message leaves by retention.
 
 By a browser, for itself: `{"sub":{"endpoint":"…","p256dh":"…","auth":"…"},
 "vapid":{"pub":"…","priv":"…"},"on":["mention","approval","decision",
-"brief","done"]}`, or `{"off":true}`. The browser creates the VAPID key pair
+"brief","done"]}`, or `{"off":true}`. A `push` whose `off` is `true` is the
+second form, whatever else it holds; any other `push` is read as the first,
+and its `off` is not read. The browser creates the VAPID key pair
 and hands it to each home it wants reminders from. `g` routes the command,
 as in every home command; the subscription covers all of that browser's
 groups on that home.
@@ -202,6 +206,8 @@ Its content is a short summary:
 | `kind` | `approval`, `decision`, `brief`, `mention`, `done` |
 | `who` | display name of the member it is about: the AI asking, the secretary, the author of the mention |
 | `title` | one line, at most 80 characters. `approval`: the first line of the justification the CLI attached (`body.why`), absent if there is none. `decision`: the question. `brief`, `done`: the brief or task title. `mention`: absent |
+
+`title` is optional; every other field is always present.
 
 Never included: message text, the command of an approval, code, file
 names. The browser shows `group · kind · who: title` in the user's language

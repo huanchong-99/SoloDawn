@@ -16,11 +16,13 @@ var (
 	errNull    = errors.New("proto: null where the contract has no null")
 	errInteger = errors.New("proto: not an integer of at most 2^53-1")
 	errID      = errors.New("proto: not a random id")
+	errSlug    = errors.New("proto: not a slug")
 )
 
 var (
 	rawMessage = reflect.TypeFor[json.RawMessage]()
 	idType     = reflect.TypeFor[ID]()
+	slugType   = reflect.TypeFor[Slug]()
 	// 16 bytes are 21 characters and one that carries two bits: its other four are zero.
 	canonicalID = regexp.MustCompile(`^[A-Za-z0-9_-]{21}[AQgw]$`)
 )
@@ -44,7 +46,8 @@ var (
 //   - A field without omitempty is always present, and only a pointer field
 //     without omitempty can be null. encoding/json leaves a field at its zero
 //     value for a missing member and for null alike.
-//   - A field of type ID takes a random id and no other text.
+//   - A field of type ID takes a random id and no other text, and a field of
+//     type Slug a slug.
 //
 // A json.RawMessage is not looked into: whoever decodes it later does that.
 func Decode(data []byte, v any) error {
@@ -54,18 +57,22 @@ func Decode(data []byte, v any) error {
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.UseNumber()
 	var value any
-	if err := d.Decode(&value); err != nil {
-		panic(err) // one JSON value decodes into any
-	}
+	sure(d.Decode(&value)) // one JSON value decodes into any
 	value = exact(value)
 	if err := fits(value, reflect.TypeOf(v).Elem()); err != nil {
 		return err
 	}
 	exact, err := json.Marshal(value)
-	if err != nil {
-		panic(err) // a value that was just decoded from JSON encodes
-	}
+	sure(err) // a value that was just decoded from JSON encodes
 	return json.Unmarshal(exact, v)
+}
+
+// sure is for a step that cannot fail: an error there is a fault of this
+// package, and a panic.
+func sure(err error) {
+	if err != nil {
+		panic(err)
+	}
 }
 
 // exact drops the members whose name could match a field in another case, at
@@ -152,6 +159,9 @@ func fitsNumber(f float64, t reflect.Type) error {
 func fitsText(s string, t reflect.Type) error {
 	if t == idType && !canonicalID.MatchString(s) {
 		return errID
+	}
+	if t == slugType && !isSlug(s) {
+		return errSlug
 	}
 	return nil
 }

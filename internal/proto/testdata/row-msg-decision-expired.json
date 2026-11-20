@@ -1,0 +1,40 @@
+{
+  "r": "msg",
+  "id": "hq411Ypqo7V0LflO-dcWIg",
+  "seq": 814,
+  "pos": 790,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "thread": "DrtCn6htSBwmMPrFPbHJHA",
+  "main": true,
+  "by": "1PC8WineBrUQ-apCjx7tug",
+  "kind": "decision",
+  "ts": 1763599999500,
+  "text": "Choose a location.",
+  "mentions": [],
+  "re": null,
+  "body": {
+    "task": "DrtCn6htSBwmMPrFPbHJHA",
+    "question": "Where should the path appear?",
+    "context": "Only space for one label.",
+    "options": [
+      {
+        "id": "A",
+        "label": "Header",
+        "effect": "Always visible."
+      }
+    ],
+    "recommended": "A",
+    "to": [
+      "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
+    ]
+  },
+  "state": {
+    "status": "expired",
+    "at": 1763600000000
+  },
+  "env": {
+    "p": "{\"t\":\"post\",\"n\":\"hq411Ypqo7V0LflO-dcWIg\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"1PC8WineBrUQ-apCjx7tug\",\"kind\":\"decision\",\"thread\":\"DrtCn6htSBwmMPrFPbHJHA\",\"main\":true,\"text\":\"Choose a location.\",\"mentions\":[],\"re\":null,\"body\":{\"task\":\"DrtCn6htSBwmMPrFPbHJHA\",\"question\":\"Where should the path appear?\",\"context\":\"Only space for one label.\",\"options\":[{\"id\":\"A\",\"label\":\"Header\",\"effect\":\"Always visible.\"}],\"recommended\":\"A\",\"to\":[\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\"]}}",
+    "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+    "s": "hT5DOqzz-_kpGZN74utRDzn1KHZOIIX87odPo7yLSlbJ6uUI7rI-lI1ssSwgNIid1Rzo5rKj8TcZbe_-gM1sAg"
+  }
+}

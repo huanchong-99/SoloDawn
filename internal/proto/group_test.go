@@ -5,9 +5,25 @@ import (
 	"testing"
 )
 
+const commit = "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
+
+// taskExample is task 12 at its review. Its slug and its branch follow from its title.
+func taskExample() TaskRow {
+	title := "Show connection path"
+	return TaskRow{
+		RowHeader: RowHeader{"task", taskID, 805}, Group: group, Num: 12, Title: title, Slug: MakeSlug(title),
+		Origin: "brief", Brief: id("brief"), State: "active", Step: "review", Commit: commit,
+		Assignee: agent, Reviewer: reviewer, Pass: 90, Depends: []string{},
+		Branch: "task/12-" + string(MakeSlug(title)), PR: 31, PRURL: "https://git.example/team/website/pull/31",
+		Checks: TaskChecks{&Check{true, ts - 3000, commit}, &Check{true, ts - 2000, commit}},
+		Review: &Review{1, 1, 86, false, reviewer, commit, ts - 1000},
+		Thread: ThreadSummary{7, 3, &ThreadMessage{agent, "progress", "Added the path indicator.", ts - 500}},
+		Stats:  TaskStats{212, 18, ts - 4000, nil}, Created: ts - 4000,
+	}
+}
+
 func TestGroupGoldens(t *testing.T) {
 	ai, human, task := id("agent"), id("member"), id("task")
-	commit := "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
 	project := GroupRow{
 		RowHeader: RowHeader{"group", group, 1}, Name: "Website", Kind: "project",
 		Repo: "https://git.example/team/website.git", Base: "main", Forge: "github",
@@ -32,24 +48,26 @@ func TestGroupGoldens(t *testing.T) {
 	golden(t, "row-device", DeviceRow{
 		RowHeader{"device", user + ":2", 41}, addNode.DeviceChange, signed(browser, " "+string(wireJSON(t, addNode))),
 	})
-	taskRow := TaskRow{
-		RowHeader: RowHeader{"task", task, 805}, Group: group, Num: 12, Title: "Show connection path",
-		Origin: "brief", Brief: id("brief"), State: "active", Step: "review", Commit: commit,
-		Assignee: ai, Reviewer: id("reviewer"), Pass: 90, Depends: []string{},
-		Branch: "task/12-path", PR: 31, PRURL: "https://git.example/team/website/pull/31",
-		Checks: TaskChecks{&Check{true, ts - 3000, commit}, &Check{true, ts - 2000, commit}},
-		Review: &Review{1, 86, false, id("reviewer"), commit, ts - 1000},
-		Thread: ThreadSummary{7, 3, &ThreadMessage{ai, "progress", "Added the path indicator.", ts - 500}},
-		Stats:  TaskStats{212, 18, ts - 4000, nil}, Created: ts - 4000,
-	}
+	taskRow := taskExample()
 	golden(t, "row-task", taskRow)
 	waiting := TaskRow{
 		RowHeader: RowHeader{"task", id("local task"), 817}, Group: group, Num: 13, Title: "Choose a label",
-		Origin: "direct", State: "active", Step: "branch", Assignee: ai, Foundation: true, Pass: 70,
-		Depends: []string{}, Wait: &TaskWait{"decision", id("local decision"), []string{user}, ts},
+		Slug: MakeSlug("Choose a label"), Origin: "direct", Plan: "Ask the owner which label the path gets.",
+		State: "active", Step: "branch", Assignee: ai, Foundation: true, Pass: 70,
+		Depends: []string{}, Wait: &TaskWait{Kind: "decision", Msg: id("local decision"), Who: []string{user}, Since: ts},
 		Stats: TaskStats{Started: ts}, Created: ts,
 	}
 	golden(t, "row-task-waiting", waiting)
+	// Paused by hand while it waited for a reviewer: the pause keeps that wait (contracts/task-machine.md section 2).
+	paused := TaskRow{
+		RowHeader: RowHeader{"task", id("paused task"), 818}, Group: group, Num: 14, Title: "Fix: the relay notice!",
+		Slug: MakeSlug("Fix: the relay notice!"), Origin: "takeover", State: "paused", Step: "review", Commit: commit,
+		Assignee: ai, Pass: 90, Depends: []string{}, Branch: "task/14-" + string(MakeSlug("Fix: the relay notice!")),
+		Checks: TaskChecks{Local: &Check{true, ts - 3000, commit}},
+		Wait:   &TaskWait{Kind: "manual", Since: ts, Kept: "reviewer"},
+		Thread: ThreadSummary{Count: 2}, Stats: TaskStats{9, 2, ts - 4000, nil}, Created: ts - 4000,
+	}
+	golden(t, "row-task-paused", paused)
 
 	msg := decidedExample(t)
 	note := NoteRow{RowHeader{"note", id("note"), 640}, 640, group, nil, "Path events include the connection id.", human, ts - 4000}
@@ -66,6 +84,7 @@ func TestGroupGoldens(t *testing.T) {
 	golden(t, "fetch", FetchThread{page, &task})
 	golden(t, "fetch-main", FetchThread{page, nil})
 	golden(t, "fetch-kind", FetchKind{page, "note"})
+	golden(t, "fetch-row", FetchRow{FetchPage{Request{"fetch", 3}, group, 0, 1}, "task", task})
 	golden(t, "fetched", Fetched{"fetched", Success{3, true}, []json.RawMessage{wireJSON(t, msg)}, false})
 
 	act := msg.State.Act

@@ -45,6 +45,14 @@ type FetchKind struct {
 	Kind string `json:"kind"`
 }
 
+// FetchRow asks for one row of the group by its type and id, with Before 0 and
+// Limit 1.
+type FetchRow struct {
+	FetchPage
+	Row   string `json:"r"`
+	RowID string `json:"row"`
+}
+
 type Fetched struct {
 	Type string `json:"t"`
 	Success

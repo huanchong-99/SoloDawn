@@ -130,9 +130,13 @@ development dependency, an IndexedDB for the tests.
   them. `decode(schema, text)` is the only place where received text becomes a typed value;
   `Frame` is what a node may send on `ctl`. Code after it trusts the type. An envelope's `p` stays
   the exact string received. `Id` is a random id, the canonical base64url spelling of 16 bytes;
-  `n` and `g` of a signed payload have this type, the other fields that hold ids are still
-  strings (`issues.md`). `Ctl` is the interface of a `ctl` connection: numbered requests,
-  their answers, and pushes.
+  `n`, `g` and `conn` of a signed payload have this type, and so has every id in a command
+  payload and in an inbox item, the `task` in the body of a review post included; rows and the
+  other message bodies still hold ids as strings (`issues.md`).
+  `Slug` is a task's slug, the type of `slug` in a task row. The payload of each command has its
+  schema (`GroupCreate`, `Post`, `Act`, `TaskStart`); a schema names the `op`, `kind` or `code`
+  that selects it. `Ctl` is the interface of a `ctl` connection: numbered requests, their
+  answers, and pushes.
 - **Mock connection.** `mockCtl(onpush)` in `src/lib/mock.ts` is a `Ctl` that answers from the
   files of `internal/proto/testdata`: `hello` with `welcome`; `sync` with the pushes `reset` and
   `rows`, then `synced`; `fetch` with `fetched`; every `cmd` with `ok`. It knows the examples'
@@ -312,10 +316,13 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   holds `--spring` to `spring()`. Frame rate was not measured, and the fallback without view
   transitions was exercised only in the tests.
 - `src/lib/proto.test.ts` reads every wire example with the schema of its file name and fails on a
-  file that has none (`crypto.json`, which holds test vectors, excepted); it adds an unknown field
-  to every object, which is dropped (so a golden file with a field the schema lacks fails the exact
-  comparison), and removes every field in turn. Fields that appear in no example are not
-  covered by those variants.
+  file that has none (`crypto.json` and `wire.json`, which hold test vectors, excepted); it adds
+  an unknown field to every object, which is dropped (so a golden file with a field the schema
+  lacks fails the exact comparison). It then holds the schemas to `internal/proto/testdata/wire.json`,
+  which the Go tests write from the Go types and judge `proto.Decode` by: every value of every
+  example is changed in turn (left out, `null`, another type, a fraction, 2^53, a text that is no
+  id) and must be read or refused as that file says, and so must its cases, the slugs among them.
+  Fields that appear in no example are not covered by those variants.
 - `src/lib/vectors.test.ts` holds the client to every part of
   `internal/proto/testdata/crypto.json` (`planning/contracts/vectors.md`). It never compares
   signature bytes, since Safari's signatures are random: it verifies the vectors' signatures and
