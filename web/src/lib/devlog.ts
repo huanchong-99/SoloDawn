@@ -29,6 +29,8 @@ export class DeviceLog {
   /** Exactly as signed; version v is entries[v - 1]. For storing and passing on. */
   readonly entries: Envelope[] = [];
   private readonly changes: Entry[] = [];
+  /** Settles when the entries applied so far are checked. */
+  private queue: Promise<unknown> = Promise.resolve();
 
   /** user is the person: the device id of their first device. */
   constructor(
@@ -45,10 +47,17 @@ export class DeviceLog {
 
   /** Checks one signed entry against the log and appends it. Resolves to false for an entry the
    *  log already holds: logs are passed on between devices, so the same entry arrives more than
-   *  once. Rejects with Refused, and leaves the log as it was. */
-  async apply(env: Envelope): Promise<boolean> {
+   *  once. Rejects with Refused, and leaves the log as it was. Entries applied at the same time
+   *  are checked one after another, in the order of the calls, as the Go log takes them under
+   *  its lock; a refused entry does not stop the ones after it. */
+  apply(env: Envelope): Promise<boolean> {
+    const checked = this.queue.then(() => this.check(env));
+    this.queue = checked.catch(() => {});
+    return checked;
+  }
+
+  private async check(env: Envelope): Promise<boolean> {
     const e = await entry(this.crypto, env);
-    // From here on nothing waits, so entries applied at the same time are checked one by one.
     if (e.user !== this.user) throw new Refused('person');
     if (e.ver !== this.entries.length + 1) return this.held(e.ver, env);
     this.follows(e, env.k);

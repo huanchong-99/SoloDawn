@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DeviceLog, Refused } from './devlog';
 import { Device, ed25519, encode, verifyEnvelope } from './identity';
 
@@ -8,6 +8,10 @@ const newDevice = async () =>
 let first: Device; // the person's first device: its id is the user id
 let second: Device;
 let third: Device;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 beforeAll(async () => {
   [first, second, third] = await Promise.all([newDevice(), newDevice(), newDevice()]);
@@ -245,13 +249,47 @@ describe('DeviceLog.apply', () => {
     expect(await refusal(log.apply(await signed(first, 2, 'revoke', first)))).toBe('last');
   });
 
-  it('checks entries that arrive at the same time one after the other', async () => {
+  it('checks entries that arrive at the same time in the order they arrive', async () => {
     const log = await logWith(genesis());
     const [a, b] = [await signed(first, 2, 'add', second), await signed(first, 2, 'add', third)];
-    // Which verification finishes first is up to WebCrypto: one entry wins, the other is a fork.
     const results = await Promise.all([refusal(log.apply(a)), refusal(log.apply(b))]);
-    expect(results.sort()).toStrictEqual(['accepted', 'fork']);
-    expect(log.entries).toHaveLength(2);
+    expect(results).toStrictEqual(['accepted', 'fork']);
+    expect(log.entries.slice(1)).toStrictEqual([a]);
+  });
+
+  it('takes valid entries applied at the same time even when a later one verifies first', async () => {
+    const verify = crypto.subtle.verify.bind(crypto.subtle);
+    // Entry 1's signature takes longest to check, so without the order of arrival 2 would be a gap.
+    vi.spyOn(crypto.subtle, 'verify').mockImplementation(
+      async (algorithm, key, signature, data) => {
+        const text = new TextDecoder().decode(data as Uint8Array);
+        if (text.includes('"ver":1,')) await new Promise((resolve) => setTimeout(resolve, 20));
+        return verify(algorithm, key, signature, data);
+      },
+    );
+    const log = new DeviceLog(crypto, first.id);
+    const entries = await Promise.all([
+      genesis(),
+      signed(first, 2, 'add', second),
+      signed(second, 3, 'add', third),
+      signed(third, 4, 'revoke', second),
+    ]);
+    const results = await Promise.all(entries.map((env) => refusal(log.apply(env))));
+    expect(results).toStrictEqual(['accepted', 'accepted', 'accepted', 'accepted']);
+    expect(log.entries).toStrictEqual(entries);
+    expect(log.validDevices()).toStrictEqual([first.id, third.id].sort());
+  });
+
+  it('checks the entries after a refused one', async () => {
+    const log = new DeviceLog(crypto, first.id);
+    const entries = await Promise.all([
+      genesis(),
+      signed(first, 3, 'add', second),
+      signed(first, 2, 'add', third),
+    ]);
+    const results = await Promise.all(entries.map((env) => refusal(log.apply(env))));
+    expect(results).toStrictEqual(['accepted', 'gap', 'accepted']);
+    expect(log.entries).toStrictEqual([entries[0], entries[2]]);
   });
 
   it('names the reason of a refusal', () => {
