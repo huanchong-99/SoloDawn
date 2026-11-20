@@ -41,7 +41,7 @@ func (v *Snapshot) AfterSeqUpTo(after, upTo int64) ([]json.RawMessage, error) {
 }
 
 func (v *Snapshot) PageThread(thread *string, before int64, limit int) ([]json.RawMessage, error) {
-	const selectMsg = "SELECT data FROM row WHERE g=? AND r='msg' AND gone=0 AND pos<? AND "
+	const selectMsg = "SELECT data FROM row WHERE g=? AND r='msg' AND pos<? AND "
 	const newest = " ORDER BY pos DESC LIMIT ?"
 	if thread == nil {
 		return v.rows(selectMsg+"in_main=1"+newest, v.group, before, limit)
