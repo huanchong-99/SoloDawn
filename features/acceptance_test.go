@@ -5,6 +5,7 @@ package features
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -19,11 +20,17 @@ func TestFeatures(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/solodawn").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
+	fakes := t.TempDir()
+	if out, err := exec.Command("go", "build", "-o", fakes+string(os.PathSeparator), "../internal/host/fakecli/claude", "../internal/host/fakecli/codex").CombinedOutput(); err != nil {
+		t.Fatalf("build fake CLIs: %v\n%s", err, out)
+	}
+	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(sc *godog.ScenarioContext) {
 			protocolSteps(sc)
 			identitySteps(sc)
 			storeSteps(sc)
+			hostSteps(sc, t, fakes)
 			rendezvousSteps(sc, bin)
 			var stdout, stderr bytes.Buffer
 			var code int
