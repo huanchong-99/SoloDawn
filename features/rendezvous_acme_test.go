@@ -184,13 +184,22 @@ func (w *acmeWorld) startRendezvous(domain string) error {
 	cmd := exec.Command(w.bin, "rendezvous", "--listen", w.tcp, "--domain", domain, "--turn-domain", "turn."+domain, "--udp-port", "0",
 		"--acme-directory", "https://localhost:"+w.acme+"/dir", "--acme-ca", filepath.Join(w.dir, "cert"))
 	cmd.Env = append(os.Environ(), "HOME="+home, "XDG_CACHE_HOME="+home, "LocalAppData="+home)
+	stderr, err := os.Create(filepath.Join(w.dir, "rendezvous.log"))
+	if err != nil {
+		return err
+	}
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	w.cleanup = append(w.cleanup, func() { cmd.Process.Kill(); cmd.Wait() })
+	w.cleanup = append(w.cleanup, func() { cmd.Process.Kill(); cmd.Wait(); stderr.Close() })
 	w.httpClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: w.issuer, ServerName: domain}}}
 	w.ws = "wss://" + w.tcp + "/rv"
-	return rvListening(w.tcp)
+	if err := rvListening(w.tcp); err != nil {
+		ips, lookup := net.LookupIP(domain)
+		return fmt.Errorf("%v; the binary wrote %q; %s resolves to %v, %v", err, w.log("rendezvous"), domain, ips, lookup)
+	}
+	return nil
 }
 
 // leaf is the certificate that a name presents on the shared port, checked
