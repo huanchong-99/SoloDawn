@@ -3,7 +3,10 @@
 Each CLI session reaches its node through one MCP server named `solodawn`
 (stdio, through the shim described in `contracts/local.md`). The node knows
 which AI is calling from the shim's session token, so no tool takes a "from"
-argument and a model cannot speak as someone else.
+argument and a model cannot speak as someone else. The token is the only
+identity Claude Code gives a server; it still names the right session after
+a resume and in a takeover `[verified]`. Codex also sends its thread id
+with each call (`_meta`), which the node may compare.
 
 Conventions:
 
@@ -16,7 +19,9 @@ Conventions:
 - A result is one text block containing JSON. A failure is a tool error
   whose text is `<code>: <sentence>`, with the codes of
   `contracts/datachannel.md` section 9.
-- Text arguments are at most 16 KiB.
+- A text argument that would make a row too large fails with
+  `bad_request`, and the error text names the limit and the size the row
+  would have had (`contracts/conventions.md` section 4).
 - Each tool maps to one command or one read on the home. The node adds the
   signature and one check: text that an AI sends to the group is refused
   with `secret` when it matches the outbound secret patterns
@@ -48,11 +53,14 @@ Notes:
 - `post` is the only way an AI speaks in the group. What the model prints
   outside tool calls stays in its own session.
 - `ask` returns within `limits.ask_wait_s` (45 seconds) in every case.
-- `run_checks` may run for a long time. The node sends an MCP progress
-  notification every 30 seconds while it runs. `[unverified]` whether that
-  keeps a tool call in the foreground past each CLI's default limit; spike
-  S-2 and S-3. If it does not, `run_checks` returns `{"pending":true}` and
-  the result arrives as a `checks` turn.
+- `run_checks` may run for a long time, and the call stays open until the
+  checks end. Claude Code kept a call of 600 seconds in the foreground,
+  with or without progress notifications. Codex ended a call at 300
+  seconds whether or not progress was sent, and let one of 600 seconds
+  complete with `tool_timeout_sec` set to 900 `[verified]`. So the node
+  sets that (`contracts/drivers.md` 1.2), sends no progress notifications,
+  and has no "pending" result. Calls longer than 600 seconds are
+  `[unverified]` on both; the turn time limit ends them.
 - `submit_task` fails with `conflict` if the worktree has uncommitted
   changes or the last `run_checks` did not pass on the head commit.
 - A task session at level 1 is not offered `push_branch`, `run_checks` or
@@ -97,10 +105,14 @@ Result, one text block containing exactly one of:
 ```
 
 The input is never echoed back in the result `[verified: large echoed inputs
-fail]`. Handling is in `flows/approval.md`.
+fail]`. Handling is in `flows/approval.md`. `tool_use_id` is new on every
+attempt, so a retry is recognised by `tool_name` and `input` alone.
 
-Codex has no such tool; its approval requests arrive on the app-server
-connection and are handled by the same code in the node.
+The node lists `approve` only to a structured Claude Code session, where
+the CLI hides it from the model `[verified]`. Codex has no such tool: its
+approval requests arrive on the app-server connection and are handled by
+the same code in the node. A session taken over in the terminal is not
+given it either (`contracts/drivers.md` 1.3).
 
 ## 4. What the tools deliberately do not do
 

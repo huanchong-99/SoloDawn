@@ -4,7 +4,7 @@ Status: **plan converged after three review rounds; implementation
 started.**
 
 Three review rounds are answered in `reviews/`; the last ended with "ready
-to start". The coordinator has settled Q-1 to Q-22 (`risks.md`). Next:
+to start". The coordinator has settled Q-1 to Q-28 (`risks.md`). Next:
 
 1. Work proceeds by `steps/step-1.md`: the backend by
    `steps/step-1-backend.md`, starting with B-00; the frontend by
@@ -15,7 +15,8 @@ to start". The coordinator has settled Q-1 to Q-22 (`risks.md`). Next:
    that needs a contract changed says so in its description; the planning
    lead changes the contract. Code does not silently depart from it.
 4. The answers of the spikes (M0) are recorded here by the planning lead.
-   Q-4 waits for spike S-5.
+   S-1, S-2, S-3, S-4 and S-7 are answered and recorded
+   (`steps/step-1.md`, M0). Q-4 waits for spike S-5.
 5. Questions that implementation raises about a contract are settled in
    the contract itself. The first batches, from the reviews of backend
    tasks B-01 and B-02, are in `contracts/conventions.md`,
@@ -133,6 +134,7 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/envelope.md` | identities, signed envelope, device log |
 | `contracts/vectors.md` | the shared test vectors that hold the Go node and the web client to `contracts/envelope.md` |
 | `contracts/rendezvous.md` | WebSocket signalling protocol, STUN and relay |
+| `contracts/rendezvous-evidence.md` | what spike S-1 and the A.1 design review measured for the ICE rules, the sources read, and what is not verified |
 | `contracts/datachannel.md` | data-channel protocol: channels, framing, session, reading, inbox, terminal |
 | `contracts/conventions.md` | rules for everything on the wire: which fields are always present, requests and answers, sizes, and which task freezes which shape |
 | `contracts/rows.md` | the rows a home pushes: group, member, device, task, message, note |
@@ -143,7 +145,8 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/task-machine.md` | the one table of task transitions |
 | `contracts/drivers.md` | how each CLI is started, levels, turn format, instructions |
 | `contracts/local.md` | local interfaces: command line, MCP shim socket, Git commands, outbound secret check, self-update |
-| `steps/step-1.md` | step 1 scope, spikes, milestones, acceptance tests |
+| `steps/step-1.md` | step 1 scope, spikes, order of the milestones |
+| `steps/step-1-acceptance.md` | step 1 milestones M1 to M8 and their acceptance tests |
 | `steps/step-1-backend.md` | step 1 backend task list |
 | `steps/step-1-frontend.md` | step 1 frontend task list |
 | `steps/step-2-3.md` | outline of steps 2 and 3 |

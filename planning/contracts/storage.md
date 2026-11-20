@@ -283,6 +283,6 @@ DELETE FROM receipt WHERE ts < :now - 86400000;
 
 ## 6. Sizes to expect
 
-A message row is about 0.5 to 2 KiB, at most about 50 KiB. A busy project
+A message row is about 0.5 to 2 KiB, at most 16 KiB. A busy project
 group may write a few thousand rows a day; ninety days stay well under a
 gigabyte. No sharding, no archive tables, no compaction beyond SQLite's own.
