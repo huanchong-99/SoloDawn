@@ -6,6 +6,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · limitation · A child of a Windows check can start before the job holds the shell
+
+- Symptom: on Windows a check's `cmd.exe` joins its job object only after it has started, so a process it starts in that moment is outside the job and survives the check.
+- Cause: Go starts the process before `killCheckTree` assigns it (`internal/host/checks_tree_windows.go`, `newCheckJob`).
+- Status: open. The fix is to start the shell with `CREATE_SUSPENDED`, assign it to the job, then resume it.
+
+### 2026-11-20 · limitation · A key in a UTF-16 file passes the secrets check
+
+- Symptom: a UTF-16LE file holding a private key or a token passes the secrets hard check: with `--text`, Git shows its bytes, and every second byte is NUL, so no pattern matches.
+- Cause: the patterns of `local.md` §8 match ASCII text (`internal/host/secret.go`); `checkAddedLines` reads the diff as it comes.
+- Status: open.
+
+### 2026-11-20 · limitation · Files hidden by ignore rules can change what a check runs
+
+- Symptom: a file ignored through `.git/info/exclude` or `core.excludesFile`, not through the project's `.gitignore`, is shown by neither `git status` nor `git ls-files`; it can change what a project check does, so a passing check may not describe the commit alone (L5).
+- Cause: `run_checks` runs in the task's worktree (`internal/host/checks.go`, `cleanCheckHead`), where such files can exist.
+- Status: open. Step 2 closes it by running the checks on a clean export of the commit.
+
 ### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
 
 - Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
@@ -266,6 +284,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `web/src/components/chat/Chat.svelte`, `.scroller` (`flex-direction: column-reverse`). The reversed scroller is what keeps a page added above from moving anything, in every browser.
 - Status: open. No correction in script was added, because it could not be tried in Safari here.
 
+### 2026-11-20 · limitation · A device in the logs of two people is read as the device of the lower user id
+
+- Symptom: nothing stops a person from adding to their own log a device that another person's log already holds. A home then reads that device's commands as coming from whichever of the two people has the lower user id (`planning/contracts/commands.md`, "Who"). A member could so turn the commands of another member's device into their own, which that device's person did not ask for.
+- Cause: `(*State).user` walks the logs in the order of their user ids and returns the first that holds the device as valid (`internal/home/check.go:92`). `planning/contracts/envelope.md` section 4 says nothing about one device in two logs.
+- Status: open, without effect in step 1, where a group has one person. Step 2, which adds people, has to settle it.
+
+### 2026-11-20 · limitation · A member of another group on the same home is answered `unknown_device`, not `forbidden`
+
+- Symptom: check 2 of `planning/contracts/envelope.md` section 3 knows a device of "a member of a group it homes". A command for group A from a device whose person is a member only of group B, homed on the same node, is answered `unknown_device`, where `forbidden` is the code for a known signer that may not do this.
+- Cause: `(*State).known` asks the logs of one group's `State` (`internal/home/check.go:88`), which hold the node owner's log and those of that group's people.
+- Status: open, without effect in step 1, where every group on a node has the same one person. For step 2, by the coordinator's decision of 2026-11-20 after the review of #160.
+
 ## Resolved
 
 ### 2026-11-20 · limitation · `group create` was sent as the contract describes it, before its wire example
@@ -273,6 +303,58 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: the create-group dialog of the web client was written before P-1 froze the payload of `group`, with `g` equal to `n` as `planning/contracts/commands.md` 1.1 reads.
 - Cause: the order of the units; `Home.create` in `web/src/lib/groups.svelte.ts`.
 - Status: resolved in #164. P-1 (#162) froze `group-create.json` with `g` equal to `n`; `create` sends the fields of that example in its order, and its test reads the payload with the `GroupCreate` schema. The dialog still asks for the repository address with `forge: none`, since `repo` is absent only for a group without a repository (`planning/contracts/rows.md` section 1).
+### 2026-11-20 · deviation · No unit measured a row against its size limit
+
+- Symptom: `planning/contracts/conventions.md` section 4 has the home answer `bad_request`, naming the limit and the size, to a command that would write a row above 16 KiB, or a card above 12 KiB when it is created. No row of `planning/steps/parallel-plan-units.md` names the rule, and the first version of the seam handed the rows of a command's function to its caller unmeasured.
+- Status: resolved in #160 by the coordinator's decision of 2026-11-20: `Table.Apply` measures every row of a result after numbering it and refuses the command for one above its limit (`State.Seal`, `internal/home/home.go:344`; `rowFits` at `:143`).
+
+### 2026-11-20 · bug · The tests check counted deleted files
+
+- Symptom: changing `a.go` and deleting `a_test.go` passed; only deleting `old.go` failed; renaming `x_test.go` to `y.go` passed. `local.md` §7 says a deleted file counts as neither a test file nor a source file. Found in the independent review of `internal/host` (M1).
+- Cause: the names diff of the hard checks listed deleted paths (`internal/host/checks.go:163` before the fix); with `--no-renames` a rename is a deletion and an addition.
+- Status: resolved on branch `fix/host-checks-review`: `--diff-filter=d` on the names diff. Test `TestTestsCheckIgnoresDeletedFiles`.
+
+### 2026-11-20 · bug · The secrets check did not read files Git takes as binary
+
+- Symptom: a `server.pem` holding a PKCS #8 key passed the secrets hard check when `.gitattributes` marked `*.pem binary` or the file held a NUL byte; Git printed "Binary files differ" instead of the added lines (M2).
+- Cause: the patch diff ran without `--text` (`internal/host/checks.go:159` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: `--text` on the patch diff. A large binary then put tens of MiB through the scan: the check now matches in place with a literal prefilter and no copies, fails above 64 MiB of added lines with "too large to check", and the hard checks stop at their own 2-minute limit with "timed out". Tests `TestSecretsCheckReadsFilesGitTakesAsBinary`, `TestAddedLinesOverTheLimit`, `TestHardChecksTimeOutOnTheirOwnLimit`.
+
+### 2026-11-20 · bug · A check's output tail could hold the end of a private key
+
+- Symptom: a check that printed a 4.4 KiB key left a tail that began inside the key and ended with its END line, which redaction did not match (L1).
+- Cause: the output was cut to 4 KiB before redaction, and redaction needed the header (`internal/host/checks.go:118-125` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: the last 64 KiB of output are redacted, then cut to the 4 KiB tail (`checkDetail`); redaction, and not the check, also replaces a private-key footer without its header from the start of the text. Tests `TestCheckOutputRedactsKeyLongerThanTail`, `TestCheckDetailIsErrorThenRedactedTail`, `TestRedactSecrets`.
+
+### 2026-11-20 · bug · A turn that ran out took the hard checks with it
+
+- Symptom: with a context of 300 ms and the check `sleep 2`, `Run` returned "context deadline exceeded" and no items, so neither hard check ran (L3; R-103 says both always run).
+- Cause: the hard checks used the caller's context after the group's checks had used up its deadline (`internal/host/checks.go:38` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: the turn's deadline does not stop the hard checks, which have their own limit; an explicit cancel (pause, interrupt, shutdown) stops the run, which then reports nothing and returns the error. The group's checks share the turn's deadline, with `turn_minutes` bounding a context without one. Tests `TestTurnDeadlineKeepsHardChecks`, `TestCancelStopsRun`.
+
+### 2026-11-20 · bug · A background child of a check outlived it and hid the error
+
+- Symptom: `sleep 3 & echo done` gave `ok=false` with the detail "done\n": the `WaitDelay` error was dropped, and `sleep` kept running (L4).
+- Cause: the detail was replaced by the output tail, and nothing killed the process group after `Wait` (`internal/host/checks.go:115-125` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: after `Wait` the process group is killed (Unix, `checks_tree_unix.go`); on Windows the shell runs in a job object closed after `Wait` (`checks_tree_windows.go`); without a job nothing is killed after `Wait`, as Go has released the process. The detail is the error, then the redacted tail. Test `TestBackgroundChildDiesWithCheck`.
+
+### 2026-11-20 · bug · A clean status did not prove the checked commit
+
+- Symptom: a tracked file with the skip-worktree or assume-unchanged bit could differ from the commit while `git status --porcelain` stayed empty, so `run_checks` checked content that was not the commit (L5).
+- Cause: the clean-tree test read the status only (`internal/host/checks.go:70-80` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: a skip-worktree path (`S` or `s` in `git ls-files -v`) is refused with its own error naming up to 10 paths; the assume-unchanged bit, a speed hint that `core.ignoreStat` sets on every path, is cleared before the status, so a change shows and a clean tree runs. `local.md` §7 `run_checks` says so. Tests `TestSkipWorktreeIsRefusedByName`, `TestAssumeUnchangedDoesNotHideChanges`.
+
+### 2026-11-20 · deviation · Redaction was not available to the node
+
+- Symptom: the node must apply the one pattern list to the details of `task fail`, `login_invalid` and `turn_interrupted` (`local.md` §7), but the helper was unexported (L10).
+- Cause: `redactSecrets` in `internal/host/secret.go:53` before the fix.
+- Status: resolved on branch `fix/host-checks-review`: exported as `RedactSecrets`. Test `TestRedactSecretsFromOutsideHost`.
+
+### 2026-11-20 · bug · OpenPGP private keys passed the secret check
+
+- Symptom: `-----BEGIN PGP PRIVATE KEY BLOCK-----` matched no pattern (L11).
+- Cause: the PEM pattern required `PRIVATE KEY-----` (`internal/host/secret.go:19` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: the pattern takes an OpenPGP block through its END line; `local.md` §8 reads "a PEM or OpenPGP private-key header". Tests in `TestRedactSecrets` and `TestCheckOutboundSecretRejects`.
 
 ### 2026-11-20 · bug · The signalling client could set off the rendezvous's own limits
 
@@ -464,3 +546,9 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: `go test -tags acceptance -count=1 ./features/...` failed with `step is undefined` for seven scenarios of `features/web.feature` (for example `the current page is "群聊"`), so the merge gate failed.
 - Cause: `features/acceptance_test.go:44` sets `Paths: []string{"."}`, so godog runs every `.feature` in `features/`, including `web.feature`, whose steps are implemented in `web/features/web.spec.ts` (vitest-cucumber) and not in Go; `Strict: true` fails the undefined steps. Each branch passed on its own (the F-00 branch had no `go.mod`, so Go acceptance was skipped; the B-00 and B-01 branches had no `web.feature`); the conflict appeared only after both were merged.
 - Status: resolved in PR #59: `web.feature` is tagged `@web` and the godog run uses `Tags: "~@web"`.
+
+### 2026-11-20 · bug · The store wrote rows with HTML escapes
+
+- Symptom: a note with 16,000 `<` characters was stored as 96,124 bytes, though `planning/contracts/conventions.md` section 4 counts a row's size on its JSON without HTML escaping and the home accepts rows up to 16 KiB on that count. A row the home accepts could be stored above the 60 KiB limit of a `ctl` message, so a `rows` or `fetched` frame built from it could not be sent. No node wrote rows yet, so nothing was broken.
+- Cause: `Put` encoded the row with `json.Marshal` (`internal/store/put.go:17` before the fix), which escapes `<`, `>` and `&` as six-byte `<`, `>`, `&`. `internal/peer` encodes frames without escaping and leaves stored escapes as they are.
+- Status: resolved in PR #163. `Put` and `PutReceipt` encode through `encode` (`internal/store/put.go:29`, a `json.Encoder` with `SetEscapeHTML(false)`, newline trimmed); `internal/store/put.go:18` and `internal/store/receipt.go:16` call it. Raw JSON the store returns (read paths, signed envelopes in the inbox) is never re-encoded. Test: `TestPutStoresWithoutHTMLEscapes` in `internal/store/read_test.go`. `internal/proto/decode.go:64` has the same `json.Marshal` pattern but is an intermediate that is decoded again at once; not changed (owned by P-1).
