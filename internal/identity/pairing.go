@@ -71,5 +71,5 @@ func (s Secret) MAC(m proto.Pair) string {
 // the secret and wrote the other four. A message in the receiver's own role is
 // its own message sent back, and proves nothing.
 func (s Secret) Verify(m proto.Pair, role string) bool {
-	return m.Type == "pair" && m.Role == role && isDevice(m.Key) && (m.Kind == "node" || m.Kind == "browser") && hmac.Equal([]byte(m.MAC), []byte(s.MAC(m)))
+	return m.Type == "pair" && m.Role == role && IsDevice(m.Key) && (m.Kind == "node" || m.Kind == "browser") && hmac.Equal([]byte(m.MAC), []byte(s.MAC(m)))
 }

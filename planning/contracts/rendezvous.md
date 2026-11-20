@@ -30,7 +30,8 @@ WebSocket, text frames, one JSON object per frame, at most 16 KiB per frame
 Field presence follows `contracts/conventions.md` section 2: every field
 shown for a frame is always present. The server closes a connection that
 sends a larger frame, more than 120 frames in 10 seconds, a frame it cannot
-read, or a `t` it does not know. The limit holds for the forwarded `from`
+read, a `t` it does not know, or a `k` in `to` or `watch` that is not a
+device id (`contracts/envelope.md` section 2). The limit holds for the forwarded `from`
 too: a `to` that would exceed it closes its sender, and the target gets none.
 A receiver that reads too slowly to take another frame loses that frame:
 the server drops it for that receiver and closes neither connection. The

@@ -164,17 +164,14 @@ func TestRoutePresenceAndReplacement(t *testing.T) {
 	url := fixture(t)
 	a, b := key(1), key(2)
 	from := login(t, url, a)
-	send(t, from, proto.Watch{Type: "watch", Keys: []string{b.ID(), "no device id"}})
+	send(t, from, proto.Watch{Type: "watch", Keys: []string{b.ID()}})
 	expect(t, from, proto.Presence{Type: "presence", Key: b.ID(), On: false})
-	expect(t, from, proto.Presence{Type: "presence", Key: "no device id", On: false})
 	// The application owning the envelope is the only one that reads it.
 	// Even unknown keys, an out-of-range number and an invalid payload survive.
 	env := json.RawMessage(`{"Unknown":9e999,"p":"  not JSON","s":null}`)
 	to := proto.Route{Type: "to", Key: b.ID(), Env: env}
 	send(t, from, to)
 	expect(t, from, proto.Offline{Type: "offline", Key: b.ID()})
-	send(t, from, proto.Route{Type: "to", Key: "", Env: env})
-	expect(t, from, proto.Offline{Type: "offline", Key: ""})
 	old := login(t, url, b)
 	expect(t, from, proto.Presence{Type: "presence", Key: b.ID(), On: true})
 	newConn := login(t, url, b)
@@ -195,7 +192,11 @@ func TestRoutePresenceAndReplacement(t *testing.T) {
 
 func TestInvalidFrames(t *testing.T) {
 	url := fixture(t)
-	for _, msg := range []string{`{}`, `null`, `{"T":"ice"}`, `{"t":"ready"}`, `[]`, `{}{}`, `{"t":"to","k":5,"env":{}}`, `{"t":"to","env":{}}`, fmt.Sprintf(`{"t":"to","k":%q}`, key(2).ID()), fmt.Sprintf(`{"t":"to","k":%q,"env":null}`, key(2).ID()), `{"t":"watch"}`, `{"t":"watch","k":[null]}`, `{"t":"watch","k":"device"}`, `{"t":"join","room":"AB"}`, `{"t":"room","room":"00000000000000000000000000000000","data":[]}`, "{\"t\":\"ice\",\"x\":\"\xff\"}"} {
+	// A device id is 32 bytes in canonical base64url and no weak key.
+	id := key(2).ID()
+	noncanonical := id[:42] + string(id[42]+1)
+	weak := strings.Repeat("A", 43)
+	for _, msg := range []string{`{}`, `null`, `{"T":"ice"}`, `{"t":"ready"}`, `[]`, `{}{}`, `{"t":"to","k":5,"env":{}}`, `{"t":"to","env":{}}`, fmt.Sprintf(`{"t":"to","k":%q}`, key(2).ID()), fmt.Sprintf(`{"t":"to","k":%q,"env":null}`, key(2).ID()), `{"t":"watch"}`, `{"t":"watch","k":[null]}`, `{"t":"watch","k":"device"}`, `{"t":"to","k":"","env":{}}`, `{"t":"to","k":"no device id","env":{}}`, `{"t":"to","k":"\ud800","env":{}}`, `{"t":"to","k":"` + strings.Repeat("\u2028", 5000) + `","env":{}}`, fmt.Sprintf(`{"t":"to","k":%q,"env":{}}`, noncanonical), fmt.Sprintf(`{"t":"to","k":%q,"env":{}}`, weak), `{"t":"watch","k":["no device id"]}`, fmt.Sprintf(`{"t":"watch","k":[%q,"\ud800"]}`, key(2).ID()), fmt.Sprintf(`{"t":"watch","k":[%q]}`, weak), `{"t":"join","room":"AB"}`, `{"t":"room","room":"00000000000000000000000000000000","data":[]}`, "{\"t\":\"ice\",\"x\":\"\xff\"}"} {
 		t.Run(msg, func(t *testing.T) {
 			c := login(t, url, key(1))
 			write(t, c, websocket.MessageText, msg)

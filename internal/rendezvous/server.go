@@ -217,10 +217,10 @@ func (m fields) object(name string) bool {
 	return len(raw) != 0 && raw[0] == '{'
 }
 
-// A target that is no device id is a device that is not connected.
+// A target must be a device id; anything else is bad input.
 func (s *server) route(c *client, m fields) bool {
 	var key string
-	if proto.Decode(m["k"], &key) != nil || !m.object("env") {
+	if proto.Decode(m["k"], &key) != nil || !identity.IsDevice(key) || !m.object("env") {
 		return false
 	}
 	if target := s.online[key]; target != nil {
@@ -232,7 +232,7 @@ func (s *server) route(c *client, m fields) bool {
 
 func (s *server) watch(c *client, m fields) bool {
 	var keys []string
-	if proto.Decode(m["k"], &keys) != nil || len(keys) > 64 {
+	if proto.Decode(m["k"], &keys) != nil || len(keys) > 64 || slices.ContainsFunc(keys, notDevice) {
 		return false
 	}
 	c.watch = keys
@@ -241,6 +241,8 @@ func (s *server) watch(c *client, m fields) bool {
 	}
 	return true
 }
+
+func notDevice(id string) bool { return !identity.IsDevice(id) }
 
 func (s *server) notify(key string, online bool) {
 	for _, c := range s.online {
