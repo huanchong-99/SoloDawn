@@ -323,6 +323,16 @@ func rewritten(signer device, p, old, new string) proto.Envelope {
 	return signer.key.Sign(changed)
 }
 
+func TestLogAcceptsAnOffCurveDeviceID(t *testing.T) {
+	l := started(t)
+	id := b64.EncodeToString(offCurve())
+	entry := rewritten(browser, change(browser, 2, "add", node), node.id(), id)
+	apply(t, l, "add the off-curve device", entry, true, nil)
+	if !l.Valid(id) {
+		t.Error("the added device is missing from the valid set")
+	}
+}
+
 // Rule 2 of section 4: p is at most 2,048 bytes as UTF-8, whatever it holds.
 func TestLogRefusesAnEntryOfMoreThan2048Bytes(t *testing.T) {
 	addNode := change(browser, 2, "add", node)
@@ -332,11 +342,15 @@ func TestLogRefusesAnEntryOfMoreThan2048Bytes(t *testing.T) {
 		"a name of two bytes to a character": func(size int) string { return sized(addNode, size) },
 	} {
 		l := started(t)
-		if p := fill(2049); len(p) != 2049 || len([]rune(p)) > 2048 && what != "spaces after the entry" {
-			t.Fatalf("%s: %d bytes, %d characters", what, len(p), len([]rune(p)))
+		atLimit, over := browser.key.Sign(fill(2048)), browser.key.Sign(fill(2049))
+		if len(atLimit.Payload) != 2048 || len(over.Payload) != 2049 {
+			t.Fatalf("%s: sizes %d, %d", what, len(atLimit.Payload), len(over.Payload))
 		}
-		apply(t, l, what+": 2,049 bytes", browser.key.Sign(fill(2049)), false, BadRequest)
-		apply(t, l, what+": 2,048 bytes", browser.key.Sign(fill(2048)), true, nil)
+		tampered := atLimit
+		tampered.Payload = over.Payload
+		apply(t, l, what+": signature checked before size", tampered, false, BadSig)
+		apply(t, l, what+": 2,049 bytes", over, false, BadRequest)
+		apply(t, l, what+": 2,048 bytes", atLimit, true, nil)
 		if got := valid(l); got != "phone browser, workstation" {
 			t.Errorf("%s: valid %q", what, got)
 		}

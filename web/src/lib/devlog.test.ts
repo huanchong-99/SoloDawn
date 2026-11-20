@@ -167,7 +167,9 @@ describe('DeviceLog.apply', () => {
     const importKey = vi.spyOn(crypto.subtle, 'importKey');
     const add = await signed(first, 2, 'add', noPoint);
     expect(await log.apply(add)).toBe(true);
+    expect(log.valid(noPoint)).toBe(true);
     expect(await log.apply(await signed(first, 3, 'revoke', noPoint))).toBe(true);
+    expect(log.valid(noPoint)).toBe(false);
     const imported = importKey.mock.calls.map(([, key]) => encode(key as Uint8Array));
     expect(imported).toStrictEqual([first.id, first.id]);
     importKey.mockRestore();
@@ -188,11 +190,17 @@ describe('DeviceLog.apply', () => {
       return two.replace('workstation', 'workstation' + fill);
     };
     for (const fill of [spaces, name]) {
-      const log = await logWith(genesis());
+      const one = await genesis();
+      const log = await DeviceLog.replay(crypto, first.id, [one]);
+      const atLimit = await first.sign(fill(2048));
+      const over = await first.sign(fill(2049));
       expect(bytes(fill(2049))).toBe(2049);
-      expect(await refusal(log.apply(await first.sign(fill(2049))))).toBe('bad_request');
+      expect(await refusal(log.apply({ ...atLimit, p: over.p }))).toBe('bad_sig');
+      expect(await refusal(log.apply(over))).toBe('bad_request');
+      expect(log.entries).toStrictEqual([one]);
       expect(bytes(fill(2048))).toBe(2048);
-      expect(await log.apply(await first.sign(fill(2048)))).toBe(true);
+      expect(await log.apply(atLimit)).toBe(true);
+      expect(log.entries).toStrictEqual([one, atLimit]);
     }
     expect(name(2049).length).toBeLessThan(2048);
   });
