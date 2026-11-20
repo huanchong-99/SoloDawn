@@ -1,13 +1,13 @@
 # Contract (step 2): accepting check lists, forge templates
 
 What a machine owner accepts before their node runs a group's commands
-(design point D-3), and how a group names the commands of a forge other
-than GitHub (D-10). Rules: R-40, R-44, R-92, R-103, R-136, R-137. It adds
-to `contracts/local.md` section 7, `contracts/commands.md`,
-`contracts/rows.md` section 1 and `contracts/task-machine.md`, and changes
-the meaning of no step 1 shape. It is folded into those files when step 1
-is built; until then this file is the statement of record for its subject.
-Markers `[verified]`, `[documented]`, `[unverified]` as in that file.
+(D-3), and how a group names the commands of a forge other than GitHub
+(D-10). Rules: R-40, R-44, R-92, R-103, R-136, R-137. It adds to these files
+of `contracts/`: `local.md` section 7, `commands.md`, `rows.md` sections 1
+and 4, `task-machine.md`, `datachannel.md` sections 7 and 9, `storage.md`
+section 3, `mcp-tools.md` section 1 and `vectors.md`, and changes the
+meaning of no step 1 shape. It is folded into them when step 1 is built, and
+is the statement of record until then. Markers as in `local.md`.
 
 ## 1. The rule
 

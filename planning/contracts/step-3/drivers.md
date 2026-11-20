@@ -7,11 +7,14 @@ It refines `steps/step-2-3.md` 3.1. The two step 1 drivers are in
 `flows/takeover.md`; approvals in `flows/approval.md`.
 
 This is a new file so that no step 1 contract has two writers while step 1
-is built. It is folded into `contracts/drivers.md` afterwards. Nothing here
-changes the meaning of a step 1 shape or of a step 1 driver.
+is built. It is folded into `contracts/drivers.md` afterwards; section 5
+also into `contracts/commands.md` section 2 and `contracts/mcp-tools.md`
+section 3, and section 6 into `contracts/datachannel.md` section 7 and
+`contracts/rows.md` section 2. Nothing here changes the meaning of a step 1
+shape or of a step 1 driver.
 
 Markers: `[verified]`, `[documented]`, `[unverified]` as in
-`contracts/drivers.md`. **Gap** marks what waits for research unit T3-0.
+`contracts/drivers.md`.
 
 ## 1. When a driver is built
 
@@ -159,7 +162,8 @@ The name is not `caps`: that field holds the owner's usage caps.
   one pull request (`contracts/conventions.md` section 5): unit P-5, as
   the coordinator decided on 2026-11-20. The Fable interface unit U3-3
   shows it: the account choice, the level control, the cap units and the
-  terminal button. The tables of the parallel plan do not list either yet.
+  terminal button. The P-5 row of the parallel plan lists `driver`; U3-3
+  is not in its tables yet.
 
 ## 7. Acceptance
 
@@ -170,7 +174,7 @@ the test of the switch takes their place:
 
 | Declaration | Step 1 tests that do not run for this CLI |
 | --- | --- |
-| no level 2 | A4.1, A4.2, A4.3, A4.6, A4.10 |
+| no level 2 | A4.1, A4.2, A4.3, A4.6, A4.10, and the last sentence of A4.7: without level 2 no approval card can arise (`contracts/drivers.md` section 2) |
 | no level 3 | A4.5 |
 | `takeover` `none` | A7.1 to A7.9 |
 | `takeover` `resume` | A7.7 runs with the structured `assign` turn first |
