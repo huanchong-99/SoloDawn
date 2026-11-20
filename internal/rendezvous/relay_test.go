@@ -230,12 +230,23 @@ func TestNodeQuota(t *testing.T) {
 }
 
 func TestOmittedFamilyOnIPv6Stream(t *testing.T) {
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		t.Run(host, func(t *testing.T) { testOmittedFamily(t, host) })
+	}
+}
+
+func testOmittedFamily(t *testing.T, host string) {
 	l, err := net.Listen("tcp6", "[::1]:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	o := Options{Domain: "127.0.0.1", TurnDomain: "turn.localhost"}
-	r, s, err := o.start(udpLocal(t), l, l.Addr().(*net.TCPAddr).Port)
+	o := Options{Domain: host, TurnDomain: "turn.localhost"}
+	udp, err := net.ListenPacket("udp", net.JoinHostPort(host, "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+	r, s, err := o.start(udp, l, l.Addr().(*net.TCPAddr).Port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +271,7 @@ func TestOmittedFamilyOnIPv6Stream(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	if got := a.LocalAddr().(*net.UDPAddr).IP; !got.Equal(net.IPv4(127, 0, 0, 1)) {
+	if got := a.LocalAddr().(*net.UDPAddr).IP; !got.Equal(net.ParseIP(host)) {
 		t.Fatal(got)
 	}
 }

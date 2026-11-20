@@ -43,7 +43,7 @@ func (o Options) start(udp net.PacketConn, tlsListener net.Listener, tlsPort int
 	local := udp.LocalAddr().(*net.UDPAddr)
 	addr := net.JoinHostPort(o.Domain, strconv.Itoa(local.Port))
 	r := &relay{stun: "stun:" + addr}
-	cfg := turn.ServerConfig{Realm: o.Domain, StrictAddressFamily: true, PacketConnConfigs: []turn.PacketConnConfig{{PacketConn: udp}}}
+	cfg := turn.ServerConfig{Realm: o.Domain, PacketConnConfigs: []turn.PacketConnConfig{{PacketConn: udp}}}
 	if tlsListener != nil {
 		ips, err := net.LookupIP(o.Domain)
 		if err != nil {
@@ -52,6 +52,9 @@ func (o Options) start(udp net.PacketConn, tlsListener net.Listener, tlsPort int
 		r.limit, r.secret = o.QuotaMB<<20, rand.Text()
 		r.urls = []string{"turn:" + addr + "?transport=udp", "turns:" + net.JoinHostPort(o.TurnDomain, strconv.Itoa(tlsPort)) + "?transport=tcp"}
 		g := &generator{public: ips, bind: local.IP, ledger: &r.ledger}
+		// Use the RFC IPv4 default when available. On IPv6-only hosts let
+		// Pion use the transport family for clients that omit the attribute.
+		cfg.StrictAddressFamily = g.publicIP("udp4") != nil && (local.IP.To4() != nil || local.IP.IsUnspecified())
 		cfg.PacketConnConfigs[0].RelayAddressGenerator = g
 		cfg.PacketConnConfigs[0].PermissionHandler = g.permitPeer
 		cfg.ListenerConfigs = []turn.ListenerConfig{{Listener: tlsListener, RelayAddressGenerator: g, PermissionHandler: g.permitPeer}}
