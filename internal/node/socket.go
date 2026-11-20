@@ -17,7 +17,7 @@ var errRunning = errors.New("a node is already running")
 // which only the current user can open (local.md 3). A socket file left by a
 // node that stopped is removed first.
 func ListenLocal(dir string) (*net.UnixListener, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := privateDir(dir); err != nil {
 		return nil, err
 	}
 	path := filepath.Join(dir, "sock")
