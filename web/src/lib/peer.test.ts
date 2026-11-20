@@ -900,6 +900,19 @@ describe('a peer', () => {
     },
   );
 
+  it('rejects the requests that waited for a welcome when the node refuses for good', async () => {
+    const { peer, pc } = await served();
+    const cmd = peer.request({ t: 'cmd', env: { p: '', k: '', s: '' } });
+    const settled = vi.fn();
+    cmd.then(settled, settled);
+    pc.ctl.onclose();
+    await flush();
+    await wait(1000);
+    expect(settled).not.toHaveBeenCalled();
+    await refuseHello('version');
+    await expect(cmd).rejects.toThrow(new Error('connection lost'));
+  });
+
   it('stops as well when its listener does not hear refusals', async () => {
     const unhandled = vi.fn();
     process.on('unhandledRejection', unhandled);
@@ -1203,6 +1216,20 @@ describe('a probe and a move', () => {
     const probe = await probing(peer);
     peer.adopt(probe, next);
     expect([pc.closes, stale.closes, last().closes]).toStrictEqual([1, 1, 0]);
+  });
+
+  it('does not adopt a connection that is already gone: the one that serves stays', async () => {
+    const { peer, pc, listen, listeners } = await served();
+    const probe = await probing(peer);
+    expect(probe.gone).toBe(false);
+    last().becomes('failed');
+    expect(probe.gone).toBe(true);
+    peer.adopt(probe, next);
+    expect(pc.closes).toBe(0);
+    expect(listen).toHaveBeenCalledTimes(1);
+    expect(listeners[0].offline).not.toHaveBeenCalled();
+    peer.request({ t: 'cmd', env: { p: '', k: '', s: '' } }).catch(() => {});
+    expect(pc.ctl.frames().at(-1)).toStrictEqual({ t: 'cmd', env: { p: '', k: '', s: '' }, id: 2 });
   });
 
   it('cannot be brought back once it is closed', async () => {

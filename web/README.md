@@ -169,8 +169,9 @@ development dependency, an IndexedDB for the tests.
     once, 64 at most for a connection; one for a connection the browser did not offer is dropped,
     as a browser answers none. When `ctl` opens the peer says `hello`; a refusal, an unreadable
     `welcome` or 10 seconds without one closes the connection. A `hello` refused with `version`
-    or `forbidden` also stops the peer: a listener from `listen()` hears `refused(code)`, when it
-    has one, and that node is offered nothing more until a new peer is made for it. After any
+    or `forbidden` also stops the peer: the requests still waiting reject, a listener from
+    `listen()` hears `refused(code)`, when it has one, and that node is offered nothing more until
+    a new peer is made for it. After any
     other failure or a loss (`ctl` closed, the connection `failed`) it offers again after 1, 2,
     4 … 60 seconds, from 1 second again only after `ctl` stayed open for 60 seconds, and at once
     when a path reports the node present or the window gets `online`.
@@ -203,7 +204,9 @@ development dependency, an IndexedDB for the tests.
     channel beside `ctl` (the terminal).
   - **Closing.** `peer.close()` and `session.close()` close every connection a peer dialled,
     probes included. A closed peer stays closed: `dial` throws, and `adopt` closes the connection
-    it is handed, so a welcome that comes after the tab lost its lock connects nothing.
+    it is handed, so a welcome that comes after the tab lost its lock connects nothing. A live
+    peer does not adopt a connection that is already gone (`connection.gone`): the one that
+    serves stays.
 - **Fonts.** Geist and Geist Mono 1.9.2, one variable `woff2` each, are served from
   `public/fonts/` with their licence (OFL-1.1); the page requests nothing from a third party. A
   browser downloads a face only when text uses it and shows the system fonts until it arrives.

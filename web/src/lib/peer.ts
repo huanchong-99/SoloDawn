@@ -325,6 +325,11 @@ export class Connection {
     this.onpath(this.path);
   }
 
+  /** Whether the connection has ended. */
+  get gone() {
+    return this.#gone;
+  }
+
   /** Sends a request and answers its response. Rejects when the connection ends first, and when
    *  the response is not an answer of that request's kind. Throws a RangeError for a request that
    *  no id could fit into a ctl message. */
@@ -514,9 +519,10 @@ export class Peer {
    *  connection the peer dialled is closed: the one before it, an attempt or a probe still on
    *  its way. Its listener hears `online`, and then the requests without a response are sent
    *  again. A closed peer adopts nothing: it closes the connection, so a welcome that comes
-   *  late cannot bring it back. */
+   *  late cannot bring it back. Nor is a connection adopted that is already gone: the one that
+   *  serves stays. */
   adopt(conn: Connection, welcome: Welcome) {
-    if (this.#closed) return conn.close();
+    if (this.#closed || conn.gone) return conn.close();
     this.#retry.stop();
     this.#lost = undefined;
     this.#end(conn);
@@ -589,9 +595,16 @@ export class Peer {
     if (conn === this.#conn) this.#offline();
     else if (conn !== this.#attempt) return;
     this.#attempt = undefined;
-    if (final(conn.refused)) return this.#listen().refused?.(conn.refused!);
+    if (final(conn.refused)) return this.#stop(conn.refused!);
     this.#lost = open;
     this.#again();
+  }
+
+  /** The node refused the peer for good. No welcome will come, so the requests that waited
+   *  for the next one reject, and a listener hears the code. */
+  #stop(code: string) {
+    for (const ask of this.#asked) this.#fail(ask);
+    this.#listen().refused?.(code);
   }
 
   #again() {
