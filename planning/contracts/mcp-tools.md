@@ -22,11 +22,14 @@ Conventions:
 - A text argument that would make a row too large fails with
   `bad_request`, and the error text names the limit and the size the row
   would have had (`contracts/conventions.md` section 4).
-- Each tool maps to one command or one read on the home. The node adds the
+- Each tool maps to what the last column of its table names: commands or a
+  read on the home, or work the node does locally. The node adds the
   signature and one check: text that an AI sends to the group is refused
   with `secret` when it matches the outbound secret patterns
   (`contracts/local.md` section 8, R-137).
-- Which tools a session sees depends on its kind (`sessions.md`); the last column of each table says so.
+- Which tools a session sees depends on its kind (`sessions.md`), as the
+  last column of each table says, and for a task session on its level
+  (the notes of section 1).
 
 ## 1. Tools for every AI
 
@@ -101,8 +104,13 @@ Result, one text block containing exactly one of:
 
 ```json
 {"behavior":"allow"}
-{"behavior":"deny","message":"Denied by the owner."}
+{"behavior":"deny","message":"…"}
 ```
+
+The message of a denial is `Denied by the owner.` when a person denied the
+card while the CLI waited, and the sentence of `flows/approval.md` step 4
+or step 12 for a request that contains a secret or that was not decided in
+time.
 
 The input is never echoed back in the result `[verified: large echoed inputs
 fail]`. Handling is in `flows/approval.md`. `tool_use_id` is new on every

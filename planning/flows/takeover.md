@@ -93,7 +93,8 @@ terminal as well, so there are no changed files to report.
 - `[unverified]` Whether trusting a parent folder covers Claude Code's
   worktrees below it.
 - `[unverified]` Pseudo-terminal behaviour on Windows (ConPTY) with both
-  CLIs. Spike S-5.
+  CLIs. Spike S-5 measured ConPTY with another program; go-pty is measured
+  in HS-19 (`risks.md` T-4).
 
 ## G. Watching (step 2)
 
