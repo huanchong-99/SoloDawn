@@ -25,7 +25,11 @@ var shapes = map[string]reflect.Type{
 	"act-confirm":                    of[Act](),
 	"act-deny":                       of[Act](),
 	"act-revise":                     of[Act](),
+	"agent-set":                      of[AgentSet](),
 	"answer":                         of[Answer](),
+	"audit-answer":                   of[AuditAnswer](),
+	"audit-request":                  of[Audit](),
+	"beacon":                         of[Beacon](),
 	"cmd":                            of[Cmd](),
 	"cmd-error":                      of[ErrorResponse](),
 	"cmd-ok":                         of[CmdResult](),
@@ -46,9 +50,15 @@ var shapes = map[string]reflect.Type{
 	"group-pause":                    of[GroupCommand](),
 	"group-resume":                   of[GroupCommand](),
 	"group-set":                      of[GroupSet](),
+	"groups":                         of[Groups](),
 	"hello":                          of[Hello](),
+	"host-info-answer":               of[HostInfo](),
+	"host-info-push":                 of[HostInfoPush](),
+	"host-info-request":              of[Request](),
 	"host-join":                      of[HostJoin](),
 	"host-leave":                     of[HostLeave](),
+	"host-offline":                   of[HostCommand](),
+	"host-online":                    of[HostCommand](),
 	"ice":                            of[ICECandidate](),
 	"inbox":                          of[Inbox](),
 	"item-assign":                    of[Item](),
@@ -75,6 +85,8 @@ var shapes = map[string]reflect.Type{
 	"note":                           of[Note](),
 	"offer":                          of[Offer](),
 	"pair":                           of[Pair](),
+	"pair-browser":                   of[HostCommand](),
+	"perm-set":                       of[PermSet](),
 	"post-approval":                  of[Post[ApprovalBody]](),
 	"post-brief":                     of[Post[BriefBody]](),
 	"post-call":                      of[Post[CallBody]](),
@@ -87,6 +99,7 @@ var shapes = map[string]reflect.Type{
 	"post-review":                    of[Post[ReviewSigned]](),
 	"post-summary":                   of[Post[EmptyBody]](),
 	"post-text":                      of[Post[EmptyBody]](),
+	"pty-resize":                     of[PTYResize](),
 	"push-off":                       of[PushOff](),
 	"push-on":                        of[PushOn](),
 	"push-reminder":                  of[Reminder](),
@@ -142,8 +155,11 @@ var shapes = map[string]reflect.Type{
 	"rv-room":                        of[RoomData](),
 	"rv-to":                          of[Route](),
 	"rv-watch":                       of[Watch](),
+	"settings-set":                   of[SettingsSet](),
 	"sync":                           of[Sync](),
 	"synced":                         of[Synced](),
+	"takeover-end":                   of[Takeover](),
+	"takeover-start":                 of[TakeoverStart](),
 	"task-assign":                    of[TaskAssign](),
 	"task-branch":                    of[TaskBranch](),
 	"task-cancel":                    of[TaskCommand](),
@@ -160,8 +176,9 @@ var shapes = map[string]reflect.Type{
 	"welcome":                        of[Welcome](),
 }
 
-// notExamples are the files of testdata that hold test vectors, not one wire example.
-var notExamples = []string{"crypto", "wire"}
+// notExamples are the files of testdata that are not one wire example: test
+// vectors, the MCP tool lists, and the facts of wire_test.go.
+var notExamples = []string{"crypto", "tools", "wire"}
 
 // exampleNames lists the wire examples in testdata, sorted.
 func exampleNames(t *testing.T) []string {

@@ -146,3 +146,40 @@ review session, and a task session twice, at level 1 and at level 2 or 3,
 because the two differ. `approve` is not in the file: the node adds it for
 a structured Claude Code session only (section 3). The names and argument
 schemas in that file are the contract; this document explains them.
+
+The file is one object with a member per kind of session: `secretary`,
+`group` (a working AI's group session), `review`, `task_level_1` and
+`task_level_2_3`. Each holds `{"tools":[…]}`, the tools in the order of the
+tables above, and each tool has `name` and `inputSchema` only: a tool's
+`description` is prose the node writes for the model and is not part of the
+contract. An `inputSchema` is a JSON Schema of `"type":"object"` with
+`properties` (`{}` for a tool without arguments), `required` when an
+argument must be given, and `"additionalProperties":false`, so that an
+argument the tool does not know is refused. Inside it the keywords are
+`type`, `enum`, `default`, `minimum`, `maximum`, `items`, `properties`,
+`required` and `additionalProperties`, and no others. The Go type is
+`proto.ToolLists`; `internal/proto` and the web client both read the file,
+refusing a member it does not name.
+
+What the file settles where the tables above leave it open:
+
+- **Where the task and the people come from.** In a group session (the
+  secretary's, a working AI's) `read_thread` requires `task` and
+  `request_decision` requires `to`; in a task or review session both are
+  optional and default to the session's own task and to the requester of
+  its brief. `note_put` and `note_list` take an optional `task` everywhere:
+  in a group session a note may be about no task.
+- **Kinds of `post`.** `text`, `progress` and `question` everywhere;
+  `handback` in the sessions a takeover can reach (the secretary's group
+  session, review and task sessions; `flows/takeover.md` A), and `summary`
+  for the secretary, whose `post` also takes `task`. `kind` defaults to
+  `text`; `where` has no default, because it depends on the turn.
+- **Defaults and bounds.** `ask.wait` defaults to `true`; `read_thread.limit`
+  is 1 to 100, default 30, and `before` at least 1 (no `pos` is 0);
+  `submit_review.score` is 0 to 100, each item requires `text`, `line` is at
+  least 1 and `veto` defaults to `false`; `request_decision.options` is
+  required (it may be `[]`) and each option requires `label` and `effect`;
+  `recommended` is an index from 0; in `propose_brief` each task requires
+  `title`, `assignee` and `reviewer`, `foundation` defaults to `false` and
+  `depends` to `[]`, indexes from 0; `list_tasks.state` is one of the task
+  states of `contracts/rows.md` section 4; `set_task` requires `task` only.

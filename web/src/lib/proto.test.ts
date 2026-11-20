@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 import { describe, expect, it } from 'vitest';
-import { examples, goldens, schemaOf } from './mock';
+import { examples, goldens, mockCtl, schemaOf } from './mock';
 import * as p from './proto';
 
 /** What the two readers of the wire agree on: internal/proto/testdata/wire.json, which the Go
@@ -363,9 +363,19 @@ describe('rendezvous frames', () => {
 });
 
 describe('decode', () => {
-  const frames = ['welcome', 'synced', 'fetched', 'cmd-ok', 'cmd-pair-link', 'cmd-error'];
+  const frames = [
+    'welcome',
+    'synced',
+    'fetched',
+    'cmd-ok',
+    'cmd-pair-link',
+    'cmd-error',
+    'host-info-answer',
+    'audit-answer',
+  ];
+  const pushes = ['rows', 'reset', 'devlog', 'groups', 'host-info-push'];
 
-  it.each([...frames, 'rows', 'reset', 'devlog'])('reads the %s frame', (name) => {
+  it.each([...frames, ...pushes])('reads the %s frame', (name) => {
     expect(p.decode(p.Frame, goldens[name])).toStrictEqual(JSON.parse(goldens[name]));
   });
 
@@ -376,10 +386,26 @@ describe('decode', () => {
     },
   );
 
-  it('reads the groups push, which has no wire example yet', () => {
-    const groups = '{"t":"groups","groups":[{"g":"Qm1","name":"Website","seq":812}]}';
-    expect(p.decode(p.Frame, groups)).toStrictEqual(JSON.parse(groups));
+  it('reads the groups push with the entries of welcome', () => {
+    const groups = p.decode(p.Groups, goldens.groups);
+    expect(groups.groups).toStrictEqual(p.decode(p.Welcome, goldens.welcome).groups);
     expect(() => p.decode(p.Frame, '{"t":"groups","groups":[{"g":"Qm1"}]}')).toThrow(v.ValiError);
+  });
+
+  it('tells the answer to host.info from its push by re', () => {
+    const answer = JSON.parse(goldens['host-info-answer']);
+    const push = JSON.parse(goldens['host-info-push']);
+    expect(v.is(p.HostInfo, push)).toBe(false);
+    expect(v.parse(p.Frame, push)).toStrictEqual(push);
+    expect(v.parse(p.Frame, answer)).toStrictEqual(answer);
+    // An answer that its schema refuses is not read as a push.
+    expect(() => v.parse(p.Frame, { ...answer, ok: false })).toThrow(v.ValiError);
+  });
+
+  it('refuses an audit answer with a row it cannot read, not reading it as a cmd answer', () => {
+    const answer = JSON.parse(goldens['audit-answer']);
+    expect(() => v.parse(p.Frame, { ...answer, rows: [{ ts: 1 }] })).toThrow(v.ValiError);
+    expect(() => v.parse(p.Frame, { ...answer, rows: 'none' })).toThrow(v.ValiError);
   });
 
   // An answer without t is one to cmd; one with t is read by the schema its t names.
@@ -531,6 +557,101 @@ describe('commands', () => {
       expect(accepts(name, { ...command, op: 'unknown' })).toBe(false);
     },
   );
+});
+
+describe('host surface', () => {
+  // A host command has `to` and a `t` with a dot; the frames of the host surface have no `to`.
+  const hostCommands = examples.filter((name) => {
+    const { t, to } = JSON.parse(goldens[name]);
+    return typeof t === 'string' && t.includes('.') && to !== undefined;
+  });
+
+  it.each(hostCommands)('%s is named by its t, and is for one node', (name) => {
+    const command = JSON.parse(goldens[name]);
+    expect(name).toBe(command.t.replace('.', '-'));
+    expect(command.to).toBe(p.decode(p.Welcome, goldens.welcome).device);
+    expect(accepts(name, { ...command, t: 'host.unknown' })).toBe(false);
+  });
+
+  it('holds the agent of host.info as settings.set and agent.set name it', () => {
+    const info = p.decode(p.HostInfo, goldens['host-info-answer']);
+    const set = p.decode(p.SettingsSet, goldens['settings-set']);
+    expect(info.agents.map((agent) => agent.agent)).toEqual(Object.keys(set.caps!));
+    expect(info.agents.map((agent) => agent.account)).toEqual(['personal', null]);
+    expect(p.decode(p.AgentSet, goldens['agent-set'])).toMatchObject({ agent: 'codex' });
+    expect(info.homes).toEqual([
+      { g: info.agents[0].groups[0].g, home: info.device, name: 'Website' },
+    ]);
+  });
+
+  it('reads caps only of the agents it knows, and refuses a cap without its max', () => {
+    const set = JSON.parse(goldens['settings-set']);
+    const read = (caps: unknown) => v.safeParse(p.SettingsSet, { ...set, caps });
+    expect(read({ Claude: { day: null } }).output).toMatchObject({ caps: {} });
+    expect(read({ codex: { day: { unit: 'turns' } } }).success).toBe(false);
+    expect(read({ codex: null }).success).toBe(false);
+    expect(read([]).success).toBe(false);
+  });
+
+  it('takes a takeover member and task, and a terminal member, only as ids', () => {
+    const start = JSON.parse(goldens['takeover-start']);
+    const resize = JSON.parse(goldens['pty-resize']);
+    expect(start.member).toBe(resize.ai);
+    expect(accepts('takeover-start', { ...start, member: 'codex' })).toBe(false);
+    expect(accepts('pty-resize', { ...resize, ai: 'codex' })).toBe(false);
+  });
+});
+
+describe('MCP tool lists', () => {
+  const lists = p.decode(p.ToolLists, goldens.tools);
+  const names = (kind: keyof p.ToolLists) => lists[kind].tools.map((tool) => tool.name);
+
+  it('reads tools.json as it is written, and nothing it does not name', () => {
+    expect(lists).toStrictEqual(JSON.parse(goldens.tools));
+    const described = JSON.parse(goldens.tools);
+    described.group.tools[0].description = 'Post a message.';
+    expect(v.is(p.ToolLists, described)).toBe(false);
+  });
+
+  it('lists the tools of section 1 to every session, and none twice', () => {
+    for (const kind of Object.keys(lists) as (keyof p.ToolLists)[]) {
+      expect(names(kind), kind).toEqual(expect.arrayContaining(['post', 'ask', 'net_status']));
+      expect(new Set(names(kind)).size, kind).toBe(names(kind).length);
+      expect(names(kind), kind).not.toContain('approve');
+    }
+    expect(names('secretary')).toEqual(expect.arrayContaining(['propose_brief', 'set_task']));
+    expect(names('task_level_1')).not.toContain('submit_task');
+    expect(names('task_level_2_3')).toContain('submit_task');
+  });
+});
+
+describe('mock connection', () => {
+  it('pushes reset and rows before it answers sync', async () => {
+    const seen: string[] = [];
+    const ctl = mockCtl((push) => seen.push(push.t));
+    const synced = await ctl.request({ t: 'sync', g: 'g', since: 0, state_only: false });
+    expect([...seen, synced]).toEqual(['reset', 'rows', { ...JSON.parse(goldens.synced), re: 1 }]);
+  });
+
+  it('answers host.info with the example, numbered', async () => {
+    const ctl = mockCtl(() => {});
+    await ctl.request({ t: 'host.info' });
+    const info = await ctl.request({ t: 'host.info' });
+    expect(info).toStrictEqual({ ...JSON.parse(goldens['host-info-answer']), re: 2 });
+  });
+
+  it('pushes groups before it answers a group create, and after no other command', async () => {
+    const seen: string[] = [];
+    const ctl = mockCtl((push) => seen.push(push.t));
+    const sign = (payload: unknown) => ({ p: JSON.stringify(payload), k: 'k', s: 's' });
+    await ctl.request({ t: 'cmd', env: p.decode(p.Cmd, goldens.cmd).env });
+    expect(seen).toEqual([]);
+    await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['group-pause'])) });
+    expect(seen).toEqual([]);
+    const created = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['group-create'])) });
+    expect(seen).toEqual(['groups']);
+    expect(created).toStrictEqual({ re: 3, ok: true });
+  });
 });
 
 describe('inbox', () => {
