@@ -142,6 +142,6 @@ place for it.
 - `[unverified]` That a blocked action at level 2 becomes a request when
   the AI asks to run it outside the sandbox (`contracts/drivers.md` 1.1;
   `risks.md` Q-25).
-- `[unverified]` Whether level 2 can be expressed on Claude Code for native
-  Windows, where its sandbox is not available. The coordinator decides after
-  spike S-5 (`risks.md` Q-4).
+- Decided after spike S-5 (`risks.md` Q-4): on native Windows, where
+  Claude Code has no sandbox, the node refuses level 2 for Claude Code and
+  offers only the levels it can enforce.

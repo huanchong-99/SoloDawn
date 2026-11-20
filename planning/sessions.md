@@ -13,8 +13,8 @@ An AI in a group has several sessions over time:
 | Session | Exists | Working folder | Level | Receives |
 | --- | --- | --- | --- | --- |
 | group session | one per AI per group, long-lived. For the secretary this is its only session. | the project clone | 1, read only | main-line mentions, direct questions (R-70), calls from threads where the AI has no role; for the secretary, everything addressed to it |
-| task session | one per task the AI is assigned, from first delivery until the task is merged or cancelled | the task's worktree | the level the owner set for this AI in this project | everything about that task |
-| review session | one per task the AI reviews, until that task is merged or cancelled | a read-only checkout of the submitted commit | 1, read only | review requests for that task |
+| task session | one per task the AI is assigned, from first delivery until the task is merged, cancelled or given to another AI (`flows/agent-turn.md` step 17) | the task's worktree | the level the owner set for this AI in this project | everything about that task |
+| review session | one per task the AI reviews, until that task is merged, cancelled or given to another AI (`flows/agent-turn.md` step 17) | a read-only checkout of the submitted commit | 1, read only | review requests for that task |
 
 - A working AI cannot change code in its group session: the session is read
   only. To change code it calls `start_task`, which creates a task and moves

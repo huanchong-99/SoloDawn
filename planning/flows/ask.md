@@ -31,9 +31,10 @@ home. NA and NB may be the same node; nothing below changes.
 
 ## B. No answer within the wait
 
-8. After `limits.ask_wait_s` (45 seconds) NA returns to A: "No answer yet.
-   Receipt <call id>. The answer will arrive as a message." A goes on or
-   ends its turn.
+8. After `limits.ask_wait_s` (45 seconds) NA returns
+   `{"pending":true,"receipt":"<call id>"}` to A, the result of
+   `contracts/mcp-tools.md` section 1: the answer will arrive as a message.
+   A goes on or ends its turn.
 9. When B replies, steps 5 and 6 happen. NA now has no open call for that
    id, so it delivers the `reply` item to A as a turn.
 
