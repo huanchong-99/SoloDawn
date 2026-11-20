@@ -122,6 +122,16 @@ describe('wire examples', () => {
       ),
     ).toBe(false);
   });
+
+  it.each([0.5, Number.MAX_SAFE_INTEGER + 1, Number.MIN_SAFE_INTEGER - 1])(
+    'refuses %s as a payload timestamp or device-log version',
+    (value) => {
+      expect(accepts('offer', { ...JSON.parse(goldens.offer), ts: value })).toBe(false);
+      expect(accepts('device-add', { ...JSON.parse(goldens['device-add']), ver: value })).toBe(
+        false,
+      );
+    },
+  );
 });
 
 describe('Id', () => {

@@ -7,6 +7,7 @@ import * as v from 'valibot';
 
 const str = v.string();
 const num = v.number();
+const int = v.pipe(num, v.safeInteger());
 const bool = v.boolean();
 const strs = v.array(str);
 
@@ -19,7 +20,7 @@ export type Envelope = v.InferOutput<typeof Envelope>;
  *  holds an id takes no other text. */
 export const Id = v.pipe(str, v.regex(/^[A-Za-z0-9_-]{21}[AQgw]$/));
 
-const PayloadHeader = { n: Id, ts: num, g: v.optional(Id), to: v.optional(str) };
+const PayloadHeader = { n: Id, ts: int, g: v.optional(Id), to: v.optional(str) };
 const SignalHeader = { ...PayloadHeader, conn: str };
 
 export const Offer = v.object({
@@ -53,7 +54,7 @@ export type Pair = v.InferOutput<typeof Pair>;
 
 const DeviceChange = {
   user: str,
-  ver: num,
+  ver: int,
   op: str,
   dev: str,
   kind: v.optional(str),
@@ -231,7 +232,6 @@ export const TaskRow = v.object({
 });
 export type TaskRow = v.InferOutput<typeof TaskRow>;
 
-const int = v.pipe(num, v.safeInteger());
 const optionalText = v.optional(str);
 const optionalInt = v.optional(int);
 // valibot's object({}) also accepts arrays; the body on the wire must be an object.
