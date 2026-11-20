@@ -70,9 +70,9 @@ is not a wire message.
   only `hello` and `devlog` until the newcomer is enrolled are rules about connections and belong
   to `internal/node`.
 - `kind` and `name` of an `add` entry are not checked.
-- Two limits are recorded in [issues.md](../../issues.md): an empty `to` is read as no `to`, and
-  the Go and browser JSON parsers can disagree on a log entry that only one of the person's own
-  devices could write.
+- Three limits are recorded in [issues.md](../../issues.md): an empty `to` is read as no `to`; the
+  Go and browser JSON parsers can disagree on a payload that only its signer could write; and
+  `crypto/ed25519` verifies signatures of small-order public keys that other implementations refuse.
 
 ## Verification and sources
 
