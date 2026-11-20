@@ -33,7 +33,9 @@ alone reads four things differently from a browser. An error from `Decode` is
 
 A `json.RawMessage` is not looked into; decode it with `Decode` when its type is
 known. So a wire type states the contract in its tags: `omitempty` for an optional
-field, a pointer without it for "or `null`". `go test ./internal/proto` reads every
+field, a pointer without it for "or `null`". Because `Decode` drops members by the
+characters of their names, a wire type has no map whose keys are not fixed names:
+such a key could hold an upper-case letter and would be dropped. `go test ./internal/proto` reads every
 example in `testdata` with `Decode`. A missing field and a wrong type are told apart
 only by the error text, which is for logs.
 
