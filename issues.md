@@ -24,6 +24,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `prefs` reads `localStorage` while its module loads (`web/src/lib/prefs.svelte.ts:12-16`), and both the application and the upgrade notice import it. A browser that refuses storage access throws on `localStorage` (Chrome raises a `SecurityError`), so the import fails before `boot` mounts anything.
 - Status: open. Reported in the review of PR #53; not changed there.
 
+### 2026-11-20 · limitation · An empty `to` in a signed payload is read as no `to`
+
+- Symptom: an envelope whose payload carries `"to":""` passes the `not_for_me` check on every receiver, although `contracts/envelope.md` section 3 says a `to` that is present must equal the receiver's device id.
+- Cause: `proto.PayloadHeader.To` is a plain string (`internal/proto/envelope.go:17`), so `addressed` cannot tell an empty `to` from a missing one (`internal/identity/envelope.go:56`). Only a device the receiver already listens to can sign such a payload.
+- Status: open.
+
+### 2026-11-20 · limitation · Go and browser JSON parsers can disagree on a device-log entry
+
+- Symptom: not observed. A log entry written by hand by one of the person's own valid devices could be accepted by a node and refused by a browser, or the reverse, which leaves their logs at different versions. Examples: `"ver":2.0` (refused by Go, read as 2 by `JSON.parse`), a key spelled `"VER"` (matched by Go, ignored by a browser).
+- Cause: `entry` reads the payload with `encoding/json` into `proto.DeviceEntry` (`internal/identity/devlog.go:68`), which matches keys without regard to case and refuses a fraction for an integer; the contract has no canonical JSON. The shared vectors (`internal/proto/testdata/crypto.json`) hold no such entry.
+- Status: open. No software of this project writes such an entry.
+
 ## Resolved
 
 ### 2026-11-20 · bug · Go acceptance suite ran the web feature
