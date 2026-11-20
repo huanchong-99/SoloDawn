@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,7 +16,24 @@ import (
 
 func TestRun(t *testing.T) {
 	const usage = "usage: solodawn <command> [arguments]\n"
-	const flags = "Usage of rendezvous:\n  -listen string\n    \tHTTP signalling and static file address (default \"127.0.0.1:8080\")\n"
+	flags := strings.ReplaceAll(`Usage of rendezvous:
+  -cert string
+	PEM certificate chain for both hostnames
+  -domain string
+	signalling and STUN hostname
+  -key string
+	PEM certificate private key
+  -listen string
+	signalling address (TLS :443 or local HTTP 127.0.0.1:8080)
+  -no-relay
+	offer STUN but no relay
+  -relay-quota-mb int
+	per-device UTC daily limit in MiB (default 50)
+  -turn-domain string
+	TURN-over-TLS hostname
+  -udp-port int
+	STUN and TURN UDP port (default 3478)
+`, "\n\t", "\n    \t")
 	for _, tc := range []struct {
 		args           []string
 		code           int
@@ -149,10 +167,23 @@ func replyToCommand(l *net.UnixListener) <-chan string {
 	return received
 }
 
-func TestDefaultRendezvousAddress(t *testing.T) {
-	var stderr bytes.Buffer
-	code := rendezvous(nil, &stderr, func(addr string) error { return fmt.Errorf("stopped %s", addr) })
-	if code != 1 || stderr.String() != "stopped 127.0.0.1:8080\n" {
-		t.Errorf("rendezvous returned %d, %q", code, stderr.String())
+func TestRelayFlags(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want node.RendezvousOptions
+	}{
+		{nil, node.RendezvousOptions{UDPPort: 3478, QuotaMB: 50}},
+		{strings.Fields("--listen :443 --domain a --turn-domain b --cert c --key d --udp-port 123 --relay-quota-mb 9 --no-relay"), node.RendezvousOptions{Listen: ":443", Domain: "a", TurnDomain: "b", Cert: "c", Key: "d", UDPPort: 123, QuotaMB: 9, NoRelay: true}},
+	} {
+		var stderr bytes.Buffer
+		code := rendezvous(tc.args, &stderr, func(got node.RendezvousOptions) error {
+			if got != tc.want {
+				t.Fatalf("parsed %+v; want %+v", got, tc.want)
+			}
+			return fmt.Errorf("stopped")
+		})
+		if code != 1 || stderr.String() != "stopped\n" {
+			t.Fatal(code, stderr.String())
+		}
 	}
 }

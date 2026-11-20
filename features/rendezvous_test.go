@@ -64,18 +64,19 @@ const rvICE = `{"t":"ice","ice":[],"ttl":3600}`
 
 // rvWorld is one scenario: a rendezvous and the connections of up to three devices.
 type rvWorld struct {
-	bin      string
-	http, ws string
-	listener *rvListener
-	conns    map[string]*websocket.Conn
-	nonces   map[string]string
-	earlier  *websocket.Conn
-	sent     []byte   // the frame that the other side is to receive
-	answers  []string // what the rendezvous answers when no limit is passed
-	got      []string // what it did answer
-	ended    error    // how reading those answers ended early
-	offer    proto.Envelope
-	cleanup  []func()
+	bin        string
+	http, ws   string
+	listener   *rvListener
+	conns      map[string]*websocket.Conn
+	nonces     map[string]string
+	earlier    *websocket.Conn
+	sent       []byte   // the frame that the other side is to receive
+	answers    []string // what the rendezvous answers when no limit is passed
+	got        []string // what it did answer
+	ended      error    // how reading those answers ended early
+	offer      proto.Envelope
+	cleanup    []func()
+	httpClient *http.Client
 }
 
 func init() {
@@ -84,9 +85,15 @@ func init() {
 	}
 }
 
+// rvKey gives the other step sets of a scenario its rendezvous world.
+type rvKey struct{}
+
 func rendezvousSteps(sc *godog.ScenarioContext, bin string) {
 	w := &rvWorld{bin: bin, conns: map[string]*websocket.Conn{}, nonces: map[string]string{}}
 	const device = `(browser|node|tablet)`
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		return context.WithValue(ctx, rvKey{}, w), nil
+	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
 		for _, undo := range slices.Backward(w.cleanup) {
 			undo()
@@ -199,7 +206,7 @@ func rvRead(c *websocket.Conn) (websocket.MessageType, []byte, error) {
 }
 
 func (w *rvWorld) dial(name string) error {
-	c, _, err := websocket.Dial(context.Background(), w.ws, nil)
+	c, _, err := websocket.Dial(context.Background(), w.ws, &websocket.DialOptions{HTTPClient: w.httpClient})
 	if err != nil {
 		return err
 	}

@@ -7,6 +7,12 @@ type RVFrame struct {
 	Type string `json:"t"`
 }
 
+type Quota struct {
+	Type  string `json:"t"`
+	Used  int64  `json:"used"`
+	Limit int64  `json:"limit"`
+}
+
 type Challenge struct {
 	Type  string `json:"t"`
 	Nonce string `json:"nonce"`
