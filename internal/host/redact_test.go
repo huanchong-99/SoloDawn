@@ -23,11 +23,16 @@ func TestRedactSecrets(t *testing.T) {
 		{"before\n-----BEGIN RSA PRIVATE KEY-----\nMIIab\n-----END RSA PRIVATE KEY-----\nafter", "before\n[redacted]\nafter"},
 		{"a -----BEGIN PRIVATE KEY-----\nMIIab\nrest", "a [redacted]"},
 		{"-----BEGIN PRIVATE KEY-----\n1\n-----END PRIVATE KEY-----\nmid\n-----BEGIN EC PRIVATE KEY-----\n2\n-----END EC PRIVATE KEY-----", "[redacted]\nmid\n[redacted]"},
+		{"MIIab\ncd\n-----END PRIVATE KEY-----\nafter", "[redacted]\nafter"},
+		{"x\n-----END RSA PRIVATE KEY-----\ny\n-----END RSA PRIVATE KEY-----\nz", "[redacted]\nz"},
+		{"a\n-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nlQOY\n=abcd\n-----END PGP PRIVATE KEY BLOCK-----\nb", "a\n[redacted]\nb"},
+		{"lQOY\n-----END PGP PRIVATE KEY BLOCK-----\nb", "[redacted]\nb"},
+		{"-----BEGIN PGP PUBLIC KEY BLOCK-----\nmQ\n-----END PGP PUBLIC KEY BLOCK-----", "-----BEGIN PGP PUBLIC KEY BLOCK-----\nmQ\n-----END PGP PUBLIC KEY BLOCK-----"},
 		{"intro\nA=1\napi_key=2\nC=3\noutro", "intro\n[redacted]\noutro"},
 		{"A=1\nB=2\nC=3\nD=4\n\nX=1\nMY_TOKEN=2\nZ=3", "A=1\nB=2\nC=3\nD=4\n\n[redacted]"},
 	} {
-		if got := redactSecrets(tc.text); got != tc.want {
-			t.Errorf("redactSecrets(%q) = %q, want %q", tc.text, got, tc.want)
+		if got := RedactSecrets(tc.text); got != tc.want {
+			t.Errorf("RedactSecrets(%q) = %q, want %q", tc.text, got, tc.want)
 		}
 	}
 }

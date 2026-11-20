@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · limitation · Files hidden by ignore rules can change what a check runs
+
+- Symptom: a file ignored through `.git/info/exclude` or `core.excludesFile`, not through the project's `.gitignore`, is shown by neither `git status` nor `git ls-files`; it can change what a project check does, so a passing check may not describe the commit alone (L5).
+- Cause: `run_checks` runs in the task's worktree (`internal/host/checks.go`, `cleanCheckHead`), where such files can exist.
+- Status: open. Step 2 closes it by running the checks on a clean export of the commit.
+
 ### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
 
 - Symptom: `crap.py` gives `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reports `internal/peer` at 100% of statements.
@@ -195,6 +201,54 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
 
 ## Resolved
+
+### 2026-11-20 · bug · The tests check counted deleted files
+
+- Symptom: changing `a.go` and deleting `a_test.go` passed; only deleting `old.go` failed; renaming `x_test.go` to `y.go` passed. `local.md` §7 says a deleted file counts as neither a test file nor a source file. Found in the independent review of `internal/host` (M1).
+- Cause: the names diff of the hard checks listed deleted paths (`internal/host/checks.go:163` before the fix); with `--no-renames` a rename is a deletion and an addition.
+- Status: resolved on branch `fix/host-checks-review`: `--diff-filter=d` on the names diff. Test `TestTestsCheckIgnoresDeletedFiles`.
+
+### 2026-11-20 · bug · The secrets check did not read files Git takes as binary
+
+- Symptom: a `server.pem` holding a PKCS #8 key passed the secrets hard check when `.gitattributes` marked `*.pem binary` or the file held a NUL byte; Git printed "Binary files differ" instead of the added lines (M2).
+- Cause: the patch diff ran without `--text` (`internal/host/checks.go:159` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: `--text` on the patch diff. Test `TestSecretsCheckReadsFilesGitTakesAsBinary`.
+
+### 2026-11-20 · bug · A check's output tail could hold the end of a private key
+
+- Symptom: a check that printed a 4.4 KiB key left a tail that began inside the key and ended with its END line, which redaction did not match (L1).
+- Cause: the output was cut to 4 KiB before redaction, and redaction needed the header (`internal/host/checks.go:118-125` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: the last 64 KiB of output are redacted, then cut to the 4 KiB tail (`checkDetail`); redaction also replaces a private-key footer without its header from the start of the text. Tests `TestCheckOutputRedactsKeyLongerThanTail`, `TestCheckDetailIsErrorThenRedactedTail`, `TestRedactSecrets`.
+
+### 2026-11-20 · bug · A turn that ran out took the hard checks with it
+
+- Symptom: with a context of 300 ms and the check `sleep 2`, `Run` returned "context deadline exceeded" and no items, so neither hard check ran (L3; R-103 says both always run).
+- Cause: the hard checks used the caller's context after the group's checks had used up its deadline (`internal/host/checks.go:38` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: the hard checks run on `context.WithoutCancel`; the group's checks share the turn's deadline, with `turn_minutes` bounding a context without one. Test `TestTurnDeadlineKeepsHardChecks`.
+
+### 2026-11-20 · bug · A background child of a check outlived it and hid the error
+
+- Symptom: `sleep 3 & echo done` gave `ok=false` with the detail "done\n": the `WaitDelay` error was dropped, and `sleep` kept running (L4).
+- Cause: the detail was replaced by the output tail, and nothing killed the process group after `Wait` (`internal/host/checks.go:115-125` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: after `Wait` the process group is killed (Unix, `checks_tree_unix.go`); on Windows the shell runs in a job object closed after `Wait` (`checks_tree_windows.go`, not run on Windows). The detail is the error, then the redacted tail. Test `TestBackgroundChildDiesWithCheck`.
+
+### 2026-11-20 · bug · A clean status did not prove the checked commit
+
+- Symptom: a tracked file with the skip-worktree or assume-unchanged bit could differ from the commit while `git status --porcelain` stayed empty, so `run_checks` checked content that was not the commit (L5).
+- Cause: the clean-tree test read the status only (`internal/host/checks.go:70-80` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: a path tagged `S` or in lower case by `git ls-files -v` makes the tree not clean; `local.md` §7 `run_checks` says so. Test `TestChecksRefuseHiddenTrackedChanges`.
+
+### 2026-11-20 · deviation · Redaction was not available to the node
+
+- Symptom: the node must apply the one pattern list to the details of `task fail`, `login_invalid` and `turn_interrupted` (`local.md` §7), but the helper was unexported (L10).
+- Cause: `redactSecrets` in `internal/host/secret.go:53` before the fix.
+- Status: resolved on branch `fix/host-checks-review`: exported as `RedactSecrets`. Test `TestRedactSecretsFromOutsideHost`.
+
+### 2026-11-20 · bug · OpenPGP private keys passed the secret check
+
+- Symptom: `-----BEGIN PGP PRIVATE KEY BLOCK-----` matched no pattern (L11).
+- Cause: the PEM pattern required `PRIVATE KEY-----` (`internal/host/secret.go:19` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: the pattern takes an OpenPGP block through its END line; `local.md` §8 reads "a PEM or OpenPGP private-key header". Tests in `TestRedactSecrets` and `TestCheckOutboundSecretRejects`.
 
 ### 2026-11-20 · limitation · The own-address rule knows the interface addresses of the start only
 

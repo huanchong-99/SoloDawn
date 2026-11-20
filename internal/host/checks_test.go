@@ -235,16 +235,37 @@ func TestCheckEnvironment(t *testing.T) {
 	}
 }
 
-func TestCheckOutputKeepsLastFourKiB(t *testing.T) {
-	const limit = 4 * 1024
+func TestCheckOutputKeepsLast64KiB(t *testing.T) {
+	const limit = 64 * 1024
 	var tail checkTail
 	var output string
-	for _, chunk := range []string{"", "first", strings.Repeat("a", 5000), strings.Repeat("b", 4095), "c", "d"} {
+	for _, chunk := range []string{"", "first", strings.Repeat("a", limit+904), strings.Repeat("b", limit-1), "c", "d"} {
 		n, err := tail.Write([]byte(chunk))
 		output += chunk
 		want := output[max(0, len(output)-limit):]
 		if err != nil || n != len(chunk) || string(tail) != want {
 			t.Fatalf("write %d bytes: n=%d, err=%v, tail matches=%v", len(chunk), n, err, string(tail) == want)
+		}
+	}
+}
+
+func TestCheckDetailIsErrorThenRedactedTail(t *testing.T) {
+	key := "-----BEGIN PRIVATE KEY-----\n" + strings.Repeat("MIIab\n", 750) + "-----END PRIVATE KEY-----\n"
+	long := strings.Repeat("x", 5000)
+	for _, tc := range []struct {
+		err    error
+		output string
+		want   *string
+	}{
+		{nil, "", nil},
+		{errors.New("exit status 1"), "", new("exit status 1")},
+		{nil, "ok\n", new("ok\n")},
+		{errors.New("exit status 2"), "out\n", new("exit status 2\nout\n")},
+		{nil, "log\n" + key + "end\n", new("log\n[redacted]\nend\n")},
+		{nil, long, new(long[5000-4096:])},
+	} {
+		if got := checkDetail(tc.err, tc.output); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("checkDetail(%v, %d bytes) = %v, want %v", tc.err, len(tc.output), got, tc.want)
 		}
 	}
 }

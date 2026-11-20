@@ -14,9 +14,12 @@ var (
 	// the run of key characters the contract gives; the whole longer run is
 	// the secret.
 	secretPatterns = []*regexp.Regexp{
-		// A PEM private key: the header, through its footer when the text
-		// has one, else to the end of the text.
-		regexp.MustCompile(`()(-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----(?s:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|.*))`),
+		// A PEM or OpenPGP private key: the header, through its footer when
+		// the text has one, else to the end of the text.
+		regexp.MustCompile(`()(-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?s:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|.*))`),
+		// A footer left without its header, as when output was cut inside a
+		// key: from the start of the text through the last such footer.
+		regexp.MustCompile(`()((?s:\A.*)-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----)`),
 		// OpenAI keys (sk-, sk-proj-) and Anthropic keys: every sk-ant- key
 		// with its run of 32 is also an sk- key with a run of at least 32.
 		regexp.MustCompile(`(^|[^A-Za-z0-9])(sk-[A-Za-z0-9_-]{32,})`),
@@ -41,16 +44,17 @@ const (
 // CheckOutboundSecret checks text an AI sends for the fixed secret patterns
 // in local.md §8.
 func CheckOutboundSecret(text string) error {
-	if redactSecrets(text) != text {
+	if RedactSecrets(text) != text {
 		return errSecret
 	}
 	return nil
 }
 
-// redactSecrets replaces each match of the patterns in local.md §8 with
-// "[redacted]", for free text the host writes and sends to the group. An
-// environment-file run is replaced as a whole.
-func redactSecrets(text string) string {
+// RedactSecrets replaces each match of the patterns in local.md §8 with
+// "[redacted]", for free text the host or the node writes and sends to the
+// group (local.md §7, "Text the host writes"). An environment-file run is
+// replaced as a whole.
+func RedactSecrets(text string) string {
 	for _, pattern := range secretPatterns {
 		text = pattern.ReplaceAllString(text, keepLead)
 	}

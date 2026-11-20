@@ -35,7 +35,9 @@ func (r CheckRunner) Run(ctx context.Context, worktree, baseRef string, group pr
 	}
 	result := proto.ChecksBody{Stage: "local", Commit: head, OK: true}
 	result.Items = runGroupChecks(ctx, worktree, group)
-	hard, err := r.hardChecks(ctx, worktree, baseRef+"..."+head)
+	// Both hard checks always run (R-103), also when the turn ran out during
+	// the group's checks.
+	hard, err := r.hardChecks(context.WithoutCancel(ctx), worktree, baseRef+"..."+head)
 	if err != nil {
 		return proto.ChecksBody{}, err
 	}
@@ -46,6 +48,8 @@ func (r CheckRunner) Run(ctx context.Context, worktree, baseRef string, group pr
 	return result, nil
 }
 
+// The group's checks share the time left in the turn: ctx carries the
+// turn's deadline, and turn_minutes bounds a context without one.
 func runGroupChecks(ctx context.Context, dir string, group proto.GroupRow) []proto.CheckItem {
 	checkCtx, cancel := context.WithTimeout(ctx, time.Duration(group.Limits.TurnMinutes)*time.Minute)
 	defer cancel()
@@ -67,12 +71,23 @@ func checkGit(ctx context.Context, dir string, args ...string) (string, error) {
 	return string(out), err
 }
 
+// hiddenCheckPath matches an entry of `git ls-files -v -z` whose content
+// the status does not show: tag S for skip-worktree, a lower-case tag for
+// assume-unchanged.
+var hiddenCheckPath = regexp.MustCompile(`(?:^|\x00)[Sa-z] `)
+
+// cleanCheckHead refuses a tree whose status is not empty, or in which a
+// tracked path hides its content from the status (local.md 7, run_checks).
 func cleanCheckHead(ctx context.Context, dir string) (string, error) {
 	status, err := checkGit(ctx, dir, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return "", err
 	}
-	if status != "" {
+	tracked, err := checkGit(ctx, dir, "ls-files", "-v", "-z")
+	if err != nil {
+		return "", err
+	}
+	if status != "" || hiddenCheckPath.MatchString(tracked) {
 		return "", ErrDirtyCheckTree
 	}
 	head, err := checkGit(ctx, dir, "rev-parse", "--verify", "HEAD")
@@ -97,14 +112,20 @@ func checkEnvironment(env []string, windows bool) []string {
 	return result
 }
 
-const checkTailLimit = 4096
+// A check's output is kept as its last 64 KiB, redacted, and then cut to
+// the 4 KiB tail the group sees: redacting before the cut keeps a key that
+// spans the cut from leaving its end in the tail.
+const (
+	checkOutputWindow = 64 << 10
+	checkTailLimit    = 4096
+)
 
 type checkTail []byte
 
 func (t *checkTail) Write(p []byte) (int, error) {
 	n := len(p)
-	p = p[max(0, n-checkTailLimit):]
-	*t = append((*t)[max(0, len(*t)+len(p)-checkTailLimit):], p...)
+	p = p[max(0, n-checkOutputWindow):]
+	*t = append((*t)[max(0, len(*t)+len(p)-checkOutputWindow):], p...)
 	return n, nil
 }
 
@@ -115,15 +136,33 @@ func runProjectCheck(ctx context.Context, dir, command string) proto.CheckItem {
 	cmd.WaitDelay = time.Second
 	cmd.Dir = dir
 	cmd.Env = checkEnvironment(os.Environ(), runtime.GOOS == "windows")
-	var tail checkTail
-	cmd.Stdout, cmd.Stderr = &tail, &tail
-	err := cmd.Run()
-	item := checkedItem(command, err)
-	// The tail goes to the group, so a secret in it is redacted (local.md 8).
-	if len(tail) != 0 {
-		item.Detail = new(redactSecrets(string(tail)))
+	var output checkTail
+	cmd.Stdout, cmd.Stderr = &output, &output
+	err := cmd.Start()
+	if err == nil {
+		kill := killCheckTree(cmd)
+		err = cmd.Wait()
+		// A background child of the check dies with it.
+		kill()
 	}
-	return item
+	return proto.CheckItem{Name: command, OK: err == nil, Detail: checkDetail(err, string(output))}
+}
+
+// checkDetail is the error, then the tail of the output, which goes to the
+// group and so is redacted first (local.md 7 and 8).
+func checkDetail(err error, output string) *string {
+	var parts []string
+	if err != nil {
+		parts = append(parts, err.Error())
+	}
+	if output != "" {
+		output = RedactSecrets(output)
+		parts = append(parts, output[max(0, len(output)-checkTailLimit):])
+	}
+	if parts == nil {
+		return nil
+	}
+	return new(strings.Join(parts, "\n"))
 }
 
 // Go exposes CmdLine only on Windows and Setpgid only on Unix. Set the
@@ -156,11 +195,14 @@ func checkedItem(name string, err error) proto.CheckItem {
 }
 
 func (r CheckRunner) hardChecks(ctx context.Context, dir, revisions string) ([]proto.CheckItem, error) {
-	patch, err := checkGit(ctx, dir, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--find-renames", "--unified=0", "--output-indicator-new=>", "--end-of-options", revisions, "--")
+	// --text: a file Git takes as binary still shows its added lines.
+	patch, err := checkGit(ctx, dir, "diff", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--find-renames", "--unified=0", "--output-indicator-new=>", "--end-of-options", revisions, "--")
 	if err != nil {
 		return nil, err
 	}
-	names, err := checkGit(ctx, dir, "diff", "--name-only", "-z", "--no-renames", "--end-of-options", revisions, "--")
+	// --diff-filter=d: a deleted file counts as neither a test nor a source
+	// file; a rename is a deletion and an addition.
+	names, err := checkGit(ctx, dir, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=d", "--end-of-options", revisions, "--")
 	if err != nil {
 		return nil, err
 	}
