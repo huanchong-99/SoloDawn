@@ -753,6 +753,7 @@ jobs:
             }
             & $exe status 2>$null
             if ($LASTEXITCODE -eq 0) { throw 'solodawn status still succeeded after node stopped' }
+            $global:LASTEXITCODE = 0
           } finally {
             [Environment]::SetEnvironmentVariable('Path', $origUserPath, 'User')
             Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
@@ -760,3 +761,4 @@ jobs:
               Where-Object { $_.ExecutablePath -eq $exe } |
               ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
           }
+          exit 0
