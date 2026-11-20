@@ -1,5 +1,4 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
-import * as v from 'valibot';
 import { expect, vi } from 'vitest';
 import { examples, goldens, mockCtl, schemaOf } from '../src/lib/mock';
 import * as proto from '../src/lib/proto';
@@ -236,10 +235,12 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then('each one is read with every field as written', () => {
         expect(read).toStrictEqual(names.map((name) => JSON.parse(goldens[name])));
       });
-      And('each one is refused with one unknown field added', () => {
+      And('each one is read without a field added that the client does not know', () => {
         for (const name of names) {
           const text = goldens[name].replace('{', '{"unknown":1,');
-          expect(() => proto.decode(schemaOf[name], text), name).toThrow(v.ValiError);
+          const value = proto.decode(schemaOf[name], text);
+          expect(value, name).toStrictEqual(JSON.parse(goldens[name]));
+          expect(value, name).not.toStrictEqual(JSON.parse(text));
         }
       });
     },

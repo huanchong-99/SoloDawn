@@ -52,8 +52,9 @@ The one runtime dependency is `valibot`, for the wire types.
   changes without remembering them. `tokens.css` turns `data-theme` into `color-scheme`; every
   colour is a `light-dark()` pair.
 - **Wire types.** `src/lib/proto.ts` mirrors `internal/proto`: one `valibot` schema per message,
-  with its TypeScript type inferred under the same name. Objects are strict: an unknown field is
-  refused, and so is a missing one unless Go tags it `omitempty`; a Go pointer without
+  with its TypeScript type inferred under the same name. An unknown field is dropped, as Go's
+  `encoding/json` does, so a node that adds a field does not break an older client; a missing
+  field is refused unless Go tags it `omitempty`; a Go pointer without
   `omitempty` must be there and may be `null`. Message bodies are any JSON until a contract types
   them. `decode(schema, text)` is the only place where received text becomes a typed value;
   `Frame` is what a node may send on `ctl`. Code after it trusts the type. An envelope's `p` stays
@@ -118,7 +119,8 @@ are hidden; both choices are on the settings page at every width.
   opened on a real phone, in Safari or in Firefox.
 - `src/lib/proto.test.ts` reads every wire example with the schema of its file name and fails on a
   file that has none (`crypto.json`, which holds test vectors, excepted); it adds an unknown field
-  to every object and removes every field in turn. Fields that appear in no example are not
+  to every object, which is dropped (so a golden file with a field the schema lacks fails the exact
+  comparison), and removes every field in turn. Fields that appear in no example are not
   covered by those variants.
 - Importing `decode` and `Frame` adds about 7.6 KiB to the bundle, 2.6 KiB gzipped (measured
   with `valibot` 1.5.0 on 2026-11-20). Nothing in the application imports them yet.
