@@ -26,7 +26,7 @@ func hostSteps(sc *godog.ScenarioContext, t *testing.T, bin string) {
 		if filepath.Dir(path) != bin {
 			return fmt.Errorf("%s resolved outside the test bin directory: %s", name, path)
 		}
-		out, err := exec.Command(path, "--version").CombinedOutput()
+		out, err := exec.Command(path, "--version").Output()
 		if err != nil || string(out) != version+"\n" {
 			return fmt.Errorf("--version: %q (%v), want %q", out, err, version)
 		}

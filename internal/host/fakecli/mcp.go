@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"slices"
 	"strings"
 )
 
@@ -16,88 +15,69 @@ type server struct {
 	Args    []string
 }
 
-func claudeServer(args []string) (server, error) {
-	i := slices.Index(args, "--mcp-config")
-	if i < 0 || i+1 == len(args) {
-		return server{}, errors.New("expected --mcp-config <file>")
-	}
-	b, err := os.ReadFile(args[i+1])
-	if err != nil {
-		return server{}, err
-	}
-	var cfg struct{ MCPServers map[string]server }
-	if err := json.Unmarshal(b, &cfg); err != nil {
-		return server{}, err
-	}
-	return cfg.MCPServers["solodawn"], nil
+type mcp struct {
+	cmd *exec.Cmd
+	in  io.WriteCloser
+	out *bufio.Reader
 }
 
-func codexServer(args []string) (server, error) {
-	var srv server
-	for i := 0; i < len(args); i++ {
-		if args[i] != "-c" {
-			continue
-		}
-		i++
-		if i == len(args) {
-			return srv, errors.New("expected key=value after -c")
-		}
-		key, value, _ := strings.Cut(args[i], "=")
-		switch key {
-		case "mcp_servers.solodawn.command":
-			if err := json.Unmarshal([]byte(value), &srv.Command); err != nil {
-				return srv, err
-			}
-		case "mcp_servers.solodawn.args":
-			if err := json.Unmarshal([]byte(value), &srv.Args); err != nil {
-				return srv, err
-			}
+// The first MCP step starts the server the node configured as "solodawn".
+func (p *process) mcpStep(dir string, msg []byte) error {
+	if p.mcp == nil {
+		if err := p.startMCP(); err != nil {
+			return err
 		}
 	}
-	return srv, nil
-}
-
-type mcpProcess struct {
-	cmd    *exec.Cmd
-	input  io.WriteCloser
-	output *bufio.Reader
-}
-
-func (p *mcpProcess) start(vendor string, args []string) error {
-	config := claudeServer
-	if vendor == "codex" {
-		config = codexServer
+	if dir == "mcp<-cli" {
+		return send(p.mcp.in, msg)
 	}
-	srv, err := config(args)
+	_, err := expect(p.mcp.out, msg)
+	return err
+}
+
+func (p *process) startMCP() error {
+	srv, err := p.server()
 	if err != nil {
 		return err
-	}
-	if srv.Command == "" {
-		return errors.New("missing solodawn MCP command")
 	}
 	cmd := exec.Command(srv.Command, srv.Args...)
-	cmd.Stderr = os.Stderr
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
+	in, _ := cmd.StdinPipe()
+	out, _ := cmd.StdoutPipe()
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	p.cmd, p.input, p.output = cmd, stdin, bufio.NewReader(stdout)
+	p.mcp = &mcp{cmd, in, bufio.NewReader(out)}
 	return nil
 }
 
-func (p *mcpProcess) close() {
-	if p.cmd == nil {
+func (p *process) stopMCP() {
+	if p.mcp == nil {
 		return
 	}
-	p.input.Close()
-	// A scripted crash can strand the shim in an unanswered call.
-	p.cmd.Process.Kill()
-	p.cmd.Wait()
+	p.mcp.in.Close()
+	// A script that ends inside a call leaves the server waiting.
+	p.mcp.cmd.Process.Kill()
+	p.mcp.cmd.Wait()
+}
+
+// Claude Code names a configuration file; Codex takes -c settings, whose TOML
+// values are also JSON here.
+func (p *process) server() (srv server, err error) {
+	if path := value(p.args, "--mcp-config"); path != "" {
+		var config struct{ MCPServers map[string]server }
+		data, err := os.ReadFile(path)
+		if err == nil {
+			err = json.Unmarshal(data, &config)
+		}
+		return config.MCPServers["solodawn"], err
+	}
+	for _, arg := range p.args {
+		if value, ok := strings.CutPrefix(arg, "mcp_servers.solodawn.command="); ok {
+			err = errors.Join(err, json.Unmarshal([]byte(value), &srv.Command))
+		}
+		if value, ok := strings.CutPrefix(arg, "mcp_servers.solodawn.args="); ok {
+			err = errors.Join(err, json.Unmarshal([]byte(value), &srv.Args))
+		}
+	}
+	return srv, err
 }

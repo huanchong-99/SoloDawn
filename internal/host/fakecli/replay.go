@@ -1,9 +1,11 @@
-// Package fakecli runs the test-only, file-scripted Claude and Codex processes.
+// Package fakecli runs the test-only Claude Code and Codex stand-ins. Each
+// start replays one script file of messages the real CLIs sent.
 package fakecli
 
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,208 +16,168 @@ import (
 	"strings"
 )
 
-type step struct {
-	Dir string
-	Msg json.RawMessage
-}
-
 type script struct {
-	Session string // the thread id issued by the scripted Codex server
-	Steps   []step
-	Exit    int
+	Session string // the thread id a scripted Codex app-server issues
+	Steps   []struct {
+		Dir string
+		Msg json.RawMessage
+	}
+	Exit int
 }
 
-func Main(vendor, version string) {
-	args := os.Args[1:]
+type process struct {
+	vendor         string
+	args           []string
+	stdin          *bufio.Reader
+	stdout, stderr io.Writer
+	session, id    json.RawMessage
+	mcp            *mcp
+}
+
+// Run is one start of a fake CLI. It returns the exit status.
+func Run(vendor, version string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if slices.Equal(args, []string{"--version"}) {
-		fmt.Println(version)
-		return
+		fmt.Fprintln(stdout, version)
+		return 0
 	}
-	code, err := run(vendor, args)
+	p := process{vendor: vendor, args: args, stdin: bufio.NewReader(stdin), stdout: stdout, stderr: stderr}
+	code, err := p.replay()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "fake "+vendor+":", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, "fake "+vendor+":", err)
+		return 1
 	}
-	os.Exit(code)
+	return code
 }
 
-func sessionID(vendor string, args []string, id string) (string, error) {
-	switch {
-	case vendor == "claude":
-		for i, arg := range args {
-			if arg == "--session-id" || arg == "--resume" {
-				if i+1 < len(args) {
-					return args[i+1], nil
-				}
-				break
-			}
-		}
-		return "", errors.New("expected --session-id or --resume with an id")
-	case len(args) > 1 && args[0] == "resume":
-		return args[1], nil
-	case len(args) > 0 && args[0] == "app-server" && id != "":
-		return id, nil
-	default:
-		return "", errors.New("expected app-server with script session, or resume <id>")
-	}
-}
-
-func run(vendor string, args []string) (code int, err error) {
-	key := "SOLODAWN_FAKE_" + strings.ToUpper(vendor) + "_SCRIPT"
-	path := os.Getenv(key)
-	if path == "" {
-		return 0, fmt.Errorf("set %s to a script file", key)
-	}
-	data, err := os.ReadFile(path)
+func (p *process) replay() (int, error) {
+	s, err := load("SOLODAWN_FAKE_" + strings.ToUpper(p.vendor) + "_SCRIPT")
 	if err != nil {
 		return 0, err
 	}
-	var s script
-	if err := json.Unmarshal(data, &s); err != nil {
-		return 0, err
-	}
-	if s.Steps == nil {
-		return 0, errors.New("script requires a steps array")
-	}
-	id, err := sessionID(vendor, args, s.Session)
-	if err != nil {
-		return 0, err
+	id := cmp.Or(value(p.args, "--session-id", "--resume", "resume"), s.Session)
+	if id == "" {
+		return 0, errors.New("no session id in the arguments or the script")
 	}
 	log, err := os.OpenFile(os.Getenv("SOLODAWN_FAKECLI_LOG"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("SOLODAWN_FAKECLI_LOG: %w", err)
 	}
 	defer log.Close()
-	if _, err := fmt.Fprintln(log, "start", vendor, id); err != nil {
-		return 0, err
-	}
-	defer func() {
-		_, logErr := fmt.Fprintln(log, "exit", vendor, id)
-		err = errors.Join(err, logErr)
-	}()
-	session, _ := json.Marshal(id)
-	p := replay{stdin: bufio.NewReader(os.Stdin), session: session}
-	defer p.mcp.close()
+	fmt.Fprintln(log, "start", p.vendor, id)
+	defer fmt.Fprintln(log, "exit", p.vendor, id)
+	defer p.stopMCP()
+	p.session, _ = json.Marshal(id)
 	for i, step := range s.Steps {
-		if err := p.step(step, vendor, args); err != nil {
+		if err := p.step(step.Dir, step.Msg); err != nil {
 			return 0, fmt.Errorf("step %d (%s): %w", i+1, step.Dir, err)
 		}
 	}
 	return s.Exit, nil
 }
 
-type replay struct {
-	stdin              *bufio.Reader
-	session, requestID json.RawMessage
-	mcp                mcpProcess
+func load(key string) (s script, err error) {
+	data, err := os.ReadFile(os.Getenv(key))
+	if err == nil {
+		err = json.Unmarshal(data, &s)
+	}
+	if err != nil {
+		err = fmt.Errorf("%s: %w", key, err)
+	}
+	return s, err
 }
 
-func (p *replay) step(s step, vendor string, args []string) error {
-	if s.Dir != "eof" && len(s.Msg) == 0 {
-		return errors.New("missing msg")
+// value is the argument after the first of names.
+func value(args []string, names ...string) string {
+	i := slices.IndexFunc(args, func(arg string) bool { return slices.Contains(names, arg) })
+	if i < 0 || i+1 == len(args) {
+		return ""
 	}
-	msg := bytes.ReplaceAll(s.Msg, []byte(`"$session"`), p.session)
-	switch s.Dir {
+	return args[i+1]
+}
+
+func (p *process) step(dir string, msg []byte) error {
+	msg = bytes.ReplaceAll(msg, []byte(`"$session"`), p.session)
+	switch dir {
 	case "stdin":
-		got, err := expect(p.stdin, msg)
-		p.requestID = got["id"]
-		return err
+		return p.request(msg)
 	case "stdout":
-		if p.requestID == nil && bytes.Contains(msg, []byte(`"$id"`)) {
-			return errors.New("no request id on the last stdin message")
-		}
-		return json.NewEncoder(os.Stdout).Encode(json.RawMessage(bytes.ReplaceAll(msg, []byte(`"$id"`), p.requestID)))
-	case "mcp<-cli":
-		if p.mcp.cmd == nil {
-			if err := p.mcp.start(vendor, args); err != nil {
-				return err
-			}
-		}
-		return json.NewEncoder(p.mcp.input).Encode(json.RawMessage(msg))
-	case "mcp->cli":
-		if p.mcp.cmd == nil {
-			return errors.New("no open MCP transport")
-		}
-		_, err := expect(p.mcp.output, msg)
-		return err
-	case "eof":
-		_, err := p.stdin.ReadByte()
-		if err == io.EOF {
-			return nil
-		}
-		return errors.New("expected closed stdin")
+		return send(p.stdout, bytes.ReplaceAll(msg, []byte(`"$id"`), p.id))
 	case "stderr":
-		var line string
-		if err := json.Unmarshal(msg, &line); err != nil {
-			return err
-		}
-		_, err := fmt.Fprintln(os.Stderr, line)
-		return err
-	default:
-		return fmt.Errorf("unknown direction %q", s.Dir)
+		return p.print(msg)
+	case "eof":
+		return p.eof()
+	case "mcp<-cli", "mcp->cli":
+		return p.mcpStep(dir, msg)
 	}
+	return fmt.Errorf("unknown direction %q", dir)
 }
 
-// Read one NDJSON message. Object expectations can name just the fields a test
-// cares about; a missing field never matches null.
-func expect(in *bufio.Reader, msg json.RawMessage) (map[string]json.RawMessage, error) {
-	line, err := in.ReadBytes('\n')
+// A reply quotes the id of the last line from the node as "$id".
+func (p *process) request(want []byte) error {
+	line, err := expect(p.stdin, want)
+	if err != nil {
+		return err
+	}
+	var request struct{ ID json.RawMessage }
+	err = json.Unmarshal(line, &request)
+	p.id = request.ID
+	return err
+}
+
+func (p *process) print(msg []byte) error {
+	var line string
+	if err := json.Unmarshal(msg, &line); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(p.stderr, line)
+	return err
+}
+
+func (p *process) eof() error {
+	if _, err := p.stdin.ReadByte(); err != io.EOF {
+		return errors.New("expected closed stdin")
+	}
+	return nil
+}
+
+func send(to io.Writer, msg []byte) error {
+	var line bytes.Buffer
+	if err := json.Compact(&line, msg); err != nil {
+		return err
+	}
+	line.WriteByte('\n')
+	_, err := to.Write(line.Bytes())
+	return err
+}
+
+// expect reads one line and checks that it has every field of want.
+func expect(from *bufio.Reader, want []byte) ([]byte, error) {
+	line, err := from.ReadBytes('\n')
 	if err != nil {
 		return nil, err
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(line, &fields); err != nil {
+	line = line[:len(line)-1]
+	var got, fields any
+	if err := errors.Join(json.Unmarshal(line, &got), json.Unmarshal(want, &fields)); err != nil {
 		return nil, err
 	}
-	if !contains(messageValue(line), messageValue(msg)) {
-		return nil, fmt.Errorf("expected %s, got %s", msg, line)
+	if !contains(got, fields) {
+		return nil, fmt.Errorf("expected %s, got %s", want, line)
 	}
-	return fields, nil
+	return line, nil
 }
 
-// MCP carries tool results as JSON inside text. Go and the capture's Python
-// server need not put spaces or object keys in the same places.
-func messageValue(line []byte) any {
-	v := valueOf(line)
-	obj, _ := v.(map[string]any)
-	result, _ := obj["result"].(map[string]any)
-	content, _ := result["content"].([]any)
-	for _, item := range content {
-		block, _ := item.(map[string]any)
-		text, ok := block["text"].(string)
-		if ok && block["type"] == "text" && json.Valid([]byte(text)) {
-			type jsonText struct{ value any }
-			block["text"] = jsonText{valueOf([]byte(text))}
-		}
-	}
-	return v
-}
-
-// Both the script and the incoming line have already been parsed as JSON.
-func valueOf(b []byte) any {
-	d := json.NewDecoder(bytes.NewReader(b))
-	d.UseNumber()
-	var v any
-	if err := d.Decode(&v); err != nil {
-		panic(err)
-	}
-	return v
-}
-
+// An object matches when it has the wanted fields; anything else must be equal.
 func contains(got, want any) bool {
 	fields, ok := want.(map[string]any)
 	if !ok {
 		return reflect.DeepEqual(got, want)
 	}
-	obj, ok := got.(map[string]any)
-	if !ok {
-		return false
-	}
-	for k, v := range fields {
-		actual, present := obj[k]
-		if !present || !contains(actual, v) {
+	object, ok := got.(map[string]any)
+	for name, value := range fields {
+		if !contains(object[name], value) {
 			return false
 		}
 	}
-	return true
+	return ok
 }
