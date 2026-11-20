@@ -274,6 +274,7 @@ The documentation of step 2 has a place for each of these:
 | 5 | Nothing is stored: the cache and the logs live in memory (`flows/sync.md` G) | every check is made again after a reload |
 | 6 | A node and a browser read the escape of a lone surrogate differently (`risks.md` K-17) | such a message does not match; only its signer can write one |
 | 7 | An own home is not checked | if one of the viewer's own nodes is in the wrong hands, revoking it protects; this file does not |
+| 8 | A removed member's row becomes a `gone` marker with no user id (`contracts/step-2/people.md` 2.4) | in homes of others every message and decision of that member carries the mark "cannot be checked" (section 6, line 2) |
 
 ## 11. Needs the coordinator's word
 
@@ -290,9 +291,8 @@ The contract is written on the first answer of each point.
 
 ## 12. Not verified
 
-- The sibling files of `contracts/step-2/` are written at the same time
-  and were not read. 8.1 follows D-4 as the plan states it; section 4
-  assumes that a `confirm` card keeps its `act` in `state.act`.
+- `contracts/step-2/authority.md` did not exist yet: 8.1 follows D-4 as
+  the plan states it.
 - The signed fields were taken from `contracts/messages.md`, not compared
   with the golden files or with code.
 - How long the checks of a first read take in each baseline browser.
