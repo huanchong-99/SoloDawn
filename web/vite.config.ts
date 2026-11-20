@@ -24,7 +24,13 @@ export default defineConfig(({ mode }) => ({
       },
     },
   ],
-  build: { outDir: webdist, emptyOutDir: true },
+  // The supported browsers (docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md).
+  // CSS is minified for the same targets, so light-dark() and nesting ship as written.
+  build: {
+    outDir: webdist,
+    emptyOutDir: true,
+    target: ['chrome137', 'edge137', 'firefox136', 'safari17.5', 'ios17.5'],
+  },
   server: { fs: { allow: ['.', testdata] } },
   resolve: {
     alias: { '@testdata': testdata },

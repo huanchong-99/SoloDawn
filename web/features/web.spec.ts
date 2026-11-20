@@ -11,6 +11,7 @@ const noEd25519 = {
 } as unknown as Crypto;
 
 let browserCrypto: Crypto;
+let browserCss: Pick<typeof CSS, 'supports'>;
 let svelte: typeof import('svelte');
 let app: Record<string, never> | undefined;
 
@@ -21,8 +22,14 @@ async function open(hash = '') {
   location.hash = hash;
   svelte = await import('svelte');
   const { boot } = await import('../src/lib/boot');
-  app = await boot(document.body, browserCrypto);
+  app = await boot(document.body, browserCrypto, browserCss);
   svelte.flushSync();
+}
+
+/** The test runtime's WebCrypto has Ed25519 and happy-dom's CSS.supports answers yes. */
+function supported() {
+  browserCrypto = crypto;
+  browserCss = CSS;
 }
 
 const texts = (selector: string) =>
@@ -59,9 +66,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario('The shell opens on the chats page', ({ Given, When, Then, And }) => {
-    Given('the browser supports Ed25519 in WebCrypto', () => {
-      browserCrypto = crypto;
-    });
+    Given('the browser supports Ed25519 in WebCrypto', supported);
     When('the person opens the client', () => open());
     Then('the navigation reads "群聊", "电脑和 AI", "设置"', () => {
       expect(texts('nav a[href^="#/"] span')).toEqual(['群聊', '电脑和 AI', '设置']);
@@ -73,9 +78,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario('The address fragment selects the page', ({ Given, When, Then, And }) => {
-    Given('the browser supports Ed25519 in WebCrypto', () => {
-      browserCrypto = crypto;
-    });
+    Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client', () => open());
     When('the address fragment becomes "#/nodes"', () => {
       location.hash = '#/nodes';
@@ -89,9 +92,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario('An unknown address opens the chats page', ({ Given, When, Then }) => {
-    Given('the browser supports Ed25519 in WebCrypto', () => {
-      browserCrypto = crypto;
-    });
+    Given('the browser supports Ed25519 in WebCrypto', supported);
     When('the person opens the client at "#/nowhere"', () => open('#/nowhere'));
     Then('the current page is "群聊"', () => {
       expect(texts('h1')).toEqual(['群聊']);
@@ -101,9 +102,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   Scenario(
     'The language choice changes the interface texts and is remembered',
     ({ Given, When, Then, And }) => {
-      Given('the browser supports Ed25519 in WebCrypto', () => {
-        browserCrypto = crypto;
-      });
+      Given('the browser supports Ed25519 in WebCrypto', supported);
       And('the person opens the client at "#/settings"', () => open('#/settings'));
       When('the person chooses the language "English"', () => choose('English'));
       Then('the navigation reads "Chats", "Computers", "Settings"', () => {
@@ -123,9 +122,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario('The theme choice is applied and remembered', ({ Given, When, Then, And }) => {
-    Given('the browser supports Ed25519 in WebCrypto', () => {
-      browserCrypto = crypto;
-    });
+    Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client at "#/settings"', () => open('#/settings'));
     When('the person chooses the theme "深色"', () => choose('深色'));
     Then('the page uses the "dark" theme', () => {
@@ -139,9 +136,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario('The top bar switches theme and language', ({ Given, When, Then, And }) => {
-    Given('the browser supports Ed25519 in WebCrypto', () => {
-      browserCrypto = crypto;
-    });
+    Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client', () => open());
     When('the person presses "切换深色 / 浅色"', () => press('切换深色 / 浅色'));
     And('the person presses "Switch language / 切换语言"', () =>
@@ -158,9 +153,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   Scenario(
     'The client opens when the browser blocks site storage',
     ({ Given, When, Then, And }) => {
-      Given('the browser supports Ed25519 in WebCrypto', () => {
-        browserCrypto = crypto;
-      });
+      Given('the browser supports Ed25519 in WebCrypto', supported);
       And('the browser blocks site storage', () => {
         vi.spyOn(globalThis, 'localStorage', 'get').mockImplementation(() => {
           throw new DOMException('The operation is insecure.', 'SecurityError');
@@ -178,6 +171,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
   Scenario('A browser without Ed25519 gets the upgrade notice', ({ Given, When, Then, And }) => {
     Given('the browser lacks Ed25519 in WebCrypto', () => {
+      supported();
       browserCrypto = noEd25519;
     });
     When('the person opens the client', () => open());
@@ -188,6 +182,44 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       expect(document.querySelector('nav')).toBeNull();
     });
   });
+
+  Scenario(
+    'A browser that cannot keep its Ed25519 key gets the upgrade notice',
+    ({ Given, When, Then, And }) => {
+      // Firefox 129 to 135: the key is made and stored, but a structured clone of it (what
+      // IndexedDB reads back) fails.
+      Given('the browser makes Ed25519 keys but cannot clone them for storage', () => {
+        supported();
+        vi.spyOn(globalThis, 'structuredClone').mockImplementation(() => {
+          throw new DOMException('CryptoKey', 'DataCloneError');
+        });
+      });
+      When('the person opens the client', () => open());
+      Then('the upgrade notice "这个浏览器需要升级" is shown', () => {
+        expect(texts('h1')).toEqual(['这个浏览器需要升级']);
+      });
+      And('the application is not shown', () => {
+        expect(document.querySelector('nav')).toBeNull();
+      });
+    },
+  );
+
+  Scenario(
+    'A browser without light-dark() colours gets the upgrade notice',
+    ({ Given, When, Then, And }) => {
+      Given('the browser supports Ed25519 in WebCrypto but not light-dark() in CSS', () => {
+        supported();
+        browserCss = { supports: () => false };
+      });
+      When('the person opens the client', () => open());
+      Then('the upgrade notice "这个浏览器需要升级" is shown', () => {
+        expect(texts('h1')).toEqual(['这个浏览器需要升级']);
+      });
+      And('the application is not shown', () => {
+        expect(document.querySelector('nav')).toBeNull();
+      });
+    },
+  );
 
   Scenario(
     'Every wire example of the node is read as a typed frame',
