@@ -33,21 +33,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Workaround: the connection works over the relay, and the probe of `planning/flows/connect.md` section B moves it to a direct path.
 - Status: open, external; not reported upstream for now.
 
-### 2026-11-20 · deviation · CI and release builds use Go 1.26.0, eleven patch releases behind
-
-- Symptom: every CI job, and the six binaries of `.github/workflows/release.yml`, build with Go 1.26.0 (Backend run 44697108086: "Setup go version spec 1.26.0"). The newest 1.26 release is 1.26.11, so released binaries would lack the standard-library security fixes of 1.26.1 to 1.26.11.
-- Cause: `go.mod:3` says `go 1.26.0`, and `actions/setup-go` v5.6.0 takes the `go` line as an exact version; it does not read a `toolchain` line (v6 does).
-- Status: open; needs a decision: a `toolchain go1.26.11` line in `go.mod` with setup-go v6, or `go-version: 1.26.x` with `check-latest: true` in the workflows.
-
-### 2026-11-20 · bug · The Git helper of the host-check steps can still end the whole suite
-
-- Symptom: when its Git command fails, the remaining scenarios do not run and go test reports "subtest may have called FailNow on a parent test" (reproduced with commit signing in the global Git configuration: 8 of 70 scenarios ran).
-- Cause: `features/host_checks_test.go:36` calls `f.t.Fatalf` on the suite's test from a scenario; see the resolved entry "Go acceptance steps acted beyond their own scenario". The file was left out of the audit fixes because it belonged to another fix at the time.
-- Status: open. Return the error from the step, as `features/host_forge_test.go` does.
-
 ### 2026-11-20 · limitation · Three peer scenarios time out on a Mac with its firewall on
 
-- Symptom: "Both nodes can offer over the same two signalling paths", "A replayed offer is not processed" and "Early and repeated candidates" fail with `context deadline exceeded` after 20 s on macOS with the application firewall enabled, on `rebuild` as merged (815c52aa6) and with the audit fixes; the other 77 scenarios pass. CI runs them on Linux only.
+- Symptom: "Both nodes can offer over the same two signalling paths", "A replayed offer is not processed" and "Early and repeated candidates" fail with `context deadline exceeded` after 20 s on macOS with the application firewall enabled, on `rebuild` as merged (815c52aa6) and with the audit fixes; the other 77 scenarios pass. They pass on Linux in CI, and on GitHub's `macos-latest` runner (#145).
 - Cause, not verified: `features/peer_test.go` makes each node's sockets with `peer.Listen(0, 0)`, which listens on every interface (`internal/peer/sockets.go:22-23`), and the firewall holds incoming traffic to the unsigned test binary on addresses other than loopback. The package's own tests keep the sockets on loopback (`internal/peer/sockets.go:26-27`).
 - Status: open. Bind the acceptance nodes to loopback as the unit tests do, or exclude the scenarios on macOS by tag.
 
@@ -139,12 +127,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: only those two fields have the type (`internal/proto/envelope.go:12-23`, `web/src/lib/proto.ts:17-22`). The contracts type `n` and `g` as ids in a field table; for the other fields `contracts/rows.md` says "random ids unless stated" without saying per field which values stand beside the id (the `by` of a message row may be `"system"`, a device row's `id` is `<user id>:<ver>`).
 - Status: open. A field gets the type (`proto.ID` in Go, `Id` in `proto.ts`) in the task that first reads it from the wire.
 
-### 2026-11-20 · limitation · A message cut between fragments is forwarded as if it were complete
+### 2026-11-20 · limitation · A message cut short by a closing transport is forwarded as if it were complete
 
-- Symptom: when a client sends a WebSocket message in several fragments and its transport closes between two of them, the rendezvous reads the fragments received so far as one complete message. If they happen to form a valid frame, it is handled like any other: a `to` is forwarded as `from`. `planning/contracts/rendezvous.md` section 2 says that a frame the server cannot read closes its sender.
-- Cause: `github.com/coder/websocket` v1.8.15, `read.go:447-449`: `msgReader.Read` takes any `io.EOF` for the end of the message, and the header of the next fragment, read by `readFrameHeader` (`frame.go:52-58`), fails with a plain `io.EOF` when the transport has closed. `Conn.Read` then returns the bytes so far without an error, to `internal/rendezvous/server.go:128`.
+- Symptom: when a client's transport closes in the middle of a WebSocket message, the rendezvous can read the bytes received so far as one complete message. This happens between two fragments of a fragmented message, and also inside one unfragmented frame when the transport closes at the boundary of a read. If those bytes happen to form a valid frame, it is handled like any other: a `to` is forwarded as `from`. `planning/contracts/rendezvous.md` section 2 says that a frame the server cannot read closes its sender.
+- Cause: `github.com/coder/websocket` v1.8.15 takes a plain `io.EOF` for the end of the message (`read.go:447-449`, `msgReader.Read`). Between fragments, the header of the next fragment fails with `io.EOF` when the transport has closed (`readFrameHeader`, `frame.go:52-58`). Inside one frame, `Conn.Read` collects the payload with `io.ReadAll`, and when no byte arrives for its next read, `io.ReadFull` returns `io.EOF`, not `io.ErrUnexpectedEOF` (`readFramePayload`, `read.go:282`). `Conn.Read` then returns the bytes so far without an error, to `internal/rendezvous/server.go:135`.
 - Why it is harmless: what is forwarded is a complete, valid frame that the same authenticated sender could have sent on purpose; the sender's connection is already gone; and the receiver checks the signed envelope itself (`planning/contracts/envelope.md` section 3).
-- Status: open, accepted by the coordinator on 2026-11-20 with no code change. Revisit if the library changes, or if the server ever acts on a frame beyond forwarding it.
+- Status: open, accepted by the coordinator on 2026-11-20 with no code change; the in-frame case was added after the rendezvous audit of the same day. Revisit if the library changes, or if the server ever acts on a frame beyond forwarding it.
+
+### 2026-11-20 · limitation · A frame dropped for a slow receiver can leave it with stale state
+
+- Symptom: when a receiver's queue of 128 frames is full, the rendezvous drops the next frame for it and closes neither connection (`planning/contracts/rendezvous.md` section 2). A dropped `from` or `room` is covered by its sender's offer timeout and back-off. A frame the server itself generates has no sender to send it again: after a dropped `presence` a watcher shows the wrong online state until that device's next change or the next `watch`; after a dropped `joined` a pairing member waits until it joins again; a dropped `offline`, `ice` or `quota` leaves that request unanswered.
+- Cause: `client.send` drops a frame when the queue is full (`internal/rendezvous/server.go:113-116`, queue size at `:70`).
+- Status: open. Coalescing the server's own frames is not built, by the coordinator's decision of 2026-11-20.
+
+### 2026-11-20 · limitation · The rendezvous challenge is not bound to a server
+
+- Symptom: a malicious rendezvous, or any node that serves `/rv`, can hand a device that connects to it the nonce of another server's `challenge`, and answer that server with the device's signature. It is then signed in there as the device: the device's own connection there is replaced and closed, and the attacker receives the frames sent to the device, which shows who signals it and when, and can watch other devices under its id.
+- Cause: the answer signs `"solodawn/rv/1\n"` and the nonce only, nothing that names the server (`planning/contracts/rendezvous.md` section 2.1; `internal/identity/key.go:75-82`, checked at `internal/rendezvous/server.go:156-165`).
+- Status: open design issue, owner the coordinator, to be designed after the quota reset. The challenge format is unchanged until then.
 
 ### 2026-11-20 · limitation · A late `offline` can retire a newer unanswered offer
 
@@ -164,11 +164,23 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the rule was settled after B-02c and F-01d (#136). The identity code has the two kinds only: `internal/identity/envelope.go:30` and `:37`, and `web/src/lib/identity.ts:185-195`. `planning/contracts/vectors.md` section 3 lets `received` be `command` or `signal` only, and `internal/proto/testdata/crypto.json` has no beacon case.
 - Status: open. PR-2 adds a beacon case to `received` in `vectors.md` and `crypto.json`, and a third envelope kind in both identity implementations, before it reads beacons.
 
+### 2026-11-20 · deviation · The web client does not handle `full` yet
+
+- Symptom: a browser that joins a pairing room that already has two members is answered `{"t":"full","room":"<room id>"}` (`planning/contracts/rendezvous.md` section 2.2), but the web client drops the frame without telling the page, so a third browser keeps waiting for `joined`.
+- Cause: `full` is not among the frames the web rendezvous client reads (`web/src/lib/rendezvous.ts:20`); a frame that does not parse is ignored (`web/src/lib/rendezvous.ts:55-56`). The server sends it from `internal/rendezvous/room.go` (`join`).
+- Status: open, owner W-2.
+
 ### 2026-11-20 · limitation · `ReviewedMerge.GitHubRepo` is not filled from the group's repository yet
 
 - Symptom: the merge with a remote runs `gh pr merge <pr> --repo <owner>/<repo>` (`planning/contracts/local.md` section 7, row "merge, with a remote"), but no code sets `<owner>/<repo>` from the group's repository; an empty `GitHubRepo` would make the merge fail.
 - Cause: `ReviewedMerge.GitHubRepo` (`internal/host/merge.go`) is set by its caller, and no unit calls the merge yet. The claim that `--repo` makes gh skip every local step (worktree removal, local branch deletion) rests on the gh 2.102.0 source (`pkg/cmd/pr/merge/merge.go`: `CanDeleteLocalBranch = !cmd.Flags().Changed("repo")`), not on a run against GitHub or on older gh versions.
 - Status: open. The unit that wires the merge (HS-10 or N-4) sets `GitHubRepo` from the group's repository.
+
+### 2026-11-20 · limitation · A8.4 does not run on Windows
+
+- Symptom: on Windows the A8.4 scenario (`features/rendezvous_acme.feature`) cannot start its rendezvous: the binary exits with `lookup rv.localhost: no such host` (CI run 44716573698, `test (windows-latest)`). The scenario is tagged `@not-windows`, which the acceptance runner leaves out on Windows (`features/acceptance_test.go`, `tags`); Linux and macOS run it.
+- Cause: the Windows resolver answers no name under `.localhost` (RFC 6761), and the rendezvous looks up its `--domain` for the relay address at startup (`internal/rendezvous/relay.go`, `start`, `net.LookupIP`). The certificate library refuses `localhost` itself, a name without a dot, so the test cannot use it instead.
+- Status: open. A hosts file entry for `rv.localhost` and `turn.rv.localhost` on the Windows runner would let it run; that changes the machine, not the test.
 
 ## Resolved
 
@@ -185,26 +197,33 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · bug · Go acceptance steps acted beyond their own scenario
 
 Found in the audit of the harness; each was reproduced before the fix (lines are those before it).
-- A failing step could end the whole suite: later scenarios and their After hooks did not run, godog printed no summary, go test said "subtest may have called FailNow on a parent test". Steps called `Fatal` on the suite's own test from a scenario's subtest (`features/node_update_test.go:98`, `:104`, `features/host_forge_test.go:26`).
+- A failing step could end the whole suite: later scenarios and their After hooks did not run, godog printed no summary, go test said "subtest may have called FailNow on a parent test". Steps called `Fatal` on the suite's own test from a scenario's subtest (`features/node_update_test.go:98`, `:104`, `features/host_forge_test.go:26`, and `features/host_checks_test.go:36`, fixed on branch `ci/go127-windows-macos`).
 - `go test -tags acceptance -count=2 ./features/` failed with `open …/TestFeatures…/017/v0.3.1: no such file or directory`: the cache of release builds was a package variable that outlived the TempDir of the first run (`features/node_update_test.go:89`).
 - The fake node's socket stayed listening through every later scenario, and each node-update scenario left an HTTP server listening (five by the end): cleanups were registered with `f.t.Cleanup` (`features/cmd_local_test.go:38`, `:44`, `features/node_update_test.go:54`).
 - Under `go test -run` naming the two login-service scenarios, "Register" failed and "Remove" passed without doing anything: HOME was set in a subtest of the suite's test that `-run` skipped (`features/node_service_test.go:30`).
 - A scenario that changed a variable other than HOME, or the working directory, changed every later scenario: the guard of PR #121 checked HOME only and did not restore it (`features/acceptance_test.go:67-80`).
 - With `commit.gpgsign = true` in the global Git configuration, a host-check scenario failed with "gpg failed to sign the data": git ran with the user's and the system's configuration.
 - A step error X was printed as "after scenario hook failed: X, step error: X, X, step error: X": After hooks returned the step's error as their own (`features/identity_test.go:72`, `features/rendezvous_test.go:101`, `features/peer_test.go:61`).
-- Status: resolved on branch `test/audit-harness-ci`: steps return errors (the comment on `fixtures.t` states the rule); `afterScenario` undoes per scenario; the build cache is `fixtures.stamped`; the login steps set and restore the variables around each operation; after each scenario the suite compares every variable and the working directory with their state at its start, names what changed (never values) and restores it; `TestFeatures` sets `GIT_CONFIG_GLOBAL` to the null device and `GIT_CONFIG_NOSYSTEM`; the hooks return nil. One `Fatal` remains (open entry above).
+- Status: resolved in PR #142: steps return errors (the comment on `fixtures.t` states the rule); `afterScenario` undoes per scenario; the build cache is `fixtures.stamped`; the login steps set and restore the variables around each operation; after each scenario the suite compares every variable and the working directory with their state at its start, names what changed (never values) and restores it; `TestFeatures` sets `GIT_CONFIG_GLOBAL` to the null device and `GIT_CONFIG_NOSYSTEM`; the hooks return nil.
 
 ### 2026-11-20 · bug · The web acceptance file failed on a busy machine although its tests passed
 
 - Symptom: with every core busy, `features/web.spec.ts` failed 3 of 3 runs with "HookTimeoutError: Hook timed out in 10000ms" at `web/features/motion.ts:22`; all 213 tests passed.
 - Cause: `browser.close()` took 10.0 s under that load (20 to 60 ms idle), Vitest's default hook limit.
-- Status: resolved on branch `test/audit-harness-ci`: both browser hooks have 60 s; 3 of 3 loaded runs passed.
+- Status: resolved in PR #142: both browser hooks have 60 s; 3 of 3 loaded runs passed.
+
+### 2026-11-20 · bug · The node could not start on Windows
+
+- Symptom: on the first Windows runs of CI (Windows Server 2025, and 2022 in a trial), every `ListenLocal` failed, so `solodawn node` could not start: 13 tests of `internal/node` and `cmd/solodawn` failed, first with "remove …\sock: The system cannot find the file specified", then with "Access is denied".
+- Cause: Windows refuses a dial to a path where no file is, as it refuses one to a stale socket, so `clearStale` removed a file that was not there (`internal/node/socket.go:45-46` before the fix). Then `ownerOnly` opened the socket with `WRITE_DAC` alone, and `SetSecurityInfo` answers "Access is denied" to such a handle on both versions (`internal/node/socket_windows.go:51` before the fix; found with a diagnostic test in CI).
+- Also: five tests encoded Unix answers (the error of a dial to a missing socket, the text of exec on a non-executable, address in use, a binary's mode, the `.old` image the Windows install keeps), and the two DACL tests expected `D:P(…)` with the full SID where Windows writes `D:PAI(…)` and the alias `LA` of the runner's built-in Administrator.
+- Status: resolved on branch `ci/go127-windows-macos`: a refused dial removes the file only if one is there, the handle also has `READ_CONTROL`, and the tests take the system's own answers.
 
 ### 2026-11-20 · deviation · CI gaps found in the audit of the workflows
 
-- Symptom: `pnpm/action-setup` (third party) and the `actions/*` were referenced by movable tags; `release.yml` restored pnpm and Go caches into the build of released files; `sudo ./netsim.test` had no time limit (a test binary run directly has none); CI never vetted code behind the `acceptance` tag and never compiled the macOS and Windows test files.
-- Status: resolved on branch `test/audit-harness-ci`: every action is pinned to the full commit its tag names today, the release job uses no cache, the netsim binary gets `-test.timeout=10m`, and `go vet` runs with the `acceptance` tag and for every cross-compile target.
-
+- Actions were referenced by movable tags (`pnpm/action-setup` is third party); `release.yml` restored pnpm and Go caches into the build of released files; `sudo ./netsim.test` had no time limit; CI never vetted code behind the `acceptance` tag nor compiled the macOS and Windows tests. Resolved in PR #142: pins to the full commit, no cache in the release job, `-test.timeout=10m`, `go vet` with the tag and for every cross-compile target.
+- Every job built with Go 1.26.0, eleven patch releases behind 1.26.11 (Backend run 44697108086), because setup-go v5.6.0 reads `go 1.26.0` in `go.mod:3` as an exact version. Resolved on branch `ci/go127-windows-macos` by the coordinator's decision of 2026-11-20: every setup-go takes `go-version: '1.27.x'` with `check-latest: true`, the newest patch of the line development uses (1.27.4); `go.mod` keeps `go 1.26.0` as the minimum.
+- No job had a time limit, so a hung step could hold a runner for six hours (a `pnpm install` held a macOS runner for 30 minutes on 2026-11-20); and no Go code ran on Windows or macOS. Resolved on branch `ci/go127-windows-macos`: `timeout-minutes` on every job, and a Backend job on `windows-latest` and `macos-latest` (vet, `go test -race`, the acceptance suite, coverage of the files built only there).
 ### 2026-11-20 · deviation · Two host check tests skipped themselves on Windows
 
 - Symptom: `TestChecksRequireBothGitDiffReads` and `TestCheckCancellationStopsForegroundPipeline` in `internal/host/checks_test.go` called `t.Skip` on Windows. `t.Skip(` is a listed directive under `[tamper]` in `.project-standard/gates.toml` with no exception, yet both merged with HS-5 (#94).

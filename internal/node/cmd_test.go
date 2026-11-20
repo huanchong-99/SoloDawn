@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,12 @@ import (
 
 func TestCannotSendCommand(t *testing.T) {
 	c := Command{Cmd: "status"}
-	if err := c.send(t.TempDir(), io.Discard); !errors.Is(err, os.ErrNotExist) {
+	// Windows refuses a dial to a path where no file is.
+	missing := error(os.ErrNotExist)
+	if runtime.GOOS == "windows" {
+		missing = connRefused
+	}
+	if err := c.send(t.TempDir(), io.Discard); !errors.Is(err, missing) {
 		t.Fatalf("send to a missing socket = %v", err)
 	}
 	conn := struct {

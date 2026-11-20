@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -35,14 +36,15 @@ func ListenLocal(dir string) (*net.UnixListener, error) {
 
 // clearStale removes the socket file when a dial to it is refused. A dial
 // that connects means a node is running; any other failure, such as no file,
-// leaves the bind to report.
+// leaves the bind to report. Windows refuses a dial to a path where no file
+// is, as it refuses one to a stale socket, so a file must be there too.
 func clearStale(path string) error {
 	conn, err := net.Dial("unix", path)
 	if err == nil {
 		conn.Close()
 		return errRunning
 	}
-	if errors.Is(err, connRefused) {
+	if _, missing := os.Lstat(path); errors.Is(err, connRefused) && !errors.Is(missing, fs.ErrNotExist) {
 		return os.Remove(path)
 	}
 	return nil

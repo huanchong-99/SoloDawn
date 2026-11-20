@@ -202,7 +202,8 @@ func TestServeFailures(t *testing.T) {
 	udp := udpLocal(t)
 	o.UDPPort = udp.LocalAddr().(*net.UDPAddr).Port
 	l := listenLocal(t)
-	if err := o.serveICE(web, l); !errors.Is(err, syscall.EADDRINUSE) {
+	// Windows answers WSAEADDRINUSE (10048), which syscall.EADDRINUSE does not match there.
+	if err := o.serveICE(web, l); !errors.Is(err, syscall.EADDRINUSE) && !errors.Is(err, syscall.Errno(10048)) {
 		t.Fatal(err)
 	}
 	o.Domain = "invalid domain%"
@@ -219,7 +220,7 @@ func TestCertificatePolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.MinVersion != tls.VersionTLS12 || !reflect.DeepEqual(cfg.NextProtos, []string{"http/1.1", "acme-tls/1"}) {
+	if cfg.MinVersion != tls.VersionTLS12 || !reflect.DeepEqual(cfg.NextProtos, []string{"http/1.1", "stun.turn", "acme-tls/1"}) {
 		t.Fatal(cfg.MinVersion, cfg.NextProtos)
 	}
 	_, err = cfg.GetCertificate(&tls.ClientHelloInfo{ServerName: "unconfigured.example"})

@@ -17,6 +17,10 @@ import (
 func TestRun(t *testing.T) {
 	const usage = "usage: solodawn <command> [arguments]\n"
 	flags := strings.ReplaceAll(`Usage of rendezvous:
+  -acme-ca string
+	PEM roots for the ACME server's HTTPS only
+  -acme-directory string
+	ACME server directory URL (empty: Let's Encrypt)
   -cert string
 	PEM certificate chain for both hostnames
   -domain string
@@ -178,7 +182,7 @@ func TestRelayFlags(t *testing.T) {
 		want node.RendezvousOptions
 	}{
 		{nil, node.RendezvousOptions{UDPPort: 3478, QuotaMB: 50}},
-		{strings.Fields("--listen :443 --domain a --turn-domain b --cert c --key d --udp-port 123 --relay-quota-mb 9 --no-relay"), node.RendezvousOptions{Listen: ":443", Domain: "a", TurnDomain: "b", Cert: "c", Key: "d", UDPPort: 123, QuotaMB: 9, NoRelay: true}},
+		{strings.Fields("--listen :443 --domain a --turn-domain b --cert c --key d --udp-port 123 --relay-quota-mb 9 --no-relay --acme-directory e --acme-ca f"), node.RendezvousOptions{Listen: ":443", Domain: "a", TurnDomain: "b", Cert: "c", Key: "d", ACMEDirectory: "e", ACMECA: "f", UDPPort: 123, QuotaMB: 9, NoRelay: true}},
 	} {
 		var stderr bytes.Buffer
 		code := rendezvous(tc.args, &stderr, func(got node.RendezvousOptions) error {

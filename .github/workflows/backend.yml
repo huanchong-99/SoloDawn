@@ -9,16 +9,20 @@ on:
 permissions:
   contents: read
 
+# Every job builds with the newest Go 1.27 release (check-latest), as development does;
+# go.mod keeps go 1.26.0 as the minimum.
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.x'
+          check-latest: true
       - run: go vet ./...
       - run: go vet -tags acceptance ./features/...
       - run: go test ./...
@@ -28,13 +32,15 @@ jobs:
   # Its tests are built with the tag "netsim" and run as root here only.
   netsim:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.x'
+          check-latest: true
       - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nftables miniupnpd-nftables miniupnpc
       - run: go vet -tags netsim ./features/netsim
       - run: go test -c -tags netsim -o netsim.test ./features/netsim
@@ -43,17 +49,18 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -66,17 +73,19 @@ jobs:
 
   cross-compile:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         os: [linux, darwin, windows]
         arch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.x'
+          check-latest: true
       - run: go build ./cmd/solodawn ./internal/host/fakecli/claude ./internal/host/fakecli/codex
         env:
           CGO_ENABLED: "0"
@@ -88,3 +97,45 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
+
+  # The Go checks on Windows and macOS, so the files built only there run somewhere. gofmt runs on
+  # macOS only: Git for Windows checks files out with CRLF unless told not to, as below.
+  other-os:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+      - if: runner.os == 'macOS'
+        run: out=$(gofmt -l cmd internal features); echo "$out"; test -z "$out"
+      - run: go vet ./...
+      - run: go vet -tags acceptance ./features/...
+      - run: go test -race -covermode=atomic -coverprofile=cover.out ./...
+      - run: go test -tags acceptance -count=1 ./features/...
+      # Statement coverage of the files that only this system builds, from the unit tests above.
+      # The percentage comes first: setup-go's problem matcher takes "<file>.go: <text>" for an error.
+      - name: Coverage of the files built only here
+        run: |
+          awk -F'[:, ]' 'NR > 1 && $1 ~ /_(windows|darwin|unix)\.go$/ { n[$1] += $4; if ($5 > 0) c[$1] += $4 }
+            END { for (f in n) { g = f; sub(/^github\.com\/huanchong-99\/SoloDawn\//, "", g)
+              printf "%.1f%% of %d statements in %s\n", 100 * c[f] / n[f], n[f], g } }' cover.out |
+            sort -k5 | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-${{ matrix.os }}
+          path: cover.out
+          if-no-files-found: error

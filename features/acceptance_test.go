@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -58,6 +59,7 @@ func cmdSteps(sc *godog.ScenarioContext, f fixtures) {
 }
 
 // TestFeatures runs every scenario in this directory except @web; the vitest-cucumber suite under web/ runs those.
+// On Windows it also leaves out @not-windows: a scenario whose fixture Windows cannot provide, as its feature file says.
 func TestFeatures(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "solodawn.exe")
 	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/solodawn").CombinedOutput(); err != nil {
@@ -99,11 +101,19 @@ func TestFeatures(t *testing.T) {
 				return ctx, nil
 			})
 		},
-		Options: &godog.Options{Format: "pretty", Paths: []string{"."}, Tags: "~@web", Strict: true, TestingT: t},
+		Options: &godog.Options{Format: "pretty", Paths: []string{"."}, Tags: tags(runtime.GOOS), Strict: true, TestingT: t},
 	}
 	if suite.Run() != 0 {
 		t.Fatal("acceptance scenarios failed")
 	}
+}
+
+// tags is the suite's tag filter on one operating system.
+func tags(goos string) string {
+	if goos == "windows" {
+		return "~@web && ~@not-windows"
+	}
+	return "~@web"
 }
 
 // afterScenario returns a function that defers undo to the end of the current

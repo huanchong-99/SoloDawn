@@ -56,6 +56,7 @@ type client struct {
 	out    chan []byte
 	id     string
 	watch  []string
+	rooms  map[string]*room // the rooms this connection is in
 	window [120]time.Time
 	next   int
 }
@@ -67,7 +68,7 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(maxBytes)
-	c := &client{conn: conn, out: make(chan []byte, 128)}
+	c := &client{conn: conn, out: make(chan []byte, 128), rooms: make(map[string]*room)}
 	go c.write()
 	defer close(c.out)
 	if !c.authenticate(s.wait) {
@@ -94,9 +95,11 @@ func (c *client) write() {
 	}
 }
 
-// While routing, a stalled socket must not hold up other devices.
-// send returns false when the frame would exceed the wire limit. In
-// particular, the authenticated "from" wrapper is longer than "to".
+// While routing, a stalled socket must not hold up other devices: a frame for
+// a receiver whose queue is full is dropped, and both connections stay open.
+// The sender's offer timeout and back-off cover the loss. send returns false
+// when the frame would exceed the wire limit. In particular, the
+// authenticated "from" wrapper is longer than "to".
 func (c *client) send(frame any) bool {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -111,7 +114,6 @@ func (c *client) send(frame any) bool {
 	select {
 	case c.out <- data:
 	default:
-		c.conn.CloseNow()
 	}
 	return true
 }
@@ -216,10 +218,10 @@ func (m fields) object(name string) bool {
 	return len(raw) != 0 && raw[0] == '{'
 }
 
-// A target that is no device id is a device that is not connected.
+// A target must be a device id; anything else is bad input.
 func (s *server) route(c *client, m fields) bool {
 	var key string
-	if proto.Decode(m["k"], &key) != nil || !m.object("env") {
+	if proto.Decode(m["k"], &key) != nil || !identity.IsDevice(key) || !m.object("env") {
 		return false
 	}
 	if target := s.online[key]; target != nil {
@@ -231,7 +233,7 @@ func (s *server) route(c *client, m fields) bool {
 
 func (s *server) watch(c *client, m fields) bool {
 	var keys []string
-	if proto.Decode(m["k"], &keys) != nil || len(keys) > 64 {
+	if proto.Decode(m["k"], &keys) != nil || len(keys) > 64 || slices.ContainsFunc(keys, notDevice) {
 		return false
 	}
 	c.watch = keys
@@ -240,6 +242,8 @@ func (s *server) watch(c *client, m fields) bool {
 	}
 	return true
 }
+
+func notDevice(id string) bool { return !identity.IsDevice(id) }
 
 func (s *server) notify(key string, online bool) {
 	for _, c := range s.online {

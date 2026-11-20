@@ -131,7 +131,7 @@ func TestWeakKeysAreRefusedBeforeTheLibraryIsAsked(t *testing.T) {
 		if !ed25519.Verify(key, []byte(envelopeContext+p), sig) {
 			t.Fatalf("%x: the forgery does not verify in crypto/ed25519", key)
 		}
-		if verify(id, envelopeContext+p, b64.EncodeToString(sig)) || isDevice(id) {
+		if verify(id, envelopeContext+p, b64.EncodeToString(sig)) || IsDevice(id) {
 			t.Errorf("%x is taken for a device id", key)
 		}
 		// Under a weak key even a signature that begins with an ordinary point is refused.
@@ -141,7 +141,7 @@ func TestWeakKeysAreRefusedBeforeTheLibraryIsAsked(t *testing.T) {
 		}
 	}
 	for _, k := range []Key{testKey("browser"), testKey("node"), rfcKey(t)} {
-		if !isDevice(k.ID()) {
+		if !IsDevice(k.ID()) {
 			t.Errorf("%s is not taken for a device id", k.ID())
 		}
 	}

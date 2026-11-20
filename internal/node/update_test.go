@@ -118,8 +118,13 @@ func TestUpdateInstallsThenRestartsWhenIdle(t *testing.T) {
 	checkImage(t, f.u.Binary, newImage)
 	info, err := os.Stat(f.u.Binary)
 	noErr(t, err)
-	checkUpdateValue(t, info.Mode(), fs.FileMode(0o755))
-	checkFolder(t, filepath.Dir(f.u.Binary), "solodawn")
+	// Windows has no executable bit, and keeps the replaced image beside the new one.
+	mode, folder := fs.FileMode(0o755), []string{"solodawn"}
+	if runtime.GOOS == "windows" {
+		mode, folder = 0o666, []string{"solodawn", "solodawn.old"}
+	}
+	checkUpdateValue(t, info.Mode(), mode)
+	checkFolder(t, filepath.Dir(f.u.Binary), folder...)
 	checkUpdateValue(t, f.u.Status, &UpdateStatus{Version: "v1.10.1", Status: "pending"})
 	noErr(t, f.u.Apply())
 	checkUpdateValue(t, f.restarts, 0)
@@ -182,8 +187,15 @@ func TestUpdateInstallFailure(t *testing.T) {
 	f.serve(mux)
 	noErr(t, os.Remove(f.u.Binary))
 	noErr(t, os.MkdirAll(filepath.Join(f.u.Binary, "in use"), 0o700))
+	// Windows first moves the binary aside, which a folder survives; a
+	// folder where it goes stops the install there.
+	stuck := f.u.Binary
+	if runtime.GOOS == "windows" {
+		stuck += ".old"
+		noErr(t, os.MkdirAll(filepath.Join(stuck, "in use"), 0o700))
+	}
 	var rename *os.LinkError
-	if err := f.u.Check(t.Context(), time.Now()); !errors.As(err, &rename) || rename.Op != "rename" || rename.New != f.u.Binary {
+	if err := f.u.Check(t.Context(), time.Now()); !errors.As(err, &rename) || rename.Op != "rename" || rename.New != stuck {
 		t.Fatalf("install over a folder: %v", err)
 	}
 	checkUpdateValue(t, f.u.Status, (*UpdateStatus)(nil))
