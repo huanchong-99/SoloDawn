@@ -102,7 +102,11 @@ describe('verify', () => {
     const device = await newDevice();
     const s = await device.signChallenge('n');
     const text = 'solodawn/rv/1\nn';
+    const importing = vi.spyOn(crypto.subtle, 'importKey');
     expect(await verify(crypto, device.id, text, s)).toBe(true);
+    expect(importing).toHaveBeenCalledExactlyOnceWith('raw', decode(device.id), ed25519, false, [
+      'verify',
+    ]);
     expect(await verify(crypto, device.id + '=', text, s)).toBe(false);
     expect(await verify(crypto, device.id, text, s + '=')).toBe(false);
     expect(await verify(crypto, device.id.slice(0, 40), text, s)).toBe(false);

@@ -7,10 +7,11 @@
     "types": ["svelte", "vite/client"],
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["src", "features", "vite.config.ts"]
+  "include": ["src", "features", "vite.config.ts", "vitest.vectors.ts"]
 }

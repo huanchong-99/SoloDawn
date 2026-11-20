@@ -119,15 +119,34 @@ type devlogVector struct {
 	Valid   []string      `json:"valid"`
 }
 
+// entryVector holds env as it is on the wire, JSON text, so that its p can
+// carry the escape of a lone surrogate, which Go never writes.
 type entryVector struct {
-	Env    proto.Envelope `json:"env"`
-	Accept bool           `json:"accept"`
+	Env    json.RawMessage `json:"env"`
+	Accept bool            `json:"accept"`
 }
 
 var lowerHex32 = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-func yes(env proto.Envelope) entryVector { return entryVector{env, true} }
-func no(env proto.Envelope) entryVector  { return entryVector{env, false} }
+func yes(env proto.Envelope) entryVector { return entryVector{onWire(env), true} }
+func no(env proto.Envelope) entryVector  { return entryVector{onWire(env), false} }
+
+// onWire writes an envelope as the file writes the rest: no HTML escapes.
+func onWire(env proto.Envelope) json.RawMessage {
+	var out bytes.Buffer
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(env); err != nil {
+		panic(err) // three strings always encode
+	}
+	return bytes.TrimSuffix(out.Bytes(), []byte("\n"))
+}
+
+// lone is an accepted entry as it arrives with the escape of a lone surrogate
+// in p where the signed text has U+FFFD.
+func lone(env proto.Envelope) entryVector {
+	return entryVector{json.RawMessage(strings.Replace(string(onWire(env)), "\ufffd", `\ud800`, 1)), true}
+}
 
 func devlogCase(name string, valid []device, entries ...entryVector) devlogVector {
 	ids := []string{}
@@ -236,6 +255,8 @@ func cryptoVectors() vectors {
 	tampered := add(browser, 2, node)
 	tampered.Payload = strings.Replace(tampered.Payload, "workstation", "workstatiom", 1)
 	entry := change(browser, 2, "add", node)
+	replacement := browser.key.Sign(strings.Replace(change(browser, 1, "add", browser), browser.name, "\ufffd", 1))
+	replacementNode := browser.key.Sign(strings.Replace(entry, node.name, "\ufffd", 1))
 	v.Devlogs = []devlogVector{
 		devlogCase("genesis, add a second browser, add a node, revoke the second browser", []device{browser, node},
 			yes(genesis), yes(add(browser, 2, tablet)), yes(add(tablet, 3, node)), yes(revoke(node, 4, tablet))),
@@ -296,6 +317,8 @@ func cryptoVectors() vectors {
 			yes(genesis),
 			yes(rewritten(browser, entry, `"ts":`+fmt.Sprint(ts+2), `"ts":null,"n":null,"to":null,"g":7,"x":1e400`)),
 			yes(browser.key.Sign(`{"t":"device","user":"`+browser.id()+`","ver":3,"op":"revoke","dev":"`+node.id()+`","kind":"phone","name":null}`))),
+		devlogCase("the same entry again with the escape of a lone surrogate in p where the entry held has U+FFFD, and the reverse: one signed text, not refused", []device{browser, node},
+			yes(replacement), lone(replacement), lone(replacementNode), yes(replacementNode)),
 		devlogCase("a revoke of the last valid device", []device{node},
 			yes(genesis), no(revoke(browser, 2, browser)), yes(addNode), yes(revoke(node, 3, browser)), no(revoke(node, 4, node)), yes(revoke(node, 4, tablet))),
 		devlogCase("what the rules allow: a revoke of a key never added, a second add, a device revoking itself, the first device revoked", []device{node},
@@ -638,7 +661,11 @@ func TestCryptoVectorsHold(t *testing.T) {
 	for _, c := range v.Devlogs {
 		l := &Log{User: c.User}
 		for i, e := range c.Entries {
-			if _, err := l.Apply(e.Env); (err == nil) != e.Accept {
+			var env proto.Envelope
+			if err := proto.Decode(e.Env, &env); err != nil {
+				t.Fatalf("devlog %q, entry %d: %v", c.Name, i+1, err)
+			}
+			if _, err := l.Apply(env); (err == nil) != e.Accept {
 				t.Errorf("devlog %q, entry %d: Apply gave %v, accept is %v", c.Name, i+1, err, e.Accept)
 			}
 		}

@@ -352,6 +352,13 @@ describe('rendezvous frames', () => {
       expect(accepts(name, { ...frame, ttl })).toBe(false);
     }
   });
+
+  it.each(['used', 'limit'])('reads quota %s as a safe integer', (field) => {
+    const frame = JSON.parse(goldens['rv-quota-answer']);
+    for (const n of [0.5, 2 ** 53]) {
+      expect(accepts('rv-quota-answer', { ...frame, [field]: n })).toBe(false);
+    }
+  });
 });
 
 describe('decode', () => {

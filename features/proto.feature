@@ -1,6 +1,9 @@
 Feature: Protocol wire compatibility
   Nodes and browsers exchange the same signed entries and group rows.
 
+  Scenario: A client reads the quota wire example
+    Then the quota answer example reports 3250000 of 52428800 bytes
+
   Scenario: A forwarded device log preserves the bytes its author signed
     When a peer decodes and re-encodes the enrollment log
     Then both signatures verify for the original additions of "phone browser" and "workstation"
