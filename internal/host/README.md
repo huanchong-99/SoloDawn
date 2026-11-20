@@ -75,6 +75,16 @@ The table is in memory and written through to the `session` table of the store. 
 
 Not in the seam: the one state per AI that others see (sessions.md, section 3), the overlays, and which session an item goes to.
 
+## Turns and instructions
+
+`turn.go` provides `Instructions` and `Compose` ([drivers.md](../../planning/contracts/drivers.md), sections 3 and 4).
+
+- `Instructions(s)` returns the embedded English prompt for `s` from `instructions/{group,task,review,secretary}.md` (`secretary.md` when `s.Secretary` is set, otherwise by `s.Kind`).
+- `Compose(h, s, kind, items)` formats `ItemsTurn`, `ReplacedTurn`, `ContinueTurn` and `HandbackTurn`, returning the turn text and `Turn{Kind, Thread, Depth, Jump}` (`N` is set later by `Sessions.SetTurn`).
+- Authority (`instruction` or `information`) comes strictly from verifying the signed envelope (`msg.env` or `cause`) against the node owner's device log (`setting` key `owner` and `device_log` in `h.Store`) and never from row text or unsigned fields.
+- First task turns, review turns and `ReplacedTurn` fetch the brief (`FetchRow`), notes up to 8 KiB newest first (`FetchKind`), and up to 20 recent thread or main-line messages (`FetchThread`) through `h.Home(s.Home)`. Because `Compose` reads `h.Store` with `Store.Write` and calls `Home.Request`, call it outside any `Store.Write` or `Sessions.Write` transaction.
+- For a newly created takeover task on a CLI that needs an initial structured turn (`flows/takeover.md` A), `Compose(h, s, ItemsTurn, nil)` (or a single `assign` item before any thread message) produces the pre-takeover `assign` turn.
+
 ## Drivers
 
 A `Driver` starts the structured CLI (`Start`) and gives the command line of the interactive one (`Interactive`), both from a `Launch`. A running `Process` takes turns, an interrupt, answers to permission requests and a close, and reports through `Events`. Only the session runtime holds a `Process`; the other units hear its events through `Listeners` and reach it through `Runner`.

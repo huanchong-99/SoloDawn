@@ -258,19 +258,33 @@ Which fields do you need in the path event?
 
 - Header per item, in the order of the examples: position, `why`, author,
   place, authority, and the call id when the message is a `call`.
+- Session header labels: `task session T-<num>`, `review session T-<num>`,
+  `group session` (for a working AI), and `secretary session`. Place in an
+  item header is `in T-<num>` for a thread and `in main` for the main line.
 - Authority comes from signatures, never from the text. It is `instruction`
   when the message that caused the item is signed by the AI's owner as a
   person (a device in the owner's log, with no `as`; a message an AI wrote
   is never one), and for the workflow items of a task the owner confirmed
   (`assign`, `review`, `reviewed`, `decided`, `checks`, `resume`, the
-  hand-back and continue turns). It is `information` for everything else
-  (R-52).
+  hand-back and continue turns; a main-line `decided` without a task gets
+  its authority from the signer of `cause`). It is `information` for
+  everything else (R-52).
 - A `confirmed` item keeps the writer of the brief as its author and also
-  names the person who confirmed it or sent it back; its authority comes
-  from that person, by the rule above.
+  names the person who confirmed it or sent it back (`confirmed by "<name>"`
+  or `sent back by "<name>"`); its authority comes from that person, by the
+  rule above.
+- A task without a brief (`direct` or `takeover` origin) shows `Plan: <plan>`
+  when `plan` is not empty, and `Reviewer: none` while no reviewer is named.
 - Text from other members is included verbatim below the header and never
   above it. A label is context for the model; it enforces nothing.
-- Notes are included newest first up to 8 KiB; `note_list` returns all.
+- Notes are included newest first up to 8 KiB (`8,192` UTF-8 bytes of
+  `note.Text`, stopping before the first note that would exceed the limit,
+  and omitting `Notes of this group:` when none fit); `note_list` returns
+  all.
+- A replaced session (`flows/agent-turn.md` E) carries `== context · instruction`
+  with its first-turn preamble and `Recent messages:` (up to 20 newest
+  messages in chronological order, each under `-- <kind> · <who/place> · <authority>`)
+  before the turn's items.
 
 ## 4. Instructions given to every session
 
