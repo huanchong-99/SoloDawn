@@ -214,7 +214,7 @@ task session:
 [SoloDawn] group "Website" · you are "Claude Code" · task session T-12
 == 1 of 1 · assign · instruction
 Task T-12 "Node: report connection path changes"
-Branch: task/12-conn-events (this folder is its worktree)
+Branch: task/12-node-report-connection-path-changes (this folder is its worktree)
 Goal: …
 Acceptance criteria:
 1. …

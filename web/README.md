@@ -112,7 +112,9 @@ development dependency, an IndexedDB for the tests.
   browser downloads a face only when text uses it and shows the system fonts until it arrives.
 - **Texts.** Every interface string is a key in both `src/messages/zh-CN.json` and
   `src/messages/en.json` and is read with `t(key)`; a test fails when the key sets differ. Chat
-  content is never translated.
+  content is never translated. The options of the language choice are named in their own
+  language in both files and carry its `lang`, so a screen reader speaks each in its language
+  (WCAG 2.2 SC 3.1.2).
 - **Motion.** No animation library is bundled: CSS transitions and keyframes move the parts, the
   browser's View Transitions cross-fade the page, and `svelte/motion` reads the system setting.
   The tokens are in `tokens.css` beside the others: four durations (`--dur-1` 120 ms hover and
