@@ -163,15 +163,17 @@ remote.
   or that shows another head or a check still running, counts as
   unfinished, and the next read follows 30 s later. An empty rollup (no
   checks) counts as passed only after two consecutive empty reads at least
-  30 s apart. After 60 minutes of reads for one commit the checks count as
-  failed: `task cloud` not passed, with one item named `hosted checks`
-  whose `detail` is `hosted checks timed out`. After a restart the host
-  reads again for every task at step `cloud_check` whose assignee runs on
-  it, and the 60 minutes start again.
+  30 s apart. 60 minutes after `checks.local.at` of the submitted commit
+  the checks count as failed: `task cloud` not passed, whose items are
+  those of the last read as they were, followed by
+  `{"name":"hosted checks","ok":false,"detail":"hosted checks timed out"}`.
+  After a restart the host reads again for every task at step
+  `cloud_check` whose assignee runs on it; the 60 minutes still count from
+  `checks.local.at`, so the limit left may be slightly short.
 - **Text the host writes.** Before the host sends them, the output tails of
   check items, the Git output in `task conflict`, and the `detail` of
-  `login_invalid` and `turn_interrupted` go through the patterns of
-  section 8; each match is replaced by `[redacted]`.
+  `task fail`, `login_invalid` and `turn_interrupted` go through the
+  patterns of section 8; each match is replaced by `[redacted]`.
 - Checks are about a commit, so they need a clean tree: the commit that is
   checked is the commit that is submitted, reviewed and merged
   (`contracts/task-machine.md` section 4).
@@ -210,8 +212,9 @@ remote.
 
 ## 8. Outbound secret check (R-137)
 
-One fixed list of patterns, in one source file, used in two places: the hard
-check on diffs (section 7) and everything an AI sends to the group.
+One fixed list of patterns, in one source file, used for the hard check on
+diffs (section 7), the text arguments of tools and the texts of approvals
+(below), and the text the host writes (section 7).
 
 Patterns:
 

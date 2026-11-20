@@ -126,7 +126,7 @@ an `event` in `member status`, which H turns into a `system` row
 | the CLI cannot resume the session id | starts a fresh session in the same folder; its first turn carries what the first turn of that session kind carries, plus the last 20 messages of the thread (R-123); reports `session_replaced` |
 | the CLI reports a vendor rate limit | state `limited`; reports `rate_limited` with the reset time; items are held until then |
 | the owner's cap is reached (R-61) | state `limited`; reports `cap_reached`; items are held until the cap is released (`contracts/commands.md` section 2) |
-| the CLI reports that sign-in is not valid in this mode | state `limited`; reports `login_invalid`; N never changes how the CLI authenticates (R-56). The state ends when the owner sends `agent.set` for that CLI again, or when the session start for the next item succeeds: that start is still tried |
+| the CLI reports that sign-in is not valid in this mode | state `limited`; reports `login_invalid` only when the AI enters `limited`, at the first failed start after a success; later failed tries are not reported again. N never changes how the CLI authenticates (R-56). The state ends when the owner sends `agent.set` for that CLI again, or when the session start for the next item succeeds: that start is still tried |
 | group paused | interrupts running turns of the group's sessions (`turn_interrupted`, `stop`); the sessions stay open; items are held |
 | task paused (`contracts/task-machine.md` row 12) | interrupts a running turn of that task's sessions (`turn_interrupted`, `stop`); the sessions stay open; items are held |
 | owner's "all offline" | interrupts running turns (`turn_interrupted`, `stop`) and closes every session; items are held |
@@ -155,6 +155,8 @@ an `event` in `member status`, which H turns into a `system` row
   Codex, is closed by closing its stdin; an interactive CLI by closing its
   pseudo-terminal.
 - A CLI that does not answer an interrupt or a close within 10 s gets its
-  process tree killed and is treated as a crash (section E, first row).
+  process tree killed. During a turn that is a crash (section E, first
+  row). Outside a turn (an idle close) N writes an audit row and nothing
+  else: no `turn_interrupted` and no `task fail`.
 - N cannot stop a person from resuming the same session id in their own
   terminal outside SoloDawn. The owner is told not to; see `risks.md` K-6.
