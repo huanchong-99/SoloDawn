@@ -986,15 +986,18 @@ export type HostInfo = v.InferOutput<typeof HostInfo>;
 export const HostInfoPush = v.object({ t: v.literal('host.info'), ...HostState });
 export type HostInfoPush = v.InferOutput<typeof HostInfoPush>;
 
-/** Asks for the audit rows written before `before`, newest first; `before: 0` for the newest. */
+/** Asks for the audit rows whose `id` is lower than `before`, the id of the oldest row already
+ *  held, newest first; `before: 0` for the newest. */
 export const Audit = v.object({ t: v.literal('audit'), id: int, before: int, limit: int });
 export type Audit = v.InferOutput<typeof Audit>;
 
-/** The answer to `audit`, which has no `t`. `ai` is the agent, `by` the device that caused it. */
+/** The answer to `audit`, which has no `t`. `id` numbers a row on its node and grows with each;
+ *  `ai` is the agent, `by` the device that caused it. */
 export const AuditAnswer = v.object({
   ...Success,
   rows: v.array(
     v.object({
+      id: int,
       ts: int,
       g: v.optional(Id),
       ai: optionalText,

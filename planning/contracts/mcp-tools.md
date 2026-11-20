@@ -172,7 +172,9 @@ What the file settles where the tables above leave it open:
 - **Kinds of `post`.** `text`, `progress` and `question` everywhere;
   `handback` in the sessions a takeover can reach (the secretary's group
   session, review and task sessions; `flows/takeover.md` A), and `summary`
-  for the secretary, whose `post` also takes `task`. `kind` defaults to
+  for the secretary, whose `post` also takes `task`. A list is fixed for a
+  session, so the node refuses `handback` outside a hand-back turn with
+  `bad_request` (`issues.md`). `kind` defaults to
   `text`; `where` has no default, because it depends on the turn.
 - **Defaults and bounds.** `ask.wait` defaults to `true`; `read_thread.limit`
   is 1 to 100, default 30, and `before` at least 1 (no `pos` is 0);

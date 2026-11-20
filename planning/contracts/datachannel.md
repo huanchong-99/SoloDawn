@@ -275,13 +275,17 @@ and without `re` and `ok` (`contracts/conventions.md` section 3):
 
 ### `audit` (request)
 
-`{"t":"audit","id":6,"before":1763600000000,"limit":50}` is answered with
+`{"t":"audit","id":6,"before":413,"limit":50}` is answered with
 `{"re":6,"ok":true,"rows":[…]}`, each row shaped as
-`{"ts":1763599000000,"g":"Qm1…","ai":"claude","what":"approval","detail":"git push origin other-branch","by":"<device id>","result":"approved"}`.
+`{"id":412,"ts":1763599000000,"g":"Qm1…","ai":"claude","what":"approval","detail":"git push origin other-branch","by":"<device id>","result":"approved"}`.
 `g`, `ai`, `by` and `result` are optional. `ai` is the agent (`claude`), not a
 member id; `what` is one of the values of `contracts/storage.md` section 3.
-`before` is a time in Unix milliseconds: the answer holds rows written before
-it, newest first, and `before: 0` asks for the newest. `limit` is at most
+`id` is the row's number on this node (the `id` of the `audit` table,
+`contracts/storage.md` section 3), which grows with every row. `before` is
+the `id` of the oldest row the client already holds: the answer holds the
+rows whose `id` is lower, newest first, and `before: 0` asks for the newest.
+Ids are never reused, so no row is skipped or repeated between pages, as
+paging by time could do for rows with the same `ts`. `limit` is at most
 100. `rows` is `[]` when there is nothing.
 
 ### Terminal
