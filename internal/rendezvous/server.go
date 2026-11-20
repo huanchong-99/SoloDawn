@@ -2,6 +2,7 @@
 package rendezvous
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -40,7 +41,7 @@ const maxBytes = 16_384 // 16 KiB
 
 type client struct {
 	conn   *websocket.Conn
-	out    chan any
+	out    chan []byte
 	id     string
 	watch  map[string]bool
 	window [120]time.Time
@@ -54,7 +55,7 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	conn.SetReadLimit(maxBytes)
-	c := &client{conn: conn, out: make(chan any, 128)}
+	c := &client{conn: conn, out: make(chan []byte, 128)}
 	go c.write()
 	defer close(c.out)
 	if !c.authenticate() {
@@ -75,19 +76,32 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 func (c *client) write() {
 	defer c.conn.Close()
 	for frame := range c.out {
-		if c.conn.WriteJSON(frame) != nil {
+		if c.conn.WriteMessage(websocket.TextMessage, frame) != nil {
 			return
 		}
 	}
 }
 
 // While routing, a stalled socket must not hold up other devices.
-func (c *client) send(frame any) {
+// send returns false when the frame would exceed the wire limit. In
+// particular, the authenticated "from" wrapper is longer than "to".
+func (c *client) send(frame any) bool {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(frame); err != nil {
+		panic(err) // All outbound frames contain validated JSON.
+	}
+	data := bytes.TrimSuffix(buf.Bytes(), []byte{'\n'})
+	if len(data) > maxBytes {
+		return false
+	}
 	select {
-	case c.out <- frame:
+	case c.out <- data:
 	default:
 		c.conn.Close()
 	}
+	return true
 }
 
 func (c *client) admit(now time.Time) bool {
@@ -197,10 +211,9 @@ func (s *server) route(c *client, m fields) bool {
 		return false
 	}
 	if target := s.online[key]; target != nil {
-		target.send(proto.Route{Type: "from", Key: c.id, Env: m["env"]})
-	} else {
-		c.send(proto.Offline{Type: "offline", Key: key})
+		return target.send(proto.Route{Type: "from", Key: c.id, Env: m["env"]})
 	}
+	c.send(proto.Offline{Type: "offline", Key: key})
 	return true
 }
 

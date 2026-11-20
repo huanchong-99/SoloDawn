@@ -230,6 +230,42 @@ func TestLimits(t *testing.T) {
 	closed(t, c)
 }
 
+func TestForwardedFrameSize(t *testing.T) {
+	url := fixture(t)
+	a, b := key(1), key(2)
+	sender, receiver := login(t, url, a), login(t, url, b)
+	receiver.SetReadLimit(16_384)
+	to := fmt.Sprintf(`{"t":"to","k":"%s","env":{"p":"`, b.ID())
+	from := fmt.Sprintf(`{"t":"from","k":"%s","env":{"p":"`, a.ID())
+	p := strings.Repeat("&", 16_384-len(from)-3)
+	rawSend := func(frame string) {
+		t.Helper()
+		if err := sender.WriteMessage(websocket.TextMessage, []byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rawSend(to + p + `"}}`)
+	typ, data, err := receiver.ReadMessage()
+	if err != nil || typ != websocket.TextMessage || string(data) != from+p+`"}}` {
+		t.Fatalf("forwarded boundary frame: type %d, length %d, error %v", typ, len(data), err)
+	}
+	rawSend(to + p + `&"}}`)
+	closed(t, sender)
+	// The target never gets a partial or oversized frame and stays connected.
+	send(t, receiver, proto.RVFrame{Type: "ice"})
+	expect(t, receiver, config("ice"))
+}
+
+func TestInvalidServerFramePanics(t *testing.T) {
+	defer func() {
+		got := recover()
+		if fmt.Sprint(got) != "json: unsupported type: chan int" {
+			t.Errorf("panic = %v", got)
+		}
+	}()
+	new(client).send(make(chan int))
+}
+
 func TestRollingWindow(t *testing.T) {
 	var c client
 	start := time.Unix(123, 0)
@@ -255,14 +291,14 @@ func TestRollingWindow(t *testing.T) {
 
 func TestFullSendQueueAndFailedWrite(t *testing.T) {
 	conn, _ := dial(t, fixture(t))
-	c := client{conn: conn, out: make(chan any, 1)}
+	c := client{conn: conn, out: make(chan []byte, 1)}
 	c.send("first")
 	c.send("second")
-	if got := <-c.out; got != "first" {
+	if got := <-c.out; string(got) != `"first"` {
 		t.Fatalf("queue = %v", got)
 	}
 	// A failed write must return even when the queue remains open.
-	c.out <- "after close"
+	c.out <- []byte(`"after close"`)
 	done := make(chan struct{})
 	go func() { c.write(); close(done) }()
 	select {
@@ -275,7 +311,7 @@ func TestFullSendQueueAndFailedWrite(t *testing.T) {
 func TestSupersededSocketCannotDispatch(t *testing.T) {
 	s := server{online: map[string]*client{}}
 	old := &client{id: "device"}
-	current := &client{id: "device", out: make(chan any, 1)}
+	current := &client{id: "device", out: make(chan []byte, 1)}
 	s.online["device"] = current
 	if s.handle(old, nil, "ice") {
 		t.Fatal("replaced socket still active")
