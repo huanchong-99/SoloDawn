@@ -9,8 +9,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"time"
 
 	"github.com/cucumber/godog"
+	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
@@ -23,6 +26,7 @@ func readWireExample(name string, v any) error {
 }
 
 func protocolSteps(sc *godog.ScenarioContext) {
+	approvalSteps(sc)
 	var forwarded []byte
 	sc.Step(`^a peer decodes and re-encodes the enrollment log$`, func() error {
 		var log proto.Devlog
@@ -102,6 +106,41 @@ func protocolSteps(sc *godog.ScenarioContext) {
 		}
 		if gone.Type != "note" || gone.Seq != seq || !gone.Gone {
 			return fmt.Errorf("unexpected marker: %+v", gone)
+		}
+		return nil
+	})
+}
+
+func approvalSteps(sc *godog.ScenarioContext) {
+	var before proto.MessageRow[proto.ApprovalBody, proto.StatusOnly]
+	var after proto.MessageRow[proto.ApprovalBody, proto.ActedState]
+	sc.Step(`^a client reads the pending approval and its approved update$`, func() error {
+		if err := readWireExample("row-msg-approval-pending", &before); err != nil {
+			return err
+		}
+		return readWireExample("row-msg-approval-approved", &after)
+	})
+	sc.Step(`^both show the same signed request for "([^"]*)"$`, func(command string) error {
+		if before.State.Status != "pending" || after.State.Status != "approved" || before.ID != after.ID ||
+			before.Pos != after.Pos || before.Seq >= after.Seq || before.Body.Command != command ||
+			!reflect.DeepEqual(before.Body, after.Body) || *before.Env != *after.Env {
+			return fmt.Errorf("approval changed: before %+v; after %+v", before, after)
+		}
+		return nil
+	})
+	sc.Step(`^the update carries the approver's signed "([^"]*)" action for that card$`, func(action string) error {
+		env := after.State.Act
+		var act struct{ Msg, Action string }
+		if err := json.Unmarshal([]byte(env.Payload), &act); err != nil {
+			return err
+		}
+		known := func(key string) bool { return key == after.Body.Approvers[0] }
+		header, err := identity.OpenCommand(env, "", known, time.UnixMilli(after.State.At))
+		if err != nil {
+			return err
+		}
+		if header.Type != "act" || string(header.Group) != after.Group || act.Msg != after.ID || act.Action != action {
+			return fmt.Errorf("unexpected approval action: %+v", env)
 		}
 		return nil
 	})

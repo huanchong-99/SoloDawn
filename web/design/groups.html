@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0C0F16" />
+    <title>群列表 — SoloDawn 样稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="base.css" />
+    <script src="base.js"></script>
+    <style>
+      /* 电脑：左边群列表，右边「等你处理」总览；手机：只有群列表，顶上一条等你处理 */
+      .split {
+        display: grid;
+        height: 100%;
+        grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+      }
+      .split > * {
+        min-height: 0;
+        overflow: auto;
+      }
+      .split > .groups {
+        border-right: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .groups .sec-title {
+        padding: var(--sp-4) var(--sp-4) var(--sp-1);
+      }
+      .gmeta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px 10px;
+        margin-top: 3px;
+        font-size: var(--fs-xs);
+        color: var(--text-3);
+      }
+      .gmeta .st {
+        font-size: inherit;
+      }
+      .digest {
+        padding: var(--sp-6);
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-4);
+      }
+      .digest > * {
+        max-width: 760px;
+        width: 100%;
+        margin-inline: auto;
+      }
+      .todo {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        padding: 12px var(--sp-4);
+      }
+      .todo + .todo {
+        border-top: 1px solid var(--line);
+      }
+      .todo .i {
+        color: var(--dawn-text);
+      }
+      .rows {
+        padding: 0;
+        gap: 0;
+      }
+      .rows > header {
+        padding: 14px var(--sp-4) 10px;
+      }
+      .now {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1.4fr);
+        gap: var(--sp-3);
+        align-items: center;
+        padding: 10px var(--sp-4);
+        border-top: 1px solid var(--line);
+        font-size: var(--fs-sm);
+      }
+      @media (max-width: 899px) {
+        .split {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .split > .groups {
+          border: 0;
+        }
+        .digest {
+          display: none;
+        }
+      }
+      @media (min-width: 900px) {
+        .groups > .needbar {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body class="app" data-page="groups" data-nav="groups">
+    <a class="skip" href="#main">跳到群列表</a>
+
+    <header class="bar">
+      <div class="bar-title">
+        <h1 data-en="Chats">群聊</h1>
+        <p data-en="5 groups · 3 things waiting on you">5 个群 · 3 件事等你</p>
+      </div>
+      <button class="btn btn-sm only-wide">
+        <svg class="i sm"><use href="#i-plus" /></svg
+        ><span data-en="New project group">新建项目群</span>
+      </button>
+      <button class="icon-btn only-narrow" aria-label="新建项目群">
+        <svg class="i"><use href="#i-plus" /></svg>
+      </button>
+    </header>
+
+    <main id="main" class="split">
+      <section class="groups" aria-label="群列表">
+        <nav class="needbar" aria-label="等你处理">
+          <b
+            ><svg class="i sm"><use href="#i-alert" /></svg
+            ><span data-en="Waiting on you · 3">等你处理 3</span></b
+          >
+          <a href="chat.html#ap-1">审批 · Codex 要装依赖</a>
+          <a href="chat.html#dc-1">拍板 · 中继提示放哪</a>
+          <a href="chat.html#brief-2">确认开工 · 保留天数</a>
+        </nav>
+
+        <h2 class="sec-title" data-en="Team">团队</h2>
+        <nav class="glist">
+          <a class="gitem" href="chat.html">
+            <span class="gav team"
+              ><svg class="i"><use href="#i-users" /></svg
+            ></span>
+            <span class="gbody"
+              ><b class="cut">团队大群</b>
+              <span class="gprev cut">秘书（官网与文档）：文档站今晚 8 点切换域名</span>
+              <span class="gmeta"
+                ><span data-en="Announcements and cross-project talk. No work happens here."
+                  >通知和跨项目的事，AI 不在这里干活</span
+                ></span
+              ></span
+            >
+            <span class="gside"><time>10:05</time></span>
+          </a>
+        </nav>
+
+        <h2 class="sec-title" data-en="Projects · one group each">项目 · 一个项目一个群</h2>
+        <nav class="glist">
+          <a class="gitem" href="chat.html">
+            <span class="gav" style="--h: 265">重</span>
+            <span class="gbody"
+              ><b class="cut">SoloDawn 重建</b>
+              <span class="gprev cut">秘书：任务说明已发出，等你确认开工</span>
+              <span class="gmeta"
+                ><span class="st" data-st="working"><i></i>1 个在干活</span
+                ><span class="st" data-st="needyou"><i></i>2 个在等你</span
+                ><span class="st" data-st="waiting"><i></i>1 个在等Mina</span></span
+              ></span
+            >
+            <span class="gside"
+              ><time>11:44</time
+              ><span class="badge solid count" data-tone="dawn" aria-label="3 件事等你"
+                >3</span
+              ></span
+            >
+          </a>
+          <a class="gitem" href="chat.html">
+            <span class="gav" style="--h: 160">官</span>
+            <span class="gbody"
+              ><b class="cut">官网与文档</b>
+              <span class="gprev cut">Codex：自建文档第 3 节已提交，等云端检查</span>
+              <span class="gmeta"
+                ><span class="st" data-st="working"><i></i>2 个在干活</span></span
+              ></span
+            >
+            <span class="gside"
+              ><time>11:20</time><span class="badge count" aria-label="6 条未读">6</span></span
+            >
+          </a>
+          <a class="gitem" href="chat.html">
+            <span class="gav" style="--h: 20">示</span>
+            <span class="gbody"
+              ><b class="cut">「示例项目」</b>
+              <span class="gprev cut">秘书：T-4 已合并，全部任务完成</span>
+              <span class="gmeta"
+                ><span class="st" data-st="sleeping"><i></i>全部休眠</span></span
+              ></span
+            >
+            <span class="gside"><time>昨天</time></span>
+          </a>
+          <a class="gitem" href="chat.html">
+            <span class="gav" style="--h: 320">手</span>
+            <span class="gbody"
+              ><b class="cut">手机体验打磨</b>
+              <span class="gprev cut">Sam：我晚点把添加到主屏幕的截图发上来</span>
+              <span class="gmeta"
+                ><span class="st" data-st="down"
+                  ><i></i>群的家（Sam 的 Linux）不在线，暂时只能看记录</span
+                ></span
+              ></span
+            >
+            <span class="gside"><time>周二</time></span>
+          </a>
+        </nav>
+      </section>
+
+      <!-- 电脑宽屏：所有群里卡在你这儿的事，和每个 AI 现在在做什么 -->
+      <section class="digest" aria-label="总览">
+        <div class="page-head">
+          <div class="grow">
+            <h2 data-en="Waiting on you">等你处理</h2>
+            <p data-en="Everything across your groups that cannot move until you act.">
+              所有群里，你不点头就走不下去的事。
+            </p>
+          </div>
+        </div>
+
+        <section class="card need rows">
+          <div class="todo">
+            <svg class="i"><use href="#i-shield" /></svg>
+            <div class="grow">
+              <b>审批：Codex 想安装 Playwright</b>
+              <p class="muted" style="font-size: var(--fs-sm)">
+                SoloDawn 重建 · T-13 已挂起 8 分钟
+              </p>
+            </div>
+            <a class="btn btn-sm btn-dawn" href="chat.html#ap-1">去审批</a>
+          </div>
+          <div class="todo">
+            <svg class="i"><use href="#i-fork" /></svg>
+            <div class="grow">
+              <b>拍板：走中继时「受限」的提示放在哪</b>
+              <p class="muted" style="font-size: var(--fs-sm)">SoloDawn 重建 · 秘书 11:38 提出</p>
+            </div>
+            <a class="btn btn-sm btn-dawn" href="chat.html#dc-1">去拍板</a>
+          </div>
+          <div class="todo">
+            <svg class="i"><use href="#i-doc" /></svg>
+            <div class="grow">
+              <b>确认开工：设置里可以改「本地数据保留天数」</b>
+              <p class="muted" style="font-size: var(--fs-sm)">
+                SoloDawn 重建 · 2 个任务等你确认后派出
+              </p>
+            </div>
+            <a class="btn btn-sm btn-dawn" href="chat.html#brief-2">去确认</a>
+          </div>
+        </section>
+
+        <section class="card rows">
+          <header class="card-head">
+            <span class="kind" data-en="What each AI is doing">每个 AI 现在在做什么</span
+            ><span class="badge">6 个 AI · 3 台电脑</span>
+          </header>
+          <div class="now">
+            <span class="who"
+              ><span class="av ai sm"
+                ><svg><use href="#b-claude" /></svg></span
+              ><span class="cut"
+                >Claude Code <span class="muted">· Alex的 MacBook</span></span
+              ></span
+            ><span class="st" data-st="working"><i></i>干活中</span
+            ><span class="cut">SoloDawn 重建 · T-12 修评审意见</span>
+          </div>
+          <div class="now">
+            <span class="who"
+              ><span class="av ai sm"
+                ><svg><use href="#b-openai" /></svg></span
+              ><span class="cut">Codex <span class="muted">· Alex的 Windows</span></span></span
+            ><span class="st" data-st="needyou"><i></i>等你审批</span
+            ><span class="cut">SoloDawn 重建 · T-13 安装依赖</span>
+          </div>
+          <div class="now">
+            <span class="who"
+              ><span class="av ai sec sm"
+                ><svg><use href="#b-claude" /></svg></span
+              ><span class="cut">秘书 <span class="muted">· Alex的 MacBook</span></span></span
+            ><span class="st" data-st="needyou"><i></i>等你处理</span
+            ><span class="cut">SoloDawn 重建 · 1 件拍板、1 份任务说明</span>
+          </div>
+          <div class="now">
+            <span class="who"
+              ><span class="av ai sm"
+                ><svg><use href="#b-claude" /></svg></span
+              ><span class="cut"
+                >Claude Code <span class="muted">· Mina的 MacBook</span></span
+              ></span
+            ><span class="st" data-st="waiting"><i></i>等Mina审批</span
+            ><span class="cut">SoloDawn 重建 · T-11 推送分支</span>
+          </div>
+          <div class="now">
+            <span class="who"
+              ><span class="av ai sm"
+                ><svg><use href="#b-openai" /></svg></span
+              ><span class="cut">Codex <span class="muted">· Mina的 MacBook</span></span></span
+            ><span class="st" data-st="working"><i></i>干活中</span
+            ><span class="cut">官网与文档 · T-7 自建文档</span>
+          </div>
+          <div class="now">
+            <span class="who"
+              ><span class="av ai sm"
+                ><svg><use href="#b-gemini" /></svg></span
+              ><span class="cut"
+                >Gemini（API key） <span class="muted">· Sam 的 Linux</span></span
+              ></span
+            ><span class="st" data-st="sleeping"><i></i>休眠</span
+            ><span class="cut muted">被 @ 时自动醒来</span>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

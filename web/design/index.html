@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0C0F16" />
+    <title>SoloDawn 界面设计稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="base.css" />
+    <script src="base.js"></script>
+    <style>
+      .top {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: var(--sp-3) var(--sp-5);
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text);
+        font-weight: 600;
+        font-size: var(--fs-lg);
+        letter-spacing: -0.02em;
+      }
+      .cover {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: var(--sp-12) var(--sp-5) var(--sp-8);
+      }
+      .cover h1 {
+        font-size: var(--fs-3xl);
+        letter-spacing: -0.03em;
+        max-width: 14em;
+        text-wrap: balance;
+      }
+      .cover p {
+        margin-top: var(--sp-3);
+        color: var(--text-2);
+        font-size: var(--fs-lg);
+        max-width: 36em;
+      }
+      .cover .hz {
+        height: 2px;
+        border-radius: 1px;
+        margin-top: var(--sp-8);
+        background: var(--horizon);
+      }
+      .toc {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 0 var(--sp-5) var(--sp-16);
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-8);
+      }
+      .toc h2 {
+        font-size: var(--fs-xs);
+        font-weight: 600;
+        color: var(--text-3);
+        letter-spacing: 0.06em;
+        margin-bottom: var(--sp-3);
+      }
+      .pages {
+        display: grid;
+        gap: var(--sp-3);
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+      }
+      .pg {
+        color: var(--text);
+        transition:
+          border-color var(--dur-1) var(--ease),
+          transform var(--dur-1) var(--ease);
+      }
+      .pg:hover {
+        text-decoration: none;
+        border-color: var(--line-strong);
+        transform: translateY(-1px);
+      }
+      .pg .n {
+        font: 500 12px var(--font-mono);
+        color: var(--text-3);
+      }
+      .pg p {
+        color: var(--text-2);
+        font-size: var(--fs-sm);
+      }
+      .pg .i {
+        color: var(--text-3);
+      }
+      .how li {
+        display: flex;
+        gap: var(--sp-3);
+        padding: 8px 0;
+        font-size: var(--fs-sm);
+        color: var(--text-2);
+      }
+      .how li + li {
+        border-top: 1px solid var(--line);
+      }
+      .how b {
+        color: var(--text);
+        flex: none;
+        width: 7em;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="top">
+      <span class="brand grow"
+        ><svg class="logo-mark"><use href="#logo" /></svg>SoloDawn</span
+      >
+      <button class="icon-btn" data-act="lang" aria-label="Switch language / 切换语言">EN</button>
+      <button class="icon-btn" data-act="theme" aria-label="切换深色 / 浅色">
+        <svg class="i"><use href="#i-moon" /></svg>
+      </button>
+    </header>
+
+    <main>
+      <section class="cover">
+        <span class="badge" data-en="UI design draft · 2026-11-20 · static mockups"
+          >界面设计稿 · 2026-11-20 · 静态样稿</span
+        >
+        <h1
+          style="margin-top: var(--sp-4)"
+          data-en="See what every AI is doing, where it is stuck, and who it is waiting for."
+        >
+          一眼看出 AI 在做什么、卡在哪、等谁
+        </h1>
+        <p
+          data-en="One design system and seven pages. Every page works at phone width and desktop width, in light and dark."
+        >
+          一套设计系统，七个页面。每一页都适配手机和电脑宽度，都有深色和浅色。
+        </p>
+        <div class="hz" role="presentation"></div>
+      </section>
+
+      <div class="toc">
+        <section>
+          <h2 data-en="PAGES">页面</h2>
+          <div class="pages">
+            <a class="card pg" href="onboarding.html"
+              ><div class="row">
+                <span class="n">01</span>
+                <h3 class="grow" data-en="Onboarding">引导页</h3>
+                <svg class="i"><use href="#i-copy" /></svg>
+              </div>
+              <p
+                data-en="Copy one prompt to your AI; it installs the node and connects. Steps and live connection status."
+              >
+                把一段提示词发给你的 AI，它装好节点并接入。有复制按钮、步骤和连接状态。
+              </p></a
+            >
+            <a class="card pg" href="groups.html"
+              ><div class="row">
+                <span class="n">02</span>
+                <h3 class="grow" data-en="Group list">群列表</h3>
+                <svg class="i"><use href="#i-chat" /></svg>
+              </div>
+              <p
+                data-en="One group per project plus a team group. On desktop, an overview of what is waiting on you."
+              >
+                一个项目一个群，另有团队大群。电脑上右侧是「等你处理」总览。
+              </p></a
+            >
+            <a class="card pg" href="chat.html"
+              ><div class="row">
+                <span class="n">03</span>
+                <h3 class="grow" data-en="Group chat">群聊</h3>
+                <svg class="i"><use href="#i-users" /></svg>
+              </div>
+              <p
+                data-en="Main line and task threads. Contains the task brief, task cards, approval cards, a decision card and the AI member cards."
+              >
+                主线 + 任务话题。任务说明卡、任务卡片、审批卡片、请拍板、完成总结、AI
+                成员卡片都在这一页。
+              </p></a
+            >
+            <a class="card pg" href="terminal.html"
+              ><div class="row">
+                <span class="n">04</span>
+                <h3 class="grow" data-en="Terminal takeover">终端接管</h3>
+                <svg class="i"><use href="#i-terminal" /></svg>
+              </div>
+              <p data-en="The owner drives the AI's own CLI directly, then hands it back.">
+                主人直接操作 AI 的命令行界面，用完「交还」。
+              </p></a
+            >
+            <a class="card pg" href="nodes.html"
+              ><div class="row">
+                <span class="n">05</span>
+                <h3 class="grow" data-en="My computers and AIs">我的电脑和 AI</h3>
+                <svg class="i"><use href="#i-pc" /></svg>
+              </div>
+              <p
+                data-en="Nodes, online status, direct or relay, and each AI's permission level per project."
+              >
+                节点、在线状态、直连还是中继、每个 AI 在每个项目里的权限级别。
+              </p></a
+            >
+            <a class="card pg" href="settings.html"
+              ><div class="row">
+                <span class="n">06</span>
+                <h3 class="grow" data-en="Settings">设置</h3>
+                <svg class="i"><use href="#i-sliders" /></svg>
+              </div>
+              <p data-en="Permissions, data retention (90 days), notifications, theme, language.">
+                权限、本地数据保留天数（默认 90）、浏览器通知、主题、语言。
+              </p></a
+            >
+            <a class="card pg" href="components.html"
+              ><div class="row">
+                <span class="n">07</span>
+                <h3 class="grow" data-en="Design system and states">设计系统与组件状态</h3>
+                <svg class="i"><use href="#i-doc" /></svg>
+              </div>
+              <p
+                data-en="Colors, type, buttons, and every state of each card: connection, pause-all, tasks, approvals, AI members."
+              >
+                颜色、字号、按钮，以及每种卡片的全部状态：连接、急停、任务、审批、AI 成员。
+              </p></a
+            >
+          </div>
+        </section>
+
+        <section>
+          <h2 data-en="HOW TO REVIEW">怎么看</h2>
+          <ul class="how card" style="gap: 0">
+            <li>
+              <b data-en="Suggested order">建议顺序</b
+              ><span
+                data-en="03 Group chat first (it is the product), then 01 Onboarding, then 05 and 04."
+                >先看 03 群聊（它就是产品本身），再看 01 引导页，然后 05、04。</span
+              >
+            </li>
+            <li>
+              <b data-en="Phone width">手机宽度</b
+              ><span
+                data-en="Narrow the window to about 375 px, or use the browser's device mode. In group chat, the people icon at the top right opens the AI member cards."
+                >把浏览器窗口拉窄到 375
+                像素左右，或用开发者工具的手机模式。群聊页右上角的成员图标可以打开 AI
+                成员卡片。</span
+              >
+            </li>
+            <li>
+              <b data-en="Theme, language">主题和语言</b
+              ><span
+                data-en="Buttons at the top right of every page (on phones: in Settings). Onboarding and Settings are fully bilingual; other pages translate the frame and labels only."
+                >每页右上角有切换按钮（手机上在「设置」页里）。引导页和设置页中英文完整可切换；其他页面只切换外壳和标签，聊天内容不翻译。</span
+              >
+            </li>
+            <li>
+              <b data-en="Pause all">急停</b
+              ><span data-en="“Pause all” at the top right of every app page is live: try it."
+                >每个应用页面右上角的「全部暂停」可以真的点：会弹确认，暂停后顶部出现横幅。</span
+              >
+            </li>
+            <li>
+              <b data-en="Files">文件</b
+              ><span
+                ><code>README.md</code> · <code>tokens.css</code> · <code>base.css</code> ·
+                <code>base.js</code></span
+              >
+            </li>
+          </ul>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

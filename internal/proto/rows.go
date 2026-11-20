@@ -93,37 +93,42 @@ type DeviceRow struct {
 	Env Envelope `json:"env"`
 }
 
-type MsgRow struct {
+// MsgRow holds a message before its kind and status are known.
+type MsgRow = MessageRow[json.RawMessage, CardState]
+
+// MessageRow binds a body and card state for a known kind. Non-cards have nil State.
+type MessageRow[B, S any] struct {
 	RowHeader
-	Pos       int64           `json:"pos"`
-	Group     string          `json:"g"`
-	Thread    *string         `json:"thread"`
-	Main      bool            `json:"main"`
-	By        string          `json:"by"`
-	Kind      string          `json:"kind"`
-	Timestamp int64           `json:"ts"`
-	Text      string          `json:"text"`
-	Mentions  []string        `json:"mentions"`
-	Re        *string         `json:"re"`
-	Body      json.RawMessage `json:"body"` // selected by kind
-	State     *CardState      `json:"state"`
-	Env       *Envelope       `json:"env,omitempty"`
+	Pos       int64     `json:"pos"`
+	Group     string    `json:"g"`
+	Thread    *string   `json:"thread"`
+	Main      bool      `json:"main"`
+	By        string    `json:"by"`
+	Kind      string    `json:"kind"`
+	Timestamp int64     `json:"ts"`
+	Text      string    `json:"text"`
+	Mentions  []string  `json:"mentions"`
+	Re        *string   `json:"re"`
+	Body      B         `json:"body"`
+	State     *S        `json:"state"`
+	Env       *Envelope `json:"env,omitempty"`
 }
 
 type CardState struct {
 	Status string    `json:"status"`
-	By     string    `json:"by,omitempty"`
-	At     int64     `json:"at,omitempty"`
-	Note   string    `json:"note,omitempty"`
-	Choice string    `json:"choice,omitempty"`
-	Text   string    `json:"text,omitempty"`
-	Reply  string    `json:"reply,omitempty"`
+	By     *string   `json:"by,omitempty"`
+	At     *int64    `json:"at,omitempty"`
+	Note   *string   `json:"note,omitempty"`
+	Choice *string   `json:"choice,omitempty"`
+	Text   *string   `json:"text,omitempty"`
+	Reply  *string   `json:"reply,omitempty"`
 	MS     *int64    `json:"ms,omitempty"`
 	Act    *Envelope `json:"act,omitempty"`
 }
 
 type NoteRow struct {
 	RowHeader
+	Pos       int64   `json:"pos"`
 	Group     string  `json:"g"`
 	Task      *string `json:"task"`
 	Text      string  `json:"text"`

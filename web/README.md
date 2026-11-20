@@ -15,6 +15,9 @@ notices for browsers that cannot run the client or that block its storage; this 
 key with signed envelopes, the device log and pairing; the wire types with their decoding; and a
 mock connection that answers from the node's wire examples.
 
+The interface mockups are in `design/`. They are the visual reference for the interface: implement
+screens to match them, and add the motion they leave out.
+
 ## Use this capability
 
 Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-lock.yaml`.

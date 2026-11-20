@@ -1,0 +1,30 @@
+{
+  "r": "msg",
+  "id": "fts2DwasrvLMgNuhbPVj8Q",
+  "seq": 814,
+  "pos": 790,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "thread": "DrtCn6htSBwmMPrFPbHJHA",
+  "main": false,
+  "by": "1PC8WineBrUQ-apCjx7tug",
+  "kind": "call",
+  "ts": 1763599999500,
+  "text": "Which event reports a path change?",
+  "mentions": [],
+  "re": null,
+  "body": {
+    "to": "LXCZmuGAXkvO-bSrOkuCfw",
+    "depth": 1,
+    "wait": true
+  },
+  "state": {
+    "status": "answered",
+    "reply": "V4Kxhofmz4pIL8MtLbWxlg",
+    "ms": 500
+  },
+  "env": {
+    "p": "{\"t\":\"post\",\"n\":\"fts2DwasrvLMgNuhbPVj8Q\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"1PC8WineBrUQ-apCjx7tug\",\"kind\":\"call\",\"thread\":\"DrtCn6htSBwmMPrFPbHJHA\",\"main\":false,\"text\":\"Which event reports a path change?\",\"mentions\":[],\"re\":null,\"body\":{\"to\":\"LXCZmuGAXkvO-bSrOkuCfw\",\"depth\":1,\"wait\":true}}",
+    "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+    "s": "FclW2WW5CMtqZ7CY4hm_ZHawPmdVLSGklLryJ_PzHgKPeZe53HmeGG2V5yFVua-xh-cqiacNcj5r7P-XJ1NeBA"
+  }
+}

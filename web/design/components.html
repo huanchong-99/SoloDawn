@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0C0F16" />
+    <title>设计系统与组件状态 — SoloDawn 样稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="base.css" />
+    <script src="base.js"></script>
+    <style>
+      .top {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: var(--sp-3) var(--sp-5);
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text);
+        font-weight: 600;
+        font-size: var(--fs-lg);
+        letter-spacing: -0.02em;
+      }
+      .doc {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: var(--sp-4) var(--sp-5) var(--sp-16);
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-12);
+      }
+      .doc > section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-4);
+      }
+      .doc h2 {
+        font-size: var(--fs-xl);
+      }
+      .doc h2 + p {
+        color: var(--text-2);
+        margin-top: -8px;
+        max-width: 46em;
+      }
+      .grid {
+        display: grid;
+        gap: var(--sp-3);
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+        align-items: start;
+      }
+      .sw {
+        display: grid;
+        gap: var(--sp-2);
+        grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+      }
+      .sw div {
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        overflow: hidden;
+        background: var(--surface);
+        font-size: var(--fs-xs);
+      }
+      .sw i {
+        display: block;
+        height: 44px;
+        background: var(--c);
+        border-bottom: 1px solid var(--line);
+      }
+      .sw b,
+      .sw span {
+        display: block;
+        padding: 0 8px;
+      }
+      .sw b {
+        padding-top: 6px;
+        font: 500 12px var(--font-mono);
+      }
+      .sw span {
+        padding-bottom: 6px;
+        color: var(--text-3);
+      }
+      .type p {
+        display: flex;
+        align-items: baseline;
+        gap: var(--sp-4);
+        padding: 6px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .type code {
+        flex: none;
+        width: 96px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+      .box {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--sp-3);
+        align-items: center;
+        padding: var(--sp-4);
+        border: 1px solid var(--line);
+        border-radius: var(--r-lg);
+        background: var(--surface);
+      }
+      .box.col {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .cap {
+        font-size: var(--fs-xs);
+        color: var(--text-3);
+      }
+      .shape {
+        width: 56px;
+        height: 40px;
+        background: var(--surface-3);
+        display: grid;
+        place-items: center;
+        font: 11px var(--font-mono);
+        color: var(--text-2);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand grow" href="index.html"
+        ><svg class="logo-mark"><use href="#logo" /></svg>SoloDawn
+        <span class="muted" style="font-weight: 400">· 设计系统</span></a
+      >
+      <button class="icon-btn" data-act="theme" aria-label="切换深色 / 浅色">
+        <svg class="i"><use href="#i-moon" /></svg>
+      </button>
+    </header>
+
+    <main class="doc">
+      <section>
+        <h2>颜色</h2>
+        <p>
+          只有五个语义角色。暖色只有「晨光」一种，留给需要人处理的事；其他地方保持冷静。点右上角切换深浅主题，色值来自
+          <code>tokens.css</code>。
+        </p>
+        <div class="sw">
+          <div style="--c: var(--bg)"><i></i><b>--bg</b><span>页面底</span></div>
+          <div style="--c: var(--surface)"><i></i><b>--surface</b><span>卡片、面板</span></div>
+          <div style="--c: var(--surface-2)">
+            <i></i><b>--surface-2</b><span>内嵌块、悬停</span>
+          </div>
+          <div style="--c: var(--surface-3)"><i></i><b>--surface-3</b><span>按下、滑轨</span></div>
+          <div style="--c: var(--line)"><i></i><b>--line</b><span>分隔线</span></div>
+          <div style="--c: var(--line-strong)">
+            <i></i><b>--line-strong</b><span>输入框边</span>
+          </div>
+          <div style="--c: var(--text)"><i></i><b>--text</b><span>正文</span></div>
+          <div style="--c: var(--text-2)"><i></i><b>--text-2</b><span>次要文字</span></div>
+          <div style="--c: var(--text-3)"><i></i><b>--text-3</b><span>辅助文字</span></div>
+          <div style="--c: var(--sky)"><i></i><b>--sky</b><span>AI 在干活、链接、焦点</span></div>
+          <div style="--c: var(--dawn)"><i></i><b>--dawn</b><span>等你处理</span></div>
+          <div style="--c: var(--dawn-text)">
+            <i></i><b>--dawn-text</b><span>晨光色的文字</span>
+          </div>
+          <div style="--c: var(--ok)"><i></i><b>--ok</b><span>通过、在线</span></div>
+          <div style="--c: var(--danger)"><i></i><b>--danger</b><span>失败、急停</span></div>
+          <div style="--c: var(--sky-soft)"><i></i><b>--sky-soft</b><span>浅底</span></div>
+          <div style="--c: var(--dawn-soft)"><i></i><b>--dawn-soft</b><span>浅底</span></div>
+          <div style="--c: var(--ok-soft)"><i></i><b>--ok-soft</b><span>浅底</span></div>
+          <div style="--c: var(--danger-soft)"><i></i><b>--danger-soft</b><span>浅底</span></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>字体与字号</h2>
+        <p>
+          西文和数字用 Geist，中文用系统字体（苹方、微软雅黑）；代码、分支名、终端用 Geist
+          Mono。没有网络时全部回落到系统字体。
+        </p>
+        <div class="type">
+          <p>
+            <code>--fs-3xl</code
+            ><span
+              style="
+                font-size: var(--fs-3xl);
+                font-weight: 600;
+                letter-spacing: -0.03em;
+                line-height: 1.2;
+              "
+              >破晓 Dawn 46</span
+            >
+          </p>
+          <p>
+            <code>--fs-2xl 28</code
+            ><span style="font-size: var(--fs-2xl); font-weight: 600">分区大标题</span>
+          </p>
+          <p>
+            <code>--fs-xl 21</code
+            ><span style="font-size: var(--fs-xl); font-weight: 600">页面标题</span>
+          </p>
+          <p>
+            <code>--fs-lg 17</code
+            ><span style="font-size: var(--fs-lg); font-weight: 600"
+              >卡片标题：节点上报连接方式变化</span
+            >
+          </p>
+          <p>
+            <code>--fs-md 15</code><span>正文和主线消息：走中继的时候提示速度和流量受限。</span>
+          </p>
+          <p>
+            <code>--fs-sm 13</code
+            ><span style="font-size: var(--fs-sm)">话题里的消息、卡片里的次要信息</span>
+          </p>
+          <p>
+            <code>--fs-xs 12</code
+            ><span style="font-size: var(--fs-xs)">时间、徽标、说明文字 11:42</span>
+          </p>
+          <p>
+            <code>--font-mono</code
+            ><span class="mono">task/12-conn-events · go test ./... · +212 −18</span>
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2>间距、圆角、动效</h2>
+        <div class="box">
+          <span class="cap">间距（4 的倍数）</span>
+          <i class="shape" style="width: 4px"></i><i class="shape" style="width: 8px"></i
+          ><i class="shape" style="width: 12px"></i><i class="shape" style="width: 16px"></i
+          ><i class="shape" style="width: 20px"></i><i class="shape" style="width: 24px"></i
+          ><i class="shape" style="width: 32px"></i><i class="shape" style="width: 48px"></i
+          ><i class="shape" style="width: 64px"></i>
+        </div>
+        <div class="box">
+          <span class="cap">圆角</span>
+          <i class="shape" style="border-radius: var(--r-sm)">6</i
+          ><i class="shape" style="border-radius: var(--r-md)">10</i
+          ><i class="shape" style="border-radius: var(--r-lg)">14</i
+          ><i class="shape" style="border-radius: var(--r-xl)">20</i
+          ><i class="shape" style="border-radius: var(--r-full)">full</i>
+          <span class="cap" style="margin-left: var(--sp-5)">动效</span>
+          <span class="st" data-st="working"><i></i>干活中的呼吸点（唯一一直在动的东西）</span>
+          <span class="cap">悬停 120ms · 展开 200ms · 系统开了「减少动态效果」时全部关闭</span>
+        </div>
+      </section>
+
+      <section>
+        <h2>按钮</h2>
+        <p>
+          晨光色按钮只用在「只有你能做的那一下」：确认开工、批准、复制提示词。普通主操作用墨色。
+        </p>
+        <div class="box">
+          <button class="btn btn-dawn">确认开工</button>
+          <button class="btn btn-primary">主要操作</button>
+          <button class="btn">普通</button>
+          <button class="btn btn-danger">危险</button>
+          <button class="btn btn-ghost">幽灵</button>
+          <button class="btn" disabled>不可点</button>
+          <button class="btn btn-sm">
+            <svg class="i sm"><use href="#i-terminal" /></svg>小号
+          </button>
+          <button class="icon-btn" aria-label="图标按钮">
+            <svg class="i"><use href="#i-users" /></svg>
+          </button>
+        </div>
+      </section>
+
+      <section>
+        <h2>全局状态</h2>
+        <p>顶栏右侧永远是这两样：连接状态和急停。连接状态点进去是「我的电脑和 AI」。</p>
+        <div class="box">
+          <span class="cap">连接</span>
+          <span class="conn st" data-st="ok"><i></i>直连 <span class="muted">18 ms</span></span>
+          <span class="conn st" data-st="limited"><i></i>中继 · 受限</span>
+          <span class="conn st" data-st="linking"><i></i>重连中</span>
+          <span class="conn st" data-st="down"><i></i>连不上群的家</span>
+        </div>
+        <div class="box">
+          <span class="cap">急停</span>
+          <button class="btn btn-sm estop">
+            <svg class="i sm"><use href="#i-pause" /></svg><span>全部暂停</span>
+          </button>
+          <span class="cap">点了以后弹确认，选「本群的全部 AI」或「我的全部 AI」→</span>
+          <button class="btn btn-sm">
+            <svg class="i sm"><use href="#i-play" /></svg><span>恢复运行</span>
+          </button>
+        </div>
+        <div class="box col" style="padding: 0; overflow: hidden">
+          <div class="ban" style="display: flex">
+            <svg class="i"><use href="#i-pause" /></svg
+            ><span class="grow"
+              ><b>AI 已全部暂停。</b> 进行中的任务已保存现场，不会开始新的操作。</span
+            ><button class="btn btn-sm">
+              <svg class="i sm"><use href="#i-play" /></svg>恢复运行
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>AI 的状态</h2>
+        <p>形状和颜色一起变，色弱也能分清。只有「等你」是实心暖色；等别人的是空心圈。</p>
+        <div class="box">
+          <span class="st" data-st="working"><i></i>干活中</span>
+          <span class="st" data-st="needyou"><i></i>等你审批</span>
+          <span class="st" data-st="waiting"><i></i>等待中 · 等Mina</span>
+          <span class="st" data-st="sleeping"><i></i>休眠</span>
+          <span class="st" data-st="takeover"><i></i>主人正在直接操作</span>
+          <span class="st" data-st="paused"><i></i>已暂停</span>
+          <span class="st" data-st="offline"><i></i>离线</span>
+        </div>
+        <div class="box">
+          <span class="cap">头像：人圆、AI 方，秘书带「秘」章</span>
+          <span class="av" style="--h: 40">A</span><span class="av" style="--h: 160">M</span
+          ><span class="av" style="--h: 320">S</span>
+          <span class="av ai sec" role="img" aria-label="秘书（Claude）"
+            ><svg><use href="#b-claude" /></svg
+          ></span>
+          <span class="av ai" data-st="working" role="img" aria-label="Claude"
+            ><svg><use href="#b-claude" /></svg></span
+          ><span class="av ai" data-st="needyou" role="img" aria-label="OpenAI"
+            ><svg><use href="#b-openai" /></svg></span
+          ><span class="av ai" data-st="waiting" role="img" aria-label="Claude"
+            ><svg><use href="#b-claude" /></svg></span
+          ><span class="av ai" data-st="sleeping" role="img" aria-label="Gemini"
+            ><svg><use href="#b-gemini" /></svg
+          ></span>
+        </div>
+        <div class="box">
+          <span class="cap">话题里的消息类型</span>
+          <span class="badge">进度</span><span class="badge">提问</span
+          ><span class="badge" data-tone="sky">调用</span
+          ><span class="badge" data-tone="ok">完成报告</span
+          ><span class="badge" data-tone="ok">评审 · 通过</span
+          ><span class="badge" data-tone="danger">评审 · 打回</span
+          ><span class="badge" data-tone="dawn">审批申请</span
+          ><span class="badge" data-tone="dawn">请拍板</span>
+        </div>
+      </section>
+
+      <section>
+        <h2>任务卡片的状态</h2>
+        <p>
+          六步进度条：开工 → 本机检查 → 开 PR → 云端检查 → 评审 →
+          合并。绿色是过了，蓝色是正在做，暖色是卡在你这儿，红色是失败。
+        </p>
+        <div class="grid">
+          <section class="card">
+            <header class="card-head">
+              <span class="mono">T-16</span>
+              <h3>排队中</h3>
+              <span class="badge">排队 · 前面 1 个</span>
+            </header>
+            <div class="steps"><i></i><i></i><i></i><i></i><i></i><i></i><span>0 / 6</span></div>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <span class="mono">T-12</span>
+              <h3>进行中</h3>
+              <span class="badge" data-tone="sky"
+                ><span class="st" data-st="working"><i></i></span>进行中</span
+              >
+            </header>
+            <div class="steps">
+              <i data-s="done"></i><i data-s="now"></i><i></i><i></i><i></i><i></i
+              ><span>本机检查 · 2 / 6</span>
+            </div>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <span class="mono">T-13</span>
+              <h3>卡在你这儿</h3>
+              <span class="badge solid" data-tone="dawn">等你审批</span>
+            </header>
+            <div class="steps">
+              <i data-s="done"></i><i data-s="wait"></i><i></i><i></i><i></i><i></i
+              ><span>本机检查 · 2 / 6</span>
+            </div>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <span class="mono">T-11</span>
+              <h3>卡在别人那儿</h3>
+              <span class="badge">等 Mina 审批</span>
+            </header>
+            <div class="steps">
+              <i data-s="done"></i><i data-s="done"></i><i data-s="now"></i><i></i><i></i><i></i
+              ><span>开 PR · 3 / 6</span>
+            </div>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <span class="mono">T-10</span>
+              <h3>评审打回</h3>
+              <span class="badge" data-tone="danger">打回 · 第 2 轮</span>
+            </header>
+            <div class="steps">
+              <i data-s="done"></i><i data-s="done"></i><i data-s="done"></i><i data-s="done"></i
+              ><i data-s="fail"></i><i></i><span>评审 · 5 / 6</span>
+            </div>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <span class="mono">T-8</span>
+              <h3>失败熔断</h3>
+              <span class="badge solid" data-tone="danger">连续失败 3 次，已停</span>
+            </header>
+            <div class="steps">
+              <i data-s="done"></i><i data-s="fail"></i><i></i><i></i><i></i><i></i
+              ><span>本机检查 · 2 / 6</span>
+            </div>
+            <footer class="card-foot">
+              <button class="btn btn-sm">换一个 AI 重做</button
+              ><button class="btn btn-sm btn-ghost">看话题</button>
+            </footer>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <span class="mono">T-9</span>
+              <h3>已合并</h3>
+              <span class="badge" data-tone="ok">已合并 · 94 分</span>
+            </header>
+            <div class="steps">
+              <i data-s="done"></i><i data-s="done"></i><i data-s="done"></i><i data-s="done"></i
+              ><i data-s="done"></i><i data-s="done"></i><span>6 / 6</span>
+            </div>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <span class="mono">T-12</span>
+              <h3>主人接管中</h3>
+              <span class="badge"
+                ><span class="st" data-st="takeover"><i></i></span>主人正在直接操作</span
+              >
+            </header>
+            <div class="steps">
+              <i data-s="done"></i><i data-s="done"></i><i data-s="done"></i><i data-s="done"></i
+              ><i data-s="now"></i><i></i><span>评审 · 5 / 6</span>
+            </div>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <span class="mono">T-12</span>
+              <h3>已暂停</h3>
+              <span class="badge"
+                ><span class="st" data-st="paused"><i></i></span>已暂停</span
+              >
+            </header>
+            <div class="steps">
+              <i data-s="done"></i><i data-s="done"></i><i></i><i></i><i></i><i></i
+              ><span>开 PR · 3 / 6</span>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section>
+        <h2>审批卡片的状态</h2>
+        <p>
+          同一张卡片，不同的人看到的不一样：电脑的主人能点，其他人只能看。完整的卡片见
+          <a href="chat.html#ap-1">群聊页</a>。
+        </p>
+        <div class="grid">
+          <section class="card need">
+            <header class="card-head">
+              <svg class="i"><use href="#i-shield" /></svg><span class="kind">主人看到的</span
+              ><span class="badge solid" data-tone="dawn">等你审批</span>
+            </header>
+            <footer class="card-foot">
+              <button class="btn btn-dawn">批准</button><button class="btn">拒绝</button>
+            </footer>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <svg class="i"><use href="#i-shield" /></svg><span class="kind">其他人看到的</span
+              ><span class="badge">等 Mina 审批</span>
+            </header>
+            <footer class="card-foot">
+              <button class="btn" disabled>批准</button><button class="btn" disabled>拒绝</button
+              ><span class="hint"
+                ><svg class="i sm"><use href="#i-lock" /></svg>只有电脑的主人能批</span
+              >
+            </footer>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <svg class="i"><use href="#i-shield" /></svg><span class="kind">已批准</span
+              ><span class="badge" data-tone="ok">Alex 已批准 · 11:46</span>
+            </header>
+            <p class="hint">只批了这一次。Codex 已继续干活。</p>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <svg class="i"><use href="#i-shield" /></svg><span class="kind">已拒绝</span
+              ><span class="badge" data-tone="danger">Alex 已拒绝 · 11:46</span>
+            </header>
+            <p class="hint">Codex 会换一种不需要这个权限的做法，做不了就回来汇报。</p>
+          </section>
+          <section class="card">
+            <header class="card-head">
+              <svg class="i"><use href="#i-shield" /></svg><span class="kind">主人一直没回</span
+              ><span class="badge">已改派 · 等了 30 分钟</span>
+            </header>
+            <p class="hint">秘书把任务改派给了有权限的 Claude Code，这条申请作废。</p>
+          </section>
+        </div>
+      </section>
+
+      <section>
+        <h2>AI 成员卡片的状态</h2>
+        <div class="grid">
+          <section class="card">
+            <header class="row">
+              <span class="av ai lg"
+                ><svg><use href="#b-claude" /></svg
+              ></span>
+              <div class="grow">
+                <h3>干活中</h3>
+                <p class="st" data-st="working"><i></i>干活中 · T-12 修评审意见</p>
+              </div>
+            </header>
+            <div class="meter" style="--v: 62%"><span>这一轮额度已用</span><b>62%</b><i></i></div>
+            <footer class="card-foot">
+              <button class="btn btn-sm">
+                <svg class="i sm"><use href="#i-terminal" /></svg>打开终端
+              </button>
+            </footer>
+          </section>
+          <section class="card">
+            <header class="row">
+              <span class="av ai lg"
+                ><svg><use href="#b-claude" /></svg
+              ></span>
+              <div class="grow">
+                <h3>主人接管中</h3>
+                <p class="st" data-st="takeover"><i></i>主人正在直接操作 · 6 分钟</p>
+              </div>
+            </header>
+            <div class="meter" style="--v: 64%"><span>这一轮额度已用</span><b>64%</b><i></i></div>
+            <footer class="card-foot">
+              <button class="btn btn-sm btn-dawn">交还</button
+              ><span class="hint">秘书的 2 条消息在排队</span>
+            </footer>
+          </section>
+          <section class="card">
+            <header class="row">
+              <span class="av ai lg"
+                ><svg><use href="#b-openai" /></svg
+              ></span>
+              <div class="grow">
+                <h3>额度用完</h3>
+                <p class="st" data-st="paused"><i></i>已暂停 · 15:00 额度重置后继续</p>
+              </div>
+            </header>
+            <div class="meter" data-tone="danger" style="--v: 100%">
+              <span>这一轮额度已用</span><b>100%</b><i></i>
+            </div>
+            <footer class="card-foot"><button class="btn btn-sm">改派给别的 AI</button></footer>
+          </section>
+          <section class="card">
+            <header class="row">
+              <span class="av ai lg"
+                ><svg><use href="#b-gemini" /></svg
+              ></span>
+              <div class="grow">
+                <h3>休眠</h3>
+                <p class="st" data-st="sleeping"><i></i>休眠 · 空闲 15 分钟后自动休眠</p>
+              </div>
+            </header>
+            <div class="meter" style="--v: 32%"><span>今天花费</span><b>$3.20 / $10</b><i></i></div>
+            <footer class="card-foot"><button class="btn btn-sm">叫醒</button></footer>
+          </section>
+        </div>
+      </section>
+
+      <section>
+        <h2>表单</h2>
+        <div class="box">
+          <fieldset class="seg">
+            <legend class="sr">权限</legend>
+            <label><input type="radio" name="d1" /><span>只读</span></label>
+            <label><input type="radio" name="d1" checked /><span>在工作区里干活</span></label>
+            <label class="risky"><input type="radio" name="d1" /><span>完全放手</span></label>
+          </fieldset>
+          <fieldset class="seg">
+            <legend class="sr">权限（选了完全放手）</legend>
+            <label><input type="radio" name="d2" /><span>只读</span></label>
+            <label><input type="radio" name="d2" /><span>在工作区里干活</span></label>
+            <label class="risky"
+              ><input type="radio" name="d2" checked /><span>完全放手</span></label
+            >
+          </fieldset>
+          <input class="switch" type="checkbox" role="switch" aria-label="开关（关）" />
+          <input class="switch" type="checkbox" role="switch" checked aria-label="开关（开）" />
+          <input class="input" value="90" aria-label="输入框" style="width: 80px" />
+          <label class="check"><input type="checkbox" checked />复选框</label>
+        </div>
+        <p class="note" data-tone="dawn">
+          <svg class="i sm"><use href="#i-alert" /></svg
+          ><span><b>提示条（晨光色）：</b>正在走中继，速度和流量受限。</span>
+        </p>
+        <p class="note">
+          <svg class="i sm"><use href="#i-info" /></svg
+          ><span>提示条（中性）：SoloDawn 不读取终端里的内容。</span>
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

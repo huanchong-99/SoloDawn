@@ -1,0 +1,39 @@
+{
+  "r": "msg",
+  "id": "yXrOTI_vLO6PoPPJ9SqrGA",
+  "seq": 790,
+  "pos": 790,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "thread": "DrtCn6htSBwmMPrFPbHJHA",
+  "main": false,
+  "by": "LXCZmuGAXkvO-bSrOkuCfw",
+  "kind": "review",
+  "ts": 1763599999500,
+  "text": "",
+  "mentions": [],
+  "re": null,
+  "body": {
+    "task": "DrtCn6htSBwmMPrFPbHJHA",
+    "num": 12,
+    "title": "Show connection paths",
+    "commit": "9f2c1ab",
+    "round": 1,
+    "score": 86,
+    "pass": 90,
+    "ok": false,
+    "items": [
+      {
+        "text": "Missing relay path",
+        "veto": false,
+        "file": "path.go",
+        "line": 88
+      }
+    ]
+  },
+  "state": null,
+  "env": {
+    "p": "{\"t\":\"post\",\"n\":\"yXrOTI_vLO6PoPPJ9SqrGA\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"LXCZmuGAXkvO-bSrOkuCfw\",\"kind\":\"review\",\"thread\":\"DrtCn6htSBwmMPrFPbHJHA\",\"main\":false,\"text\":\"\",\"mentions\":[],\"re\":null,\"body\":{\"commit\":\"9f2c1ab\",\"items\":[{\"text\":\"Missing relay path\",\"veto\":false,\"file\":\"path.go\",\"line\":88}],\"score\":86,\"task\":\"DrtCn6htSBwmMPrFPbHJHA\"}}",
+    "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+    "s": "8aolLd9RH0sBOgtzYFHJ5rsQjk1oj-B_fqNEZIgsr7D7xY2NCJYf2Syj_QLs6dgOaN0A2T3BZjKU8-8UHIoRBg"
+  }
+}

@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0C0F16" />
+    <title>我的电脑和 AI — SoloDawn 样稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="base.css" />
+    <script src="base.js"></script>
+    <style>
+      .node {
+        padding: 0;
+        gap: 0;
+      }
+      .node > header {
+        padding: var(--sp-4);
+      }
+      .node > header h3 {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        flex-wrap: wrap;
+      }
+      .node > .kv,
+      .node > .note {
+        margin: 0 var(--sp-4) var(--sp-4);
+      }
+      .node-ico {
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 13px;
+        background: var(--surface-2);
+        color: var(--text-2);
+      }
+      .ai-row {
+        border-top: 1px solid var(--line);
+        padding: var(--sp-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-3);
+      }
+      .perm {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        font-size: var(--fs-sm);
+      }
+      .perm + .perm {
+        padding-top: var(--sp-2);
+        border-top: 1px dashed var(--line);
+      }
+      .perm > span:first-child {
+        flex: 1;
+        min-width: 0;
+      }
+      .levels {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--sp-4);
+        font-size: var(--fs-sm);
+        color: var(--text-2);
+      }
+      .levels b {
+        display: block;
+        color: var(--text);
+        font-size: 14px;
+        margin-bottom: 2px;
+      }
+      @media (max-width: 640px) {
+        .perm {
+          flex-direction: column;
+          align-items: stretch;
+          gap: 6px;
+        }
+        .perm .seg {
+          display: grid;
+        }
+        .levels {
+          grid-template-columns: minmax(0, 1fr);
+          gap: var(--sp-3);
+        }
+      }
+    </style>
+  </head>
+  <body class="app" data-page="nodes" data-nav="nodes">
+    <a class="skip" href="#main">跳到电脑列表</a>
+
+    <header class="bar">
+      <div class="bar-title">
+        <h1 data-en="My computers and AIs">我的电脑和 AI</h1>
+        <p data-en="3 computers · 4 AIs">3 台电脑 · 4 个 AI</p>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="page">
+        <div class="page-head">
+          <div class="grow">
+            <h2 data-en="My computers and AIs">我的电脑和 AI</h2>
+            <p
+              data-en="Each computer runs one node. You decide how much each AI may do in each project."
+            >
+              每台电脑装一个节点。每个 AI 在每个项目里能做到哪一步，由你定。
+            </p>
+          </div>
+          <a class="btn" href="onboarding.html"
+            ><svg class="i sm"><use href="#i-plus" /></svg
+            ><span data-en="Add a computer">添加电脑</span></a
+          >
+          <button class="btn btn-danger">
+            <svg class="i sm"><use href="#i-power" /></svg
+            ><span data-en="Take all my AIs offline">我的 AI 全部下线</span>
+          </button>
+        </div>
+
+        <!-- 电脑 1：在线，直连，是群的家 -->
+        <section class="card node" aria-labelledby="n1">
+          <header class="row">
+            <span class="node-ico"
+              ><svg class="i"><use href="#i-pc" /></svg
+            ></span>
+            <div class="grow">
+              <h3 id="n1">Alex的 MacBook <span class="badge">这台电脑</span></h3>
+              <p class="muted" style="font-size: var(--fs-sm)">
+                macOS · 节点 v0.3.1 · 开着 2 个 AI，上限 4 个
+              </p>
+            </div>
+            <span class="st" data-st="ok"><i></i>在线</span>
+          </header>
+          <dl class="kv">
+            <dt data-en="Link">连接方式</dt>
+            <dd>
+              <span class="who"
+                ><svg class="i sm" style="color: var(--ok)"><use href="#i-direct" /></svg>直连
+                <span class="muted">· 局域网 · 4 ms</span></span
+              >
+            </dd>
+            <dt data-en="Hosts">群的家</dt>
+            <dd>「SoloDawn 重建」「团队大群」</dd>
+          </dl>
+          <p class="note" data-tone="dawn">
+            <svg class="i sm"><use href="#i-home" /></svg
+            ><span
+              ><b>这台电脑是 2 个群的家，不能关机。</b
+              >它一关，这两个群就收发不了消息，直到它回来。</span
+            >
+          </p>
+
+          <div class="ai-row">
+            <div class="row">
+              <span class="av ai sec"
+                ><svg><use href="#b-claude" /></svg
+              ></span>
+              <div class="grow">
+                <b>秘书</b> <span class="badge">个人订阅</span>
+                <p class="st" data-st="needyou"><i></i>等待中 · 等你处理 3 件事</p>
+              </div>
+              <a class="btn btn-sm" href="terminal.html"
+                ><svg class="i sm"><use href="#i-terminal" /></svg>打开终端</a
+              >
+            </div>
+            <div class="perm">
+              <span>SoloDawn 重建</span><span class="muted">只协调，不改代码（秘书固定如此）</span>
+            </div>
+          </div>
+
+          <div class="ai-row">
+            <div class="row">
+              <span class="av ai"
+                ><svg><use href="#b-claude" /></svg
+              ></span>
+              <div class="grow">
+                <b>Claude Code</b> <span class="badge">个人订阅</span>
+                <p class="st" data-st="working"><i></i>干活中 · SoloDawn 重建 T-12</p>
+              </div>
+              <a class="btn btn-sm" href="terminal.html"
+                ><svg class="i sm"><use href="#i-terminal" /></svg>打开终端</a
+              >
+            </div>
+            <div class="perm">
+              <span>SoloDawn 重建</span>
+              <fieldset class="seg">
+                <legend class="sr">Claude Code 在 SoloDawn 重建 里的权限</legend>
+                <label><input type="radio" name="p1" /><span data-en="Read only">只读</span></label>
+                <label
+                  ><input type="radio" name="p1" checked /><span data-en="Work in workspace"
+                    >在工作区里干活</span
+                  ></label
+                >
+                <label class="risky"
+                  ><input type="radio" name="p1" /><span data-en="Full access"
+                    >完全放手</span
+                  ></label
+                >
+              </fieldset>
+            </div>
+            <div class="perm">
+              <span>官网与文档</span>
+              <fieldset class="seg">
+                <legend class="sr">Claude Code 在 官网与文档 里的权限</legend>
+                <label
+                  ><input type="radio" name="p2" checked /><span data-en="Read only"
+                    >只读</span
+                  ></label
+                >
+                <label
+                  ><input type="radio" name="p2" /><span data-en="Work in workspace"
+                    >在工作区里干活</span
+                  ></label
+                >
+                <label class="risky"
+                  ><input type="radio" name="p2" /><span data-en="Full access"
+                    >完全放手</span
+                  ></label
+                >
+              </fieldset>
+            </div>
+            <div class="perm">
+              <span>「示例项目」</span>
+              <fieldset class="seg">
+                <legend class="sr">Claude Code 在「示例项目」 里的权限</legend>
+                <label><input type="radio" name="p3" /><span data-en="Read only">只读</span></label>
+                <label
+                  ><input type="radio" name="p3" /><span data-en="Work in workspace"
+                    >在工作区里干活</span
+                  ></label
+                >
+                <label class="risky"
+                  ><input type="radio" name="p3" checked /><span data-en="Full access"
+                    >完全放手</span
+                  ></label
+                >
+              </fieldset>
+            </div>
+          </div>
+        </section>
+
+        <!-- 电脑 2：在线，走中继 -->
+        <section class="card node" aria-labelledby="n2">
+          <header class="row">
+            <span class="node-ico"
+              ><svg class="i"><use href="#i-pc" /></svg
+            ></span>
+            <div class="grow">
+              <h3 id="n2">Alex的 Windows</h3>
+              <p class="muted" style="font-size: var(--fs-sm)">
+                Windows 11 · 节点 v0.3.1 · 开着 1 个 AI，上限 3 个
+              </p>
+            </div>
+            <span class="st" data-st="ok"><i></i>在线</span>
+          </header>
+          <dl class="kv">
+            <dt data-en="Link">连接方式</dt>
+            <dd>
+              <span class="who" style="color: var(--dawn-text)"
+                ><svg class="i sm"><use href="#i-relay" /></svg><b>中继</b>
+                <span class="muted">· 210 ms · 已持续 26 分钟</span></span
+              >
+            </dd>
+          </dl>
+          <div class="note" data-tone="dawn">
+            <svg class="i sm"><use href="#i-alert" /></svg>
+            <div class="grow">
+              <b>正在走中继，速度和流量受限。</b
+              >聊天和任务消息照常，终端画面暂时打不开。后台还在继续尝试直连，一打通就自动切回去。
+              <div class="row" style="margin-top: 8px">
+                <button class="btn btn-sm">让 AI 帮我排查网络</button
+                ><span class="hint">今天已用中继流量 3.1 MB / 50 MB</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="ai-row">
+            <div class="row">
+              <span class="av ai"
+                ><svg><use href="#b-openai" /></svg
+              ></span>
+              <div class="grow">
+                <b>Codex</b> <span class="badge">个人订阅</span>
+                <p class="st" data-st="needyou"><i></i>等待中 · T-13 等你审批</p>
+              </div>
+              <button class="btn btn-sm" disabled>
+                <svg class="i sm"><use href="#i-terminal" /></svg>打开终端
+              </button>
+            </div>
+            <div class="perm">
+              <span>SoloDawn 重建</span>
+              <fieldset class="seg">
+                <legend class="sr">Codex 在 SoloDawn 重建 里的权限</legend>
+                <label><input type="radio" name="p4" /><span data-en="Read only">只读</span></label>
+                <label
+                  ><input type="radio" name="p4" checked /><span data-en="Work in workspace"
+                    >在工作区里干活</span
+                  ></label
+                >
+                <label class="risky"
+                  ><input type="radio" name="p4" /><span data-en="Full access"
+                    >完全放手</span
+                  ></label
+                >
+              </fieldset>
+            </div>
+          </div>
+        </section>
+
+        <!-- 电脑 3：离线 -->
+        <section class="card node" aria-labelledby="n3">
+          <header class="row">
+            <span class="node-ico"
+              ><svg class="i"><use href="#i-pc" /></svg
+            ></span>
+            <div class="grow">
+              <h3 id="n3">旧笔记本</h3>
+              <p class="muted" style="font-size: var(--fs-sm)">
+                Linux · 节点 v0.2.8 · 上次在线：3 天前
+              </p>
+            </div>
+            <span class="st" data-st="offline"><i></i>离线</span>
+          </header>
+          <div class="ai-row">
+            <div class="row">
+              <span class="av ai"
+                ><svg><use href="#b-claude" /></svg
+              ></span>
+              <div class="grow">
+                <b>Claude Code</b> <span class="badge">API key</span>
+                <p class="st" data-st="offline"><i></i>离线 · 电脑上线后可以被叫醒</p>
+              </div>
+              <button class="btn btn-sm btn-danger">作废这台设备</button>
+            </div>
+            <p class="hint">电脑丢了或不再使用时作废它：它的身份密钥立刻失效，再也连不进任何群。</p>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="lv">
+          <header class="card-head">
+            <h3
+              id="lv"
+              class="kind"
+              style="font-size: var(--fs-sm)"
+              data-en="The three permission levels"
+            >
+              三个权限级别是什么意思
+            </h3>
+          </header>
+          <div class="levels">
+            <p>
+              <b data-en="Read only">只读</b
+              ><span data-en="Can read code and answer questions. Cannot change anything."
+                >能看代码、回答问题，什么都不能改。</span
+              >
+            </p>
+            <p>
+              <b data-en="Work in workspace (default)">在工作区里干活（默认）</b
+              ><span
+                data-en="Works freely inside the project's workspace. Asks you before installing software, pushing code, touching files outside, using secrets, or bulk deleting."
+                >在这个项目的工作区里随便干。装软件、推代码、动工作区外的文件、用密钥、大批量删除，要先问你。</span
+              >
+            </p>
+            <p>
+              <b data-en="Full access">完全放手</b
+              ><span
+                data-en="No approval prompts. Only applies to work you assign yourself; work from teammates is capped at the middle level."
+                >不再逐次问你。只对你自己派的活生效；同事派来的活最高到中间这一级。</span
+              >
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

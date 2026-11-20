@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0C0F16" />
+    <title>设置 — SoloDawn 样稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="base.css" />
+    <script src="base.js"></script>
+    <style>
+      .days {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+      }
+      .days .input {
+        width: 76px;
+        text-align: right;
+      }
+      .stack {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px var(--sp-4);
+      }
+    </style>
+  </head>
+  <body class="app" data-page="settings" data-nav="settings">
+    <a class="skip" href="#main">跳到设置</a>
+
+    <header class="bar">
+      <div class="bar-title">
+        <h1 data-en="Settings">设置</h1>
+        <p data-en="Saved on this device as you change them">改了就生效，保存在这台设备上</p>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="page" style="max-width: 760px">
+        <section class="card set" aria-labelledby="s-perm">
+          <header>
+            <h3 id="s-perm" data-en="Permissions">权限</h3>
+            <p data-en="How much your AIs may do without asking you.">
+              你的 AI 不问你，最多能做到哪一步。
+            </p>
+          </header>
+          <div class="set-row">
+            <div>
+              <b data-en="Default for a new project">新项目的默认权限</b>
+              <p
+                data-en="Applied when one of your AIs joins a project group. Change it per project under “Computers”."
+              >
+                你的 AI 被拉进新的项目群时用这一级。可以在「电脑和 AI」里按项目单独改。
+              </p>
+            </div>
+            <fieldset class="seg">
+              <legend class="sr">新项目的默认权限</legend>
+              <label><input type="radio" name="def" /><span data-en="Read only">只读</span></label>
+              <label
+                ><input type="radio" name="def" checked /><span data-en="Workspace"
+                  >在工作区里干活</span
+                ></label
+              >
+              <label class="risky"
+                ><input type="radio" name="def" /><span data-en="Full access">完全放手</span></label
+              >
+            </fieldset>
+          </div>
+          <div class="set-row">
+            <div>
+              <b data-en="Full access in every project">所有项目都完全放手</b>
+              <p
+                data-en="Your AIs stop asking for approval anywhere. Only for work you assign yourself."
+              >
+                你的 AI 在任何项目里都不再找你审批。只对你自己派的活生效。
+              </p>
+            </div>
+            <input class="switch" type="checkbox" role="switch" aria-labelledby="s-all" /><span
+              class="sr"
+              id="s-all"
+              >所有项目都完全放手</span
+            >
+          </div>
+          <div class="set-row">
+            <div>
+              <b data-en="Load AI config shipped inside repos">加载仓库自带的 AI 配置</b>
+              <p
+                data-en="Plugins and hooks inside a repo can run commands. Off by default; allow it per trusted project."
+              >
+                仓库里自带的插件和 hook 能执行命令。默认不加载，只对你信任的项目逐个放开。
+              </p>
+            </div>
+            <button class="btn btn-sm" data-en="Trusted projects · 1">信任的项目 · 1</button>
+          </div>
+          <div class="set-row">
+            <div>
+              <b data-en="Who may approve for me">谁可以替我审批</b>
+              <p data-en="When you are away, these people can approve requests from your AIs.">
+                你不在的时候，这些人可以批你的 AI 提的申请。
+              </p>
+            </div>
+            <button class="btn btn-sm" data-en="Nobody yet">还没有人</button>
+          </div>
+        </section>
+
+        <section class="card set" aria-labelledby="s-data">
+          <header>
+            <h3 id="s-data" data-en="Data on this computer">本地数据</h3>
+            <p
+              data-en="Chats, tasks and audit logs stay on your own computers. Our server stores nothing."
+            >
+              聊天记录、任务和审计记录都只存在你自己的电脑上，服务器不存。
+            </p>
+          </header>
+          <div class="set-row">
+            <div>
+              <b id="s-days" data-en="Keep data for">保留天数</b>
+              <p data-en="Older days are deleted one by one, every day. Default is 90.">
+                每天自动删掉最早的一天。默认 90 天。
+              </p>
+            </div>
+            <div class="days">
+              <input
+                class="input mono"
+                type="number"
+                min="7"
+                max="365"
+                value="90"
+                aria-labelledby="s-days"
+              /><span data-en="days">天</span>
+            </div>
+          </div>
+          <div class="set-row">
+            <div>
+              <b data-en="Audit log">审计记录</b>
+              <p
+                data-en="Who asked your AIs to do what, and what you approved. Follows the same retention."
+              >
+                谁让你的 AI 做了什么、你批准了什么。按同一个保留期清理。
+              </p>
+            </div>
+            <button class="btn btn-sm" data-en="View">查看</button>
+          </div>
+        </section>
+
+        <section class="card set" aria-labelledby="s-noti">
+          <header>
+            <h3 id="s-noti" data-en="Notifications">通知</h3>
+            <p data-en="Only the moments that need a person. AI progress never notifies you.">
+              只在需要人的时候提醒你。AI 的进度不会打扰你。
+            </p>
+          </header>
+          <div class="set-row">
+            <div>
+              <b id="s-push" data-en="Browser notifications">浏览器通知</b>
+              <p>
+                <span class="st" data-st="ok"
+                  ><i></i><span data-en="Allowed in this browser">这个浏览器已允许</span></span
+                >
+              </p>
+            </div>
+            <input class="switch" type="checkbox" role="switch" checked aria-labelledby="s-push" />
+          </div>
+          <div class="set-row">
+            <div><b data-en="Notify me when">什么时候提醒我</b></div>
+            <div class="stack">
+              <label class="check"
+                ><input type="checkbox" checked /><span data-en="I am @mentioned"
+                  >有人 @ 我</span
+                ></label
+              >
+              <label class="check"
+                ><input type="checkbox" checked /><span data-en="A decision is needed"
+                  >要我拍板</span
+                ></label
+              >
+              <label class="check"
+                ><input type="checkbox" checked /><span data-en="An approval is needed"
+                  >要我审批</span
+                ></label
+              >
+              <label class="check"
+                ><input type="checkbox" checked /><span data-en="A task is done"
+                  >任务完成</span
+                ></label
+              >
+            </div>
+          </div>
+          <p class="note" style="margin-bottom: var(--sp-4)">
+            <svg class="i sm"><use href="#i-phone" /></svg
+            ><span
+              data-en="On iPhone, add SoloDawn to your Home Screen first; notifications work after that."
+              >iPhone 上要先把 SoloDawn「添加到主屏幕」，之后才能收到通知。</span
+            >
+          </p>
+        </section>
+
+        <section class="card set" aria-labelledby="s-look">
+          <header><h3 id="s-look" data-en="Appearance">外观</h3></header>
+          <div class="set-row">
+            <div><b data-en="Theme">主题</b></div>
+            <fieldset class="seg">
+              <legend class="sr">主题</legend>
+              <label
+                ><input type="radio" name="theme" value="auto" checked /><span data-en="System"
+                  >跟随系统</span
+                ></label
+              >
+              <label
+                ><input type="radio" name="theme" value="light" /><span data-en="Light"
+                  >浅色</span
+                ></label
+              >
+              <label
+                ><input type="radio" name="theme" value="dark" /><span data-en="Dark"
+                  >深色</span
+                ></label
+              >
+            </fieldset>
+          </div>
+          <div class="set-row">
+            <div>
+              <b data-en="Language">语言</b>
+              <p data-en="Changes the interface only. Messages stay as written.">
+                只改界面文字，聊天内容保持原样。
+              </p>
+            </div>
+            <fieldset class="seg">
+              <legend class="sr">语言 / Language</legend>
+              <label
+                ><input type="radio" name="lang" value="zh" checked /><span>简体中文</span></label
+              >
+              <label><input type="radio" name="lang" value="en" /><span>English</span></label>
+            </fieldset>
+          </div>
+        </section>
+
+        <section class="card set" aria-labelledby="s-dev">
+          <header>
+            <h3 id="s-dev" data-en="This browser">这个浏览器</h3>
+            <p data-en="Every browser and computer has its own identity key.">
+              每个浏览器、每台电脑都有自己的身份密钥。
+            </p>
+          </header>
+          <div class="set-row">
+            <div>
+              <b data-en="Fingerprint">身份指纹</b>
+              <p><code>B7E2 41AF 90D3</code></p>
+            </div>
+            <button class="btn btn-sm btn-danger" data-en="Revoke another device">
+              作废其他设备
+            </button>
+          </div>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>
