@@ -3,6 +3,8 @@ package fakecli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,6 +105,11 @@ func TestAStartThatCannotRunSaysWhy(t *testing.T) {
 	if err := os.WriteFile(broken, []byte("{"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// The text of a missing file differs by platform, so each want takes it from the call that
+	// the start makes, after checking that the platform reports the file as missing.
+	_, noScript := os.ReadFile("")
+	_, noLog := os.OpenFile("", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+	_, noMCP := os.ReadFile(missing)
 	const mcp = `{"steps":[{"dir":"mcp->cli","msg":{}}]}`
 	started := "start claude " + session + "\nexit claude " + session + "\n"
 	for _, tt := range []struct {
@@ -111,15 +118,15 @@ func TestAStartThatCannotRunSaysWhy(t *testing.T) {
 		want, log                string
 	}{
 		{"no script", `{}`, "SOLODAWN_FAKE_CLAUDE_SCRIPT", "", []string{"--resume", session},
-			"SOLODAWN_FAKE_CLAUDE_SCRIPT: open : no such file or directory", ""},
+			"SOLODAWN_FAKE_CLAUDE_SCRIPT: " + notFound(t, noScript), ""},
 		{"broken script", `{`, "", "", []string{"--resume", session},
 			"SOLODAWN_FAKE_CLAUDE_SCRIPT: unexpected end of JSON input", ""},
 		{"no session id", `{}`, "", "", []string{"-p"}, "no session id in the arguments or the script", ""},
 		{"session id cut off", `{}`, "", "", []string{"-p", "--resume"}, "no session id in the arguments or the script", ""},
 		{"no log", `{}`, "SOLODAWN_FAKECLI_LOG", "", []string{"--resume", session},
-			"SOLODAWN_FAKECLI_LOG: open : no such file or directory", ""},
+			"SOLODAWN_FAKECLI_LOG: " + notFound(t, noLog), ""},
 		{"no MCP file", mcp, "", "", []string{"--resume", session, "--mcp-config", missing},
-			"step 1 (mcp->cli): open " + missing + ": no such file or directory", started},
+			"step 1 (mcp->cli): " + notFound(t, noMCP), started},
 		{"broken MCP file", mcp, "", "", []string{"--resume", session, "--mcp-config", broken},
 			"step 1 (mcp->cli): unexpected end of JSON input", started},
 		{"MCP command that is no string", mcp, "", "", []string{"resume", session, "-c", "mcp_servers.solodawn.command=7"},
@@ -145,6 +152,15 @@ func TestAStartThatCannotRunSaysWhy(t *testing.T) {
 			}
 		})
 	}
+}
+
+// notFound is the text this platform gives for err, which must report a missing file.
+func notFound(t *testing.T, err error) string {
+	t.Helper()
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("%v does not report a missing file", err)
+	}
+	return err.Error()
 }
 
 func TestAnExpectationNamesTheFieldsThatMatter(t *testing.T) {
