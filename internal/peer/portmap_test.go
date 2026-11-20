@@ -231,6 +231,13 @@ func TestDefaultMapConfigAndLocalHelpers(t *testing.T) {
 	eq(t, halfLease(3), 1500*time.Millisecond)
 	eq(t, halfLease(2), time.Second)
 	eq(t, halfLease(1), time.Second)
+	eq(t, eligibleIP(net.ParseIP("10.0.0.2")), true)
+	eq(t, eligibleIP(net.ParseIP("169.254.1.1")), true)
+	eq(t, eligibleIP(net.ParseIP("2001:db8::1")), true)
+	eq(t, eligibleIP(net.ParseIP("fe80::1")), false)
+	sListen, err := Listen(0, 0)
+	check(t, err)
+	check(t, sListen.Close())
 
 	base := published{mapped: true, signalURL: "ws://198.51.100.1:47800/rv", answerCands: []string{"a", "b"}, offerCands: []string{"b"}}
 	eq(t, samePublished(base, base), true)

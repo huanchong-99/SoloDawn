@@ -177,11 +177,8 @@ func servePeer(in io.Reader, out *helperWriter) error {
 	defer db.Close()
 
 	var iceServers []proto.ICEServer
-	if os.Getenv("NETSIM_TURN") == "1" {
-		iceServers = []proto.ICEServer{
-			{URLs: []string{"stun:" + WANIP + ":3478"}},
-			{URLs: []string{"turn:" + WANIP + ":3478?transport=udp"}, Username: "u", Credential: "p"},
-		}
+	if os.Getenv("NETSIM_STUN") == "1" {
+		iceServers = []proto.ICEServer{{URLs: []string{"stun:" + WANIP + ":3478"}}}
 	}
 	route := peer.Route{
 		ID:  "pipe",
@@ -233,6 +230,7 @@ func drivePeerLoop(in io.Reader, out *helperWriter, node *peer.Peer, route peer.
 		case "sig":
 			_ = node.Receive(ctx, route, proto.Route{Type: "from", Key: m.Key, Env: m.Env})
 		case "close":
+			cancel()
 			return nil
 		}
 	}
@@ -284,6 +282,7 @@ func runOfferConn(ctx context.Context, out *helperWriter, node *peer.Peer, targe
 	}
 	waitDirectPath(ctx, c)
 	out.send(helperMsg{T: "done", Path: c.Path()})
+	<-ctx.Done()
 }
 
 func waitDirectPath(ctx context.Context, c *peer.Connection) {
@@ -380,7 +379,7 @@ func occupyPort(t *testing.T, clientNS string) {
 	}
 }
 
-var clientDNAT = regexp.MustCompile(`dport (\d+) .*dnat (?:ip )?to 10\.0\.0\.2:(\d+)`)
+var clientDNAT = regexp.MustCompile(`dport (\d+) .*dnat (?:ip )?to 10\.0\.0\.2(?::\d+)?`)
 
 func clientMappings(t *testing.T, gwNS string) []string {
 	t.Helper()
@@ -388,7 +387,7 @@ func clientMappings(t *testing.T, gwNS string) []string {
 	must(t, err)
 	var rules []string
 	for _, m := range clientDNAT.FindAllStringSubmatch(string(out), -1) {
-		rules = append(rules, m[1]+"->"+m[2])
+		rules = append(rules, m[1])
 	}
 	return rules
 }
@@ -475,9 +474,9 @@ func TestPortMapDirectPeerAcrossSymmetricNAT(t *testing.T) {
 		mapAns   bool
 		upnpOnly bool
 		blockUDP bool
-		withTURN bool
+		withSTUN bool
 	}{
-		{name: "answerer-udp-natpmp-occupied", mapAns: true, withTURN: true},
+		{name: "answerer-udp-natpmp-occupied", mapAns: true, withSTUN: true},
 		{name: "answerer-icetcp-upnp-udp-blocked", mapAns: true, upnpOnly: true, blockUDP: true},
 		{name: "offerer-icetcp-udp-blocked", mapOffer: true, blockUDP: true},
 	} {
@@ -497,9 +496,9 @@ func TestPortMapDirectPeerAcrossSymmetricNAT(t *testing.T) {
 			if tc.blockUDP {
 				n.SetBlocked(t, true, 0)
 			}
-			if tc.withTURN {
-				relay := spawnHelper(t, n.WAN, "turn")
-				relay.recv(t, 5*time.Second)
+			if tc.withSTUN {
+				stunSrv := spawnHelper(t, n.WAN, "turn")
+				stunSrv.recv(t, 5*time.Second)
 			}
 
 			boolStr := func(v bool) string {
@@ -510,8 +509,8 @@ func TestPortMapDirectPeerAcrossSymmetricNAT(t *testing.T) {
 			}
 			// Notice NETSIM_WAIT_MAP=0 on UPnP test exercises trickling mapped
 			// candidates after the offer is already in flight!
-			offer := spawnHelper(t, n.Left.Client, "peer", "NETSIM_SIDE=offer", "NETSIM_MAP="+boolStr(tc.mapOffer), "NETSIM_WAIT_MAP="+boolStr(tc.mapOffer), "NETSIM_TURN="+boolStr(tc.withTURN))
-			answer := spawnHelper(t, n.Right.Client, "peer", "NETSIM_SIDE=answer", "NETSIM_MAP="+boolStr(tc.mapAns), "NETSIM_WAIT_MAP="+boolStr(!tc.upnpOnly), "NETSIM_TURN="+boolStr(tc.withTURN))
+			offer := spawnHelper(t, n.Left.Client, "peer", "NETSIM_SIDE=offer", "NETSIM_MAP="+boolStr(tc.mapOffer), "NETSIM_WAIT_MAP="+boolStr(tc.mapOffer), "NETSIM_STUN="+boolStr(tc.withSTUN))
+			answer := spawnHelper(t, n.Right.Client, "peer", "NETSIM_SIDE=answer", "NETSIM_MAP="+boolStr(tc.mapAns), "NETSIM_WAIT_MAP="+boolStr(!tc.upnpOnly), "NETSIM_STUN="+boolStr(tc.withSTUN))
 
 			oReady := offer.recv(t, 10*time.Second)
 			aReady := answer.recv(t, 10*time.Second)
