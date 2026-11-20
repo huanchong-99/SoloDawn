@@ -142,7 +142,7 @@ Two rows for the table of `contracts/commands.md` 1.4. No new action name:
 | --- | --- | --- |
 | `direct` | the home queues what the request gives this AI, each item with this `act` as `cause`: the `mention`, when the request mentions the AI or is a main-line message that goes to it as secretary; and the items of section 7, when a task from the request names it | section 7 for a role. `notice` for the secretary when the request was written by an AI or gave a role |
 | `ask` | `mention` for the callee with the call as `msg` and this `act` as `cause`. From there `flows/ask.md` step 4 | the call stays `waiting`; `notice` for the secretary |
-| `watch` | no item. The card now holds the watcher's request (`env`) and the owner's confirmation of it (`state.act`); the watcher's browser presents both to the AI's host (`contracts/step-2/watch-team.md`) | nothing |
+| `watch` | one item `watch` for the AI's host, with the card as `msg` and this `act` as `cause`; the host checks both and keeps the grant (`contracts/step-2/watch-team.md` section 2) | nothing |
 
 **Reminders.** The card waits for a person (R-34): `push`
 (`contracts/commands.md` 1.7) gains the value `confirm` in `on` and in
