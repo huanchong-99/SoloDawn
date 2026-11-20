@@ -257,7 +257,7 @@ Folded in when step 1 is built; until then this file is the reference.
 | File | Addition |
 | --- | --- |
 | `contracts/messages.md` | kind `confirm` (section 3), its states (section 4) |
-| `contracts/commands.md` | `post` kind `confirm`; `act confirm` and `deny` on the card (section 5); in `push`, the value `confirm`; `notice` after a denial |
+| `contracts/commands.md` | 1.3: a card in place of a `mention` item when the word behind it is not enough (section 2); `post` kind `confirm`; `act confirm` and `deny` on the card (section 5); in `push`, the value `confirm`; `notice` after a denial |
 | `contracts/task-machine.md`, `contracts/rows.md` | `wait.kind` `confirm`; the rule of section 7 |
 | `contracts/drivers.md` | the label rule and the sentence of section 8 |
 | `contracts/datachannel.md` | section 6: `cause` may also be the `act` that confirmed a `confirm` card |
@@ -271,11 +271,11 @@ per status, `row-msg-confirm-<status>.json`, and the `act` with `arg`.
    card as for a personal AI (section 2), not a refusal.
 2. A change of direction after a task started: no card for a message in
    the thread; a mention outside it is a new card (section 8).
-3. Only a message a person signed is `instruction` (section 8). Follow-up
-   for the coordinator, not made here: `contracts/drivers.md` section 3
-   says "signed by a device of the AI's owner", which its own example
-   contradicts for a call from the owner's other AI; it is to say "signed
-   by the owner as a person".
+3. Only a message a person signed is `instruction` (section 8).
+   `contracts/drivers.md` section 3 said "signed by a device of the AI's
+   owner", which its own example contradicted for a call from the owner's
+   other AI; pull request #118 changed it to "signed by the AI's owner as
+   a person".
 4. A listed person's message in the thread of a running task is
    `information`: R-52 governs there, R-53 outside it (section 8).
 5. A task with no request cannot go to an AI whose owner would have to
