@@ -25,6 +25,12 @@ func readWireExample(name string, v any) error {
 	return json.Unmarshal(b, v)
 }
 
+func init() {
+	stepSets["proto"] = func(sc *godog.ScenarioContext, _ fixtures) {
+		protocolSteps(sc)
+	}
+}
+
 func protocolSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the quota answer example reports (\d+) of (\d+) bytes$`, func(used, limit int64) error {
 		b, err := os.ReadFile("../internal/proto/testdata/rv-quota-answer.json")

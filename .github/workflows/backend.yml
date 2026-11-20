@@ -53,7 +53,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go build ./cmd/solodawn
+      - run: go build ./cmd/solodawn ./internal/host/fakecli/claude ./internal/host/fakecli/codex
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.os }}

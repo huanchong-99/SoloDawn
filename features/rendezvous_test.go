@@ -79,6 +79,12 @@ type rvWorld struct {
 	httpClient *http.Client
 }
 
+func init() {
+	stepSets["rendezvous"] = func(sc *godog.ScenarioContext, f fixtures) {
+		rendezvousSteps(sc, f.bin)
+	}
+}
+
 func rendezvousSteps(sc *godog.ScenarioContext, bin string) {
 	w := &rvWorld{bin: bin, conns: map[string]*websocket.Conn{}, nonces: map[string]string{}}
 	const device = `(browser|node|tablet)`
