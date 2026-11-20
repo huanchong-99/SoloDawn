@@ -87,18 +87,18 @@ func (o Options) serveICE(web fs.FS, l net.Listener) error {
 	defer udp.Close()
 	httpEndpoint := newEndpoint(l.Addr())
 	defer httpEndpoint.Close()
-	names := map[string]*endpoint{tlsName(o.Domain): httpEndpoint}
+	port := &sharedPort{config: cfg, names: map[string]*endpoint{tlsName(o.Domain): httpEndpoint}}
 	var turnListener net.Listener
 	if !o.NoRelay {
-		e := newEndpoint(l.Addr())
-		names[tlsName(o.TurnDomain)] = e
-		turnListener = e
+		port.turn = newEndpoint(l.Addr())
+		port.names[tlsName(o.TurnDomain)] = port.turn
+		turnListener = turnStreams{port.turn}
 	}
 	r, server, err := o.start(udp, turnListener, l.Addr().(*net.TCPAddr).Port)
 	if err != nil {
 		return err
 	}
 	defer server.Close()
-	go http.Serve(httpEndpoint, r.handler(web))
-	return serveTLS(l, cfg, names)
+	go httpsServer(r.handler(web)).Serve(httpEndpoint)
+	return port.serve(l)
 }

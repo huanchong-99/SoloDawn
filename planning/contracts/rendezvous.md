@@ -23,6 +23,16 @@ Port numbers are defaults and can be changed by flags.
 `[unverified]` Serving HTTPS and TURN-over-TLS on the same port 443 by
 choosing on the TLS server name. Spike S-6 in `steps/step-1.md`.
 
+Connections on that shared TLS port:
+
+- The TLS handshake must finish within 10 seconds.
+- A connection that negotiates the ALPN id `stun.turn` (RFC 7443) is TURN,
+  whatever its server name; any other goes by its server name.
+- HTTPS reads a request's headers within 10 seconds and closes a keep-alive
+  connection that is idle for 120 seconds. An upgraded WebSocket is subject
+  to neither.
+- A TURN stream that receives nothing for 10 minutes is closed.
+
 ## 2. Signalling protocol
 
 WebSocket, text frames, one JSON object per frame, at most 16 KiB per frame

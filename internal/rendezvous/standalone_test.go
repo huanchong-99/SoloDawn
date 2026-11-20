@@ -219,7 +219,7 @@ func TestCertificatePolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.MinVersion != tls.VersionTLS12 || !reflect.DeepEqual(cfg.NextProtos, []string{"http/1.1", "acme-tls/1"}) {
+	if cfg.MinVersion != tls.VersionTLS12 || !reflect.DeepEqual(cfg.NextProtos, []string{"http/1.1", "stun.turn", "acme-tls/1"}) {
 		t.Fatal(cfg.MinVersion, cfg.NextProtos)
 	}
 	_, err = cfg.GetCertificate(&tls.ClientHelloInfo{ServerName: "unconfigured.example"})
