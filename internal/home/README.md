@@ -168,6 +168,8 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
 `ItemsPush`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+The cards take the names that start with `card`, their tests too, and their test functions start
+with `TestCard`.
 
 ## The run loop
 
@@ -392,9 +394,54 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Cards
+
+`cmd_card.go` holds `post` of kinds `approval` and `decision`, `act` `approve`, `deny` and `choose`
+on them ([commands](../../planning/contracts/commands.md) 1.3 and 1.4;
+[messages](../../planning/contracts/messages.md) 2.3, 2.4, 3.2 and 3.3;
+[task machine](../../planning/contracts/task-machine.md) rows 17 to 20), under the keys
+`post/approval`, `post/decision`, `act/approve`, `act/deny` and `act/choose`, and the helpers
+`cardPending` and `cardClose` that task transitions share. Where the contracts are silent, it does
+this:
+
+- **Post.** Only an AI posts an `approval` or `decision` card, else `forbidden`. What the payload
+  says by itself is `bad_request`: for `approval`, `thread` missing or not `body.task`, `body.ai`
+  not `as`, `category` outside `command`/`file`/`network`/`other`, `command` above 3,072 bytes as a
+  JSON string with its quotes, `full` at or below `len(command)`, `why` empty or above 256 bytes as
+  a JSON string with its quotes, `approvers` empty or holding an empty or repeated user id; for
+  `decision`, `thread` and `body.task` disagreeing, `context` empty, an option with an empty or
+  repeated `id`, `recommended` naming no option of the card, `to` empty or holding an empty or
+  repeated user id; for either, a member mentioned twice. A mentioned id that is no member of the
+  group is `conflict`. For a card about a task, a missing task is `not_found`; then `Step` runs
+  (`OnApproval` or `OnDecision`) with `cardPending` before the message id is checked, so a wrong
+  sender (`forbidden`) or a paused task (`paused`) comes before a duplicate id (`conflict`). The
+  card row has `main` `true`, `ts` as signed and `state` `pending`; a card in a thread advances
+  `task.Thread` (`count` + 1, `last` with `text` cut to 200 characters) and writes `[card, task]`.
+- **Act.** `approve` and `deny` take neither `arg` nor `text`; `choose` takes no empty `arg` or
+  `text`, a `text` of at most 1,024 bytes as a JSON string with its quotes, `arg` naming one of
+  `body.options` when `options` is not empty, and `text` without `arg` when `options` is empty;
+  else `bad_request`. A missing message is `not_found`; a message of the wrong kind is
+  `bad_request`. Only a person in `body.approvers` decides an approval, and only a person in
+  `body.to` or an admin decides a decision (`as` never does), else `forbidden`. A card whose
+  `state.status` is not `pending` (`approved`, `denied`, `decided`, `expired`, `reassigned`), or
+  one whose task is missing, final (`merged`, `cancelled`) or, for `approval`, assigned to another
+  AI than `body.ai`, is `conflict`.
+- **Outcome, expiry and reassignment.** The card's `state` gets `by` (the person's member id),
+  `at` (`c.Now`), `act` (`c.Env`), and for `choose` `choice` and `text` when present. Cards naming
+  a task run `Step` (`OnApprove` or `OnChoose`) with `ByPerson` and `cardPending`; the task row is
+  written after the card row when `Step` changed it (`[card, task]`), and left out when it did not
+  (such as a paused task keeping its wait). Each `decided` item (`body.ai` for `approval`;
+  `card.By`, and `task.Assignee` when another, for `decision`) carries `c.Env` as `cause`, while
+  that AI is still a member of the group. Cards never expire on a timer: a pending card stays
+  pending until someone acts on it or its task is reassigned, merged or cancelled
+  ([approval flow](../../planning/flows/approval.md), sections D and E). `cardPending` reads the
+  task's pending cards from `Disk.Pending` oldest first; `cardClose` applies `Effects.Cards`
+  (`reassigned` on pending approval cards when the assignee changes, `expired` on pending approval
+  and decision cards when the task is merged or cancelled, queuing no `decided` item).
+
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
+- The table of commands holds only the briefs and the cards, and no node starts a loop yet: the other command
   files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
@@ -435,3 +482,9 @@ while a task is paused and a reviewer named while it is paused.
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`cmd_card_test.go` exercises `post/approval`, `post/decision`, `act/approve`, `act/deny` and
+`act/choose` through `Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every boundary,
+wait recomputation and refusal, and `cmd_card_internal_test.go` covers `cardPending` and
+`cardClose`. `features/home_card.feature` holds the home half of acceptance tests A4.1 and A4.2,
+decision priority, reassignment and expiry.
