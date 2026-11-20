@@ -16,7 +16,7 @@ try {
         $user.SID, 'ReadAndExecute', 'Allow'))
     [void][IO.Directory]::CreateDirectory($dir, $acl)
     $exe = Join-Path $dir 'probe.exe'
-    go build -o $exe (Join-Path $PSScriptRoot 'socket_windows.go')
+    go -C $PSScriptRoot build -o $exe .
     if ($LASTEXITCODE -ne 0) { throw 'go build failed' }
     $acl = Get-Acl $exe
     $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
