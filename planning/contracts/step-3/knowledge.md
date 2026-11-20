@@ -65,10 +65,10 @@ Result, only when `type` is sent: `id`, `replaced`.
 
 - **Create.** If the group has no note of that `type` and `name`, the home
   writes a new row with the command's `id`; `replaced` is `false`.
-- **Replace.** If it has one, that row gets the command's `text`, the
-  signer as `by`, the command's `ts`, and a new `seq`. Its `id` and `pos`
-  stay; the command's own `id` is not used. The result has the row's `id`
-  and `replaced: true`. No history is kept: the earlier text is gone.
+- **Replace.** If it has one, that row gets the command's `text` and `ts`,
+  the member id of the person or AI that sent it as `by`, and a new `seq`.
+  Its `id` and `pos` stay; the command's own `id` is not used. The result
+  has the row's `id` and `replaced: true`. No history: the old text is gone.
 - A document is renamed by writing the new name and forgetting the old one.
 
 Refused:
