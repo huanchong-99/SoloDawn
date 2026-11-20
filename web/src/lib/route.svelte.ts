@@ -85,11 +85,14 @@ function fit(path: string, parts: string[]) {
  *  address that fits no path, or the page of a development server in the build, opens the
  *  chats. No address fits two paths. */
 export function parse(hash: string, dev = import.meta.env.DEV) {
-  let parts: string[] = [];
+  const chats = () => ({ page: 'groups' as Page, params: {} });
+  if (!hash.startsWith('#/')) return chats();
+  let parts: string[];
   try {
-    if (hash.startsWith('#/')) parts = hash.slice(2).split('/').map(decodeURIComponent);
+    parts = hash.slice(2).split('/').map(decodeURIComponent);
   } catch {
     // A malformed escape: the address names no page.
+    return chats();
   }
   if (parts.at(-1) === '') parts.pop();
   for (const page of pages) {
@@ -97,7 +100,7 @@ export function parse(hash: string, dev = import.meta.env.DEV) {
     const params = dev || !route.dev ? fit(route.path, parts) : undefined;
     if (params) return { page, params };
   }
-  return { page: 'groups' as Page, params: {} };
+  return chats();
 }
 
 /** The address of a page with its parameters. */

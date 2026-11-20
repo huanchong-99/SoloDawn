@@ -70,6 +70,15 @@ describe('merge', () => {
     expect(() => merge(shell, files)).toThrow(new Error(problem));
   });
 
+  it('tells the keys of an area apart by their borders, not by their letters', () => {
+    expect(() =>
+      merge(shell, {
+        './chat.en.json': { 'chat.a': 'A', 'chat.b': 'B' },
+        './chat.xx.json': { 'chat.achat.b': 'AB' },
+      }),
+    ).toThrow(new Error('./chat.xx.json: the keys differ between languages'));
+  });
+
   it.each([
     [{ './chat.en.json': { 'chat.a': 5 } }, './chat.en.json: chat.a is not text'],
     [{ './chat.en.json': { 'chat.a': null, 'chat.b': '' } }, './chat.en.json: chat.a is not text'],

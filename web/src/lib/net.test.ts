@@ -87,6 +87,10 @@ describe('start', () => {
     expect(path.since).toBeGreaterThanOrEqual(before);
     expect(path.since).toBeLessThanOrEqual(Date.now());
     expect(net.path(other)).toBeUndefined();
+    // A home with a connection that the mock did not add has no time it came online.
+    other.ctl = home.ctl;
+    expect(net.path(other)).toBeUndefined();
+    other.ctl = undefined;
     home.ctl = undefined;
     expect(net.path(home)).toBeUndefined();
     stop();
