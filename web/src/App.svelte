@@ -21,7 +21,7 @@
   });
 </script>
 
-<svelte:head><title>{t(`${route.page}.title`)} · SoloDawn</title></svelte:head>
+<svelte:head><title>{`${t(`${route.page}.title`)} · SoloDawn`}</title></svelte:head>
 
 <div class="app" style:--dir={route.dir}>
   <button class="skip" onclick={() => main.focus()}>{t('app.skip')}</button>
@@ -31,7 +31,7 @@
     </a>
     <div class="tabs" style:--at={pages.indexOf(route.page)}>
       {#each pages as page (page)}
-        <a href="#/{page}" aria-current={page === route.page ? 'page' : undefined}>
+        <a href={`#/${page}`} aria-current={page === route.page ? 'page' : undefined}>
           <Icon name={icons[page]} /><span>{t(`nav.${page}`)}</span>
         </a>
       {/each}
