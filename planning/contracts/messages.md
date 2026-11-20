@@ -93,19 +93,33 @@ card is drawn from the task row.
 
 | Field | Value |
 | --- | --- |
-| `command` | the request exactly as the CLI presented it |
-| `why` | optional: the justification the CLI attached |
+| `tool` | what the CLI names: Claude Code's tool (`Bash`, `Write`, …), or the type of Codex's item (`commandExecution`, `fileChange`) |
+| `command` | the request as the CLI presented it (table below), or its beginning: at most 3 KiB as JSON text in the payload, cut at a character |
+| `full` | optional: the size in bytes of the whole request, there when `command` holds only its beginning. The card then says that it shows a part, how long the whole is, and what `risks.md` K-21 recommends |
+| `why` | optional: the justification the CLI attached; at most 256 bytes as JSON text, cut like `command` |
 | `category` | `command`, `file`, `network`, `other`: the kind of request the CLI made, taken from the type of the request and never from the text of a command (C-10, `risks.md` Q-18). A display hint; it decides nothing |
 | `approvers` | user ids, at least one |
 
-The card's label is `category` plus `why`.
+The card's label is `category` plus `why`. The host fills the body from the
+CLI's request (`contracts/drivers.md` 1.1 and 1.2); the first, second and
+last two rows were seen in spikes S-2 and S-3:
 
-Signed: every field; the host takes them from the CLI's request. Added by
-the home: nothing.
+| Request | `tool` | `category` | `command` | `why` |
+| --- | --- | --- | --- | --- |
+| Claude Code `approve`, `tool_name` `Bash` | `Bash` | `command` | `input.command` | `input.description` |
+| the same with `Write`, `Edit`, `NotebookEdit`, `Read` | the tool name | `file` | `input` as JSON text | — |
+| the same with `WebFetch`, `WebSearch` | the tool name | `network` | `input` as JSON text | — |
+| the same with any other tool | the tool name | `other` | `input` as JSON text | — |
+| Codex `item/commandExecution/requestApproval` | `commandExecution` | `command` | `command` | `reason` |
+| Codex `item/fileChange/requestApproval` | `fileChange` | `file` | for each change of the item: `kind`, `path`, then its `diff` | `reason`, when it is not `null` |
 
-The values of `tool` and `category` are provisional. They are aligned with
-the request types the two CLIs really have in the planning change that
-records spikes S-2 and S-3, and the approval golden files follow it.
+Signed: every field. Added by the home: nothing.
+
+A long request is shown in part and not refused: with these two limits the
+card fits the row of a card (`contracts/conventions.md` section 4).
+The owner's decision still covers the whole request, whose digest the host
+recorded (`flows/approval.md` step 5). In the first version nobody can
+read the rest of it (`risks.md` K-21).
 
 ### 2.4 `decision`
 
@@ -226,7 +240,10 @@ row lists below, except `ai`, which the home adds.
 Only four kinds have a `state`; for every other kind it is `null`. `status`
 is always present; every other key is optional and appears as listed. `by`
 is the member id of the person who acted, `at` the time, `act` the signed
-`act` envelope that decided the card.
+`act` envelope that decided the card. The `text` of an `act` (the note of
+a `revise`, the free text of a `choose`) is at most 1 KiB as JSON text in
+its payload; the home answers `bad_request` to a longer one. A decision
+therefore adds less than 4 KiB to a card's row.
 
 ### 3.1 `brief`
 

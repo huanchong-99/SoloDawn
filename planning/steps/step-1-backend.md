@@ -3,7 +3,7 @@
 For the backend implementer. Read first, in this order: `README.md`,
 `product-rules.md`, `architecture.md`, `sessions.md`, every file in
 `contracts/`, then the flow each task names. Milestones and acceptance tests
-are in `steps/step-1.md`.
+are in `steps/step-1-acceptance.md`.
 
 ## Working rules
 
@@ -63,7 +63,7 @@ are in `steps/step-1.md`.
 ## Tasks
 
 `→` means "depends on". "Done when" names the acceptance tests of
-`steps/step-1.md`, or the artefact that must exist.
+`steps/step-1-acceptance.md`, or the artefact that must exist.
 
 ### Foundation
 
@@ -73,9 +73,9 @@ are in `steps/step-1.md`.
 | B-01 | `internal/proto`, **frozen in slices** (a), (b), (d) and (c), each with its golden files. What each slice holds is in `contracts/conventions.md` section 5; (a) and (b) are done. Slice (c) is one confirmed task from brief to merge as a complete signed vector, with and without a remote, as `flows/trace-task.md` describes it: nothing abridged, every response with its request id | B-00 | round-trip tests pass; a test fails if a struct and its golden file disagree. Slice (a) before B-06, (b) before B-11, (d) before B-10, whose tests use its `null` helper, and as early as possible because the frontend's cards are built from it, (c) before B-19 |
 | B-02 | `internal/identity`: key creation and loading, envelope sign and verify, device-log apply and replay, adoption, fingerprint, the canonical bytes of the pairing secret, `mac` and room id; `testdata/crypto.json` with fixed vectors for the frontend. Merged (pull request 63) as the contract stood then; the rules settled since are B-02b | B-01a | unit tests cover the rules of `contracts/envelope.md` sections 3, 4, 6 as they stood |
 | B-02b | The rules settled after B-02, in `internal/identity` and `internal/proto`: the function that decodes what a node reads from the wire by `contracts/conventions.md` section 2 (exact names, `null`, integers, missing fields); `contracts/envelope.md` as it now stands (weak keys in a key and in a signature, the checks on `to` and `ts`, what is read from a log entry, the last valid device, how a typed secret is read, the `k` of a `pair` message); `testdata/crypto.json` with every part and case of `contracts/vectors.md`. Merged (pull request 67) | B-02 | unit tests cover every rule of `contracts/envelope.md` sections 1 to 4 and 6; the vector file holds every case `contracts/vectors.md` names |
-| B-02c | What was settled after B-02b: the pairing `mac` over `kind` and `name`, and the check of `kind` in a `pair` message (`contracts/envelope.md` section 6); an id as a type, for `n` and `g` in the envelope check (`contracts/conventions.md` section 2); the vector parts and cases added since (`contracts/vectors.md`). One merged case changes: in `received`, "an empty t and n are values" becomes `bad_request`, because an empty `n` is no id, and its empty `t` goes into a case of its own. One pull request with the web client's side (frontend task F-01d): both test suites read the vector file, and the `mac` values in it change | B-02b | unit tests cover the changed rules; the vector file holds every case `contracts/vectors.md` names; both test suites pass |
-| B-03 | Spikes S-1, S-6, S-8, S-9 | B-00 | answers written in the pull request, which is not merged |
-| B-04 | Spikes S-2, S-3, S-4 on macOS; S-5 on Windows | B-00 | answers written in the pull request, which is not merged; the messages the real CLIs sent are kept as files for B-13 |
+| B-02c | What was settled after B-02b: the pairing `mac` over `kind` and `name`, and the check of `kind` in a `pair` message (`contracts/envelope.md` section 6); an id as a type, for `n` and `g` in the envelope check (`contracts/conventions.md` section 2); the size limit of a log entry (`contracts/envelope.md` section 4); the vector parts and cases added since (`contracts/vectors.md`). One merged case changes: in `received`, "an empty t and n are values" becomes `bad_request`, because an empty `n` is no id, and its empty `t` goes into a case of its own. One pull request with the web client's side (frontend task F-01d): both test suites read the vector file, and the `mac` values in it change | B-02b | unit tests cover the changed rules; the vector file holds every case `contracts/vectors.md` names; both test suites pass |
+| B-03 | Spikes S-1, S-6, S-8, S-9. S-1 is answered (pull request 56) and recorded in `contracts/rendezvous.md` section 5, `contracts/rendezvous-evidence.md` and `flows/connect.md` | B-00 | answers written in the pull request, which is not merged |
+| B-04 | Spikes S-2, S-3, S-4 on macOS; S-5 on Windows. The three on macOS are answered (pull request 57) and recorded in `contracts/drivers.md` section 1, `flows/approval.md` H and `flows/takeover.md` F | B-00 | answers written in the pull request, which is not merged; the messages the real CLIs sent are kept as files for B-13 |
 | B-05 | `internal/store`: open, migrations, the tables of `contracts/storage.md`, row put / after-seq-up-to / page by `pos`, counters, inbox, receipts, retention with the purge mark. Merged (pull request 62) | B-01b | unit tests with an in-memory database |
 
 B-03 and B-04 run in parallel with B-01, B-02, B-05. Their answers come
@@ -88,8 +88,8 @@ and B-11, and S-2, S-3, S-5 before B-13.
 | --- | --- | --- | --- |
 | B-06 | `internal/rendezvous`, signalling: handshake, `to`/`from`, `watch`, rooms; static file handler; `solodawn rendezvous` | B-02b, B-03 | A1.5 against a local instance |
 | B-07 | `internal/rendezvous`, relay: STUN and TURN, credentials, the daily byte quota counted on relayed data, `quota`; TLS by flags | B-06 | A1.7 |
-| B-08 | `internal/peer`, connections: signalling client with fan-out of every payload over every path; pion setup per `contracts/rendezvous.md` section 5; acceptance hook; `ctl` framing with requests, responses and pushes; one inbound connection per client device; path classification from the selected pair; reconnect | B-06 | A1.3 up to "the path is `relay`" |
-| B-09 | `internal/peer`, paths: the relay-free probe and the move as a reconnect (or renomination, if S-1 says so); local-network beacon; remembered addresses; port mapping | B-07, B-08 | A1.3, A1.4 |
+| B-08 | `internal/peer`, connections: signalling client with fan-out of every payload over every path; pion setup per `contracts/rendezvous.md` section 5, answering on the fixed port and offering from sockets of its own; acceptance hook; `ctl` framing with requests, responses and pushes; holding early candidates; one inbound connection per client device, with the remembered (signer, `conn`) that makes a replayed offer harmless (section 2.3 there); path classification from the selected pair; reconnect | B-06 | A1.3 up to "the path is `relay`"; A1.10, A1.11 |
+| B-09 | `internal/peer`, paths: the relay-free probe and the move as a reconnect (`flows/connect.md` B); classifying the path again when the selected pair or its candidate types change; local-network beacon; remembered addresses; port mapping | B-07, B-08 | A1.3, A1.4, A1.13 |
 | B-10 | `internal/node`, the assembly package: start-up and wiring; local socket; pairing with the bootstrap rule; `devlog` in both directions and forwarding; `hello`/`welcome`, `groups`; routing of `ctl` messages to the home and host surfaces; receipts for host commands; the node-level part of the host surface (`settings.set`, `pair.browser`, `host.info`). `cmd/solodawn`: `node`, `pair`, `pair-browser`, `open`, `status` as argument parsing | B-02c, B-05, B-08 | A1.1, A1.2, A1.6, A1.8, A1.9 |
 
 ### M2 home
@@ -112,7 +112,7 @@ and B-11, and S-2, S-3, S-5 before B-13.
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-16 | A task session, minimal: `task start` and `task branch` on the home with the task row and `task` message; `start_task`; worktree and branch; the session created on `assign`; `task cancel` in its smallest form, ending the session | B-15 | A5.7 |
-| B-17 | Permissions: level by session kind for both CLIs; what the node itself offers at each level; `perm.set`; the `approve` tool and Codex approval requests behind one handler; approval records; `post` kind `approval` and `act approve`/`deny`; the wait and the late decision; the check of `cause` on the host; audit and the `audit` request | B-16, answers of S-2, S-3, S-5 | A4.1 to A4.6, A4.10 |
+| B-17 | Permissions: level by session kind for both CLIs; what the node itself offers at each level; `perm.set`; the `approve` tool and Codex approval requests behind one handler; approval records; `post` kind `approval` and `act approve`/`deny`; the wait and the late decision; the check of `cause` on the host; audit and the `audit` request | B-16, answers of S-2, S-3, S-5 | A4.1 to A4.6, A4.10. The `live` part of A4.1 is run first: R-41 rests on it (`contracts/drivers.md` 1.1) |
 | B-18 | Limits and stops: usage recording and caps; turn time limit; wake-up cap; `group pause`/`resume`; `host.offline`/`online` | B-17 | A4.7 to A4.9 |
 
 ### M5 tasks
@@ -129,7 +129,7 @@ and B-11, and S-2, S-3, S-5 before B-13.
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-22 | `ask` and `reply`: call depth per turn, open-call table on the host, the answer to an open call ahead of the queue, wait and receipt | B-20 | A6.1 to A6.4 |
-| B-23 | Takeover: choice of session, a task created for a working AI without one and cancelled when nothing changed; interactive start with the session's level; state switch under C-6; `pty` channel bridge with back-pressure, `pty.resize`; hand-back facts and turn; refusal on a relayed path; a repeated `takeover.start` | B-17 | A7.1 to A7.8 |
+| B-23 | Takeover: choice of session, a task created for a working AI without one and cancelled when nothing changed; interactive start with the session's level; state switch under C-6; `pty` channel bridge with back-pressure, `pty.resize`; hand-back facts and turn; refusal unless the path is `direct`, and closing the `pty` channel when the path becomes relayed; a repeated `takeover.start` | B-17 | A7.1 to A7.9 |
 
 ### M8 shipping
 

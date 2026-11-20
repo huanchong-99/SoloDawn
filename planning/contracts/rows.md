@@ -67,7 +67,7 @@ AI:
 | `allow` | user ids that may direct this AI without confirmation (step 2, R-53) |
 | `approvers` | user ids that may decide its approvals: the owner, plus delegates |
 | `state` | `working`, `waiting`, `dormant`, `takeover`, `paused`, `limited`, `offline` |
-| `path` | path between the AI's host and the home: `local` (same node), `lan`, `direct`, `relay` |
+| `path` | path between the AI's host and the home: `local` (same node), `direct`, `relay` (`flows/connect.md` step 8) |
 | `usage` | what the CLI reports. Always an object; `{}` when nothing was reported |
 
 Optional, AI only: `task` (absent when its state names no task); every key
@@ -127,6 +127,7 @@ does not.
 | `wait.kind` | while `queued`: `depends`; while `active`: `approval`, `decision`, `reviewer`, `conflict`; while `paused`: `manual`, `rounds`, `preempted` |
 | `failures` | consecutive failures (R-63) |
 | `thread.rounds` | AI-to-AI exchanges since the last human message in the thread (R-60) |
+| `thread.last.text` | a preview: at most the first 200 characters of that message's text. A long message is cut here, never refused because of it |
 | `stats.ended` | the time the task finished, or `null` |
 
 Optional:
@@ -172,7 +173,7 @@ What the mock-up badges map to:
 | `thread` | task id, or `null` for a main-line message |
 | `main` | `true` if it also appears in the main line (cards raised from a thread) |
 | `by` | member id, or `"system"` for rows written by the home |
-| `text` | at most 16 KiB of UTF-8; plain text with Markdown code spans; `""` when the message is only a card |
+| `text` | plain text with Markdown code spans; `""` when the message is only a card. How long it can be is below |
 | `mentions` | member ids |
 | `re` | the message this one answers, or `null` |
 | `body` | always an object, fixed after creation; its shape depends on `kind`, and it is `{}` for kinds without one |
@@ -183,6 +184,20 @@ Optional: `env`, absent on rows written by the home.
 
 The kinds, the body of each, and the states of cards are in
 `contracts/messages.md`.
+
+**How long a message can be.** The limit is that of the row
+(`contracts/conventions.md` section 4), and the row holds the text twice:
+as `text`, and inside `env.p`, where it is escaped once more. Counted in
+the row, an ASCII character costs 2 bytes, a line break 5, a quote or a
+backslash 6, a Chinese character 6; the rest of the row takes about 0.8
+KiB. That is about 7,700 characters of plain English, about 2,500 Chinese
+characters, and 5.5 to 7 KiB of source code, less the more quotes it has
+(2.5 KiB if it were nothing but quotes). A client estimates the row by
+this rule and tells the writer before sending. Go's `encoding/json`
+always writes U+2028 and U+2029 as six-byte escapes, also with HTML
+escaping off, and a browser writes them as they are: an estimate made in
+a browser undercounts those two characters, and the size the node
+measures decides. This limit is `risks.md` K-22.
 
 ## 6. `note`
 

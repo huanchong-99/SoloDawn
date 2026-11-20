@@ -81,18 +81,20 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   Level 2 limits what the AI itself does. The project's own check commands
   run outside the sandbox; the product says so where levels are chosen
   (Q-19).
-- **R-41** `[S1]` At level 2 these need approval: touching files outside the
-  workspace, installing software, bulk deletion, pushing code, using secrets.
-  As settled by the coordinator:
-  - pushing the task's own branch is inside the workspace and needs no
-    approval; pushing any other branch, or force-pushing, needs approval
-    (Q-10). The node itself pushes that branch and opens the pull request
-    (Q-16);
+- **R-41** `[S1]` At level 2 the AI changes files in the workspace without
+  asking. What reaches further (a change outside the workspace, or the
+  network: installing software, pushing code) is meant to happen only
+  after the AI has asked through its CLI and the owner has approved the
+  card. Level 2 does not promise to limit reading, and Codex reads
+  anywhere at level 1 too. What each CLI was measured to confine, and what
+  is not shown yet, is in `contracts/drivers.md` section 1 (Q-25). As settled:
+  - pushing the task's own branch needs no approval, and the node itself
+    does it and opens the pull request (Q-10, Q-16); pushing any other
+    branch, or force-pushing, needs approval;
   - the platform never inspects commands. Bulk deletion inside the
-    workspace is covered by Git and by the CLI's own sandbox, not by a
-    card (Q-11). An approval card shows the kind of request and the
-    CLI's own one-line description, never a label derived from reading
-    the command (Q-18);
+    workspace is covered by Git and by the CLI's sandbox, not by a card
+    (Q-11). A card shows the kind of request and the CLI's own one-line
+    description, never a label derived from reading the command (Q-18);
   - secrets are guarded where they would leave the machine (R-137).
 - **R-42** `[S1]` Approval flow: the AI stops and asks; an approval card
   appears in the main line under the secretary's name and mentions the
@@ -104,8 +106,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   interface. The platform never reads terminal output to detect them.
 - **R-44** `[S2]` Work a colleague assigns to my AI runs at level 2 at most.
 - **R-45** `[S1]` AI configuration shipped inside a repository (plugins,
-  hooks, project MCP servers) is not loaded by default. The owner may enable
-  it per trusted project.
+  hooks, project MCP servers, the project's own instruction file) is not
+  loaded by default. The owner may enable it per trusted project (Q-24).
 
 ## Whose instructions an AI follows
 

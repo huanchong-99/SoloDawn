@@ -93,9 +93,50 @@
     0 8px 28px light-dark(rgb(23 26 33 / 0.14), rgb(0 0 0 / 0.55)), 0 0 0 1px var(--line);
   --focus: 2px solid var(--sky);
 
+  /* Motion. Only transform and opacity ever move, so nothing is laid out or painted again. */
   --dur-1: 120ms; /* hover, press */
-  --dur-2: 200ms; /* expand, switch */
-  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-2: 200ms; /* expand, switch, focus */
+  --dur-3: 320ms; /* a page or a part arrives, the page cross-fades */
+  --dur-4: 500ms; /* a spring comes to rest */
+  --ease: cubic-bezier(0.2, 0, 0, 1); /* a change of state */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* an arrival: fast in, long to settle */
+  /* What a person moved follows like a spring, 4% past and back: spring() in motion.ts, sampled
+     every 30th of the way. */
+  --spring: linear(
+    0,
+    0.059,
+    0.197,
+    0.365,
+    0.532,
+    0.682,
+    0.804,
+    0.897,
+    0.963,
+    1.006,
+    1.03,
+    1.041,
+    1.043,
+    1.04,
+    1.033,
+    1.026,
+    1.019,
+    1.012,
+    1.007,
+    1.004,
+    1.001,
+    0.999,
+    0.999,
+    0.998,
+    0.998,
+    0.998,
+    0.999,
+    0.999,
+    0.999,
+    1,
+    1
+  );
+  --travel: 12px; /* how far an arriving part comes */
+  --stagger: 45ms; /* between the parts of an arriving page */
 
   --rail-w: 64px; /* side navigation */
   --list-w: 300px; /* group list column */

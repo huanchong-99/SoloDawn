@@ -32,6 +32,10 @@ Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-l
 | `pnpm format`      | Prettier                                                           |
 | `pnpm stryker run` | mutation tests of every `.ts` module outside routes and components |
 
+Before the first `pnpm test`, install the headless browser with
+`pnpm exec playwright install --with-deps --only-shell chromium`. The five motion scenarios run
+against a temporary production build in Chromium.
+
 The one runtime dependency is `valibot`, for the wire types. Signatures, hashes and macs use the
 browser's WebCrypto only; no signature library is bundled (R-164). `fake-indexeddb` is a
 development dependency, an IndexedDB for the tests.
@@ -103,6 +107,29 @@ development dependency, an IndexedDB for the tests.
 - **Texts.** Every interface string is a key in both `src/messages/zh-CN.json` and
   `src/messages/en.json` and is read with `t(key)`; a test fails when the key sets differ. Chat
   content is never translated.
+- **Motion.** No animation library is bundled: CSS transitions and keyframes move the parts, the
+  browser's View Transitions cross-fade the page, and `svelte/motion` reads the system setting.
+  The tokens are in `tokens.css` beside the others: four durations (`--dur-1` 120 ms hover and
+  press, `--dur-2` 200 ms switch and focus, `--dur-3` 320 ms arrival and cross-fade, `--dur-4`
+  500 ms spring), `--ease` for a change of state, `--ease-out` for an arrival, `--spring` for what
+  a person moved, `--travel` and `--stagger`. Only `transform` and `opacity` are animated; a colour
+  that changes on hover, press or focus is a layer under or around the part whose opacity changes.
+  Keyboard focus is seen in full the moment it lands: the skip button is in place and the ring
+  is opaque at once, and only the ring's settling onto the part is animated.
+  `route.dir` is the way the last page change went along the navigation (1, -1, or 0 within a
+  page) and `--at` on the navigation and on a segmented control is the index of the current entry;
+  the styles turn them into the side a page arrives from and the place of the sliding mark. The
+  parts of a page arrive one after another, but only their travel waits: all of them fade in
+  from the first frame, and a part whose animation does not run is seen in full.
+  `choose(key, value)` changes a preference through `shift` of `src/lib/motion.ts`, which
+  cross-fades the page where the browser has view transitions (Chrome and Edge, Safari 18,
+  Firefox 144) and changes it at once elsewhere. The fade takes a picture of the old page only
+  and fades it out over the new page: a page in a picture takes no pointer input, so `shift`
+  marks the new page `data-live`, which keeps it out of the pictures, and a press during the fade
+  reaches it. When the system asks for reduced motion, nothing moves: no transition, no
+  keyframes, no cross-fade, and a cross-fade under way ends at once (the rule for its pictures is apart
+  from the rule for every part, which a browser without view transitions would otherwise drop); the logo does not turn to
+  the pointer and a press does not sink a button, which shows the press by its layer alone.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. Shared styles are global classes in
   `src/styles/base.css`, taken from the design; a component's own layout goes in its `<style>`.
@@ -118,7 +145,8 @@ development dependency, an IndexedDB for the tests.
 | `src/lib/pairing.ts`        | pairing secret, room id, mac, pair message check                |
 | `src/lib/payload.ts`        | the payload fields the envelope and log checks read             |
 | `src/lib/prefs.svelte.ts`   | theme and language state, their persistence, `t`                |
-| `src/lib/route.svelte.ts`   | current page from the address fragment                          |
+| `src/lib/route.svelte.ts`   | current page from the address fragment, and the way it changed  |
+| `src/lib/motion.ts`         | `spring`, the curve of `--spring`; `shift`, the page cross-fade |
 | `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface           |
 | `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`                 |
 | `src/App.svelte`            | shell: skip link, navigation, top bar, the current route        |
@@ -152,6 +180,11 @@ are hidden; both choices are on the settings page at every width.
 - The shell was checked in headless Chrome at 375, 820, 1100 and 1440 px in both themes and both
   languages on every page (no element wider than the viewport) on 2026-11-20. It has not been
   opened on a real phone, in Safari or in Firefox.
+- The motion was checked there too: while pages changed, the theme and language switched and
+  parts were hovered, pressed and focused, the page's animations (`document.getAnimations()`)
+  changed `opacity` and `transform` only, and with reduced motion emulated there were none. A test
+  holds `--spring` to `spring()`. Frame rate was not measured, and the fallback without view
+  transitions was exercised only in the tests.
 - `src/lib/proto.test.ts` reads every wire example with the schema of its file name and fails on a
   file that has none (`crypto.json`, which holds test vectors, excepted); it adds an unknown field
   to every object, which is dropped (so a golden file with a field the schema lacks fails the exact

@@ -119,3 +119,4 @@ pion's ICE, so the bar is high (`risks.md` Q-1).
 
 Phone app. Bridges to chat applications. Cloud-hosted AIs joining through a
 public interface of the home. A built-in rule engine for quality gates.
+Viewing the full text of a long approval request (`risks.md` K-21).
