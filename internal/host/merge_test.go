@@ -231,12 +231,12 @@ func checkMergeCalls(t *testing.T, repo, want string) {
 
 const (
 	mergeInvocation = "pr merge 32 --squash --delete-branch --match-head-commit abc\n"
-	viewInvocation  = "pr view 32 --json state,mergeCommit\n"
+	viewInvocation  = "pr view 32 --json state,mergeCommit,headRefOid\n"
 )
 
 func TestMergeReviewedPR(t *testing.T) {
 	m := mergeForgeFixture(t)
-	t.Setenv("GH_FIXTURE_OUTPUT", `{"state":"MERGED","mergeCommit":{"oid":"def"}}`)
+	t.Setenv("GH_FIXTURE_OUTPUT", `{"state":"MERGED","mergeCommit":{"oid":"def"},"headRefOid":"abc"}`)
 	result, err := m.Apply(t.Context())
 	mergeOK(t, err)
 	mergeEqual(t, result, host.MergeResult{MergeCommit: "def"})
@@ -260,7 +260,7 @@ func TestMergePRCommandFailure(t *testing.T) {
 func TestMergePRBranchDeletionFailure(t *testing.T) {
 	m := mergeForgeFixture(t)
 	t.Setenv("FAIL_GH_COMMAND", "merge")
-	t.Setenv("GH_FIXTURE_OUTPUT", `{"state":"MERGED","mergeCommit":{"oid":"def"}}`)
+	t.Setenv("GH_FIXTURE_OUTPUT", `{"state":"MERGED","mergeCommit":{"oid":"def"},"headRefOid":"abc"}`)
 	result, err := m.Apply(t.Context())
 	mergeOK(t, err)
 	mergeEqual(t, result, host.MergeResult{MergeCommit: "def"})
@@ -272,7 +272,7 @@ func TestMergePRUnknownOutcome(t *testing.T) {
 	t.Setenv("FAIL_GH_COMMAND", "view")
 	result, err := m.Apply(t.Context())
 	mergeEqual(t, result, host.MergeResult{})
-	mergeEqual(t, err.Error(), "gh pr view 32 --json state,mergeCommit: exit status 1: forge refused")
+	mergeEqual(t, err.Error(), "gh pr view 32 --json state,mergeCommit,headRefOid: exit status 1: forge refused")
 	checkMergeCalls(t, m.Repo, mergeInvocation+viewInvocation)
 }
 
@@ -280,10 +280,12 @@ func TestMergePRInspection(t *testing.T) {
 	for _, tc := range []struct{ out, fail, conflict, problem string }{
 		{out: `{"state":"OPEN","mergeCommit":null}`, conflict: "pull request 32 is OPEN"},
 		{out: `{"state":"CLOSED","mergeCommit":null}`, conflict: "pull request 32 is CLOSED"},
-		{out: `{"state":"MERGED","mergeCommit":null}`, problem: "gh pr view: merged pull request has no merge commit"},
+		{out: `{"state":"MERGED","mergeCommit":{"oid":"def"},"headRefOid":"abc1"}`, conflict: "pull request 32 merged head abc1, expected abc"},
+		{out: `{"state":"MERGED","mergeCommit":null,"headRefOid":"abc"}`, problem: "gh pr view: merged pull request is missing its head or merge commit"},
+		{out: `{"state":"MERGED","mergeCommit":{"oid":"def"}}`, problem: "gh pr view: merged pull request is missing its head or merge commit"},
 		{out: `{}`, problem: `gh pr view: unexpected state ""`},
 		{out: "{", problem: "gh pr view: unexpected end of JSON input"},
-		{fail: "view", problem: "gh pr view 32 --json state,mergeCommit: exit status 1: forge refused"},
+		{fail: "view", problem: "gh pr view 32 --json state,mergeCommit,headRefOid: exit status 1: forge refused"},
 	} {
 		t.Run(tc.out+tc.fail, func(t *testing.T) {
 			m := mergeForgeFixture(t)

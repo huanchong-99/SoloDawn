@@ -114,12 +114,13 @@ func (m ReviewedMerge) Inspect(ctx context.Context) (MergeResult, error) {
 }
 
 func (m ReviewedMerge) inspectPR(ctx context.Context) (MergeResult, error) {
-	out, err := m.run(ctx, "gh", "pr", "view", strconv.Itoa(m.PR), "--json", "state,mergeCommit")
+	out, err := m.run(ctx, "gh", "pr", "view", strconv.Itoa(m.PR), "--json", "state,mergeCommit,headRefOid")
 	if err != nil {
 		return MergeResult{}, err
 	}
 	var pr struct {
 		State       string
+		HeadRefOID  string
 		MergeCommit struct{ OID string }
 	}
 	if err := json.Unmarshal([]byte(out), &pr); err != nil {
@@ -127,15 +128,22 @@ func (m ReviewedMerge) inspectPR(ctx context.Context) (MergeResult, error) {
 	}
 	switch pr.State {
 	case "MERGED":
-		if pr.MergeCommit.OID == "" {
-			return MergeResult{}, errors.New("gh pr view: merged pull request has no merge commit")
-		}
-		return MergeResult{MergeCommit: pr.MergeCommit.OID}, nil
+		return m.mergedPR(pr.HeadRefOID, pr.MergeCommit.OID)
 	case "OPEN", "CLOSED":
 		return MergeResult{Conflict: fmt.Sprintf("pull request %d is %s", m.PR, pr.State)}, nil
 	default:
 		return MergeResult{}, fmt.Errorf("gh pr view: unexpected state %q", pr.State)
 	}
+}
+
+func (m ReviewedMerge) mergedPR(head, squash string) (MergeResult, error) {
+	if head == "" || squash == "" {
+		return MergeResult{}, errors.New("gh pr view: merged pull request is missing its head or merge commit")
+	}
+	if head != m.Commit {
+		return MergeResult{Conflict: fmt.Sprintf("pull request %d merged head %s, expected %s", m.PR, head, m.Commit)}, nil
+	}
+	return MergeResult{MergeCommit: squash}, nil
 }
 
 func (m ReviewedMerge) run(ctx context.Context, name string, args ...string) (string, error) {
