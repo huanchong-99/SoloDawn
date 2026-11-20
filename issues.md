@@ -51,6 +51,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: only those two fields have the type (`internal/proto/envelope.go:12-23`, `web/src/lib/proto.ts:17-22`). The contracts type `n` and `g` as ids in a field table; for the other fields `contracts/rows.md` says "random ids unless stated" without saying per field which values stand beside the id (the `by` of a message row may be `"system"`, a device row's `id` is `<user id>:<ver>`).
 - Status: open. A field gets the type (`proto.ID` in Go, `Id` in `proto.ts`) in the task that first reads it from the wire.
 
+### 2026-11-20 · limitation · A message cut between fragments is forwarded as if it were complete
+
+- Symptom: when a client sends a WebSocket message in several fragments and its transport closes between two of them, the rendezvous reads the fragments received so far as one complete message. If they happen to form a valid frame, it is handled like any other: a `to` is forwarded as `from`. `planning/contracts/rendezvous.md` section 2 says that a frame the server cannot read closes its sender.
+- Cause: `github.com/coder/websocket` v1.8.15, `read.go:447-449`: `msgReader.Read` takes any `io.EOF` for the end of the message, and the header of the next fragment, read by `readFrameHeader` (`frame.go:52-58`), fails with a plain `io.EOF` when the transport has closed. `Conn.Read` then returns the bytes so far without an error, to `internal/rendezvous/server.go:128`.
+- Why it is harmless: what is forwarded is a complete, valid frame that the same authenticated sender could have sent on purpose; the sender's connection is already gone; and the receiver checks the signed envelope itself (`planning/contracts/envelope.md` section 3).
+- Status: open, accepted by the coordinator on 2026-11-20 with no code change. Revisit if the library changes, or if the server ever acts on a frame beyond forwarding it.
+
 ## Resolved
 
 ### 2026-11-20 · deviation · Identity code was behind the contract settled in PR #69
