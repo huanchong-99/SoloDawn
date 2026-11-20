@@ -270,14 +270,14 @@ func cryptoVectors() vectors {
 			no(proto.Envelope{Payload: change(browser, 3, "add", tablet), Key: b64.EncodeToString(offCurve()), Signature: add(browser, 3, tablet).Signature})),
 		devlogCase("p is at most 2,048 bytes as UTF-8: 2,049 are refused, 2,048 accepted", []device{browser, node},
 			yes(genesis), no(browser.key.Sign(sized(entry, 2049))), yes(browser.key.Sign(sized(entry, 2048)))),
-		devlogCase("ver is an integer by its value: 2.0, and 2.0000000000000001, are 2; null, a text and 2.5 are none", []device{browser, node, tablet},
+		devlogCase("ver is an integer by its value: 2.0000000000000001 is 2 and 3.0 is 3", []device{browser, node, tablet},
 			yes(genesis),
 			no(rewritten(browser, entry, `"ver":2`, `"ver":null`)),
 			no(rewritten(browser, entry, `"ver":2`, `"ver":"2"`)),
 			no(rewritten(browser, entry, `"ver":2`, `"ver":2.5`)),
 			no(rewritten(browser, entry, `"ver":2`, `"ver":9007199254740992`)),
-			yes(rewritten(browser, entry, `"ver":2`, `"ver":2.0`)),
-			yes(rewritten(browser, change(browser, 3, "add", tablet), `"ver":3`, `"ver":3.0000000000000001`))),
+			yes(rewritten(browser, entry, `"ver":2`, `"ver":2.0000000000000001`)),
+			yes(rewritten(browser, change(browser, 3, "add", tablet), `"ver":3`, `"ver":3.0`))),
 		devlogCase("names are exact: VER beside ver is not read, and VER alone is no ver", []device{browser, node},
 			yes(genesis),
 			no(rewritten(browser, entry, `"ver":2`, `"VER":2`)),
@@ -372,6 +372,7 @@ func receivedVectors() []receivedVector {
 	both("no t", `{`+n(id)+fresh+to(me)+`}`, "bad_request")
 	both("t a number", `{"t":7,`+n(id)+fresh+to(me)+`}`, "bad_request")
 	both("an empty t is a value", `{"t":"",`+n(id)+fresh+to(me)+`}`, "ok")
+	both("an empty t and n", `{"t":"",`+n("")+fresh+to(me)+`}`, "bad_request")
 	both("an empty n is no id", `{"t":"offer",`+n("")+fresh+to(me)+`}`, "bad_request")
 	both("n written with the escape of a lone surrogate", `{"t":"offer",`+n(`\ud800`)+fresh+to(me)+`}`, "bad_request")
 	both("n one character short of an id", `{"t":"offer",`+n(id[:21])+fresh+to(me)+`}`, "bad_request")

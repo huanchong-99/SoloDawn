@@ -972,6 +972,32 @@
       "code": "ok"
     },
     {
+      "name": "an empty t and n",
+      "kind": "signal",
+      "me": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+      "now": 1763600000000,
+      "known": true,
+      "env": {
+        "p": "{\"t\":\"\",\"n\":\"\",\"ts\":1763600000000,\"to\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\"}",
+        "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+        "s": "B3d_2XLnH9DhOxKXQFPvZWe8xFtgEZgHGDkpvuDRI_EPGXLRbPweNI0EviMQSSaxuQ5LJ_blEsg4gNCdnQs0Ag"
+      },
+      "code": "bad_request"
+    },
+    {
+      "name": "an empty t and n",
+      "kind": "command",
+      "me": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+      "now": 1763600000000,
+      "known": true,
+      "env": {
+        "p": "{\"t\":\"\",\"n\":\"\",\"ts\":1763600000000,\"to\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\"}",
+        "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+        "s": "B3d_2XLnH9DhOxKXQFPvZWe8xFtgEZgHGDkpvuDRI_EPGXLRbPweNI0EviMQSSaxuQ5LJ_blEsg4gNCdnQs0Ag"
+      },
+      "code": "bad_request"
+    },
+    {
       "name": "an empty n is no id",
       "kind": "signal",
       "me": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
@@ -2461,7 +2487,7 @@
       ]
     },
     {
-      "name": "ver is an integer by its value: 2.0, and 2.0000000000000001, are 2; null, a text and 2.5 are none",
+      "name": "ver is an integer by its value: 2.0000000000000001 is 2 and 3.0 is 3",
       "user": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
       "entries": [
         {
@@ -2506,17 +2532,17 @@
         },
         {
           "env": {
-            "p": "{\"t\":\"device\",\"n\":\"Sz2Uz85rLoeS2_MfpuIXPw\",\"ts\":1763600000002,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":2.0,\"op\":\"add\",\"dev\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\",\"kind\":\"node\",\"name\":\"workstation\"}",
+            "p": "{\"t\":\"device\",\"n\":\"Sz2Uz85rLoeS2_MfpuIXPw\",\"ts\":1763600000002,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":2.0000000000000001,\"op\":\"add\",\"dev\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\",\"kind\":\"node\",\"name\":\"workstation\"}",
             "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
-            "s": "ThMbjCtOpX_52ikGBgGBnG61eeU5kCAh5-Al8JN6F7oD6QjQ7yVxs_rqMWWFDf-AjshZnGgVpOTD4Ej7KfbeAA"
+            "s": "-0u3wTpf-L_PdjFFyffeNvxfEr_3w2MqB3HyK0_RVUwQ0Nf_7etQVaEgg4HN7tKJqfftayo0CdiQAllXUjmSBA"
           },
           "accept": true
         },
         {
           "env": {
-            "p": "{\"t\":\"device\",\"n\":\"oozJPivgasTQy9-ajPo_Ew\",\"ts\":1763600000003,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":3.0000000000000001,\"op\":\"add\",\"dev\":\"Uf0smnF_JZaPezkT98YFrtcqsk7qcy0S63F2cBmzXew\",\"kind\":\"browser\",\"name\":\"tablet browser\"}",
+            "p": "{\"t\":\"device\",\"n\":\"oozJPivgasTQy9-ajPo_Ew\",\"ts\":1763600000003,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":3.0,\"op\":\"add\",\"dev\":\"Uf0smnF_JZaPezkT98YFrtcqsk7qcy0S63F2cBmzXew\",\"kind\":\"browser\",\"name\":\"tablet browser\"}",
             "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
-            "s": "QE12DHn3mQTLtHiyLIci9HoV6l4OiS1n8tbmvweMkNs0Zx75xrEMZPk3192zzEiWxA2f7700jad45Ia2YKNaCA"
+            "s": "qjJRqFtt6AvGoZ30kyKcQ4elYfKP08VwHENmala5xa3nGRic39dvh0jI99bL3TeY0D1hNVrE9zoXdY7JloQQCw"
           },
           "accept": true
         }
