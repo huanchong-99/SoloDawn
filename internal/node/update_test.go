@@ -258,17 +258,23 @@ func TestUpdateSizeLimit(t *testing.T) {
 	checkImage(t, f.u.Binary, "old binary")
 }
 
-func setStall(t *testing.T, d time.Duration) {
+// setStall sets the stall limit for the test and returns a channel that a
+// handler waits on to hang: it is closed when the test ends, before the
+// server stops. The request's own context is not used for that, because the
+// server may end it before the client gives up.
+func setStall(t *testing.T, d time.Duration) <-chan struct{} {
 	saved := stallTimeout
-	t.Cleanup(func() { stallTimeout = saved })
+	hang := make(chan struct{})
+	t.Cleanup(func() { stallTimeout = saved; close(hang) })
 	stallTimeout = d
+	return hang
 }
 
 // No answer within the stall limit: the request is given up.
 func TestUpdateStallsWithoutAnswer(t *testing.T) {
 	f, mux := newUpdate(t)
-	mux.HandleFunc("/download/SHA256SUMS", func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
-	setStall(t, 50*time.Millisecond)
+	hang := setStall(t, 50*time.Millisecond)
+	mux.HandleFunc("/download/SHA256SUMS", func(http.ResponseWriter, *http.Request) { <-hang })
 	if err := f.u.Check(t.Context(), time.Now()); !errors.Is(err, errStalled) {
 		t.Fatalf("a server that never answers: %v", err)
 	}
@@ -277,11 +283,11 @@ func TestUpdateStallsWithoutAnswer(t *testing.T) {
 // The body stops halfway: the download is given up and nothing is installed.
 func TestUpdateStallsInTheBody(t *testing.T) {
 	f, mux := newUpdate(t)
-	setStall(t, 50*time.Millisecond)
-	f.serveBinary(mux, func(w http.ResponseWriter, r *http.Request) {
+	hang := setStall(t, 50*time.Millisecond)
+	f.serveBinary(mux, func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(f.image[:4]))
 		w.(http.Flusher).Flush()
-		<-r.Context().Done()
+		<-hang
 	})
 	if err := f.u.Check(t.Context(), time.Now()); !errors.Is(err, errStalled) {
 		t.Fatalf("a body that stops: %v", err)
