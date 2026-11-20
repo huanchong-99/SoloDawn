@@ -306,13 +306,15 @@ describe('openSignal and openCommand', () => {
     const device = await newDevice();
     const p = `{"t":"cmd","n":"${n}","ts":1.0000000000000001,"TO":"o","to":"o","to":"me","Ts":"no"}`;
     const opened = await openCommand(crypto, await device.sign(p), 'me', everyone, 1);
-    expect(opened).toMatchObject({ header: { ts: 1, to: 'me' } });
+    expect(opened).toStrictEqual({ header: JSON.parse(p) });
   });
 
   it('let a command have no to, and read an empty to as a value', async () => {
     const device = await newDevice();
     const none = await device.sign(payload(''));
-    expect(await openCommand(crypto, none, 'me', everyone, now)).toHaveProperty('header');
+    expect(await openCommand(crypto, none, 'me', everyone, now)).toStrictEqual({
+      header: { t: 'offer', n, ts: now },
+    });
     const empty = await device.sign(payload(',"to":""'));
     expect(await openCommand(crypto, empty, 'me', everyone, now)).toStrictEqual({
       code: 'not_for_me',
@@ -335,8 +337,9 @@ describe('openSignal and openCommand', () => {
     const device = await newDevice();
     const env = await device.sign(payload(',"to":"me"'));
     const at = async (t: number) => open(crypto, env, 'me', everyone, t);
-    expect(await at(now + window)).toHaveProperty('header');
-    expect(await at(now - window)).toHaveProperty('header');
+    const opened = { header: { t: 'offer', n, ts: now, to: 'me' } };
+    expect(await at(now + window)).toStrictEqual(opened);
+    expect(await at(now - window)).toStrictEqual(opened);
     expect(await at(now + window + 1)).toStrictEqual({ code: 'stale' });
     expect(await at(now - window - 1)).toStrictEqual({ code: 'stale' });
   });

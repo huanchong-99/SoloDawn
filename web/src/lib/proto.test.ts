@@ -195,7 +195,8 @@ describe('Id', () => {
     const msg = JSON.parse(goldens['row-msg-system']);
     expect(msg.by).toBe('system');
     expect(accepts('row-msg-system', msg)).toBe(true);
-    expect(JSON.parse(goldens['row-device']).id).toContain(':');
+    const device = p.decode(p.DeviceRow, goldens['row-device']);
+    expect(device.id).toBe(`${device.user}:${device.ver}`);
   });
 });
 
