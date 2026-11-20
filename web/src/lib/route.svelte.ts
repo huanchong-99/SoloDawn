@@ -4,8 +4,11 @@ export type Page = (typeof pages)[number];
 
 const parse = (hash: string): Page => pages.find((p) => p === hash.split('/')[1]) ?? 'groups';
 
-export const route = $state({ page: parse(location.hash) });
+// dir is the way the last change went along the navigation: 1 forward, -1 back.
+export const route = $state({ page: parse(location.hash), dir: 1 });
 
-addEventListener('hashchange', () => {
-  route.page = parse(location.hash);
+addEventListener('hashchange', (event) => {
+  const page = parse(new URL(event.newURL).hash);
+  route.dir = Math.sign(pages.indexOf(page) - pages.indexOf(route.page));
+  route.page = page;
 });
