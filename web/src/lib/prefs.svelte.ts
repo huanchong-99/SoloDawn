@@ -2,6 +2,7 @@
 import { MediaQuery } from 'svelte/reactivity';
 import en from '../messages/en.json';
 import zh from '../messages/zh-CN.json';
+import { shift } from './motion';
 
 export type Key = keyof typeof zh;
 
@@ -50,12 +51,15 @@ const systemDark = new MediaQuery('prefers-color-scheme: dark');
 
 export const isDark = () => (prefs.theme === 'auto' ? systemDark.current : prefs.theme === 'dark');
 
-export function toggleTheme() {
-  prefs.theme = isDark() ? 'light' : 'dark';
+/** Changes a preference; the page cross-fades to its new look. */
+export function choose<K extends keyof typeof prefs>(key: K, value: (typeof prefs)[K]) {
+  shift(() => {
+    prefs[key] = value;
+  });
 }
 
-export function toggleLang() {
-  prefs.lang = prefs.lang === 'en' ? 'zh-CN' : 'en';
-}
+export const toggleTheme = () => choose('theme', isDark() ? 'light' : 'dark');
+
+export const toggleLang = () => choose('lang', prefs.lang === 'en' ? 'zh-CN' : 'en');
 
 export const t = (key: Key) => messages[prefs.lang][key];

@@ -66,6 +66,24 @@ function choose(label: string) {
   svelte.flushSync();
 }
 
+function go(hash: string) {
+  location.hash = hash;
+  dispatchEvent(new HashChangeEvent('hashchange'));
+  svelte.flushSync();
+}
+
+/** A custom property that a part's motion reads, such as the place of a mark. */
+const motionOf = (selector: string, property: string) =>
+  document.querySelector<HTMLElement>(selector)!.style.getPropertyValue(property);
+
+/** The changes the browser was asked to cross-fade, in a browser with view transitions. */
+let crossFades: (() => void)[];
+
+function viewTransitions() {
+  crossFades = [];
+  Object.assign(document, { startViewTransition: (change: () => void) => crossFades.push(change) });
+}
+
 function press(label: string) {
   document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)!.click();
   svelte.flushSync();
@@ -73,6 +91,7 @@ function press(label: string) {
 
 describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScenario }) => {
   AfterEachScenario(() => {
+    Reflect.deleteProperty(document, 'startViewTransition');
     vi.restoreAllMocks();
     localStorage.clear();
   });
@@ -103,11 +122,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
   Scenario('The address fragment selects the page', ({ Given, When, Then, And }) => {
     Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client', () => open());
-    When('the address fragment becomes "#/nodes"', () => {
-      location.hash = '#/nodes';
-      dispatchEvent(new HashChangeEvent('hashchange'));
-      svelte.flushSync();
-    });
+    When('the address fragment becomes "#/nodes"', () => go('#/nodes'));
     Then('the current page is "我的电脑和 AI"', () => {
       expect(texts('h1')).toEqual(['我的电脑和 AI']);
       expect(texts('nav a[aria-current="page"]')).toEqual(['电脑和 AI']);
@@ -172,6 +187,94 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       expect(document.documentElement.lang).toBe('en');
     });
   });
+
+  Scenario(
+    'The mark of the current page moves to the entry that is opened',
+    ({ Given, When, Then, And }) => {
+      Given('the browser supports Ed25519 in WebCrypto', supported);
+      And('the person opens the client', () => open());
+      When('the address fragment becomes "#/settings"', () => go('#/settings'));
+      Then('the mark of the current page is on entry 3 of the navigation', () => {
+        expect(motionOf('nav .tabs', '--at')).toBe('2');
+      });
+      And('the page arrives from the side of the later entries', () => {
+        expect(motionOf('.app', '--dir')).toBe('1');
+      });
+    },
+  );
+
+  Scenario(
+    'A page opened from a later one arrives from the other side',
+    ({ Given, When, Then, And }) => {
+      Given('the browser supports Ed25519 in WebCrypto', supported);
+      And('the person opens the client at "#/settings"', () => open('#/settings'));
+      When('the address fragment becomes "#/nodes"', () => go('#/nodes'));
+      Then('the mark of the current page is on entry 2 of the navigation', () => {
+        expect(motionOf('nav .tabs', '--at')).toBe('1');
+      });
+      And('the page arrives from the side of the earlier entries', () => {
+        expect(motionOf('.app', '--dir')).toBe('-1');
+      });
+    },
+  );
+
+  Scenario('The mark of the chosen option moves with the choice', ({ Given, When, Then, And }) => {
+    Given('the browser supports Ed25519 in WebCrypto', supported);
+    And('the person opens the client at "#/settings"', () => open('#/settings'));
+    When('the person chooses the theme "深色"', () => choose('深色'));
+    And('the person chooses the language "English"', () => choose('English'));
+    Then('the mark of the theme is on option 3', () => {
+      expect(motionOf('fieldset:has([name=theme])', '--at')).toBe('2');
+    });
+    And('the mark of the language is on option 2', () => {
+      expect(motionOf('fieldset:has([name=lang])', '--at')).toBe('1');
+    });
+  });
+
+  Scenario(
+    'The page cross-fades to a new theme in a browser with view transitions',
+    ({ Given, When, Then, And }) => {
+      Given('the browser supports Ed25519 in WebCrypto', supported);
+      And('the browser has view transitions', viewTransitions);
+      And('the person opens the client', () => open());
+      When('the person presses "切换深色 / 浅色"', () => press('切换深色 / 浅色'));
+      Then('the page uses the "auto" theme until the cross-fade has its first picture', () => {
+        expect(crossFades).toHaveLength(1);
+        expect(document.documentElement.dataset.theme).toBe('auto');
+      });
+      And('the page uses the "dark" theme in the cross-fade', () => {
+        crossFades[0]();
+        svelte.flushSync();
+        expect(document.documentElement.dataset.theme).toBe('dark');
+      });
+    },
+  );
+
+  Scenario(
+    'The theme changes at once when the system asks for reduced motion',
+    ({ Given, When, Then, And }) => {
+      Given('the browser supports Ed25519 in WebCrypto', supported);
+      And('the browser has view transitions', viewTransitions);
+      And('the system asks for reduced motion', () => {
+        vi.spyOn(window, 'matchMedia').mockImplementation(
+          (query) =>
+            ({
+              matches: query === '(prefers-reduced-motion: reduce)',
+              addEventListener() {},
+              removeEventListener() {},
+            }) as unknown as MediaQueryList,
+        );
+      });
+      And('the person opens the client', () => open());
+      When('the person presses "切换深色 / 浅色"', () => press('切换深色 / 浅色'));
+      Then('the page uses the "dark" theme', () => {
+        expect(document.documentElement.dataset.theme).toBe('dark');
+      });
+      And('the page has not cross-faded', () => {
+        expect(crossFades).toEqual([]);
+      });
+    },
+  );
 
   Scenario(
     'The client opens when the browser blocks site storage',

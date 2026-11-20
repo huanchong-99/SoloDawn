@@ -24,3 +24,18 @@ it('follows the address when it changes', async () => {
   dispatchEvent(new HashChangeEvent('hashchange'));
   expect(route.page).toBe('settings');
 });
+
+it('knows which way along the navigation each change went', async () => {
+  const route = await load('#/nodes');
+  expect(route.dir).toBe(1);
+  for (const [hash, dir] of [
+    ['#/groups', -1],
+    ['#/settings', 1],
+    ['#/nodes', -1],
+    ['#/nodes/a-node', 0],
+  ] as const) {
+    location.hash = hash;
+    dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(route.dir).toBe(dir);
+  }
+});

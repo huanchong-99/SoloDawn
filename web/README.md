@@ -103,6 +103,20 @@ development dependency, an IndexedDB for the tests.
 - **Texts.** Every interface string is a key in both `src/messages/zh-CN.json` and
   `src/messages/en.json` and is read with `t(key)`; a test fails when the key sets differ. Chat
   content is never translated.
+- **Motion.** No animation library is bundled: CSS transitions and keyframes move the parts, the
+  browser's View Transitions cross-fade the page, and `svelte/motion` reads the system setting.
+  The tokens are in `tokens.css` beside the others: four durations (`--dur-1` 120 ms hover and
+  press, `--dur-2` 200 ms switch and focus, `--dur-3` 320 ms arrival and cross-fade, `--dur-4`
+  500 ms spring), `--ease` for a change of state, `--ease-out` for an arrival, `--spring` for what
+  a person moved, `--travel` and `--stagger`. Only `transform` and `opacity` are animated; a colour
+  that changes on hover, press or focus is a layer under or around the part whose opacity changes.
+  `route.dir` is the way the last page change went along the navigation (1, -1, or 0 within a
+  page) and `--at` on the navigation and on a segmented control is the index of the current entry;
+  the styles turn them into the side a page arrives from and the place of the sliding mark.
+  `choose(key, value)` changes a preference through `shift` of `src/lib/motion.ts`, which
+  cross-fades the page where the browser has view transitions (Chrome and Edge, Safari 18,
+  Firefox 144) and changes it at once elsewhere. When the system asks for reduced motion, nothing
+  moves: no transition, no keyframes, no cross-fade.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. Shared styles are global classes in
   `src/styles/base.css`, taken from the design; a component's own layout goes in its `<style>`.
@@ -118,7 +132,8 @@ development dependency, an IndexedDB for the tests.
 | `src/lib/pairing.ts`        | pairing secret, room id, mac, pair message check                |
 | `src/lib/payload.ts`        | the payload fields the envelope and log checks read             |
 | `src/lib/prefs.svelte.ts`   | theme and language state, their persistence, `t`                |
-| `src/lib/route.svelte.ts`   | current page from the address fragment                          |
+| `src/lib/route.svelte.ts`   | current page from the address fragment, and the way it changed  |
+| `src/lib/motion.ts`         | `spring`, the curve of `--spring`; `shift`, the page cross-fade |
 | `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface           |
 | `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`                 |
 | `src/App.svelte`            | shell: skip link, navigation, top bar, the current route        |
@@ -152,6 +167,11 @@ are hidden; both choices are on the settings page at every width.
 - The shell was checked in headless Chrome at 375, 820, 1100 and 1440 px in both themes and both
   languages on every page (no element wider than the viewport) on 2026-11-20. It has not been
   opened on a real phone, in Safari or in Firefox.
+- The motion was checked there too: while pages changed, the theme and language switched and
+  parts were hovered, pressed and focused, the page's animations (`document.getAnimations()`)
+  changed `opacity` and `transform` only, and with reduced motion emulated there were none. A test
+  holds `--spring` to `spring()`. Frame rate was not measured, and the fallback without view
+  transitions was exercised only in the tests.
 - `src/lib/proto.test.ts` reads every wire example with the schema of its file name and fails on a
   file that has none (`crypto.json`, which holds test vectors, excepted); it adds an unknown field
   to every object, which is dropped (so a golden file with a field the schema lacks fails the exact

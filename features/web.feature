@@ -49,6 +49,45 @@ Feature: Web client
     Then the page uses the "dark" theme
     And the page is marked as "en"
 
+  Scenario: The mark of the current page moves to the entry that is opened
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client
+    When the address fragment becomes "#/settings"
+    Then the mark of the current page is on entry 3 of the navigation
+    And the page arrives from the side of the later entries
+
+  Scenario: A page opened from a later one arrives from the other side
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client at "#/settings"
+    When the address fragment becomes "#/nodes"
+    Then the mark of the current page is on entry 2 of the navigation
+    And the page arrives from the side of the earlier entries
+
+  Scenario: The mark of the chosen option moves with the choice
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client at "#/settings"
+    When the person chooses the theme "深色"
+    And the person chooses the language "English"
+    Then the mark of the theme is on option 3
+    And the mark of the language is on option 2
+
+  Scenario: The page cross-fades to a new theme in a browser with view transitions
+    Given the browser supports Ed25519 in WebCrypto
+    And the browser has view transitions
+    And the person opens the client
+    When the person presses "切换深色 / 浅色"
+    Then the page uses the "auto" theme until the cross-fade has its first picture
+    And the page uses the "dark" theme in the cross-fade
+
+  Scenario: The theme changes at once when the system asks for reduced motion
+    Given the browser supports Ed25519 in WebCrypto
+    And the browser has view transitions
+    And the system asks for reduced motion
+    And the person opens the client
+    When the person presses "切换深色 / 浅色"
+    Then the page uses the "dark" theme
+    And the page has not cross-faded
+
   Scenario: The client opens when the browser blocks site storage
     Given the browser supports Ed25519 in WebCrypto
     And the browser blocks site storage
