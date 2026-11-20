@@ -53,6 +53,12 @@ func deviceLog(user identity.Key, entries ...proto.Envelope) (*identity.Log, err
 	return identity.Replay(user.ID(), entries)
 }
 
+func init() {
+	stepSets["identity"] = func(sc *godog.ScenarioContext, _ fixtures) {
+		identitySteps(sc)
+	}
+}
+
 func identitySteps(sc *godog.ScenarioContext) {
 	browser, node, tablet := exampleKey("browser"), exampleKey("node"), exampleKey("tablet")
 	now := time.UnixMilli(1763600000000)

@@ -15,6 +15,12 @@ import (
 	"github.com/cucumber/godog"
 )
 
+func init() {
+	stepSets["host"] = func(sc *godog.ScenarioContext, f fixtures) {
+		hostSteps(sc, f.t, f.fakeCLIs)
+	}
+}
+
 func hostSteps(sc *godog.ScenarioContext, t *testing.T, bin string) {
 	var vendor, id, log string
 	sc.Step(`^"([^"]+)" is found first on PATH with version "([^"]+)"$`, func(name, version string) error {
