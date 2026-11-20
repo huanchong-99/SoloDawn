@@ -34,10 +34,6 @@ const (
 	briefNoteLimit = 1 << 10
 )
 
-// briefSenders names the person who confirms as row 1 of the task machine
-// knows them.
-var briefSenders = map[bool]Sender{true: ByAdmin, false: ByPerson}
-
 // briefPost is post of kind brief: the secretary's card in the main line,
 // which waits for its requester. A brief that replaces another supersedes it.
 func briefPost(s *State, c Command) (Result, *Refusal) {
@@ -310,7 +306,8 @@ func (s *State) briefCreate(c Command, d briefDecision, ids []string, i int) ([]
 		Slug: proto.MakeSlug(entry.Title), Origin: briefKind, Brief: d.card.ID, Assignee: entry.Assignee, Reviewer: entry.Reviewer,
 		Foundation: entry.Foundation, Pass: pass, Depends: depends, Created: c.Now, Stats: proto.TaskStats{Started: c.Now},
 	}
-	task, fx, err := Step(task, Event{Kind: OnConfirm, By: briefSenders[s.Admin(c.Who)], Now: c.Now, Blocked: len(entry.Depends) > 0})
+	// Row 1 takes a person and an admin alike; briefMay let only a person confirm.
+	task, fx, err := Step(task, Event{Kind: OnConfirm, By: ByPerson, Now: c.Now, Blocked: len(entry.Depends) > 0})
 	if err != nil {
 		return nil, nil, &Refusal{err.Error(), "the task machine refused a task of the brief"}
 	}

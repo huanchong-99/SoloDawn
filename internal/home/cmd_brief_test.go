@@ -27,7 +27,7 @@ const briefPostTS, briefActTS = clock - 500, clock - 1000
 func briefState(t *testing.T) *home.State {
 	t.Helper()
 	s := group(t)
-	s.Group.Pass, s.Group.PassFoundation, s.Num = 90, 70, 4
+	s.Group.Pass, s.Group.PassFoundation, s.Num = 85, 70, 4
 	for _, member := range []string{briefA, briefB, briefC} {
 		s.AIs[member] = ai(member, laptop)
 	}
@@ -44,7 +44,7 @@ func briefBody() proto.BriefBody {
 			{Title: "Report path changes", Assignee: briefA, Reviewer: briefB, Foundation: true, Depends: []int{}},
 			{Title: "Show the path", Assignee: briefB, Reviewer: briefA, Depends: []int{0}},
 		},
-		Pass: 90, Requester: ownerID,
+		Pass: 95, Requester: ownerID,
 	}
 }
 
@@ -277,7 +277,7 @@ func briefConfirmedRows(t *testing.T, card proto.MsgRow, act proto.Envelope, by 
 		}
 	}
 	entries := briefBody().Tasks
-	queued := task(two, from+3, 6, entries[1], "show-the-path", 90, []string{one})
+	queued := task(two, from+3, 6, entries[1], "show-the-path", 95, []string{one})
 	queued.State, queued.Wait = "queued", &proto.TaskWait{Kind: "depends", Since: clock}
 	return []any{card, task(one, from+1, 5, entries[0], "report-path-changes", 70, []string{}), msg(one, from+2), queued, msg(two, from+4)}
 }
@@ -408,13 +408,16 @@ func TestBriefConfirmRefusals(t *testing.T) {
 // Revise sends the brief back to the secretary, with the note when there is one.
 func TestBriefReviseSendsTheBriefBack(t *testing.T) {
 	long := strings.Repeat("a", 1022) // 1024 bytes as a JSON string
+	// 1024 bytes as a JSON string without HTML escaping, as rows are measured; 1029 with it.
+	angled := strings.Repeat("a", 1021) + "<"
 	for name, c := range map[string]struct {
 		more string
 		note *string
 	}{
-		"with a note":          {more: `,"text":"Include the relay."`, note: briefText("Include the relay.")},
-		"with a note of 1 KiB": {more: `,"text":"` + long + `"`, note: &long},
-		"without a note":       {},
+		"with a note":                       {more: `,"text":"Include the relay."`, note: briefText("Include the relay.")},
+		"with a note of 1 KiB":              {more: `,"text":"` + long + `"`, note: &long},
+		"with a note of 1 KiB that holds <": {more: `,"text":"` + angled + `"`, note: &angled},
+		"without a note":                    {},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := briefState(t)
@@ -435,10 +438,11 @@ func TestBriefReviseRefusals(t *testing.T) {
 		more string
 		code string
 	}{
-		"with an arg":                {more: `,"arg":"A"`, code: "bad_request"},
-		"with an empty text":         {more: `,"text":""`, code: "bad_request"},
-		"with a text above 1 KiB":    {more: `,"text":"` + strings.Repeat("a", 1023) + `"`, code: "bad_request"},
-		"with a payload that is bad": {more: `,"text":7`, code: "bad_request"},
+		"with an arg":                       {more: `,"arg":"A"`, code: "bad_request"},
+		"with an empty text":                {more: `,"text":""`, code: "bad_request"},
+		"with a text above 1 KiB":           {more: `,"text":"` + strings.Repeat("a", 1023) + `"`, code: "bad_request"},
+		"with a text holding < above 1 KiB": {more: `,"text":"` + strings.Repeat("a", 1022) + `<"`, code: "bad_request"},
+		"with a payload that is bad":        {more: `,"text":7`, code: "bad_request"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := briefState(t)

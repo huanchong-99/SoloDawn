@@ -214,7 +214,7 @@ function that moves a task calls it and adds nothing to its rules.
   that fails one is answered `conflict`. Two are left: the brief it replaces has been superseded
   since the post, and the task machine refuses an entry whose assignee is its reviewer
   ([issues](../../issues.md)). Then each entry becomes a task through `Step` with `OnConfirm`,
-  `By` `ByAdmin` or `ByPerson`, and `Blocked` when the entry has a dependency: a dependency is an
+  `By` `ByPerson` (row 1 takes a person and an admin alike), and `Blocked` when the entry has a dependency: a dependency is an
   earlier entry, created by the same confirm, so it is not merged. The row has `num` from
   `State.Num + 1` in the order of the entries, `origin` `brief`, `brief` the card's id, `slug`
   from `proto.MakeSlug`, `pass` the brief's or, for a foundation task, the group's
