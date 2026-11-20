@@ -266,6 +266,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:41-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
 
+### 2026-11-20 · limitation · Cards and home-written rows are one line each in the chat main line
+
+- Symptom: in the main line of the web client a brief, an approval, a decision, a summary and a call are one outlined line that names the kind and the card's subject, with the dawn edge and "Waiting on you" when the card waits for the reader. It has no buttons: the reader cannot confirm, approve or choose there. A row the home wrote (`task`, `system`) is a quiet centred line; a `system` row shows its `code` as it is on the wire, not a sentence.
+- Cause: F-07 is the row layout and text messages (`planning/steps/step-1-frontend.md`). The line is drawn in `web/src/components/chat/Message.svelte`; `subject` in `web/src/lib/groups.svelte.ts` gives the subject.
+- Status: open. The card units replace the line (U-4 approvals, U-7 brief, decision and summary, U-8 task, U-9 the wording of `system` rows, U-10 calls).
+
+### 2026-11-20 · deviation · An open chat hides the shell's top bar on a phone from its own styles
+
+- Symptom: below 768 px an open chat shows no top bar and no bottom navigation; its own head, with a back button and the group's name, stands where the bar was, as the design asks (`web/design/README.md` 3.4). At every other width the top bar stays "Chats" and the group's name is in the chat's head below it, where the design has one bar with the group's name.
+- Cause: the shell has no place yet where a page says what the top bar shows or that the navigation is hidden. `web/src/routes/Groups.svelte` hides both with `.app:has(.groups.open)` in its own styles, and reads the group id from the address itself, because `route` carries only the page (`web/src/lib/route.svelte.ts`).
+- Status: open, for U-0 (mounting points of the shell, the route table).
+
+### 2026-11-20 · limitation · In Safari the main line moves when a message arrives while the reader is scrolled back
+
+- Symptom: not observed, expected from the engine. The main line is a reversed scroller, whose offset is counted from its bottom. A message that arrives at the bottom while the reader is scrolled back pushes what they read up by its height, unless the browser anchors the scroll position. Chrome and Firefox do; Safari has no scroll anchoring.
+- Cause: `web/src/components/chat/Chat.svelte`, `.scroller` (`flex-direction: column-reverse`). The reversed scroller is what keeps a page added above from moving anything, in every browser.
+- Status: open. No correction in script was added, because it could not be tried in Safari here.
+
 ### 2026-11-20 · limitation · A device in the logs of two people is read as the device of the lower user id
 
 - Symptom: nothing stops a person from adding to their own log a device that another person's log already holds. A home then reads that device's commands as coming from whichever of the two people has the lower user id (`planning/contracts/commands.md`, "Who"). A member could so turn the commands of another member's device into their own, which that device's person did not ask for.
@@ -280,6 +298,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-20 · limitation · `group create` was sent as the contract describes it, before its wire example
+
+- Symptom: the create-group dialog of the web client was written before P-1 froze the payload of `group`, with `g` equal to `n` as `planning/contracts/commands.md` 1.1 reads.
+- Cause: the order of the units; `Home.create` in `web/src/lib/groups.svelte.ts`.
+- Status: resolved in #164. P-1 (#162) froze `group-create.json` with `g` equal to `n`; `create` sends the fields of that example in its order, and its test reads the payload with the `GroupCreate` schema. The dialog still asks for the repository address with `forge: none`, since `repo` is absent only for a group without a repository (`planning/contracts/rows.md` section 1).
 ### 2026-11-20 · deviation · No unit measured a row against its size limit
 
 - Symptom: `planning/contracts/conventions.md` section 4 has the home answer `bad_request`, naming the limit and the size, to a command that would write a row above 16 KiB, or a card above 12 KiB when it is created. No row of `planning/steps/parallel-plan-units.md` names the rule, and the first version of the seam handed the rows of a command's function to its caller unmeasured.
