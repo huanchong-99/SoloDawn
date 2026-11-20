@@ -29,7 +29,8 @@ type UpdateStatus struct {
 // Updater is owned by the node, which calls Check and Apply from one goroutine.
 // ReleaseURL is the latest release's download directory (releases/latest/download
 // on GitHub), Binary the installed executable, Version the running release tag.
-// Busy reports whether a session is working or in takeover.
+// Busy reports whether a session is working or in takeover. Transport
+// carries the requests; nil is http.DefaultTransport.
 type Updater struct {
 	ReleaseURL string
 	Binary     string
@@ -37,6 +38,7 @@ type Updater struct {
 	Busy       func() bool
 	Restart    func() error
 	Status     *UpdateStatus
+	Transport  http.RoundTripper
 
 	nextCheck time.Time
 }
@@ -81,7 +83,9 @@ func (u *Updater) update(ctx context.Context, name, tag, sum string) (*UpdateSta
 		return &UpdateStatus{Version: tag, Status: "mismatch"}, nil
 	}
 	if err == nil {
-		err = installRelease(staged, u.Binary, runtime.GOOS)
+		if err = installRelease(staged, u.Binary, runtime.GOOS); err != nil {
+			os.Remove(staged)
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -102,12 +106,29 @@ func (u *Updater) pending() bool {
 	return u.Status != nil && u.Status.Status == "pending"
 }
 
+// Downloads are limited: a longer file is cut, and so fails its checksum.
+var (
+	maxDownload   int64 = 256 << 20
+	updateTimeout       = 10 * time.Minute
+)
+
+// maxRedirects allows GitHub's two (latest release, then its asset store).
+const maxRedirects = 5
+
+var errRedirect = errors.New("self-update: redirect to another scheme or too many redirects")
+
+// get fetches a file of the release over https only, following at most
+// maxRedirects redirects, each to https.
 func (u *Updater) get(ctx context.Context, name string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.ReleaseURL+"/"+name, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if req.URL.Scheme != "https" {
+		return nil, fmt.Errorf("self-update: %s is not https", u.ReleaseURL)
+	}
+	client := &http.Client{Transport: u.Transport, Timeout: updateTimeout, CheckRedirect: httpsRedirect}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +136,17 @@ func (u *Updater) get(ctx context.Context, name string) (io.ReadCloser, error) {
 		resp.Body.Close()
 		return nil, fmt.Errorf("self-update: %s: %s", name, resp.Status)
 	}
-	return resp.Body, nil
+	return struct {
+		io.Reader
+		io.Closer
+	}{io.LimitReader(resp.Body, maxDownload), resp.Body}, nil
+}
+
+func httpsRedirect(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" || len(via) > maxRedirects {
+		return errRedirect
+	}
+	return nil
 }
 
 func updateTarget(goos, arch string) string {
@@ -163,7 +194,7 @@ func stageRelease(dir string, body io.Reader, sum string) (string, error) {
 	}
 	hash := sha256.New()
 	_, err = io.Copy(io.MultiWriter(f, hash), body)
-	if err = errors.Join(err, f.Close()); err == nil && hex.EncodeToString(hash.Sum(nil)) != sum {
+	if err = errors.Join(err, f.Sync(), f.Close()); err == nil && hex.EncodeToString(hash.Sum(nil)) != sum {
 		err = errUpdateMismatch
 	}
 	if err != nil {
@@ -177,12 +208,18 @@ func installRelease(staged, binary, goos string) error {
 	if err := os.Chmod(staged, 0o755); err != nil {
 		return err
 	}
-	if goos == "windows" {
-		// Windows lets a running executable be renamed, not replaced. The
-		// previous image is overwritten by the next update.
-		if err := os.Rename(binary, binary+".old"); err != nil {
-			return err
-		}
+	if goos != "windows" {
+		return os.Rename(staged, binary)
 	}
-	return os.Rename(staged, binary)
+	// Windows lets a running executable be renamed, not replaced. The
+	// previous image is overwritten by the next update, or put back when the
+	// new one cannot take its place.
+	old := binary + ".old"
+	if err := os.Rename(binary, old); err != nil {
+		return err
+	}
+	if err := os.Rename(staged, binary); err != nil {
+		return errors.Join(err, os.Rename(old, binary))
+	}
+	return nil
 }

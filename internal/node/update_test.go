@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -78,7 +79,7 @@ type updateFixture struct {
 func newUpdate(t *testing.T) (*updateFixture, *http.ServeMux) {
 	t.Helper()
 	mux := http.NewServeMux()
-	server := httptest.NewServer(mux)
+	server := httptest.NewTLSServer(mux)
 	t.Cleanup(server.Close)
 	f := &updateFixture{
 		name:     "solodawn_v1.10.1_" + updateTarget(runtime.GOOS, runtime.GOARCH),
@@ -92,6 +93,7 @@ func newUpdate(t *testing.T) (*updateFixture, *http.ServeMux) {
 		Version:    "v1.9.1",
 		Busy:       func() bool { return f.busy },
 		Restart:    func() error { f.restarts++; return nil },
+		Transport:  server.Client().Transport,
 	}
 	writeImage(t, f.u.Binary, "old binary")
 	return f, mux
@@ -199,6 +201,73 @@ func TestUpdateInstallFailure(t *testing.T) {
 		t.Fatalf("install over a folder: %v", err)
 	}
 	checkUpdateValue(t, f.u.Status, (*UpdateStatus)(nil))
+	// The download that could not be installed is gone.
+	want := []string{"solodawn"}
+	if runtime.GOOS == "windows" {
+		want = append(want, "solodawn.old")
+	}
+	checkFolder(t, filepath.Dir(f.u.Binary), want...)
+}
+
+func TestUpdateNeedsHTTPS(t *testing.T) {
+	f, _ := newUpdate(t)
+	f.u.ReleaseURL = "http://127.0.0.1:1/download"
+	checkUpdateValue(t, fmt.Sprint(f.u.Check(t.Context(), time.Now())), "self-update: http://127.0.0.1:1/download is not https")
+}
+
+// GitHub redirects twice; up to maxRedirects are followed, each to https.
+func TestUpdateRedirects(t *testing.T) {
+	f, mux := newUpdate(t)
+	f.serve(mux)
+	mux.HandleFunc("/hop/{n}/{file}", func(w http.ResponseWriter, r *http.Request) {
+		next := "/download/" + r.PathValue("file")
+		if n, _ := strconv.Atoi(r.PathValue("n")); n > 1 {
+			next = fmt.Sprintf("/hop/%d/%s", n-1, r.PathValue("file"))
+		}
+		http.Redirect(w, r, next, http.StatusFound)
+	})
+	mux.HandleFunc("/plain/{file}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://"+r.Host+"/download/"+r.PathValue("file"), http.StatusFound)
+	})
+	release := f.u.ReleaseURL
+	f.u.ReleaseURL = strings.Replace(release, "/download", "/hop/5", 1)
+	body, err := f.u.get(t.Context(), "SHA256SUMS")
+	noErr(t, err)
+	got, _ := io.ReadAll(body)
+	body.Close()
+	checkUpdateValue(t, string(got), f.manifest)
+	for _, path := range []string{"/hop/6", "/plain"} {
+		f.u.ReleaseURL = strings.Replace(release, "/download", path, 1)
+		if _, err := f.u.get(t.Context(), "SHA256SUMS"); !errors.Is(err, errRedirect) {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
+}
+
+// A download longer than the limit is cut, and fails its checksum.
+func TestUpdateSizeLimit(t *testing.T) {
+	f, mux := newUpdate(t)
+	f.image = strings.Repeat("x", 1000)
+	f.manifest = fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte(f.image)), f.name)
+	f.serve(mux)
+	saved := maxDownload
+	t.Cleanup(func() { maxDownload = saved })
+	maxDownload = int64(len(f.manifest)) // all of SHA256SUMS, a tenth of the binary
+	noErr(t, f.u.Check(t.Context(), time.Now()))
+	checkUpdateValue(t, f.u.Status, &UpdateStatus{Version: "v1.10.1", Status: "mismatch"})
+	checkImage(t, f.u.Binary, "old binary")
+}
+
+func TestUpdateTimeout(t *testing.T) {
+	f, mux := newUpdate(t)
+	mux.HandleFunc("/download/SHA256SUMS", func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
+	saved := updateTimeout
+	t.Cleanup(func() { updateTimeout = saved })
+	updateTimeout = 50 * time.Millisecond
+	var timeout interface{ Timeout() bool }
+	if err := f.u.Check(t.Context(), time.Now()); !errors.As(err, &timeout) || !timeout.Timeout() {
+		t.Fatalf("a server that never answers: %v", err)
+	}
 }
 
 func TestUpdateRequestErrors(t *testing.T) {
@@ -258,6 +327,12 @@ func TestInstallRelease(t *testing.T) {
 		t.Fatalf("missing binary: %v", err)
 	}
 	writeImage(t, binary, "old")
+	// The new image cannot take the binary's place: the binary is put back.
+	if err := installRelease(binary, binary, "windows"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("failed second rename: %v", err)
+	}
+	checkImage(t, binary, "old")
+	checkFolder(t, dir, "solodawn.exe", "stage")
 	writeImage(t, binary+".old", "older")
 	noErr(t, installRelease(staged, binary, "windows"))
 	checkImage(t, binary, "new")

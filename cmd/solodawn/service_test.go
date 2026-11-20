@@ -10,6 +10,7 @@ import (
 
 func TestServiceCommand(t *testing.T) {
 	self, _ := os.Executable() // as service reads it
+	t.Setenv("PATH", "/opt/tools/bin:/usr/bin")
 	const usage = "usage: solodawn <command> [arguments]\n"
 	for _, tc := range []struct {
 		args   []string
@@ -18,9 +19,9 @@ func TestServiceCommand(t *testing.T) {
 		stderr string
 		calls  []string
 	}{
-		{[]string{"install"}, nil, 0, "", []string{"install " + self}},
+		{[]string{"install"}, nil, 0, "", []string{"install " + self + " /opt/tools/bin:/usr/bin"}},
 		{[]string{"remove"}, nil, 0, "", []string{"remove"}},
-		{[]string{"install"}, errors.New("cannot write\nthe entry"), 1, "cannot write the entry\n", []string{"install " + self}},
+		{[]string{"install"}, errors.New("cannot write\nthe entry"), 1, "cannot write the entry\n", []string{"install " + self + " /opt/tools/bin:/usr/bin"}},
 		{[]string{"remove"}, errors.New("no entry"), 1, "no entry\n", []string{"remove"}},
 		{nil, nil, 2, usage, nil},
 		{[]string{"start"}, nil, 2, usage, nil},
@@ -28,7 +29,10 @@ func TestServiceCommand(t *testing.T) {
 	} {
 		var calls []string
 		cmd := service(
-			func(executable string) error { calls = append(calls, "install "+executable); return tc.fail },
+			func(executable, path string) error {
+				calls = append(calls, "install "+executable+" "+path)
+				return tc.fail
+			},
 			func() error { calls = append(calls, "remove"); return tc.fail },
 		)
 		var stdout, stderr bytes.Buffer

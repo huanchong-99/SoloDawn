@@ -57,6 +57,7 @@ func (c Command) exchange(conn io.ReadWriter, stdout io.Writer) error {
 // {"done":true,"ok":true} or {"done":true,"error":"…"}.
 type localReply struct {
 	Done  bool   `json:"done,omitempty"`
+	OK    bool   `json:"ok,omitempty"`
 	Error string `json:"error,omitempty"`
 	Text  string `json:"text,omitempty"`
 }
@@ -80,9 +81,15 @@ func readReplies(r *bufio.Reader, stdout io.Writer) error {
 	}
 }
 
+// errNoOK answers a last line with neither "ok":true nor an error.
+var errNoOK = errors.New("the node ended its answer without ok")
+
 func (r localReply) failure() error {
-	if r.Error == "" {
-		return nil
+	if r.Error != "" {
+		return errors.New(r.Error)
 	}
-	return errors.New(r.Error)
+	if !r.OK {
+		return errNoOK
+	}
+	return nil
 }

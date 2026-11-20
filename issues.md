@@ -6,6 +6,33 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
+
+- Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
+- Cause: `pair` (`cmd/solodawn/main.go:61`) only sends the command through `Command.send` (`internal/node/cmd.go:40`). No unit owned starting the node.
+- Status: open. Added to N-4's row in `planning/steps/parallel-plan-units.md` by the coordinator's decision of 2026-11-20 (independent review of `internal/node`).
+
+### 2026-11-20 · deviation · A second node is stopped by a lock, not by the dial of `local.md` section 3
+
+- Symptom: `local.md` section 3 says a starting node dials a `sock` it finds and removes it when the dial is refused. Two nodes that started together both did so: one removed the other's live socket, and the first one's close then removed the second's (89 of 3000 rounds in the review).
+- Cause: the dial and the removal were not one step (`internal/node/socket.go`, before this fix).
+- Status: resolved in code by the coordinator's decision of 2026-11-20: `ListenLocal` (`internal/node/socket.go:36`) first takes an exclusive lock on `lock` in the data directory (`lockData`, `:54`; `flock` on Unix, `LockFileEx` on Windows), held while the node runs. Without it the node says "a node is already running"; with it, a `sock` it finds is stale and is removed. The text of `local.md` section 3 still describes the dial and is to be updated by a contract change.
+
+### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
+
+- Symptom, from the independent review of `internal/node`:
+  1. `Apply` checks `Busy` and then calls `Restart` (`internal/node/update.go:98`). A turn or a takeover admitted between the two is restarted.
+  2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
+  3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
+- Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
+- Status: open, for N-4.
+
+### 2026-11-20 · limitation · `SHA256SUMS` proves the download intact, not where it came from
+
+- Symptom: the node checks the binary against `SHA256SUMS` from the same release (`local.md` section 9). Whoever can replace the binary there can replace `SHA256SUMS` too, so the check catches a damaged or cut download, not a forged release.
+- Cause: the contract has no signature over releases; binaries are not signed (decided). The download itself is https only, follows at most five redirects, each to https, and is limited in size and time (`internal/node/update.go`, `get`).
+- Status: accepted trade-off of the contract.
+
 ### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
 
 - Symptom: `crap.py` gives `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reports `internal/peer` at 100% of statements.

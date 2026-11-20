@@ -3,15 +3,45 @@
 package node
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"net"
 	"os"
 	"syscall"
 )
 
-const connRefused = syscall.ECONNREFUSED
+// currentUID is the user that must own the data directory.
+var currentUID = os.Getuid
 
-// privateDir creates dir, mode 0700, if it does not exist.
+// privateDir creates dir, mode 0700, if it does not exist. An existing one
+// must be a directory owned by the current user; its mode is set to 0700.
 func privateDir(dir string) error {
-	return os.MkdirAll(dir, 0o700)
+	info, err := os.Stat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return os.MkdirAll(dir, 0o700)
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	if int(info.Sys().(*syscall.Stat_t).Uid) != currentUID() {
+		return fmt.Errorf("%s is not owned by the current user", dir)
+	}
+	return os.Chmod(dir, 0o700)
+}
+
+func lockFile(f *os.File) error {
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+}
+
+// listenPrivate binds under umask 0177, so the socket is never open to
+// others, not even before ownerOnly.
+func listenPrivate(path string) (*net.UnixListener, error) {
+	defer syscall.Umask(syscall.Umask(0o177))
+	return net.ListenUnix("unix", &net.UnixAddr{Net: "unix", Name: path})
 }
 
 func ownerOnly(path string) error {
