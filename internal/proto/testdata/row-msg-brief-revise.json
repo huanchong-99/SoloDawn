@@ -1,0 +1,68 @@
+{
+  "r": "msg",
+  "id": "KaiCW9JC8UOG7lKNduDo8Q",
+  "seq": 814,
+  "pos": 790,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "thread": null,
+  "main": false,
+  "by": "qBSFMsr2hHYKOMblEA_kdA",
+  "kind": "brief",
+  "ts": 1763599999500,
+  "text": "",
+  "mentions": [],
+  "re": null,
+  "body": {
+    "title": "Show connection paths",
+    "goal": "People can see how a peer is connected.",
+    "criteria": [
+      "Show a path change within 1 s."
+    ],
+    "scope": {
+      "in": [
+        "node events",
+        "web indicator"
+      ],
+      "out": [
+        "relay service"
+      ]
+    },
+    "tasks": [
+      {
+        "title": "Report path changes",
+        "assignee": "1PC8WineBrUQ-apCjx7tug",
+        "reviewer": "LXCZmuGAXkvO-bSrOkuCfw",
+        "foundation": true,
+        "depends": []
+      },
+      {
+        "title": "Show the path",
+        "assignee": "LXCZmuGAXkvO-bSrOkuCfw",
+        "reviewer": "1PC8WineBrUQ-apCjx7tug",
+        "foundation": false,
+        "depends": [
+          0
+        ]
+      }
+    ],
+    "pass": 90,
+    "requester": "4xq2Q8RPeg7IJLWdEZTWDQ",
+    "replaces": null
+  },
+  "state": {
+    "status": "revise",
+    "by": "4xq2Q8RPeg7IJLWdEZTWDQ",
+    "at": 1763600000000,
+    "act": {
+      "p": "{\"t\":\"act\",\"n\":\"RN8-GfpCX2ZzuEF2tjwN3w\",\"ts\":1763600000000,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"msg\":\"KaiCW9JC8UOG7lKNduDo8Q\",\"action\":\"revise\",\"arg\":\"\",\"text\":\"Include the relay path.\"}",
+      "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+      "s": "d20gipgO5Hn32jz14qVFXMIQCPe8oE4s9lw5hSAsHC8Yc8BMiEKowara-ULXLc1qQ5UDl-d7llf4hztCi0aUDA"
+    },
+    "note": "Include the relay path."
+  },
+  "env": {
+    "p": "{\"t\":\"post\",\"n\":\"KaiCW9JC8UOG7lKNduDo8Q\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"qBSFMsr2hHYKOMblEA_kdA\",\"kind\":\"brief\",\"thread\":null,\"main\":false,\"text\":\"\",\"mentions\":[],\"re\":null,\"body\":{\"title\":\"Show connection paths\",\"goal\":\"People can see how a peer is connected.\",\"criteria\":[\"Show a path change within 1 s.\"],\"scope\":{\"in\":[\"node events\",\"web indicator\"],\"out\":[\"relay service\"]},\"tasks\":[{\"title\":\"Report path changes\",\"assignee\":\"1PC8WineBrUQ-apCjx7tug\",\"reviewer\":\"LXCZmuGAXkvO-bSrOkuCfw\",\"foundation\":true,\"depends\":[]},{\"title\":\"Show the path\",\"assignee\":\"LXCZmuGAXkvO-bSrOkuCfw\",\"reviewer\":\"1PC8WineBrUQ-apCjx7tug\",\"foundation\":false,\"depends\":[0]}],\"pass\":90,\"requester\":\"4xq2Q8RPeg7IJLWdEZTWDQ\",\"replaces\":null}}",
+    "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+    "s": "gRCsZHin4TJYUK-txKz_HREtMHynjzs529nZCe96BYjmrTdhZwa17T9eUqkPcdN-vV8oRR1I-M8O_ou_UW0BCg"
+  }
+}

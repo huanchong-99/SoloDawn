@@ -1,0 +1,22 @@
+{
+  "r": "msg",
+  "id": "tfkKluaAFA1R4rqUVGFxbg",
+  "seq": 790,
+  "pos": 790,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "thread": "DrtCn6htSBwmMPrFPbHJHA",
+  "main": false,
+  "by": "1PC8WineBrUQ-apCjx7tug",
+  "kind": "progress",
+  "ts": 1763599999500,
+  "text": "Added the path indicator.",
+  "mentions": [],
+  "re": null,
+  "body": {},
+  "state": null,
+  "env": {
+    "p": "{\"t\":\"post\",\"n\":\"tfkKluaAFA1R4rqUVGFxbg\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"1PC8WineBrUQ-apCjx7tug\",\"kind\":\"progress\",\"thread\":\"DrtCn6htSBwmMPrFPbHJHA\",\"main\":false,\"text\":\"Added the path indicator.\",\"mentions\":[],\"re\":null,\"body\":{}}",
+    "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+    "s": "ADhcqAyEJhA2nXub_jZuvDK0WpIZHNA_mSyvpwjPeL1kw7Z7INUUA2q6ZLQVw2SVo7p_tb7Oz4Uq08aBDzBkCg"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "r": "msg",
+  "id": "H1CH25Gc7VwSPH9QfT_M6A",
+  "seq": 790,
+  "pos": 790,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "thread": null,
+  "main": false,
+  "by": "1PC8WineBrUQ-apCjx7tug",
+  "kind": "question",
+  "ts": 1763599999500,
+  "text": "Should the path include latency?",
+  "mentions": [],
+  "re": null,
+  "body": {},
+  "state": null,
+  "env": {
+    "p": "{\"t\":\"post\",\"n\":\"H1CH25Gc7VwSPH9QfT_M6A\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"1PC8WineBrUQ-apCjx7tug\",\"kind\":\"question\",\"thread\":null,\"main\":false,\"text\":\"Should the path include latency?\",\"mentions\":[],\"re\":null,\"body\":{}}",
+    "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+    "s": "E-aSQx56saTgmbRijGH76yy4LRxq3Vjl7gbrOvst2xkdzHGBFanja-Iby5tPbwej89kuEQauRk0ipzdRMZvUBA"
+  }
+}

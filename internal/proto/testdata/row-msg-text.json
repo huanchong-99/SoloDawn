@@ -1,0 +1,22 @@
+{
+  "r": "msg",
+  "id": "mC2ePrmW9VnmM_TRlN7zdg",
+  "seq": 790,
+  "pos": 790,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "thread": null,
+  "main": false,
+  "by": "1PC8WineBrUQ-apCjx7tug",
+  "kind": "text",
+  "ts": 1763599999500,
+  "text": "The path is direct.",
+  "mentions": [],
+  "re": null,
+  "body": {},
+  "state": null,
+  "env": {
+    "p": "{\"t\":\"post\",\"n\":\"mC2ePrmW9VnmM_TRlN7zdg\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"1PC8WineBrUQ-apCjx7tug\",\"kind\":\"text\",\"thread\":null,\"main\":false,\"text\":\"The path is direct.\",\"mentions\":[],\"re\":null,\"body\":{}}",
+    "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+    "s": "dWC28mJrF803uvyO4QhE32136PfEaG2MC69jbRO-okGreUCtwKoURX31e_iLwfw6j9vZJJVgQLfCiu88IgXSDw"
+  }
+}
