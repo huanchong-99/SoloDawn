@@ -54,9 +54,10 @@ connect.
 `[verified]` in spike S-5, on Windows Server 2022 with Go 1.26: a Go
 listener and a Go client exchange lines over a Unix socket at `sock`; closing
 the listener removes the file and the name can be bound again; `chmod 0600`
-changes neither the DACL nor the reported mode; a socket takes the
-inheritable entry of its folder. `[unverified]` that the DACL refuses another
-account, and the other supported Windows versions.
+changes neither the DACL nor the reported mode; with the protected DACL set
+on the socket right after binding, the owner connects and another local
+account, not an administrator, is refused with "access denied".
+`[unverified]` the other supported Windows versions.
 
 One JSON line opens a connection:
 
@@ -134,10 +135,20 @@ group has no remote.
 - **Hard check "tests"** uses two fixed lists; there is no setting. A
   *test file* has a name that contains `_test.`, `.test.` or `.spec.` or
   starts with `test_`, or lies in a folder named `tests` or `__tests__` at
-  any depth. A *source file* is any other file whose name ends in a code
-  extension: `.go`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`,
-  `.cts`, `.svelte`, `.vue`, `.py`. A file that is neither does not count.
-  Support for projects with other conventions is a later option.
+  any depth; these are matched with exact case, whatever the extension. A
+  *source file* is any other file whose last extension, in lower case, is
+  one of:
+
+  ```
+  .asm .bash .bat .c .cc .cjs .clj .cljc .cljs .cmd .cpp .cs .css .cts
+  .cxx .dart .erl .ex .exs .fs .fsi .fsx .go .h .hh .hpp .hrl .htm .html
+  .hxx .java .js .jsx .kt .kts .less .lua .m .mjs .mm .mts .php .pl .pm
+  .ps1 .py .pyi .r .rb .rs .s .sass .scala .scss .sh .sql .svelte .swift
+  .ts .tsx .vb .vue .zsh
+  ```
+
+  A file that is neither does not count. Support for projects with other
+  conventions is a later option.
 - "Fake tests" has no command; it is a veto item in review.
 - Both hard checks always run (R-103). There is no setting to turn one off.
 
