@@ -19,11 +19,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Effect: none for an ordinary home directory such as `/Users/<name>`.
 - Status: open, accepted for tests; a test that sets HOME for a node on macOS keeps it under `/tmp`.
 
-### 2026-11-20 · deviation · End-to-end steps are not in a `.spec.ts` file, and `pnpm test` would run `web/e2e/*.spec.ts`
+### 2026-11-20 · deviation · End-to-end steps are not in a `.spec.ts` file
 
-- Symptom: the feature-file convention (`planning/steps/parallel-plan.md` section 2, `planning/contracts/conventions.md` section 5) puts a web slice's steps in `web/features/<slice>.spec.ts`. The steps of `features/web_e2e.feature` are in `web/features/e2e.ts`, and the acceptance gate's `vitest run features` does not run them; the `Browser end-to-end` workflow does. The plan names I-8's file `web/e2e/connect.spec.ts`, which `web/e2e/config.ts` includes.
-- Cause: `pnpm test` and the gates use `web/vite.config.ts`, which sets no `include` or `exclude`, so Vitest's default pattern runs every `*.spec.ts` under `web/` without the global setup, Go and the browsers that end-to-end tests need. F-01c keeps `web/features/browser-crypto.ts` out of that run the same way.
-- Status: open. Before I-8 adds `web/e2e/connect.spec.ts`, `web/vite.config.ts` needs `exclude: [...configDefaults.exclude, 'e2e/**']` in `test` (a file E-0 does not own), or the end-to-end files need another suffix.
+- Symptom: the feature-file convention (`planning/steps/parallel-plan.md` section 2, `planning/contracts/conventions.md` section 5) puts a web slice's steps in `web/features/<slice>.spec.ts`. The steps of `features/web_e2e.feature` are in `web/features/e2e.ts`, and the acceptance gate's `vitest run features` does not run them; the `Browser end-to-end` workflow does.
+- Cause: `pnpm test` and the gates use `web/vite.config.ts`, whose Vitest default pattern would run a `web/features/*.spec.ts` without the global setup, Go and the browsers that end-to-end tests need. F-01c keeps `web/features/browser-crypto.ts` out of that run the same way.
+- Status: open, accepted by the coordinator on 2026-11-20. `web/vite.config.ts` excludes `e2e/**` ([#132](https://github.com/huanchong-99/SoloDawn/pull/132)), so `web/e2e/*.spec.ts`, I-8's `connect.spec.ts` included, run only under `web/e2e/config.ts`.
+
+### 2026-11-20 · limitation · Two workflows download the same pinned browsers
+
+- Symptom: `.github/workflows/e2e.yml` repeats the download steps of `.github/workflows/browser-vectors.yml`: Chrome for Testing 137, Edge 137 and Firefox 136 with their URLs and SHA-256 sums. A change of version has to be made in both files.
+- Cause: E-0 added the end-to-end workflow beside F-01c's without changing it.
+- Status: open. A composite action that both workflows use can replace the steps later (coordinator, 2026-11-20).
 
 ### 2026-11-20 · limitation · The end-to-end harness runs on macOS and Linux only
 
