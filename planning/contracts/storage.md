@@ -41,10 +41,12 @@ CREATE INDEX        row_pending   ON row (g) WHERE pending = 1;
 CREATE INDEX        row_keep      ON row (g, r, pos) WHERE keep = 1;
 ```
 
-- "Rows after n": `SELECT data FROM row WHERE g = ? AND seq > ? ORDER BY
-  seq`, run in a read transaction opened by the writer at the moment it
-  takes S. The snapshot of that transaction is the cut: later writes do not
-  appear in it and cannot replace a row it contains.
+- "Rows after n, up to m": `SELECT data FROM row WHERE g = ? AND seq > ?
+  AND seq <= ? ORDER BY seq`, markers included, run in a read transaction
+  opened by the writer at the moment it takes S. The snapshot of that
+  transaction is the cut: later writes do not appear in it and cannot
+  replace a row it contains. The upper bound lets the home read the rows
+  up to S in batches.
 - A thread page: `… WHERE g = ? AND r = 'msg' AND thread = ? AND pos < ?
   ORDER BY pos DESC LIMIT ?`. The ledger and the notes are read through
   `row_keep`.
@@ -237,7 +239,14 @@ Once a day, with `cutoff = now − retention_days`:
 UPDATE grp SET purged = MAX(purged, (SELECT COALESCE(MAX(seq), 0) FROM row
                                      WHERE row.g = grp.g AND gone = 1 AND mt < :cutoff));
 DELETE FROM row   WHERE gone = 1 AND mt < :cutoff;
-DELETE FROM row   WHERE r = 'msg'  AND keep = 0 AND pending = 0 AND ts < :cutoff;
+DELETE FROM row   WHERE r = 'msg'  AND gone = 0 AND keep = 0 AND pending = 0
+                    AND ts < :cutoff
+                    AND NOT (data->>'kind' = 'brief'
+                             AND data->>'$.state.status' = 'confirmed'
+                             AND EXISTS (SELECT 1 FROM row AS t
+                                         WHERE t.g = row.g AND t.r = 'task'
+                                           AND t.data->>'state' = 'queued'
+                                           AND t.data->>'brief' = row.id));
 DELETE FROM row   WHERE r = 'task' AND final = 1 AND mt < :cutoff;
 DELETE FROM inbox WHERE created < :cutoff;
 DELETE FROM audit WHERE ts < :cutoff;
@@ -246,13 +255,19 @@ DELETE FROM peer  WHERE ok_at < :cutoff;
 DELETE FROM receipt WHERE ts < :now - 86400000;
 ```
 
+- A deletion marker leaves only through the second statement, after the
+  first has moved `purged` past it. That is why the third has `gone = 0`:
+  without it, an old message that was deleted recently would lose its
+  marker while `purged` stayed, and a client would never learn of the
+  deletion.
 - A finished task is aged from the day it finished (`mt`), not from the day
   it was created.
 - A card that is still pending is never deleted, however old: someone still
   has to act on it. It goes with the next run after it is decided.
 - A confirmed brief is not deleted while a task made from it is still
   queued: that task's first `assign` item must carry the confirmation the
-  brief holds.
+  brief holds. The statement reads this from the rows' JSON, which is
+  enough at this size; with much more data it becomes an indexed column.
 - Notes and `review` messages have `keep = 1` and are never deleted by this
   run (R-102). A person removes one with `forget`; the row then becomes a
   `gone` marker.
