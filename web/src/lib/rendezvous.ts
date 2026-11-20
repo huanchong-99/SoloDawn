@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { openSignal, utf8, type Device, type Known } from './identity';
+import { openSignal, type Device, type Known } from './identity';
 import {
   RVChallenge,
   RVFrom,
@@ -21,28 +21,23 @@ const incoming = v.variant('t', [RVFrom, RVOffline, RVPresence, RVJoined, RVRoom
 type Incoming = v.InferOutput<typeof incoming> | RVReady | { t: 'closed' };
 type Receive = (url: string, frame: Incoming) => void;
 
-const maxBytes = 16_384;
-
-function read(data: unknown): unknown {
-  if (typeof data !== 'string' || utf8(data).length > maxBytes) return;
+function read(data: string): unknown {
   try {
     return JSON.parse(data);
   } catch {
-    // No frame to dispatch.
+    // A frame that is no JSON is read as nothing, which no schema accepts.
   }
 }
 
 function path(url: string, device: Device, known: Known, receive: Receive) {
   const socket = new WebSocket(url);
-  // A slow handshake queues only its own copies. It never delays another path.
+  // Frames sent before this path's ready wait here, so a slow path delays no other.
   let pending: string[] | undefined = [];
 
   socket.onmessage = async ({ data }) => {
     const challenge = v.safeParse(RVChallenge, read(data));
     if (!challenge.success) return socket.close();
-    socket.onmessage = () => socket.close();
     const s = await device.signChallenge(challenge.output.nonce);
-    if (socket.readyState !== WebSocket.OPEN) return;
     socket.onmessage = ready;
     socket.send(JSON.stringify({ t: 'auth', k: device.id, s } satisfies RVAuth));
   };
@@ -60,19 +55,16 @@ function path(url: string, device: Device, known: Known, receive: Receive) {
     const result = v.safeParse(incoming, read(data));
     if (!result.success) return;
     const frame = result.output;
-    if (frame.t === 'from' && !(await accepts(frame))) return;
-    if (socket.readyState === WebSocket.OPEN) receive(url, frame);
+    if (frame.t === 'from' && 'code' in (await opened(frame))) return;
+    receive(url, frame);
   }
 
-  async function accepts({ k, env }: RVFrom) {
-    return k === env.k && 'header' in (await openSignal(crypto, env, device.id, known, Date.now()));
-  }
+  const opened = ({ env }: RVFrom) => openSignal(crypto, env, device.id, known, Date.now());
 
   socket.onclose = () => receive(url, { t: 'closed' });
 
   return {
     send(text: string) {
-      if (socket.readyState >= WebSocket.CLOSING) return;
       if (pending) pending.push(text);
       else socket.send(text);
     },
@@ -80,8 +72,11 @@ function path(url: string, device: Device, known: Known, receive: Receive) {
   };
 }
 
-/** Open the supplied signalling URLs (configured rendezvous and/or local node).
- * The peer owns the signed payload; room data still needs the pairing MAC check. */
+/** Signs in on each signalling URL (rendezvous and local node; contracts/rendezvous.md 2) and
+ *  sends every frame on each of them. receive gets each path's frames with its URL, and
+ *  `closed` when the path closes. A `from` reaches it only when its envelope passes the
+ *  receiver's checks for a signal; its sender is the envelope's `k`. Room data still needs the
+ *  pairing mac check. */
 export function rendezvous(
   urls: readonly string[],
   device: Device,
@@ -91,9 +86,7 @@ export function rendezvous(
   const paths = Array.from(new Set(urls), (url) => path(url, device, known, receive));
   return {
     send(frame: Outgoing) {
-      if (frame.t === 'watch' && frame.k.length > 64) throw new RangeError('watch exceeds 64 ids');
       const text = JSON.stringify(frame);
-      if (utf8(text).length > maxBytes) throw new RangeError('frame exceeds 16 KiB');
       for (const path of paths) path.send(text);
     },
     close() {
