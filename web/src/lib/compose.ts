@@ -51,17 +51,21 @@ function named(text: string, at: number, members: Named[]) {
 /** Text outside code spans, cut at the mentions of the members given: what is before the first
  *  mention, the mention, and the rest in the same way. */
 function plain(text: string, members: Named[]): Part[] {
+  const out: Part[] = [];
+  let from = 0;
   for (let at = text.indexOf('@'); at >= 0; at = text.indexOf('@', at + 1)) {
     const member = named(text, at, members);
     if (!member) continue;
     const end = at + 1 + member.name.length;
-    return [
-      { kind: 'text', text: text.slice(0, at) },
+    out.push(
+      { kind: 'text', text: text.slice(from, at) },
       { kind: 'at', text: text.slice(at, end), id: member.id },
-      ...plain(text.slice(end), members),
-    ];
+    );
+    from = end;
+    at = end - 1;
   }
-  return [{ kind: 'text', text }];
+  out.push({ kind: 'text', text: text.slice(from) });
+  return out;
 }
 
 /** A text as its parts: the code spans between backticks, the mentions of the members given, and
@@ -76,7 +80,7 @@ export function parts(text: string, members: Named[]): Part[] {
     .flatMap((piece, i): Part[] =>
       i % 2 ? [{ kind: 'code', text: piece }] : plain(piece, members),
     )
-    .filter((part) => part.text);
+    .filter((part) => part.text !== '');
 }
 
 /** The ids of the members a text mentions, each once, in the order of their first mention. */

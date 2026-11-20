@@ -44,6 +44,18 @@ Each session has one state, kept by the host: `dormant`, `working`,
 
 A session ends, and its row is removed, as section 1 says.
 
+- The host makes a change only from the state it takes the session to be
+  in. A change the table does not list, or one from another state than the
+  session is in, is refused and changes nothing.
+- While one session of an AI in a group is `working` or in `takeover`, no
+  other session of that AI in that group becomes `working` or goes to
+  `takeover`: section 1 gives the AI one turn at a time per group, and a
+  takeover holds its other sessions (`flows/takeover.md` step 9).
+- When the node starts, rows saved as `working` or `waiting` become
+  `dormant` before anything else happens. A row saved as `takeover` keeps
+  that state, and so holds its deliveries, until its hand-back starts the
+  structured CLI (`working`) or ends the session (`flows/takeover.md` E).
+
 Overlays, each of which holds deliveries: `paused` (group pause; the
 session's task paused by hand, by the round limit, or pre-empted),
 `limited` (usage cap or vendor rate limit; also sign-in not valid, which

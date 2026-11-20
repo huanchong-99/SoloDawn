@@ -278,6 +278,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:41-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
 
+### 2026-11-20 · deviation · The audit record has no `what` for a CLI killed on an idle close
+
+- Symptom: `planning/flows/agent-turn.md` section G has the node write an audit row, and nothing else, when it kills a CLI that did not answer a close within 10 s outside a turn. `planning/contracts/storage.md` section 3 lists eight values of `what` (`delivered`, `refused`, `requested`, `approval`, `takeover`, `handback`, `merge`, `setting`), and none of them says that.
+- Cause: the list of `what` was written before that rule. The audit write takes any text as `what` and has a constant for each of the eight only (`internal/host/audit.go:6-15`); nothing kills a CLI yet.
+- Status: open. HS-15 adds the value to `storage.md` section 3 and a constant beside the others when it builds the idle close (coordinator, 2026-11-20).
+
+### 2026-11-20 · limitation · The host gives no notice when something `host.info` shows has changed
+
+- Symptom: `planning/contracts/datachannel.md` section 7 pushes `host.info` whenever one of its fields changes. `open`, and `state`, `task` and `queued` of each AI in a group, come from the host's sessions, and the host tells nobody when one of them changes: whoever builds `host.info` can only read the session table again (`Sessions.All`, `internal/host/session.go:341`).
+- Cause: the seam of the host (HS-0, #159) has no hook on a change of the session table (`internal/host/session.go:115`); which changes matter depends on what `host.info` is built from, which is N-3's.
+- Status: open. N-3 decides whether it needs a notice or reads the table again, and asks the owner of `internal/host/session.go` for the hook if it does (coordinator, 2026-11-20).
+
+### 2026-11-20 · limitation · A commit that fails leaves the session table ahead of the store
+
+- Symptom: not observed. If the store fails to commit a transaction whose function succeeded (an I/O error at `COMMIT`), the session table in memory keeps the changes the store lost, until the node restarts and reads the table again.
+- Cause: `Sessions.Write` puts a change into memory inside the transaction and takes it out again only when the transaction's function returns an error (`internal/host/session.go:180`, `Write`). The store reports a failed commit only after the next transaction may have started (`internal/store/store.go:76-86`, `:88-92`), and has no hook that runs before it.
+- Status: open, accepted for step 1. A store hook that runs on the writer after a failed commit would close it.
+
 ### 2026-11-20 · limitation · Cards and home-written rows are one line each in the chat main line
 
 - Symptom: in the main line of the web client a brief, an approval, a decision, a summary and a call are one outlined line that names the kind and the card's subject, with the dawn edge and "Waiting on you" when the card waits for the reader. It has no buttons: the reader cannot confirm, approve or choose there. A row the home wrote (`task`, `system`) is a quiet centred line; a `system` row shows its `code` as it is on the wire, not a sentence.
@@ -315,6 +333,48 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: F-02 in `planning/steps/step-1-frontend.md` asks for a mock that answers `hello`, `sync`, `fetch` and `host.info`; the settled plan (PR #58) adds that it pushes `groups`. `mockCtl` answers `hello`, `sync`, `fetch` and `cmd`, and pushes only `reset` and `rows`. `proto.ts` has no `host.info` type; it has a `Groups` type, written from the contract.
 - Cause: neither frame has a Go type or a wire example yet, and the mock answers from wire examples only (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:94-96`, `web/src/lib/proto.ts:372-377`). Both are frozen by unit P-2 (`planning/contracts/conventions.md` section 5; `planning/steps/parallel-plan-units.md` section 1), which also adds the mock answers for `host.info` and `groups`; B-10 named them before the parallel plan.
 - Status: resolved in #165 (P-2): `host-info-answer.json` and `groups.json` exist with their Go types and schemas; `mockCtl` answers `host.info` and pushes `groups` before it answers a `group create` (`web/src/lib/mock.ts`, `mockCtl`).
+
+### 2026-11-20 · bug · The local merge ran the project's Git hooks (review M5)
+
+- Symptom: once a check's `npm install` had let Husky set `core.hooksPath` in the clone's config, a `prepare-commit-msg` hook that adds a trailer made `Apply` return a conflict ("last commit on base does not record …") although the base held the change, and the next round added a second squash commit; a commitlint-style `commit-msg` hook made every local merge a conflict. A configured signing key could make the commit wait for a person.
+- Cause: `git merge --squash`, `git commit` and `git reset --merge` in `squashLocal` (`internal/host/merge.go`) ran with the clone's own hooks and signing settings, and the inspection compared the exact message.
+- Status: resolved on branch `fix/host-merge-review`: the three commands, and the reset of an interrupted squash after a restart, run with `-c core.hooksPath=<repo>/.git/solodawn-no-hooks`, an empty folder the host makes; the commit with `--no-verify --no-gpg-sign` (`noHooks`, `squashLocal`, `resetLocal`). Pushes and fetches keep the project's hooks (Git LFS needs `pre-push`). `local.md` section 7, row "merge, no remote". Tests `TestLocalMergeRunsNoProjectHooks`, `TestLocalMergeWithoutHooksFolder`.
+
+### 2026-11-20 · bug · `Submit` could reuse a pull request from a fork (review M6)
+
+- Symptom: an open pull request from a fork whose branch has the task branch's name, into the same base, was taken as the task's pull request.
+- Cause: in gh 2.102.0 `gh pr list --head` matches the branch name only; `openPR` (`internal/host/forge.go`) took the first entry.
+- Status: resolved on branch `fix/host-merge-review`: `--json` asks for `isCrossRepository` and such entries are skipped; `local.md` section 7, row `submit_task`. Test `TestSubmitForgeSkipsForkPullRequests`, with a fake `gh`; not verified against GitHub.
+
+### 2026-11-20 · bug · A merge queue or auto-merge was reported as a conflict (review M7)
+
+- Symptom: when `gh pr merge` exits 0 and the pull request stays `OPEN` (a merge queue or auto-merge merges it later), `Apply` reported `task conflict` "pull request N is OPEN", and so did `Inspect` after a restart.
+- Cause: `Apply` and `Inspect` (`internal/host/merge.go`) read the pull request once.
+- Status: resolved on branch `fix/host-merge-review`: the pull request is read with one `gh api graphql` call (`state`, `headRefOid`, `mergeCommit`, `autoMergeRequest`, `mergeQueueEntry`). The merge is pending only while it is `OPEN` with a merge queue entry or auto-merge; `awaitPR` then reads every 30 s until an outcome, or 60 minutes after the merge command (after a restart, after `ReviewedMerge.Taken`, the audit row's time, or the restart), then `task conflict` "merge still pending after 60 minutes (merge queue or auto-merge)". An `OPEN` pull request with neither (the merge never ran, failed, or left the queue) is `task conflict` at once (re-check N2; `TestOpenPRWithNothingPending`). Right after a merge command that succeeded, that holds only from the second read, as GitHub's read can lag its write; at the limit, a last read that failed returns its error, so a merged PR out of reach is not reported as a conflict (focused review D1, D2; `TestReadFailureAtTheLimitAfterARestart`, `TestReadFailureAtTheLimitAfterAnOutage`, `TestFirstReadAfterTheMergeMayLag`). `local.md` section 7, rows "merge, with a remote" and "node restarts with a merge". Tests `TestMergeWaitsWhilePending`, `TestPendingMergeEnds`, `TestInspectResumesPendingMerge`, `TestPendingMergeStops`, with a fake `gh`; not verified against GitHub. A read that fails during the wait counts as unfinished and is repeated 30 s later, as for hosted checks (`TestPendingMergeOutlastsFailedReads`).
+
+### 2026-11-20 · bug · `HostedChecksToResume` panicked on a row without `checks.local` (review M8)
+
+- Symptom: a task row at `cloud_check` with no `checks.local` made the selection dereference a nil pointer.
+- Cause: `time.UnixMilli(t.Checks.Local.At)` in `HostedChecksToResume` (`internal/host/forge.go`).
+- Status: resolved on branch `fix/host-merge-review`: such a task resumes with its 60 minutes spent (`Since` is the zero time), so it ends with the timed-out result unless its first read has finished. Tests `TestHostedChecksToResumePausedAndWithoutLocalCheck`, `TestHostedChecksWithoutLocalCheckTimeOut`.
+
+### 2026-11-20 · bug · Restart inspection without a remote looked at the last commit only (review L6)
+
+- Symptom: after merging task t1 and then t2, `Inspect` of t1 reported a conflict.
+- Cause: `inspectLocal` (`internal/host/merge.go`) compared the message of `git log -1` on the base only.
+- Status: resolved on branch `fix/host-merge-review`: merged means a commit on the first-parent history of the base whose message is exactly the merge message; `local.md` section 7, row "node restarts with a merge". Test `TestInspectFindsAnEarlierLocalMerge`.
+
+### 2026-11-20 · deviation · Paused tasks were not resumed at `cloud_check` (review L8)
+
+- Symptom: after a restart, a paused task at `cloud_check` was not polled again, though task-machine row 6 takes `task cloud` while paused and `local.md` section 7 says every task at that step.
+- Cause: `HostedChecksToResume` (`internal/host/forge.go`) kept `active` tasks only, and its test asserted the exclusion.
+- Status: resolved on branch `fix/host-merge-review`: tasks at `cloud_check` that are active or paused resume, the two states row 6 accepts; the test now expects the paused task.
+
+### 2026-11-20 · bug · `DeleteBranch` could drop unreviewed commits (review L9)
+
+- Symptom: a local task branch that had moved past the merged commit was deleted with `git branch -D`, and its later commits with it.
+- Cause: `DeleteBranch` (`internal/host/merge.go`) deleted the branch whatever it pointed at.
+- Status: resolved on branch `fix/host-merge-review`: the branch is deleted with `git branch -D` only while `rev-parse` shows it is the merged commit; a moved branch is kept and `DeleteBranch` returns `deleted` false. `branch -D` refuses a branch that a worktree still has checked out, the only place it could move from; an earlier version used `update-ref -d`, which deleted it under a worktree whose removal had failed (re-check N1). `local.md` section 7, row "task merged". Tests `TestDeleteBranchOnlyAtTheMergedCommit`, `TestDeleteBranchRefusedWhileCheckedOut`, `TestDeleteBranchFailures`.
 
 ### 2026-11-20 · limitation · The task machine held `review.failed` and `wait.kept` beside the task row
 
@@ -578,3 +638,15 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: a note with 16,000 `<` characters was stored as 96,124 bytes, though `planning/contracts/conventions.md` section 4 counts a row's size on its JSON without HTML escaping and the home accepts rows up to 16 KiB on that count. A row the home accepts could be stored above the 60 KiB limit of a `ctl` message, so a `rows` or `fetched` frame built from it could not be sent. No node wrote rows yet, so nothing was broken.
 - Cause: `Put` encoded the row with `json.Marshal` (`internal/store/put.go:17` before the fix), which escapes `<`, `>` and `&` as six-byte `<`, `>`, `&`. `internal/peer` encodes frames without escaping and leaves stored escapes as they are.
 - Status: resolved in PR #163. `Put` and `PutReceipt` encode through `encode` (`internal/store/put.go:29`, a `json.Encoder` with `SetEscapeHTML(false)`, newline trimmed); `internal/store/put.go:18` and `internal/store/receipt.go:16` call it. Raw JSON the store returns (read paths, signed envelopes in the inbox) is never re-encoded. Test: `TestPutStoresWithoutHTMLEscapes` in `internal/store/read_test.go`. `internal/proto/decode.go:64` has the same `json.Marshal` pattern but is an intermediate that is decoded again at once; not changed (owned by P-1).
+
+### 2026-11-20 · bug · A refused read left the top of the main line loading forever
+
+- Symptom: when the home refused the `sync` of a group with `forbidden` while the group was still listed, the chat top showed the idle loading dots for good instead of "Earlier messages cannot be loaded right now."
+- Cause: `Group.sync` returned on `answer.err` without touching the paging (`web/src/lib/groups.svelte.ts:160-170` before the fix), so `more=true` and `failed=false` stayed while the connection was up, and `stuck` in `web/src/components/chat/Chat.svelte:19` stayed false. No page is asked for after a refused read (the group is not live), which is intended.
+- Status: resolved in PR #169: a refused read sets `paging().failed` (`web/src/lib/groups.svelte.ts:163`), a read that comes too late does not. The next successful read starts a fresh paging. Tests in `web/src/lib/groups.test.ts` (refused read, late refusal).
+
+### 2026-11-20 · bug · `plain` copied its list at every mention
+
+- Symptom: 2300 mentions in one text took about 69 ms to cut into parts, and it runs on every key press; 6000 overflowed the stack.
+- Cause: `plain` (`web/src/lib/compose.ts` before the fix) was recursive and spread the result of the rest of the text into a new list at each mention, so the cost grew with the square of the mentions and the depth with their number.
+- Status: resolved in PR #169: `plain` builds the list with a loop (`web/src/lib/compose.ts:53`), same output. Test in `web/src/lib/compose.test.ts` (2300 mentions give the same parts; 6000 take under ten times what 1500 do).

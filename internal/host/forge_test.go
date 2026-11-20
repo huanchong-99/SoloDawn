@@ -122,7 +122,7 @@ func forgeRepo(t *testing.T) (TaskForge, string, string) {
 }
 
 func forgeList(branch string) []string {
-	return []string{"pr", "list", "--head", branch, "--base", "base", "--state", "open", "--json", "number,headRefOid,url,state,baseRefName"}
+	return []string{"pr", "list", "--head", branch, "--base", "base", "--state", "open", "--json", "number,headRefOid,url,state,baseRefName,isCrossRepository"}
 }
 
 func forgeCreate(branch, title, body string) []string {
@@ -319,7 +319,56 @@ func TestHostedChecksToResume(t *testing.T) {
 		task("t3", "active", "review", "a1"), task("t4", "paused", "cloud_check", "a2"), task("t5", "active", "cloud_check", "a2")}
 	assertForge(t, HostedChecksToResume(tasks, []string{"a1", "a2"}), []HostedCheck{
 		{Task: "t1", Branch: "task/4-fix", Commit: "new", PR: 12, Since: time.UnixMilli(1_700_000_000_123)},
+		{Task: "t4", Branch: "task/4-fix", Commit: "new", PR: 12, Since: time.UnixMilli(1_700_000_000_123)},
 		{Task: "t5", Branch: "task/4-fix", Commit: "new", PR: 12, Since: time.UnixMilli(1_700_000_000_123)},
 	})
 	assertForge(t, HostedChecksToResume(tasks, nil), []HostedCheck(nil))
+}
+
+// A paused task takes task cloud too (task-machine row 6), so it resumes; a
+// task in another state does not. A row without checks.local resumes with
+// its 60 minutes spent instead of panicking.
+func TestHostedChecksToResumePausedAndWithoutLocalCheck(t *testing.T) {
+	local := &proto.Check{OK: true, At: 1_700_000_000_123, Commit: "new"}
+	tasks := []proto.TaskRow{
+		{RowHeader: proto.RowHeader{ID: "t1"}, State: "paused", Step: "cloud_check", Assignee: "a1", Commit: "new", PR: 12, Checks: proto.TaskChecks{Local: local}},
+		{RowHeader: proto.RowHeader{ID: "t2"}, State: "cancelled", Step: "cloud_check", Assignee: "a1", Commit: "new", PR: 13, Checks: proto.TaskChecks{Local: local}},
+		{RowHeader: proto.RowHeader{ID: "t3"}, State: "active", Step: "cloud_check", Assignee: "a1", Commit: "new", PR: 14},
+	}
+	assertForge(t, HostedChecksToResume(tasks, []string{"a1"}), []HostedCheck{
+		{Task: "t1", Commit: "new", PR: 12, Since: time.UnixMilli(1_700_000_000_123)},
+		{Task: "t3", Commit: "new", PR: 14},
+	})
+}
+
+// A wait from the zero time, as for a row without checks.local, ends with
+// the timed-out result after its first unfinished read.
+func TestHostedChecksWithoutLocalCheckTimeOut(t *testing.T) {
+	f := TaskForge{Worktree: t.TempDir()}
+	calls := fakeForgeGH(t, hostedView("new", queuedRun))
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		result, err := f.WaitHostedChecks(t.Context(), 4, "new", time.Time{})
+		assertForge(t, err, nil)
+		assertForge(t, result, &proto.ChecksBody{Stage: "cloud", Commit: "new", OK: false, Items: []proto.CheckItem{
+			{Name: "build", Detail: new("QUEUED")}, {Name: "hosted checks", Detail: new("hosted checks timed out")}}})
+		assertForge(t, time.Since(start), time.Duration(0))
+	})
+	calls([]string{"pr", "view", "4", "--json", "headRefOid,statusCheckRollup"})
+}
+
+// gh pr list --head matches the branch name only, so a pull request from a
+// fork with a branch of the same name is listed too; it is never reused.
+func TestSubmitForgeSkipsForkPullRequests(t *testing.T) {
+	f, _, head := forgeRepo(t)
+	own := "https://example.invalid/test/repo/pull/12"
+	fork := forgeAnswer{Stdout: `[{"url":"https://example.invalid/test/repo/pull/9","isCrossRepository":true}]`}
+	both := forgeAnswer{Stdout: fmt.Sprintf(`[{"url":"https://example.invalid/test/repo/pull/9","isCrossRepository":true},{"url":%q,"isCrossRepository":false}]`, own)}
+	calls := fakeForgeGH(t, fork, forgeAnswer{Stdout: own + "\n"}, both)
+	for range 2 {
+		pr, err := f.Submit(t.Context(), head, "base", "t", "s")
+		assertForge(t, err, nil)
+		assertForge(t, pr, &ForgePullRequest{Number: 12, URL: own})
+	}
+	calls(forgeList(f.Branch), forgeCreate(f.Branch, "t", "s"), forgeList(f.Branch))
 }
