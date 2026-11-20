@@ -18,7 +18,7 @@ import (
 )
 
 func init() {
-	stepSets["node-service"] = nodeServiceSteps
+	stepSets["node_service"] = nodeServiceSteps
 }
 
 func nodeServiceSteps(sc *godog.ScenarioContext, f fixtures) {
@@ -77,14 +77,12 @@ func loginRegistration(profile string) (bool, error) {
 		return loginFile(filepath.Join(profile, "systemd", "user", "default.target.wants", "solodawn.service"))
 	case "darwin":
 		return loginFile(filepath.Join(profile, "Library", "LaunchAgents", "org.solodawn.node.plist"))
-	case "windows":
+	default: // windows
 		// Never replace a real user's pre-existing task; the background checks absence first.
 		out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference = 'Stop'
 $name = 'SoloDawn-' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 Get-ScheduledTask -TaskPath '\' | Where-Object TaskName -eq $name | Select-Object -ExpandProperty TaskName`).Output()
 		return strings.TrimSpace(string(out)) != "", err
-	default:
-		panic("unsupported login service platform")
 	}
 }
 

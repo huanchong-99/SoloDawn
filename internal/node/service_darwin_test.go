@@ -2,6 +2,7 @@ package node
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -21,6 +22,12 @@ func TestServiceLoginAgent(t *testing.T) {
 </dict>
 </plist>
 `)
+	// launchd reads the agent through the same property list parser as plutil.
+	out, err := exec.Command("plutil", "-convert", "json", "-o", "-", plist).Output()
+	serviceOK(t, err)
+	if want := `{"Label":"org.solodawn.node","ProgramArguments":["\/opt\/a <node> & b","node"],"RunAtLoad":true}`; string(out) != want {
+		t.Fatalf("plutil: got %q; want %q", out, want)
+	}
 	serviceOK(t, RemoveService())
 	serviceAbsent(t, plist)
 }
