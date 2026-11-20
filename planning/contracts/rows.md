@@ -193,8 +193,11 @@ backslash 6, a Chinese character 6; the rest of the row takes about 0.8
 KiB. That is about 7,700 characters of plain English, about 2,500 Chinese
 characters, and 5.5 to 7 KiB of source code, less the more quotes it has
 (2.5 KiB if it were nothing but quotes). A client estimates the row by
-this rule and tells the writer before sending. The first version accepts
-this limit (`risks.md` K-22).
+this rule and tells the writer before sending. Go's `encoding/json`
+always writes U+2028 and U+2029 as six-byte escapes, also with HTML
+escaping off, and a browser writes them as they are: an estimate made in
+a browser undercounts those two characters, and the size the node
+measures decides. This limit is `risks.md` K-22.
 
 ## 6. `note`
 
