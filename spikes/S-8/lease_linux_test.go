@@ -7,8 +7,9 @@ import (
 	"time"
 )
 
-// gone polls a mapped port until a datagram no longer arrives. Each failed
-// probe waits 700 ms, so the result is late by up to about a second.
+// gone polls a mapped port from new source ports until a datagram no longer
+// arrives. Each failed probe waits 700 ms, so the result is late by up to
+// about a second.
 func gone(t *testing.T, r *router, port int, start time.Time, limit time.Duration) time.Duration {
 	t.Helper()
 	for time.Since(start) < limit {
@@ -25,8 +26,11 @@ func TestLease(t *testing.T) {
 	r := startRouter(t)
 	start := time.Now()
 	p := r.call(t, msg{T: "pmp", Proto: "udp", Internal: answerPort, External: answerPort, Lifetime: 4})
+	flow := r.established(t, p.Port)
 	pmpGone := gone(t, r, p.Port, start, 15*time.Second)
-	t.Logf("NAT-PMP lifetime 4 s (granted %d s, err %q): unreachable %s after the request", p.Lifetime, p.Err, pmpGone)
+	still := r.established(t, p.Port)
+	t.Logf("NAT-PMP lifetime 4 s (granted %d s, err %q): unreachable from new ports %s after the request; a flow established before expiry still passes %v (before %v)",
+		p.Lifetime, p.Err, pmpGone, still, flow)
 
 	p = r.call(t, msg{T: "pmp", Proto: "udp", Internal: answerPort, External: answerPort, Lifetime: 4})
 	ports := []int{p.Port}

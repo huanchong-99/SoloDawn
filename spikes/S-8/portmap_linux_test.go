@@ -24,7 +24,9 @@ var narrow = []string{"allow 30000-30009 0.0.0.0/0 1024-65535", "deny 0-65535 0.
 
 // router is the right-hand port-restricted gateway with miniupnpd, a socket
 // on the client's 47800 and a sender in the WAN. Without a mapping no
-// datagram from the WAN reaches the client.
+// datagram from the WAN reaches the client. The gateway's conntrack keeps
+// translating a flow it has seen after its rule is gone, so reach probes
+// from a new source port each time and established probes from one port.
 type router struct {
 	n           netsim.Network
 	client, wan *net.UDPConn
@@ -47,7 +49,31 @@ func startRouter(t *testing.T, config ...string) *router {
 
 func (r *router) reach(t *testing.T, port int) bool {
 	t.Helper()
+	return arrives(t, udpSocket(t, r.n.WAN, netsim.WANIP+":0"), r.client, netip.AddrPortFrom(r.public, uint16(port)))
+}
+
+func (r *router) established(t *testing.T, port int) bool {
+	t.Helper()
 	return arrives(t, r.wan, r.client, netip.AddrPortFrom(r.public, uint16(port)))
+}
+
+// occupy has another device on the LAN, 10.0.0.3, map 47800/UDP by NAT-PMP
+// before the node asks.
+func occupy(t *testing.T, client string) {
+	t.Helper()
+	command(t, "ip", "-n", client, "address", "add", "10.0.0.3/24", "dev", "eth0")
+	c := udpSocket(t, client, "10.0.0.3:0")
+	// Version 0, opcode 1 (UDP), internal and external port 47800, 3600 s.
+	req := []byte{0, 1, 0, 0, 0xba, 0xb8, 0xba, 0xb8, 0, 0, 0x0e, 0x10}
+	_, err := c.WriteToUDPAddrPort(req, netip.MustParseAddrPort("10.0.0.1:5351"))
+	must(t, err)
+	must(t, c.SetReadDeadline(time.Now().Add(2*time.Second)))
+	var resp [16]byte
+	n, _, err := c.ReadFromUDPAddrPort(resp[:])
+	must(t, err)
+	if n != 16 || resp[3] != 0 || resp[10] != 0xba || resp[11] != 0xb8 {
+		t.Fatalf("10.0.0.3 did not get 47800: % x", resp[:n])
+	}
 }
 
 func (r *router) call(t *testing.T, req msg) msg {
@@ -92,12 +118,13 @@ func TestLibrary(t *testing.T) {
 		first := r.call(t, msg{T: "map", NAT: typ, Proto: "udp", Internal: answerPort, Lifetime: 60})
 		reached := r.reach(t, first.Port)
 		again := r.call(t, msg{T: "map", NAT: typ, Proto: "udp", Internal: answerPort, Lifetime: 60})
+		flow := r.established(t, first.Port)
 		rules := r.mappings(t)
 		del := r.call(t, msg{T: "delete", NAT: typ, Proto: "udp", Internal: answerPort})
-		after := r.reach(t, first.Port)
-		t.Logf("%s: external %s (%d ms, err %q); mapped %d in %d ms (err %q), reachable %v; renewed to %d (err %q); gateway rules %v; delete err %q, reachable after delete %v",
-			typ, ext.IP, ext.Ms, ext.Err, first.Port, first.Ms, first.Err, reached, again.Port, again.Err, rules, del.Err, after)
-		if ext.IP != r.public.String() || first.Err != "" || !reached || again.Port != first.Port {
+		after, still := r.reach(t, first.Port), r.established(t, first.Port)
+		t.Logf("%s: external %s (%d ms, err %q); mapped %d in %d ms (err %q), reachable %v; renewed to %d (err %q); gateway rules %v; delete err %q; after delete reachable from a new port %v, from the established flow %v",
+			typ, ext.IP, ext.Ms, ext.Err, first.Port, first.Ms, first.Err, reached, again.Port, again.Err, rules, del.Err, after, still)
+		if ext.IP != r.public.String() || first.Err != "" || !reached || again.Port != first.Port || !flow || !still {
 			t.Errorf("%s: mapping cycle failed", typ)
 		}
 		if want := typ == "NAT-PMP"; after != want { // go-nat's NAT-PMP delete sends nothing
@@ -142,11 +169,11 @@ func external(rule string) int {
 	return n
 }
 
-// The protocols used directly when another mapping holds 47800/UDP, as when
-// a second node behind the same router asks first.
+// The protocols used directly when another device holds 47800/UDP, as when
+// a second node behind the same router asked first.
 func TestProtocols(t *testing.T) {
 	r := startRouter(t)
-	command(t, "ip", "netns", "exec", r.n.Right.Client, "upnpc", "-m", netsim.ClientIP, "-a", netsim.ClientIP, "47899", strconv.Itoa(answerPort), "UDP")
+	occupy(t, r.n.Right.Client)
 	ext := r.call(t, msg{T: "pmp", Kind: "external"})
 	p := r.call(t, msg{T: "pmp", Proto: "udp", Internal: answerPort, External: answerPort, Lifetime: 60})
 	reached := r.reach(t, p.Port)

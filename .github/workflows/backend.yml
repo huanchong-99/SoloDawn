@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nftables miniupnpd-nftables miniupnpc
+      - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nftables miniupnpd-nftables miniupnpc conntrack
       - run: go vet -tags netsim ./features/netsim ./spikes/S-8
       - run: go test -c -tags netsim -o netsim.test ./features/netsim
       - run: sudo ./netsim.test -test.v -test.count=1

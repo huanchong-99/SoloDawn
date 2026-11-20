@@ -61,7 +61,11 @@ type peer struct {
 
 func runPeer(in io.Reader, out *emitter) error {
 	offer := os.Getenv("S8_SIDE") == "offer"
-	e := webrtc.SettingEngine{LoggerFactory: &logging.DefaultLoggerFactory{Writer: os.Stderr, DefaultLogLevel: logging.LogLevelWarn}}
+	logs := &logging.DefaultLoggerFactory{Writer: os.Stderr, DefaultLogLevel: logging.LogLevelWarn}
+	if os.Getenv("S8_DEBUG") == "1" {
+		logs.ScopeLevels = map[string]logging.LogLevel{"ice": logging.LogLevelTrace}
+	}
+	e := webrtc.SettingEngine{LoggerFactory: logs}
 	e.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 	e.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryOnly)
 	if offer {
@@ -76,6 +80,13 @@ func runPeer(in io.Reader, out *emitter) error {
 		}
 		defer mux.Close()
 		e.SetICEUDPMux(mux)
+	}
+	if os.Getenv("S8_TCP") == "1" {
+		mux, err := iceTCP(&e, out, !offer)
+		if err != nil {
+			return err
+		}
+		defer mux.Close()
 	}
 	servers := []webrtc.ICEServer{{URLs: []string{"stun:" + netsim.WANIP + ":3478"}}}
 	if os.Getenv("S8_TURN") == "1" {
@@ -136,10 +147,15 @@ func (p *peer) pair(event string) {
 	pair, err := p.pc.SCTP().Transport().ICETransport().GetSelectedCandidatePair()
 	m := msg{T: event, Ms: since(p.start), Err: errText(err)}
 	if pair != nil {
-		m.Local = pair.Local.Typ.String() + " " + net.JoinHostPort(pair.Local.Address, strconv.Itoa(int(pair.Local.Port)))
-		m.Remote = pair.Remote.Typ.String() + " " + net.JoinHostPort(pair.Remote.Address, strconv.Itoa(int(pair.Remote.Port)))
+		m.Local = describe(pair.Local)
+		m.Remote = describe(pair.Remote)
 	}
 	p.out.send(m)
+}
+
+// describe gives a candidate's type, protocol and address: "srflx udp 11.0.0.6:47801".
+func describe(c *webrtc.ICECandidate) string {
+	return c.Typ.String() + " " + c.Protocol.String() + " " + net.JoinHostPort(c.Address, strconv.Itoa(int(c.Port)))
 }
 
 func (p *peer) candidate(c *webrtc.ICECandidate) {

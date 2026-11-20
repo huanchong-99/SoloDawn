@@ -23,6 +23,10 @@ type variant struct {
 	relay               bool // TURN offered to both ends (a node's ordinary connection)
 	mapOffer, mapAnswer bool // that end maps its host candidate's port by NAT-PMP
 	occupied            bool // another mapping holds 47800/UDP on the right gateway
+	tcp, mapTCP         bool // both ends listen for ICE-TCP; the answerer maps that port
+	blockUDP            bool // NET-1 drops UDP between the two gateways
+	runs                int  // repetitions of each pair (1 if zero)
+	debug               bool // ICE trace and the gateways' conntrack tables
 }
 
 // outcome is what one run saw within the deadline.
@@ -50,18 +54,22 @@ const deadline = 15 * time.Second
 // punch opens one connection in a fresh network and reports what happened.
 func punch(t *testing.T, left, right netsim.NAT, v variant) outcome {
 	n := netsim.Start(t, left, right)
-	env := []string{"S8_TURN=0"}
-	if v.relay {
-		env[0] = "S8_TURN=1"
+	env := []string{"S8_TURN=" + flag(v.relay), "S8_TCP=" + flag(v.tcp), "S8_MAP_TCP=" + on(v.mapTCP)}
+	if v.blockUDP {
+		n.SetBlocked(t, true, 0)
 	}
-	if v.mapAnswer || v.occupied {
+	if v.mapAnswer || v.occupied || v.mapTCP {
 		n.Right.StartUPnP(t)
 	}
 	if v.mapOffer {
 		n.Left.StartUPnP(t)
 	}
 	if v.occupied {
-		command(t, "ip", "netns", "exec", n.Right.Client, "upnpc", "-m", netsim.ClientIP, "-a", netsim.ClientIP, "47899", strconv.Itoa(answerPort), "UDP")
+		occupy(t, n.Right.Client)
+	}
+	if v.debug {
+		env = append(env, "S8_DEBUG=1")
+		t.Cleanup(func() { dump(t, n) }) // after the processes stop, before the namespaces go
 	}
 	relay := spawn(t, n.WAN, "relay")
 	if m, ok := relay.next(t, 5*time.Second); !ok || m.T != "ready" {
@@ -95,6 +103,13 @@ func punch(t *testing.T, left, right netsim.NAT, v variant) outcome {
 	return o
 }
 
+func flag(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
 func on(b bool) string {
 	if b {
 		return "pmp"
@@ -113,7 +128,7 @@ func (o *outcome) observe(t *testing.T, side string, m msg, other *child) {
 		o.answer = m.Local + " -> " + m.Remote
 	case "mapped":
 		o.mapped += fmt.Sprintf("%s %d->%s:%d (%d ms, err %q) ", side, m.Internal, m.IP, m.Port, m.Ms, m.Err)
-		if side == "answer" {
+		if side == "answer" && m.Proto != "tcp" {
 			o.granted = net.JoinHostPort(m.IP, strconv.Itoa(m.Port))
 		}
 	case "error":
@@ -126,13 +141,37 @@ func (o *outcome) observe(t *testing.T, side string, m msg, other *child) {
 // matrix holds the outcomes of one variant for the summary table.
 type matrix struct {
 	mu   sync.Mutex
-	runs map[[2]netsim.NAT]outcome
+	runs map[[2]netsim.NAT][]outcome
 }
 
 func (x *matrix) put(l, r netsim.NAT, o outcome) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	x.runs[[2]netsim.NAT{l, r}] = o
+	k := [2]netsim.NAT{l, r}
+	x.runs[k] = append(x.runs[k], o)
+}
+
+// cell counts the paths of one pair, with the offerer's time to the echo.
+func cell(runs []outcome) string {
+	count := map[string]int{}
+	lo, hi := int64(-1), int64(0)
+	for _, o := range runs {
+		count[o.path()]++
+		if o.open && (lo < 0 || o.ms < lo) {
+			lo = o.ms
+		}
+		hi = max(hi, o.ms)
+	}
+	var parts []string
+	for _, p := range []string{"direct", "relay", "none"} {
+		if count[p] > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d/%d", p, count[p], len(runs)))
+		}
+	}
+	if lo >= 0 {
+		parts = append(parts, fmt.Sprintf("%d-%d ms", lo, hi))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (x *matrix) table() string {
@@ -145,12 +184,7 @@ func (x *matrix) table() string {
 	for _, l := range nats {
 		b.WriteString("| " + string(l) + " |")
 		for _, r := range nats {
-			o := x.runs[[2]netsim.NAT{l, r}]
-			cell := o.path()
-			if o.open {
-				cell += fmt.Sprintf(" %d ms", o.ms)
-			}
-			b.WriteString(" " + cell + " |")
+			b.WriteString(" " + cell(x.runs[[2]netsim.NAT{l, r}]) + " |")
 		}
 		b.WriteString("\n")
 	}
@@ -164,29 +198,32 @@ func relayOnly(l, r netsim.NAT) bool {
 	return (l == netsim.Symmetric && hard(r)) || (r == netsim.Symmetric && hard(l))
 }
 
-// Question 2: every pair of NET-1's NAT types, four ways.
+// Question 2: every pair of NET-1's NAT types, four ways; the variants that
+// can only connect run each pair three times.
 func TestPunch(t *testing.T) {
 	variants := []variant{
-		{name: "direct"},
-		{name: "relay", relay: true},
-		{name: "answerer-mapped", relay: true, mapAnswer: true},
-		{name: "offerer-mapped", relay: true, mapOffer: true},
+		{name: "direct", runs: 1},
+		{name: "relay", relay: true, runs: 3},
+		{name: "answerer-mapped", relay: true, mapAnswer: true, runs: 3},
+		{name: "offerer-mapped", relay: true, mapOffer: true, runs: 3},
 	}
 	for _, v := range variants {
-		x := &matrix{runs: map[[2]netsim.NAT]outcome{}}
+		x := &matrix{runs: map[[2]netsim.NAT][]outcome{}}
 		t.Run(v.name, func(t *testing.T) {
 			for _, l := range nats {
 				for _, r := range nats {
-					t.Run(string(l)+"/"+string(r), func(t *testing.T) {
-						t.Parallel()
-						o := punch(t, l, r, v)
-						x.put(l, r, o)
-						t.Logf("%s offerer %s answerer %s: path %s at %d ms; offerer %s; answerer %s; %s%s",
-							v.name, l, r, o.path(), o.ms, o.offer, o.answer, o.mapped, o.failure)
-						if want := expected(v, l, r); o.path() != want {
-							t.Errorf("path %s, want %s", o.path(), want)
-						}
-					})
+					for i := range v.runs {
+						t.Run(fmt.Sprintf("%s/%s/%d", l, r, i), func(t *testing.T) {
+							t.Parallel()
+							o := punch(t, l, r, v)
+							x.put(l, r, o)
+							t.Logf("%s offerer %s answerer %s: path %s at %d ms; offerer %s; answerer %s; %s%s",
+								v.name, l, r, o.path(), o.ms, o.offer, o.answer, o.mapped, o.failure)
+							if want := expected(v, l, r); o.path() != want {
+								t.Errorf("path %s, want %s", o.path(), want)
+							}
+						})
+					}
 				}
 			}
 		})
@@ -212,7 +249,7 @@ func TestGrantedPortPublished(t *testing.T) {
 			o := punch(t, l, netsim.Symmetric, variant{relay: true, mapAnswer: true, occupied: true})
 			t.Logf("offerer %s answerer symmetric, 47800 occupied: path %s at %d ms; offerer %s; answerer %s; %s%s",
 				l, o.path(), o.ms, o.offer, o.answer, o.mapped, o.failure)
-			if o.path() != "direct" || strings.HasSuffix(o.granted, ":47800") || !strings.HasSuffix(o.offer, "srflx "+o.granted) {
+			if o.path() != "direct" || strings.HasSuffix(o.granted, ":47800") || !strings.HasSuffix(o.offer, "srflx udp "+o.granted) {
 				t.Errorf("want a direct path through the granted port")
 			}
 		})
