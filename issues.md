@@ -113,9 +113,10 @@ F-01c measurements. The first two results are native `subtle.verify`; the last i
 
 | Browser (Playwright) | OS | Identity-point vector | Valid empty message (RFC 8032 §7.1 test 1) | Receiver |
 | --- | --- | --- | --- | --- |
-| Chrome for Testing 137.0.7151.119 | macOS | true | true | `bad_sig` |
+| Chrome for Testing 137.0.7151.119 | Linux, macOS | true | true | `bad_sig` |
+| Edge 137.0.3296.93 | Linux | true | true | `bad_sig` |
 | Chromium 156.0.8078.4 | macOS | true | true | `bad_sig` |
-| Firefox 136.0 | macOS | true | true | `bad_sig` |
+| Firefox 136.0 | Linux, macOS | true | true | `bad_sig` |
 | Firefox 157.0 | macOS | true | true | `bad_sig` |
 | Apple WebKit 27.2 (2370) | macOS | true | false | `bad_sig` |
 
