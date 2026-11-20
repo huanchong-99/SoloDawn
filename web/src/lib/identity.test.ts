@@ -103,10 +103,13 @@ describe('verify', () => {
     expect(await verify(crypto, device.id, text + ' ', s)).toBe(false);
   });
 
-  it('is false when WebCrypto refuses the key', async () => {
-    const refusing = {
-      subtle: { importKey: () => Promise.reject(new DOMException('point', 'DataError')) },
-    } as unknown as Crypto;
+  const notAPoint = () => Promise.reject(new DOMException('point', 'DataError'));
+
+  it.each([
+    ['refuses the key', { importKey: notAPoint }],
+    ['fails to verify', { importKey: () => Promise.resolve({}), verify: notAPoint }],
+  ])('is false when WebCrypto %s', async (_, subtle) => {
+    const refusing = { subtle } as unknown as Crypto;
     expect(await verify(refusing, id, 'x', encode(new Uint8Array(64).fill(1)))).toBe(false);
   });
 });
