@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -102,20 +103,39 @@ func CreateTaskWorkspace(projectDir string, num int, slug, base string, remote, 
 }
 
 func addTaskWorktree(repo, path, branch, base string, remote, takeover bool) error {
-	if takeover && !remote {
+	if !takeover {
+		return newTaskWorktree(repo, path, branch, base)
+	}
+	if !remote {
 		return workspaceGit(repo, nil, "worktree", "add", "--", path, branch)
 	}
-	if takeover {
-		published := "refs/remotes/origin/" + branch
-		var refs bytes.Buffer
-		if err := workspaceGit(repo, &refs, "for-each-ref", "--format=%(refname)", published); err != nil {
-			return err
-		}
-		if strings.TrimSuffix(refs.String(), "\n") == published {
-			base = published
-		}
+	local, published := "refs/heads/"+branch, "refs/remotes/origin/"+branch
+	var out bytes.Buffer
+	if err := workspaceGit(repo, &out, "for-each-ref", "--format=%(refname)", local, published); err != nil {
+		return err
 	}
+	refs := strings.Split(out.String(), "\n")
+	if slices.Contains(refs, local) {
+		return resumeTaskWorktree(repo, path, branch, published)
+	}
+	if slices.Contains(refs, published) {
+		base = published
+	}
+	return newTaskWorktree(repo, path, branch, base)
+}
+
+func newTaskWorktree(repo, path, branch, base string) error {
 	return workspaceGit(repo, nil, "worktree", "add", "-b", branch, "--", path, base)
+}
+
+func resumeTaskWorktree(repo, path, branch, published string) error {
+	if err := workspaceGit(repo, nil, "worktree", "add", "--", path, branch); err != nil {
+		return err
+	}
+	if err := workspaceGit(filepath.Join(repo, path), nil, "merge", "--ff-only", published); err != nil {
+		return errors.Join(err, workspaceGit(repo, nil, "worktree", "remove", "--", path))
+	}
+	return nil
 }
 
 const reviewDiff = ".solodawn-review.diff"

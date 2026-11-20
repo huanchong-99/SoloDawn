@@ -121,6 +121,49 @@ func TestWorkspaceRemoteReassignment(t *testing.T) {
 	workEqual(t, fixtureGit(t, tree, "rev-parse", "HEAD"), base)
 }
 
+func TestWorkspaceRetainedBranchFastForward(t *testing.T) {
+	f := workspaceSetup(t)
+	tree, err := CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, false)
+	workOK(t, err)
+	workOK(t, RemoveTaskWorkspace(f.project, 3, "fix"))
+	fixtureGit(t, f.source, "switch", "-c", "task/3-fix")
+	newHead := workspaceCommit(t, f.source, "progress", "published")
+	fixtureGit(t, f.source, "push", "origin", "task/3-fix")
+	resumed, err := CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, true)
+	workOK(t, err)
+	workEqual(t, resumed, tree)
+	workEqual(t, fixtureGit(t, resumed, "branch", "--show-current"), "task/3-fix")
+	workEqual(t, fixtureGit(t, resumed, "rev-parse", "HEAD"), newHead)
+	// A concurrent second attempt cannot remove the active worktree.
+	_, err = CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, true)
+	requireGitExit(t, err, 128)
+	workEqual(t, fixtureGit(t, resumed, "rev-parse", "HEAD"), newHead)
+}
+
+func TestWorkspaceRetainedBranchDiverged(t *testing.T) {
+	f := workspaceSetup(t)
+	tree, err := CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, false)
+	workOK(t, err)
+	local := workspaceCommit(t, tree, "local", "local change")
+	fixtureGit(t, f.source, "switch", "-c", "task/3-fix")
+	published := workspaceCommit(t, f.source, "published", "another change")
+	fixtureGit(t, f.source, "push", "origin", "task/3-fix")
+	fixtureGit(t, f.repo, "fetch", "origin")
+	// Compare the diagnostic to the installed Git, including its advice text.
+	cmd := exec.Command("git", "merge", "--ff-only", "refs/remotes/origin/task/3-fix")
+	cmd.Dir = tree
+	output, err := cmd.CombinedOutput()
+	requireGitExit(t, err, 128)
+	workOK(t, RemoveTaskWorkspace(f.project, 3, "fix"))
+	_, err = CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, true)
+	requireGitExit(t, err, 128)
+	workEqual(t, err.Error(), "git: exit status 128: "+strings.TrimSpace(string(output)))
+	workEqual(t, fixtureGit(t, f.repo, "rev-parse", "task/3-fix"), local)
+	workEqual(t, fixtureGit(t, f.repo, "rev-parse", "origin/task/3-fix"), published)
+	_, err = os.Stat(tree)
+	workEqual(t, errors.Is(err, fs.ErrNotExist), true)
+}
+
 func TestWorkspaceReviewRounds(t *testing.T) {
 	f := workspaceSetup(t)
 	fixtureGit(t, f.source, "checkout", "-b", "task/1-change")
