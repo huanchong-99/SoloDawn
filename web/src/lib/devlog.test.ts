@@ -188,11 +188,11 @@ describe('DeviceLog.apply', () => {
 
   it('checks entries that arrive at the same time one after the other', async () => {
     const log = await logWith(genesis());
-    const results = await Promise.all([
-      refusal(log.apply(await signed(first, 2, 'add', second))),
-      refusal(log.apply(await signed(first, 2, 'add', third))),
-    ]);
-    expect(results).toStrictEqual(['accepted', 'fork']);
+    const [a, b] = [await signed(first, 2, 'add', second), await signed(first, 2, 'add', third)];
+    // Which verification finishes first is up to WebCrypto: one entry wins, the other is a fork.
+    const results = await Promise.all([refusal(log.apply(a)), refusal(log.apply(b))]);
+    expect(results.sort()).toStrictEqual(['accepted', 'fork']);
+    expect(log.entries).toHaveLength(2);
   });
 
   it('names the reason of a refusal', () => {
