@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"time"
@@ -39,8 +40,10 @@ func runInput(ctx context.Context, dir string, stdin io.Reader, name string, arg
 	if dir != "" {
 		// With SysProcAttr set, os.StartProcess no longer checks the folder,
 		// and Windows reports a missing one only as "The directory name is
-		// invalid"; the check here names the folder on every system.
+		// invalid". This is that check, with the same "chdir" error on every
+		// system (os.Stat names its own call, which differs on Windows).
 		if _, err := os.Stat(dir); err != nil {
+			err.(*fs.PathError).Op = "chdir"
 			return "", "", err
 		}
 		// exec sets PWD itself only when it builds the environment.

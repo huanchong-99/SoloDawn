@@ -43,7 +43,7 @@ func TestCommandInAMissingFolder(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "missing")
 	_, _, err := runIn(t.Context(), dir, "git", "status")
 	pathErr, ok := errors.AsType[*fs.PathError](err)
-	if !ok || pathErr.Op != "stat" || pathErr.Path != dir || !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("got %#v, want stat %s: not exist", err, dir)
+	if !ok || pathErr.Op != "chdir" || pathErr.Path != dir || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("got %#v, want chdir %s: not exist", err, dir)
 	}
 }
