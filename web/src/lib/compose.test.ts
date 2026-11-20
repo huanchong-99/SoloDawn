@@ -282,3 +282,28 @@ describe('parts of a text with many mentions', () => {
     expect(time(6000).ms).toBeLessThan(small * 10);
   });
 });
+
+describe('parts, exactly', () => {
+  it('gives a text with no mention as that one part', () => {
+    expect(parts('hello', members)).toEqual([{ kind: 'text', text: 'hello' }]);
+    expect(parts('hello @nobody', members)).toEqual([{ kind: 'text', text: 'hello @nobody' }]);
+    expect(parts('', members)).toEqual([]);
+  });
+
+  it('finds a mention that starts where the one before ends, or one character after it', () => {
+    const at = (id: string, name: string) => ({ kind: 'at', text: `@${name}`, id });
+    expect(parts('@Codex@Claude', members)).toEqual([at('x', 'Codex'), at('c', 'Claude')]);
+    expect(parts('@Codex @Claude', members)).toEqual([
+      at('x', 'Codex'),
+      { kind: 'text', text: ' ' },
+      at('c', 'Claude'),
+    ]);
+    expect(parts('a@Codex@Codex@Codex!', members)).toEqual([
+      { kind: 'text', text: 'a' },
+      at('x', 'Codex'),
+      at('x', 'Codex'),
+      at('x', 'Codex'),
+      { kind: 'text', text: '!' },
+    ]);
+  });
+});
