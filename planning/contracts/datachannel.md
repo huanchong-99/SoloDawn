@@ -47,7 +47,7 @@ Node to client:
 
 ```json
 {"t":"welcome","re":1,"ok":true,"v":1,"device":"<node device id>",
- "name":"workstation","version":"0.3.1","time":1763600000000,
+ "name":"workstation","version":"v0.3.1","time":1763600000000,
  "groups":[{"g":"Qm1…","name":"Website","seq":812}],"owner":true}
 ```
 
@@ -226,7 +226,7 @@ carry the whole object:
 
 ```json
 {"t":"host.info","re":5,"ok":true,
- "device":"…","name":"workstation","os":"macOS 15.2","version":"0.3.1",
+ "device":"…","name":"workstation","os":"macOS 15.2","version":"v0.3.1",
  "open":2,"max_open":4,"offline":false,"update":null,
  "homes":[{"g":"Qm1…","name":"Website"}],
  "relay":{"used":3250000,"limit":52428800},
@@ -242,7 +242,7 @@ carry the whole object:
 
 `agents` lists every supported CLI found on the machine. `account` is `null`
 until the owner has declared it. `update` is `null`, or
-`{"version":"0.3.2","status":"pending"}` after an update check
+`{"version":"v0.3.2","status":"pending"}` after an update check
 (`contracts/local.md` section 9): `pending` when that version is installed
 and waits for a restart, `mismatch` when its file failed the checksum and
 nothing was replaced. In `groups`, `state` and `task` are the AI's derived

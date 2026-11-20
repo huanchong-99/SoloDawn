@@ -59,6 +59,11 @@ on the socket right after binding, the owner connects and another local
 account, not an administrator, is refused with "access denied".
 `[unverified]` the other supported Windows versions.
 
+**A `sock` left behind.** When the node starts and `sock` exists, it dials
+it. If the dial is refused, the file is stale: the node removes it and
+binds. If the dial succeeds, a node is already running: the new one says so
+in one line and exits without binding.
+
 One JSON line opens a connection:
 
 - `{"mcp":"<session token>"}`: the rest of the connection is the MCP
@@ -89,7 +94,8 @@ is not signed in, the command fails and its error text is what the AI and
 the owner see (R-137, C-11).
 
 Names used below: `<wt>` is `wt/<num>-<slug>`; `<br>` is
-`task/<num>-<slug>`; `<base>` is the **name** of the base branch (for
+`task/<num>-<slug>`, where `<slug>` is the task row's `slug`;
+`<base>` is the **name** of the base branch (for
 example `main`); `<base-ref>` is what to branch from and diff against:
 `origin/<base>` with a remote, `<base>` without one. Nothing fetches when the
 group has no remote.
@@ -102,7 +108,7 @@ group has no remote.
 | task session created for a task taken over from another AI | with a remote: fetch, then `git -C repo worktree add ../<wt> -b <br> origin/<br>` if that branch exists there, else as for a new task. Without a remote: `git -C repo worktree add ../<wt> <br>` |
 | task session created for a task that returns to a node which still has the local branch `<br>` | with a remote: fetch, `git -C repo worktree add ../<wt> <br>` (the branch is reused, not created), then `git -C <wt> merge --ff-only origin/<br>`. If the branch has diverged, the worktree is removed again and the session fails with the output of Git. Without a remote: as the row above |
 | `push_branch` | `git -C <wt> push origin refs/heads/<br>:refs/heads/<br>`: the full ref on both sides, never a short name; never with a force option |
-| `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Then each entry of `group.checks`, through the system shell, in the worktree, stopped at `limits.turn_minutes`. The commit recorded is `git -C <wt> rev-parse HEAD` |
+| `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Then each entry of `group.checks`, in order, through the system shell, in the worktree. `limits.turn_minutes` limits the whole run of these entries together, not each command. The commit recorded is `git -C <wt> rev-parse HEAD` |
 | hard check: secrets | the patterns of section 8 over the added lines of `git diff <base-ref>...HEAD` |
 | hard check: tests | fails when the diff changes source files and no test file; what counts as each is below the table |
 | `submit_task` | refused unless the tree is clean, by the status command of `run_checks`, and HEAD is the checked commit. With a remote: the push above, then `gh pr list --head <br> --base <base> --state open --json number,headRefOid,url,state,baseRefName`. A pull request that is closed (merged included) or whose base is not `<base>` is never reused. If the list is empty: `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
@@ -113,10 +119,26 @@ group has no remote.
 | node restarts with a merge it took and did not report | no second attempt. It looks: `gh pr view <pr> --json state,mergeCommit,headRefOid`, or without a remote the last commit message on `<base>`. Merged, and with a remote `headRefOid` is the reviewed commit: `task merged`. Merged with another head, or not merged: `task conflict` |
 | merge failed, or the head is not the reviewed commit | `task conflict` with the command's output |
 | task given to another AI | with a remote, first the push of `push_branch`; then as the next row |
-| task merged, cancelled, or given away | `git -C repo worktree remove ../<wt>`; the reviewer's node removes `review/<num>` |
+| task merged, or given away | `git -C repo worktree remove ../<wt>`; the reviewer's node removes `review/<num>` |
+| task cancelled | `git -C repo worktree remove --force ../<wt>`: uncommitted changes in the worktree are discarded; the branch `<br>` keeps its commits. The reviewer's node removes `review/<num>` |
 | hand-back facts | in the session's folder: `git rev-parse HEAD`, `git status --porcelain --untracked-files=all`, `git log <start>..HEAD --format='%h %s'`, `git diff --shortstat <start>` |
 | statistics | `git diff --shortstat <base-ref>...<commit>` |
 
+- **Slug.** The home writes `slug` into the task row once, when it creates
+  the task, and never changes it, so a later title edit renames no branch.
+  The home is its only producer; hosts read it from the row. From the
+  title: lower-case ASCII letters and digits are kept (upper-case ASCII
+  letters are lowered); every other run of characters becomes one `-`;
+  leading and trailing `-` are trimmed; the result is cut to 40 characters
+  and trimmed of `-` again; if nothing is left, it is `task`. Example:
+  "Node: report connection path changes" gives
+  `node-report-connection-path-changes`.
+- **An interrupted squash merge** (no remote), which a restart leaves
+  staged in `repo` while `<base>` does not yet record the merge, counts as
+  a failed merge. On restart, before anything else touches the clone, the
+  host runs `git -C repo reset --merge` under the same lock as merges; the
+  row on the restart above then reports `task conflict`. HS-7b implements
+  it.
 - Checks are about a commit, so they need a clean tree: the commit that is
   checked is the commit that is submitted, reviewed and merged
   (`contracts/task-machine.md` section 4).
@@ -146,7 +168,9 @@ group has no remote.
 
   A change to a file of any other type does not trigger the check: the
   check neither fails nor passes because of it. Support for projects with
-  other conventions is a later option.
+  other conventions is a later option. This is the list of the code's
+  `checkCodeExtensions` (`internal/host/checks.go`): the HS-5 list cut to
+  those languages.
 - "Fake tests" has no command; it is a veto item in review.
 - Both hard checks always run (R-103). There is no setting to turn one off.
 
@@ -159,7 +183,23 @@ Patterns:
 
 - a PEM private-key header;
 - well-known credential formats, recognised by prefix and length (the list
-  is short and is part of the code review);
+  is short and is part of the code review). The vendors document the
+  prefixes, not a fixed length (GitHub warns that a token's length can
+  change), so each is a prefix, not preceded by a letter or digit,
+  followed by at least the number of key characters given:
+
+  | Credential | Prefix | Then | Source |
+  | --- | --- | --- | --- |
+  | Anthropic API key | `sk-ant-` | 32 of `A-Za-z0-9_-` | [Claude docs][ak] |
+  | OpenAI API keys, project keys included | `sk-` (`sk-proj-` for a project key) | 32 of `A-Za-z0-9_-` | [OpenAPI spec][oa], [Cookbook][op] |
+  | GitHub personal access token (classic) | `ghp_` | 36 of `A-Za-z0-9` | [GitHub docs][gh]; the length as HS-6 has it |
+  | GitHub fine-grained personal access token | `github_pat_` | 30 of `A-Za-z0-9_` | [GitHub docs][gh] |
+  | GitHub OAuth, user, installation and refresh tokens | `gho_`, `ghu_`, `ghs_`, `ghr_` | 30 of `A-Za-z0-9_.-` | [GitHub docs][gh] |
+  | AWS access key id | `AKIA`, `ASIA` | 16 of `A-Z0-9` | as HS-6 has it |
+
+  The minimum runs are this contract's choice; the code follow-up is
+  HS-6b. `ghs_` includes the stateless `ghs_<app id>_<JWT>` format that
+  GitHub began on 2026-04-27, hence `.` and `-`;
 - environment-file content: three or more lines of `NAME=value` in a row
   where a name contains `KEY`, `SECRET`, `TOKEN` or `PASSWORD`.
 
@@ -201,3 +241,8 @@ is not applied to what people type.
 `http://localhost:47800/` serves the embedded web client. Requests whose
 `Host` header is not `localhost` or `127.0.0.1` are refused. The page gets
 no special trust: it pairs like any browser (`solodawn open`).
+
+[ak]: https://platform.claude.com/docs/en/get-api-key
+[oa]: https://github.com/openai/openai-openapi/blob/manual_spec/openapi.yaml
+[op]: https://developers.openai.com/cookbook/examples/agents_sdk/context_personalization
+[gh]: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github
