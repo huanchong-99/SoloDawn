@@ -69,7 +69,9 @@ No field is both: a field is either always present or optional.
   two decoders read differently: for the escape of a lone surrogate
   (`"\ud800"`) Go reads U+FFFD and a browser keeps the surrogate, so two
   such nonces would be one nonce to a node and two to a browser. Free text
-  may still hold one (`risks.md` K-17).
+  may still hold one (`risks.md` K-17). A value that a contract names
+  beside the id is as good as an id there: the `by` of a message row may
+  be `"system"`.
 - **For implementers, writing.** Where a language writes an unset list or
   an unset raw JSON value as `null` (Go does, for a nil slice and a nil
   `json.RawMessage`), the code that builds a row, a frame, a payload or a
@@ -95,8 +97,9 @@ No field is both: a field is either always present or optional.
   read two ways. To keep exact names it drops every member whose name
   holds an upper-case letter, U+017F or U+212A before the standard decoder
   sees it. That works because of the rule on names at the top of this
-  section, and it sets a limit: no type on the wire may be a map with
-  free keys, such as one keyed by an id.
+  section, and it binds maps as well: the keys of a map on the wire are
+  made of `a` to `z`, `0` to `9` and `_`, like the agent names that key
+  `caps` in `settings.set`. An id is never a key.
 
 How both are tested, and by which task, is in `steps/step-1-backend.md`,
 working rules.
@@ -134,12 +137,16 @@ that of a message's `text` in `contracts/rows.md` section 5.
 
 "Frozen" means: a struct in `internal/proto`, a golden file in
 `internal/proto/testdata/`, and the same file parsed by the web client's
-tests. A shape is frozen by the first backend task that needs it, at the
-start of its pull request, so that the frontend can build against the file
-while the rest is written. Until its golden file exists, the example and
-the field table in the contract are the reference, and the web client types
-the shape from them. This table is the only place that says who freezes
-what.
+tests. All three change in one pull request: whoever adds or changes a
+golden file also updates the schema in `web/src/lib/proto.ts` and the file
+map of `proto.test.ts`, because the web client's golden test fails on a file
+it has no mapping for and the web job of CI runs on every pull request
+(decided by coordinator). A shape is frozen by the first backend task that
+needs it, at the start of its pull request, so that the frontend can build
+against the file while the rest is written. Until its golden file exists,
+the example and the field table in the contract are the reference, and the
+web client types the shape from them. This table is the only place that says
+who freezes what.
 
 | Shapes | Frozen in |
 | --- | --- |

@@ -36,14 +36,10 @@ are in `steps/step-1.md`.
   request.
 - Every task ships **one wire example and one observable test**: a golden
   JSON file under `internal/proto/testdata/` for what it puts on the wire,
-  and a test that fails without the task. Which task freezes which shape
-  is the table in `contracts/conventions.md` section 5; the shape goes in
-  at the start of the pull request.
-- **A shape is frozen in both languages at once.** A pull request that adds
-  or changes a golden file under `internal/proto/testdata/` also updates
-  the schema in `web/src/lib/proto.ts` and the file map of `proto.test.ts`.
-  The web client's golden test fails on a file it has no mapping for, and
-  the web job of CI runs on every pull request (decided by coordinator).
+  and a test that fails without the task. Which task freezes which shape,
+  and what a pull request that touches a golden file must also change in
+  the web client, is in `contracts/conventions.md` section 5; the shape
+  goes in at the start of the pull request.
 - **Presence and names on the wire** follow `contracts/conventions.md`
   section 2, which also says what Go gets wrong by default. Two tests hold
   the code to it.
@@ -77,7 +73,7 @@ are in `steps/step-1.md`.
 | B-01 | `internal/proto`, **frozen in slices** (a), (b), (d) and (c), each with its golden files. What each slice holds is in `contracts/conventions.md` section 5; (a) and (b) are done. Slice (c) is one confirmed task from brief to merge as a complete signed vector, with and without a remote, as `flows/trace-task.md` describes it: nothing abridged, every response with its request id | B-00 | round-trip tests pass; a test fails if a struct and its golden file disagree. Slice (a) before B-06, (b) before B-11, (d) before B-10, whose tests use its `null` helper, and as early as possible because the frontend's cards are built from it, (c) before B-19 |
 | B-02 | `internal/identity`: key creation and loading, envelope sign and verify, device-log apply and replay, adoption, fingerprint, the canonical bytes of the pairing secret, `mac` and room id; `testdata/crypto.json` with fixed vectors for the frontend. Merged (pull request 63) as the contract stood then; the rules settled since are B-02b | B-01a | unit tests cover the rules of `contracts/envelope.md` sections 3, 4, 6 as they stood |
 | B-02b | The rules settled after B-02, in `internal/identity` and `internal/proto`: the function that decodes what a node reads from the wire by `contracts/conventions.md` section 2 (exact names, `null`, integers, missing fields); `contracts/envelope.md` as it now stands (weak keys in a key and in a signature, the checks on `to` and `ts`, what is read from a log entry, the last valid device, how a typed secret is read, the `k` of a `pair` message); `testdata/crypto.json` with every part and case of `contracts/vectors.md`. Merged (pull request 67) | B-02 | unit tests cover every rule of `contracts/envelope.md` sections 1 to 4 and 6; the vector file holds every case `contracts/vectors.md` names |
-| B-02c | What was settled after B-02b: the pairing `mac` over `kind` and `name`, and the check of `kind` in a `pair` message (`contracts/envelope.md` section 6); an id as a type, for `n` and `g` in the envelope check (`contracts/conventions.md` section 2); the vector parts and cases added since (`contracts/vectors.md`). One pull request with the web client's side (frontend task F-01d): both test suites read the vector file, and the `mac` values in it change | B-02b | unit tests cover the changed rules; the vector file holds every case `contracts/vectors.md` names; both test suites pass |
+| B-02c | What was settled after B-02b: the pairing `mac` over `kind` and `name`, and the check of `kind` in a `pair` message (`contracts/envelope.md` section 6); an id as a type, for `n` and `g` in the envelope check (`contracts/conventions.md` section 2); the vector parts and cases added since (`contracts/vectors.md`). One merged case changes: in `received`, "an empty t and n are values" becomes `bad_request`, because an empty `n` is no id, and its empty `t` goes into a case of its own. One pull request with the web client's side (frontend task F-01d): both test suites read the vector file, and the `mac` values in it change | B-02b | unit tests cover the changed rules; the vector file holds every case `contracts/vectors.md` names; both test suites pass |
 | B-03 | Spikes S-1, S-6, S-8, S-9 | B-00 | answers written in the pull request, which is not merged |
 | B-04 | Spikes S-2, S-3, S-4 on macOS; S-5 on Windows | B-00 | answers written in the pull request, which is not merged; the messages the real CLIs sent are kept as files for B-13 |
 | B-05 | `internal/store`: open, migrations, the tables of `contracts/storage.md`, row put / after-seq-up-to / page by `pos`, counters, inbox, receipts, retention with the purge mark. Merged (pull request 62) | B-01b | unit tests with an in-memory database |

@@ -22,12 +22,8 @@ design notes. Milestones and acceptance tests are in `steps/step-1.md`.
   `contracts/rows.md` and `contracts/messages.md`. A shape that has no
   golden file yet (`conventions.md` section 5 says which task adds it) is
   typed from the example and field table in its contract.
-- **A shape is frozen in both languages at once.** A pull request that adds
-  or changes a golden file under `internal/proto/testdata/` also updates
-  the schema in `web/src/lib/proto.ts` and the file map of `proto.test.ts`,
-  whoever opens it: the golden test fails on a file it has no mapping for,
-  and the web job of CI runs on every pull request (decided by
-  coordinator).
+- A golden file changes in both languages in one pull request, whoever
+  opens it (`contracts/conventions.md` section 5).
 - Validate only at boundaries: messages from a data channel or WebSocket,
   and what a person types. Components trust their props.
 - Least code. Svelte 5 runes for state; no state library; no component
