@@ -146,7 +146,15 @@ func TestBackoffSequenceAndWake(t *testing.T) {
 func TestNoRouteFailsBeforeOpeningSession(t *testing.T) {
 	f := newPair(t)
 	f.a.paths = func(string) []Route { return nil }
-	eq(t, f.a.attempt(t.Context(), f.b.key.ID(), func(*Connection) { t.Error("called session with no route") }), time.Duration(0))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	cl := f.a.Client(ctx, f.b.key.ID(), nil, testHello, func(*Session, proto.Welcome) {
+		t.Error("welcomed session with no route")
+	})
+	recv(t, cl.Done())
+	s, opened := cl.openSession()
+	eq(t, s == nil, true)
+	eq(t, opened.IsZero(), true)
 }
 
 // rawOffer negotiates with f.b, signed as f.a, from a pion connection of the
@@ -215,9 +223,9 @@ func TestRejectedCtlChannels(t *testing.T) {
 	eq(t, recv(t, f.opened), c)
 }
 
-// connectOnce answers the next offer of a's Connect and returns the
-// connection once it is open at both ends.
-func (f *pair) connectOnce(t *testing.T, opened chan *Connection) negotiation {
+// connectOnce answers the next offer of a's Client, completes the hello
+// handshake, and returns the Session and negotiation once welcomed.
+func (f *pair) connectOnce(t *testing.T, opened chan *Session) (*Session, negotiation) {
 	t.Helper()
 	offer := recv(t, f.aMail["offer"])
 	o := offerLink(t, f.b.key.ID(), offer)
@@ -228,25 +236,28 @@ func (f *pair) connectOnce(t *testing.T, opened chan *Connection) negotiation {
 	deliver(t, f.a, f.aMail.route(), e)
 	e, _ = hostUDP(t, f.aMail, o.conn)
 	deliver(t, f.b, f.bMail.route(), e)
-	return negotiation{recv(t, opened), recv(t, f.opened), offer, answer}
+	srv := recv(t, f.opened)
+	raw, err := srv.Read(t.Context())
+	check(t, err)
+	var h proto.Hello
+	check(t, proto.Decode(raw, &h))
+	check(t, srv.Send(testWelcome(h.ID, f.b.key.ID())))
+	s := recv(t, opened)
+	return s, negotiation{s.c, srv, offer, answer}
 }
 func TestReconnectAfterOpen(t *testing.T) {
 	f := newPair(t)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	opened := make(chan *Connection, 1)
-	done := make(chan struct{})
+	opened := make(chan *Session, 1)
 	wake := make(chan struct{}, 1)
-	go func() { f.a.Connect(ctx, f.b.key.ID(), wake, func(c *Connection) { opened <- c }); close(done) }()
+	cl := f.a.Client(t.Context(), f.b.key.ID(), wake, testHello, func(s *Session, _ proto.Welcome) { opened <- s })
 	for range 2 {
-		n := f.connectOnce(t, opened)
+		s, n := f.connectOnce(t, opened)
 		n.info(t)
 		check(t, n.server.Close())
-		recv(t, n.client.Done())
+		recv(t, s.Done())
 		wake <- struct{}{}
 	}
-	cancel()
-	recv(t, done)
+	check(t, cl.Close())
 }
 
 // A connection that closes before it was open for 60 seconds keeps the
@@ -254,24 +265,30 @@ func TestReconnectAfterOpen(t *testing.T) {
 // connection, the next offer waits 2 seconds, not 1.
 func TestBackoffKeptAfterShortConnection(t *testing.T) {
 	f := newPair(t)
-	var failed atomic.Bool
+	var offers atomic.Int32
 	mailRoute := f.aMail.route()
-	f.a.paths = func(string) []Route {
-		return []Route{{Send: func(ctx context.Context, to string, env proto.Envelope) error {
-			if strings.Contains(env.Payload, `"t":"offer"`) && !failed.Swap(true) {
-				return errors.New("first offer lost")
-			}
-			return mailRoute.Send(ctx, to, env)
-		}}}
-	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	opened := make(chan *Connection, 1)
-	done := make(chan struct{})
-	go func() { f.a.Connect(ctx, f.b.key.ID(), nil, func(c *Connection) { opened <- c }); close(done) }()
-	n := f.connectOnce(t, opened)
+	f.a.paths = func(string) []Route {
+		return []Route{{Send: func(sCtx context.Context, to string, env proto.Envelope) error {
+			if strings.Contains(env.Payload, `"t":"offer"`) {
+				n := offers.Add(1)
+				if n == 1 {
+					return errors.New("first offer lost")
+				}
+				if n > 6 {
+					cancel()
+					return errors.New("unexpected offer flood")
+				}
+			}
+			return mailRoute.Send(sCtx, to, env)
+		}}}
+	}
+	opened := make(chan *Session, 1)
+	cl := f.a.Client(ctx, f.b.key.ID(), nil, testHello, func(s *Session, _ proto.Welcome) { opened <- s })
+	s, n := f.connectOnce(t, opened)
 	check(t, n.server.Close())
-	recv(t, n.client.Done())
+	recv(t, s.Done())
 	closed := time.Now()
 	select {
 	case <-f.aMail["offer"]:
@@ -282,7 +299,7 @@ func TestBackoffKeptAfterShortConnection(t *testing.T) {
 		t.Fatal("no new offer")
 	}
 	cancel()
-	recv(t, done)
+	recv(t, cl.Done())
 }
 
 func TestBackoffAfterAnAttempt(t *testing.T) {

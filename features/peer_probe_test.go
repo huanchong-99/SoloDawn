@@ -39,31 +39,34 @@ const (
 )
 
 type probeWorld struct {
-	ctx           context.Context
-	cleanup       func(func())
-	keys          [2]identity.Key
-	nodes         [2]*peer.Peer
-	paths         [2]*peer.Path
-	relay         []proto.ICEServer
-	blocked       atomic.Bool
-	mode          probeMode
-	client        *peer.Client
-	mu            sync.Mutex
-	served        []*peer.Connection
-	sentOffers    []proto.Offer
-	baselineCount int
-	probeHello    chan struct{}
-	probeClosed   chan struct{}
-	periodicStop  context.CancelFunc
-	periodicDone  chan error
-	periodicCount atomic.Int64
+	ctx             context.Context
+	cleanup         func(func())
+	keys            [2]identity.Key
+	nodes           [2]*peer.Peer
+	paths           [2]*peer.Path
+	relay           []proto.ICEServer
+	blocked         atomic.Bool
+	mode            probeMode
+	client          *peer.Client
+	connectedAt     time.Time
+	mu              sync.Mutex
+	served          []*peer.Connection
+	sentOffers      []proto.Offer
+	baselineCount   int
+	probeHello      chan struct{}
+	probeClosed     chan struct{}
+	periodicStop    context.CancelFunc
+	periodicDone    chan error
+	periodicSent    int
+	periodicAnswers map[int]int
 }
 
 func probeSteps(sc *godog.ScenarioContext) {
 	w := &probeWorld{
-		cleanup:     afterScenario(sc),
-		probeHello:  make(chan struct{}, 4),
-		probeClosed: make(chan struct{}, 4),
+		cleanup:         afterScenario(sc),
+		probeHello:      make(chan struct{}, 4),
+		probeClosed:     make(chan struct{}, 4),
+		periodicAnswers: make(map[int]int),
 	}
 	sc.Step(`^two authorized nodes with a local relay$`, w.setupNodes)
 	sc.Step(`^the client connects to the node on one local network$`, func() error { return w.startClient(false) })
@@ -95,7 +98,7 @@ func probeSteps(sc *godog.ScenarioContext) {
 }
 
 func (w *probeWorld) setupNodes() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	w.ctx = ctx
 	w.cleanup(cancel)
 
@@ -177,8 +180,8 @@ func (w *probeWorld) wrapRoute(i int, r peer.Route) peer.Route {
 }
 
 // answerDetachedProbe answers a probe offer on a standalone PeerConnection that
-// opens ctl, records hello, and never sends welcome, leaving nodes[1]'s serving
-// connection untouched.
+// opens ctl, records hello, and withholds welcome without touching nodes[1]'s
+// serving connection.
 func (w *probeWorld) answerDetachedProbe(o proto.Offer) error {
 	var engine webrtc.SettingEngine
 	engine.SetIncludeLoopbackCandidate(true)
@@ -277,7 +280,7 @@ func (w *probeWorld) acceptInbound(c *peer.Connection) {
 			default:
 			}
 			if mode == modeWithholdWelcomeCloseOld {
-				// Switch back to normal for the ordinary reconnect that follows!
+				// Restore normal mode so the ordinary reconnect that follows succeeds.
 				w.mu.Lock()
 				w.mode = modeNormal
 				w.mu.Unlock()
@@ -285,7 +288,7 @@ func (w *probeWorld) acceptInbound(c *peer.Connection) {
 			}
 			if mode == modeCloseOldBeforeWelcome && prev != nil {
 				<-prev.Done()
-				// Give DTLS close notification time to reach the client while it
+				// Allow the old connection's close to reach the client while it
 				// still waits for welcome on the probe.
 				time.Sleep(200 * time.Millisecond)
 			}
@@ -309,17 +312,38 @@ func (w *probeWorld) startClient(blockDirect bool) error {
 		w.client = nil
 	}
 	w.blocked.Store(blockDirect)
+	welcomed := make(chan struct{}, 1)
 	w.client = w.nodes[0].Client(
 		w.ctx, w.keys[1].ID(), nil,
 		func() proto.Hello { return proto.Hello{Kind: "host", Name: "node", Addrs: []string{}} },
-		func(*peer.Session, proto.Welcome) {},
+		func(s *peer.Session, _ proto.Welcome) {
+			go w.checkUnexpectedFrames(s)
+			select {
+			case welcomed <- struct{}{}:
+			default:
+			}
+		},
 	)
 	w.cleanup(func() {
 		if w.client != nil {
 			_ = w.client.Close()
 		}
 	})
-	return nil
+	select {
+	case <-w.ctx.Done():
+		return w.ctx.Err()
+	case <-welcomed:
+		w.connectedAt = time.Now()
+		return nil
+	}
+}
+
+func (w *probeWorld) checkUnexpectedFrames(s *peer.Session) {
+	for {
+		if _, err := s.Read(w.ctx); err != nil {
+			return
+		}
+	}
 }
 
 func (w *probeWorld) waitClientPath(want string, limit time.Duration) error {
@@ -338,20 +362,19 @@ func (w *probeWorld) waitClientPath(want string, limit time.Duration) error {
 }
 
 func (w *probeWorld) observeDirectAndInfo(want string) error {
-	if err := w.waitClientPath(want, time.Second); err != nil {
+	limit := max(time.Until(w.connectedAt.Add(time.Second)), time.Nanosecond)
+	if err := w.waitClientPath(want, limit); err != nil {
 		return err
 	}
 	return w.clientInfo()
 }
 
 func (w *probeWorld) bothObservePath(want string) error {
-	start := time.Now()
-	// Wait until the connection opens, then require the path observation within 1s.
-	if err := w.waitClientPath(want, 8*time.Second); err != nil {
+	deadline := w.connectedAt.Add(time.Second)
+	limit := max(time.Until(deadline), time.Nanosecond)
+	if err := w.waitClientPath(want, limit); err != nil {
 		return err
 	}
-	_ = start
-	deadline := time.Now().Add(time.Second)
 	for {
 		w.mu.Lock()
 		var srv *peer.Connection
@@ -359,13 +382,13 @@ func (w *probeWorld) bothObservePath(want string) error {
 			srv = w.served[n-1]
 		}
 		w.mu.Unlock()
-		if srv != nil && srv.Path() == want {
+		if srv != nil && srv.Path() == want && !time.Now().After(deadline) {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("server did not observe path %q within 1s", want)
+			return fmt.Errorf("both ends did not observe path %q within 1s", want)
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -385,17 +408,30 @@ func (w *probeWorld) clientInfo() error {
 	return nil
 }
 
+func (w *probeWorld) recordPeriodicInfo() error {
+	w.mu.Lock()
+	w.periodicSent++
+	seq := w.periodicSent
+	w.mu.Unlock()
+	if err := w.clientInfo(); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	w.periodicAnswers[seq]++
+	w.mu.Unlock()
+	return nil
+}
+
 func (w *probeWorld) startPeriodicInfo() error {
 	pCtx, stop := context.WithCancel(w.ctx)
 	w.periodicStop = stop
 	w.periodicDone = make(chan error, 1)
 	w.cleanup(stop)
 	go func() {
-		if err := w.clientInfo(); err != nil {
+		if err := w.recordPeriodicInfo(); err != nil {
 			w.periodicDone <- err
 			return
 		}
-		w.periodicCount.Add(1)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
@@ -404,11 +440,10 @@ func (w *probeWorld) startPeriodicInfo() error {
 				w.periodicDone <- nil
 				return
 			case <-ticker.C:
-				if err := w.clientInfo(); err != nil {
+				if err := w.recordPeriodicInfo(); err != nil {
 					w.periodicDone <- err
 					return
 				}
-				w.periodicCount.Add(1)
 			}
 		}
 	}()
@@ -425,15 +460,30 @@ func (w *probeWorld) waitForMovedPath(want string) error {
 }
 
 func (w *probeWorld) stopAndVerifyPeriodicInfo() error {
-	if err := w.clientInfo(); err != nil {
-		return err
-	}
 	w.periodicStop()
 	if err := <-w.periodicDone; err != nil {
 		return err
 	}
-	if w.periodicCount.Load() < 2 {
-		return fmt.Errorf("expected periodic host.info requests, got %d", w.periodicCount.Load())
+	if err := w.clientInfo(); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	sent := w.periodicSent
+	answers := make(map[int]int, len(w.periodicAnswers))
+	for k, v := range w.periodicAnswers {
+		answers[k] = v
+	}
+	w.mu.Unlock()
+	if sent < 2 {
+		return fmt.Errorf("expected at least 2 periodic host.info requests, got %d", sent)
+	}
+	if len(answers) != sent {
+		return fmt.Errorf("sent %d periodic host.info requests, answered %d distinct requests", sent, len(answers))
+	}
+	for seq := 1; seq <= sent; seq++ {
+		if answers[seq] != 1 {
+			return fmt.Errorf("periodic host.info #%d answered %d times, want 1", seq, answers[seq])
+		}
 	}
 	return nil
 }
@@ -467,8 +517,7 @@ func (w *probeWorld) forceMoveCloseOld() error {
 	w.mode = modeCloseOldBeforeWelcome
 	w.baselineCount = len(w.sentOffers)
 	w.mu.Unlock()
-	w.client.Probe()
-	return w.waitClientPath("direct", 8*time.Second)
+	return w.waitClientPath("direct", 38*time.Second)
 }
 
 func (w *probeWorld) verifyMovedWithoutExtraOffer(want string) error {
@@ -479,7 +528,7 @@ func (w *probeWorld) verifyMovedWithoutExtraOffer(want string) error {
 	offers := slices.Clone(w.sentOffers[w.baselineCount:])
 	w.mu.Unlock()
 	if len(offers) != 1 || !offers[0].Probe {
-		return fmt.Errorf("expected exactly 1 probe offer and no extra offer, got %+v", offers)
+		return fmt.Errorf("expected 1 probe offer and no extra offer, got %+v", offers)
 	}
 	return nil
 }
@@ -490,19 +539,17 @@ func (w *probeWorld) forceMoveWithholdCloseOld() error {
 	w.mode = modeWithholdWelcomeCloseOld
 	w.baselineCount = len(w.sentOffers)
 	w.mu.Unlock()
-	w.client.Probe()
 	select {
 	case <-w.ctx.Done():
 		return w.ctx.Err()
 	case <-w.probeHello:
 	}
-	// N promoted the probe on hello and closed the old connection.
 	select {
 	case <-w.ctx.Done():
 		return w.ctx.Err()
 	case <-oldSrv.Done():
 	}
-	// Before the 10-second welcome deadline, no ordinary offer may be sent.
+	// Before the 10-second welcome deadline expires, no ordinary offer leaves.
 	time.Sleep(2 * time.Second)
 	w.mu.Lock()
 	duringWait := slices.Clone(w.sentOffers[w.baselineCount:])
@@ -541,13 +588,11 @@ func (w *probeWorld) verifySingleOrdinaryReconnect() error {
 }
 
 func (w *probeWorld) forceMoveAndExpireKeepOld() error {
-	w.client.Probe()
 	select {
 	case <-w.ctx.Done():
 		return w.ctx.Err()
 	case <-w.probeHello:
 	}
-	// Wait for the 10-second welcome deadline to close the probe.
 	select {
 	case <-w.ctx.Done():
 		return w.ctx.Err()
@@ -559,7 +604,6 @@ func (w *probeWorld) forceMoveAndExpireKeepOld() error {
 }
 
 func (w *probeWorld) verifyDiscardedProbeKeptOld() error {
-	// Wait past the 1-second reconnect backoff to confirm no ordinary offer leaves.
 	time.Sleep(1500 * time.Millisecond)
 	w.mu.Lock()
 	offers := slices.Clone(w.sentOffers[w.baselineCount:])

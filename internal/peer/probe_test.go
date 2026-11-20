@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,13 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/pion/webrtc/v4"
 )
+
+func reqCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
 
 func testHello() proto.Hello {
 	return proto.Hello{Kind: "host", Name: "test-host"}
@@ -56,14 +64,14 @@ func TestProbeICEStripsTURN(t *testing.T) {
 		r.ICE = []proto.ICEServer{{URLs: []string{"bogus"}}}
 		return []Route{r}
 	}
-	_, err := f.a.OfferProbe(t.Context(), f.b.key.ID())
+	_, err := f.a.offerProbe(t.Context(), f.b.key.ID())
 	eq(t, err == nil, false)
 
 	f2 := newPair(t)
 	relay := localRelay(t)
 	f2.a.paths = func(string) []Route { r := f2.aMail.route(); r.ICE = []proto.ICEServer{relay}; return []Route{r} }
 	f2.b.paths = func(string) []Route { r := f2.bMail.route(); r.ICE = []proto.ICEServer{relay}; return []Route{r} }
-	pr, err := f2.a.OfferProbe(t.Context(), f2.b.key.ID())
+	pr, err := f2.a.offerProbe(t.Context(), f2.b.key.ID())
 	check(t, err)
 	t.Cleanup(func() { pr.Close() })
 	offer := recv(t, f2.aMail["offer"])
@@ -73,8 +81,6 @@ func TestProbeICEStripsTURN(t *testing.T) {
 	deliver(t, f2.b, f2.bMail.route(), offer)
 	answer := recv(t, f2.bMail["answer"])
 	deliver(t, f2.a, f2.aMail.route(), answer)
-	// Wait briefly to gather host/srflx candidates and confirm neither end
-	// gathers a relay candidate on a probe.
 	_, aCand := hostUDP(t, f2.aMail, o.Conn)
 	_, bCand := hostUDP(t, f2.bMail, o.Conn)
 	eq(t, strings.Contains(aCand.Candidate, "typ relay"), false)
@@ -88,10 +94,10 @@ func TestProbeICEStripsTURN(t *testing.T) {
 }
 
 // dialProbe negotiates a probe from f.a to f.b over loopback UDP and returns
-// the client and server *Connection once ctl is open on the client.
+// the client and server *Connection once ctl is open on both ends.
 func (f *pair) dialProbe(t *testing.T) (*Connection, *Connection, proto.Envelope, proto.Envelope) {
 	t.Helper()
-	c, err := f.a.OfferProbe(t.Context(), f.b.key.ID())
+	c, err := f.a.offerProbe(t.Context(), f.b.key.ID())
 	check(t, err)
 	t.Cleanup(func() { c.Close() })
 	offer := recv(t, f.aMail["offer"])
@@ -114,15 +120,9 @@ func (f *pair) dialProbe(t *testing.T) (*Connection, *Connection, proto.Envelope
 	return c, srv, offer, answer
 }
 
-// TestInboundProbePromotionAndRaces covers:
-//   - probe not taking the slot before hello;
-//   - a second probe superseding the first;
-//   - non-ctl channels, binary frames, malformed/non-hello requests, and v!=1
-//     before promotion;
-//   - promotion on first valid hello closing the predecessor, dispatching extra
-//     channels afterwards, and ignoring repeated hello for promotion;
-//   - ordinaryOffer closing both the slot and any pending probe;
-//   - a revoked signer or superseded probe failing promotion on hello.
+// TestInboundProbePromotionAndRaces covers inbound probe slot isolation,
+// supersession by a second probe or an ordinary offer, pre-promotion frame
+// checks, and promotion on the first valid hello.
 func TestInboundProbePromotionAndRaces(t *testing.T) {
 	f := newPair(t)
 	handed := make(chan *Stream, 2)
@@ -130,8 +130,7 @@ func TestInboundProbePromotionAndRaces(t *testing.T) {
 	first := f.open(t, 0)
 	first.info(t)
 
-	// First probe opens ctl: slot stays first, inbound not called yet, copy of
-	// probe offer gets the same answer.
+	// A probe with open ctl leaves Peer.slot untouched until hello.
 	p1Client, p1Server, p1Offer, p1Answer := f.dialProbe(t)
 	dup := mail()
 	deliver(t, f.b, dup.route(), p1Offer)
@@ -143,12 +142,12 @@ func TestInboundProbePromotionAndRaces(t *testing.T) {
 	eq(t, len(f.opened), 0)
 	first.info(t)
 
-	// Extra channel opened on an unpromoted probe is closed.
+	// Non-ctl channels opened before promotion are closed.
 	earlyExtra := openRemote(t, p1Client, "test:before")
 	recv(t, earlyExtra.closed)
 	eq(t, len(handed), 0)
 
-	// Second probe supersedes p1 while leaving first.server in slot.
+	// A second probe supersedes p1 while leaving first.server in Peer.slot.
 	p2Client, p2Server, _, _ := f.dialProbe(t)
 	recv(t, p1Server.Done())
 	recv(t, p1Client.Done())
@@ -160,35 +159,36 @@ func TestInboundProbePromotionAndRaces(t *testing.T) {
 	f.b.mu.Unlock()
 	first.info(t)
 
-	// Binary message, non-hello request, re+id frame, bad hello kind, and v=2
-	// hello all leave p2 unpromoted and open.
-	check(t, p2Client.dc.Send([]byte("binary")))
+	// Binary frames (even containing valid hello JSON), non-hello requests,
+	// bad hello kinds, and unsupported versions leave p2 open and unpromoted.
+	check(t, p2Client.dc.Send([]byte(`{"t":"hello","id":77,"v":1,"kind":"host","name":"n","addrs":[]}`)))
 	for _, tmpl := range []string{
 		`{"t":"host.info","id":%d}`,
 		`{"t":"hello","id":%d,"re":1,"v":1,"kind":"host","name":"n","addrs":[]}`,
 		`{"t":"hello","id":%d,"v":1,"kind":"other","name":"n","addrs":[]}`,
+		`{"t":"other","id":%d,"v":1,"kind":"host","name":"n","addrs":[]}`,
 		`{"t":"hello","id":%d,"v":1,"kind":"host","name":"n","addrs":null}`,
 	} {
-		raw, err := p2Client.Request(t.Context(), func(id int64) any { return json.RawMessage(fmt.Sprintf(tmpl, id)) })
+		raw, err := p2Client.Request(reqCtx(t), func(id int64) any { return json.RawMessage(fmt.Sprintf(tmpl, id)) })
 		check(t, err)
 		var e proto.ErrorResponse
 		check(t, proto.Decode(raw, &e))
 		eq(t, e.Err.Code, "bad_request")
 	}
-	// Push without id is dropped without closing or promoting.
 	check(t, p2Client.Send(proto.RVFrame{Type: "devlog"}))
-	// Unsupported version answers "version" and keeps p2 open and unpromoted.
-	raw, err := p2Client.Request(t.Context(), func(id int64) any {
-		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 2, Kind: "host", Name: "n", Addrs: []string{}}
-	})
-	check(t, err)
-	var verErr proto.ErrorResponse
-	check(t, proto.Decode(raw, &verErr))
-	eq(t, verErr.Err.Code, "version")
+	for _, ver := range []int{0, 2} {
+		raw, err := p2Client.Request(reqCtx(t), func(id int64) any {
+			return json.RawMessage(fmt.Sprintf(`{"t":"hello","id":%d,"v":%d,"kind":"host","name":"n","addrs":[]}`, id, ver))
+		})
+		check(t, err)
+		var verErr proto.ErrorResponse
+		check(t, proto.Decode(raw, &verErr))
+		eq(t, verErr.Err.Code, "version")
+	}
 	eq(t, len(f.opened), 0)
 	first.info(t)
 
-	// Valid hello promotes p2, closes first.server, delivers hello to inbound.
+	// Valid hello promotes p2, closes first.server, and hands p2 to inbound.
 	helloSent := make(chan error, 1)
 	go func() {
 		reply, reqErr := p2Client.Request(t.Context(), func(id int64) any {
@@ -210,8 +210,8 @@ func TestInboundProbePromotionAndRaces(t *testing.T) {
 	check(t, p2Server.Send(testWelcome(gotHello.ID, f.b.key.ID())))
 	check(t, recv(t, helloSent))
 
-	// After promotion, channels beside ctl are dispatched and repeated hello
-	// goes straight through deliver without re-promoting.
+	// After promotion, registered channels are handed over and repeated hello
+	// frames pass through deliver without calling inbound again.
 	laterExtra := openRemote(t, p2Client, "test:after")
 	s := recv(t, handed)
 	eq(t, s.Label(), "test:after")
@@ -221,8 +221,9 @@ func TestInboundProbePromotionAndRaces(t *testing.T) {
 	check(t, err)
 	check(t, proto.Decode(msg, &gotHello))
 	eq(t, gotHello.ID, int64(99))
+	eq(t, len(f.opened), 0)
 
-	// A pending probe p3 is closed when an ordinary offer arrives.
+	// An ordinary offer closes both Peer.slot and any pending probe.
 	_, p3Server, _, _ := f.dialProbe(t)
 	second := f.open(t, 0)
 	recv(t, p2Server.Done())
@@ -235,11 +236,25 @@ func TestInboundProbePromotionAndRaces(t *testing.T) {
 	second.info(t)
 }
 
-// TestInboundProbeEdgeRejections covers refused probe SDP, rejected/duplicate
-// probe ctl channels, and a signer revoked before hello arrives on its probe.
+// TestInboundProbeEdgeRejections covers refused probe SDP, ctl size limits on
+// validHelloPacket, promote/unpromotedCtl operand combinations, unordered or
+// duplicate ctl channels, and signer revocation before hello.
 func TestInboundProbeEdgeRejections(t *testing.T) {
+	// Exact ctlLimit boundary on validHelloPacket (61,440 passes, 61,441 fails).
+	base := `{"t":"hello","id":1,"v":1,"kind":"host","name":"`
+	tail := `","addrs":[]}`
+	exact := []byte(base + strings.Repeat("a", ctlLimit-len(base)-len(tail)) + tail)
+	eq(t, len(exact), ctlLimit)
+	_, ok := validHelloPacket(exact)
+	eq(t, ok, true)
+	over := []byte(base + strings.Repeat("a", ctlLimit+1-len(base)-len(tail)) + tail)
+	eq(t, len(over), ctlLimit+1)
+	_, ok = validHelloPacket(over)
+	eq(t, ok, false)
+	eq(t, validHelloKind(proto.Hello{Request: proto.Request{Type: "other"}, Kind: "host"}), false)
+	eq(t, validHelloKind(proto.Hello{Request: proto.Request{Type: "hello"}, Kind: "other"}), false)
+
 	f := newPair(t)
-	// Refused SDP in a probe offer closes the connection and leaves slot/probes empty.
 	badOffer := f.a.sign(proto.Offer{
 		SignalHeader: f.a.header(link{f.b.key.ID(), randomID()}, "offer"),
 		SDP:          probeSDP, Probe: true,
@@ -250,8 +265,14 @@ func TestInboundProbeEdgeRejections(t *testing.T) {
 	eq(t, len(f.b.probes), 0)
 	f.b.mu.Unlock()
 
-	// A closed probe still present in p.probes cannot promote, and closing a
-	// pending probe clears p.probes via forgetProbe.
+	// Both operands of promote: (not in probes, open) and (in probes, closed).
+	openCtx, openCancel := context.WithCancel(t.Context())
+	openUnregistered := &Connection{Device: f.a.key.ID(), ctx: openCtx, close: func() error { openCancel(); return nil }}
+	eq(t, f.b.promote(openUnregistered), false)
+	// unpromotedCtl with known == true and promote == false closes the connection.
+	eq(t, f.b.unpromotedCtl(openUnregistered, exact), false)
+	recv(t, openUnregistered.Done())
+
 	closedCtx, closedCancel := context.WithCancel(t.Context())
 	closedCancel()
 	closedProbe := &Connection{Device: f.a.key.ID(), ctx: closedCtx, close: func() error { return nil }}
@@ -259,6 +280,7 @@ func TestInboundProbeEdgeRejections(t *testing.T) {
 	eq(t, f.b.promote(closedProbe), false)
 	delete(f.b.probes, f.a.key.ID())
 
+	// Promotion when Peer.slot has no predecessor.
 	soloClient, soloServer, _, _ := f.dialProbe(t)
 	check(t, soloClient.Send(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "host", Name: "n", Addrs: []string{}}))
 	eq(t, recv(t, f.opened), soloServer)
@@ -266,9 +288,11 @@ func TestInboundProbeEdgeRejections(t *testing.T) {
 	check(t, soloClient.Close())
 	recv(t, soloServer.Done())
 
+	// Closing an unpromoted probe removes it from Peer.probes via forgetProbe.
 	dropClient, dropServer, _, _ := f.dialProbe(t)
 	check(t, dropClient.Close())
 	check(t, dropServer.Close())
+	deadline := time.Now().Add(2 * time.Second)
 	for {
 		f.b.mu.Lock()
 		nProbes := len(f.b.probes)
@@ -276,10 +300,12 @@ func TestInboundProbeEdgeRejections(t *testing.T) {
 		if nProbes == 0 {
 			break
 		}
+		if time.Now().After(deadline) {
+			t.Fatal("forgetProbe did not remove closed probe")
+		}
 		time.Sleep(time.Millisecond)
 	}
 
-	// Unordered ctl on a probe closes the probe; duplicate ctl closes the second.
 	rawProbe := func(inits ...*webrtc.DataChannelInit) ([]*webrtc.DataChannel, *Connection) {
 		pc, err := webrtc.NewAPI(webrtc.WithSettingEngine(loopbackEngine())).NewPeerConnection(webrtc.Configuration{})
 		check(t, err)
@@ -319,8 +345,13 @@ func TestInboundProbeEdgeRejections(t *testing.T) {
 	chans[1].OnClose(func() { close(dupClosed) })
 	recv(t, dupCtl.Ready())
 	recv(t, dupClosed)
+	dupCtl.mu.Lock()
+	firstDC := dupCtl.dc
+	dupCtl.mu.Unlock()
+	eq(t, dupCtl.ownsCtl(firstDC), true)
+	eq(t, dupCtl.ownsCtl(chans[1]), false)
 
-	// Revoked device before hello on probe closes the probe without promoting.
+	// Revoking the signer before hello arrives closes the probe without promoting.
 	var allowed atomic.Bool
 	allowed.Store(true)
 	f.b.known = func(id string) bool { return id == f.a.key.ID() && allowed.Load() }
@@ -333,27 +364,26 @@ func TestInboundProbeEdgeRejections(t *testing.T) {
 	cur.info(t)
 }
 
-// TestOfferProbeDeadlinesAndSendFailure covers OfferProbe broadcast errors,
-// context cancellation, and all three cases of watchProbeOpen (15s timeout,
-// early Ready, early Done).
+// TestOfferProbeDeadlinesAndSendFailure covers offerProbe broadcast errors,
+// context cancellation, and all three cases of watchProbeOpen.
 func TestOfferProbeDeadlinesAndSendFailure(t *testing.T) {
 	f := newPair(t)
 	f.a.paths = func(string) []Route { return nil }
-	_, err := f.a.OfferProbe(t.Context(), f.b.key.ID())
+	_, err := f.a.offerProbe(t.Context(), f.b.key.ID())
 	eq(t, err.Error(), "no signalling path")
 
 	fCancel := newPair(t)
 	sending := make(chan struct{}, 1)
 	fCancel.a.paths = func(string) []Route {
 		return []Route{{Send: func(ctx context.Context, _ string, _ proto.Envelope) error {
-			sendBoolChan(sending)
+			notify(sending)
 			<-ctx.Done()
 			return ctx.Err()
 		}}}
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	go func() { <-sending; cancel() }()
-	_, err = fCancel.a.OfferProbe(ctx, fCancel.b.key.ID())
+	_, err = fCancel.a.offerProbe(ctx, fCancel.b.key.ID())
 	eq(t, err, context.Canceled)
 
 	synctest.Test(t, func(t *testing.T) {
@@ -363,7 +393,6 @@ func TestOfferProbeDeadlinesAndSendFailure(t *testing.T) {
 			c := &Connection{ctx: cCtx, ready: ready, close: func() error { cCancel(); return nil }}
 			return c, ready, cCancel
 		}
-		// 1. Expires at exactly 15 seconds when ctl has not opened.
 		c1, _, _ := mk()
 		go watchProbeOpen(c1, probeOpenLimit)
 		time.Sleep(probeOpenLimit - time.Nanosecond)
@@ -373,7 +402,6 @@ func TestOfferProbeDeadlinesAndSendFailure(t *testing.T) {
 		synctest.Wait()
 		eq(t, c1.isClosed(), true)
 
-		// 2. Exits cleanly when Ready closes before 15 seconds.
 		c2, ready2, cancel2 := mk()
 		defer cancel2()
 		go watchProbeOpen(c2, probeOpenLimit)
@@ -382,7 +410,6 @@ func TestOfferProbeDeadlinesAndSendFailure(t *testing.T) {
 		synctest.Wait()
 		eq(t, c2.isClosed(), false)
 
-		// 3. Exits cleanly when Done closes before 15 seconds.
 		c3, _, cancel3 := mk()
 		go watchProbeOpen(c3, probeOpenLimit)
 		cancel3()
@@ -391,26 +418,86 @@ func TestOfferProbeDeadlinesAndSendFailure(t *testing.T) {
 	})
 }
 
-func sendBoolChan(ch chan<- struct{}) {
-	select {
-	case ch <- struct{}{}:
-	default:
-	}
+// TestSessionPathChangedDoesNotCompeteWithServe verifies F1: a host-side reader
+// of Session.PathChanged and a node-side reader of Client.PathChanged each
+// observe every path change alongside the Client's own serve loop.
+func TestSessionPathChangedDoesNotCompeteWithServe(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var pathVal atomic.Value
+		pathVal.Store("direct")
+		cCtx, cCancel := context.WithCancel(context.Background())
+		defer cCancel()
+		srvConn := &Connection{
+			ctx: cCtx, ready: make(chan struct{}), pathChanged: make(chan struct{}, 1),
+			incoming: make(chan json.RawMessage, 4), waiting: make(map[int64]chan json.RawMessage),
+			close: func() error { cCancel(); return nil },
+		}
+		cl := &Client{
+			device: "dev", hello: testHello, onWelcome: func(*Session, proto.Welcome) {},
+			probe:      func(context.Context, string) (*Connection, error) { return nil, errors.New("unused") },
+			pathOf:     func(*Connection) string { return pathVal.Load().(string) },
+			firstProbe: probeFirstWait, ctx: cCtx, cancel: cCancel,
+			done: make(chan struct{}), pathChanged: make(chan struct{}, 1),
+		}
+		s := newSession(cl, srvConn)
+		cl.current = s
+		done := make(chan time.Duration, 1)
+		go func() { done <- cl.serve(s, time.Now()) }()
+		synctest.Wait()
+
+		var sessionSeen, clientSeen atomic.Int32
+		go func() {
+			for {
+				select {
+				case <-s.Done():
+					return
+				case <-s.PathChanged():
+					sessionSeen.Add(1)
+				}
+			}
+		}()
+		go func() {
+			for {
+				select {
+				case <-cCtx.Done():
+					return
+				case <-cl.PathChanged():
+					clientSeen.Add(1)
+				}
+			}
+		}()
+		synctest.Wait()
+
+		steps := []string{"relay", "direct", "relay", "direct", "relay"}
+		for i, next := range steps {
+			pathVal.Store(next)
+			srvConn.reclassify()
+			synctest.Wait()
+			eq(t, int(sessionSeen.Load()), i+1)
+			eq(t, int(clientSeen.Load()), i+1)
+			eq(t, s.Path(), next)
+			eq(t, cl.Path(), next)
+		}
+		cCancel()
+		synctest.Wait()
+		<-done
+	})
 }
 
-// mockConn builds a real SCTP-backed pair of *Connections on loopback so Send
-// and Request work end to end, or an in-memory *Connection for synctest.
-// Notice c.Send calls c.dc.SendText: for synctest we only need real SendText
-// if c.Send is called! Wait: let's check what happens if c.dc is nil! c.Send
-// panics if c.dc is nil! Let's check!
-
-// TestEndToEndClientProbeMoveAndRequests exercises p.Client over real WebRTC
-// connections and a local TURN relay:
-// - initial relayed path;
-// - forced probe while commands and pushes are in flight;
-// - Session.Read stopping immediately on retirement even with queued pushes;
-// - Session.Request on sync vs non-sync, oversize Request, disconnected Request.
+// TestEndToEndClientProbeMoveAndRequests exercises Client and Session over real
+// WebRTC connections and a local TURN relay: initial relayed path, probe move,
+// FIFO replay of unanswered non-sync requests without duplicating in-flight
+// answered ones, sync isolation on both Session.Request and Client.Request,
+// exact 60 KiB ctl frame boundaries, and retirement behavior.
 func TestEndToEndClientProbeMoveAndRequests(t *testing.T) {
+	fCheck := newPair(t)
+	fCheck.a.paths = func(string) []Route { return nil }
+	chkCtx, chkCancel := context.WithCancel(t.Context())
+	chkCancel()
+	defaultCl := fCheck.a.Client(chkCtx, fCheck.b.key.ID(), nil, testHello, func(*Session, proto.Welcome) {})
+	eq(t, defaultCl.firstProbe, probeFirstWait)
+	check(t, defaultCl.Close())
+
 	f := newPair(t)
 	relay := localRelay(t)
 	var blocked atomic.Bool
@@ -434,7 +521,6 @@ func TestEndToEndClientProbeMoveAndRequests(t *testing.T) {
 	f.a.paths = wrapRoute(f.aMail)
 	f.b.paths = wrapRoute(f.bMail)
 
-	// Pump signalling between f.aMail and f.bMail.
 	pumpCtx, stopPump := context.WithCancel(t.Context())
 	defer stopPump()
 	pump := func(from mailbox, to *Peer, toMail mailbox) {
@@ -454,16 +540,15 @@ func TestEndToEndClientProbeMoveAndRequests(t *testing.T) {
 	pump(f.aMail, f.b, f.bMail)
 	pump(f.bMail, f.a, f.aMail)
 
-	// Server handler on f.b: answers hello with welcome, holds "hold" requests
-	// until released (simulating a command in flight across a move!), and
-	// answers "host.info" immediately.
 	var holdFirst atomic.Bool
 	holdFirst.Store(true)
-	var syncCount atomic.Int32
+	var syncDropsLeft atomic.Int32
+	syncDropsLeft.Store(2)
+	var fastCount atomic.Int32
 	heldArrived := make(chan struct{}, 1)
-	serverConns := make(chan *Connection, 4)
+	serverConns := make(chan *Connection, 8)
 	var orderMu sync.Mutex
-	var wireIDs []int64
+	var holdIDs []int64
 	f.b.inbound = func(srv *Connection) {
 		serverConns <- srv
 		go func() {
@@ -481,18 +566,20 @@ func TestEndToEndClientProbeMoveAndRequests(t *testing.T) {
 					_ = srv.Send(testWelcome(q.ID, f.b.key.ID()))
 				case "hold":
 					orderMu.Lock()
-					wireIDs = append(wireIDs, q.ID)
+					holdIDs = append(holdIDs, q.ID)
 					orderMu.Unlock()
 					if holdFirst.CompareAndSwap(true, false) {
-						sendBoolChan(heldArrived)
+						notify(heldArrived)
 						continue
 					}
 					_ = srv.Send(proto.Success{Re: q.ID, OK: true})
+				case "fast":
+					fastCount.Add(1)
+					_ = srv.Send(proto.Success{Re: q.ID, OK: true})
 				case "sync":
-					if syncCount.Add(1) > 1 {
+					if syncDropsLeft.Add(-1) < 0 {
 						_ = srv.Send(proto.Success{Re: q.ID, OK: true})
 					}
-					continue
 				case "host.info":
 					_ = srv.Send(proto.Success{Re: q.ID, OK: true})
 				}
@@ -501,21 +588,24 @@ func TestEndToEndClientProbeMoveAndRequests(t *testing.T) {
 	}
 
 	sessions := make(chan *Session, 4)
-	cl := f.a.Client(t.Context(), f.b.key.ID(), nil, testHello, func(s *Session, _ proto.Welcome) {
-		sessions <- s
-	})
+	cl := newClient(
+		t.Context(), f.b.key.ID(), nil, testHello,
+		func(s *Session, _ proto.Welcome) { sessions <- s },
+		f.a.Offer, f.a.offerProbe, (*Connection).Path, 50*time.Millisecond,
+	)
 	t.Cleanup(func() { cl.Close() })
 
 	s1 := recv(t, sessions)
 	srv1 := recv(t, serverConns)
-	_ = cl.PathChanged()
-	for cl.Path() != "relay" {
+	for range 32 {
+		if cl.Path() == "relay" {
+			break
+		}
 		recv(t, cl.PathChanged())
 	}
+	eq(t, cl.Path(), "relay")
 	eq(t, s1.Path(), "relay")
-	_ = s1.PathChanged()
 
-	// Start a blocking Read on s1 before retirement so s1.Read wakes with io.EOF.
 	blockingReadErr := make(chan error, 1)
 	go func() {
 		_, rErr := s1.Read(t.Context())
@@ -523,43 +613,56 @@ func TestEndToEndClientProbeMoveAndRequests(t *testing.T) {
 	}()
 	time.Sleep(20 * time.Millisecond)
 
-	// Start a sync (per-session: ends with io.EOF on move) and a non-sync
-	// request ("hold") that must replay on s2.
-	syncErr := make(chan error, 1)
+	// Start sync on both Session.Request and Client.Request, plus a held non-sync
+	// request ("hold"); while "hold" is active on s1, send "fast" so takeUnsent
+	// sees hold.active != nil && !hold.active.isClosed() and does not duplicate it.
+	sessSyncErr := make(chan error, 1)
 	go func() {
 		_, err := s1.Request(t.Context(), func(id int64) any { return proto.Request{Type: "sync", ID: id} })
-		syncErr <- err
+		sessSyncErr <- err
+	}()
+	clientSyncErr := make(chan error, 1)
+	go func() {
+		_, err := cl.Request(t.Context(), func(id int64) any { return proto.Request{Type: "sync", ID: id} })
+		clientSyncErr <- err
 	}()
 	holdRes := make(chan error, 1)
 	go func() {
-		_, err := s1.Request(t.Context(), func(id int64) any {
-			return proto.Request{Type: "hold", ID: id}
-		})
+		_, err := s1.Request(t.Context(), func(id int64) any { return proto.Request{Type: "hold", ID: id} })
 		holdRes <- err
 	}()
 	recv(t, heldArrived)
 
-	// Remove premature queue on s1 before blockingReadErr finished:
-	// Unblock direct candidates and force a move.
+	fastReply, err := cl.Request(t.Context(), func(id int64) any { return proto.Request{Type: "fast", ID: id} })
+	check(t, err)
+	eq(t, strings.Contains(string(fastReply), `"ok":true`), true)
+	eq(t, int(fastCount.Load()), 1)
+	orderMu.Lock()
+	eq(t, len(holdIDs), 1)
+	orderMu.Unlock()
+
+	// Unblock direct candidates; the next scheduled probe moves to s2.
 	blocked.Store(false)
-	cl.Probe()
-	cl.Probe()
 
 	s2 := recv(t, sessions)
-	_ = recv(t, serverConns)
+	srv2 := recv(t, serverConns)
+	eq(t, srv2 == srv1, false)
 	recv(t, srv1.Done())
 	recv(t, s1.Done())
 	eq(t, recv(t, blockingReadErr), io.EOF)
-	eq(t, recv(t, syncErr), io.EOF)
+	eq(t, recv(t, sessSyncErr), io.EOF)
+	eq(t, recv(t, clientSyncErr), io.EOF)
 	check(t, recv(t, holdRes))
 	orderMu.Lock()
-	eq(t, len(wireIDs), 2)
+	eq(t, len(holdIDs), 2)
 	orderMu.Unlock()
 
-	// Completed sync on s2 returns the server's reply directly.
-	syncReply, err := s2.Request(t.Context(), func(id int64) any { return proto.Request{Type: "sync", ID: id} })
-	check(t, err)
-	eq(t, strings.Contains(string(syncReply), `"ok":true`), true)
+	// Completed sync succeeds on both Session.Request and Client.Request without replay.
+	for _, fn := range []func(context.Context, func(int64) any) (json.RawMessage, error){s2.Request, cl.Request} {
+		syncReply, sErr := fn(t.Context(), func(id int64) any { return proto.Request{Type: "sync", ID: id} })
+		check(t, sErr)
+		eq(t, strings.Contains(string(syncReply), `"ok":true`), true)
+	}
 
 	// Retired s1 refuses Read and Send with io.EOF despite queued messages.
 	s1.c.queue(json.RawMessage(`{"t":"rows"}`))
@@ -567,36 +670,57 @@ func TestEndToEndClientProbeMoveAndRequests(t *testing.T) {
 	eq(t, err, io.EOF)
 	eq(t, s1.Send(proto.RVFrame{Type: "ack"}), io.EOF)
 
-	// Active s2 and cl work on direct path.
-	for cl.Path() != "direct" {
+	for range 32 {
+		if cl.Path() == "direct" {
+			break
+		}
 		recv(t, cl.PathChanged())
 	}
+	eq(t, cl.Path(), "direct")
 	check(t, cl.Send(proto.RVFrame{Type: "push"}))
 	check(t, srvPush(t, s2))
 
-	// Oversize request and cancelled context on Request.
-	big := strings.Repeat("x", ctlLimit)
-	_, err = cl.Request(t.Context(), func(id int64) any { return map[string]any{"t": "cmd", "id": id, "x": big} })
-	eq(t, err.Error(), "ctl frame exceeds 60 KiB")
-	cCtx, cCancel := context.WithCancel(t.Context())
-	cCancel()
-	_, err = cl.Request(cCtx, func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
-	eq(t, err, context.Canceled)
-
-	reply, err := cl.Request(t.Context(), func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
+	// Exact 61,440-byte request passes preflightReq and succeeds; 61,441 fails.
+	sizedFrame := func(target int) func(int64) any {
+		probe := map[string]any{"t": "host.info", "id": int64(math.MaxInt64), "pad": ""}
+		padLen := target - len(encode(probe))
+		pad := strings.Repeat("x", padLen)
+		return func(id int64) any {
+			if id == math.MaxInt64 {
+				return map[string]any{"t": "host.info", "id": id, "pad": pad}
+			}
+			return proto.Request{Type: "host.info", ID: id}
+		}
+	}
+	eq(t, len(encode(sizedFrame(ctlLimit)(math.MaxInt64))), ctlLimit)
+	reply, err := cl.Request(t.Context(), sizedFrame(ctlLimit))
 	check(t, err)
 	var okRes proto.Success
 	check(t, proto.Decode(reply, &okRes))
 	eq(t, bool(okRes.OK), true)
 
+	eq(t, len(encode(sizedFrame(ctlLimit+1)(math.MaxInt64))), ctlLimit+1)
+	_, err = cl.Request(t.Context(), sizedFrame(ctlLimit+1))
+	eq(t, err.Error(), "ctl frame exceeds 60 KiB")
+	_, err = s2.Request(t.Context(), func(id int64) any {
+		return map[string]any{"t": "sync", "id": id, "pad": strings.Repeat("x", ctlLimit)}
+	})
+	eq(t, err.Error(), "ctl frame exceeds 60 KiB")
+
+	cCtx, cCancel := context.WithCancel(t.Context())
+	cCancel()
+	_, err = cl.Request(cCtx, func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
+	eq(t, err, context.Canceled)
+	_, err = s2.Request(cCtx, func(id int64) any { return proto.Request{Type: "sync", ID: id} })
+	eq(t, err, context.Canceled)
+
 	check(t, cl.Close())
 	recv(t, cl.Done())
-	// Calling Probe twice once stopped exercises both branches of sendBool.
-	cl.Probe()
-	cl.Probe()
 	eq(t, cl.Path(), "")
 	eq(t, cl.Send(proto.RVFrame{Type: "push"}), io.EOF)
 	_, err = cl.Request(t.Context(), func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
+	eq(t, err, io.EOF)
+	_, err = cl.Request(t.Context(), func(id int64) any { return proto.Request{Type: "sync", ID: id} })
 	eq(t, err, io.EOF)
 }
 
@@ -615,27 +739,17 @@ func srvPush(t *testing.T, s *Session) error {
 	return nil
 }
 
-// TestClientTimingsAndMoveOutcomes tests the exact timers and races of Client:
-//   - probe schedule 30s -> 1m -> 2m -> 4m -> 5m -> 5m while relayed;
-//   - stopping probes when Path flips to direct, and restarting at 30s when relay;
-//   - A1.13 all three outcomes around the 10-second welcome deadline;
-//   - Race 1 (ordinary connection closes while probe is unopened);
-//   - failed offer, unopened ordinary connection, refused hello, send failure in
-//     flushOne, request cancellation while in flight, and Client close while
-//     requests wait.
+// TestClientTimingsAndMoveOutcomes tests the probe timer schedule in synctest:
+//   - reclassify at +20s does not postpone the 30s first probe;
+//   - reclassify at +32s while probe #1 is pending does not arm a premature timer;
+//   - probe intervals double 30s -> 1m -> 2m -> 4m -> 5m -> 5m while relayed;
+//   - switching to direct stops probes and resets the wait to 30s;
+//   - closing the ordinary connection while a probe is pending closes the probe.
 func TestClientTimingsAndMoveOutcomes(t *testing.T) {
-	// Create one pair of real open DataChannels outside synctest ONLY for tests
-	// that need c.dc.SendText, OR use a closed/connecting DataChannel for error
-	// paths; Wait: c.Send calls c.dc.SendText! Let's check: inside synctest,
-	// does Pion's unopened DataChannel.SendText touch OS sockets? No! An
-	// unopened webrtc.NewPeerConnection(Configuration{}) with no candidates
-	// opens zero sockets until SetLocalDescription!
-	// Even better: let's test the real-DataChannel helper outside synctest for
-	// send-error/cancel cases, and test serveState/schedule/backoff logic in
-	// synctest!
 	synctest.Test(t, func(t *testing.T) {
 		var mu sync.Mutex
 		var probeTimes []time.Time
+		var lastProbe *Connection
 		countProbes := func() int {
 			mu.Lock()
 			defer mu.Unlock()
@@ -653,20 +767,28 @@ func TestClientTimingsAndMoveOutcomes(t *testing.T) {
 		var failOffer atomic.Bool
 		cl := &Client{
 			device: "dev", hello: testHello, onWelcome: func(*Session, proto.Welcome) {},
-			pathOf: func(*Connection) string { return pathVal.Load().(string) },
-			ctx:    cCtx, cancel: cCancel, done: make(chan struct{}),
-			pathChanged: make(chan struct{}, 1), probeNow: make(chan bool, 1),
+			pathOf:     func(*Connection) string { return pathVal.Load().(string) },
+			firstProbe: probeFirstWait, ctx: cCtx, cancel: cCancel,
+			done: make(chan struct{}), pathChanged: make(chan struct{}, 1),
 		}
 		cl.probe = func(context.Context, string) (*Connection, error) {
 			mu.Lock()
 			probeTimes = append(probeTimes, time.Now())
+			n := len(probeTimes)
 			mu.Unlock()
+			if n > 10 {
+				cCancel()
+				t.Errorf("unexpected probe count %d", n)
+				return nil, errors.New("probe limit exceeded")
+			}
 			if failOffer.Load() {
 				return nil, errors.New("no path")
 			}
 			pCtx, pCancel := context.WithCancel(context.Background())
 			pConn := &Connection{ctx: pCtx, ready: make(chan struct{}), close: func() error { pCancel(); return nil }}
-			// Probe fails after 5 seconds (before ctl opens).
+			mu.Lock()
+			lastProbe = pConn
+			mu.Unlock()
 			time.AfterFunc(5*time.Second, pCancel)
 			return pConn, nil
 		}
@@ -677,7 +799,12 @@ func TestClientTimingsAndMoveOutcomes(t *testing.T) {
 		go func() { done <- cl.serve(s, start) }()
 		synctest.Wait()
 
-		// Each probe attempt runs for 5s before failing, then waits 60s, 120s, 240s, 300s, 300s.
+		// Trickled candidate at +20s while relayed must not postpone the 30s probe.
+		time.Sleep(20 * time.Second)
+		srvConn.reclassify()
+		synctest.Wait()
+		eq(t, countProbes(), 0)
+
 		want := []time.Duration{
 			30 * time.Second,
 			95 * time.Second,
@@ -687,8 +814,15 @@ func TestClientTimingsAndMoveOutcomes(t *testing.T) {
 			1075 * time.Second,
 		}
 		for i, target := range want {
+			if i == 1 {
+				// At +32s (2s into probe #1), reclassify while pending != nil must not arm st.timer.
+				time.Sleep(2 * time.Second)
+				srvConn.reclassify()
+				synctest.Wait()
+				eq(t, countProbes(), 1)
+			}
 			if i == 5 {
-				failOffer.Store(true) // cover synchronous OfferProbe error branch too
+				failOffer.Store(true)
 			}
 			wait := time.Until(start.Add(target))
 			time.Sleep(wait - time.Nanosecond)
@@ -699,16 +833,15 @@ func TestClientTimingsAndMoveOutcomes(t *testing.T) {
 			eq(t, countProbes(), i+1)
 		}
 
-		// Path flips to direct: stops scheduled probes; stale non-forced signal ignored.
+		// Direct path stops scheduled probes.
 		pathVal.Store("direct")
 		srvConn.reclassify()
 		synctest.Wait()
-		sendBool(cl.probeNow, false)
 		time.Sleep(10 * time.Minute)
 		synctest.Wait()
 		eq(t, countProbes(), 6)
 
-		// Path flips back to relay: schedule starts fresh from 30s.
+		// Returning to relay starts the schedule fresh from 30s.
 		failOffer.Store(false)
 		pathVal.Store("relay")
 		srvConn.reclassify()
@@ -720,11 +853,14 @@ func TestClientTimingsAndMoveOutcomes(t *testing.T) {
 		synctest.Wait()
 		eq(t, countProbes(), 7)
 
-		// Ordinary connection closes while probe #7 is still pending (at +2s < 5s):
-		// pending probe is closed immediately and serve returns open duration.
+		// Closing the ordinary connection while probe #7 is pending closes the probe.
 		time.Sleep(2 * time.Second)
 		srvConn.Close()
 		synctest.Wait()
+		mu.Lock()
+		p7Closed := lastProbe.isClosed()
+		mu.Unlock()
+		eq(t, p7Closed, true)
 		openDur := <-done
 		if openDur < 10*time.Minute {
 			t.Fatalf("unexpected open duration %v", openDur)
@@ -732,11 +868,10 @@ func TestClientTimingsAndMoveOutcomes(t *testing.T) {
 	})
 }
 
-// TestClientErrorAndCancelBranches covers openSession failures, flushOne send
-// error, request ctx cancellation while sent, and Client close while requests
-// wait during a move.
+// TestClientErrorAndCancelBranches covers openSession failures, sayHello
+// refusals, Session retirement while underlying Connection is open, flushOne
+// Send failure, sync cancellation mid-flight, and request queue boundaries.
 func TestClientErrorAndCancelBranches(t *testing.T) {
-	// Unopened Pion DataChannel makes SendText fail deterministically in flushOne.
 	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
 	check(t, err)
 	t.Cleanup(func() { pc.Close() })
@@ -763,7 +898,6 @@ func TestClientErrorAndCancelBranches(t *testing.T) {
 				cCtx, cCancel := context.WithCancel(t.Context())
 				ready := make(chan struct{})
 				close(ready)
-				// Unopened dc causes sayHello's Request -> Send to fail!
 				c := &Connection{
 					ctx: cCtx, ready: ready, dc: unopenedDC,
 					waiting: make(map[int64]chan json.RawMessage),
@@ -775,14 +909,62 @@ func TestClientErrorAndCancelBranches(t *testing.T) {
 		},
 		func(context.Context, string) (*Connection, error) { return nil, errors.New("unused") },
 		func(*Connection) string { return "direct" },
+		probeFirstWait,
 	)
 	recv(t, cl.Done())
 
-	// 2. flushOne Send failure closes c, releases req, and retries on replacement;
-	//    and cancelling req.ctx while awaiting reply hits <-req.done;
-	//    and closing Client while moving finishes queued requests with io.EOF.
+	// 2. sayHello and decodeWelcome branches on real connections.
+	for _, replyPayload := range []any{
+		proto.ErrorResponse{Re: 1, Err: proto.WireError{Code: "version", Message: "bad"}},
+		proto.Welcome{Type: "other", Success: proto.Success{Re: 1, OK: true}, V: 1, Device: "d", Name: "n", Version: "1", Time: 1, Addrs: []string{}, Groups: []proto.GroupSummary{}},
+		proto.Welcome{Type: "welcome", Success: proto.Success{Re: 1, OK: true}, V: 2, Device: "d", Name: "n", Version: "1", Time: 1, Addrs: []string{}, Groups: []proto.GroupSummary{}},
+	} {
+		p := newPair(t).open(t, 0)
+		go func(ans any) {
+			raw, rErr := p.server.Read(t.Context())
+			if rErr == nil {
+				var q proto.Request
+				_ = proto.Decode(raw, &q)
+				switch v := ans.(type) {
+				case proto.ErrorResponse:
+					v.Re = q.ID
+					_ = p.server.Send(v)
+				case proto.Welcome:
+					v.Re = q.ID
+					_ = p.server.Send(v)
+				}
+			}
+		}(replyPayload)
+		_, ok := sayHello(t.Context(), p.client, testHello)
+		eq(t, ok, false)
+		eq(t, p.client.isClosed(), true)
+	}
+
+	// 3. Retired Session while s.c is still open refuses Read, Send, and sync Request.
 	f := newPair(t)
 	n := f.open(t, 0)
+	cl2Ctx, cl2Cancel := context.WithCancel(t.Context())
+	defer cl2Cancel()
+	cl2 := &Client{
+		device: f.b.key.ID(), hello: testHello, onWelcome: func(*Session, proto.Welcome) {},
+		pathOf: (*Connection).Path, firstProbe: probeFirstWait, ctx: cl2Ctx, cancel: cl2Cancel,
+		done: make(chan struct{}), pathChanged: make(chan struct{}, 1),
+	}
+	retiredSess := newSession(cl2, n.client)
+	n.client.queue(json.RawMessage(`{"t":"buffered"}`))
+	retiredSess.retire()
+	for range 4 {
+		_, err = retiredSess.Read(t.Context())
+		eq(t, err, io.EOF)
+	}
+	eq(t, retiredSess.Send(proto.RVFrame{Type: "push"}), io.EOF)
+	_, err = retiredSess.Request(t.Context(), func(id int64) any { return proto.Request{Type: "sync", ID: id} })
+	eq(t, err, io.EOF)
+	// Drain buffered message on n.client so later tests start clean.
+	_, err = n.client.Read(t.Context())
+	check(t, err)
+
+	// 4. flushOne Send failure closes brokenConn and adopt replays req on n.client.
 	c2Ctx, c2Cancel := context.WithCancel(t.Context())
 	defer c2Cancel()
 	brokenConn := &Connection{
@@ -790,26 +972,16 @@ func TestClientErrorAndCancelBranches(t *testing.T) {
 		dc: unopenedDC, waiting: make(map[int64]chan json.RawMessage),
 		close: sync.OnceValue(func() error { c2Cancel(); return nil }),
 	}
-
-	cl2Ctx, cl2Cancel := context.WithCancel(t.Context())
-	cl2 := &Client{
-		device: f.b.key.ID(), hello: testHello, onWelcome: func(*Session, proto.Welcome) {},
-		pathOf: (*Connection).Path, ctx: cl2Ctx, cancel: cl2Cancel,
-		done: make(chan struct{}), pathChanged: make(chan struct{}, 1), probeNow: make(chan bool, 1),
-	}
 	cl2.current = newSession(cl2, brokenConn)
-	// Swap current to n.client as soon as brokenConn closes so releaseReq triggers retry!
 	context.AfterFunc(c2Ctx, func() {
-		cl2.mu.Lock()
-		cl2.current = newSession(cl2, n.client)
-		cl2.mu.Unlock()
-		cl2.flushPending()
+		cl2.adopt(n.client, testWelcome(1, f.b.key.ID()))
 	})
 	go func() {
 		raw, rErr := n.server.Read(t.Context())
 		if rErr == nil {
 			var q proto.Request
 			_ = proto.Decode(raw, &q)
+			eq(t, q.Type, "host.info")
 			_ = n.server.Send(proto.Success{Re: q.ID, OK: true})
 		}
 	}()
@@ -817,7 +989,19 @@ func TestClientErrorAndCancelBranches(t *testing.T) {
 	check(t, err)
 	eq(t, strings.Contains(string(reply), `"ok":true`), true)
 
-	// Cancel req.ctx while request is sent on n.client and unanswered -> hits <-req.done in awaitReq!
+	// 5. Cancel sync Request mid-flight returns context.Canceled (not io.EOF),
+	//    and cancel non-sync Request mid-flight wakes awaitReq via req.done.
+	syncCtx, syncCancel := context.WithCancel(t.Context())
+	syncCh := make(chan error, 1)
+	go func() {
+		_, sErr := cl2.current.Request(syncCtx, func(id int64) any { return proto.Request{Type: "sync", ID: id} })
+		syncCh <- sErr
+	}()
+	_, err = n.server.Read(t.Context())
+	check(t, err)
+	syncCancel()
+	eq(t, recv(t, syncCh), context.Canceled)
+
 	reqCtx, reqCancel := context.WithCancel(t.Context())
 	reqErrCh := make(chan error, 1)
 	go func() {
@@ -829,98 +1013,84 @@ func TestClientErrorAndCancelBranches(t *testing.T) {
 	reqCancel()
 	eq(t, recv(t, reqErrCh), context.Canceled)
 
-	// Queue a request while moving with current == nil, then cancel cl2Ctx -> hits io.EOF via stopClient!
-	// First test releaseReq retry when current has already moved to another open connection before old closes:
-	oldPair := newPair(t).open(t, 0)
+	// 6. takeUnsent when current == nil and when current.c is closed;
+	//    and stopClient finishing queued requests with io.EOF when cl2Ctx ends.
+	closedSubCtx, closedSubCancel := context.WithCancel(t.Context())
+	closedSubCancel()
+	closedConn := &Connection{ctx: closedSubCtx, close: func() error { return nil }}
 	cl2.mu.Lock()
-	cl2.current = newSession(cl2, oldPair.client)
+	cl2.current = newSession(cl2, closedConn)
 	cl2.mu.Unlock()
-	retryDone := make(chan error, 1)
-	go func() {
-		_, rErr := cl2.Request(t.Context(), func(id int64) any { return proto.Request{Type: "moved-before-close", ID: id} })
-		retryDone <- rErr
-	}()
-	// Wait until oldPair.server receives the request (so awaitReq is waiting on oldPair.client).
-	_, err = oldPair.server.Read(t.Context())
-	check(t, err)
-	// Point cl2.current at n.client while oldPair.client is still open, then close oldPair.client!
-	cl2.mu.Lock()
-	cl2.current = newSession(cl2, n.client)
-	cl2.mu.Unlock()
-	go func() {
-		raw, rErr := n.server.Read(t.Context())
-		if rErr == nil {
-			var q proto.Request
-			_ = proto.Decode(raw, &q)
-			_ = n.server.Send(proto.Success{Re: q.ID, OK: true})
-		}
-	}()
-	check(t, oldPair.client.Close())
-	check(t, recv(t, retryDone))
-
-	cl2.retireCurrent()
-	cl2.setMoving(true)
 	eofCh := make(chan error, 1)
 	go func() {
 		_, rErr := cl2.Request(t.Context(), func(id int64) any { return proto.Request{Type: "queued", ID: id} })
 		eofCh <- rErr
 	}()
-	// Wait until queued in cl2.pending before cancelling cl2Ctx.
+	waitLimit := time.Now().Add(2 * time.Second)
 	for {
 		cl2.mu.Lock()
 		nPending := len(cl2.pending)
+		var active *Connection
+		if nPending == 1 {
+			active = cl2.pending[0].active
+		}
 		cl2.mu.Unlock()
 		if nPending == 1 {
+			eq(t, active == nil, true)
 			break
+		}
+		if time.Now().After(waitLimit) {
+			t.Fatal("request was not queued on closed current connection")
 		}
 		time.Sleep(time.Millisecond)
 	}
+	// Cancel cl2Ctx while cl2.current != nil: enqueueReq now refuses new requests.
 	cl2Cancel()
 	eq(t, recv(t, eofCh), io.EOF)
-	// With cl2Ctx cancelled while moving is still true, enqueueReq refuses new requests,
-	// and a repeated finishReq on an already-finished request is a no-op.
-	_, err = cl2.Request(t.Context(), func(id int64) any { return proto.Request{Type: "after-cancel", ID: id} })
-	eq(t, err, io.EOF)
+	_, ok := cl2.enqueueReq(func(id int64) any { return proto.Request{Type: "after-cancel", ID: id} })
+	eq(t, ok, false)
+	cl2.retireCurrent()
+	cl2.flushPending()
 	cl2.finishReq(&pendingReq{done: make(chan struct{}), reply: make(chan reqResult, 1)}, reqResult{err: io.EOF})
 
-	// buildHello and validWelcome boundary checks.
+	// 7. buildHello, isSync, and decodeWelcome boundary checks.
+	eq(t, isSync(func(int64) any { return "not-an-object" }), false)
+	eq(t, isSync(func(id int64) any { return proto.Request{Type: "host.info", ID: id} }), false)
+	eq(t, isSync(func(id int64) any { return proto.Request{Type: "sync", ID: id} }), true)
 	eq(t, buildHello(proto.Hello{Kind: "host", Name: "n"}, 7), proto.Hello{
 		Request: proto.Request{Type: "hello", ID: 7}, V: 1, Kind: "host", Name: "n", Addrs: []string{},
 	})
 	eq(t, buildHello(proto.Hello{V: 2, Kind: "host", Name: "n", Addrs: []string{"ws://127.0.0.1:47800/rv"}}, 8), proto.Hello{
 		Request: proto.Request{Type: "hello", ID: 8}, V: 2, Kind: "host", Name: "n", Addrs: []string{"ws://127.0.0.1:47800/rv"},
 	})
-	eq(t, validWelcome(proto.Welcome{Type: "welcome", V: 1}), true)
-	eq(t, validWelcome(proto.Welcome{Type: "other", V: 1}), false)
-	eq(t, validWelcome(proto.Welcome{Type: "welcome", V: 2}), false)
+	_, ok = decodeWelcome(encode(proto.Welcome{Type: "welcome", Success: proto.Success{Re: 1, OK: true}, V: 0, Device: "d", Name: "n", Version: "1", Time: 1, Addrs: []string{}, Groups: []proto.GroupSummary{}}))
+	eq(t, ok, false)
 }
 
-// TestA113MoveBoundaries tests all three A1.13 move outcomes on Client.move:
-//  1. Old closes during hello wait, welcome arrives before 10s -> move succeeds, no reconnect;
-//  2. Old closes during hello wait, welcome withheld past 10s -> move fails, ends serve to reconnect;
-//  3. Old stays open during hello wait, welcome withheld past 10s -> probe discarded, old continues,
-//     and pending requests queued during moving flush onto old.
+// TestA113MoveBoundaries tests all move outcomes on Client.move:
+//  1. Old closes during hello wait, welcome arrives in time -> move succeeds;
+//  2. Probe fails while old stays open -> probe discarded, old continues and schedules next probe;
+//  3. Probe fails after old closed -> move ends serve to start one ordinary reconnect;
+//  4. Probe fails after Client context ended while old stays open -> move ends serve.
 func TestA113MoveBoundaries(t *testing.T) {
 	f := newPair(t)
-	// Case 1: old closes after hello sent, welcome arrives before 10s.
 	old1 := f.open(t, 0)
 	cand1Client, cand1Server, _, _ := f.dialProbe(t)
 	clCtx, clCancel := context.WithCancel(t.Context())
 	defer clCancel()
 	cl := &Client{
 		device: f.b.key.ID(), hello: testHello, onWelcome: func(*Session, proto.Welcome) {},
-		pathOf: (*Connection).Path, ctx: clCtx, cancel: clCancel,
-		done: make(chan struct{}), pathChanged: make(chan struct{}, 1), probeNow: make(chan bool, 1),
+		pathOf: func(*Connection) string { return "relay" }, firstProbe: probeFirstWait,
+		ctx: clCtx, cancel: clCancel, done: make(chan struct{}), pathChanged: make(chan struct{}, 1),
 	}
 	s1 := newSession(cl, old1.client)
 	cl.current = s1
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
 	st := &serveState{
-		s: s1, opened: time.Now(), wait: probeFirstWait,
-		timer: time.AfterFunc(time.Hour, func() {}),
+		s: s1, opened: time.Now().Add(-time.Minute), wait: 2 * probeFirstWait,
+		timer: timer,
 	}
-	st.timer.Stop()
-	// Drive cand1Server: promote on hello (closing old1.server), wait until old1.client
-	// is closed, then send welcome!
 	go func() {
 		eq(t, recv(t, f.opened), cand1Server)
 		recv(t, old1.server.Done())
@@ -931,18 +1101,18 @@ func TestA113MoveBoundaries(t *testing.T) {
 		check(t, proto.Decode(raw, &h))
 		_ = cand1Server.Send(testWelcome(h.ID, f.b.key.ID()))
 	}()
+	beforeMove := time.Now()
 	ended := cl.move(st, cand1Client)
 	eq(t, ended, false)
 	eq(t, st.s.c, cand1Client)
+	eq(t, st.wait, probeFirstWait)
+	eq(t, st.scheduled, true)
+	if st.opened.Before(beforeMove) {
+		t.Fatalf("st.opened %v was not updated on move", st.opened)
+	}
 	recv(t, s1.Done())
+	st.stop()
 
-	// Case 2 & Case 3 using synctest with an unopened cand DataChannel? Wait: in
-	// synctest, to wait the full 10s helloTimeout (instead of failing immediately
-	// on SendText), we test move with a real SCTP pair or test sayHello's 10s
-	// timeout! Wait: in features/peer_probe_test.go we test the real 10s welcome
-	// timeout end-to-end, AND here we can test both! Let's test Case 2 (old closed
-	// + move fails) and Case 3 (old open + move fails + queued request flushes to old)
-	// directly here too!
 	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
 	check(t, err)
 	t.Cleanup(func() { pc.Close() })
@@ -957,42 +1127,23 @@ func TestA113MoveBoundaries(t *testing.T) {
 		}
 	}
 
-	// Case 3: old (cand1Client) is STILL open when probe fails -> ended == false,
-	// st.s remains cand1Client, and a pending request flushes onto cand1Client!
-	reqDone := make(chan error, 1)
-	cl.mu.Lock()
-	req := &pendingReq{
-		ctx:   t.Context(),
-		build: func(id int64) any { return proto.Request{Type: "after-fail", ID: id} },
-		reply: make(chan reqResult, 1),
-		done:  make(chan struct{}),
-	}
-	cl.pending = append(cl.pending, req)
-	cl.mu.Unlock()
-	go func() {
-		res := <-req.reply
-		reqDone <- res.err
-	}()
-	go func() {
-		raw, rErr := cand1Server.Read(t.Context())
-		if rErr == nil {
-			var q proto.Request
-			_ = proto.Decode(raw, &q)
-			_ = cand1Server.Send(proto.Success{Re: q.ID, OK: true})
-		}
-	}()
+	// Probe fails while cand1Client is still open: old continues and schedules 2*wait.
 	ended = cl.move(st, mkBrokenProbe())
 	eq(t, ended, false)
 	eq(t, st.s.c, cand1Client)
-	check(t, recv(t, reqDone))
+	eq(t, st.wait, 2*probeFirstWait)
+	eq(t, st.scheduled, true)
+	st.stop()
+	st.scheduleNext("direct")
+	eq(t, st.scheduled, false)
 
-	// Case 2: old (cand1Client) is CLOSED when probe fails -> ended == true!
+	// Probe fails after cand1Client closed: serve ends so Client.run reconnects.
 	check(t, cand1Client.Close())
 	ended = cl.move(st, mkBrokenProbe())
 	eq(t, ended, true)
 	recv(t, st.s.Done())
 
-	// Case 2b: old is still open, but cl.ctx is cancelled when probe fails -> ended == true!
+	// Probe fails when cl.ctx is cancelled while old connection is still open: serve ends.
 	liveOld := newPair(t).open(t, 0)
 	sLive := newSession(cl, liveOld.client)
 	cl.current = sLive

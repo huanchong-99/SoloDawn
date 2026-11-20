@@ -88,9 +88,8 @@ func TestOfflineReportsApplyOnlyToThisUnansweredOffer(t *testing.T) {
 
 	device := f.b.key.ID()
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
-	go func() { f.a.Connect(ctx, device, nil, func(*Connection) { t.Error("unexpected open") }); close(done) }()
-	defer func() { cancel(); recv(t, done) }()
+	cl := f.a.Client(ctx, device, nil, testHello, func(*Session, proto.Welcome) { t.Error("unexpected welcome") })
+	defer func() { cancel(); recv(t, cl.Done()) }()
 	offer := recv(t, f.aMail["offer"])
 	eq(t, recv(t, second["offer"]), offer)
 	first := offerLink(t, device, offer)

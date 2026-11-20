@@ -1,19 +1,19 @@
 package peer
 
 import (
-	"github.com/huanchong-99/SoloDawn/internal/proto"
-	"github.com/pion/stun/v4"
-	"github.com/pion/webrtc/v4"
-
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/huanchong-99/SoloDawn/internal/proto"
+	"github.com/pion/stun/v4"
+	"github.com/pion/webrtc/v4"
 )
 
 const (
@@ -175,55 +175,15 @@ func (p *Peer) promote(c *Connection) bool {
 	return true
 }
 
-// OfferProbe sends a relay-free offer with probe: true and gives ctl 15
+// offerProbe sends a relay-free offer with probe: true and gives ctl 15
 // seconds from the sent offer to open (flows/connect.md steps 10 and 11).
-func (p *Peer) OfferProbe(ctx context.Context, device string) (*Connection, error) {
-	k := link{device, randomID()}
-	routes := p.paths(device)
-	c, offer, err := p.newProbeOffer(k, routes)
+func (p *Peer) offerProbe(ctx context.Context, device string) (*Connection, error) {
+	c, err := p.startOffer(ctx, device, true)
 	if err != nil {
-		return nil, err
-	}
-	if err := sendOffer(ctx, c, routes, device, offer); err != nil {
 		return nil, err
 	}
 	go watchProbeOpen(c, probeOpenLimit)
 	return c, nil
-}
-
-func sendOffer(ctx context.Context, conn *Connection, routes []Route, target string, offer proto.Envelope) error {
-	cancelOnCtx := context.AfterFunc(ctx, func() { conn.Close() })
-	defer cancelOnCtx()
-	err := broadcast(conn.ctx, routes, target, offer)
-	if err != nil {
-		conn.Close()
-		return err
-	}
-	conn.deadline.Reset(helloTimeout)
-	return nil
-}
-
-func (p *Peer) newProbeOffer(k link, routes []Route) (*Connection, proto.Envelope, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	c, err := p.create(k, p.sockets.offer, routes, true)
-	if err != nil {
-		return nil, proto.Envelope{}, err
-	}
-	sdp := initOfferCtl(c)
-	env := p.sign(proto.Offer{SignalHeader: p.header(k, "offer"), SDP: sdp, Probe: true})
-	p.waitForAnswer(c, routes)
-	return c, env, nil
-}
-
-func initOfferCtl(c *Connection) string {
-	ctl, err := c.pc.CreateDataChannel("ctl", nil)
-	must(err)
-	c.bind(ctl, func(*Connection) {})
-	desc, err := c.pc.CreateOffer(nil)
-	must(err)
-	must(c.pc.SetLocalDescription(desc))
-	return desc.SDP
 }
 
 func watchProbeOpen(c *Connection, limit time.Duration) {
@@ -243,18 +203,23 @@ func watchProbeOpen(c *Connection, limit time.Duration) {
 // a move or a loss retires it (flows/connect.md step 11.3); its Request sends
 // unanswered non-sync requests again after the next welcome (steps 12 and 18).
 type Session struct {
-	client *Client
-	c      *Connection
-	ctx    context.Context
-	retire context.CancelFunc
-	done   chan struct{}
-	close  func()
+	client      *Client
+	c           *Connection
+	ctx         context.Context
+	retire      context.CancelFunc
+	pathChanged chan struct{} // read only by the caller of Session.PathChanged
+	done        chan struct{} // closed once when the Session is retired
+	close       func()
 }
 
 func newSession(cl *Client, c *Connection) *Session {
 	ctx, retire := context.WithCancel(cl.ctx)
 	done := make(chan struct{})
-	s := &Session{client: cl, c: c, ctx: ctx, retire: retire, done: done, close: sync.OnceFunc(func() { close(done) })}
+	s := &Session{
+		client: cl, c: c, ctx: ctx, retire: retire,
+		pathChanged: make(chan struct{}, 1), done: done,
+		close: sync.OnceFunc(func() { close(done) }),
+	}
 	context.AfterFunc(c.ctx, retire)
 	return s
 }
@@ -265,6 +230,8 @@ func mergeCancel(a, b context.Context) (context.Context, func()) {
 	return ctx, func() { stop(); cancel() }
 }
 
+// Read returns the next incoming request or push on s, or io.EOF once s has
+// been retired by a move or connection loss.
 func (s *Session) Read(ctx context.Context) (json.RawMessage, error) {
 	if s.ctx.Err() != nil {
 		return nil, io.EOF
@@ -281,6 +248,8 @@ func (s *Session) Read(ctx context.Context) (json.RawMessage, error) {
 	return msg, nil
 }
 
+// Send writes a push or response on s while s is active, or returns io.EOF
+// once s has been retired.
 func (s *Session) Send(frame any) error {
 	if s.ctx.Err() != nil {
 		return io.EOF
@@ -288,13 +257,35 @@ func (s *Session) Send(frame any) error {
 	return s.c.Send(frame)
 }
 
-func (s *Session) Path() string                 { return s.client.pathOf(s.c) }
-func (s *Session) PathChanged() <-chan struct{} { return s.c.PathChanged() }
-func (s *Session) Done() <-chan struct{}        { return s.done }
+// Path reports "direct", "relay", or "" for s's underlying connection.
+func (s *Session) Path() string { return s.client.pathOf(s.c) }
 
+// PathChanged returns a channel signalled whenever s.Path may have changed.
+// It is distinct from Client.PathChanged and the Client's own serve loop, so
+// a single reader on s observes every signal.
+func (s *Session) PathChanged() <-chan struct{} { return s.pathChanged }
+
+// Done is closed once s has been retired.
+func (s *Session) Done() <-chan struct{} { return s.done }
+
+// Request sends the request built by build and returns its response. A sync
+// request belongs to s alone and ends with io.EOF if s ends; any other request
+// is sent again under a fresh id if a move or reconnect intervenes
+// (flows/connect.md steps 12 and 18). build must be pure: type and size checks
+// call it with synthetic ids before each wire send.
 func (s *Session) Request(ctx context.Context, build func(int64) any) (json.RawMessage, error) {
-	if !isSync(build) {
-		return s.client.Request(ctx, build)
+	if isSync(build) {
+		return s.syncRequest(ctx, build)
+	}
+	return s.client.request(ctx, build)
+}
+
+func (s *Session) syncRequest(ctx context.Context, build func(int64) any) (json.RawMessage, error) {
+	if err := preflightReq(ctx, build); err != nil {
+		return nil, err
+	}
+	if s.ctx.Err() != nil {
+		return nil, io.EOF
 	}
 	merged, stop := mergeCancel(ctx, s.ctx)
 	defer stop()
@@ -303,6 +294,13 @@ func (s *Session) Request(ctx context.Context, build func(int64) any) (json.RawM
 		return nil, io.EOF
 	}
 	return reply, err
+}
+
+func preflightReq(ctx context.Context, build func(int64) any) error {
+	if len(encode(build(math.MaxInt64))) > ctlLimit {
+		return fmt.Errorf("ctl frame exceeds 60 KiB")
+	}
+	return ctx.Err()
 }
 
 func isSync(build func(int64) any) bool {
@@ -318,41 +316,39 @@ type reqResult struct {
 }
 
 type pendingReq struct {
-	ctx    context.Context
 	build  func(int64) any
-	reply  chan reqResult
-	done   chan struct{}
+	reply  chan reqResult // read only by Client.request
+	done   chan struct{}  // closed once by finishReq
 	active *Connection
 }
 
 // A Client keeps one offered direction open, says hello, probes without TURN
-// while relayed, moves on welcome, and sends unanswered requests again
-// (flows/connect.md sections A, B and C).
+// while relayed, moves on welcome, and sends unanswered non-sync requests
+// again (flows/connect.md sections A, B and C).
 type Client struct {
 	device      string
-	present     <-chan struct{}
+	present     <-chan struct{} // read only by Client.run via backoff
 	hello       func() proto.Hello
 	onWelcome   func(*Session, proto.Welcome)
 	offer       func(context.Context, string) (*Connection, error)
 	probe       func(context.Context, string) (*Connection, error)
 	pathOf      func(*Connection) string
+	firstProbe  time.Duration
 	ctx         context.Context
 	cancel      context.CancelFunc
-	done        chan struct{}
-	pathChanged chan struct{}
-	probeNow    chan bool
+	done        chan struct{} // closed once when Client.run returns
+	pathChanged chan struct{} // read only by the caller of Client.PathChanged
 	sendMu      sync.Mutex
 	mu          sync.Mutex
 	current     *Session
-	moving      bool
 	pending     []*pendingReq
 }
 
 // Client starts maintaining a connection to device until ctx ends or Close is
-// called. onWelcome sets up each welcomed Session before unanswered requests
-// are sent again.
+// called. onWelcome sets up each welcomed Session before unanswered non-sync
+// requests are sent again.
 func (p *Peer) Client(ctx context.Context, device string, present <-chan struct{}, hello func() proto.Hello, onWelcome func(*Session, proto.Welcome)) *Client {
-	return newClient(ctx, device, present, hello, onWelcome, p.Offer, p.OfferProbe, (*Connection).Path)
+	return newClient(ctx, device, present, hello, onWelcome, p.Offer, p.offerProbe, (*Connection).Path, probeFirstWait)
 }
 
 func newClient(
@@ -364,26 +360,36 @@ func newClient(
 	offer func(context.Context, string) (*Connection, error),
 	probe func(context.Context, string) (*Connection, error),
 	pathOf func(*Connection) string,
+	firstProbe time.Duration,
 ) *Client {
 	ctx, cancel := context.WithCancel(parent)
 	cl := &Client{
 		device: device, present: present, hello: hello, onWelcome: onWelcome,
-		offer: offer, probe: probe, pathOf: pathOf, ctx: ctx, cancel: cancel,
-		done: make(chan struct{}), pathChanged: make(chan struct{}, 1), probeNow: make(chan bool, 1),
+		offer: offer, probe: probe, pathOf: pathOf, firstProbe: firstProbe,
+		ctx: ctx, cancel: cancel, done: make(chan struct{}),
+		pathChanged: make(chan struct{}, 1),
 	}
 	go cl.run()
 	return cl
 }
 
+// Close stops reconnects and probes, closes the current Session if any, and
+// waits until the Client loop has exited.
 func (cl *Client) Close() error {
 	cl.cancel()
 	<-cl.done
 	return nil
 }
 
-func (cl *Client) Done() <-chan struct{}        { return cl.done }
+// Done is closed once the Client has stopped.
+func (cl *Client) Done() <-chan struct{} { return cl.done }
+
+// PathChanged returns a channel signalled whenever Client.Path may have
+// changed. Only one caller should read from it.
 func (cl *Client) PathChanged() <-chan struct{} { return cl.pathChanged }
 
+// Path reports the current Session's path ("direct", "relay", or ""), or ""
+// while no Session is active.
 func (cl *Client) Path() string {
 	cl.mu.Lock()
 	s := cl.current
@@ -394,6 +400,8 @@ func (cl *Client) Path() string {
 	return cl.pathOf(s.c)
 }
 
+// Send writes a push or response on the current Session, or returns io.EOF
+// while no Session is active.
 func (cl *Client) Send(frame any) error {
 	cl.mu.Lock()
 	s := cl.current
@@ -404,21 +412,9 @@ func (cl *Client) Send(frame any) error {
 	return s.Send(frame)
 }
 
-// Probe starts an immediate probe attempt on the current connection.
-func (cl *Client) Probe() { sendBool(cl.probeNow, true) }
-
-func sendBool(ch chan<- bool, v bool) {
+func notify(ch chan<- struct{}) {
 	select {
-	case ch <- v:
-		return
-	default:
-		return
-	}
-}
-
-func (cl *Client) notifyPath() {
-	select {
-	case cl.pathChanged <- struct{}{}:
+	case ch <- struct{}{}:
 		return
 	default:
 		return
@@ -434,9 +430,6 @@ func (cl *Client) run() {
 		var open time.Duration
 		if s != nil {
 			open = cl.serve(s, opened)
-		}
-		if cl.ctx.Err() != nil {
-			return
 		}
 		delay = backoff(cl.ctx, cl.present, after(delay, open))
 	}
@@ -473,15 +466,22 @@ func sayHello(ctx context.Context, c *Connection, hello func() proto.Hello) (w p
 	hCtx, cancel := context.WithTimeout(ctx, helloTimeout)
 	defer cancel()
 	raw, err := c.Request(hCtx, func(id int64) any { return buildHello(hello(), id) })
-	if err != nil || proto.Decode(raw, &w) != nil || !validWelcome(w) {
+	if err != nil {
 		c.Close()
 		return w, false
 	}
-	return w, true
+	w, ok = decodeWelcome(raw)
+	if !ok {
+		c.Close()
+	}
+	return w, ok
 }
 
-func validWelcome(w proto.Welcome) bool {
-	return w.Type == "welcome" && w.V == 1
+func decodeWelcome(raw json.RawMessage) (w proto.Welcome, ok bool) {
+	if proto.Decode(raw, &w) != nil {
+		return w, false
+	}
+	return w, w.Type == "welcome" && w.V == 1
 }
 
 func buildHello(h proto.Hello, id int64) proto.Hello {
@@ -500,13 +500,12 @@ func (cl *Client) adopt(c *Connection, welcome proto.Welcome) *Session {
 	cl.mu.Lock()
 	prev := cl.current
 	cl.current = next
-	cl.moving = false
 	cl.mu.Unlock()
 	if prev != nil {
 		prev.retire()
 		prev.c.Close()
 	}
-	cl.notifyPath()
+	notify(cl.pathChanged)
 	cl.onWelcome(next, welcome)
 	if prev != nil {
 		prev.close()
@@ -519,7 +518,6 @@ func (cl *Client) retireCurrent() {
 	cl.mu.Lock()
 	prev := cl.current
 	cl.current = nil
-	cl.moving = false
 	cl.mu.Unlock()
 	if prev != nil {
 		prev.retire()
@@ -528,28 +526,23 @@ func (cl *Client) retireCurrent() {
 	}
 }
 
-func (cl *Client) setMoving(v bool) {
-	cl.mu.Lock()
-	cl.moving = v
-	cl.mu.Unlock()
-}
-
 type serveState struct {
 	s           *Session
 	opened      time.Time
 	wait        time.Duration
 	scheduled   bool
-	timer       *time.Timer
+	timer       *time.Timer // C read only by stepServe
 	pending     *Connection
-	probeResult <-chan bool
+	probeResult <-chan bool // read only by stepServe
 }
 
 func (cl *Client) serve(s *Session, opened time.Time) time.Duration {
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
 	st := &serveState{
-		s: s, opened: opened, wait: probeFirstWait,
-		timer: time.AfterFunc(time.Hour, func() { sendBool(cl.probeNow, false) }),
+		s: s, opened: opened, wait: cl.firstProbe,
+		timer: timer,
 	}
-	st.timer.Stop()
 	st.syncPath(cl.pathOf(s.c))
 	for !cl.stepServe(st) {
 	}
@@ -560,29 +553,23 @@ func (cl *Client) stepServe(st *serveState) bool {
 	select {
 	case <-st.s.ctx.Done():
 		return cl.endServe(st)
-	case <-st.s.c.PathChanged():
-		cl.notifyPath()
+	case <-st.s.c.PathChanged(): // Connection.pathChanged is read only here while served
+		notify(st.s.pathChanged)
+		notify(cl.pathChanged)
 		st.syncPath(cl.pathOf(st.s.c))
 		return false
-	case forced := <-cl.probeNow:
-		st.triggerProbe(cl, forced)
+	case <-st.timer.C:
+		st.startProbe(cl)
 		return false
 	case opened := <-st.probeResult:
 		return cl.finishProbe(st, opened)
 	}
 }
 
-func (st *serveState) triggerProbe(cl *Client, forced bool) {
-	if !forced && (!st.scheduled || cl.pathOf(st.s.c) != "relay") {
-		return
-	}
-	st.startProbe(cl)
-}
-
 func (cl *Client) endServe(st *serveState) bool {
 	st.stop()
 	cl.retireCurrent()
-	cl.notifyPath()
+	notify(cl.pathChanged)
 	return true
 }
 
@@ -592,7 +579,7 @@ func (st *serveState) syncPath(path string) {
 		return
 	}
 	st.stop()
-	st.wait = probeFirstWait
+	st.wait = st.s.client.firstProbe
 }
 
 func (st *serveState) armIfIdle() {
@@ -654,33 +641,46 @@ func (cl *Client) finishProbe(st *serveState, opened bool) bool {
 }
 
 func (cl *Client) move(st *serveState, cand *Connection) bool {
-	cl.setMoving(true)
 	now := time.Now()
 	welcome, ok := sayHello(cl.ctx, cand, cl.hello)
 	if ok {
 		st.s = cl.adopt(cand, welcome)
 		st.opened = now
-		st.wait = probeFirstWait
+		st.wait = cl.firstProbe
 		st.syncPath(cl.pathOf(st.s.c))
 		return false
 	}
-	cl.setMoving(false)
 	if cl.ctx.Err() != nil || st.s.c.isClosed() {
 		return cl.endServe(st)
 	}
-	cl.flushPending()
 	st.scheduleNext(cl.pathOf(st.s.c))
 	return false
 }
 
+// Request sends the request built by build on the current Session. A sync
+// request runs only on the Session open now and is never replayed; any other
+// request is sent again under a fresh id after the next welcome if the
+// connection moves or reconnects (flows/connect.md steps 12 and 18). build
+// must be pure: type and size checks call it with synthetic ids before each
+// wire send.
 func (cl *Client) Request(ctx context.Context, build func(int64) any) (json.RawMessage, error) {
-	if len(encode(build(math.MaxInt64))) > ctlLimit {
-		return nil, errors.New("ctl frame exceeds 60 KiB")
+	if isSync(build) {
+		cl.mu.Lock()
+		s := cl.current
+		cl.mu.Unlock()
+		if s == nil {
+			return nil, io.EOF
+		}
+		return s.syncRequest(ctx, build)
 	}
-	if err := ctx.Err(); err != nil {
+	return cl.request(ctx, build)
+}
+
+func (cl *Client) request(ctx context.Context, build func(int64) any) (json.RawMessage, error) {
+	if err := preflightReq(ctx, build); err != nil {
 		return nil, err
 	}
-	req, ok := cl.enqueueReq(ctx, build)
+	req, ok := cl.enqueueReq(build)
 	if !ok {
 		return nil, io.EOF
 	}
@@ -693,13 +693,13 @@ func (cl *Client) Request(ctx context.Context, build func(int64) any) (json.RawM
 	return res.data, res.err
 }
 
-func (cl *Client) enqueueReq(ctx context.Context, build func(int64) any) (*pendingReq, bool) {
+func (cl *Client) enqueueReq(build func(int64) any) (*pendingReq, bool) {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
-	if cl.ctx.Err() != nil || (cl.current == nil && !cl.moving) {
+	if cl.ctx.Err() != nil || cl.current == nil {
 		return nil, false
 	}
-	req := &pendingReq{ctx: ctx, build: build, reply: make(chan reqResult, 1), done: make(chan struct{})}
+	req := &pendingReq{build: build, reply: make(chan reqResult, 1), done: make(chan struct{})}
 	cl.pending = append(cl.pending, req)
 	return req, true
 }
@@ -722,7 +722,7 @@ func (cl *Client) takeUnsent() (*Connection, []*pendingReq) {
 	c := cl.current.c
 	var todo []*pendingReq
 	for _, req := range cl.pending {
-		if needsSend(req) {
+		if req.active == nil || req.active.isClosed() {
 			req.active = c
 			todo = append(todo, req)
 		}
@@ -730,16 +730,11 @@ func (cl *Client) takeUnsent() (*Connection, []*pendingReq) {
 	return c, todo
 }
 
-func needsSend(req *pendingReq) bool {
-	return (req.active == nil || req.active.isClosed()) && req.ctx.Err() == nil
-}
-
 func (cl *Client) flushOne(c *Connection, req *pendingReq) {
 	id, ch := c.reserve()
 	if err := c.Send(req.build(id)); err != nil {
 		c.unwait(id)
-		go c.Close()
-		cl.releaseReq(c, req)
+		c.Close()
 		return
 	}
 	go cl.awaitReq(c, id, ch, req)
@@ -757,21 +752,9 @@ func (cl *Client) awaitReq(c *Connection, id int64, ch <-chan json.RawMessage, r
 	case msg := <-ch:
 		cl.finishReq(req, reqResult{data: msg})
 	case <-c.Done():
-		cl.releaseReq(c, req)
+		return
 	case <-req.done:
 		return
-	}
-}
-
-func (cl *Client) releaseReq(c *Connection, req *pendingReq) {
-	cl.mu.Lock()
-	if req.active == c {
-		req.active = nil
-	}
-	retry := cl.current != nil && cl.current.c != c && !cl.current.c.isClosed()
-	cl.mu.Unlock()
-	if retry {
-		go cl.flushPending()
 	}
 }
 

@@ -22,10 +22,12 @@ type link struct{ device, conn string }
 // Lock order, for the node that wires it: the Peer holds its own lock only
 // around its own decisions, and never while it calls known, paths, inbound or
 // a channel handler, or sends on a Route. known and paths run on the caller's
-// goroutine during Receive and Offer, and paths and Route.Send also on pion's
-// goroutines; inbound and the handlers run on pion's. A callback may call back
-// into the Peer, but a caller of Receive, Offer or Connect must not hold a
-// lock that known or paths takes.
+// goroutine during Receive and Offer, and known, paths and Route.Send also run
+// on pion's goroutines; inbound runs on pion's goroutines when ctl opens on an
+// ordinary connection and on a new goroutine after the first valid hello of a
+// promoted probe, and channel handlers run on goroutines of their own. A
+// callback may call back into the Peer, but a caller of Receive, Offer or
+// Client must not hold a lock that known or paths takes.
 type Peer struct {
 	key      identity.Key
 	sockets  *Sockets
@@ -236,9 +238,13 @@ func (c *Connection) addCandidate(i webrtc.ICECandidateInit) {
 // Offer starts gathering without waiting for it to finish. Ready signals when
 // ctl opens; a closed Done before Ready means negotiation failed.
 func (p *Peer) Offer(ctx context.Context, device string) (*Connection, error) {
+	return p.startOffer(ctx, device, false)
+}
+
+func (p *Peer) startOffer(ctx context.Context, device string, probe bool) (*Connection, error) {
 	k := link{device, randomID()}
 	paths := p.paths(device)
-	c, offer, err := p.makeOffer(k, paths)
+	c, offer, err := p.makeOffer(k, paths, probe)
 	if err != nil {
 		return nil, err
 	}
@@ -250,13 +256,14 @@ func (p *Peer) Offer(ctx context.Context, device string) (*Connection, error) {
 		c.Close()
 		return nil, err
 	}
-	c.deadline.Reset(10 * time.Second)
+	c.deadline.Reset(helloTimeout)
 	return c, nil
 }
-func (p *Peer) makeOffer(k link, paths []Route) (*Connection, proto.Envelope, error) {
+
+func (p *Peer) makeOffer(k link, paths []Route, probe bool) (*Connection, proto.Envelope, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	c, err := p.create(k, p.sockets.offer, paths, false)
+	c, err := p.create(k, p.sockets.offer, paths, probe)
 	if err != nil {
 		return nil, proto.Envelope{}, err
 	}
@@ -267,7 +274,7 @@ func (p *Peer) makeOffer(k link, paths []Route) (*Connection, proto.Envelope, er
 	offer, err := c.pc.CreateOffer(nil)
 	must(err)
 	must(c.pc.SetLocalDescription(offer))
-	env := p.sign(proto.Offer{SignalHeader: p.header(k, "offer"), SDP: offer.SDP})
+	env := p.sign(proto.Offer{SignalHeader: p.header(k, "offer"), SDP: offer.SDP, Probe: probe})
 	p.waitForAnswer(c, paths)
 	return c, env, nil
 }

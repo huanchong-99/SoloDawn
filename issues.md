@@ -102,8 +102,14 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: in spike S-8 ([#134](https://github.com/huanchong-99/SoloDawn/pull/134)), 5 of 63 runs with TURN, a port-mapped answerer and a restricted-cone offerer selected the relay after 2.0 s, although direct pairs were valid from about 630 ms. None of 160 runs without a mapping, none of 160 with a mapped offerer, and none with another offerer NAT type did so.
 - Cause, from the ICE trace of [run 44704969215](https://github.com/huanchong-99/SoloDawn/actions/runs/44704969215): a check relayed through the answerer's TURN allocation reaches the offerer before that relay candidate is trickled, so the offerer files it as peer-reflexive and validates the pair. When the relay candidate arrives, pion ice v4.4.8 replaces the peer-reflexive candidate but keeps the pair's old priority (`agent.go:1247-1262`, `setPriorityOverride`). That pair stays the best valid one, and the controlling agent nominates only the best valid pair once its type's wait has passed, 2 s for relay (`selection.go:74-84`). Details in [`spikes/S-8/results.md`](https://github.com/huanchong-99/SoloDawn/blob/spike/S-8-portmap/spikes/S-8/results.md), section 2.
-- Workaround: the connection works over the relay, and the probe of `planning/flows/connect.md` section B moves it to a direct path.
-- Status: open, external; not reported upstream for now.
+- Workaround: the connection works over the relay, and the probe of `planning/flows/connect.md` section B moves it to a direct path. Implemented on the node side in `internal/peer/probe.go` (`Client` and `probeOffer`, PR-1); the browser side is unit W-3.
+- Status: open, external; worked around on the node side by PR-1 (browser side in W-3), not reported upstream for now.
+
+### 2026-11-20 · limitation · An answered probe whose `ctl` opens without `hello` stays pending until superseded or closed
+
+- Symptom: on the answering side, an inbound probe whose `ctl` channel opens (`internal/peer/probe.go`, `acceptInbound` and `dispatchProbe`) and never receives a valid `hello` remains in `Peer.probes[device]` until the peer closes it, a newer probe offer or an ordinary offer from the same signer supersedes it, or ICE closes the connection.
+- Cause: `planning/flows/connect.md` section B sets the 15-second `ctl` open deadline and the 10-second `welcome` deadline on the offering side (`offerProbe`, `sayHello`), with no separate `hello` timer on an unpromoted inbound probe (`internal/peer/probe.go`).
+- Status: open, accepted for step 1; bounded at one pending probe per authenticated device (`Peer.probes[device]`), outside `Peer.slot[device]`.
 
 ### 2026-11-20 · limitation · Three peer scenarios time out on a Mac with its firewall on
 
