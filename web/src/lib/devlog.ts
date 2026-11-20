@@ -107,8 +107,10 @@ export class DeviceLog {
   }
 }
 
-/** An envelope as one text, for comparing entries: the same p, k and s. */
-const same = (env: Envelope) => JSON.stringify([env.p, env.k, env.s]);
+/** An envelope as one text, for comparing entries: the same p, k and s. p counts as the text that
+ *  is signed, where TextEncoder writes a lone surrogate as U+FFFD, and as a Go node reads it: the
+ *  escape "\ud800" and U+FFFD are one p. */
+const same = (env: Envelope) => JSON.stringify([env.p.toWellFormed(), env.k, env.s]);
 
 /** Entry 1: dev, k and user are the same key, and it is an add. */
 function genesis(e: Entry, signer: string, user: string): void {
