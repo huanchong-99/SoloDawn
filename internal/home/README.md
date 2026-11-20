@@ -26,6 +26,8 @@ time, and the reads and receipts of a transaction, and returns what to write.
 | queue or withdraw inbox items | `Result.Items`, with `Item.NotBefore` to hold one back; `Result.Retire` |
 | change something that is no row | `Result.Writes`, values with `Put(tx)` |
 | have every peer pushed its `groups` again | `Result.GroupsChanged` |
+| show the group an accepted device-log entry | a `proto.DeviceRow` in `Result.Rows`; `Commit` applies its entry to the state's log |
+| do after a commit what a pure function cannot, such as a Web Push | a function `func(s *State, res Result)` and `After.Add(name, f)` in its file's `init` |
 | answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round` |
 | refuse | `&Refusal{Code: "conflict", Msg: "…"}`, with a code of [datachannel](../../planning/contracts/datachannel.md) section 9 |
 | read a message, a note, a thread, the pending cards, the queued items | `c.Disk` in a command, the `Disk` argument of a timer or a handler |
@@ -33,6 +35,7 @@ time, and the reads and receipts of a transaction, and returns what to write.
 | add a rule for an event outside the commands | a function `func(s *State, d Disk, now int64, event any) Result` and `Events.Add(name, f)` in its file's `init` |
 | take a `cmd` from a connection | `Commands.Apply(s, disk, tx, device, env, now)` inside the command's transaction, then `s.Commit(result)` once it is committed, and `result.Frame(re)` for the answer |
 | run a timer or a handler | `s.Seal(f(s, disk, now, …))` inside a transaction, then write and `s.Commit(result)` as for a command |
+| finish any result | after `s.Commit(result)`, every hook of `After`, on the goroutine of the group |
 | know whether a device may use the home surface of a group | `s.Serves(device)` |
 | push to a client | the `Client` interface |
 
@@ -93,11 +96,18 @@ JSON without HTML escaping, with its `seq` and `pos` set. A card is a message wh
 **State.** A `State` holds the group row, the member rows of people and of AIs, the task rows, the
 last sequence number and the last task number, and beside them this node's device id, its owner's
 user id and the device logs by user id. `Wakes` is the place for the count of the wake-up cap:
-by AI, when each item of the last hour was sent; the seam only keeps the place. `Commit` takes the group, member and task rows of a result,
-drops a member whose row became a `gone` marker, raises `Num` to the highest task number and
-moves `Seq` past the rows. It does not hold messages, notes or device rows. `Commit` is called
-once per result, after its transaction is committed and before the next `Apply` or `Seal`: a
-`State` is used by one goroutine.
+by AI, when each item of the last hour was sent. The seam only keeps the place; the goroutine of
+the group owns it, like the rest of the state. `Commit` takes the group, member and task rows of
+a result, drops a member whose row became a `gone` marker, raises `Num` to the highest task number
+and moves `Seq` past the rows. It does not hold messages or notes. `Commit` is called once per
+result, after its transaction is committed and before the next `Apply` or `Seal`: a `State` is
+used by one goroutine, the group's.
+
+**Device logs.** The logs of a `State` are its own values: no other state and no other goroutine
+holds them. `Commit` applies the entry of each `device` row of a result to the log of its person,
+and starts a log with a person's first row, so a device is known to the group, or no longer known,
+from the row that says so. The same entry in a row again changes nothing. An entry that the log
+refuses makes `Commit` panic: whoever writes a device row has had its entry accepted, in order.
 
 **Disk.** `Disk` reads what a home keeps on disk only: one message, one note, a page of a thread
 newest first, the pending cards oldest first, the unacknowledged inbox items oldest first. A `Disk`
@@ -111,6 +121,11 @@ their files choose. A `Timer` gets the state, a `Disk` and the home's time; a `H
 the event, a value that the unit of that kind of event defines. Both return a `Result`, which
 `State.Seal` numbers and measures as `Apply` does for a command; a refused result has no rows.
 The seam runs neither table: whoever runs the home does, in a transaction per result.
+
+**After a commit.** `After` holds hooks, `func(s *State, res Result)`, for what a pure function
+cannot do. Whoever runs the home calls every hook after each `Commit`, on the goroutine of the
+group, with the result of a command, a timer or an event and the state that now holds it. The
+seam calls none and gives a hook nothing else.
 
 **Other writes.** A `Write` in `Result.Writes` is a change that is no row. The function only
 returns it; the caller of `Apply` calls its `Put` in the command's transaction, after the rows.
@@ -135,8 +150,8 @@ are in package `home_test` and use only what is exported.
 
 ## Known limitations
 
-- The tables are empty and nothing in a node calls `Apply` or `Seal` yet: the command files and
-  the run loop are separate units ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- The tables are empty and nothing in a node calls `Apply`, `Seal` or a hook yet: the command
+  files and the run loop are separate units ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - A device of a member of another group on the same home is answered `unknown_device`, not
   `forbidden` ([issues](../../issues.md)).
 - The store writes a row with HTML escaping, so a row that the seam measured may be stored larger

@@ -20,7 +20,7 @@ contract is the [module README](../../../../internal/home/README.md). The choice
 session that built HM-0, under the coordinator's instruction for that unit to decide where a
 contract is silent and to write the rule into the contract. An independent review of the first
 version found one defect and several gaps; the coordinator decided how each is closed, and points
-6 and 8 to 11 are as those decisions left them. The owner did not decide them in person.
+6 and 8 to 13 are as those decisions left them. The owner did not decide them in person.
 
 1. **The table is a value.** `Table` is a map from key to function with the methods `Add` and
    `Apply`; `Commands` is the table of a node. A test or an acceptance step makes a table of its
@@ -59,7 +59,13 @@ version found one defect and several gaps; the coordinator decided how each is c
     `Put(tx)` for what is no row; `Result.GroupsChanged` asks for the `groups` push;
     `Item.NotBefore` holds an item back. The seam passes them on and reads none of them.
 11. **The count of the wake-up cap has its place in the state.** `State.Wakes` is a map the seam
-    makes and never reads; the unit that sends items keeps it.
+    makes and never reads; the unit that sends items keeps it, on the goroutine of the group.
+12. **A state keeps its own device logs and follows them through device rows.** `Commit` applies
+    the entry of each `device` row to the log of its person. The goroutine of the group is the
+    only writer of those logs.
+13. **What needs I/O after a commit is a hook.** `After` is a table of `func(s *State, res
+    Result)` that the run loop calls after each `Commit`. The seam holds the table and calls
+    nothing.
 
 ## Alternatives considered
 
@@ -102,6 +108,16 @@ and the defect the review found: `{"t":"post/text","kind":"brief"}` reached the 
 needs another field could not add it without changing the seam. An event is a value of a type its
 own unit defines, and its handler asserts that type.
 
+**Device logs that the states share with the node.** In the first version whoever made a state
+filled in its logs, and nothing updated them: a device added after the start stayed unknown to
+the group until a restart. Handing every state the node's own `identity.Log` values would update
+them, but a log has no lock, and the node and each group write and read on goroutines of their
+own.
+
+**A handler sends the Web Push.** A handler is pure and runs before the commit. The run loop
+cannot call the push code either: it is built without it. A table of hooks lets that unit add
+itself.
+
 **The function of a command writes what is no row itself.** It would then need the transaction
 and could not be tested without a database. It returns a value with `Put(tx)` and stays pure.
 
@@ -112,6 +128,10 @@ and could not be tested without a database. It returns a value with `Put(tx)` an
 - The run loop builds a `Disk` per transaction, which needs reads of the store that run in a
   transaction. It runs the timers and the handlers, and calls `Seal` for their results.
 - A handler asserts the type of its event; a caller that passes another type makes it panic.
+- `Commit` panics on a device row whose entry its log refuses. A handler that writes device rows
+  must write only entries that were accepted, in the order of the log.
+- A hook gets the state and the result and nothing else. What it needs beyond them, such as which
+  browsers are connected, has no place in the seam yet.
 - The run loop must call `NextSeq` once per row and `Commit` once per result, in that order, on
   one goroutine per group. A second writer of the same `State` breaks the numbering, and so does
   a second `Seal` before the `Commit` of the first.
@@ -130,6 +150,6 @@ and could not be tested without a database. It returns a value with `Put(tx)` an
 
 `go test ./internal/home` covers every statement of both files, the two payloads of the review's
 defect among its cases. Each `==`, `!=`, `>` and arithmetic operator of the two files was flipped
-by hand, one at a time, and the package's tests failed for all 44. `features/home.feature` holds A2.3 and A2.4; its step file type-checks under
+by hand, one at a time, and the package's tests failed for all 46. `features/home.feature` holds A2.3 and A2.4; its step file type-checks under
 `go vet -tags acceptance ./features/`. The acceptance suite and the mutation gate were not run in
 the building session: the coordinator ran the long checks from one place at that time.
