@@ -40,7 +40,7 @@
       member_name: member.trim(),
     });
     busy = false;
-    if ('err' in answer) {
+    if (answer.err) {
       failed = answer.err.code;
       return;
     }

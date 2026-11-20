@@ -31,7 +31,7 @@
       name: 'development',
       addrs: [],
     });
-    if ('err' in welcome) return;
+    if (welcome.err) return;
     homes.push(home);
     home.online(ctl, welcome);
   });

@@ -70,7 +70,7 @@
     const sent = text.trim();
     const answer = await group.post(sent, mentioned(sent, group.members));
     busy = false;
-    if ('err' in answer) failed = answer.err.code;
+    if (answer.err) failed = answer.err.code;
     else await put({ text: '', caret: 0 });
   }
 

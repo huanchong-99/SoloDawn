@@ -145,7 +145,7 @@ export class Group {
     const answer = await ctl
       .request({ t: 'sync', g: this.g, since: this.cursor, state_only: false })
       .catch(lost);
-    if ('err' in answer) return;
+    if (answer.err) return;
     this.cursor = answer.seq;
     this.#live = true;
   }
@@ -162,7 +162,7 @@ export class Group {
       .request({ t: 'fetch', g: this.g, thread, before: paging.before, limit: pageSize })
       .catch(lost);
     paging.busy = false;
-    const page = 'err' in answer ? { rows: [], more: false } : answer;
+    const page = answer.err ? { rows: [], more: false } : answer;
     this.apply(page.rows, false);
     // An empty page is the end, whatever it says: nothing would move the next request on.
     paging.more = page.rows.length > 0 && page.more;
