@@ -26,6 +26,7 @@ type Connection struct {
 	next       int64
 	waiting    map[int64]chan json.RawMessage
 	answer     *proto.Envelope
+	pending    *answerWait
 	candidates *batch
 }
 

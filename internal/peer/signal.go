@@ -186,8 +186,11 @@ func (p *Peer) receiveAnswer(k link, data []byte) error {
 		return identity.BadRequest
 	}
 	c := p.live[k]
-	if c == nil || c.answer != nil || c.candidates.ready {
+	if c == nil || c.pending == nil || c.isClosed() {
 		return nil
+	}
+	if !time.Now().Before(c.pending.until) {
+		return c.Close()
 	}
 	return c.remote(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: a.SDP})
 }
@@ -195,6 +198,7 @@ func (c *Connection) remote(desc webrtc.SessionDescription) error {
 	if err := c.pc.SetRemoteDescription(desc); err != nil {
 		return identity.BadRequest
 	}
+	c.endWait()
 	return c.candidates.flush(c.pc.AddICECandidate)
 }
 
@@ -202,17 +206,20 @@ func (c *Connection) remote(desc webrtc.SessionDescription) error {
 // ctl opens; a closed Done before Ready means negotiation failed.
 func (p *Peer) Offer(ctx context.Context, device string) (*Connection, error) {
 	k := link{device, randomID()}
-	c, offer, err := p.makeOffer(k)
+	paths := p.paths(device)
+	c, offer, err := p.makeOffer(k, paths)
 	if err != nil {
 		return nil, err
 	}
-	if err := broadcast(ctx, p.paths(device), device, offer); err != nil {
+	stop := context.AfterFunc(ctx, func() { c.Close() })
+	defer stop()
+	if err := broadcast(c.ctx, paths, device, offer); err != nil {
 		c.Close()
 		return nil, err
 	}
 	return c, nil
 }
-func (p *Peer) makeOffer(k link) (*Connection, proto.Envelope, error) {
+func (p *Peer) makeOffer(k link, paths []Route) (*Connection, proto.Envelope, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	c, err := p.create(k, p.sockets.offer)
@@ -233,7 +240,9 @@ func (p *Peer) makeOffer(k link) (*Connection, proto.Envelope, error) {
 		c.Close()
 		return nil, proto.Envelope{}, err
 	}
-	return c, p.sign(proto.Offer{SignalHeader: p.header(k, "offer"), SDP: offer.SDP}), nil
+	env := p.sign(proto.Offer{SignalHeader: p.header(k, "offer"), SDP: offer.SDP})
+	p.waitForAnswer(c, paths)
+	return c, env, nil
 }
 
 func (p *Peer) create(k link, api *webrtc.API) (*Connection, error) {
@@ -265,6 +274,7 @@ func (p *Peer) forget(k link, c *Connection) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.live, k)
+	c.endWait()
 	if p.slot[k.device] == c {
 		delete(p.slot, k.device)
 	}

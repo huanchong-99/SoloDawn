@@ -30,11 +30,13 @@ func encode(v any) []byte {
 
 // Route is one applicable signalling path (a WebSocket or node-local delivery).
 type Route struct {
+	ID   string // Stable for the life of one signalling path, including local delivery.
 	Send func(context.Context, string, proto.Envelope) error
 	ICE  []proto.ICEServer
 }
 
 type Path struct {
+	id     string
 	ws     *websocket.Conn
 	mu     sync.Mutex
 	config proto.ICEConfig
@@ -47,7 +49,7 @@ func Dial(ctx context.Context, url string, key identity.Key) (*Path, error) {
 		return nil, err
 	}
 	ws.SetReadLimit(signalLimit)
-	p := &Path{ws: ws}
+	p := &Path{id: randomID(), ws: ws}
 	if err := p.handshake(ctx, key); err != nil {
 		p.Close()
 		return nil, err
@@ -107,7 +109,7 @@ func (p *Path) Write(ctx context.Context, frame any) error {
 func (p *Path) Route() Route {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return Route{p.send, p.config.ICE}
+	return Route{ID: p.id, Send: p.send, ICE: p.config.ICE}
 }
 func (p *Path) send(ctx context.Context, to string, env proto.Envelope) error {
 	return p.Write(ctx, proto.Route{Type: "to", Key: to, Env: encode(env)})
@@ -132,15 +134,20 @@ func (p *Path) handle(ctx context.Context, kind string, data []byte, node *Peer,
 	switch kind {
 	case "from":
 		return p.from(ctx, node, data)
+	case "offline":
+		var f proto.Offline
+		if err := proto.Decode(data, &f); err != nil {
+			return err
+		}
+		node.Offline(p.id, f.Key)
 	case "ice":
 		if err := p.refresh(data); err != nil {
 			return err
 		}
 		timer.Reset(p.lifetime())
 		return nil
-	default:
-		return event(kind, data)
 	}
+	return event(kind, data)
 }
 func (p *Path) from(ctx context.Context, node *Peer, data []byte) error {
 	var f proto.Route

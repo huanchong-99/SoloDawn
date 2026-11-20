@@ -49,14 +49,25 @@ func (p *Peer) attempt(ctx context.Context, device string, present <-chan struct
 	defer c.Close()
 	stop := context.AfterFunc(ctx, func() { c.Close() })
 	defer stop()
-	select {
-	case <-c.Done():
-		return failed
-	case <-present:
-		return retryNow
-	case <-c.Ready():
+	if result := p.awaitOpen(c, present); result != wasOpen {
+		return result
 	}
 	go session(c)
 	<-c.Done()
 	return wasOpen
+}
+
+func (p *Peer) awaitOpen(c *Connection, present <-chan struct{}) attemptResult {
+	for {
+		select {
+		case <-c.Done():
+			return failed
+		case <-present:
+			if p.retirePending(c) {
+				return retryNow
+			}
+		case <-c.Ready():
+			return wasOpen
+		}
+	}
 }
