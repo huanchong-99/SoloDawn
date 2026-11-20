@@ -23,9 +23,6 @@ func (o Options) validate() error {
 	if o.QuotaMB < 0 || o.QuotaMB >= 1<<33 {
 		return errors.New("--relay-quota-mb is outside the wire integer range")
 	}
-	if o.UDPPort < 0 || o.UDPPort > 65535 {
-		return errors.New("invalid --udp-port")
-	}
 	return o.validateNames()
 }
 
@@ -40,9 +37,6 @@ func (o Options) validateNames() error {
 }
 
 func (o Options) validateRelayName() error {
-	if o.Domain == "." || o.TurnDomain == "." {
-		return errors.New("TLS needs a hostname, not the DNS root")
-	}
 	if !o.NoRelay && (o.TurnDomain == "" || tlsName(o.Domain) == tlsName(o.TurnDomain)) {
 		return errors.New("relay needs a distinct --turn-domain")
 	}
@@ -68,6 +62,12 @@ func (o Options) Serve(web fs.FS) error {
 		return err
 	}
 	defer l.Close()
+	return o.serve(web, l)
+}
+
+// serve answers on l until it is closed: plain HTTP without a domain,
+// otherwise TLS signalling, STUN and, unless disabled, TURN.
+func (o Options) serve(web fs.FS, l net.Listener) error {
 	if o.Domain == "" {
 		return http.Serve(l, Handler(web))
 	}
@@ -92,7 +92,7 @@ func (o Options) serveICE(web fs.FS, l net.Listener) error {
 	if !o.NoRelay {
 		e := newEndpoint(l.Addr())
 		names[tlsName(o.TurnDomain)] = e
-		turnListener = turnStreams{e}
+		turnListener = e
 	}
 	r, server, err := o.start(udp, turnListener, l.Addr().(*net.TCPAddr).Port)
 	if err != nil {

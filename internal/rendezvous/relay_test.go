@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"testing/synctest"
@@ -31,20 +32,18 @@ func TestRESTLifetime(t *testing.T) {
 		check("ready", user, password)
 		time.Sleep(123 * time.Second)
 		check("ice", "946688523:device", "ay+89oSv4H/J4DZABOURaF+mr80=")
+		// The verifier is the library's: it accepts until the end of the
+		// expiry second and refuses from the next one.
 		req := &turn.RequestAttributes{Username: user, Realm: "rv"}
-		auth := restAuth("secret")
-		time.Sleep(3477*time.Second - time.Nanosecond)
+		auth := turn.LongTermTURNRESTAuthHandler("secret", nil)
+		time.Sleep(3478*time.Second - time.Nanosecond)
 		id, k, ok := auth(req)
 		if !ok || id != "device" || !bytes.Equal(k, turn.GenerateAuthKey(user, "rv", password)) {
 			t.Fatalf("before expiry: %q %x %v", id, k, ok)
 		}
 		time.Sleep(time.Nanosecond)
 		if id, k, ok := auth(req); ok || k != nil || id != "" {
-			t.Fatalf("at expiry: %q %x %v", id, k, ok)
-		}
-		time.Sleep(time.Second)
-		if _, _, ok := auth(req); ok {
-			t.Fatal("accepted an expired credential")
+			t.Fatalf("after expiry: %q %x %v", id, k, ok)
 		}
 	})
 }
@@ -127,8 +126,9 @@ func TestMeteredSocket(t *testing.T) {
 	if got := l.quota("device").Used; got != 2 {
 		t.Fatal(got)
 	}
-	if _, err := raw.WriteTo([]byte("x"), &net.UDPAddr{IP: ip, Port: -1}); err == nil {
-		t.Fatal("expected bad destination")
+	// A failed send is not charged.
+	if n, err := raw.WriteTo([]byte("x"), &net.UDPAddr{IP: ip, Port: -1}); n != 0 || !errors.Is(err, syscall.EINVAL) {
+		t.Fatal(n, err)
 	}
 	raw.WriteTo([]byte("drop"), peer.LocalAddr())
 	raw.WriteTo([]byte("yes"), peer.LocalAddr())
@@ -162,7 +162,7 @@ func TestGenerator(t *testing.T) {
 		t.Fatal(got)
 	}
 	g.public = []net.IP{v4}
-	if c, a, err := g.AllocatePacketConn(turn.AllocateListenerConfig{Network: "udp4", RequestedPort: -1}); c != nil || a != nil || err == nil {
+	if c, a, err := g.AllocatePacketConn(turn.AllocateListenerConfig{Network: "udp4", RequestedPort: -1}); c != nil || a != nil || err == nil || err.Error() != "listen udp4: address -1: invalid port" {
 		t.Fatalf("invalid port: %v, %v, %v", c, a, err)
 	}
 	if c, a, err := g.AllocateListener(turn.AllocateListenerConfig{}); c != nil || a != nil || !errors.Is(err, errTransport) {

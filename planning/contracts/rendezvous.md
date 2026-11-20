@@ -142,9 +142,11 @@ Rules:
 - **Quota**: bytes relayed for a device, both directions, summed over all
   its allocations, per UTC day. Default 50 MB, set by a flag. The count is
   taken where relayed data is read and written, so an allocation that is
-  already open stops forwarding once the quota is used. Counters reset on restart:
-  the quota limits a resource, it is not a budget. On a node and with `--no-relay`,
-  `quota` answers `{"t":"quota","used":0,"limit":0}`.
+  already open stops forwarding once the quota is used; refusing new
+  allocations is not enough. Counters live in memory and start again when
+  the service restarts: the quota limits a resource, it is not a budget.
+  On a node and with `--no-relay`, `quota` answers
+  `{"t":"quota","used":0,"limit":0}`.
 - The relay sees DTLS ciphertext only.
 - Clients treat the relay as the lowest-priority path and leave it as soon as
   a direct path works (`flows/connect.md`).
@@ -291,10 +293,12 @@ gain (`risks.md` Q-1).
 solodawn rendezvous --domain rv.example --turn-domain turn.rv.example
 ```
 
-- Obtains certificates automatically for both names, or takes `--cert` and `--key`.
-- `--relay-quota-mb 50`; `--domain` with `--no-relay` serves TLS signalling and STUN without TURN.
-- `--listen <address>`: where signalling and static files are served. Used alone, it
-  serves both over plain HTTP without STUN or TURN, for local use and tests.
+- Obtains certificates automatically for both names, or takes
+  `--cert` and `--key`.
+- `--relay-quota-mb 50`, `--no-relay` to run signalling and STUN only:
+  `--domain` with `--no-relay` serves TLS signalling and STUN, without TURN.
+- `--listen <address>`: where signalling and the static files are served.
+  Used alone, it serves both over plain HTTP, without STUN or TURN.
 - No database, no configuration file, no accounts.
 - Nodes and web clients are pointed at it with a rendezvous URL; the web
   client served by that host uses its own origin by default.

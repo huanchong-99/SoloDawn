@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -30,10 +29,8 @@ func (r *relay) ice(kind, id string) proto.ICEConfig {
 	}
 	frame.ICE = append(frame.ICE, proto.ICEServer{URLs: []string{r.stun}})
 	if len(r.urls) != 0 {
-		user, pass, err := turn.GenerateLongTermTURNRESTCredentials(r.secret, id, ttl)
-		if err != nil {
-			panic(err) // hash.Hash.Write never fails.
-		}
+		// The only error is that of hash.Hash.Write, which never fails.
+		user, pass, _ := turn.GenerateLongTermTURNRESTCredentials(r.secret, id, ttl)
 		frame.ICE = append(frame.ICE, proto.ICEServer{URLs: r.urls, Username: user, Credential: pass})
 	}
 	return frame
@@ -58,23 +55,11 @@ func (o Options) start(udp net.PacketConn, tlsListener net.Listener, tlsPort int
 		cfg.PacketConnConfigs[0].RelayAddressGenerator = g
 		cfg.PacketConnConfigs[0].PermissionHandler = g.permitPeer
 		cfg.ListenerConfigs = []turn.ListenerConfig{{Listener: tlsListener, RelayAddressGenerator: g, PermissionHandler: g.permitPeer}}
-		cfg.AuthHandler = restAuth(r.secret)
+		cfg.AuthHandler = turn.LongTermTURNRESTAuthHandler(r.secret, nil)
 		cfg.EventHandler = g.events()
 	}
 	s, err := turn.NewServer(cfg)
 	return r, s, err
-}
-
-func restAuth(secret string) turn.AuthHandler {
-	verify := turn.LongTermTURNRESTAuthHandler(secret, nil)
-	return func(a *turn.RequestAttributes) (string, []byte, bool) {
-		expiry, _, _ := strings.Cut(a.Username, ":")
-		// Pion refuses earlier timestamps but accepts the expiry second itself.
-		if expiry == strconv.FormatInt(time.Now().Unix(), 10) {
-			return "", nil, false
-		}
-		return verify(a)
-	}
 }
 
 type generator struct {

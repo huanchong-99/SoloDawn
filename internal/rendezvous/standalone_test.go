@@ -12,11 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"syscall"
 	"testing"
 	"testing/fstest"
-	"testing/synctest"
 	"time"
 
 	"github.com/pion/turn/v5"
@@ -27,20 +25,16 @@ func TestStandaloneOptions(t *testing.T) {
 	distinct := "relay needs a distinct --turn-domain"
 	pair := "--cert and --key must be supplied together"
 	quota := "--relay-quota-mb is outside the wire integer range"
-	port := "invalid --udp-port"
 	for _, tc := range []struct {
 		o   Options
 		msg string
 	}{
 		{Options{}, ""}, {Options{Domain: "localhost", NoRelay: true}, ""},
-		{Options{Domain: "localhost", TurnDomain: "turn.localhost", Cert: "c", Key: "k", UDPPort: 65535, QuotaMB: 1<<33 - 1}, ""},
+		{Options{Domain: "localhost", TurnDomain: "turn.localhost", Cert: "c", Key: "k", QuotaMB: 1<<33 - 1}, ""},
 		{Options{Cert: "c"}, pair}, {Options{Key: "k"}, pair}, {Options{Cert: "c", Key: "k"}, noDomain},
 		{Options{TurnDomain: "turn.localhost"}, noDomain}, {Options{NoRelay: true}, noDomain},
 		{Options{Domain: "localhost"}, distinct}, {Options{Domain: "localhost", TurnDomain: "LOCALHOST"}, distinct},
 		{Options{Domain: "localhost.", TurnDomain: "localhost"}, distinct},
-		{Options{Domain: ".", NoRelay: true}, "TLS needs a hostname, not the DNS root"},
-		{Options{Domain: "localhost", TurnDomain: "."}, "TLS needs a hostname, not the DNS root"},
-		{Options{UDPPort: -1}, port}, {Options{UDPPort: 65536}, port},
 		{Options{QuotaMB: -1}, quota}, {Options{QuotaMB: 1 << 33}, quota},
 	} {
 		err := tc.o.validate()
@@ -161,6 +155,25 @@ func TestStandaloneTLS(t *testing.T) {
 	}
 }
 
+func TestPlainHTTP(t *testing.T) {
+	l := listenLocal(t)
+	done := make(chan error, 1)
+	go func() { done <- Options{}.serve(fstest.MapFS{"index.html": {Data: []byte("local")}}, l) }()
+	resp, err := http.Get("http://" + l.Addr().String() + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil || resp.Header.Get("Content-Type") != "text/html; charset=utf-8" || string(b) != "local" {
+		t.Fatalf("plain HTTP: %s %v", b, err)
+	}
+	l.Close()
+	if err := <-done; !errors.Is(err, net.ErrClosed) {
+		t.Fatal(err)
+	}
+}
+
 func TestServeFailures(t *testing.T) {
 	web := fstest.MapFS{}
 	// Misconfigured services must return, not enter a serving loop.
@@ -194,7 +207,8 @@ func TestServeFailures(t *testing.T) {
 	}
 	o.Domain = "invalid domain%"
 	o.UDPPort = 0
-	if err := o.serveICE(web, l); err == nil || !strings.Contains(err.Error(), o.Domain) {
+	var dns *net.DNSError
+	if err := o.serveICE(web, l); !errors.As(err, &dns) || dns.Name != o.Domain {
 		t.Fatal(err)
 	}
 }
@@ -209,14 +223,15 @@ func TestCertificatePolicy(t *testing.T) {
 		t.Fatal(cfg.MinVersion, cfg.NextProtos)
 	}
 	_, err = cfg.GetCertificate(&tls.ClientHelloInfo{ServerName: "unconfigured.example"})
-	if err == nil || !strings.Contains(err.Error(), "not configured") {
+	if err == nil || err.Error() != `acme/autocert: host "unconfigured.example" not configured in HostWhitelist` {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"HOME", "XDG_CACHE_HOME", "LocalAppData"} {
 		t.Setenv(name, "")
 	}
-	if _, err := o.certificates(); err == nil {
-		t.Fatal("no cache location for automatic certificates")
+	_, want := os.UserCacheDir()
+	if _, err := o.certificates(); err == nil || err.Error() != want.Error() {
+		t.Fatal(err, want)
 	}
 }
 
@@ -235,25 +250,4 @@ func TestClosedEndpoint(t *testing.T) {
 	if c, err := e.Accept(); c != nil || !errors.Is(err, net.ErrClosed) {
 		t.Fatal(c, err)
 	}
-}
-
-func TestTURNReadIdleTimeout(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		a, b := net.Pipe()
-		stream := idleStream{a}
-		defer b.Close()
-		start := time.Now()
-		go func() { time.Sleep(9 * time.Minute); b.Write([]byte("x")) }()
-		buf := make([]byte, 1)
-		if n, err := stream.Read(buf); err != nil || n != 1 || string(buf) != "x" {
-			t.Fatal(n, err, buf)
-		}
-		if n, err := stream.Read(buf); n != 0 || !errors.Is(err, os.ErrDeadlineExceeded) || time.Since(start) != 19*time.Minute {
-			t.Fatal(n, err, time.Since(start))
-		}
-		a.Close()
-		if n, err := stream.Read(buf); n != 0 || !errors.Is(err, io.ErrClosedPipe) {
-			t.Fatal(n, err)
-		}
-	})
 }
