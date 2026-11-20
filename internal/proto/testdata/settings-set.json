@@ -1,0 +1,27 @@
+{
+  "t": "settings.set",
+  "n": "hTHS48OYvLfMPQ991e4a7w",
+  "ts": 1763600000000,
+  "to": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "retention_days": 30,
+  "idle_minutes": 20,
+  "max_open": 3,
+  "default_level": 2,
+  "all_level3": false,
+  "approvers": [
+    "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
+  ],
+  "caps": {
+    "claude": {
+      "day": {
+        "unit": "turns",
+        "max": 200
+      },
+      "task": {
+        "unit": "turns",
+        "max": 60
+      }
+    },
+    "codex": {}
+  }
+}

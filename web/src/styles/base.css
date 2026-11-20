@@ -1,6 +1,7 @@
 /* SoloDawn shared styles. Colours and sizes come from tokens.css only.
-   Sections: 1 base  2 utilities  3 shell  4 buttons  5 cards  6 forms  7 motion  8 forced colours.
-   Styles of one component (badges, avatars, chat, thread, terminal, dialog) arrive with it. */
+   Sections: 1 base  2 utilities  3 shell  4 buttons  5 cards  6 forms  7 motion  8 forced colours
+   9 badges and small texts  10 fields and dialogs.
+   Styles of one component (avatars, chat, thread, terminal) arrive with it, in its own file. */
 
 /* 1 base */
 /* Geist and Geist Mono 1.9.2, variable, self-hosted under the OFL (public/fonts/OFL.txt).
@@ -764,5 +765,122 @@ kbd,
   /* The hover layer, which the system paints in its page colour, would cover the highlight. */
   .tabs a[aria-current]::before {
     display: none;
+  }
+}
+
+/* 9 badges and small texts */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-full);
+  background: var(--tone-soft, var(--surface-2));
+  color: var(--tone-text, var(--text-2));
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+
+  &.solid {
+    background: var(--tone);
+    color: var(--on-tone);
+    font-weight: 600;
+  }
+  &.count {
+    min-width: 22px;
+    justify-content: center;
+    padding: 0 6px;
+  }
+}
+.sec-title {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.hint {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+/* A mention of a member in a text. */
+.at {
+  color: var(--sky);
+  font-weight: 500;
+}
+
+/* 10 fields and dialogs */
+.field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+
+  > span:first-child {
+    font-weight: 500;
+  }
+}
+.input {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: 14px;
+  line-height: 1.4;
+
+  /* Told once the person has left the field, not while they are still typing in it. */
+  &:user-invalid {
+    border-color: var(--danger);
+  }
+}
+textarea.input {
+  resize: vertical;
+}
+@media (pointer: coarse) {
+  .input {
+    min-height: 44px;
+    /* Below 16px, Safari on a phone zooms the page into a focused field. */
+    font-size: 16px;
+  }
+}
+/* A native dialog: the browser keeps focus inside it and closes it on Escape. It rises into
+   place over a backdrop that fades in; it closes at once. */
+.dlg {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: var(--sp-5);
+  border: 0;
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+
+  &[open] {
+    animation:
+      rise var(--dur-3) var(--ease-out),
+      appear var(--dur-2) var(--ease-out);
+  }
+  &::backdrop {
+    background: rgb(8 10 16 / 0.55);
+    animation: appear var(--dur-2) var(--ease-out);
+  }
+  h2 {
+    font-size: var(--fs-lg);
+  }
+  form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+  }
+}
+/* What arrives from just below its place: a dialog, a new message, a list that opens. */
+@keyframes rise {
+  from {
+    transform: translateY(var(--travel));
   }
 }

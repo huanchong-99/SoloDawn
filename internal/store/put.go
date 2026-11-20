@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
@@ -14,12 +15,25 @@ type wireRow interface {
 // Put stores a wire row with its assigned seq, encoded as it is. The index
 // columns are derived from that JSON. Updates retain the original pos and ts.
 func Put[R wireRow](tx *Tx, group string, modified int64, row R) error {
-	data, err := json.Marshal(row)
+	data, err := encode(row)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(putRow, group, modified, string(data))
+	_, err = tx.Exec(putRow, group, modified, data)
 	return err
+}
+
+// encode is json.Marshal without HTML escaping. The size of a row is counted
+// on its JSON without escapes, so a stored row must not grow by them: < > and &
+// would take six bytes each.
+func encode(v any) (string, error) {
+	var b bytes.Buffer
+	e := json.NewEncoder(&b)
+	e.SetEscapeHTML(false)
+	if err := e.Encode(v); err != nil {
+		return "", err
+	}
+	return string(bytes.TrimSuffix(b.Bytes(), []byte("\n"))), nil
 }
 
 const putRow = `

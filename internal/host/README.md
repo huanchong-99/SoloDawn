@@ -3,6 +3,87 @@ description: 'Offline scripted Claude Code and Codex processes for host integrat
 kind: reference
 ---
 
+# Host seam
+
+`host.go`, `session.go` and `audit.go` are what every other host file builds on. The rules they carry are in the contracts named below; this section is the API and how a unit plugs into it. `host` imports neither `peer` nor `node` ([architecture](../../planning/architecture.md), section 8.2): `node` makes the host, hands it connections, and calls what its tables hold.
+
+A unit never calls into the file of a unit built beside it. It registers in a table, provides a hook, or calls one, and its tests put a fake in the table or the hook.
+
+## Use this capability
+
+| Need | Entry |
+| --- | --- |
+| the host of a node | `New(db, key, now)`: the `Host`, and the sessions as the last run left them. `node` then sets `h.Connect` and `h.Shim` |
+| what your unit remembers, per host | `Part[T](h)`: one `*T` per type and host, made from its zero value. Not a package variable: tests run several hosts in one process |
+| a command to a home | `h.Command(ctx, home, payload)` signs the payload text with the node's key and sends it as `cmd`. It returns the home's answer, the home's error as an `*Error`, `home_unreachable`, or `bad_request` for a command too large for a `ctl` message |
+| any other request to a home, or a push such as `ack` | `h.Home(device)`, then `Request` or `Send` |
+| a connection to a home (`host.join`) | `h.Connect(ctx, device)`: `node` keeps one open until `ctx` ends and calls `h.Attach` each time it opens |
+| a failure with a wire code | `&Error{Code, Message}`; its text is `<code>: <sentence>` |
+| a session | `h.Sessions`: `Create`, `Get`, `All`, `Update`, `Move`, `End` |
+| a session change that commits with other rows | `h.Sessions.Write(func(tx *Tx) error { … })`, then `tx.Move` and the like, and `h.Audit(tx.Tx, …)` |
+| who calls a tool | `h.Sessions.Admit(key, level, interactive)` issues the token of a CLI process, `Caller(token)` reads it, `Forget(token)` drops it when the process has exited |
+| the turn a tool is called in | `Caller.Turn`: its number, its kind (`HandbackTurn` for a hand-back), the thread of its last item, the depth of the call it answers |
+| whether a tool call or a permission request is open | `done := h.Sessions.Calling(key)` around it; `h.Sessions.Calls(key)` |
+| the state rows of a group | `h.Rows`: `Put` and `Reset` for the unit that handles `rows` and `reset`, `Get` and `Of` for everyone |
+| an item that answers an open tool call | the tool: `item, done := h.Await(id, check)`, then it reads the channel until its wait runs out, calls `done`, and looks at the channel once more. Delivery, before it queues a `reply` or a `decided` item: `h.Hand(id, item)`, which never waits for the tool |
+| whether a session's deliveries are held | `h.Held(key)`, before a turn is given; whoever lifts a hold calls `Deliver` |
+| an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
+
+## Tables
+
+Each is a package map. The file that provides an entry adds it from its `init` with `Register(table, key, entry)`, which panics when the key is taken.
+
+| Table | Key | Who calls the entry |
+| --- | --- | --- |
+| `Tools` | the tool's name | the MCP server, through `ToolsFor(caller)`: a tool whose `For` refuses the caller is neither listed nor called |
+| `Drivers` | the agent name, `claude` or `codex` | whoever starts a session's process |
+| `Pushes` | `t` of a frame a home pushes: `inbox`, `rows`, `reset` | `h.Push(home, frame)`, which `node` calls for each push it reads on a connection to a home, and the local link for a home on the same node |
+| `Surface` | `t` of a request or push of the [host surface](../../planning/contracts/datachannel.md) (`audit`, `pty.resize`), or `t` of a [host command](../../planning/contracts/commands.md) (`takeover.start`) | `node`, only for a device of the owner; for a command after the envelope checks and the receipt lookup |
+| `Listeners` | the name of the listening unit | `h.Report(key, event)`, which the session runtime calls for every event of a session's CLI |
+| `Attached` | the name of the unit | `h.Attach`, each time a connection to a home opens |
+| `Holds` | the name of the unit that knows of a hold | `h.Held(key)`, which delivery calls. The unit of caps and limits registers the holds of a cap, a rate limit and "all offline"; with no entry nothing is held |
+
+`Listeners`, `Attached` and `Holds` are called in the order of their keys. `node` does the rest of the wiring: it registers the subcommands of host features and gives each `Peer` the handlers of their channels.
+
+## Hooks
+
+One unit implements a hook and sets it from its `init` with `Provide(&Hook, value)`, which panics when the hook is set already.
+
+| Hook | Provided by | Called by |
+| --- | --- | --- |
+| `Runner.Turn` | the session runtime: start or resume the CLI, note the turn, write it | delivery, with the text and the `Turn` that `Compose` made; the session runtime itself and the takeover, for their own turns |
+| `Runner.Answer` | the session runtime | the approval handler, for a request it heard as the event `Asked` |
+| `Deliver` | delivery: give the AI its next turn if items are held for it | the session runtime when a turn has ended; whoever lifts a hold |
+| `Instructions` | the unit that writes the instruction texts | whoever fills a `Launch` |
+| `Compose` | the unit that writes the turn text: all four kinds of turn, which share one header | delivery (`ItemsTurn`); the session runtime (`ReplacedTurn`, `ContinueTurn`); the takeover (`HandbackTurn`) |
+
+## Interfaces
+
+`Home`, `Owner` and `Terminal` are method sets of `*peer.Connection` and `*peer.Stream`, so `node` passes those in as they are; `features/host_test.go` holds the compile-time check. `node` calls `h.Attach(device, home)` for each connection to a home, with the local link for a home on the same node, whose `Path` is `local`. A home's `Path` is what the host reports in `member status`.
+
+## Sessions
+
+The table is in memory and written through to the `session` table of the store. States and their changes are those of [sessions.md](../../planning/sessions.md), section 2.
+
+- `Move(key, from, to)` changes a state only from the state the caller names, and only by a change the contract lists; anything else is `conflict`. A change to `working` or `takeover` is `busy` while another session of the same AI in the same group is in either.
+- `Update` changes the other columns, such as the CLI's session id.
+- `End` removes the row and the turn noted for it, and ends the tokens issued for it: they name nobody from then on, also not a session made later for the same key.
+- When the node starts, `New` makes every session saved as `working` or `waiting` dormant. One saved as `takeover` keeps that state until its hand-back. What the saved rows call for (a crash report, a hand-back) is the caller's to do, from the rows `New` returns.
+- A token is in memory only, and names nobody once it is forgotten or its session has ended.
+
+**Transactions and the lock.** Every change runs on the store's one writer and takes the table's lock only there. So `Get`, `All` and `Caller` can be called anywhere, inside a transaction of the store as well. `Create`, `Update`, `Move` and `End` of `Sessions` each start a transaction; inside `Sessions.Write`, or inside any `Write` of the store, calling one of them waits for ever, as a second `Write` of the store does. There, use the `Tx`. A change made through a `Tx` is in the table at once and is taken out again when the transaction's function fails.
+
+Not in the seam: the one state per AI that others see (sessions.md, section 3), the overlays, and which session an item goes to.
+
+## Drivers
+
+A `Driver` starts the structured CLI (`Start`) and gives the command line of the interactive one (`Interactive`), both from a `Launch`. A running `Process` takes turns, an interrupt, answers to permission requests and a close, and reports through `Events`. Only the session runtime holds a `Process`; the other units hear its events through `Listeners` and reach it through `Runner`.
+
+- `Launch.Session` is empty before the first start. A structured start reports the id in force with a `Ready` event; `Interactive` returns the id it put on the command line. Whoever started the CLI stores the id with `Update` ([drivers.md](../../planning/contracts/drivers.md), section 1).
+- `Launch.Shim` is the command line of the MCP server for that start: `h.Shim`, then `--token` and the token. The driver writes it into the CLI's MCP configuration as it is.
+- A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
+- Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
+
 # Host test CLIs
 
 Build `./internal/host/fakecli/claude` and `./internal/host/fakecli/codex` into a temporary directory and prepend it to the test's PATH. Both answer `--version` without a script. For sessions, set:

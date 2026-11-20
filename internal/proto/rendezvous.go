@@ -71,3 +71,13 @@ type RoomData struct {
 	RoomID
 	Data json.RawMessage `json:"data"`
 }
+
+// Beacon is the payload of the signed envelope a node sends by UDP multicast
+// on the local network (contracts/rendezvous.md section 4). It has no g and
+// no to; Port is where the node's signalling handler listens.
+type Beacon struct {
+	Type      string `json:"t"`
+	Nonce     ID     `json:"n"`
+	Timestamp int64  `json:"ts"`
+	Port      int    `json:"port"`
+}

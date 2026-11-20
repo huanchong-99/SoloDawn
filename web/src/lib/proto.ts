@@ -170,7 +170,7 @@ export const Welcome = v.object({
 });
 export type Welcome = v.InferOutput<typeof Welcome>;
 
-/** The whole list of readable groups again, whenever it changes. No Go type or example yet (B-10). */
+/** The whole list of readable groups again, whenever it changes, entries as in `welcome`. */
 export const Groups = v.object({ t: v.literal('groups'), groups: v.array(GroupSummary) });
 export type Groups = v.InferOutput<typeof Groups>;
 
@@ -236,6 +236,11 @@ const Usage = record({
   spend_cap: v.optional(num),
   turns_today: v.optional(int),
 });
+
+/** An agent's usage caps; a cap that is not there is not set (commands.md section 2). `max` may be
+ *  a fraction. */
+const Cap = v.object({ unit: str, max: num });
+const Caps = record({ day: v.optional(Cap), task: v.optional(Cap) });
 
 export const HumanMemberRow = v.object({
   ...MemberRow,
@@ -870,6 +875,156 @@ export const HostLeave = v.object({
 });
 export type HostLeave = v.InferOutput<typeof HostLeave>;
 
+/** Only the settings being changed. `caps` holds the caps of each agent being changed, whole: a
+ *  cap that is not there is no longer set; an agent that is not there keeps its caps. */
+export const SettingsSet = v.object({
+  t: v.literal('settings.set'),
+  ...HostCommand,
+  retention_days: optionalInt,
+  idle_minutes: optionalInt,
+  max_open: optionalInt,
+  default_level: optionalInt,
+  all_level3: v.optional(bool),
+  approvers: v.optional(strs),
+  caps: v.optional(record({ claude: v.optional(Caps), codex: v.optional(Caps) })),
+});
+export type SettingsSet = v.InferOutput<typeof SettingsSet>;
+
+/** Declares the account type of a CLI found on the node: `personal`, `team` or `api_key`. */
+export const AgentSet = v.object({
+  t: v.literal('agent.set'),
+  ...HostCommand,
+  agent: str,
+  account: str,
+});
+export type AgentSet = v.InferOutput<typeof AgentSet>;
+
+export const PermSet = v.object({
+  t: v.literal('perm.set'),
+  ...HostCommand,
+  agent: str,
+  g: Id,
+  level: int,
+  repo_config: bool,
+});
+export type PermSet = v.InferOutput<typeof PermSet>;
+
+/** The host commands that carry nothing but their header. `pair.browser` is answered with
+ *  `link` and `expires`. */
+export const HostCommandOnly = v.object({
+  t: v.picklist(['pair.browser', 'host.offline', 'host.online']),
+  ...HostCommand,
+});
+export type HostCommandOnly = v.InferOutput<typeof HostCommandOnly>;
+
+const takeover = { ...HostCommand, g: Id, member: Id };
+
+/** May name the task to work on (planning/flows/takeover.md, section A). */
+export const TakeoverStart = v.object({
+  t: v.literal('takeover.start'),
+  ...takeover,
+  task: v.optional(Id),
+});
+export type TakeoverStart = v.InferOutput<typeof TakeoverStart>;
+
+export const TakeoverEnd = v.object({ t: v.literal('takeover.end'), ...takeover });
+export type TakeoverEnd = v.InferOutput<typeof TakeoverEnd>;
+
+// The host surface (datachannel.md section 7): what the owner's browser reads from a node.
+
+export const HostInfoRequest = v.object({ t: v.literal('host.info'), id: int });
+export type HostInfoRequest = v.InferOutput<typeof HostInfoRequest>;
+
+const HostState = {
+  device: str,
+  name: str,
+  os: str,
+  version: str,
+  open: int,
+  max_open: int,
+  offline: bool,
+  /** After an update check: `pending` or `mismatch` (contracts/local.md section 9). */
+  update: v.nullable(v.object({ version: str, status: str })),
+  homes: v.array(v.object({ g: Id, home: str, name: str })),
+  /** The quota answer of the rendezvous; `null` while the node has none. */
+  relay: v.nullable(v.object({ used: int, limit: int })),
+  agents: v.array(
+    v.object({
+      agent: str,
+      cli_version: str,
+      /** `null` until the owner has declared it. */
+      account: v.nullable(str),
+      login_ok: bool,
+      caps: Caps,
+      groups: v.array(
+        v.object({
+          g: Id,
+          member: Id,
+          level: int,
+          repo_config: bool,
+          state: str,
+          task: v.optional(Id),
+          queued: int,
+        }),
+      ),
+    }),
+  ),
+  settings: v.object({
+    retention_days: int,
+    idle_minutes: int,
+    default_level: int,
+    all_level3: bool,
+    approvers: strs,
+  }),
+};
+
+/** The answer to `host.info`. */
+export const HostInfo = v.object({ t: v.literal('host.info'), ...Success, ...HostState });
+export type HostInfo = v.InferOutput<typeof HostInfo>;
+
+/** `host.info` again after one of its fields changed: a push, the whole object, without `re`. */
+export const HostInfoPush = v.object({ t: v.literal('host.info'), ...HostState });
+export type HostInfoPush = v.InferOutput<typeof HostInfoPush>;
+
+/** Asks for the audit rows whose `id` is lower than `before`, the id of the oldest row already
+ *  held, newest first; `before: 0` for the newest. */
+export const Audit = v.object({ t: v.literal('audit'), id: int, before: int, limit: int });
+export type Audit = v.InferOutput<typeof Audit>;
+
+/** The answer to `audit`, which has no `t`. `id` numbers a row on its node and grows with each;
+ *  `ai` is the agent, `by` the device that caused it. */
+export const AuditAnswer = v.object({
+  ...Success,
+  rows: v.array(
+    v.object({
+      id: int,
+      ts: int,
+      g: v.optional(Id),
+      ai: optionalText,
+      what: str,
+      detail: str,
+      by: optionalText,
+      result: optionalText,
+    }),
+  ),
+});
+export type AuditAnswer = v.InferOutput<typeof AuditAnswer>;
+
+/** The size of a takeover's terminal, pushed by the browser; `ai` is the member taken over. */
+export const PTYResize = v.object({
+  t: v.literal('pty.resize'),
+  g: Id,
+  ai: Id,
+  cols: int,
+  rows: int,
+});
+export type PTYResize = v.InferOutput<typeof PTYResize>;
+
+/** The payload of the signed envelope a node multicasts on its local network (rendezvous.md
+ *  section 4). A browser receives none; the schema is here because both test suites read it. */
+export const Beacon = v.object({ t: v.literal('beacon'), n: Id, ts: int, port: int });
+export type Beacon = v.InferOutput<typeof Beacon>;
+
 // Inbox (datachannel.md section 6): what a home sends the host of an AI. A browser receives none
 // of it; the schemas are here because every wire example is read by both test suites.
 
@@ -913,26 +1068,87 @@ export type Inbox = v.InferOutput<typeof Inbox>;
 export const Ack = v.object({ t: v.literal('ack'), g: Id, item: int });
 export type Ack = v.InferOutput<typeof Ack>;
 
+// MCP tools (mcp-tools.md section 5): what a node offers its AI sessions. Not a frame between
+// nodes, so not read by the rules of contracts/conventions.md: the names follow MCP, and a member
+// that the file does not have is refused, as internal/proto's test refuses it.
+
+/** The JSON Schema of one argument, or of an element or member of one. */
+export interface ToolArg {
+  type: string;
+  enum?: string[];
+  default?: unknown;
+  minimum?: number;
+  maximum?: number;
+  items?: ToolArg;
+  properties?: Record<string, ToolArg>;
+  required?: string[];
+  additionalProperties?: boolean;
+}
+
+const ToolArg: v.GenericSchema<ToolArg> = v.strictObject({
+  type: str,
+  enum: v.optional(strs),
+  default: v.optional(v.unknown()),
+  minimum: optionalInt,
+  maximum: optionalInt,
+  items: v.optional(v.lazy(() => ToolArg)),
+  properties: v.optional(
+    v.record(
+      str,
+      v.lazy(() => ToolArg),
+    ),
+  ),
+  required: v.optional(strs),
+  additionalProperties: v.optional(bool),
+});
+
+const ToolList = v.strictObject({
+  tools: v.array(
+    v.strictObject({
+      name: str,
+      inputSchema: v.strictObject({
+        type: v.literal('object'),
+        properties: v.record(str, ToolArg),
+        required: v.optional(strs),
+        additionalProperties: v.literal(false),
+      }),
+    }),
+  ),
+});
+
+/** internal/proto/testdata/tools.json: the `tools/list` result of each kind of session. */
+export const ToolLists = v.strictObject({
+  secretary: ToolList,
+  group: ToolList,
+  review: ToolList,
+  task_level_1: ToolList,
+  task_level_2_3: ToolList,
+});
+export type ToolLists = v.InferOutput<typeof ToolLists>;
+
 // The ctl channel (datachannel.md section 2)
 
-/** The answer to `cmd`, which has no `t`: a frame with a `t` is read by the schema it names, and
- *  refused when that schema refuses it (contracts/conventions.md section 3). */
-const CmdAnswer = v.object({ t: v.optional(v.never()), ...CmdResult.entries });
-
-/** Every frame a client can receive on `ctl`: a response (it has `re`) or a push. */
-export const Frame = v.union([
-  Welcome,
-  Synced,
-  Fetched,
-  CmdAnswer,
-  ErrorResponse,
-  Rows,
-  Reset,
-  Devlog,
-  Groups,
-]);
+/** What a client can receive on `ctl` without asking: every push, which has no `re`, and the
+ *  error answer. A frame with `re` is the answer to a request: read it with `decodeAnswer`, by the
+ *  type of the request whose `id` it names. */
+export const Frame = v.union([ErrorResponse, Rows, Reset, Devlog, Groups, HostInfoPush]);
 export type Frame = v.InferOutput<typeof Frame>;
-export type Push = Rows | Reset | Devlog | Groups;
+export type Push = Rows | Reset | Devlog | Groups | HostInfoPush;
+
+/** The schema of the answer to each request, by the request's `t`. An answer is read with the
+ *  schema of the request it answers, not by what it holds: the answers to `cmd` and `audit` have no
+ *  `t`, and like any frame each ignores the members it does not read (contracts/conventions.md
+ *  sections 2 and 3). */
+export const AnswerOf = {
+  hello: Welcome,
+  sync: Synced,
+  fetch: Fetched,
+  cmd: CmdResult,
+  'host.info': HostInfo,
+  audit: AuditAnswer,
+} as const;
+export type RequestType = keyof typeof AnswerOf;
+export type AnswerTo<T extends RequestType> = v.InferOutput<(typeof AnswerOf)[T]>;
 
 /** The one place where received JSON text becomes a typed value. Throws when the text is not
  *  JSON or does not match the schema; everything after it trusts the type. */
@@ -940,15 +1156,34 @@ export function decode<S extends v.GenericSchema>(schema: S, text: string): v.In
   return v.parse(schema, JSON.parse(text));
 }
 
+/** Reads a frame that has `re` as the answer to a request of type `t`. A frame with `err` is the
+ *  error answer, whatever else it holds (contracts/conventions.md section 3); any other is read
+ *  with `AnswerOf[t]`. Throws as `decode` does. */
+export function decodeAnswer<T extends RequestType>(
+  t: T,
+  text: string,
+): AnswerTo<T> | ErrorResponse {
+  const value: unknown = JSON.parse(text);
+  const error = typeof value === 'object' && value !== null && 'err' in value;
+  return v.parse(error ? ErrorResponse : AnswerOf[t], value) as AnswerTo<T> | ErrorResponse;
+}
+
 /** A request as its sender writes it; the connection numbers it. */
 type Ask<R> = Omit<R, 'id'>;
 
-/** A `ctl` connection: each request is answered by the response that names its id in `re`, or
- *  by an error. Pushes go to the handler given when the connection was made. Implemented by
- *  `mock.ts`, and by the real connection later. */
+/** A `ctl` connection. It numbers each request with a new `id` and keeps the request's `t` under
+ *  that id. A frame with `re` is the answer to the request of that id: it is read with
+ *  `decodeAnswer(t, text)`, settles that request, and the id is forgotten. A frame without `re` is
+ *  read with `Frame` and goes to the push handler given when the connection was made. Every request
+ *  type has an overload, so its answer is typed. Implemented by `mock.ts`, and by the real
+ *  connection later. */
 export interface Ctl {
-  request(req: Ask<Hello>): Promise<Welcome | ErrorResponse>;
-  request(req: Ask<Sync>): Promise<Synced | ErrorResponse>;
-  request(req: Ask<FetchThread> | Ask<FetchKind> | Ask<FetchRow>): Promise<Fetched | ErrorResponse>;
-  request(req: Ask<Cmd>): Promise<CmdResult | ErrorResponse>;
+  request(req: Ask<Hello>): Promise<AnswerTo<'hello'> | ErrorResponse>;
+  request(req: Ask<Sync>): Promise<AnswerTo<'sync'> | ErrorResponse>;
+  request(
+    req: Ask<FetchThread> | Ask<FetchKind> | Ask<FetchRow>,
+  ): Promise<AnswerTo<'fetch'> | ErrorResponse>;
+  request(req: Ask<Cmd>): Promise<AnswerTo<'cmd'> | ErrorResponse>;
+  request(req: Ask<HostInfoRequest>): Promise<AnswerTo<'host.info'> | ErrorResponse>;
+  request(req: Ask<Audit>): Promise<AnswerTo<'audit'> | ErrorResponse>;
 }

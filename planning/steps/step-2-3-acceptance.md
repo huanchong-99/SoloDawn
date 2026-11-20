@@ -1,7 +1,8 @@
 # Steps 2 and 3: acceptance tests
 
-The acceptance tests of step 2 (A9.x) and step 3 (A10.x), one group per
-feature of `steps/step-2-3.md`. They rest on the design answers D-1 to D-19 of
+The acceptance tests of step 2 (A9.x), one group per feature of
+`steps/step-2-3.md`; those of step 3 (A10.x) are in
+`steps/step-3-acceptance.md`. They rest on the design answers D-1 to D-19 of
 `steps/parallel-plan-step-2-3.md` section 1; each heading names the answers
 and the contract of its group. Exact shapes, names and error codes are in
 those contracts; where they differ from this file, the contract holds.
@@ -63,11 +64,11 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   browser's connection within 1 second of holding the entry.
 - **A9.7** The fork vectors of `crypto.json` give the same log in Go and in
   the web client, in both orders of arrival: of two entries for one version,
-  the one signed by the device earlier in the log stays; the other and all
-  after it are dropped. End to end: Q's first device and a second, stolen one
-  revoke each other at one version. Whichever entry `P1`, `Q1` and each
-  browser saw first, all end with the second device revoked and the first
-  valid, and `P1` closes the second device's connections within 1 second.
+  the one signed by the device earlier in the log stays; the other is dropped,
+  with what no longer fits after it. End to end: Q's first device and a
+  second, stolen one revoke each other at one version. Whichever entry `P1`,
+  `Q1` and each browser saw first, all end with the second device revoked and
+  the first valid, and `P1` closes the second's connections within 1 second.
 
 ### Whose instructions (D-2, D-8; `contracts/step-2/confirm.md`)
 
@@ -79,15 +80,17 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   and P sees its state. `act confirm` by P is answered `forbidden`; sent twice
   by Q with one nonce it makes one item and is answered `ok` twice. An `allow`
   list for Q-personal that names P does not remove the card.
-- **A9.10** The test hook queues on `P1`, validly signed by the home, an item
-  for Q-personal with no `cause` signed by Q and one whose `cause` confirms
-  another message. `Q1` refuses both, with audit `refused`.
+- **A9.10** The test hook queues on `P1`, validly signed by the home, items
+  for Q-personal: one with no `cause` signed by Q, one whose `cause` confirms
+  another message, a `reply` to no open call, a `notice`, and an `assign`
+  whose brief names another AI. `Q1` refuses each, with audit `refused`. When
+  `P1` answers `version` to `Q1`'s `hello`, `Q1` sends none with `v` 1.
 - **A9.11** P confirms a brief that makes Q-personal assignee of one task and
   reviewer of another. Both wait for Q, the second from step `review`; until Q
   confirms, no `assign` or `review` item reaches `Q1` and no worktree exists
   there. In the browser: the card, its actions for Q only, each end state.
 
-### After a task started (D-9; `contracts/step-2/confirm.md`)
+### After a task started (D-9; `contracts/step-2/labels.md`)
 
 - **A9.12** Q-personal has a task that P's brief and Q's confirmation started.
   P mentions the AI in its thread: no card appears, and the turn's header
@@ -96,6 +99,14 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 - **A9.13** P confirms a brief that replaces the first and changes the task. A
   new `confirm` card for Q appears; until Q confirms it, no turn labelled
   `instruction` from that brief reaches Q-personal.
+- **A9.42** Two labels. In a task of Q-team on `Q1`, a `reviewed` item reads
+  `instruction` in its header and `information` on the line of the review,
+  which P's AI wrote. On a decision that Q-team posted to Q, a choice by P as
+  admin reads `information` on its line and a choice by Q `instruction`; the
+  header reads `instruction` both times. The secretary's `confirmed` for a
+  brief that Q confirmed reads `information` on its line unless P listed Q for
+  it. In a one-person group the owner's own choices and confirmations read
+  `instruction` on their lines.
 
 ### Allow lists (D-2; `contracts/step-2/authority.md`)
 
@@ -134,6 +145,27 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   P, `act approve` by P is answered `forbidden`, and the same envelope
   injected at the home is ignored by `Q1` with audit `refused`. A delegate for
   Q-team decides nothing for Q-personal.
+
+### What a host accepts (D-2; `contracts/step-2/authority.md`)
+
+- **A9.43** A role the brief does not give. P makes Q `admin` and confirms a
+  brief that names only Q's AIs. Q gives its task to P's working AI with
+  `task assign`: a `confirm` card for P appears, and with P's level at 3 the
+  task starts on `P2` at level 2 once P confirms. When P gives it, or P's
+  secretary with `set_task`: no card, and level 3.
+- **A9.44** The secretary serves by its owner's consent. `group set` with
+  `secretary` naming Q-team is answered `forbidden` to P and to Q as a plain
+  member, and `ok` to Q as admin; `Q1` then lists the secretary's tools for
+  Q-team and delivers a `notice`. With the row's `secretary` set to Q-team by
+  the test hook alone, `Q1` refuses the `notice`, with audit `refused`. In a
+  one-person group the owner names another of their AIs with `group set`: the
+  quiet-task `notice` of A5.16 and a brief sent back reach it.
+- **A9.45** A merge goes where the owner accepted. The test hook queues on
+  `P1`, for tasks of Q-team, a `merge` item that names a pull request `Q1`
+  neither opened nor reused, and one whose pull request has another base than
+  the accepted `base`. The fake `gh` records the read and no merge, and each
+  task reports a conflict. A task that came to Q-team after P's AI had
+  submitted it merges through the pull request `Q1` reused.
 
 ### Watching (D-14; `contracts/step-2/watch-team.md`)
 
@@ -212,9 +244,9 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 - **A9.35** Q-team gets a task in P's group. Before Q accepted the group's
   check list and templates, `run_checks` is refused, the task waits with
   `accept` and names Q, and a marker file that the first check command would
-  create does not exist. Q's browser shows each command and template and sends
-  `checks.accept` with their hash; then `run_checks` runs them.
-  `checks.accept` with another hash, or signed by P, is refused by `Q1`.
+  create does not exist. Q's browser shows the repository, the base branch and
+  each command and template, and sends `checks.accept` with their hash; then
+  `run_checks` runs them. With another hash, or signed by P, `Q1` refuses it.
 - **A9.36** An admin changes one check command, then one template. After each
   change `run_checks`, the push and the merge on `Q1` are refused with wait
   `accept` until Q accepts the new hash. The acceptance survives a restart of
@@ -243,45 +275,7 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 
 ## Step 3: extensions (A10)
 
-TCP simultaneous open (3.4, D-19) has no test: it is not in the first version.
-If spike S-9 shows a clear benefit, its tests are written with its plan.
-
-### More CLIs (D-16; `contracts/step-3/drivers.md`)
-
-- **A10.1** Every driver declares the capability table; Claude Code and Codex
-  declare the values of section 8 of that contract, and A9.40 still holds.
-  With a declaration made up in the test that varies each field in turn,
-  each switch of its section 5 holds, A3.1 passes, and in the browser what
-  is switched off is not offered. On native Windows, `perm.set` level 2 for
-  Claude Code is refused and the browser offers no level 2 (`risks.md` Q-4).
-- **A10.2** For a CLI whose terms allow API keys only, `agent.set` takes
-  `api_key`; any other type is refused, and the browser offers none (R-54).
-- **A10.3** For each CLI added, the M3, M4 and M7 tests of step 1 that are not
-  `live` pass with its fake CLI, except those of a feature its table switches
-  off. The fake's message shapes are copied from captures of the real program;
-  until A10.4 has run, its level tables carry `[unverified]`.
-- **A10.4** For each CLI added: A3.8, the second half of A4.1, A4.10, A7.1 and
-  A7.8 with the real program, except those its table switches off. (`live`)
-
-### Style presets (D-17; `contracts/step-3/knowledge.md`)
-
-- **A10.5** A preset is a note of type `preset`. The secretary's brief names
-  it; after the confirm, the `assign` turn of every task of that brief holds
-  the preset's text unchanged, and a brief without one holds none. A brief
-  naming a preset the group lacks is refused, with no brief row. A5.14 holds
-  for presets. In the browser: the brief card names the preset; an editor
-  lists, creates and changes them.
-
-### Knowledge base (D-18; `contracts/step-3/knowledge.md`)
-
-- **A10.6** `kb_put` by an AI stores a document. `kb_search` for a word that
-  is in it returns it; for a word that is in none, an empty list; from an AI
-  of another group homed on the same node, not this document. After the home
-  restarts the search answers the same. In the browser: the group information
-  lists the documents, and its search shows what `kb_search` returns.
-- **A10.7** A5.14 holds for a document; after `forget` no search finds it. A
-  `kb_put` whose text holds a test secret pattern fails with `secret`, and the
-  home has no row for it.
+In `steps/step-3-acceptance.md`.
 
 ## What these tests assume beyond the design answers
 
@@ -290,9 +284,7 @@ The answers are silent on these; the contract of each group decides.
 | Test | Assumed | From |
 | --- | --- | --- |
 | A9.4 | a person whose AI holds an unfinished task cannot be removed | `contracts/commands.md` 1.2, `member remove` |
-| A9.11 | a `review` item needs the owner's signature as an `assign` item does | D-2 says "an item" |
 | A9.14 | decided on 2026-11-20: for an AI on a team plan and a person not on its list, the owner is asked with the same card | D-2; D-8 names personal subscriptions only. For C2-1 |
-| A9.17 | decided: the owner's `act confirm` envelope, the `cause`, names the confirmed message, and that message's signer caused the task | D-1 with D-2; C2-1 defines it |
 | A9.20 | there is a terminal to watch only during a takeover | D-14, "the bridge of step 1" |
 | A9.23 | a secretary's node may post in a team group although no AI is a member of it | D-15 refuses `host.join` there |
 | A9.27 to A9.32 | decided: the new home is another node of the group's owner | D-7: the owner is the home's owner. For C2-6 |

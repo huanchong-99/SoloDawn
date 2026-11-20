@@ -18,6 +18,17 @@ member id.
 "Admin" is a person with role `owner` or `admin`. "Secretary" is the AI that
 `group.secretary` names.
 
+A signer with no `as` is the person whose log holds it and, when it is a
+node, also a host: a row of the tables is met by whichever of the two it
+names. A home takes a command only from a device of a member of the group,
+and `group create` only from a device of its own owner; any other signer
+that passed the envelope checks is answered `forbidden`. An `as` that is no
+text, or an empty one, is `bad_request`; one that does not name an AI whose
+`host` is the signer is `forbidden` (`contracts/envelope.md` section 5).
+Should the logs of two people hold one device, a home reads it as a device
+of the person with the lower user id; step 2, which brings the second
+person, settles what such a device may do.
+
 **Once only.** The receiver stores a receipt for every command it accepts,
 keyed by signer and `n`, with the outcome (ok and its result fields, or the
 error code), in the same transaction as the change. A command that arrives
@@ -25,6 +36,14 @@ again gets that outcome, under the request id of the new request, and has
 no second effect. A command whose `ts` is more than 24 hours from the
 receiver's clock is refused with `stale`; receipts are kept for that long
 (`contracts/storage.md`).
+
+A command is accepted, in this sense, once it passed the checks that
+`contracts/datachannel.md` section 5 puts before the receipt: it arrived on
+the connection of its signer, passed the envelope checks and, as a home
+command, has its `g`. Whatever the receiver answers after that, a refusal
+included, is the outcome its receipt keeps; a command that one of those
+checks refused leaves no receipt. The answer to a repeated refusal has the
+same code. Its `msg` is not kept, and need not be the same.
 
 Two results name something that lives only in memory: the link of
 `pair.browser` and the terminal of `takeover.start`. Their receipts record
@@ -258,9 +277,19 @@ Code on native Windows), `perm.set` and `default_level` follow
 
 `caps`, per agent: `{"day":{"unit":"turns","max":200},"task":{"unit":
 "turns","max":60}}`. `unit` is `turns` always, and `tokens`, `usd` or
-`window_pct` where the CLI reports that figure. A day cap is released at
-the next local midnight or when the owner raises it; a task cap when the
-owner raises it. Reaching one is the host event `cap_reached`.
+`window_pct` where the CLI reports that figure; `max` may be a fraction. In
+`settings.set`, `caps` has a member for each agent whose caps change,
+`claude` or `codex`, holding that agent's caps whole: `day` and `task` are
+optional, a cap that is not there is no longer set, and `{}` sets none. An
+agent that is not there keeps its caps. `host.info` shows each agent's caps
+in its entry of `agents`. A day cap is released at the next local midnight
+or when the owner raises it; a task cap when the owner raises it. Reaching
+one is the host event `cap_reached`.
+
+`pair.browser`, `host.offline` and `host.online` carry `t`, `n`, `ts` and
+`to` only. In `takeover.start` and `takeover.end`, `member` is the member id
+of the AI in group `g`, as in the label `pty:<g>:<member>`
+(`contracts/datachannel.md` section 1); `task`, when there, is a task id.
 
 Except where a Result is named, effects are observed through `host.info`.
 
