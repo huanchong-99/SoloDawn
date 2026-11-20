@@ -249,8 +249,8 @@ id, so that two people can compare it outside SoloDawn (section 10, limit 1).
 
 This file adds nothing to the other files of `contracts/step-2/`
 (`people.md`, `confirm.md`, `authority.md`, `watch-team.md`,
-`checks-forge.md`, `move.md`), which say what their own additions show.
-Their acceptance tests are in `steps/step-2-3-acceptance.md`.
+`checks-forge.md`, `move.md`, `copy.md`), which say what their own
+additions show. Their acceptance tests are in `steps/step-2-3-acceptance.md`.
 
 ## 9. Notes for the user documentation
 

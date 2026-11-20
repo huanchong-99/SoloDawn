@@ -170,7 +170,7 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 - **A9.26** The M5 run against one real forge other than GitHub, with its own
   signed-in command-line program. (`live`)
 
-### Home changes (D-11; `contracts/step-2/move.md`)
+### Home changes (D-11; `contracts/step-2/move.md`, `copy.md`)
 
 - **A9.27** P moves the group from `P1` to `P2`. While it moves, `P1` refuses
   commands for the group and writes no row. Afterwards the group row names
@@ -190,10 +190,10 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 - **A9.31** With a copy to `P2` scheduled every minute, `P2` holds the group's
   rows as of the last run. The copy is read-only: `P2` answers no `sync` and
   no command for the group, and no client is told of it as a home.
-- **A9.32** `P1`'s data directory is deleted; P revokes `P1` (a restore
-  before is refused) and restores the copy on `P2` by hand: `P2` is home with
-  only the last copy's rows, clients follow as in A9.28, and a copy with a
-  byte changed on disk is refused. In the browser: move, copy, its last time.
+- **A9.32** `P1`'s data directory is deleted and P revokes `P1`; a restore
+  before that is refused. Restored by hand on `P2`, the copy makes `P2` home
+  with its rows only; clients find it among P's nodes and sync from 0; a
+  byte changed on disk refuses a copy. In the browser: move, copy, its time.
 
 ### Checks in a sandbox (D-12; `contracts/step-2/checks-forge.md`)
 
