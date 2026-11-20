@@ -1,11 +1,10 @@
 package node
 
-// TEMPORARY diagnostic for the stale-socket test on Windows; removed before merge.
+// TEMPORARY diagnostic for the socket DACL on Windows; removed before merge.
 
 import (
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,54 +12,47 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func TestZZDiagStaleSocket(t *testing.T) {
+func TestZZDiagSocketDACL(t *testing.T) {
 	var log []string
 	note := func(format string, args ...any) { log = append(log, fmt.Sprintf(format, args...)) }
-	sd := func(p string) string {
-		d, err := windows.GetNamedSecurityInfo(p, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION)
-		if err != nil {
-			return "sd error: " + err.Error()
-		}
-		return d.String()
-	}
-	dir := socketRoot(t)
-	path := filepath.Join(dir, "sock")
-	note("dir %s: %s", dir, sd(dir))
-	stale, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
-	note("listen stale: %v", err)
-	note("stale sock sd: %s", sd(path))
-	note("ownerOnly on live stale: %v", ownerOnly(path))
-	stale.SetUnlinkOnClose(false)
-	note("close stale: %v", stale.Close())
-	_, err = os.Lstat(path)
-	note("lstat after close: %v", err)
-	c, err := net.Dial("unix", path)
-	note("dial stale: %v, %v", c != nil, err)
-	note("remove: %v", os.Remove(path))
-	_, err = os.Lstat(path)
-	note("lstat after remove: %v", err)
+	v := windows.RtlGetVersion()
+	note("windows %d.%d.%d", v.MajorVersion, v.MinorVersion, v.BuildNumber)
+	tok := windows.GetCurrentProcessToken()
+	user, err := tok.GetTokenUser()
+	note("user %v (%v), elevated %v", user.User.Sid, err, tok.IsElevated())
+	path := filepath.Join(socketRoot(t), "sock")
 	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
-	note("listen again: %v", err)
-	if l != nil {
-		note("new sock sd: %s", sd(path))
-		note("ownerOnly on new: %v", ownerOnly(path))
-		l.Close()
+	note("listen: %v", err)
+	if l == nil {
+		t.Fatal(strings.Join(log, "\n"))
 	}
-	fresh := filepath.Join(socketRoot(t), "sock")
-	l2, err := net.ListenUnix("unix", &net.UnixAddr{Name: fresh, Net: "unix"})
-	note("listen fresh: %v", err)
-	if l2 != nil {
-		note("fresh sd: %s", sd(fresh))
-		note("ownerOnly on fresh: %v", ownerOnly(fresh))
-		l2.Close()
+	name, _ := windows.UTF16PtrFromString(path)
+	share := uint32(windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE)
+	open := func(label string, access, flags uint32) {
+		h, err := windows.CreateFile(name, access, share, nil, windows.OPEN_EXISTING, flags, 0)
+		note("%s: %v", label, err)
+		if err == nil {
+			if label == "write_dac" || label == "write_dac+backup" {
+				note("  SetSecurityInfo: %v", windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, ownerDACL(""), nil))
+			}
+			windows.CloseHandle(h)
+		}
 	}
-	other := filepath.Join(socketRoot(t), "sub", "solodawn")
-	note("privateDir: %v", privateDir(other))
-	l3, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(other, "sock"), Net: "unix"})
-	note("listen in private dir: %v", err)
-	if l3 != nil {
-		note("ownerOnly in private dir: %v", ownerOnly(filepath.Join(other, "sock")))
-		l3.Close()
+	open("no access", 0, windows.FILE_FLAG_OPEN_REPARSE_POINT)
+	open("read_control", windows.READ_CONTROL, windows.FILE_FLAG_OPEN_REPARSE_POINT)
+	open("read_attributes", windows.FILE_READ_ATTRIBUTES, windows.FILE_FLAG_OPEN_REPARSE_POINT)
+	open("write_dac+backup", windows.WRITE_DAC, windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS)
+	open("write_dac", windows.WRITE_DAC, windows.FILE_FLAG_OPEN_REPARSE_POINT)
+	note("SetNamedSecurityInfo: %v", windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, ownerDACL(""), nil))
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	note("after: %v %v", sd, err)
+	c, err := net.Dial("unix", path)
+	note("dial after: %v", err)
+	if c != nil {
+		c.Close()
 	}
+	l.SetUnlinkOnClose(false)
+	l.Close()
+	open("write_dac after close", windows.WRITE_DAC, windows.FILE_FLAG_OPEN_REPARSE_POINT)
 	t.Errorf("DIAG\n%s", strings.Join(log, "\n"))
 }
