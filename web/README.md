@@ -59,9 +59,10 @@ The one runtime dependency is `valibot`, for the wire types.
   files of `internal/proto/testdata`: `hello` with `welcome`; `sync` with the pushes `reset` and
   `rows`, then `synced`; `fetch` with `fetched`; every `cmd` with `ok`. It knows the examples'
   one group. It is for development and tests only: import it dynamically behind
-  `import.meta.env.DEV`, so that the build leaves it and the examples out. Vite may read that
-  directory (`server.fs.allow`), and Stryker mutates in place because its sandbox would not
-  contain it.
+  `import.meta.env.DEV`, so that the build leaves it and the examples out. `vite.config.ts` names
+  that directory `@testdata` and lets Vite read it (`server.fs.allow`). Stryker runs the tests in
+  a copy of `web/` under `.stryker-tmp/`; there the name still points at the repository's
+  directory.
 - **Fonts.** Geist and Geist Mono 1.9.2, one variable `woff2` each, are served from
   `public/fonts/` with their licence (OFL-1.1); the page requests nothing from a third party. A
   browser downloads a face only when text uses it and shows the system fonts until it arrives.

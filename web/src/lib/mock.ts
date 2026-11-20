@@ -4,7 +4,7 @@
 import type { GenericSchema } from 'valibot';
 import * as p from './proto';
 
-const files = import.meta.glob<string>('../../../internal/proto/testdata/*.json', {
+const files = import.meta.glob<string>('@testdata/*.json', {
   query: '?raw',
   import: 'default',
   eager: true,
