@@ -117,8 +117,13 @@ func TestMeteredSocket(t *testing.T) {
 	}
 	ip := peer.LocalAddr().(*net.UDPAddr).IP
 	g.events().OnPermissionCreated(nil, nil, "", "", "", endpoint, ip)
+	// Never forward or charge a prefix when Pion's destination buffer is smaller.
+	peer.WriteTo([]byte("large"), endpoint)
 	peer.WriteTo([]byte("hi"), endpoint)
-	readOne(raw, "hi")
+	raw.SetReadDeadline(time.Now().Add(time.Second))
+	if n, _, err := raw.ReadFrom(b[:2]); err != nil || n != 2 || string(b[:n]) != "hi" {
+		t.Fatal(n, err, b[:n])
+	}
 	if got := l.quota("device").Used; got != 2 {
 		t.Fatal(got)
 	}

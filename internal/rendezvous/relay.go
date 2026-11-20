@@ -107,7 +107,7 @@ func (g *generator) AllocatePacketConn(c turn.AllocateListenerConfig) (net.Packe
 		return nil, nil, err
 	}
 	addr := &net.UDPAddr{IP: ip, Port: conn.LocalAddr().(*net.UDPAddr).Port}
-	return &allocation{conn, g, addr, c.UserID}, addr, nil
+	return &allocation{PacketConn: conn, g: g, addr: addr, device: c.UserID}, addr, nil
 }
 
 func (*generator) Validate() error { return nil } // Addresses were resolved at startup.
@@ -155,16 +155,18 @@ type allocation struct {
 	g      *generator
 	addr   net.Addr
 	device string
+	packet [65535]byte // receive whole UDP datagrams, never an undetectably truncated prefix
 }
 
 func (a *allocation) ReadFrom(b []byte) (int, net.Addr, error) {
 	for {
-		n, src, err := a.PacketConn.ReadFrom(b)
+		n, src, err := a.PacketConn.ReadFrom(a.packet[:])
 		if err != nil {
 			return n, src, err
 		}
 		_, allowed := a.g.permissions.Load(permission{a.addr, src.(*net.UDPAddr).IP.String()})
-		if allowed && a.g.admit(a.device, n) {
+		if n <= len(b) && allowed && a.g.admit(a.device, n) {
+			copy(b, a.packet[:n])
 			return n, src, nil
 		}
 	}
