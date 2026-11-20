@@ -79,9 +79,11 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   and P sees its state. `act confirm` by P is answered `forbidden`; sent twice
   by Q with one nonce it makes one item and is answered `ok` twice. An `allow`
   list for Q-personal that names P does not remove the card.
-- **A9.10** The test hook queues on `P1`, validly signed by the home, an item
-  for Q-personal with no `cause` signed by Q and one whose `cause` confirms
-  another message. `Q1` refuses both, with audit `refused`.
+- **A9.10** The test hook queues on `P1`, validly signed by the home, items
+  for Q-personal: one with no `cause` signed by Q, one whose `cause` confirms
+  another message, a `reply` to no open call, a `notice`, and an `assign`
+  whose brief names another AI. `Q1` refuses each, with audit `refused`. When
+  `P1` answers `version` to `Q1`'s `hello`, `Q1` sends none with `v` 1.
 - **A9.11** P confirms a brief that makes Q-personal assignee of one task and
   reviewer of another. Both wait for Q, the second from step `review`; until Q
   confirms, no `assign` or `review` item reaches `Q1` and no worktree exists
@@ -290,9 +292,7 @@ The answers are silent on these; the contract of each group decides.
 | Test | Assumed | From |
 | --- | --- | --- |
 | A9.4 | a person whose AI holds an unfinished task cannot be removed | `contracts/commands.md` 1.2, `member remove` |
-| A9.11 | a `review` item needs the owner's signature as an `assign` item does | D-2 says "an item" |
 | A9.14 | decided on 2026-11-20: for an AI on a team plan and a person not on its list, the owner is asked with the same card | D-2; D-8 names personal subscriptions only. For C2-1 |
-| A9.17 | decided: an owner causes a task by confirming its brief, or by signing the message that leads their own AI to start it; a confirmed `confirm` card lets the AI take part and caps the level | D-1 with D-2; `contracts/step-2/authority.md` section 4 |
 | A9.20 | there is a terminal to watch only during a takeover | D-14, "the bridge of step 1" |
 | A9.23 | a secretary's node may post in a team group although no AI is a member of it | D-15 refuses `host.join` there |
 | A9.27 to A9.32 | decided: the new home is another node of the group's owner | D-7: the owner is the home's owner. For C2-6 |

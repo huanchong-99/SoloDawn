@@ -39,7 +39,7 @@ digits, a colon, and those bytes. Text is encoded the way `TextEncoder`
 encodes it (`contracts/envelope.md` section 6). A count is the text of
 its decimal digits. The items, in this order:
 
-1. `repo`, then `base`, then `forge`;
+1. `repo` (the empty text when the row has none), then `base` and `forge`;
 2. the number of entries of `checks`, then each entry in the row's order;
 3. only when `forge` is `custom`, for each of `push`, `open`, `checks`,
    `merge` in this order: the number of arguments of that template, then
@@ -67,8 +67,8 @@ and the hash is `2ZrFqCgtSSjfYdBCyXChtQV-349eaTkAdUi6GYwbBKM`. With `github`
 and no checks (`…6:github1:0`): `CYbKw6kSdvHoN2hfyyQQTyzKoED3jy4bwHNJviPtiUc`.
 
 The shared vectors (`contracts/vectors.md`) get a part `accept`: cases of
-`{"name","repo","base","forge","checks","templates","hash"}`, with
-`templates` written `{}` when `forge` is not `custom`.
+`{"name","repo","base","forge","checks","templates","hash"}`, with `repo`
+`""` for a row without one and `templates` `{}` unless `forge` is `custom`.
 
 ## 3. `checks.accept`
 

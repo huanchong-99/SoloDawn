@@ -33,12 +33,19 @@ section 7 of the authority contract:
 1. The entry is judged against the entries before that version, by the rules of the log.
 2. It wins when its signer's first `add` has the lower version than that of the held entry's
    signer. When one device signed both, the entry whose `s` is the lower text wins.
-3. When it wins, the entries from that version on leave the log, the entry is appended, and
-   those that left are applied again in order, up to the first that is refused. That one and
-   all after it are dropped.
+3. When it wins, the entries from that version on leave the log and the entry is appended.
+   The entry it replaced is dropped. The others that left are applied again in order, up to
+   the first that is refused. That one and all after it are dropped.
 
 The change against D-4 is the third point: "what follows is dropped" becomes "what follows is
 applied again". The second point adds the tie-break D-4 lacked.
+
+The example of the problem under this rule: the first receiver holds B's 4 and C's 5 when A's 4
+arrives. A is earlier than B, so A's 4 replaces B's 4, which is dropped; C's 5 is applied again
+and fits, because C is still valid and 5 is the next version. It holds 1, 2, 3, A's 4 and C's 5.
+The second receiver holds A's 4, refuses B's 4, which loses, and appends C's 5: the same five
+entries. Under the first wording of the rule the replaced entry was applied again as well; it
+is refused at once, and with "up to the first that is refused" nothing after it was ever kept.
 
 A client that revokes a device with an earlier device writes the `revoke` for the lowest version
 above that device's first `add` whose entry it, or a later device, signed; it then adds again the
@@ -74,9 +81,9 @@ receiver already forwards every entry it accepts, and peers exchange whole logs 
 
 ## Acceptance criteria
 
-- The part `forks` of `internal/proto/testdata/crypto.json` holds the cases of section 8 of the
-  authority contract, and every listed order ends with the same log in the Go node and in the
-  web client.
+- The part `forks` of `internal/proto/testdata/crypto.json` holds the cases of
+  [the fork vectors](../../../../planning/contracts/step-2/fork-vectors.md), and every listed
+  order ends with the same log in the Go node and in the web client.
 - Acceptance test A9.7 of `planning/steps/step-2-3-acceptance.md` passes end to end.
 - `planning/contracts/envelope.md` section 4 carries the rule when step 2 is folded into it, and
   this record moves to `implemented/`.
@@ -97,7 +104,8 @@ receiver already forwards every entry it accepts, and peers exchange whole logs 
 
 Nothing was run in the product. The agent of C2-1 ran a model in Python and did not keep it. An
 entry was a tuple of version, signer, `add` or `revoke`, device and a number standing for `s`;
-no keys were used.
+no keys were used. The model applied again the entries after the replaced one, not that one,
+as point 3 now says.
 
 - **Agreement.** 10,000 runs (25 seeds of 400): 2 to 5 receivers, 3 to 25 entries signed on a
   receiver's own log, 3 in 10 of them for a version already held, each forwarded to every other

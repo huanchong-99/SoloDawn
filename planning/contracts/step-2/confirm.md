@@ -196,8 +196,10 @@ needs its owner's word**:
 - An `assign` or `review` item for an AI is queued with a `cause` chosen in
   this order: the brief's confirmation, when the word behind the role is
   enough for the AI (a task without a brief then has no `cause`, as in
-  step 1); else the `state.act` of the AI's confirmed `direct` card for
-  that request. With neither, the item is not queued.
+  step 1) and the brief names the AI in that role, or the AI's owner owns
+  the home (`contracts/step-2/authority.md` section 3); else the
+  `state.act` of the AI's confirmed `direct` card for that request. With
+  neither, the item is not queued.
 - Row 2 asks nothing: the task's AI started it through its own host, which
   finds its own `task start` in the item. Its `assign` is queued as in
   step 1.
@@ -233,7 +235,8 @@ step 2 settles is which of the two an item from another owner's side gets.
 - **Workflow items** (`assign`, `review`, `reviewed`, `decided`, `checks`,
   `resume`, the hand-back and continue turns) are `instruction` for a task
   the AI takes part in. "A task the owner confirmed" of step 1 reads so in
-  step 2.
+  step 2. A message or an `act` that one carries is labelled as any other,
+  by its own signer: the item gives it nothing.
 - **Everything else is `information`**: above all a message from anyone
   but the owner, listed persons included, in the thread of a task the AI
   takes part in. It goes at once to that task's session, with no card.
@@ -244,9 +247,10 @@ step 2 settles is which of the two an item from another owner's side gets.
   added work, a mention outside the thread (a new `direct` card unless the
   person's word is enough).
 - **Answers to what the AI asked**: a `confirmed` or `decided` item caused
-  by a signed `act` and outside a task the AI takes part in is
-  `instruction` when the signer is one the card lets decide it
-  (`contracts/commands.md` 1.4), and `information` otherwise.
+  by a signed `act` is `instruction` when the signer's word is enough for
+  the AI, or, for a `decided`, when the signer is in the signed `body.to` of
+  a card the AI posted; `information` otherwise. A role in a `member` row,
+  admin included, makes no `instruction`.
 - The label is context for the model and enforces nothing, as in step 1.
 
 The sentence for every session (`contracts/drivers.md` section 4, "All")
