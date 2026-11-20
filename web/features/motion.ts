@@ -92,6 +92,29 @@ export function waitingParts(hash: string) {
   );
 }
 
+// Press Tab so many times and read, at the moment focus lands on each part, where the part is
+// and how much of its focus ring is seen. The ring of a radio is on its label.
+export async function focusCues(tabs: number) {
+  await page.evaluate(() => {
+    const cues: object[] = [];
+    Object.assign(window, { cues });
+    document.addEventListener('focusin', (event) => {
+      const part = event.target as HTMLElement;
+      const ringed = part.closest('.seg label') ?? part;
+      const ring = getComputedStyle(ringed, '::after');
+      cues.push({
+        part: part.getAttribute('aria-label') ?? ringed.textContent!.trim(),
+        top: Math.round(part.getBoundingClientRect().top),
+        ring: ring.content === 'none' ? getComputedStyle(part).outlineStyle : ring.opacity,
+      });
+    });
+  });
+  for (let i = 0; i < tabs; i++) await page.keyboard.press('Tab');
+  return page.evaluate(
+    () => (window as unknown as { cues: { part: string; top: number; ring: string }[] }).cues,
+  );
+}
+
 export async function expectMark(selector: string, items: string, index: number) {
   const offset = await page.locator(selector).evaluate(
     async (group, { items, index }) => {

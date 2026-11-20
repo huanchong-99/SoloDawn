@@ -255,6 +255,29 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     );
   });
 
+  Scenario('Keyboard focus is seen the moment it lands', ({ Given, When, Then, And }) => {
+    let cues: Awaited<ReturnType<typeof motion.focusCues>>;
+    Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+    And('the person opens the client at "#/settings"', () => motion.open('#/settings'));
+    When('the person presses the Tab key 8 times', async () => {
+      cues = await motion.focusCues(8);
+    });
+    Then('the button "跳到主要内容" was inside the page, outlined, when focus landed on it', () => {
+      expect(cues[0]).toEqual({ part: '跳到主要内容', top: 8, ring: 'solid' });
+    });
+    And('each of the 7 parts after it had its whole ring when focus landed on it', () => {
+      expect(cues.slice(1).map((cue) => [cue.part, cue.ring])).toEqual([
+        ['SoloDawn', '1'],
+        ['群聊', '1'],
+        ['电脑和 AI', '1'],
+        ['设置', '1'],
+        ['切换深色 / 浅色', '1'],
+        ['Switch language / 切换语言', '1'],
+        ['跟随系统', '1'],
+      ]);
+    });
+  });
+
   Scenario('No part of an arriving page waits unseen', ({ Given, When, Then, And }) => {
     let parts: Awaited<ReturnType<typeof motion.waitingParts>>;
     Given('the browser supports Ed25519 in WebCrypto', motion.newPage);

@@ -114,6 +114,8 @@ development dependency, an IndexedDB for the tests.
   500 ms spring), `--ease` for a change of state, `--ease-out` for an arrival, `--spring` for what
   a person moved, `--travel` and `--stagger`. Only `transform` and `opacity` are animated; a colour
   that changes on hover, press or focus is a layer under or around the part whose opacity changes.
+  Keyboard focus is seen in full the moment it lands: the skip button is in place and the ring
+  is opaque at once, and only the ring's settling onto the part is animated.
   `route.dir` is the way the last page change went along the navigation (1, -1, or 0 within a
   page) and `--at` on the navigation and on a segmented control is the index of the current entry;
   the styles turn them into the side a page arrives from and the place of the sliding mark. The

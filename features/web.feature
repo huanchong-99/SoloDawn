@@ -80,6 +80,13 @@ Feature: Web client
     Then the mark of the theme is on option 3
     And the mark of the language is on option 2
 
+  Scenario: Keyboard focus is seen the moment it lands
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client at "#/settings"
+    When the person presses the Tab key 8 times
+    Then the button "跳到主要内容" was inside the page, outlined, when focus landed on it
+    And each of the 7 parts after it had its whole ring when focus landed on it
+
   Scenario: No part of an arriving page waits unseen
     Given the browser supports Ed25519 in WebCrypto
     And the person opens the client

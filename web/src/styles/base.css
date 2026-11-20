@@ -129,7 +129,6 @@ kbd,
   background: var(--text);
   color: var(--bg);
   transform: translateY(-200%);
-  transition: transform var(--dur-2) var(--ease-out);
 }
 .skip:focus {
   transform: none;
@@ -435,9 +434,13 @@ kbd,
   &:focus-visible {
     outline-color: transparent;
   }
-  &:focus-visible::after {
+  /* The ring is there in full the moment focus lands: only its settling onto the part is
+     animated. It fades when focus leaves. */
+  &:focus-visible::after,
+  &:has(:focus-visible)::after {
     opacity: 1;
     transform: none;
+    transition: transform var(--dur-2) var(--ease-out);
   }
 }
 :is(.btn, .icon-btn, .tabs a):active::before {
@@ -619,10 +622,6 @@ kbd,
   label:has(:checked) {
     color: var(--text);
     font-weight: 600;
-  }
-  label:has(:focus-visible)::after {
-    opacity: 1;
-    transform: none;
   }
 }
 .set {
