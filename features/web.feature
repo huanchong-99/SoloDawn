@@ -96,6 +96,14 @@ Feature: Web client
     Then the second press came while the picture of the old page was up
     And the page uses the "light" theme
 
+  Scenario: A cross-fade under way ends when the system starts to ask for reduced motion
+    Given the browser supports Ed25519 in WebCrypto
+    And the browser has view transitions
+    And the person opens the client
+    When the person presses "切换深色 / 浅色" and the system asks for reduced motion while the page cross-fades
+    Then the picture of the old page is gone
+    And the page uses the "dark" theme
+
   Scenario: The theme changes at once when the system asks for reduced motion
     Given the browser supports Ed25519 in WebCrypto
     And the browser has view transitions

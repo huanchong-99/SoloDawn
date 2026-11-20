@@ -291,6 +291,29 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
   });
 
   Scenario(
+    'A cross-fade under way ends when the system starts to ask for reduced motion',
+    ({ Given, When, Then, And }) => {
+      let result: Awaited<ReturnType<typeof motion.reduceDuringCrossFade>>;
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the browser has view transitions', motion.viewTransitions);
+      And('the person opens the client', () => motion.open());
+      When(
+        'the person presses "切换深色 / 浅色" and the system asks for reduced motion while the page cross-fades',
+        async () => {
+          result = await motion.reduceDuringCrossFade();
+        },
+      );
+      Then('the picture of the old page is gone', () => {
+        expect(result.before).toEqual(['::view-transition-old(root)']);
+        expect(result.after).toEqual([]);
+      });
+      And('the page uses the "dark" theme', () => {
+        expect(result.theme).toBe('dark');
+      });
+    },
+  );
+
+  Scenario(
     'The theme changes at once when the system asks for reduced motion',
     ({ Given, When, Then, And }) => {
       let result: Awaited<ReturnType<typeof motion.reducedThemeChange>>;

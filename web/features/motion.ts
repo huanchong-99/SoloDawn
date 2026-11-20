@@ -104,21 +104,38 @@ export async function crossFade() {
   });
 }
 
-// Hold the fade at its first frame, then press as a person does: Playwright presses only when
-// the button is what the pointer hits.
-export async function pressDuringCrossFade() {
-  const button = page.getByRole('button', { name: '切换深色 / 浅色' });
-  await crossFade();
-  await page.evaluate(() => document.getAnimations().forEach((animation) => animation.pause()));
-  const pictures = await page.evaluate(() =>
+// The pictures of a page cross-fade that are animating.
+function pictures() {
+  return page.evaluate(() =>
     document
       .getAnimations()
       .map((animation) => (animation.effect as KeyframeEffect).pseudoElement)
       .filter((pseudo) => pseudo?.startsWith('::view-transition')),
   );
-  await button.click({ timeout: 2000 });
+}
+
+// Start a cross-fade and hold it at its first frame.
+async function heldCrossFade() {
+  await crossFade();
+  await page.evaluate(() => document.getAnimations().forEach((animation) => animation.pause()));
+  return pictures();
+}
+
+const theme = () => page.evaluate(() => document.documentElement.dataset.theme);
+
+// Press as a person does: Playwright presses only when the button is what the pointer hits.
+export async function pressDuringCrossFade() {
+  const held = await heldCrossFade();
+  await page.getByRole('button', { name: '切换深色 / 浅色' }).click({ timeout: 2000 });
   await page.waitForFunction(() => document.documentElement.dataset.theme !== 'dark');
-  return { pictures, theme: await page.evaluate(() => document.documentElement.dataset.theme) };
+  return { pictures: held, theme: await theme() };
+}
+
+export async function reduceDuringCrossFade() {
+  const held = await heldCrossFade();
+  await reduce();
+  await page.evaluate(() => new Promise((frame) => requestAnimationFrame(frame)));
+  return { before: held, after: await pictures(), theme: await theme() };
 }
 
 export async function reducedThemeChange() {
