@@ -5,7 +5,7 @@
 <div class="page">
   <div class="page-head">
     <div class="grow">
-      <h2>{t('nodes.title')}</h2>
+      <h2>{t('page.nodes')}</h2>
       <p>{t('nodes.lead')}</p>
     </div>
   </div>

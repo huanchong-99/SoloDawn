@@ -22,7 +22,16 @@ messages it accepts from a peer depends on who the peer is (section 8).
 - A result too large for one message is split (`rows` batches, `fetch` pages).
 - A message that is not a JSON object, or whose `t` the receiver does not
   know, is answered `bad_request` when it carries a request `id`, and is
-  dropped otherwise. The connection stays open.
+  dropped otherwise. The connection stays open. A browser serves no
+  request, so it answers `bad_request` to every message with an `id`.
+- A response that names no request still waiting is dropped. A response
+  fails the request it names, on the receiving side, when it decodes
+  neither as an error nor as the answer its section gives. Decoding is
+  that of `contracts/conventions.md` section 2 ("At run time", "Only what
+  is read is judged"), which ignores the members the answer does not
+  read: `{"t":"synced","re":4,"ok":true,"g":"…","seq":7}` answers a `cmd`
+  as `{"re":4,"ok":true}`. A request failed this way has had no response
+  from the other side, and the connection stays open.
 
 ## 3. Session
 

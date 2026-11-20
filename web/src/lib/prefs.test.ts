@@ -223,3 +223,71 @@ describe('a browser that blocks site storage', () => {
     expect(document.documentElement.lang).toBe('zh-CN');
   });
 });
+
+describe('a preference that a part of the client keeps', () => {
+  const choices = ['shown', 'hidden'] as const;
+
+  it('is the default until the person chooses, and stores nothing before', async () => {
+    const { preference } = await load();
+    const hint = preference('hint', choices, 'shown');
+    expect(hint.value).toBe('shown');
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('remembers what the person chose, and reads it on the next visit', async () => {
+    const first = await load();
+    first.preference('hint', choices, 'shown').value = 'hidden';
+    expect(localStorage.getItem('sd-hint')).toBe('hidden');
+    const next = await load();
+    expect(next.preference('hint', choices, 'shown').value).toBe('hidden');
+  });
+
+  it('ignores a stored value it does not allow', async () => {
+    localStorage.setItem('sd-hint', 'sideways');
+    const { preference } = await load();
+    expect(preference('hint', choices, 'shown').value).toBe('shown');
+  });
+
+  it('changes what a component draws from it', async () => {
+    const { flushSync, preference } = await load();
+    const { watch } = await import('../../features/watch.svelte');
+    const hint = preference('hint', choices, 'shown');
+    const seen: string[] = [];
+    const stop = watch(() => {
+      seen.push(hint.value);
+    });
+    flushSync();
+    hint.value = 'hidden';
+    flushSync();
+    stop();
+    expect(seen).toEqual(['shown', 'hidden']);
+  });
+
+  it('is the same preference when made again with the same values', async () => {
+    const { preference } = await load();
+    const hint = preference('hint', choices, 'shown');
+    expect(preference('hint', ['shown', 'hidden'], 'shown')).toBe(hint);
+  });
+
+  it.each([
+    ['hint', ['shown'], 'shown'],
+    ['hint', ['shown', 'hidden'], 'hidden'],
+    ['theme', ['auto', 'light', 'dark'], 'auto'],
+    ['lang', ['zh-CN', 'en'], 'en'],
+  ] as const)('refuses %s made again with %j and %s', async (name, allowed, fallback) => {
+    const { preference } = await load();
+    preference('hint', choices, 'shown');
+    expect(() => preference(name, allowed, fallback)).toThrow(`the preference ${name} exists`);
+  });
+
+  it('holds a choice for the visit when the browser blocks site storage', async () => {
+    const { preference } = await load();
+    vi.spyOn(globalThis, 'localStorage', 'get').mockImplementation(() => {
+      throw new DOMException('The operation is insecure.', 'SecurityError');
+    });
+    const hint = preference('hint', choices, 'shown');
+    hint.value = 'hidden';
+    expect(hint.value).toBe('hidden');
+    vi.restoreAllMocks();
+  });
+});

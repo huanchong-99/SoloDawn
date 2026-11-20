@@ -1,16 +1,45 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { prefersReducedMotion } from 'svelte/motion';
+  import { MediaQuery } from 'svelte/reactivity';
   import type { Group } from '../../lib/groups.svelte';
+  import { mounts, side } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { dayLabel, days, now } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
+  import Mount from '../Mount.svelte';
   import Composer from './Composer.svelte';
   import Message from './Message.svelte';
 
-  /** The chat of one group: its main line, newest at the bottom, and the composer. */
+  /** The chat of one group: its main line, newest at the bottom, and the composer, with what the
+   *  areas mount in its head, above its main line and beside it (lib/mounts.svelte.ts). */
   let { group }: { group: Group } = $props();
+
+  // The side panel has a column from 1024 px; below that it slides over, closed on each chat.
+  // While it is over the chat, focus is in it and the chat behind it cannot be reached.
+  const sided = mounts['chat.side'].length > 0;
+  side.open = false;
+  const sliding = new MediaQuery('max-width: 1023px');
+  const covered = $derived(side.open && sliding.current);
+  let toggle = $state<HTMLButtonElement>();
+  let closer = $state<HTMLButtonElement>();
+
+  async function openSide() {
+    side.open = true;
+    await tick();
+    if (sliding.current) closer?.focus();
+  }
+  async function closeSide() {
+    side.open = false;
+    await tick();
+    toggle?.focus();
+  }
+  // Escape closes the panel over the chat, unless a dialog took it, or a part already did.
+  function escape(event: KeyboardEvent) {
+    const inDialog = event.target instanceof Element && event.target.closest('dialog');
+    if (event.key === 'Escape' && covered && !event.defaultPrevented && !inDialog) closeSide();
+  }
 
   const paging = $derived(group.paging());
   const line = $derived(days(group.main));
@@ -57,10 +86,16 @@
     scroller.scrollTo({ top: 0, behavior: prefersReducedMotion.current ? 'auto' : 'smooth' });
 </script>
 
-<svelte:window onkeydown={() => (keys = true)} onpointerdown={() => (keys = false)} />
+<svelte:window
+  onkeydown={(event) => {
+    keys = true;
+    escape(event);
+  }}
+  onpointerdown={() => (keys = false)}
+/>
 
-<section class="chat" class:keys aria-label={group.name}>
-  <header class="chat-head">
+<section class="chat" class:keys class:sided aria-label={group.name}>
+  <header class="chat-head" inert={covered}>
     <a class="icon-btn back" href="#/groups" aria-label={t('chat.back')}><Icon name="back" /></a>
     <Avatar id={group.g} name={group.name} group size="sm" />
     <div class="bar-title">
@@ -71,7 +106,21 @@
         {#if group.home.name}· <Icon name="home" sm /> {group.home.name}{/if}
       </p>
     </div>
+    <Mount at="chat.head" props={{ group }} />
+    {#if sided}
+      <button
+        class="icon-btn side-open"
+        bind:this={toggle}
+        aria-label={t('app.side')}
+        aria-expanded={side.open}
+        aria-controls="chat-side"
+        onclick={() => (side.open ? closeSide() : openSide())}
+      >
+        <Icon name="users" />
+      </button>
+    {/if}
   </header>
+  <div class="top" inert={covered}><Mount at="chat.top" props={{ group }} /></div>
 
   <!-- The scroller is reversed and holds one child: its start is the bottom, so the newest
        message is in view when it opens and stays there, and a page added above moves nothing.
@@ -79,6 +128,7 @@
   <div
     class="scroller"
     bind:this={scroller}
+    inert={covered}
     tabindex="-1"
     role="region"
     aria-label={t('chat.line')}
@@ -123,7 +173,7 @@
     </div>
   </div>
 
-  <div class="dock">
+  <div class="dock" inert={covered}>
     {#if away}
       <button class="btn btn-sm latest" onclick={toLatest}>
         <Icon name="down" sm />{t(unseen ? 'chat.latest.new' : 'chat.latest')}
@@ -132,14 +182,79 @@
     {/if}
     <Composer {group} />
   </div>
+  {#if sided}
+    <aside id="chat-side" class="side" class:open={side.open} aria-label={t('app.side')}>
+      <button
+        class="icon-btn side-close"
+        bind:this={closer}
+        aria-label={t('app.side.close')}
+        onclick={closeSide}
+      >
+        <Icon name="x" />
+      </button>
+      <Mount at="chat.side" props={{ group }} />
+    </aside>
+  {/if}
 </section>
 
 <style>
   .chat {
     display: grid;
-    grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr);
+    grid-template: auto auto minmax(0, 1fr) auto / minmax(0, 1fr);
     min-height: 0;
     overflow: hidden;
+  }
+  .top {
+    min-width: 0;
+  }
+  /* The side panel: a column beside the line from 1024 px, which the head's button does not
+     need; below that, a panel that slides in over the chat from the right edge. */
+  .side {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: auto;
+    border-left: 1px solid var(--line);
+    background: var(--surface);
+  }
+  @media (min-width: 1024px) {
+    .chat.sided {
+      grid-template-columns: minmax(0, 1fr) var(--side-w);
+    }
+    .chat.sided > :not(.side) {
+      grid-column: 1;
+    }
+    .side {
+      grid-column: 2;
+      grid-row: 1 / -1;
+    }
+    .side-open,
+    .side-close {
+      display: none;
+    }
+  }
+  @media (max-width: 1023px) {
+    .side {
+      position: fixed;
+      inset: var(--bar-h) 0 0 auto;
+      z-index: 5;
+      width: min(360px, 100%);
+      box-shadow: var(--shadow-pop);
+      transform: translateX(100%);
+      visibility: hidden;
+      transition:
+        transform var(--dur-3) var(--ease-out),
+        visibility 0s var(--dur-3);
+    }
+    .side.open {
+      transform: none;
+      visibility: visible;
+      transition: transform var(--dur-4) var(--spring);
+    }
+    .side-close {
+      align-self: flex-end;
+      margin: var(--sp-2) var(--sp-2) 0;
+    }
   }
   .chat-head {
     display: flex;
@@ -308,6 +423,10 @@
   @media (max-width: 767px) {
     .chat-head {
       padding: 0 var(--sp-3) 0 var(--sp-2);
+    }
+    /* On a phone the chat has the screen without the top bar. */
+    .side {
+      top: 0;
     }
   }
   @media (max-width: 640px) {

@@ -1,5 +1,5 @@
 ---
-description: 'The home role of a node: how a signed command to a group is checked, answered once and turned into rows and inbox items; what a file adds to the tables of commands, timers and events, and what such a function may read and return. Read it before adding a file to internal/home or calling the package from internal/node.'
+description: 'The home role of a node: how a signed command to a group is checked, answered once and turned into rows and inbox items; what a file adds to the tables of commands, timers and events, and what such a function may read and return; how the run loop applies them, one goroutine per group, and what it tells connected clients. Read it before adding a file to internal/home or calling the package from internal/node.'
 kind: reference
 ---
 
@@ -14,6 +14,9 @@ checks every command passes before its function runs, and the receipt that answe
 command. Every other file of the package adds to a table or builds on these types. The seam opens
 no connection, keeps no clock and starts no transaction: it is given a device id, an envelope, a
 time, and the reads and receipts of a transaction, and returns what to write.
+
+The run loop, in the files whose names start with `run`, is "whoever runs the home": it owns the
+states, the transactions, the clock and the connections ("The run loop" below).
 
 ## Use this capability
 
@@ -38,6 +41,13 @@ time, and the reads and receipts of a transaction, and returns what to write.
 | run a timer or a handler | `s.Seal(f(s, disk, now, …))` inside a transaction, then write and `s.Commit(result)` as for a command |
 | finish any result | after `s.Commit(result)`, every hook of `After`, on the goroutine of the group |
 | know whether a device may use the home surface of a group | `s.Serves(device)` |
+| run the home of a node | `StartLoop(LoopConfig{…})` with `NodeTables()`; `Close` before the store is closed |
+| connect a client | `loop.Attach(device, client)` returns its `*Conn`; `loop.Detach(conn)`; `conn.Gone()` |
+| hand in a `cmd` frame | `loop.Cmd(conn, re, env)`; the answer is sent to the connection |
+| answer a `hello` | `loop.Welcome(conn, build)`: `build` makes the `welcome` frame from the groups of the peer |
+| subscribe a connection to a group | `loop.Watch(conn, group, stateOnly)` |
+| send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
+| run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
 
@@ -153,7 +163,159 @@ name is taken for all of them. The seam takes `wireRow`, `typedRow`, `rowLimit`,
 `rowFits`, `sizeLimit`, `refused`, `repeated`, `addOnce`, `keyCreate` and `keySelector`. Its tests
 are in package `home_test` and use only what is exported. The task machine takes the names that
 start with `task`, `step`, `wait`, `item` and `states`, and `workItems`, `byAssignee` and
-`byReviewer`; its tests take the names that start with `mc` and `machine`.
+`byReviewer`; its tests take the names that start with `mc` and `machine`. The run loop takes the
+names that start with `run`, and its tests those that start with `run` and `Run`; it exports
+`Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
+`ItemsPush`. The briefs take the
+names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+
+## The run loop
+
+`StartLoop` reads every group from the store and starts one goroutine per group, which owns that
+group's `State`. Everything that changes a group is a job of its goroutine, done strictly in the
+order it was handed in; two groups run side by side.
+
+**Loading.** A group is one that has a `group` row. Its state is the owner's device log as
+`LoopConfig.Logs` gives it, then the group's state rows in the order of their sequence numbers,
+then its device rows in the order of their versions, then the two counters of `grp`. The device
+rows go by version because that is the order in which `Commit` applied their entries: a row that
+was written again has a later sequence number than the entry after it, and by sequence number a
+revoked device would be valid again after a restart. `Seq` is the stored counter, `Num` the higher of the stored counter and the task rows. A
+store that cannot be read, or a state row that does not decode, starts no loop.
+
+**One result, one transaction.** A command, a timer and an event go the same way:
+
+1. In one `Write` of the store: `Commands.Apply`, or `State.Seal` of what a timer or a handler
+   returned, with a `Disk` of that transaction; then the rows, each under the next `NextSeq`,
+   which must be the number `Seal` gave it; the task counter (`RaiseNum`, to the highest `num`
+   among the rows); the items; the retirements; the other writes.
+2. If anything failed, a read of the `Disk` included, the transaction is dropped, the failure
+   goes to `LoopConfig.Report`, a command is answered `internal`, and the state is as before.
+3. Otherwise, for a result that holds something: `State.Commit`, the count of the wake-up cap,
+   every hook of `After` in the order of their names, the answer, the pushes.
+
+A result that holds nothing only gets its answer: a refusal (whose receipt is committed), a
+command answered from its receipt, a timer with nothing to do. It reaches no hook. A timer's or a
+handler's result that `Seal` refuses is reported and changes nothing.
+
+**Groups that do not exist.** A command for a group without a goroutine starts one, with a state
+that knows the owner's log only, so that `group create` can run there. If the group still does
+not exist when that goroutine has no job left, it ends and the loop forgets it. A command whose
+payload has no `g` is answered where it arrives, by the checks that leave no receipt, in their
+order; only the owner's devices are known to that answer.
+
+**Timers and events.** `Tick(now)` runs every timer for every group that exists, in the order of
+their names, each in a transaction of its own; with `LoopConfig.Every` the loop calls it by
+itself. `Event(name, event)` runs that handler for every group that exists; the handler returns
+an empty result for a group the event does not concern.
+
+**Pushes** ([datachannel](../../planning/contracts/datachannel.md), sections 3, 4 and 6). After
+the answer, in this order:
+
+1. `rows`, to each connection that watches the group (`Watch`): all rows of the result, or with
+   `state_only` the `group`, `member`, `device` and `task` rows, markers of those types included.
+   A frame takes rows up to 61,376 bytes; the rest follows in further frames. A connection that
+   would get no row gets no frame. A connection whose device the group no longer serves
+   (`State.Serves`, on the state that holds the result) stops watching with that result and is
+   not pushed its rows: a revoked device and a member who left read nothing more on a connection
+   that is still open ([datachannel](../../planning/contracts/datachannel.md), section 8). It
+   watches again only through `Watch`.
+2. `groups`, to every connection that has had its welcome, when the result has `GroupsChanged`:
+   the groups that exist and whose `State.Serves` holds for the connection's device, in the
+   order of their ids, `[]` when there are none.
+3. The inbox items the result queued, to the connections that take them and whose device the
+   group serves. So a row change reaches a host before the items it caused.
+
+**Welcome.** `Welcome(conn, build)` reads the list of groups for the connection's device, has
+`build` make the `welcome` frame from it and queues that frame, in one step under the lock that
+also orders the `groups` pushes; and a connection is pushed `groups` only once it has had a
+welcome. So no `groups` push comes before the welcome, and none that is older than the welcome
+comes after it. A node calls it for every `hello`. `Groups(conn)` reads the same list without
+queuing anything; a frame built from it can be older than a push that is already queued.
+
+`Watch` is the subscription of `sync` without the rows before it: it returns the group's sequence
+number, and the connection is pushed every change after it. It refuses a group that does not
+exist, a device that `Serves` refuses, and a connection that is gone.
+
+**Inbox items.** An item is stored in the transaction of its result, for the host of its AI as
+that result leaves the member rows; an item for a member that is no AI fails the transaction.
+`Inbox(conn)` makes a connection the taker of the items of its device: it is sent every item
+that is due now, also those it was sent before, and from then on each item when it is queued or
+when its `NotBefore` has passed, which the loop looks at on a tick. Each delivery reads the queue
+from the store, so an item that was acknowledged or retired is not sent again. A queue that
+cannot be read is reported and read again on the next tick. An item that cannot be made into a
+frame is reported and left out, once for each connection until its next `Inbox`, and the other
+items are sent. Until the inbox unit signs items, an item is
+kept and sent in the seam's form: the store's `env` holds the `Item` as JSON, and the frame is an
+`ItemsPush` with one `QueuedItem`. That unit replaces `runSeal` and `runItemFrame` in
+`run_push.go` and nothing else.
+
+**The wake-up cap.** `State.Wakes[ai]` holds one time for each item queued for that AI: when the
+item is due, which is the home's time when its result was committed, or its `NotBefore` when that
+is later. An item counts once, when it is queued. Sending it again, on a hello after a reconnect
+or to a second connection of its host, counts nothing, and so does a host that was not connected
+when the item became due. Retiring or acknowledging an item does not take its time back. Times
+that are an hour old or older are dropped from an AI's list when its next item is counted, so a
+rule that reads `Wakes` counts only the times after `c.Now` minus one hour, and can count on a
+held item's time being in the future. The count is in memory and starts again with the loop, as
+the contract says; items sent again after a restart count nothing.
+
+**Online.** `State.Online[device]` is true from `Attach` until the last connection of that device
+is gone, in every group, also for a device that the group does not serve. `Gone()` is closed
+after every group has been given the job of forgetting the connection, so a command handed in
+after it finds the device offline.
+
+**Connections.** `Attach(device, client)` gives a `Client` a queue of its own and one goroutine
+that sends from it, so the goroutine of a group never waits for a client. No frame is ever left
+out, because a client's rows must have no gap. Instead, a connection is given up when its client
+returns an error from `Send`, or when 1,024 frames wait for it: nothing more is sent, every group
+forgets it, `Gone()` is closed, and the client is closed if it has a `Close` method, as a
+`peer.Connection` has. The client then connects and reads again. A client that is done
+(`Done()`) and one that the node detaches are forgotten in the same way and not closed. A
+client's `Send` must return once the client is done or closed.
+
+**For the node and the local link.** A loop is started with a `LoopConfig`: the store, the node's
+device id, its owner's user id, the tables, and `Logs`, which returns the node's verified log of a
+person as a value of its own (a second `identity.Replay` of the entries, not the log the node
+keeps), or nil. `Now`, `Report` and `Every` may be left out: the machine's clock, the standard
+logger, and no ticks but `Tick`. A connection goes through four entries, the same for a
+`peer.Connection` and for the local link of a host on the same node:
+
+1. `conn := loop.Attach(device, client)`, once the device is authenticated.
+2. For each frame the client sends, the entry of its type: for `hello`,
+   `loop.Welcome(conn, build)`, where `build` gets the `groups` of the welcome and returns the
+   whole frame from values the node has ready, and never a `Send` of the node's own, and after it `loop.Inbox(conn)` for a host;
+   `loop.Cmd(conn, re, env)` for `cmd`, with the `id` of the request as `re`; `sync`, `fetch` and
+   `ack` come with their units.
+3. The loop calls `client.Send(frame)` for every answer and push, one at a time, in order. The
+   answer to a command is a frame like the others and comes after the frames queued before it.
+   So a `Send` must not wait for something that the sender of a command holds while it waits for
+   its answer.
+4. `loop.Detach(conn)`, or the client's `Done()`. `conn.Gone()` tells the node that the loop
+   gave a connection up; the node need not detach it then.
+
+**Who may call what.** `Cmd`, `Detach`, `Welcome`, `Inbox`, `Tick`, `Event` and `Groups` never
+wait for a group and may be called from anywhere. The `build` of a `Welcome` runs under the lock
+of the loop: it only puts the frame together from the list of groups and from values the node
+worked out before it called `Welcome`, such as `time` and `addrs`. It takes no lock, waits for
+nothing and calls nothing, the loop least of all; a `build` that waits for a lock of the node
+which another goroutine holds while it calls `Cmd` waits for ever. The loop calls `LoopConfig.Logs`, `Now`
+and `Report` on the goroutines of its groups, and `Logs` and `Now` also on the caller of `Cmd`:
+none of the three may wait for a lock that is held around a call of `Attach`, `Watch`, `Close`
+or `Cmd`, and none may call those. `Attach`, `Watch` and `Close` wait for the groups: they
+must not be called on the goroutine of a group, which is where a hook runs, or on the store's
+writer, which is where the function of a command, a timer, a handler, a `Disk` and a `Write.Put`
+run. A client's `Send` runs on the goroutine of its connection and may call every entry. A hook
+may start transactions of the store; what runs on the store's writer may not. The goroutine of a
+group waits for the store's writer and for nothing else, and what runs on the writer takes no
+lock of the loop: so no lock of a client, of a host's session or of the node can close a circle
+through the loop, as long as that code keeps to this paragraph.
+
+**For the files that build on the loop.** `loop.ask(group, f)` runs `f` on the goroutine of a
+group and waits for it; there `g.watch(conn, stateOnly)` subscribes, `g.transact` and `g.settle`
+write and finish a result, `g.deliver` sends items, and `conn.send(frame)` queues a frame behind
+the ones before it. `sync` takes its cut and subscribes in one such call. `runDisk` is the `Disk`
+of a transaction.
 
 ## The task machine
 
@@ -187,10 +349,59 @@ function that moves a task calls it and adds nothing to its rules.
   `thread.count`, `thread.last`); the bodies of the messages; for row 23, the timer and telling the
   secretary once per quiet period. The machine sets `stats.ended`.
 
+## Briefs
+
+`cmd_brief.go` holds `post` of kind `brief` and `act` `confirm` and `revise` on it
+([commands](../../planning/contracts/commands.md) 1.3 and 1.4;
+[messages](../../planning/contracts/messages.md) 2.1 and 3.1), under the keys `post/brief`,
+`act/confirm` and `act/revise`. Where the contracts are silent, it does this:
+
+- **Post.** Only the secretary posts a brief, else `forbidden`; a group without one has nobody who
+  can. What the payload says by itself is `bad_request`: a `thread` that is not `null`, no
+  criterion, no task, a dependency that is not an earlier entry or that is named twice, an entry
+  whose assignee is its reviewer. What the group says is `conflict`: a requester who is no member,
+  an assignee or reviewer who is no working AI (an AI member other than the secretary), a message
+  that already has the id `n`, and a `replaces` that names no brief that is `pending` or `revise`.
+  The row is a main-line card with `main` false, `ts` as signed, `state` `pending`, and a body
+  encoded again from the checked fields. A post creates no task and queues no item (A5.2). The
+  replaced brief keeps its state with `status` `superseded`.
+- **Act.** `confirm` has neither `arg` nor `text`, `revise` no `arg` and at most a `text` that is
+  not empty and is at most 1,024 bytes as a JSON string, its quotes included; else `bad_request`.
+  Then an act names no message: `not_found`; a message that is no brief: `bad_request`; a signer
+  that is not a person who is the requester or an admin, which an `as` never is: `forbidden`; a
+  brief that is not `pending`: `conflict`. The brief's `state` gets `by` (the person's member id),
+  `at` (the home's time) and the signed `act`; a `revise` with a `text` also gets `note`.
+- **Confirm.** The checks of the post are made again against the group as it is now, and a brief
+  that fails one is answered `conflict`. Two are left: the brief it replaces has been superseded
+  since the post, and the task machine refuses an entry whose assignee is its reviewer
+  ([issues](../../issues.md)). Then each entry becomes a task through `Step` with `OnConfirm`,
+  `By` `ByPerson` (row 1 takes a person and an admin alike), and `Blocked` when the entry has a dependency: a dependency is an
+  earlier entry, created by the same confirm, so it is not merged. The row has `num` from
+  `State.Num + 1` in the order of the entries, `origin` `brief`, `brief` the card's id, `slug`
+  from `proto.MakeSlug`, `pass` the brief's or, for a foundation task, the group's
+  `pass_foundation`, `depends` as task ids, and `created` and `stats.started` the home's time.
+  Each task has a `task` message in the main line, with the task's own id.
+- **Ids.** The id of the task of entry `i` is the first 16 bytes of the SHA-256 of
+  `SoloDawn brief task <n of the act> <i>`, in base64url: a function has no randomness, and
+  nobody can know the id before the act arrives. An id that a task or a message already has is
+  answered `conflict`.
+- **Items.** Each item of row 1 (`assign` for a task that starts) names the task and its task
+  message, with the act as `cause`. Then the secretary gets `confirmed`, naming the brief, with
+  the act as `cause`, after a `confirm` and after a `revise`; a group without a secretary gets
+  none. A queued task gets its `assign` when the merge of its last dependency releases it (unit
+  HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
+  `c.Disk.Msg` reads.
+
 ## Known limitations
 
-- The tables are empty and nothing in a node calls `Apply`, `Seal` or a hook yet: the command
-  files and the run loop are separate units ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- The table of commands holds only the briefs, and no node starts a loop yet: the other command
+  files and the wiring of the node are separate units
+  ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- The jobs of a group have no bound: a client that sends commands faster than its group applies
+  them makes the list grow ([issues](../../issues.md)).
+- A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
+  1,024 waiting frames never meets a slow browser ([issues](../../issues.md)).
+- Inbox items are stored and sent unsigned, in the seam's form, until the inbox unit is built.
 - A device of a member of another group on the same home is answered `unknown_device`, not
   `forbidden` ([issues](../../issues.md)).
 - A device held by the logs of two people is read as the device of the one with the lower user id
@@ -207,7 +418,20 @@ fakes of `Receipts`, `Disk` and `Write` in the test files and one test on an in-
 to a store in memory, because no command file exists yet. The choices behind the seam are in
 [the decision record](../../docs/decisions/implemented/architecture/2026-11-20-home-command-seam.md).
 
+The run loop is covered through its entries by `run_test.go`, `run_push_test.go` and
+`run_disk_test.go`, on a store in memory with clients that keep, hold or refuse their frames, and
+`run_internal_test.go` pins its arithmetic: where a frame is cut, when an item is due, how many
+values a queue takes. `features/home_run.feature` holds the home half of acceptance test A2.1 and
+a restart, with commands of its own. The choices behind the loop are in
+[its decision record](../../docs/decisions/implemented/architecture/2026-11-21-home-run-loop.md).
+
 `machine_test.go` has a case for every row of the task machine, for every rule of its section 2
 and for the refusals, and covers every statement of `machine.go`. `features/home_machine.feature`
 holds acceptance test A5.18 at step `merge` and the two points of the third review, a card decided
 while a task is paused and a reviewer named while it is paused.
+
+`cmd_brief_test.go` sends every command of the briefs through `Commands.Apply` with fakes of
+`Receipts` and `Disk`, with a case for every refusal and branch. `features/home_brief.feature`
+holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
+`Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
+commands of `task assign` and `task merged` are other units' (HM-9, HM-12).

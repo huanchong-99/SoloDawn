@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -224,4 +225,31 @@ func TestPutKeepsStoredEscapesOfRawJSON(t *testing.T) {
 	if !strings.Contains(stored, `"body":{"a":"<b>"}`) {
 		t.Fatalf("escapes were rewritten: %s", stored)
 	}
+}
+
+func TestSnapshotAndQueryFailures(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "node.db")
+	s := openDB(t, path+"?_txlock=immediate")
+	unlock := lockDB(t, path)
+	v, err := s.Snapshot("g")
+	equal(t, v, (*Snapshot)(nil))
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("locked snapshot begin: %v", err)
+	}
+	unlock()
+
+	v, err = s.Snapshot("g")
+	check(t, err)
+	check(t, v.Close())
+	rows, err := v.AfterSeqUpTo(0, 1)
+	equal(t, rows, ([]json.RawMessage)(nil))
+	equal(t, err, sql.ErrTxDone)
+
+	mem := openDB(t, ":memory:")
+	_, err = mem.db.Exec("DROP TABLE grp")
+	check(t, err)
+	v, err = mem.Snapshot("g")
+	equal(t, v, (*Snapshot)(nil))
+	equal(t, err.Error(), "SQL logic error: no such table: grp (1)")
+	equal(t, mem.db.Stats().InUse, 0)
 }
