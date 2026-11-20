@@ -129,6 +129,19 @@ describe('wire examples', () => {
     }
   });
 
+  // JSON.parse reads a number beyond the largest double as Infinity; proto.Decode refuses it.
+  it.each(['1e400', '-1e400'])('refuses %s in a fraction and in an integer field', (literal) => {
+    for (const field of ['window_pct', 'turns_today']) {
+      const text = goldens['row-member-ai'].replace(/("window_pct": )[^,]+/, `$1${literal}`);
+      const changed =
+        field === 'window_pct'
+          ? text
+          : goldens['row-member-ai'].replace(/("turns_today": )\d+/, `$1${literal}`);
+      expect(changed, field).not.toBe(goldens['row-member-ai']);
+      expect(() => p.decode(p.AIMemberRow, changed), field).toThrow(v.ValiError);
+    }
+  });
+
   it('keeps a signed payload as the exact text received, leading space included', () => {
     const { entries } = p.decode(p.Devlog, goldens.devlog);
     expect(entries[1].p.slice(0, 15)).toBe(' {"t":"device",');

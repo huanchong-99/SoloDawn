@@ -8,7 +8,8 @@ import * as v from 'valibot';
 const str = v.string();
 // A number on the wire is an integer, as a Go integer field reads it (contracts/conventions.md
 // section 2), except the few fields that the contracts give as a fraction.
-const num = v.number();
+// JSON.parse reads a number beyond the largest double as Infinity, which Go refuses.
+const num = v.pipe(v.number(), v.finite());
 const int = v.pipe(num, v.safeInteger());
 const bool = v.boolean();
 const strs = v.array(str);
