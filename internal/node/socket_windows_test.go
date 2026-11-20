@@ -1,6 +1,7 @@
 package node
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -29,7 +30,7 @@ func TestSocketDACLIsOwnerOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := sd.String(), "D:P(A;;FA;;;"+user.User.Sid.String()+")"; got != want {
+	if got, want := sd.String(), fmt.Sprintf("D:P(A;;FA;;;%s)", user.User.Sid); got != want {
 		t.Errorf("socket DACL = %s, want %s", got, want)
 	}
 }
