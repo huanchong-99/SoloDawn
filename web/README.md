@@ -11,7 +11,8 @@ One responsive Svelte 5 page, built by Vite into `internal/node/webdist/`, from 
 embeds it and the rendezvous serves it as static files. It holds no group logic: it renders rows
 and sends commands (`planning/steps/step-1-frontend.md`). What exists today is the frame every
 screen lives in: navigation, top bar, themes, languages, hash routing, the web manifest and the
-notice for browsers that cannot run the client.
+notice for browsers that cannot run the client; the wire types with their decoding; and a mock
+connection that answers from the node's wire examples.
 
 ## Use this capability
 
@@ -19,13 +20,15 @@ Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-l
 
 | Command            | Effect                                                             |
 | ------------------ | ------------------------------------------------------------------ |
-| `pnpm install`     | installs the development dependencies                              |
+| `pnpm install`     | installs the dependencies                                          |
 | `pnpm dev`         | development server with hot reload                                 |
 | `pnpm build`       | production build into `../internal/node/webdist/` (ignored by Git) |
 | `pnpm check`       | `svelte-check --fail-on-warnings`: types and Svelte warnings       |
 | `pnpm test`        | unit tests in `src/` and the acceptance feature in `features/`     |
 | `pnpm format`      | Prettier                                                           |
 | `pnpm stryker run` | mutation tests of every `.ts` module outside routes and components |
+
+The one runtime dependency is `valibot`, for the wire types.
 
 ## Contract
 
@@ -44,6 +47,21 @@ Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-l
   ignored. When the browser blocks site storage, the client opens with the defaults and applies
   changes without remembering them. `tokens.css` turns `data-theme` into `color-scheme`; every
   colour is a `light-dark()` pair.
+- **Wire types.** `src/lib/proto.ts` mirrors `internal/proto`: one `valibot` schema per message,
+  with its TypeScript type inferred under the same name. Objects are strict: an unknown field is
+  refused, and so is a missing one unless Go tags it `omitempty`; a Go pointer without
+  `omitempty` must be there and may be `null`. Message bodies are any JSON until a contract types
+  them. `decode(schema, text)` is the only place where received text becomes a typed value;
+  `Frame` is what a node may send on `ctl`. Code after it trusts the type. An envelope's `p` stays
+  the exact string received. `Ctl` is the interface of a `ctl` connection: numbered requests,
+  their answers, and pushes.
+- **Mock connection.** `mockCtl(onpush)` in `src/lib/mock.ts` is a `Ctl` that answers from the
+  files of `internal/proto/testdata`: `hello` with `welcome`; `sync` with the pushes `reset` and
+  `rows`, then `synced`; `fetch` with `fetched`; every `cmd` with `ok`. It knows the examples'
+  one group. It is for development and tests only: import it dynamically behind
+  `import.meta.env.DEV`, so that the build leaves it and the examples out. Vite may read that
+  directory (`server.fs.allow`), and Stryker mutates in place because its sandbox would not
+  contain it.
 - **Fonts.** Geist and Geist Mono 1.9.2, one variable `woff2` each, are served from
   `public/fonts/` with their licence (OFL-1.1); the page requests nothing from a third party. A
   browser downloads a face only when text uses it and shows the system fonts until it arrives.
@@ -62,6 +80,8 @@ Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-l
 | `src/lib/boot.ts`           | Ed25519 detection; mounts `App` or `Upgrade`                 |
 | `src/lib/prefs.svelte.ts`   | theme and language state, their persistence, `t`             |
 | `src/lib/route.svelte.ts`   | current page from the address fragment                       |
+| `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface        |
+| `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`              |
 | `src/App.svelte`            | shell: skip link, navigation, top bar, the current route     |
 | `src/Upgrade.svelte`        | the upgrade notice                                           |
 | `src/routes/`               | one component per page                                       |
@@ -89,4 +109,10 @@ are hidden; both choices are on the settings page at every width.
 - The shell was checked in headless Chrome at 375, 820, 1100 and 1440 px in both themes and both
   languages on every page (no element wider than the viewport) on 2026-11-20. It has not been
   opened on a real phone, in Safari or in Firefox.
+- `src/lib/proto.test.ts` reads every wire example with the schema of its file name and fails on a
+  file that has none (`crypto.json`, which holds test vectors, excepted); it adds an unknown field
+  to every object and removes every field in turn. Fields that appear in no example are not
+  covered by those variants.
+- Importing `decode` and `Frame` adds about 7.6 KiB to the bundle, 2.6 KiB gzipped (measured
+  with `valibot` 1.5.0 on 2026-11-20). Nothing in the application imports them yet.
 - Rules: `planning/architecture.md` section 8, `planning/product-rules.md` R-160 to R-164.

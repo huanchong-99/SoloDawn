@@ -17,6 +17,8 @@ export default defineConfig(({ mode }) => ({
     },
   ],
   build: { outDir: webdist, emptyOutDir: true },
+  // The wire examples of internal/proto, read by the golden-file test and the development mock.
+  server: { fs: { allow: ['.', '../internal/proto/testdata'] } },
   // Tests mount components, so Svelte must resolve to its browser build.
   resolve: mode === 'test' ? { conditions: ['browser'] } : {},
   test: { environment: 'happy-dom' },
