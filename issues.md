@@ -12,6 +12,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: Claude Code has no dedicated stream-json event type for sign-in or missing-session errors (see also the open entry on missing invalid-login captures), and `Interactive` has no post-exit callback.
 - Status: open. Revisit error patterns when live failure captures are added, and let the PTY runner remove the temporary file on exit if needed.
 
+### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
+
+- Symptom: not observed. A client that sends `cmd` frames faster than its group applies them makes the list of that group's jobs grow, and with it the memory of the node, until the client stops. A group applies a command in one transaction of the store, so this needs a client that sends on purpose or a store that has become slow. Ticks and events are jobs as well: while a group does not keep up, each tick of `LoopConfig.Every` and each `Event` adds one job to its list.
+- Cause: `Loop.Cmd` hands a command to the goroutine of its group and returns (`internal/home/run.go`, `route`), and `Tick` and `Event` hand theirs to every group (`all`); the list (`runQueue` in `internal/home/run_conn.go`) takes every job. That is on purpose: no caller, hook or timer can then wait for a group, which is what rules out a deadlock ([decision](docs/decisions/implemented/architecture/2026-11-21-home-run-loop.md)).
+- Status: open, without effect in step 1, where every client of a home is a device of its owner. The request table of the `ctl` session (N-2) is the place to limit how many requests of one connection are unanswered; a tick that finds the tick before it still waiting could be left out.
+
+### 2026-11-21 · limitation · The limit of waiting frames does not meet a slow browser
+
+- Symptom: not observed. The run loop gives a connection up when 1,024 frames wait for it. A `peer.Connection` never lets a frame wait: its `Send` hands the text to the data channel, which keeps it in its own send buffer without a limit. A browser that stops reading while its connection stays open so makes that buffer grow, and the loop does not see it.
+- Cause: `(*Connection).Send` calls `SendText` and returns (`internal/peer/ctl.go:174`); `home.Client` has `Send` and `Done` only (`internal/home/home.go:27`), so the loop cannot ask how much is buffered. The limit (`runBacklog`, `internal/home/run_conn.go`) applies to a client whose `Send` waits, such as a local link.
+- Status: open. Either `peer.Connection.Send` waits, or fails, above a buffered amount, or the node closes a connection whose buffer stays above a limit; owner N-2 or the owner of `internal/peer`.
+
+### 2026-11-21 · deviation · Inbox items are stored and pushed unsigned
+
+- Symptom: the run loop stores an item with the seam's `Item` as JSON in the `env` column and pushes it as `home.ItemsPush`, one `home.QueuedItem` per frame, where `planning/contracts/datachannel.md` section 6 has an `inbox` frame of items signed by the home. A host that follows the contract accepts none of them.
+- Cause: signing and the wire `item` belong to unit HM-7; the loop has two functions in their place, `runSeal` and `runItemFrame` (`internal/home/run_push.go`).
+- Status: open until HM-7, which replaces those two functions, fills a frame as far as a `ctl` message goes, and adds `ack`. Storing, holding, sending again on a hello and the count of the wake-up cap are in the loop and stay.
+
+### 2026-11-21 · limitation · A command without `g` knows only the devices of the node's owner
+
+- Symptom: a `cmd` whose payload has no `g` is answered `bad_request` when a device of the node's owner signed it, and `unknown_device` when a device of another member of a group homed here did, although that device is known to its group.
+- Cause: such a command belongs to no group, so the run loop answers it with a state that holds the owner's log only (`internal/home/run.go`, `stray`). It is the case of "A member of another group on the same home is answered `unknown_device`" below, for a payload that names no group.
+- Status: open, without effect in step 1. Settled with that entry in step 2.
+
 ### 2026-11-21 · deviation · `act confirm` does not make the `replaces` check of the post again
 
 - Symptom: `planning/contracts/commands.md` 1.4 says that a `confirm` makes "the checks of a `brief` post (1.3)" again. One of them is that `body.replaces`, when not `null`, names a brief that is `pending` or `revise`. The post itself made that brief `superseded`, so the check, made again, would refuse every confirm of a brief that replaces another.
