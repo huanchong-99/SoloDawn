@@ -82,6 +82,20 @@ it('propagates a session error without reporting another tab', async () => {
   expect(await navigator.locks.query()).toStrictEqual({ held: [], pending: [] });
 });
 
+it('propagates a session’s own AbortError without reporting another tab', async () => {
+  const failure = new DOMException('session ended', 'AbortError');
+  const otherTab = vi.fn().mockRejectedValue(new Error('the other-tab notice was shown'));
+  await expect(runTab(device, () => Promise.reject(failure), otherTab)).rejects.toBe(failure);
+  expect(otherTab.mock.calls).toStrictEqual([]);
+  expect(await navigator.locks.query()).toStrictEqual({ held: [], pending: [] });
+});
+
+it('propagates a session that rejects with undefined', async () => {
+  const otherTab = vi.fn().mockRejectedValue(new Error('the other-tab notice was shown'));
+  await expect(runTab(device, () => Promise.reject(undefined), otherTab)).rejects.toBe(undefined);
+  expect(otherTab.mock.calls).toStrictEqual([]);
+});
+
 it('propagates a lock request failure without starting a session', async () => {
   const failure = new DOMException('blocked', 'SecurityError');
   vi.spyOn(navigator.locks, 'request').mockRejectedValue(failure);

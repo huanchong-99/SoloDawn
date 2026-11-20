@@ -32,15 +32,15 @@ so `solodawn open` pairs on `localhost`. Nothing is forwarded to other nodes.
 
 WebSocket, text frames, one JSON object per frame, at most 16 KiB per frame
 (evidence 14). Every field shown for a frame is always present
-(`contracts/conventions.md` section 2), except as 2.1 says. A client sends
-under 100 frames per 10 seconds on each rendezvous connection and queues the
-rest. The server closes a connection that sends a larger frame, more than 120
-frames in 10 seconds, a frame it cannot read, an unknown `t`, a `k` in `to` or
-`watch` that is no device id (`contracts/envelope.md` section 2), a `watch` of
-more than 64 keys, a `join` of a 17th room, or a `to` whose `from` would exceed
-16 KiB (the target gets none). A receiver queues at most 128 frames, 16 per
-sender and 32 from senders off its watch list; more are dropped for it, closing
-nothing, and the sender's offer timeout and back-off cover the loss.
+(`contracts/conventions.md` section 2), except as 2.1 says. A client sends at
+most 90 frames in any 11 seconds per connection, queueing the rest, and no `to`
+over 16,382 bytes. The server closes a connection that sends a larger frame,
+more than 120 frames in 10 seconds, a frame it cannot read, an unknown `t`, a
+`k` in `to` or `watch` that is no device id (`contracts/envelope.md` section 2),
+a `watch` of more than 64 keys, a `join` of a 17th room, or a `to` whose `from`
+would exceed 16 KiB (the target gets none). A receiver queues at most 128
+frames, 16 per sender and 32 from senders off its watch list; more are dropped
+for it, closing nothing; the sender's offer timeout and back-off cover it.
 
 ### 2.1 Handshake
 
