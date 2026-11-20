@@ -68,6 +68,7 @@ const ready = `{"t":"ready","ice":[],"ttl":3600}`
 func TestPathFrameLimitsAndRefresh(t *testing.T) {
 	p, ws, err := testPath(t, challenge, ready)
 	check(t, err)
+	eq(t, p.lifetime(), time.Hour)
 	eq(t, p.Route().ICE, []proto.ICEServer{})
 	e := proto.Envelope{Payload: "<local>", Key: "peer", Signature: "sig"}
 	check(t, p.Route().Send(t.Context(), "device", e))
@@ -82,6 +83,7 @@ func TestPathFrameLimitsAndRefresh(t *testing.T) {
 	eq(t, len(data), 16384)
 	eq(t, send(16385).Error(), "signalling frame exceeds 16 KiB")
 	node := newPair(t).b
+	eq(t, p.from(t.Context(), node, []byte(`{"t":"from","k":"device"}`)).Error(), "proto: a field that is always present is missing")
 	sentinel := errors.New("finish")
 	events := make(chan string, 1)
 	done := make(chan error, 1)

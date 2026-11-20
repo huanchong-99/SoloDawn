@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
+	"github.com/pion/webrtc/v4"
 )
 
 func TestFramingBoundaries(t *testing.T) {
@@ -31,7 +32,7 @@ func TestFramingBoundaries(t *testing.T) {
 		msg := string(encode(id))
 		data := `{"re":` + msg + "," + result + "}"
 		check(t, c.deliver([]byte(data)))
-		eq(t, string(<-ch), data)
+		eq(t, string(recv(t, ch)), data)
 		check(t, c.deliver([]byte(data)))
 		eq(t, len(ch), 0)
 	}
@@ -94,6 +95,79 @@ func TestPresenceRestartsUnansweredNegotiationImmediately(t *testing.T) {
 	check(t, proto.Decode([]byte(b.Payload), &y))
 	if x.Conn == y.Conn {
 		t.Fatal("new attempt reused the old conn")
+	}
+	cancel()
+	recv(t, done)
+}
+
+func TestNoRouteFailsBeforeOpeningSession(t *testing.T) {
+	f := newPair(t)
+	f.a.paths = func(string) []Route { return nil }
+	eq(t, f.a.attempt(t.Context(), f.b.key.ID(), nil, func(*Connection) { t.Error("called session with no route") }), failed)
+}
+
+func TestRejectedCtlChannels(t *testing.T) {
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	check(t, err)
+	t.Cleanup(func() { pc.Close() })
+	unordered := false
+	limit := uint16(1)
+	for _, tc := range []struct {
+		label  string
+		init   *webrtc.DataChannelInit
+		closes bool
+	}{
+		{"unrelated", nil, false},
+		{"ctl", &webrtc.DataChannelInit{Ordered: &unordered}, true},
+		{"ctl", &webrtc.DataChannelInit{MaxRetransmits: &limit}, true},
+		{"ctl", &webrtc.DataChannelInit{MaxPacketLifeTime: &limit}, true},
+	} {
+		dc, err := pc.CreateDataChannel(tc.label, tc.init)
+		check(t, err)
+		closed := make(chan struct{})
+		c := &Connection{close: func() error { close(closed); return nil }}
+		c.acceptCtl(dc, func(*Connection) { t.Error("opened rejected channel") })
+		if tc.closes {
+			recv(t, closed)
+		} else {
+			eq(t, dc.ReadyState(), webrtc.DataChannelStateClosing)
+		}
+		eq(t, c.dc, (*webrtc.DataChannel)(nil))
+	}
+}
+
+func TestReconnectAfterOpen(t *testing.T) {
+	f := newPair(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	opened := make(chan *Connection, 1)
+	done := make(chan struct{})
+	wake := make(chan struct{}, 1)
+	go func() { f.a.Connect(ctx, f.b.key.ID(), wake, func(c *Connection) { opened <- c }); close(done) }()
+	for range 2 {
+		offer := recv(t, f.aMail["offer"])
+		var o proto.Offer
+		check(t, proto.Decode([]byte(offer.Payload), &o))
+		deliver(t, f.b, f.bMail.route(), offer)
+		answer := recv(t, f.bMail["answer"])
+		deliver(t, f.a, f.aMail.route(), answer)
+		for _, side := range []struct {
+			node        *Peer
+			mail, reply mailbox
+		}{{f.a, f.bMail, f.aMail}, {f.b, f.aMail, f.bMail}} {
+			for {
+				e, i := hostUDP(t, side.mail)
+				if i.Conn == o.Conn {
+					deliver(t, side.node, side.reply.route(), e)
+					break
+				}
+			}
+		}
+		n := negotiation{recv(t, opened), recv(t, f.opened), offer, answer}
+		n.info(t)
+		check(t, n.server.Close())
+		recv(t, n.client.Done())
+		wake <- struct{}{}
 	}
 	cancel()
 	recv(t, done)
