@@ -102,7 +102,7 @@ group has no remote.
 | task session created for a task taken over from another AI | with a remote: fetch, then `git -C repo worktree add ../<wt> -b <br> origin/<br>` if that branch exists there, else as for a new task. Without a remote: `git -C repo worktree add ../<wt> <br>` |
 | task session created for a task that returns to a node which still has the local branch `<br>` | with a remote: fetch, `git -C repo worktree add ../<wt> <br>` (the branch is reused, not created), then `git -C <wt> merge --ff-only origin/<br>`. If the branch has diverged, the worktree is removed again and the session fails with the output of Git. Without a remote: as the row above |
 | `push_branch` | `git -C <wt> push origin refs/heads/<br>:refs/heads/<br>`: the full ref on both sides, never a short name; never with a force option |
-| `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Then each entry of `group.checks`, through the system shell, in the worktree, stopped at `limits.turn_minutes`. The commit recorded is `git -C <wt> rev-parse HEAD` |
+| `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Then each entry of `group.checks`, in order, through the system shell, in the worktree. `limits.turn_minutes` limits the whole run of these entries together, not each command. The commit recorded is `git -C <wt> rev-parse HEAD` |
 | hard check: secrets | the patterns of section 8 over the added lines of `git diff <base-ref>...HEAD` |
 | hard check: tests | fails when the diff changes source files and no test file; what counts as each is below the table |
 | `submit_task` | refused unless the tree is clean, by the status command of `run_checks`, and HEAD is the checked commit. With a remote: the push above, then `gh pr list --head <br> --base <base> --state open --json number,headRefOid,url,state,baseRefName`. A pull request that is closed (merged included) or whose base is not `<base>` is never reused. If the list is empty: `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
@@ -113,7 +113,8 @@ group has no remote.
 | node restarts with a merge it took and did not report | no second attempt. It looks: `gh pr view <pr> --json state,mergeCommit,headRefOid`, or without a remote the last commit message on `<base>`. Merged, and with a remote `headRefOid` is the reviewed commit: `task merged`. Merged with another head, or not merged: `task conflict` |
 | merge failed, or the head is not the reviewed commit | `task conflict` with the command's output |
 | task given to another AI | with a remote, first the push of `push_branch`; then as the next row |
-| task merged, cancelled, or given away | `git -C repo worktree remove ../<wt>`; the reviewer's node removes `review/<num>` |
+| task merged, or given away | `git -C repo worktree remove ../<wt>`; the reviewer's node removes `review/<num>` |
+| task cancelled | `git -C repo worktree remove --force ../<wt>`: uncommitted changes in the worktree are discarded; the branch `<br>` keeps its commits. The reviewer's node removes `review/<num>` |
 | hand-back facts | in the session's folder: `git rev-parse HEAD`, `git status --porcelain --untracked-files=all`, `git log <start>..HEAD --format='%h %s'`, `git diff --shortstat <start>` |
 | statistics | `git diff --shortstat <base-ref>...<commit>` |
 
@@ -146,7 +147,9 @@ group has no remote.
 
   A change to a file of any other type does not trigger the check: the
   check neither fails nor passes because of it. Support for projects with
-  other conventions is a later option.
+  other conventions is a later option. This is the list of the code's
+  `checkCodeExtensions` (`internal/host/checks.go`): the HS-5 list cut to
+  those languages.
 - "Fake tests" has no command; it is a veto item in review.
 - Both hard checks always run (R-103). There is no setting to turn one off.
 
