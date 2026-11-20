@@ -335,18 +335,55 @@ func TestWorkspaceGitCommandsWaitForTheCloneLock(t *testing.T) {
 		{"worktree remove", func() error { return RemoveTaskWorkspace(f.project, 8, "held", TaskMerged) }},
 		{"review remove", func() error { return RemoveReviewWorkspace(f.project, 8) }},
 	} {
-		// The lock is found under another spelling of the same clone path.
-		lock := cloneLock(f.repo + string(filepath.Separator))
-		lock.Lock()
-		done := make(chan error, 1)
-		go func() { done <- c.op() }()
-		select {
-		case err := <-done:
-			lock.Unlock()
-			t.Fatalf("%s ran while the clone was locked: %v", c.name, err)
-		case <-time.After(100 * time.Millisecond):
-		}
-		lock.Unlock()
-		workOK(t, <-done)
+		requireCloneLockWait(t, f.repo, c.name, c.op)
 	}
+}
+
+// requireCloneLockWait holds the clone's lock, under another spelling of
+// its path, and checks that op starts only after it is released.
+func requireCloneLockWait(t *testing.T, repo, name string, op func() error) {
+	t.Helper()
+	lock := cloneLock(repo + string(filepath.Separator))
+	lock.Lock()
+	done := make(chan error, 1)
+	go func() { done <- op() }()
+	select {
+	case err := <-done:
+		lock.Unlock()
+		t.Fatalf("%s ran while the clone was locked: %v", name, err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	lock.Unlock()
+	workOK(t, <-done)
+}
+
+func TestCloneLocksAreSeparatePerClone(t *testing.T) {
+	f := workspaceSetup(t)
+	lock := cloneLock(f.repo)
+	lock.Lock()
+	defer lock.Unlock()
+	other := filepath.Join(t.TempDir(), "other")
+	repo, err := EnsureGroupWorkspace(other, filepath.Join(filepath.Dir(f.source), "origin.git"), "trunk")
+	workOK(t, err)
+	workEqual(t, fixtureGit(t, repo, "branch", "--show-current"), "trunk")
+}
+
+func TestTaskMergeWaitsForTheCloneLock(t *testing.T) {
+	f := workspaceSetup(t)
+	tree, err := CreateTaskWorkspace(f.project, 10, "merge", "trunk", false, false)
+	workOK(t, err)
+	commit := workspaceCommit(t, tree, "merged", "content\n")
+	merge := ReviewedMerge{Repo: f.repo, Base: "trunk", Branch: "task/10-merge", Task: "t10", Commit: commit}
+	var applied, inspected MergeResult
+	requireCloneLockWait(t, f.repo, "merge", func() (err error) {
+		applied, err = merge.Apply(t.Context())
+		return err
+	})
+	head := fixtureGit(t, f.repo, "rev-parse", "HEAD")
+	workEqual(t, applied, MergeResult{MergeCommit: head})
+	requireCloneLockWait(t, f.repo, "merge inspection", func() (err error) {
+		inspected, err = merge.Inspect(t.Context())
+		return err
+	})
+	workEqual(t, inspected, MergeResult{MergeCommit: head})
 }
