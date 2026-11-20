@@ -148,8 +148,7 @@ and could not be tested without a database. It returns a value with `Put(tx)` an
   numbers it.
 - `Seal` measures every row of a result against the size limit of a row, after numbering it,
   and refuses the whole result for one row above it. It measures the JSON without HTML escaping,
-  as the contract counts; the store still writes rows with it
-  ([issues](../../../../issues.md)).
+  as the contract counts and as the store writes it.
 - The seam does not settle to which person a device belongs when two logs hold it, and it knows a
   device only by the logs of one group; both are open in [issues](../../../../issues.md).
 

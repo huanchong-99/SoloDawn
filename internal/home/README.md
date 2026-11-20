@@ -158,8 +158,6 @@ are in package `home_test` and use only what is exported.
   files and the run loop are separate units ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - A device of a member of another group on the same home is answered `unknown_device`, not
   `forbidden` ([issues](../../issues.md)).
-- The store writes a row with HTML escaping, so a row that the seam measured may be stored larger
-  ([issues](../../issues.md)).
 - A device held by the logs of two people is read as the device of the one with the lower user id
   ([issues](../../issues.md)).
 - `Item` is the home's own type. The signed `item` payload on the wire is not frozen yet
