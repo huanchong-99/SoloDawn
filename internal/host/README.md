@@ -121,3 +121,11 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `CreateTaskWorkspace(ctx, projectDir, num, slug, ai, base, remote)` and `RemoveTaskWorkspace(ctx, projectDir, num, slug, ai, why)` handle `wt/<num>-<slug>`. `PrepareReviewWorkspace(ctx, projectDir, num, ai, commit, base, remote)` and `RemoveReviewWorkspace(ctx, projectDir, num, ai)` handle `review/<num>`. `ai` is the member id of the AI that holds the folder. A create reuses only a worktree recorded for the same AI, and a removal leaves one recorded for another AI untouched.
 - A create works out from the branches whether a task is new, taken over or returning; there is no takeover flag. A slug the home cannot produce, or a `num` below 1, is refused.
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
+
+# Talk and group state tools
+
+`tools_talk.go` registers `post`, `read_thread`, `list_members`, `list_tasks`, `note_put` and `note_list` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5).
+
+- All six tools are offered to every session (`Tool.For` is `nil`). Because `Tool.Schema` is a static `json.RawMessage`, `post` and `read_thread` register their superset schemas from `internal/proto/testdata/tools.json` (`secretary` for `post`, `group` for `read_thread`); the MCP server projects caller-specific schemas on `tools/list`, and `Call` enforces the caller rules directly (`summary` and `task` on `post` for the secretary only, `handback` refused outside a non-interactive `HandbackTurn` or in a working AI's group session, `task` required on `read_thread` in group sessions).
+- `post` and `note_put` run `CheckOutboundSecret` before signing or sending any command to the home, returning `&Error{Code: "secret", …}` on a match.
+- For `post` with `kind: "handback"` in a `TaskSession` whose `TakeoverAt` commit is set, the host reads commits, diff line counts, changed files and untracked files from the session's working folder through `workspaceGit`. Secretary and review sessions are read only and report empty hand-back facts.

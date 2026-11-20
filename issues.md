@@ -54,11 +54,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the file was written from the contract, before any server code (`internal/proto/tools_test.go`, `toolLists`).
 - Status: open. HS-8 (the tool list test of the MCP server) and I-1 (the full list against `tools.json`) must check it, and normalise what the SDK writes or raise a change of the file.
 
+### 2026-11-21 · limitation · `host.Tool.Schema` holds one static schema per tool name
+
+- Symptom: `internal/proto/testdata/tools.json` gives `post`, `read_thread` and `request_decision` session-dependent `inputSchema`s (`post` varies across `secretary`, `group` and `review`/`task`; `read_thread` and `request_decision` require `task`/`to` only in group sessions), whereas `host.Tool` (`internal/host/host.go:387`) has a single `Schema json.RawMessage` field and `Tools` is keyed by tool name.
+- Cause: the tool table seam (HS-0, #159) was frozen before `tools.json` (P-2, #165).
+- Status: open, handled across HS-8, HS-9 and HS-11 without changing `host.go`: tool units register the superset `inputSchema` from `tools.json` (`internal/host/tools_talk.go`), the MCP server (HS-8) projects caller-specific schemas when serving `tools/list`, and each tool's `Call` enforces the caller rules at execution time.
+
 ### 2026-11-20 · limitation · The `post` tool lists `handback` for a whole session, not for a hand-back turn
 
 - Symptom: `tools.json` lists `handback` among the kinds of `post` in every session a takeover can reach (the secretary's, review and task sessions), because a tool list is fixed per session, not per turn. `planning/contracts/mcp-tools.md` section 1 allows it only in a hand-back turn, so a model can call it in any turn of those sessions.
 - Cause: `tools/list` is read once per session (`internal/proto/tools_test.go`, `toolLists`; `planning/contracts/mcp-tools.md` section 5).
-- Status: open. The node refuses `post` with kind `handback` outside a hand-back turn, with `bad_request`: unit HS-9, through `Caller.Turn.Kind`.
+- Status: open, accepted limitation of per-session `tools/list`; mitigated in HS-9 (`internal/host/tools_talk.go`, `checkHandbackCaller`), which refuses `post` with kind `handback` outside a non-interactive `HandbackTurn` (and in a working AI's group session) with `bad_request`.
 
 ### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
 
