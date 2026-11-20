@@ -19,20 +19,25 @@ func unitPath() (string, error) {
 	return filepath.Join(config, "systemd", "user", unitName), nil
 }
 
-// InstallService registers the absolute executable path for the next user login.
-func InstallService(executable string) error {
-	path, err := unitPath()
+// InstallService registers the absolute executable path for the next user
+// login, with path as its PATH: the user manager's own PATH lacks the
+// directories where the CLIs usually are.
+func InstallService(executable, path string) error {
+	unit, err := unitPath()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(unit), 0700); err != nil {
 		return err
 	}
-	// systemd rejects quotes even in an escaped executable name. Pass the path
-	// as an argument, never shell source. ':' and '%%' disable unit expansion.
-	pathArg := strconv.Quote(strings.ReplaceAll(executable, "%", "%%"))
-	unit := "[Unit]\nDescription=SoloDawn node\n\n[Service]\nExecStart=:/bin/sh -c 'exec \"$0\" node' " + pathArg + "\n\n[Install]\nWantedBy=default.target\n"
-	if err := os.WriteFile(path, []byte(unit), 0600); err != nil {
+	// systemd rejects quotes even in an escaped executable name, so the path
+	// is an argument of sh, never shell source. In ExecStart, "%%" and "$$"
+	// are a literal % and $; Environment expands specifiers only.
+	execArg := strings.NewReplacer("%", "%%", "$", "$$").Replace(executable)
+	text := "[Unit]\nDescription=SoloDawn node\n\n[Service]\n" +
+		"Environment=" + strconv.Quote("PATH="+strings.ReplaceAll(path, "%", "%%")) + "\n" +
+		"ExecStart=/bin/sh -c 'exec \"$$0\" node' " + strconv.Quote(execArg) + "\n\n[Install]\nWantedBy=default.target\n"
+	if err := os.WriteFile(unit, []byte(text), 0600); err != nil {
 		return err
 	}
 	return setUnitEnabled("enable")

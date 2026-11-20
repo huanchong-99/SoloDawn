@@ -50,10 +50,14 @@ in the group. `host.join` clones only if the folder does not exist yet.
 
 ## 3. Local socket
 
-A Unix domain socket at `sock`, mode 0600. On Windows, where a mode does not
-limit who connects, the socket has instead a protected DACL with one entry:
-full access for the owner. The test there is that another account cannot
-connect.
+A Unix domain socket at `sock`, mode 0600, in the data directory. On Unix
+the node creates that directory with mode 0700; an existing one must be a
+directory owned by the current user, and its mode is set to 0700, or the
+node refuses to start. The socket is bound under umask 0077, so it is never
+open to others, not even before its mode is set to 0600. On Windows, where a mode
+does not limit who connects, the directory (when the node creates it) and
+the socket have instead a protected DACL with one entry: full access for
+the owner. The test there is that another account cannot connect.
 
 `[verified]` in spike S-5, on Windows Server 2022 with Go 1.26: a Go
 listener and a Go client exchange lines over a Unix socket at `sock`; closing
@@ -63,10 +67,15 @@ on the socket right after binding, the owner connects and another local
 account, not an administrator, is refused with "access denied".
 `[unverified]` the other supported Windows versions.
 
-**A `sock` left behind.** When the node starts and `sock` exists, it dials
-it. If the dial is refused, the file is stale: the node removes it and
-binds. If the dial succeeds, a node is already running: the new one says so
-in one line and exits without binding.
+**One node per data directory.** Before it touches `sock`, a starting node
+takes an exclusive lock on the file `lock` in the data directory (`flock`
+on Unix, `LockFileEx` on Windows) and holds it until it closes its socket,
+when it releases it before closing the file; the system releases it when
+the process ends. When another process holds the lock, a node is already
+running: the new one says `a node is already running` in one line and exits
+without binding. Any other failure to lock, such as a file system without
+locks, is reported as that error, with the path of `lock`. With the lock, a `sock` that exists was left by
+a node that stopped: the node removes it and binds.
 
 One JSON line opens a connection:
 
@@ -79,8 +88,14 @@ One JSON line opens a connection:
   is one line `{"text":"…"}`; the last line is `{"done":true,"ok":true}` or
   `{"done":true,"error":"…"}`.
 
-A first line that is neither gets one line `{"done":true,"error":"…"}`, and
-the node closes the connection.
+The first line is at most 64 KiB and must arrive within 10 s; after it the
+connection has no deadline. A first line that is neither, is longer, or
+does not arrive in time gets one line `{"done":true,"error":"…"}`, and the
+node closes the connection.
+
+The command reads lines until one has `"done":true`. That line must carry
+`"ok":true` or an `error`; a last line with neither is a failure of the
+command, like an error.
 
 A session token is 16 random bytes created when the node starts a CLI
 process and forgotten when that process exits.

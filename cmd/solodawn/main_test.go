@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -128,7 +127,7 @@ func testDataDir(t *testing.T) string {
 	return dir
 }
 
-func testListener(t *testing.T, dir string) *net.UnixListener {
+func testListener(t *testing.T, dir string) *node.Local {
 	t.Helper()
 	l, err := node.ListenLocal(dir)
 	if l == nil || err != nil {
@@ -156,7 +155,7 @@ func TestNodeErrorIsOneLine(t *testing.T) {
 	}
 }
 
-func replyToCommand(l *net.UnixListener) <-chan string {
+func replyToCommand(l *node.Local) <-chan string {
 	received := make(chan string, 1)
 	go func() {
 		l.SetDeadline(time.Now().Add(2 * time.Second))

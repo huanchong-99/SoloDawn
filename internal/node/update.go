@@ -29,7 +29,8 @@ type UpdateStatus struct {
 // Updater is owned by the node, which calls Check and Apply from one goroutine.
 // ReleaseURL is the latest release's download directory (releases/latest/download
 // on GitHub), Binary the installed executable, Version the running release tag.
-// Busy reports whether a session is working or in takeover.
+// Busy reports whether a session is working or in takeover. Transport
+// carries the requests; nil is http.DefaultTransport.
 type Updater struct {
 	ReleaseURL string
 	Binary     string
@@ -37,6 +38,7 @@ type Updater struct {
 	Busy       func() bool
 	Restart    func() error
 	Status     *UpdateStatus
+	Transport  http.RoundTripper
 
 	nextCheck time.Time
 }
@@ -81,7 +83,9 @@ func (u *Updater) update(ctx context.Context, name, tag, sum string) (*UpdateSta
 		return &UpdateStatus{Version: tag, Status: "mismatch"}, nil
 	}
 	if err == nil {
-		err = installRelease(staged, u.Binary, runtime.GOOS)
+		if err = installRelease(staged, u.Binary, runtime.GOOS); err != nil {
+			os.Remove(staged)
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -102,12 +106,47 @@ func (u *Updater) pending() bool {
 	return u.Status != nil && u.Status.Status == "pending"
 }
 
+// A download longer than maxDownload is cut, and so fails its checksum. A
+// request with no data for stallTimeout (connecting, waiting for the answer
+// or reading the body) is given up; a slow link that keeps sending is not.
+var (
+	maxDownload  int64         = 256 << 20
+	stallTimeout time.Duration = 60e9 // 60 s
+)
+
+// maxRedirects allows GitHub's two (latest release, then its asset store).
+const maxRedirects = 5
+
+var (
+	errRedirect = errors.New("self-update: redirect to another scheme or too many redirects")
+	errStalled  = errors.New("self-update: no data for 60 s")
+)
+
+// get fetches a file of the release over https only, following at most
+// maxRedirects redirects, each to https. The request is canceled when no
+// data arrives for stallTimeout.
 func (u *Updater) get(ctx context.Context, name string) (io.ReadCloser, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	stall := time.AfterFunc(stallTimeout, func() { cancel(errStalled) })
+	body, err := u.fetch(ctx, name)
+	if err != nil {
+		stall.Stop()
+		cancel(nil)
+		return nil, err
+	}
+	return &progressBody{body: body, limited: io.LimitReader(body, maxDownload), stall: stall, cancel: cancel}, nil
+}
+
+func (u *Updater) fetch(ctx context.Context, name string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.ReleaseURL+"/"+name, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if req.URL.Scheme != "https" {
+		return nil, fmt.Errorf("self-update: %s is not https", u.ReleaseURL)
+	}
+	client := &http.Client{Transport: u.Transport, CheckRedirect: httpsRedirect}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +155,34 @@ func (u *Updater) get(ctx context.Context, name string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("self-update: %s: %s", name, resp.Status)
 	}
 	return resp.Body, nil
+}
+
+// progressBody restarts the stall timer whenever data arrives. net/http
+// reports a request canceled for a stall with errStalled, the cancel cause.
+type progressBody struct {
+	body    io.ReadCloser
+	limited io.Reader
+	stall   *time.Timer
+	cancel  context.CancelCauseFunc
+}
+
+func (b *progressBody) Read(p []byte) (int, error) {
+	n, err := b.limited.Read(p)
+	b.stall.Reset(stallTimeout) // a read returns only with data or at the end
+	return n, err
+}
+
+func (b *progressBody) Close() error {
+	b.stall.Stop()
+	b.cancel(nil)
+	return b.body.Close()
+}
+
+func httpsRedirect(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" || len(via) > maxRedirects {
+		return errRedirect
+	}
+	return nil
 }
 
 func updateTarget(goos, arch string) string {
@@ -163,7 +230,7 @@ func stageRelease(dir string, body io.Reader, sum string) (string, error) {
 	}
 	hash := sha256.New()
 	_, err = io.Copy(io.MultiWriter(f, hash), body)
-	if err = errors.Join(err, f.Close()); err == nil && hex.EncodeToString(hash.Sum(nil)) != sum {
+	if err = errors.Join(err, f.Sync(), f.Close()); err == nil && hex.EncodeToString(hash.Sum(nil)) != sum {
 		err = errUpdateMismatch
 	}
 	if err != nil {
@@ -177,12 +244,18 @@ func installRelease(staged, binary, goos string) error {
 	if err := os.Chmod(staged, 0o755); err != nil {
 		return err
 	}
-	if goos == "windows" {
-		// Windows lets a running executable be renamed, not replaced. The
-		// previous image is overwritten by the next update.
-		if err := os.Rename(binary, binary+".old"); err != nil {
-			return err
-		}
+	if goos != "windows" {
+		return os.Rename(staged, binary)
 	}
-	return os.Rename(staged, binary)
+	// Windows lets a running executable be renamed, not replaced. The
+	// previous image is overwritten by the next update, or put back when the
+	// new one cannot take its place.
+	old := binary + ".old"
+	if err := os.Rename(binary, old); err != nil {
+		return err
+	}
+	if err := os.Rename(staged, binary); err != nil {
+		return errors.Join(err, os.Rename(old, binary))
+	}
+	return nil
 }
