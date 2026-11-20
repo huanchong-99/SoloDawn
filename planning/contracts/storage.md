@@ -205,7 +205,7 @@ CREATE TABLE audit (              -- R-139
   ts     INTEGER NOT NULL,
   g      TEXT,
   agent  TEXT,
-  what   TEXT NOT NULL,           -- delivered | refused | requested | approval | takeover | handback | merge | setting
+  what   TEXT NOT NULL,           -- delivered | refused | requested | approval | takeover | handback | merge | setting | killed
   item   INTEGER,                 -- delivered, refused: the inbox item id
   home   TEXT,                    -- delivered, refused: device id of the home
   detail TEXT NOT NULL,           -- merge: the task and the commit (contracts/local.md section 7)

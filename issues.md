@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · limitation · `Turn` and `Runtime.Turn` do not carry the jump message id or raw items across the host seam
+
+- Symptom: when `Runner.Turn` pre-empts a running task session for a queue jump (`planning/flows/agent-turn.md` section C, step 12), `Turn` (`internal/host/session.go:80`) carries `Jump: true` and `Thread` without the jump item's `msg` id (`proto.TaskPreempted.Msg`). Likewise, when a resume fails with `NoSession` (`flows/agent-turn.md` section E), `Runtime.Turn` (`internal/host/host.go:524`) has received the composed `text` and `Turn` without the raw `[]json.RawMessage` inbox items.
+- Cause: `Turn` and `Runtime` were frozen in HS-0 (#159) before P-1's `TaskPreempted.Msg` and `HS-14`'s `ReplacedTurn` item parsing met in Wave 2, and `HS-15` owns `internal/host/run.go` only.
+- Status: open, for I-1. In `internal/host/run.go`, `resolveJumpMsg` fetches the newest 20 rows of `turn.Thread` from the group's home and selects the matching human message id for `TaskPreempted.Msg` (which leaves `Msg` empty if more than 20 messages arrived after the jumped message or the home does not answer `fetch`), and `composeReplacedTurn` calls `Compose(h, s, ReplacedTurn, nil)` when `Compose` is set.
+
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
 - Symptom: not observed. A client that sends `cmd` frames faster than its group applies them makes the list of that group's jobs grow, and with it the memory of the node, until the client stops. A group applies a command in one transaction of the store, so this needs a client that sends on purpose or a store that has become slow. Ticks and events are jobs as well: while a group does not keep up, each tick of `LoopConfig.Every` and each `Event` adds one job to its list.
@@ -320,12 +326,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:41-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
 
-### 2026-11-20 · deviation · The audit record has no `what` for a CLI killed on an idle close
-
-- Symptom: `planning/flows/agent-turn.md` section G has the node write an audit row, and nothing else, when it kills a CLI that did not answer a close within 10 s outside a turn. `planning/contracts/storage.md` section 3 lists eight values of `what` (`delivered`, `refused`, `requested`, `approval`, `takeover`, `handback`, `merge`, `setting`), and none of them says that.
-- Cause: the list of `what` was written before that rule. The audit write takes any text as `what` and has a constant for each of the eight only (`internal/host/audit.go:6-15`); nothing kills a CLI yet.
-- Status: open. HS-15 adds the value to `storage.md` section 3 and a constant beside the others when it builds the idle close (coordinator, 2026-11-20).
-
 ### 2026-11-20 · limitation · The host gives no notice when something `host.info` shows has changed
 
 - Symptom: `planning/contracts/datachannel.md` section 7 pushes `host.info` whenever one of its fields changes. `open`, and `state`, `task` and `queued` of each AI in a group, come from the host's sessions, and the host tells nobody when one of them changes: whoever builds `host.info` can only read the session table again (`Sessions.All`, `internal/host/session.go:341`).
@@ -375,6 +375,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-20 · deviation · The audit record has no `what` for a CLI killed on an idle close
+
+- Symptom: `planning/flows/agent-turn.md` section G has the node write an audit row, and nothing else, when it kills a CLI that did not answer a close within 10 s outside a turn. `planning/contracts/storage.md` section 3 lists eight values of `what` (`delivered`, `refused`, `requested`, `approval`, `takeover`, `handback`, `merge`, `setting`), and none of them says that.
+- Cause: the list of `what` was written before that rule. The audit write takes any text as `what` and has a constant for each of the eight only (`internal/host/audit.go:6-15`); nothing kills a CLI yet.
+- Status: resolved in branch `gemini/HS-15`: `planning/contracts/storage.md` section 3 adds `killed` to `audit.what`, and `internal/host/run.go` defines `AuditKilled` and writes the row when an idle close does not finish within 10 s (`TestIdleCloseTimeoutKillsProcessAndWritesAuditOnly`).
 
 ### 2026-11-21 · bug · A missing clone folder was reported as a failed start of git
 

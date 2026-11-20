@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the session runtime, the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
 kind: reference
 ---
 
@@ -83,6 +83,17 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 - `Launch.Shim` is the command line of the MCP server for that start: `h.Shim`, then `--token` and the token. The driver writes it into the CLI's MCP configuration as it is.
 - A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
 - Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
+
+# Session runtime
+
+`run.go` provides `Runner` (`Turn` and `Answer`), registers `"runtime"` in `Attached`, defines `AuditKilled`, and exposes `(*Host).ReportSaved(ctx, saved)`.
+
+- **Per-host state.** Everything the runtime remembers lives in `Part[runtimePart](h)` (`procs`, `closing`, `starting`, slot waiters, jump pre-emption records, latest window usage, `LoginInvalid` overlay state, `PathChanged` cancellation functions, and queued startup crash reports). No package-level state is shared across hosts, so tests run independent hosts in one process.
+- **Lifecycle and C-6.** `Runner.Turn` wakes a `dormant` session (or resumes a `takeover` session on `HandbackTurn`) by starting its driver with `Launch` (`Folder`, `Session`, `Level`, `Shim` with an `Admit` token, `Instructions`, `RepoConfig`, `ToolTimeout`), stores the reported CLI session id on `Ready`, writes the turn, and reports `TurnBegan` and every `Process.Events()` event in order through `h.Report`. Every switch waits for the previous process's `Events()` channel to close and forgets its token before starting the next process or marking the session `dormant`.
+- **Dormancy, `max_open` and timeouts.** `TurnEnded` moves the session to `waiting`, arms the `idle_minutes` timer (default 15), reports `member status`, and calls `Deliver` (or continues a jump-interrupted session). Waking a `dormant` session at `max_open` (default 4) closes the open `waiting` session with the earliest `LastActive` first, or waits until an active session frees a slot. A close or interrupt unanswered within 10 s cancels `Start`'s context to kill the process tree: outside a turn that records `AuditKilled` (`what = "killed"`) and nothing else; during a turn the exit is a crash (`turn_interrupted` with reason `crash`, plus `task fail` in a task session).
+- **Failed resume and `jump`.** On `NoSession` during a resume, the runtime closes the failed process, clears `CLISession`, composes `ReplacedTurn`, starts a fresh session in the same folder, and reports `session_replaced`. On `turn.Jump`, the runtime interrupts any running turn of that AI in the group, sends `task preempted` when interrupting a different task session, runs the jump turn, and afterwards sends `task resume` (when pre-empted) and gives the interrupted session its `ContinueTurn`.
+- **Lock order.** `runtimePart.mu` is a leaf lock: nothing called while holding it acquires `Sessions`, `Rows`, `Host`, `Store`, `Driver`, `Process` or hook/listener locks.
+- **One reader per channel.** Every channel has a single named reader: `Process.Events()` is read only by `runProcessLoop`; `Home.PathChanged()` is read only by `watchHomePath`; `liveProc.turnSent` is read only by `runProcessLoop`; `liveProc.turnDone` is read only by `interruptProcess` (or `writeTurnToWaiting` on write failure); `liveProc.loopDone` is read only by `stopProcess` (or `deliverInitialTurn` on initial write failure); each waiter channel in `runtimePart.waiters` is created for and read by one `waitSignal` call.
 
 # Host test CLIs
 
