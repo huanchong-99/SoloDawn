@@ -322,6 +322,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-21 · bug · A missing clone folder was reported as a failed start of git
+
+- Symptom: on Windows CI, `TestWorkspaceGitFailures` failed at `internal/host/workspace_test.go:552`: the error of a command in a missing clone folder was not `fs.ErrNotExist`. On macOS the same error read `fork/exec /usr/bin/git: no such file or directory`, naming git instead of the folder.
+- Cause: the new runner sets `SysProcAttr` (`internal/host/command_unix.go:13`, `internal/host/command_windows.go:16`), and `os.StartProcess` checks the working folder only when `SysProcAttr` is nil (Go `src/os/exec_posix.go:30`). The start then failed in the OS: on Unix with ENOENT from the child's chdir, on Windows with `ERROR_DIRECTORY` ("The directory name is invalid"), which `syscall.Errno.Is` does not map to `fs.ErrNotExist`.
+- Status: resolved in branch `fix/host-workspace-review`: `runInput` checks the folder itself before it starts the command (`internal/host/command.go:43`), so the error is `stat <folder>: …` with `fs.ErrNotExist` on every system. Test: `TestCommandInAMissingFolder`.
+
 ### 2026-11-20 · bug · Crash recovery of the host's worktrees decided on the folder alone
 
 - Symptom: the independent review of `internal/host` reproduced four states. (a) A SIGKILL of `worktree add -b` during checkout, held there by a slow smudge filter, left a folder with only `.git` and `.gitattributes`, locked `initializing`; `CreateTaskWorkspace` reused it, `git status` there showed every file staged as deleted, and `RemoveTaskWorkspace(TaskCancelled)` failed with "cannot remove a locked working tree". (b) After `add -b` failed past the branch's creation, every retry failed with "a branch named 'task/1-x' already exists". (c) A kill inside `worktree remove` left "missing but already registered worktree" for good, and a half-deleted folder without `.git` was returned as the task's folder. (d) After a killed clone, `EnsureGroupWorkspace` accepted an empty `repo/`, and every later command failed with "not a git repository".

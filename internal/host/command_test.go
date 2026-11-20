@@ -1,6 +1,9 @@
 package host
 
 import (
+	"errors"
+	"io/fs"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -30,5 +33,17 @@ func TestCommandLimits(t *testing.T) {
 func TestCommandWaitDelayDefault(t *testing.T) {
 	if commandWaitDelay != 10*time.Second {
 		t.Fatalf("wait delay %v, want 10s", commandWaitDelay)
+	}
+}
+
+// A missing folder is reported as such on every system. Once SysProcAttr is
+// set, os/exec skips its own check of the folder, and Windows would say only
+// "The directory name is invalid", which is not fs.ErrNotExist.
+func TestCommandInAMissingFolder(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing")
+	_, _, err := runIn(t.Context(), dir, "git", "status")
+	pathErr, ok := errors.AsType[*fs.PathError](err)
+	if !ok || pathErr.Op != "stat" || pathErr.Path != dir || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("got %#v, want stat %s: not exist", err, dir)
 	}
 }

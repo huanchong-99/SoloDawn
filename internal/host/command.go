@@ -37,6 +37,12 @@ func runInput(ctx context.Context, dir string, stdin io.Reader, name string, arg
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), noPrompt...)
 	if dir != "" {
+		// With SysProcAttr set, os.StartProcess no longer checks the folder,
+		// and Windows reports a missing one only as "The directory name is
+		// invalid"; the check here names the folder on every system.
+		if _, err := os.Stat(dir); err != nil {
+			return "", "", err
+		}
 		// exec sets PWD itself only when it builds the environment.
 		cmd.Env = append(cmd.Env, "PWD="+dir)
 	}
