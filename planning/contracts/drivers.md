@@ -24,6 +24,14 @@ The node always passes permission and sandbox settings explicitly instead
 of inheriting the user's defaults. Step 1 passes no model: each CLI uses its
 own default model.
 
+**Session ids.** A session row has no CLI session id until the CLI's first
+start for it (`cli_session` is `NULL`, `contracts/storage.md` section 3).
+Claude Code takes its id from the node: at the first start the node makes a
+UUID and passes it with `--session-id`. Codex issues the thread id itself.
+In both cases the node stores the id once that start has reported it, and a
+start with a stored id is a resume. A first start that fails before then
+leaves no id, and the next start is a first start again.
+
 ### 1.1 Claude Code, structured
 
 ```
