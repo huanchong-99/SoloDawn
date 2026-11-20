@@ -121,14 +121,24 @@ A client tells a success from an error by the presence of `err`, never by
 ## 4. Sizes
 
 - A `ctl` message is at most 60 KiB `[verified]`: in spike S-1 a pion node
-  and each of the three browser engines exchanged one 61,440-byte text
-  message, over UDP, over ICE-TCP and through the relay.
-- A row is at most 16 KiB as JSON text. The home is the only writer of
-  rows: it answers `bad_request` to a command that would write a larger
-  row, or would make a row grow beyond that (a decided card holds the
-  signed `act`; a task row holds the text of the last message of its
-  thread).
-- That one number is enough for what a home sends. A `rows` or `fetched`
+  exchanged one 61,440-byte text message with each of Chromium, Firefox
+  and WPE WebKit on Linux, over UDP, over ICE-TCP and through the relay.
+- A row is at most 16 KiB: the UTF-8 bytes of its JSON as the home encodes
+  it, without HTML escaping (in Go, `SetEscapeHTML(false)`), so that `<`,
+  `>` and `&` count one byte each, as a browser counts them. Nodes encode
+  payloads the same way. The home is the only writer of rows: it answers
+  `bad_request` to a command that would write a larger row, and the
+  message of that error names the limit and the size the row would have
+  had.
+- A card is written smaller, so that it can always be decided: the row of
+  a message that has a `state` is at most 12 KiB when it is created. A
+  decision adds less than 4 KiB, because the `text` of an `act` is at
+  most 1 KiB (`contracts/messages.md` section 3).
+- Nothing else makes a row outgrow its limit later. What a task row shows
+  of its thread's last message is a short preview (`contracts/rows.md`
+  section 4), and what an approval card shows of a long request is its
+  beginning (`contracts/messages.md` 2.3).
+- These numbers are enough for what a home sends. A `rows` or `fetched`
   frame always has room for a row. An inbox item
   (`contracts/datachannel.md` section 6) carries at most one message row,
   one task row and one `cause`, and a `cause` is an envelope that already

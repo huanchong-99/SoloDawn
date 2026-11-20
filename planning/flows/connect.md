@@ -17,7 +17,9 @@ answering node; RV, any signalling path.
    A node that offers uses UDP sockets of its own for this connection,
    never its fixed port (section 5.1 there).
 3. N receives the first copy, checks the envelope
-   (`contracts/envelope.md` section 3) and creates its peer connection. It
+   (`contracts/envelope.md` section 3), closes the inbound connection it
+   still holds from C's device unless the offer is a probe
+   (`contracts/rendezvous.md` 2.3), and creates its peer connection. It
    sends its signed `answer` on every path on which a copy of that offer
    arrives. C uses the first copy of the answer.
 4. Both sides send candidates as signed `ice` payloads, each on every path.
@@ -49,7 +51,7 @@ answering node; RV, any signalling path.
    There is no separate path for a local network. Chromium and Firefox
    give a `.local` name instead of their host address, so the node sees
    them as peer-reflexive; Chromium hides its own address in its
-   statistics, and WebKit hides both `[verified, S-1]`. "Both ends are
+   statistics, and WPE WebKit hides both `[verified, S-1]`. "Both ends are
    private host addresses" cannot be told on both sides. Nothing depends
    on it either: a local network is a direct path with a short round-trip
    time.
@@ -84,11 +86,10 @@ answering node; RV, any signalling path.
 14. If the probe fails, nothing changes; the relayed connection was never
     touched. C waits for the next interval.
 
-A relayed connection may also find a direct pair by itself: with the
-direct path back, Chromium and WebKit moved within 5 seconds and Firefox
-did not in 30 `[verified, S-1]`. Each side therefore classifies again
-whenever its stack selects another pair, and C stops probing as soon as its
-path is `direct`.
+A relayed connection may also find a direct pair by itself; some browsers
+do and one does not (`contracts/rendezvous.md` section 5). Each side
+therefore classifies again whenever its stack selects another pair, and C
+stops probing as soon as its path is `direct`.
 
 Probing happens only while relayed. A connection that is already direct is
 not probed for a "more direct" path; ICE chose the best pair when it was

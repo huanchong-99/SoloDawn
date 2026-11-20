@@ -81,13 +81,13 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   Level 2 limits what the AI itself does. The project's own check commands
   run outside the sandbox; the product says so where levels are chosen
   (Q-19).
-- **R-41** `[S1]` Level 2 limits what the AI changes and where it connects,
-  not what it reads; no level limits reading (Q-25). The AI works in the
-  workspace without asking; a CLI may also keep a temporary folder of its
-  own writable. Any other change outside the workspace, and any use of
-  the network (installing software, pushing code), is stopped by the CLI
-  and happens only after the AI has asked through the CLI and the owner
-  has approved the card. As settled by the coordinator:
+- **R-41** `[S1]` At level 2 the AI changes files in the workspace without
+  asking. What reaches further (a change outside the workspace, or the
+  network: installing software, pushing code) is meant to happen only
+  after the AI has asked through its CLI and the owner has approved the
+  card. Level 2 does not promise to limit reading, and Codex reads
+  anywhere at level 1 too. What each CLI was measured to confine, and what
+  is not shown yet, is in `contracts/drivers.md` section 1 (Q-25). As settled:
   - pushing the task's own branch needs no approval, and the node itself
     does it and opens the pull request (Q-10, Q-16); pushing any other
     branch, or force-pushing, needs approval;

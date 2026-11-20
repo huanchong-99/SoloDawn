@@ -127,6 +127,7 @@ does not.
 | `wait.kind` | while `queued`: `depends`; while `active`: `approval`, `decision`, `reviewer`, `conflict`; while `paused`: `manual`, `rounds`, `preempted` |
 | `failures` | consecutive failures (R-63) |
 | `thread.rounds` | AI-to-AI exchanges since the last human message in the thread (R-60) |
+| `thread.last.text` | a preview: at most the first 200 characters of that message's text. A long message is cut here, never refused because of it |
 | `stats.ended` | the time the task finished, or `null` |
 
 Optional:
@@ -172,7 +173,7 @@ What the mock-up badges map to:
 | `thread` | task id, or `null` for a main-line message |
 | `main` | `true` if it also appears in the main line (cards raised from a thread) |
 | `by` | member id, or `"system"` for rows written by the home |
-| `text` | plain text with Markdown code spans; `""` when the message is only a card. Its length is bounded by the size of the row (`contracts/conventions.md` section 4): about 7 KiB of ordinary text, because the row holds it twice, once inside `env` |
+| `text` | plain text with Markdown code spans; `""` when the message is only a card. How long it can be is below |
 | `mentions` | member ids |
 | `re` | the message this one answers, or `null` |
 | `body` | always an object, fixed after creation; its shape depends on `kind`, and it is `{}` for kinds without one |
@@ -183,6 +184,17 @@ Optional: `env`, absent on rows written by the home.
 
 The kinds, the body of each, and the states of cards are in
 `contracts/messages.md`.
+
+**How long a message can be.** The limit is that of the row
+(`contracts/conventions.md` section 4), and the row holds the text twice:
+as `text`, and inside `env.p`, where it is escaped once more. Counted in
+the row, an ASCII character costs 2 bytes, a line break 5, a quote or a
+backslash 6, a Chinese character 6; the rest of the row takes about 0.8
+KiB. That is about 7,700 characters of plain English, about 2,500 Chinese
+characters, and 5.5 to 7 KiB of source code, less the more quotes it has
+(2.5 KiB if it were nothing but quotes). A client estimates the row by
+this rule and tells the writer before sending. The first version accepts
+this limit (`risks.md` K-22).
 
 ## 6. `note`
 

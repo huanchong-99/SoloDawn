@@ -57,24 +57,25 @@ claude -p --verbose
   `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"…"}]}}`.
 - A turn ends with an event of `type` `result`; usage is read from it, and
   the rate-limit window from the `rate_limit_event` of each turn.
-- Interrupt: a `control_request` with subtype `interrupt` on stdin. The CLI
-  answers with a `control_response` and ends the turn with a `result` of
-  subtype `error_during_execution`; the next turn works in the same
-  process. It is sent when `system/init` lists a capability whose name
-  starts with `interrupt_` (2.1.311 lists `interrupt_receipt_v1` and three
-  more, and no plain `interrupt`); otherwise the node closes stdin, waits
-  for exit, and starts again with `--resume`.
+- Interrupt: a `control_request` with subtype `interrupt` on stdin, always
+  sent. The CLI answers with a `control_response` and ends the turn with a
+  `result` of subtype `error_during_execution`; the next turn works in the
+  same process.
 - Close: close stdin and wait for exit (observed 0.6 to 1.2 s).
 
-| Level | Flags | What it gives `[verified]` |
+| Level | Flags | What was measured |
 | --- | --- | --- |
-| 1 | `--permission-mode default --tools Read,Glob,Grep`; `approve` answers deny. (`default` is accepted and reported by `system/init`, though `--help` of 2.1.311 no longer lists it.) | the tool set is those three and the node's tools: no Write, no Bash. Reading inside the folder needs no request; reading outside it reaches `approve` and is denied |
-| 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true; everything else reaches `approve`. Native Windows, where the CLI has no sandbox: open until spike S-5 (`risks.md` Q-4) | file tools: inside the folder without asking, outside it through `approve`. Sandboxed Bash: writes in the folder and in the sandbox's own temp folder, which cannot be closed; **reads anywhere**; the network is blocked with no request and no event, and the command waits for its own timeout |
-| 3 | `--permission-mode bypassPermissions`; in the terminal also `--settings '{"skipDangerousModePermissionPrompt":true}'`, without which the terminal asks the owner to accept the mode and stores the answer in the owner's configuration | no requests |
+| 1 | `--permission-mode default --tools Read,Glob,Grep`; `approve` answers deny. (`default` is accepted and reported by `system/init`, though `--help` of 2.1.311 no longer lists it.) | `[verified]` the tool set is those three and the node's tools: no Write, no Bash. Reading inside the folder needs no request; reading outside it reaches `approve` and is denied |
+| 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true; everything else reaches `approve`. Native Windows, where the CLI has no sandbox: open until spike S-5 (`risks.md` Q-4) | `[verified]` file tools: inside the folder without asking, outside it through `approve`. Sandboxed Bash: a write inside the folder works, and so does one in the sandbox's own temp folder, which cannot be closed; a write to a folder named in `sandbox.filesystem.denyWrite` is refused; **reads work anywhere**; the network is blocked with no request and no event, and the command waits for its own timeout. `[unverified]` that a Bash write anywhere else outside the folder is refused: the spike's folder lay inside that temp folder, and the only evidence is the sandbox's debug line `write: denyAllExcept` |
+| 3 | `--permission-mode bypassPermissions`; in the terminal also `--settings '{"skipDangerousModePermissionPrompt":true}'`, without which the terminal asks the owner to accept the mode and stores the answer in the owner's configuration | `[verified]` no requests |
 
 `[unverified]` That a command the model asks to run outside the sandbox
-reaches `approve`. It is how a network action would become a card at level
-2 (`risks.md` Q-25).
+reaches `approve`. R-41 rests on it: it is how an action that needs the
+network becomes a card at level 2 (`risks.md` Q-25). The `live` part of
+acceptance test A4.1 shows it, and backend task B-17 runs that part first.
+If such a command turns out to run without a request, the node turns the
+sandbox setting `allowUnsandboxedCommands` off `[documented]`, and an
+action that needs the network is then possible only at level 3.
 
 ### 1.2 Codex, structured
 
@@ -89,10 +90,10 @@ codex app-server
 
 - `default_tools_approval_mode="approve"`: without it a call of the node's
   own tools needs an approval, and under `approvalPolicy: never` fails.
-- `tool_timeout_sec`: Codex ends a tool call after 300 seconds by default,
-  and progress notifications do not extend that; with 900 a call of 600
-  seconds completed. The node sets it to the group's `limits.turn_minutes`
-  in seconds, so that the turn limit is what ends a long call.
+- `tool_timeout_sec`: without it Codex ends a long tool call
+  (`contracts/mcp-tools.md` section 1). The node sets it to the group's
+  `limits.turn_minutes` in seconds, so that the turn limit is what ends a
+  long call.
 - `notify=[]` keeps the owner's own notification program from running for
   the node's sessions (it ran in the spike).
 
@@ -158,9 +159,9 @@ codex resume <thread id> --no-alt-screen --no-daemon -C <folder>
 
 - The level, the setting sources and the MCP configuration are those of the
   structured start, without the permission prompt tool: in the terminal the
-  CLI asks the owner itself. On both CLIs, at levels 1, 2 and 3, one
-  session went from structured to the terminal and back with its history
-  intact, and the level held.
+  CLI asks the owner itself (`flows/takeover.md` F for what was shown).
+  At level 1 Codex keeps its shell in the terminal too, so the
+  secretary's terminal on Codex can read and cannot write.
 - The MCP configuration of an interactive start carries a token of its own
   kind, for which the node does not list `approve`: nothing names it as
   the permission prompt tool there, and Claude Code would show it to the

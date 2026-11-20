@@ -19,8 +19,9 @@ Conventions:
 - A result is one text block containing JSON. A failure is a tool error
   whose text is `<code>: <sentence>`, with the codes of
   `contracts/datachannel.md` section 9.
-- A text argument that would make a row too large fails with `bad_request`
-  (`contracts/conventions.md` section 4).
+- A text argument that would make a row too large fails with
+  `bad_request`, and the error text names the limit and the size the row
+  would have had (`contracts/conventions.md` section 4).
 - Each tool maps to one command or one read on the home. The node adds the
   signature and one check: text that an AI sends to the group is refused
   with `secret` when it matches the outbound secret patterns
@@ -54,11 +55,12 @@ Notes:
 - `ask` returns within `limits.ask_wait_s` (45 seconds) in every case.
 - `run_checks` may run for a long time, and the call stays open until the
   checks end. Claude Code kept a call of 600 seconds in the foreground,
-  with or without progress notifications; Codex ends a call after 300
-  seconds unless `tool_timeout_sec` is set, and ignores progress
-  (`contracts/drivers.md` 1.2) `[verified]`. So the node sends no progress
-  notifications, and there is no "pending" result. Calls longer than 600
-  seconds are `[unverified]` on both; the turn time limit ends them.
+  with or without progress notifications. Codex ended a call at 300
+  seconds whether or not progress was sent, and let one of 600 seconds
+  complete with `tool_timeout_sec` set to 900 `[verified]`. So the node
+  sets that (`contracts/drivers.md` 1.2), sends no progress notifications,
+  and has no "pending" result. Calls longer than 600 seconds are
+  `[unverified]` on both; the turn time limit ends them.
 - `submit_task` fails with `conflict` if the worktree has uncommitted
   changes or the last `run_checks` did not pass on the head commit.
 - A task session at level 1 is not offered `push_branch`, `run_checks` or

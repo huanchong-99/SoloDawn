@@ -41,8 +41,9 @@ always about one commit: the one that was submitted.
    push while working it calls `push_branch`: NA pushes the task's own
    branch, never forced. No approval is involved (R-41). A `git push` that A
    runs by itself is like any other command that needs the network: at
-   level 2 the CLI's sandbox blocks it, and a card appears when the AI
-   then asks through its CLI (`flows/approval.md`; `risks.md` Q-25).
+   level 2 the CLI's sandbox blocks it. That a card appears when the AI
+   then asks through its CLI is `[unverified]` on Claude Code
+   (`contracts/drivers.md` 1.1; `risks.md` Q-25).
 9. A calls `run_checks`. NA refuses if the worktree has uncommitted changes:
    checks are about a commit. Otherwise NA runs, in the worktree, every
    command in `group.checks` and then the universal hard checks, and reports

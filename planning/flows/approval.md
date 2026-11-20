@@ -36,17 +36,17 @@ which fields of the card is in `contracts/messages.md` 2.3.
    justification (R-137). On a match N answers "deny" with the text "This
    request contains a secret and cannot be shown for approval", writes an
    audit row, and stops here. No card.
-5. If the request is too long for a card (`contracts/conventions.md`
-   section 4), N answers "deny" with the text "This request is too long to
-   be shown for approval", writes an audit row, and stops here. No card.
-   Otherwise N writes an approval record: the id of the card it is about to
-   post, the task, the tool, and the SHA-256 of the input exactly as the
-   CLI sent it. For Claude Code that is `input`; for a Codex command its
+5. N writes an approval record: the id of the card it is about to post,
+   the task, the tool, and the SHA-256 of the input exactly as the CLI
+   sent it. For Claude Code that is `input`; for a Codex command its
    `command` and `cwd`; for a Codex file change the `changes` of its item.
    The request's own id is left out: it is new on every attempt. Then N
    sends `post` with `kind: approval` and that id to H, signed for the AI,
-   with the tool, the request text as received, the justification, the
-   kind of request, and the list of approvers. Audit row `requested`.
+   with the tool, the request text, the justification, the kind of request,
+   and the list of approvers. Audit row `requested`. A request too long
+   for a card is not refused: the card carries its beginning and says how
+   long the whole is (`contracts/messages.md` 2.3). The record, and so the
+   owner's decision, is about the whole request.
 6. H stores the card with `state.status = pending`, sets the task's wait to
    `approval`, and pushes the rows. The card appears in the main line under
    the secretary's name and mentions the approvers; the thread shows the
@@ -54,9 +54,7 @@ which fields of the card is in `contracts/messages.md` 2.3.
    list it under "waiting for you"; others see it greyed out with the name
    of who can decide.
 7. N keeps the CLI's request open for up to `limits.approval_wait_s`
-   (default 600 seconds). Both CLIs kept a request open for 630 seconds and
-   then honoured the answer, Claude Code with and without progress
-   notifications `[verified]`; N sends none.
+   (default 600 seconds). It sends no progress notifications (section H).
 
 ## C. Decided while the CLI is still waiting
 
@@ -108,9 +106,13 @@ text, who decided (device id), result.
 
 | Level | The CLI is started with | Requests |
 | --- | --- | --- |
-| 1 read only | no write tools. Claude Code has no execute tool either; Codex keeps a shell that can read and cannot write | denied by N without a card (Codex makes none) |
-| 2 workspace | edits inside the task's worktree accepted; commands run in the CLI's sandbox, which confines writes and closes the network, but does not confine reads; what the CLI then asks for becomes a card | card, owner decides |
+| 1 read only | settings that allow no change | denied by N without a card |
+| 2 workspace | the CLI's sandbox and permission rules for the task's worktree; what the CLI asks for becomes a card | card, owner decides |
 | 3 unrestricted | the CLI's own "do not ask" mode | none |
+
+What each of these settings was measured to confine on each CLI, and what
+is not shown yet, is in `contracts/drivers.md` 1.1 and 1.2; that is the one
+place for it.
 
 - The same settings apply when the session is taken over in the interactive
   CLI, where the CLI asks the owner in the terminal instead of through a
@@ -128,17 +130,17 @@ text, who decided (device id), result.
 
 ## H. What the spikes showed, and what is still open
 
-- `[verified]` Both CLIs let a request stay open for 630 seconds (S-2,
-  S-3); longer was not tried. Claude Code's 120-second rule for MCP tools
-  does not apply to `approve`. `approval_wait_s` stays at 600.
+- `[verified]` Both CLIs let a request stay open for 630 seconds and then
+  honoured the answer (S-2, S-3), Claude Code with and without progress
+  notifications; longer was not tried. Claude Code's 120-second rule for
+  MCP tools does not apply to `approve`. `approval_wait_s` stays at 600.
 - `[verified]` The input of a retried request was byte-identical, in two
   of two tries on each CLI. The model writes it again each time, so this is
   likely and not certain; when it differs, step 3 does not recognise the
   retry and the request produces a new card.
-- `[verified]` What each level really confines is in `contracts/drivers.md`
-  1.1 and 1.2. Two things differ from the table above as a person would
-  read it: no level confines reads, and at level 2 a blocked network
-  action produces no request by itself (`risks.md` Q-25).
+- `[unverified]` That a blocked action at level 2 becomes a request when
+  the AI asks to run it outside the sandbox (`contracts/drivers.md` 1.1;
+  `risks.md` Q-25).
 - `[unverified]` Whether level 2 can be expressed on Claude Code for native
   Windows, where its sandbox is not available. The coordinator decides after
   spike S-5 (`risks.md` Q-4).

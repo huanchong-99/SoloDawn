@@ -148,7 +148,8 @@ These tests need a task session, so they follow the first slice of M5
   with the exact command. Approving from a second device lets it run. The
   audit shows the request and the decision with the deciding device. With
   the real CLIs (`live`): a command that the sandbox blocks for want of
-  the network becomes a card once the AI asks through its CLI (Q-25).
+  the network becomes a card once the AI asks through its CLI. R-41 rests
+  on this; `contracts/drivers.md` 1.1 says what changes if it fails.
 - **A4.2** Denying tells the AI; the command does not run.
 - **A4.3** With the wait set to 20 seconds and no answer, the turn ends and
   the task waits. The host is restarted. Approving afterwards makes the AI

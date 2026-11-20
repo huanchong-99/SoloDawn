@@ -80,13 +80,10 @@ Used for a phone, a second browser, or after site data was cleared.
 `solodawn open` on a node does the same for the local browser in one step: it
 creates a secret and opens `http://localhost:47800/#pair=<secret>`.
 
-A browser that has lost its key comes back this way too. Safari deletes a
-site's storage, the key with it, after seven days of use without a visit,
-unless the app was added to the home screen (`risks.md` K-20). Such a
-browser has no identity left: it shows the onboarding page and is paired as
-a new device, and the owner revokes its old entry (section D). After
-pairing, the client asks the browser to keep its storage
-(`navigator.storage.persist()`).
+A browser that has lost its key comes back this way too (`risks.md` K-20
+says how a key is lost and what the client does against it). It has no
+identity left: it shows the onboarding page and is paired as a new device,
+and the owner revokes its old entry (section D).
 
 ## D. Revoking a device
 

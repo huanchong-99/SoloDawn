@@ -104,6 +104,11 @@ Rules:
 - **Acceptance.** The receiver applies an offer only if the envelope passes
   the checks in `contracts/envelope.md` section 3. Anything else is dropped
   without an answer.
+- **One inbound connection per device.** When a node applies an offer that
+  is not a probe, it first closes the inbound connection it still holds
+  from that device, if any. A probe is the exception: it lives beside the
+  connection it is meant to replace, which is closed when the probe's
+  `hello` arrives (`flows/connect.md` B). Section 5.1, point 4, says why.
 - The offer creates one data channel labelled `ctl`, ordered and reliable.
 
 ## 3. Relay
@@ -150,7 +155,8 @@ rendezvous a browser can use: it is the same handler. See `risks.md` K-2.
 ## 5. ICE configuration
 
 Node (pion). `[verified, S-1]` marks what spike S-1 showed with pion 4.2
-and the three browser engines on Linux; port mapping waits for spike S-8.
+and with Chromium, Firefox and WPE WebKit on Linux. WPE WebKit is not
+Safari. Port mapping waits for spike S-8.
 
 - **Answering.** UDP on one fixed port (default 47800), shared by every
   connection the node answers (`SetICEUDPMux`), and an ICE-TCP passive
@@ -171,7 +177,7 @@ and the three browser engines on Linux; port mapping waits for spike S-8.
   address as its checks showed it (peer-reflexive) `[verified, S-1]`.
 - A `probe` connection is created with STUN only, no TURN. The probe
   stays: when a direct path returned under a live relayed connection,
-  Chromium and WebKit moved to it by themselves within 5 seconds and
+  Chromium and WPE WebKit moved to it by themselves within 5 seconds and
   Firefox was still relayed after 30, with pion's opt-in renomination on
   or off `[verified, S-1]`.
 
@@ -199,6 +205,15 @@ and the three browser engines on Linux; port mapping waits for spike S-8.
    destination. That covers the two directions between two nodes, a probe
    beside the relayed connection it replaces, and a reconnect while the
    peer still holds the old connection. No message changes.
+   One case is left. A node that restarts may be given the port it had
+   before, and a NAT may give a new socket the port it gave the old one,
+   while the answering node still holds the old connection: the shared
+   socket then hands the new connection's packets to the old one, and the
+   new one is late by 25 to 30 seconds, until the old one times out. That
+   is why an offer that is not a probe closes the device's old inbound
+   connection at once (2.3). A probe needs no such rule: its sockets are
+   opened while those of the connection it replaces are still open, so
+   their ports, and their mappings on a NAT, differ.
 5. **Not chosen: one connection per pair of nodes, used both ways.** It
    changes who owns a connection. Today the side that offers is the
    client: it sends `hello`, reads, sends commands, reconnects and probes;
@@ -212,9 +227,9 @@ and the three browser engines on Linux; port mapping waits for spike S-8.
    to map; and it was not measured.
 7. **Hole punching** is unchanged in kind: the answering side offers the
    candidates of its fixed port, the offering side those of its new
-   sockets. That is what a browser does, and what S-1 measured with three
-   engines. Between two nodes behind real NATs it is `[unverified]`: the
-   bench of S-1 had no NAT.
+   sockets. That is what a browser does, and what S-1 measured with the
+   three browsers of section 5. Between two nodes behind real NATs it is
+   `[unverified]`: the bench of S-1 had no NAT.
 8. **Port mapping.** The mapping of 47800/udp now helps only the
    connections a node answers; a node that offers is not reached on its
    mapped UDP port. When the offering node is the one with an open port,
@@ -224,7 +239,7 @@ and the three browser engines on Linux; port mapping waits for spike S-8.
 9. **Remembered addresses** are signalling addresses and do not change.
 10. **The relay-free probe** is an offered connection: it has sockets of
     its own and cannot collide with the connection it replaces. S-1 showed
-    both open together and echoing, with each engine.
+    both open together and echoing, with each of those browsers.
 
 Browser: `RTCPeerConnection` with the `ice` list from `ready`; a `probe`
 connection drops the TURN entry.
