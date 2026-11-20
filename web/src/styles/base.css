@@ -238,8 +238,11 @@ kbd,
     margin-bottom: var(--sp-3);
     border-radius: var(--r-md);
   }
-  .logo:hover .logo-mark {
-    transform: rotate(-8deg) scale(1.06);
+  /* The mark turns to the pointer, unless the system asks for reduced motion. */
+  @media (prefers-reduced-motion: no-preference) {
+    .logo:hover .logo-mark {
+      transform: rotate(-8deg) scale(1.06);
+    }
   }
 }
 .tabs {
@@ -426,9 +429,12 @@ kbd,
       opacity var(--dur-1) var(--ease),
       transform var(--dur-2) var(--ease-out);
   }
-  &:active {
-    transform: scale(0.96);
-    transition: transform var(--dur-1) var(--ease);
+  /* Under reduced motion a press does not sink the part: the layer behind it shows the press. */
+  @media (prefers-reduced-motion: no-preference) {
+    &:active {
+      transform: scale(0.96);
+      transition: transform var(--dur-1) var(--ease);
+    }
   }
   /* The outline stays, unseen, for forced colours, which show it and not the ring's colour. */
   &:focus-visible {

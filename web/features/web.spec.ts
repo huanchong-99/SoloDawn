@@ -278,6 +278,47 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     });
   });
 
+  Scenario(
+    'The logo turns to the pointer and a press sinks a button',
+    ({ Given, When, Then, And }) => {
+      let parts: Awaited<ReturnType<typeof motion.underPointer>>;
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the person opens the client', () => motion.open());
+      When(
+        'the person points at the logo and then holds a button of the top bar down',
+        async () => {
+          parts = await motion.underPointer();
+        },
+      );
+      Then('the logo is turned, and the button is smaller over its press layer', () => {
+        expect(parts).toEqual({
+          logo: 'matrix(1.04968, -0.147523, 0.147523, 1.04968, 0, 0)',
+          button: 'matrix(0.96, 0, 0, 0.96, 0, 0)',
+          layer: '1',
+        });
+      });
+    },
+  );
+
+  Scenario(
+    'Nothing turns or sinks under the pointer when the system asks for reduced motion',
+    ({ Given, When, Then, And }) => {
+      let parts: Awaited<ReturnType<typeof motion.underPointer>>;
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the system asks for reduced motion', motion.reduce);
+      And('the person opens the client', () => motion.open());
+      When(
+        'the person points at the logo and then holds a button of the top bar down',
+        async () => {
+          parts = await motion.underPointer();
+        },
+      );
+      Then('the logo and the button are as they were, the button over its press layer', () => {
+        expect(parts).toEqual({ logo: 'none', button: 'none', layer: '1' });
+      });
+    },
+  );
+
   Scenario('No part of an arriving page waits unseen', ({ Given, When, Then, And }) => {
     let parts: Awaited<ReturnType<typeof motion.waitingParts>>;
     Given('the browser supports Ed25519 in WebCrypto', motion.newPage);

@@ -115,6 +115,26 @@ export async function focusCues(tabs: number) {
   );
 }
 
+// Hover the logo, then hold a button down, and read each once it has come to rest.
+export async function underPointer() {
+  const atRest = (selector: string) =>
+    page
+      .locator(selector)
+      .first()
+      .evaluate(async (part) => {
+        await Promise.all(part.getAnimations({ subtree: true }).map((a) => a.finished));
+        return [getComputedStyle(part).transform, getComputedStyle(part, '::before').opacity];
+      });
+  await page.locator('.logo').hover();
+  const [logo] = await atRest('.logo-mark');
+  await page.locator('.bar .icon-btn').first().hover();
+  await page.mouse.down();
+  const [button, layer] = await atRest('.bar .icon-btn');
+  await page.mouse.move(0, 0);
+  await page.mouse.up();
+  return { logo, button, layer };
+}
+
 export async function expectMark(selector: string, items: string, index: number) {
   const offset = await page.locator(selector).evaluate(
     async (group, { items, index }) => {

@@ -87,6 +87,19 @@ Feature: Web client
     Then the button "跳到主要内容" was inside the page, outlined, when focus landed on it
     And each of the 7 parts after it had its whole ring when focus landed on it
 
+  Scenario: The logo turns to the pointer and a press sinks a button
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client
+    When the person points at the logo and then holds a button of the top bar down
+    Then the logo is turned, and the button is smaller over its press layer
+
+  Scenario: Nothing turns or sinks under the pointer when the system asks for reduced motion
+    Given the browser supports Ed25519 in WebCrypto
+    And the system asks for reduced motion
+    And the person opens the client
+    When the person points at the logo and then holds a button of the top bar down
+    Then the logo and the button are as they were, the button over its press layer
+
   Scenario: No part of an arriving page waits unseen
     Given the browser supports Ed25519 in WebCrypto
     And the person opens the client

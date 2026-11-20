@@ -127,7 +127,8 @@ development dependency, an IndexedDB for the tests.
   and fades it out over the new page: a page in a picture takes no pointer input, so `shift`
   marks the new page `data-live`, which keeps it out of the pictures, and a press during the fade
   reaches it. When the system asks for reduced motion, nothing moves: no transition, no
-  keyframes, no cross-fade, and a cross-fade under way ends at once.
+  keyframes, no cross-fade, and a cross-fade under way ends at once; the logo does not turn to
+  the pointer and a press does not sink a button, which shows the press by its layer alone.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. Shared styles are global classes in
   `src/styles/base.css`, taken from the design; a component's own layout goes in its `<style>`.
