@@ -113,8 +113,8 @@ for the groups it is home to.
 - Relay: standard TURN over UDP and over TLS on port 443, short-lived
   credentials, a per-device daily byte quota kept in memory.
 - Serves the static web client.
-- Holds no database. Restarting it loses nothing but in-memory presence and
-  quota counters.
+- Holds no database. Restarting it loses only what it holds in memory:
+  presence, pairing rooms, relay allocations and credentials, quota counters.
 
 Every node also exposes the signalling handler on its own port, so a peer
 that knows a node's address can signal to it without any server (R-133).

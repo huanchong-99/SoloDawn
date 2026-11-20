@@ -20,8 +20,8 @@ node's address needs no server at all.
 
 Port numbers are defaults and can be changed by flags.
 
-`[unverified]` Serving HTTPS and TURN-over-TLS on the same port 443 by
-choosing on the TLS server name. Spike S-6 in `steps/step-1.md`.
+`[verified, S-6]`, local certificate authority only (`risks.md` T-11):
+HTTPS and TURN-over-TLS share port 443, chosen by the TLS server name.
 
 Connections on that shared TLS port:
 

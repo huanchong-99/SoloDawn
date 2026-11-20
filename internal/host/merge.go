@@ -1,12 +1,10 @@
 package host
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,14 +146,10 @@ func (m ReviewedMerge) inspectPR(ctx context.Context) (MergeResult, error) {
 }
 
 func (m ReviewedMerge) run(ctx context.Context, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = m.Repo
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	out, stderr, err := runIn(ctx, m.Repo, name, args...)
 	if err != nil {
-		detail := strings.TrimSpace(string(out) + stderr.String())
+		detail := strings.TrimSpace(out + stderr)
 		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, detail)
 	}
-	return strings.TrimRight(string(out), "\r\n"), nil
+	return strings.TrimRight(out, "\r\n"), nil
 }

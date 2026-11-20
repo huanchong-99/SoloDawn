@@ -271,7 +271,7 @@ Unit P-4 freezes the new shapes (`contracts/conventions.md` section 5).
 | `contracts/rows.md` | section 1: the values of a team group |
 | `contracts/mcp-tools.md` | `post` with `group`; the secretary's list in `tools.json` |
 | `contracts/storage.md` | audit `what` gains `watch`; `setting` key `teams` |
-| `flows/takeover.md`, `architecture.md` | section G becomes sections 1 to 6 here; section 3: a watcher's browser to the AI's host (`ctl`, `watch:*`), a node to the home of a team group |
+| `flows/takeover.md`, `flows/agent-turn.md`, `architecture.md` | takeover section G becomes sections 1 to 6 here; agent-turn A and B step 3: the item `watch` goes to no session and is never held (section 2); architecture section 3: a watcher's browser to the AI's host (`ctl`, `watch:*`), a node to the home of a team group |
 
 ## 12. Settled by the coordinator (2026-11-20)
 
