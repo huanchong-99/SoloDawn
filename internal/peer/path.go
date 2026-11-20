@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -17,7 +18,12 @@ import (
 	"github.com/pion/stun/v4"
 )
 
-const signalLimit = 16_384 // 16 KiB
+const (
+	signalLimit = 16_384 // 16 KiB
+	// toLimit leaves room for the server's from, which is 2 bytes longer than
+	// the to it forwards (contracts/rendezvous.md section 2).
+	toLimit = 16_382
+)
 
 func encode(v any) []byte {
 	var b bytes.Buffer
@@ -50,20 +56,22 @@ type Path struct {
 	pace   pacer
 }
 
-// pacer keeps one rendezvous connection at 90 frames in any 10 seconds, well
-// below the 120 at which the server closes it (contracts/rendezvous.md
-// section 2), so that a node answering many reconnects at once stays
-// connected. A frame over the limit waits for its turn.
+// pacer keeps one rendezvous connection at 90 frames in any 11 seconds, below
+// the server's 120 in 10 (contracts/rendezvous.md section 2) in number and,
+// by a second, in time: a backlog leaves in bursts 11 seconds apart, and the
+// latency between bursts cannot bring 121 frames within the server's 10
+// seconds. So a node answering many reconnects at once stays connected. A
+// frame over the limit waits for its turn.
 type pacer struct {
 	mu   sync.Mutex // held from a frame's turn until it is written: frames queue in order
 	sent [90]time.Time
 	next int
 }
 
-// turn waits until the frame 90 places back is 10 seconds old, then counts
+// turn waits until the frame 90 places back is 11 seconds old, then counts
 // this one. A frame given up on, before or while it waits, is not counted.
 func (q *pacer) turn(ctx context.Context) error {
-	wait := time.NewTimer(time.Until(q.sent[q.next].Add(10 * time.Second)))
+	wait := time.NewTimer(time.Until(q.sent[q.next].Add(11 * time.Second)))
 	defer wait.Stop()
 	select {
 	case <-ctx.Done():
@@ -132,10 +140,14 @@ func (p *Path) read(ctx context.Context) (string, []byte, error) {
 	return frame.Type, data, err
 }
 
+// Write sends one frame of at most 16 KiB, after the frames before it in the
+// queue.
 func (p *Path) Write(ctx context.Context, frame any) error {
-	data := encode(frame)
-	if len(data) > signalLimit {
-		return errors.New("signalling frame exceeds 16 KiB")
+	return p.write(ctx, encode(frame), signalLimit)
+}
+func (p *Path) write(ctx context.Context, data []byte, limit int) error {
+	if len(data) > limit {
+		return fmt.Errorf("signalling frame exceeds %d bytes", limit)
 	}
 	p.pace.mu.Lock()
 	defer p.pace.mu.Unlock()
@@ -153,7 +165,7 @@ func (p *Path) Route() Route {
 	return Route{ID: p.id, Send: p.send, ICE: p.config.ICE}
 }
 func (p *Path) send(ctx context.Context, to string, env proto.Envelope) error {
-	return p.Write(ctx, proto.Route{Type: "to", Key: to, Env: encode(env)})
+	return p.write(ctx, encode(proto.Route{Type: "to", Key: to, Env: encode(env)}), toLimit)
 }
 
 // Serve reads this path until closure. Bad envelopes are dropped in isolation;

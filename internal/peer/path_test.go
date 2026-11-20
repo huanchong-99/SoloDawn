@@ -83,7 +83,17 @@ func TestPathFrameLimitsAndRefresh(t *testing.T) {
 	_, data, err := ws.Read(t.Context())
 	check(t, err)
 	eq(t, len(data), 16384)
-	eq(t, send(16385).Error(), "signalling frame exceeds 16 KiB")
+	eq(t, send(16385).Error(), "signalling frame exceeds 16384 bytes")
+	// A to frame is forwarded as a from 2 bytes longer, so it gets 16382.
+	base := len(encode(proto.Route{Type: "to", Key: "device", Env: encode(e)})) - len(e.Payload)
+	to := func(n int) error {
+		return p.Route().Send(t.Context(), "device", proto.Envelope{Payload: strings.Repeat("a", n-base), Key: "peer", Signature: "sig"})
+	}
+	check(t, to(16382))
+	_, data, err = ws.Read(t.Context())
+	check(t, err)
+	eq(t, len(data), 16382)
+	eq(t, to(16383).Error(), "signalling frame exceeds 16382 bytes")
 	node := newPair(t).b
 	eq(t, p.from(t.Context(), node, []byte(`{"t":"from","k":"device"}`)).Error(), "proto: a field that is always present is missing")
 	sentinel := errors.New("finish")
@@ -179,7 +189,7 @@ func TestMustStopsOnError(t *testing.T) {
 	must(errors.New("mistake"))
 }
 
-// One rendezvous connection carries at most 90 frames in any 10 seconds; the
+// One rendezvous connection carries at most 90 frames in any 11 seconds; the
 // rest wait their turn, in order, and a frame given up on takes no turn.
 func TestPathPacesFrames(t *testing.T) {
 	p, ws, err := testPath(t, challenge, ready)
@@ -197,7 +207,7 @@ func TestPathPacesFrames(t *testing.T) {
 		eq(t, p.Write(canceled, "given up"), context.Canceled)
 		time.Sleep(time.Second)
 		check(t, p.Write(context.Background(), 90))
-		eq(t, time.Since(start), 10*time.Second)
+		eq(t, time.Since(start), 11*time.Second)
 	})
 	for i := range 91 {
 		_, data, err := ws.Read(t.Context())
@@ -293,4 +303,33 @@ func TestRenewalStopsWithThePath(t *testing.T) {
 		synctest.Wait()
 		eq(t, p.pace.next, 1)
 	})
+}
+
+// A backlog leaves at most 90 frames in any 11 seconds, so no 121 consecutive
+// frames, the server's limit, span less than 11 seconds: a second of margin
+// over its 10 for the latency between the bursts.
+func TestPacedBacklogKeepsAMargin(t *testing.T) {
+	p, ws, err := testPath(t, challenge, ready)
+	check(t, err)
+	p.pace = pacer{} // auth was counted on the real clock
+	var sent []time.Time
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		for i := range 200 {
+			check(t, p.Write(context.Background(), i))
+			sent = append(sent, time.Now())
+		}
+		eq(t, []time.Duration{sent[89].Sub(start), sent[90].Sub(start), sent[179].Sub(start), sent[180].Sub(start)},
+			[]time.Duration{0, 11 * time.Second, 11 * time.Second, 22 * time.Second})
+	})
+	for i := range len(sent) - 120 {
+		if span := sent[i+120].Sub(sent[i]); span < 11*time.Second {
+			t.Fatalf("frames %d to %d span %v", i, i+120, span)
+		}
+	}
+	for i := range 200 {
+		_, data, err := ws.Read(t.Context())
+		check(t, err)
+		eq(t, string(data), fmt.Sprint(i))
+	}
 }
