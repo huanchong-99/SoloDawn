@@ -14,7 +14,7 @@ func TestServiceLoginUnit(t *testing.T) {
 	serviceOK(t, InstallService("/opt/an old installation"))
 	serviceOK(t, InstallService(`/opt/%n/$HOME/a "node"`))
 	want := "[Unit]\nDescription=SoloDawn node\n\n[Service]\n" +
-		"ExecStart=\":/opt/%%n/$HOME/a \\\"node\\\"\" node\n\n[Install]\nWantedBy=default.target\n"
+		"ExecStart=:/bin/sh -c 'exec \"$0\" node' \"/opt/%%n/$HOME/a \\\"node\\\"\"\n\n[Install]\nWantedBy=default.target\n"
 	serviceFile(t, unit, want)
 	target, err := filepath.EvalSymlinks(link)
 	serviceOK(t, err)

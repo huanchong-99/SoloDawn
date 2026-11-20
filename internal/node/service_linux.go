@@ -28,9 +28,10 @@ func InstallService(executable string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	// ':' disables environment expansion; '%%' is a literal percent in a unit.
-	command := strconv.Quote(":" + strings.ReplaceAll(executable, "%", "%%"))
-	unit := "[Unit]\nDescription=SoloDawn node\n\n[Service]\nExecStart=" + command + " node\n\n[Install]\nWantedBy=default.target\n"
+	// systemd rejects quotes even in an escaped executable name. Pass the path
+	// as an argument, never shell source. ':' and '%%' disable unit expansion.
+	pathArg := strconv.Quote(strings.ReplaceAll(executable, "%", "%%"))
+	unit := "[Unit]\nDescription=SoloDawn node\n\n[Service]\nExecStart=:/bin/sh -c 'exec \"$0\" node' " + pathArg + "\n\n[Install]\nWantedBy=default.target\n"
 	if err := os.WriteFile(path, []byte(unit), 0600); err != nil {
 		return err
 	}
