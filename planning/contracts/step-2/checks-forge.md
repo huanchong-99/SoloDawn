@@ -133,18 +133,20 @@ hand-back run no command of the group and are not gated.
 
 | # | Command, by | Allowed when | Task becomes | Items | Counters |
 | --- | --- | --- | --- | --- | --- |
-| CF-1 | `task accept` with `ok: false`, by host | `active` | wait `accept`, `who` = the owner of the assignee | — | — |
-| CF-2 | `task accept` with `ok: true`, by host | `active`, wait `accept` | wait cleared | — (the host continues itself) | — |
+| CF-1 | `task accept` with `ok: false`, by host | `active` | marked as waiting for acceptance; wait cleared, which gives `accept` with `who` = the owner of the assignee and no `msg`, unless a card comes first | — | — |
+| CF-2 | `task accept` with `ok: true`, by host | `active` | mark removed; wait cleared | — (the host continues itself) | — |
 
-- There is no `wait.msg`: nothing is a card.
 - At step `merge`, CF-1 and CF-2 change `wait` and nothing else. They are
   added to the rows that may change a task at that step
   (`contracts/task-machine.md` section 2, "point of no return").
-- Row 11 with another assignee clears a wait `accept`: the new assignee's
-  host reports its own.
-- Another wait can replace `accept` meanwhile (a card, a pause). The host
-  sends CF-2 only for a task whose row still shows wait `accept`.
-- **After acceptance** the host sends CF-2 for each such task of its AIs,
+- Row 11 with another assignee removes the mark: the new assignee's host
+  reports its own. The mark is the home's and is not on the wire.
+- **Wait order.** "Wait cleared" (`contracts/task-machine.md` section 2,
+  with `contracts/step-2/confirm.md` section 7) gives: a pending `confirm`
+  card, else the oldest pending approval, else the pending decision, else
+  `accept` while the task is marked, else `null`. A card decided before
+  acceptance thus leaves the wait `accept`; a pause keeps the mark.
+- **After acceptance** the host sends CF-2 for each task it reported,
   then: gives each session whose tool was refused one turn, with the
   header `resume · instruction` (`contracts/drivers.md` section 3) and the
   text `The owner of this computer accepted the project's commands.
@@ -202,9 +204,8 @@ arguments, each handed over as one argument whatever it holds.
 - **On Windows** the program must resolve to an `.exe` file. A `.cmd` or
   `.bat` file is started through the command interpreter, which reads
   the arguments again, so it is refused with `cli` `[unverified]`.
-- **Credentials.** A template runs as `git` and `gh` do in step 1: as the
-  owner's own user, signed in by the owner. The node sets no token and
-  reads no credential (section 8, point 1).
+- **Credentials.** A template runs as `git` and `gh` do in step 1, signed
+  in by the owner; the node sets no token and reads no credential (8.1).
 
 ## 6. Running a template
 
@@ -272,29 +273,28 @@ macOS `sandbox-exec` (deprecated by Apple) works in part; see below.
   namespaces on Ubuntu 24.04), `run_checks` runs nothing and says why.
 - **Windows** has no sandbox, a stated limit: checks run as in step 1,
   under the acceptance of section 1, and the prompt says so.
-- Not decided: whether forge templates (network, sign-in) run inside it.
+- **Forge templates run outside the sandbox**: they need the network and
+  the owner's sign-in. They are gated by acceptance (section 1) alone.
 
-## 8. Open points
+## 8. Settled points (2026-11-20)
 
 Unit P-4 freezes the shapes of sections 2 to 5; code is T2-9 (acceptance
 and the gate), T2-8 (templates) and T2-12 (sandbox).
 
-1. **Needs the coordinator.** C-11 (`architecture.md` section 1) and
-   R-137 let the node run only `git` and `gh` for the forge; a template
-   names another program. Read here as "only forge programs the owner
-   installed and signed in, through a list the owner accepted; never a
-   token or a forge API called by the node". C-11 and R-137 need that
-   widening for step 2, or D-10 cannot be built.
-2. Every group asks once per machine, also a group of one person on one
-   machine. An exception would need a signed group row.
+1. **Other forge programs.** R-137 (`product-rules.md`) and C-11
+   (`architecture.md` section 1) were widened, as D-10 cannot be built
+   otherwise: the node runs a forge program other than `git` and `gh` only
+   after the machine's owner accepted it for that group (section 3). No
+   token, no forge API called by the node; unaccepted programs forbidden.
+2. Every group asks once per machine, also a one-person group: an
+   exception would need a signed group row.
 
 ## 9. Not verified
 
 - No forge program was run. `gh pr create` and `gh pr checks` are cited
   from their documentation; for other programs, whether `open` prints a
   URL and which exit statuses `checks` gives is unknown.
-- How Go starts a program from an argument list on Windows, and what it
-  does with `.cmd` and `.bat` files.
+- How Go starts an argument list on Windows, with `.cmd` and `.bat` files.
 - That a held `merge` item and a wait `accept` at step `merge` fit every
   case of the "point of no return" rule; only the contract was read.
 - The hash was computed with Python only, not the Go node or a browser.
