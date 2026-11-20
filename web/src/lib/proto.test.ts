@@ -42,13 +42,20 @@ function usage() {
 
 type Obj = Record<string, unknown>;
 
-/** Paths to every object in an example, except opaque room data and message bodies. */
+/** Paths to every object in an example, except message bodies, which are any JSON. */
 function objects(value: unknown, path: string[] = []): string[][] {
   if (typeof value !== 'object' || value === null) return [];
   const inner = Object.entries(value)
-    .filter(([k]) => k !== 'body' && k !== 'data')
+    .filter(([k]) => k !== 'body')
     .flatMap(([k, x]) => objects(x, [...path, k]));
   return Array.isArray(value) ? inner : [path, ...inner];
+}
+
+function schemaObjects(name: string) {
+  // Room data belongs to the pairing peers and can contain arbitrary keys.
+  return objects(JSON.parse(goldens[name])).filter(
+    (path) => name !== 'rv-room' || path[0] !== 'data',
+  );
 }
 
 const at = (value: unknown, path: string[]) => path.reduce((o, k) => (o as Obj)[k], value) as Obj;
@@ -72,7 +79,7 @@ describe('wire examples', () => {
   });
 
   it.each(examples)('%s drops an unknown field in any object', (name) => {
-    for (const path of objects(JSON.parse(goldens[name]))) {
+    for (const path of schemaObjects(name)) {
       const extra = variant(name, path, (o) => (o.extra = 1));
       const read = p.decode(schemaOf[name], JSON.stringify(extra));
       expect(read, `extra field at ${path.join('.')}`).toStrictEqual(JSON.parse(goldens[name]));
@@ -83,7 +90,7 @@ describe('wire examples', () => {
 
   it.each(examples)('%s is refused without a field that Go always writes', (name) => {
     // Rows inside rows and fetched are checked through their own examples.
-    const paths = objects(JSON.parse(goldens[name])).filter((path) => path[0] !== 'rows');
+    const paths = schemaObjects(name).filter((path) => path[0] !== 'rows');
     for (const path of paths) {
       for (const key of Object.keys(at(JSON.parse(goldens[name]), path))) {
         const field = named([...path, key]);

@@ -109,7 +109,8 @@ func deviceKey(id string) ([]byte, bool) {
 	return pub, ok && len(pub) == ed25519.PublicKeySize && !weak(pub)
 }
 
-func isDevice(id string) bool {
+// IsDevice reports whether id is a canonical, non-weak device id.
+func IsDevice(id string) bool {
 	_, ok := deviceKey(id)
 	return ok
 }

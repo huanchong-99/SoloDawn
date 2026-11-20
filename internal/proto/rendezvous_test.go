@@ -8,13 +8,13 @@ import (
 
 func rendezvousGoldens(t *testing.T, envelope Envelope, pair Pair) {
 	t.Helper()
-	nonce := string(id("challenge"))
+	nonce := id("challenge")
 	sig := ed25519.Sign(browser, []byte("solodawn/rv/1\n"+nonce))
 	golden(t, "rv-challenge", Challenge{"challenge", nonce})
 	golden(t, "rv-auth", Auth{"auth", user, base64.RawURLEncoding.EncodeToString(sig)})
 	ice := []ICEServer{
 		{URLs: []string{"stun:rv.example:3478"}},
-		{[]string{"turn:rv.example:3478?transport=udp", "turns:turn.rv.example:443?transport=tcp"}, "1763603600:" + user, string(id("credential"))},
+		{[]string{"turn:rv.example:3478?transport=udp", "turns:turn.rv.example:443?transport=tcp"}, "1763603600:" + user, id("credential")},
 	}
 	golden(t, "rv-ready", ICEConfig{"ready", ice, 3600})
 	golden(t, "rv-ice-request", RVFrame{"ice"})
@@ -25,7 +25,7 @@ func rendezvousGoldens(t *testing.T, envelope Envelope, pair Pair) {
 	golden(t, "rv-offline", Offline{"offline", host})
 	golden(t, "rv-watch", Watch{"watch", []string{host}})
 	golden(t, "rv-presence", Presence{"presence", host, true})
-	const room = "b72bcb682958f09b74c20ab01435e53c"
+	const room = "23b3731de722f5b7425a41416cf5d30b"
 	golden(t, "rv-join", RoomID{"join", room})
 	golden(t, "rv-joined", RoomID{"joined", room})
 	golden(t, "rv-room", RoomData{RoomID{"room", room}, wireJSON(t, pair)})

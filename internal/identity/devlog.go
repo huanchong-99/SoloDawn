@@ -90,7 +90,7 @@ func entry(env proto.Envelope) (logEntry, error) {
 
 // isEntry reports whether a payload is an add or a revoke of a device id.
 func isEntry(e logEntry, p string) bool {
-	return e.Type == "device" && isDevice(e.Device) && (e.Op == "revoke" || e.Op == "add" && isAdd(p))
+	return e.Type == "device" && IsDevice(e.Device) && (e.Op == "revoke" || e.Op == "add" && isAdd(p))
 }
 
 // isAdd checks what only an add carries: a kind and a name.
