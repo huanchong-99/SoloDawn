@@ -80,7 +80,7 @@ export function parts(text: string, members: Named[]): Part[] {
     .flatMap((piece, i): Part[] =>
       i % 2 ? [{ kind: 'code', text: piece }] : plain(piece, members),
     )
-    .filter((part) => part.text);
+    .filter((part) => part.text !== '');
 }
 
 /** The ids of the members a text mentions, each once, in the order of their first mention. */
