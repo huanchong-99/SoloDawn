@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -92,4 +93,31 @@ func TestReceipts(t *testing.T) {
 		equal(t, got, test.want)
 		equal(t, err, test.err)
 	}
+}
+
+func TestInboxFailures(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "node.db")
+	s := openDB(t, path)
+	unlock := lockDB(t, path)
+	called := false
+	err := s.Write(func(tx *Tx) error {
+		id, err := tx.Enqueue(Item{Group: "g", Host: "host", Why: "notice"}, func(int64) (json.RawMessage, error) {
+			called = true
+			return nil, nil
+		})
+		equal(t, id, int64(0))
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("locked enqueue: %v", err)
+	}
+	equal(t, called, false)
+	unlock()
+
+	closed, err := Open(":memory:")
+	check(t, err)
+	check(t, closed.Close())
+	items, err := closed.Inbox("host", 0)
+	equal(t, items, ([]Item)(nil))
+	equal(t, err.Error(), "sql: database is closed")
 }
