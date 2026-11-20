@@ -46,7 +46,7 @@ enough for that AI, the home does this instead:
 | --- | --- |
 | queue `mention` for a message that mentions the AI, or for a main-line message of a person that goes to the secretary (`contracts/commands.md` 1.3) | writes a `direct` card; no item |
 | queue `mention` for a `call` | writes an `ask` card; no item. The call stays `waiting` until the card is decided (section 5), and the caller's `ask` returns its receipt as in `flows/ask.md` B |
-| do either in the thread of a task the AI takes part in | no card. The item is queued as in step 1 and is labelled `information` (section 8, R-52) |
+| do either in the thread of a task the AI takes part in | no card. The item is queued as in step 1 and is labelled `information` (`contracts/step-2/labels.md`, R-52) |
 | give the AI a role in a task (`contracts/task-machine.md` rows 1 and 11) | writes a `direct` card unless the AI already has one for that request; section 7 |
 | queue `reply`, `decided`, `reviewed`, `checks`, `resume`, `confirmed`, `notice` or `merge` | nothing new: these follow from what the AI asked itself or already takes part in |
 
@@ -252,14 +252,16 @@ and the `act` with `arg`.
 1. A person not on the allow list of a team or API-key AI gets the same
    card as for a personal AI (section 2), not a refusal.
 2. A change of direction after a task started: no card for a message in
-   the thread; a mention outside it is a new card (section 8).
-3. Only a message a person signed is `instruction` (section 8).
+   the thread; a mention outside it is a new card
+   (`contracts/step-2/labels.md` section 4).
+3. Only a message a person signed is `instruction` (section 3 there).
    `contracts/drivers.md` section 3 said "signed by a device of the AI's
    owner", which its own example contradicted for a call from the owner's
    other AI; pull request #118 changed it to "signed by the AI's owner as
    a person".
 4. A listed person's message in the thread of a running task is
-   `information`: R-52 governs there, R-53 outside it (section 8).
+   `information`: R-52 governs there, R-53 outside it
+   (`contracts/step-2/labels.md` section 3).
 5. Replaced by `contracts/step-2/authority.md` section 6: every task has
    a request, so its owner can be asked about any task.
 

@@ -42,7 +42,7 @@ in the words of the step 1 header. The text of the envelope follows it.
 | --- | --- |
 | `mention`, `reply` | that of its message (section 3) |
 | `assign`, `review`, `reviewed`, `checks`, `resume`, and a `decided` about a task, for a task the AI takes part in; the hand-back and continue turns | `instruction` |
-| `decided` on a card the AI posted outside such a task; `confirmed` for a brief the AI posted | `instruction`: it answers what the AI asked |
+| `decided` on a card the AI posted outside such a task, while the host holds it open; `confirmed` for a brief the AI posted | `instruction`: it answers what the AI asked |
 | `confirmed` for a brief an earlier secretary posted; `notice` | `information` |
 
 - "A task the owner confirmed" of step 1 reads "a task the AI takes part

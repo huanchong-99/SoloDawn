@@ -154,12 +154,12 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   task starts on `P2` at level 2 once P confirms. When P gives it, or P's
   secretary with `set_task`: no card, and level 3.
 - **A9.44** The secretary serves by its owner's consent. `group set` with
-  `secretary` naming Q-team is answered `forbidden` to P and `ok` to Q as
-  admin; `Q1` then lists the secretary's tools for Q-team and delivers a
-  `notice`. With the row's `secretary` set to Q-team by the test hook alone,
-  `Q1` refuses the `notice`, with audit `refused`. In a one-person group the
-  owner names another of their AIs with `group set`: the quiet-task `notice`
-  of A5.16 and a brief sent back reach it.
+  `secretary` naming Q-team is answered `forbidden` to P and to Q as a plain
+  member, and `ok` to Q as admin; `Q1` then lists the secretary's tools for
+  Q-team and delivers a `notice`. With the row's `secretary` set to Q-team by
+  the test hook alone, `Q1` refuses the `notice`, with audit `refused`. In a
+  one-person group the owner names another of their AIs with `group set`: the
+  quiet-task `notice` of A5.16 and a brief sent back reach it.
 - **A9.45** A merge goes where the owner accepted. The test hook queues on
   `P1`, for tasks of Q-team, a `merge` item that names a pull request `Q1`
   neither opened nor reused, and one whose pull request has another base than

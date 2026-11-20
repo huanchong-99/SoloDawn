@@ -10,9 +10,9 @@ and a section named below without a file is one of its sections.
 | File | Gains |
 | --- | --- |
 | `contracts/envelope.md`, `contracts/vectors.md` | section 4: the fork rule; `contracts/step-2/fork-vectors.md`; the part `accept` with `repo` and `base` (`contracts/step-2/checks-forge.md` section 2) |
-| `contracts/commands.md`, `contracts/rows.md` | 1.1: who may set `secretary`; 1.2: `allow` from the host; 1.3: unique titles in a brief; 1.4: `arg` on a brief's `confirm`, who may `approve` and `deny`; section 2: `allow.set`, the cap under "Levels". Section 1: `secretary_by` |
+| `contracts/commands.md`, `contracts/rows.md` | 1.1: who may set `secretary`; 1.2: `allow` from the host; 1.3: unique titles in a brief; 1.4: `arg` on a brief's `confirm`, who may `approve` and `deny`; section 2: `allow.set`, the cap under "Levels". Section 1: `secretary_by`; section 2: `secretary_joined` |
 | `contracts/datachannel.md`, `contracts/conventions.md` | section 6: `req`, and section 3 in place of "What a host accepts (step 1)"; section 7: the lists in `host.info`. Section 4: an item with `req` stays under 54 KiB |
-| `contracts/messages.md`, `contracts/storage.md` | 2.2: `start` in the `task` body. Host table `allow`; the open calls and, on a task session, `capped` and the pull request it opened or reused; the exemption of section 6 |
+| `contracts/messages.md`, `contracts/storage.md` | 2.2: `start` in the `task` body. Host table `allow`; the open calls and decision cards and, on a task session, `capped` and the pull request it opened or reused; the exemption of section 6 |
 | `flows/approval.md`, `flows/agent-turn.md`, `flows/task.md` | steps 9 and 10; step 2, the level of step 5 and the labels of step 6; E: the check before a merge; G: the `re` of section 4 |
 | `contracts/mcp-tools.md`, `contracts/drivers.md` | section 2: the secretary's tools only by the consent of section 3. What `contracts/step-2/labels.md` section 5 lists |
 | `flows/pairing.md`, `flows/takeover.md` | D: where a client writes a `revoke`, and adding again what it dropped. A: a task registered for a takeover is O's own; a capped session stays capped in the terminal |
@@ -24,8 +24,8 @@ without a brief; a brief's `arg`; a role the brief does not give; labels),
 `contracts/step-3/knowledge.md` section 8 (`v` 1 from a host); the
 acceptance tests, with those of step 3 split off; `risks.md` K-4.
 
-P-4 freezes `allow.set`, `req`, `body.start`, `secretary_by`, a brief's
-`arg` and the lists in `host.info`. T2-3 builds sections 2 to 5 on the
+P-4 freezes `allow.set`, `req`, `body.start`, `secretary_by`,
+`secretary_joined`, a brief's `arg` and the lists in `host.info`. T2-3 builds sections 2 to 5 on the
 host, T2-2 the home's side (sections 5 and 6), T2-4 section 7 and its
 vectors, T2-13 the labels.
 

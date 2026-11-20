@@ -89,7 +89,7 @@ connection ("Still current" there), the row of its `why`:
 | `decided` on an approval | section 5 |
 | `watch` | `contracts/step-2/watch-team.md` section 2 |
 | `reply` | the call it answers is one X posted and N still holds open: the `re` of `msg`, a reply or the `confirm` card of a denial, names it. N keeps each call it posts until its answer is delivered |
-| `decided` on a decision | `msg` is a card X posted (N's own signature on its `env`, with `as` = X), or its signed `body.task` is a task whose task session X has here; and `cause` is an `act choose` on that card |
+| `decided` on a decision | `msg` is a card X posted (N's own signature on its `env`, with `as` = X) that N still holds open, or its signed `body.task` is a task whose task session X has here; and `cause` is an `act choose` on that card. N keeps each decision card it posts, as it keeps a call, until its `decided` is delivered |
 | `confirmed`, `notice` | X is the secretary by O's consent (below). For `confirmed` also: `msg` is a brief and `cause` is an `act` on it. A brief that X did not post (not N's signature with `as` = X) is one an earlier secretary left: the item is then `information` |
 
 **O's confirmation** of an envelope for X: an `act confirm` signed by O as
@@ -197,11 +197,14 @@ node's `settings.approvers`. A delegate decides approval cards of X only.
   home when a device of that owner signed the `task assign`, as a person
   or through one of their AIs. A `brief` whose `body.tasks` holds one
   `title` twice is `bad_request`: a task's title names one entry.
-- **The secretary.** `group set` with `secretary` is accepted from the
-  owner of that AI, or for an AI that was added with `secretary: true`
-  (a mark the home keeps, not on the wire); else `forbidden`. The group
-  row gains `secretary_by`, optional: the signed `group set` that named
-  the secretary, absent when `member add_ai` did.
+- **The secretary.** `group set` with `secretary` is by an admin, as in
+  `contracts/commands.md` 1.1, and only when that admin is the owner of
+  the AI or the AI's member row has `secretary_joined`; else `forbidden`.
+  `secretary_joined` is one more optional field of an AI's `member` row:
+  `true` from a `member add_ai` with `secretary: true`, never removed, so
+  that it moves with the rows of a group. The group row gains
+  `secretary_by`, optional: the signed `group set` that named the
+  secretary, absent when `member add_ai` did.
 - `member set` with `allow` is accepted from the AI's host, as `approvers`.
 
 ## 7. The fork rule of the device log (D-4)
@@ -266,8 +269,8 @@ the other answer for each, and what was modelled and not run.
 
 | | Limit | Consequence |
 | --- | --- | --- |
-| 1 | The home still says which task of a request an AI has, its role in a task without a brief, what a review said and when a merge is due, and it supplies what a session reads: notes, threads, task rows | a session trusts that home with its context; labels are the only guard (`contracts/step-2/confirm.md` section 8). Where level 3 is chosen for a group on someone else's home, the interface says so. A merge goes only into the `repo` and `base` the owner accepted (`contracts/step-2/checks-forge.md` section 2), and only through the pull request N opened or reused |
-| 2 | A home can deliver again what was authorised once: an owner's or a listed person's message, the tasks of a confirmed brief | no new authority; a confirmed `mention` is acted on once |
+| 1 | The home still says which task of a request an AI has, its role in a task without a brief, what a review said and when a merge is due, and it supplies what a session reads: notes, threads, task rows | a session trusts that home with its context; labels are the only guard (`contracts/step-2/labels.md`). Where level 3 is chosen for a group on someone else's home, the interface says so. A merge goes only into the `repo` and `base` the owner accepted (`contracts/step-2/checks-forge.md` section 2), and only through the pull request N opened or reused |
+| 2 | A home can deliver again what was authorised once: an owner's or a listed person's message, the tasks of a confirmed brief, the `decided` of a card another AI posted about a task of X, and an old `secretary_by` of O after O moved the role away | no new authority; a confirmed `mention`, a call and a decision X posted are acted on once. A secretary named again by an old `group set` serves until O takes the AI out of the group |
 | 3 | The logs of other people are in memory and come through homes | a home that holds a `revoke` back keeps that device's word good at N until the entry comes from elsewhere |
 | 4 | A signer must be valid when N judges | after the device that confirmed a brief is revoked (`risks.md` K-20), its tasks start no new session; the secretary posts a new brief |
 | 5 | A delegate removed while their `act` is on the way: the home may accept what the host refuses | the card reads approved and the request stays open; the AI asks again and a new card appears |
