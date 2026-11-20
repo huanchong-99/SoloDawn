@@ -51,7 +51,7 @@ func setupUpdate(t *testing.T, mux *http.ServeMux) *updateFixture {
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	f := &updateFixture{
-		name:     "solodawn_1.10.1_" + updateTarget(runtime.GOOS, runtime.GOARCH),
+		name:     "solodawn_v1.10.1_" + updateTarget(runtime.GOOS, runtime.GOARCH),
 		requests: make(map[string]int),
 	}
 	f.manifest = fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte(newImage)), f.name)
@@ -136,7 +136,7 @@ func TestUpdateMismatchAndDailyCheck(t *testing.T) {
 	assertOnlyInstalled(t, f.u.Binary)
 	checkUpdateValue(t, f.u.Status, &UpdateStatus{Version: "1.10.1", Status: "mismatch"})
 	checkUpdateValue(t, f.restarts, 0)
-	f.u.Version = "1.10.1"
+	f.u.Version = "v1.10.1"
 	noErr(t, f.u.Check(t.Context(), now.Add(24*time.Hour-time.Nanosecond)))
 	checkUpdateValue(t, f.requests, map[string]int{"manifest": 1, "binary": 1})
 	noErr(t, f.u.Check(t.Context(), now.Add(24*time.Hour)))
@@ -186,8 +186,9 @@ func TestReleaseSelection(t *testing.T) {
 		version, current string
 		newer            bool
 	}{
-		{"2.0.0", "1.9.9", true}, {"1.3.0", "v1.2.9", true}, {"1.0.10", "1.0.9", true},
-		{"1.2.3", "1.2.3", false}, {"1.1.9", "1.2.0", false}, {"1.0.1", "dev", false},
+		{"v2.0.0", "v1.9.9", true}, {"v1.3.0", "v1.2.9", true}, {"v1.0.10", "v1.0.9", true},
+		{"v1.2.3", "v1.2.3", false}, {"v1.1.9", "v1.2.0", false}, {"v1.0.1", "dev", false},
+		{"1.2.3", "v1.2.0", false}, {"v1.2.3", "1.2.0", false}, {"v1.2.3-rc.1", "v1.2.0", false},
 	} {
 		t.Run(tc.version+"_vs_"+tc.current, func(t *testing.T) {
 			checkUpdateValue(t, newerRelease(tc.version, tc.current), tc.newer)
@@ -197,9 +198,9 @@ func TestReleaseSelection(t *testing.T) {
 	name := "solodawn_v1.2.3_windows_arm64.exe"
 	line := sum + " *" + name + "\r\n"
 	target := updateTarget("windows", "arm64")
-	file, err := findRelease(strings.NewReader(sum+"  solodawn_1.2.3_linux_arm64\n"+line), target)
+	file, err := findRelease(strings.NewReader(sum+"  solodawn_v1.2.3_linux_arm64\n"+line), target)
 	noErr(t, err)
-	checkUpdateValue(t, *file, releaseFile{name: name, version: "1.2.3", sum: sum})
+	checkUpdateValue(t, *file, releaseFile{name: name, tag: "v1.2.3", sum: sum})
 	if _, err := findRelease(strings.NewReader(line+line), target); err == nil || err.Error() != "self-update: multiple SHA256SUMS entries for windows_arm64.exe" {
 		t.Fatalf("duplicate entry: %v", err)
 	}

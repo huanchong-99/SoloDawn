@@ -44,8 +44,8 @@ type Updater struct {
 }
 
 type releaseFile struct {
-	name, version, sum string
-	staged             string
+	name, tag, sum string
+	staged         string
 }
 
 var errUpdateMismatch = errors.New("self-update: SHA-256 mismatch")
@@ -66,7 +66,7 @@ func (u *Updater) Check(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if !newerRelease(file.version, u.Version) {
+	if !newerRelease(file.tag, u.Version) {
 		u.Status = nil
 		return nil
 	}
@@ -97,12 +97,10 @@ func updateTarget(goos, arch string) string {
 	return target
 }
 
-const versionPattern = `(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){2}`
-
-var releaseVersion = regexp.MustCompile(fmt.Sprintf(`^v?%s$`, versionPattern))
+var stableTag = regexp.MustCompile(`^v(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){2}$`)
 
 func findRelease(body io.Reader, target string) (*releaseFile, error) {
-	line := regexp.MustCompile(`^([[:xdigit:]]{64}) [ *](solodawn_v?(` + versionPattern + `)_` + regexp.QuoteMeta(target) + `)$`)
+	line := regexp.MustCompile(`^([[:xdigit:]]{64}) [ *](solodawn_(v[0-9A-Za-z.+-]+)_` + regexp.QuoteMeta(target) + `)$`)
 	var file *releaseFile
 	scanner := bufio.NewScanner(body)
 	for scanner.Scan() {
@@ -113,7 +111,7 @@ func findRelease(body io.Reader, target string) (*releaseFile, error) {
 		if file != nil {
 			return nil, fmt.Errorf("self-update: multiple SHA256SUMS entries for %s", target)
 		}
-		file = &releaseFile{name: m[2], version: m[3], sum: m[1]}
+		file = &releaseFile{name: m[2], tag: m[3], sum: m[1]}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -126,12 +124,12 @@ func findRelease(body io.Reader, target string) (*releaseFile, error) {
 
 // Compare the three decimal components of stable releases without integer
 // overflow. A development build has no release version to advance.
-func newerRelease(version, current string) bool {
-	if !releaseVersion.MatchString(current) {
+func newerRelease(tag, current string) bool {
+	if !stableTag.MatchString(tag) || !stableTag.MatchString(current) {
 		return false
 	}
 	parts := strings.Split(strings.TrimPrefix(current, "v"), ".")
-	order := slices.CompareFunc(strings.Split(version, "."), parts, func(a, b string) int {
+	order := slices.CompareFunc(strings.Split(strings.TrimPrefix(tag, "v"), "."), parts, func(a, b string) int {
 		return cmp.Or(cmp.Compare(len(a), len(b)), strings.Compare(a, b))
 	})
 	return order > 0
@@ -145,7 +143,7 @@ func (u *Updater) prepare(ctx context.Context, file *releaseFile) error {
 	defer body.Close()
 	file.staged, err = stageRelease(filepath.Dir(u.Binary), body, file.sum)
 	if errors.Is(err, errUpdateMismatch) {
-		u.Status = &UpdateStatus{Version: file.version, Status: "mismatch"}
+		u.Status = &UpdateStatus{Version: strings.TrimPrefix(file.tag, "v"), Status: "mismatch"}
 		log.Printf("%v for %s", err, file.name)
 	}
 	if err != nil {
@@ -186,7 +184,7 @@ func (u *Updater) Apply() error {
 			return err
 		}
 		u.ready.staged = ""
-		u.Status = &UpdateStatus{Version: u.ready.version, Status: "pending"}
+		u.Status = &UpdateStatus{Version: strings.TrimPrefix(u.ready.tag, "v"), Status: "pending"}
 	}
 	if err := u.Restart(); err != nil {
 		return err
