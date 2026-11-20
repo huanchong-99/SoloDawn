@@ -16,9 +16,6 @@ const ready = {
 
 /** One end of a signalling address, as the test rendezvous holds it. */
 class Address {
-  static OPEN = 1;
-  static CLOSING = 2;
-  readyState = Address.OPEN;
   sent: unknown[] = [];
   onmessage!: (event: { data: string }) => void | Promise<void>;
   constructor(readonly url: keyof typeof nonces) {
