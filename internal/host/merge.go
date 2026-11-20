@@ -227,8 +227,7 @@ func pollWait(ctx context.Context) error {
 }
 
 // prQuery reads, in one call, what decides a merge through the forge.
-const prQuery = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { " +
-	"pullRequest(number: $number) { state headRefOid mergeCommit { oid } autoMergeRequest { enabledAt } mergeQueueEntry { id } } } }"
+const prQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { state headRefOid mergeCommit { oid } autoMergeRequest { enabledAt } mergeQueueEntry { id } } } }`
 
 // readPR reads the PR once, from the folder that holds the clone, and returns
 // whether its merge is pending, else the outcome.
