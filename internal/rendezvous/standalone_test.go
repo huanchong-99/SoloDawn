@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"testing"
 	"testing/fstest"
+	"testing/synctest"
 	"time"
 
 	"github.com/pion/turn/v5"
@@ -228,4 +229,25 @@ func TestClosedEndpoint(t *testing.T) {
 	if c, err := e.Accept(); c != nil || !errors.Is(err, net.ErrClosed) {
 		t.Fatal(c, err)
 	}
+}
+
+func TestTURNReadIdleTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		a, b := net.Pipe()
+		stream := idleStream{a}
+		defer b.Close()
+		start := time.Now()
+		go func() { time.Sleep(9 * time.Minute); b.Write([]byte("x")) }()
+		buf := make([]byte, 1)
+		if n, err := stream.Read(buf); err != nil || n != 1 || string(buf) != "x" {
+			t.Fatal(n, err, buf)
+		}
+		if n, err := stream.Read(buf); n != 0 || !errors.Is(err, os.ErrDeadlineExceeded) || time.Since(start) != 19*time.Minute {
+			t.Fatal(n, err, time.Since(start))
+		}
+		a.Close()
+		if n, err := stream.Read(buf); n != 0 || !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatal(n, err)
+		}
+	})
 }

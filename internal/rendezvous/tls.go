@@ -65,6 +65,27 @@ func (e *endpoint) deliver(c net.Conn) {
 	}
 }
 
+// A live allocation sends refreshes before its ten-minute lifetime expires.
+// An idle TURN stream must not hold a socket forever, even before allocation.
+type turnStreams struct{ *endpoint }
+
+func (s turnStreams) Accept() (net.Conn, error) {
+	c, err := s.endpoint.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return idleStream{c}, nil
+}
+
+type idleStream struct{ net.Conn }
+
+func (c idleStream) Read(p []byte) (int, error) {
+	if err := c.SetReadDeadline(time.Now().Add(10 * time.Minute)); err != nil {
+		return 0, err
+	}
+	return c.Conn.Read(p)
+}
+
 func routeTLS(conn net.Conn, config *tls.Config, names map[string]*endpoint) {
 	c := tls.Server(conn, config)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

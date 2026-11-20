@@ -90,7 +90,7 @@ func (o Options) serveICE(web fs.FS, l net.Listener) error {
 	if !o.NoRelay {
 		e := newEndpoint(l.Addr())
 		names[strings.ToLower(o.TurnDomain)] = e
-		turnListener = e
+		turnListener = turnStreams{e}
 	}
 	r, server, err := o.start(udp, turnListener, l.Addr().(*net.TCPAddr).Port)
 	if err != nil {
