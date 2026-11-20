@@ -54,6 +54,15 @@ func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 	return result, nil
 }
 
+// DeleteBranch deletes the local task branch after a successful merge and
+// the removal of the task's worktree; Git refuses while a worktree still has
+// the branch checked out. A squash leaves the branch unmerged into the base,
+// hence -D.
+func (m ReviewedMerge) DeleteBranch(ctx context.Context) error {
+	_, err := m.run(ctx, "git", "branch", "-D", m.Branch)
+	return err
+}
+
 func (m ReviewedMerge) message() string {
 	return fmt.Sprintf("Merge task %s at %s", m.Task, m.Commit)
 }
