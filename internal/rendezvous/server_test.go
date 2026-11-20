@@ -296,12 +296,12 @@ func TestRollingWindow(t *testing.T) {
 // A receiver too slow to take a frame loses that frame and stays connected.
 func TestFullSendQueueDropsTheFrame(t *testing.T) {
 	conn, _ := dial(t, fixture(t))
-	c := client{conn: conn, out: make(chan []byte, 1)}
-	if !c.send("first") || !c.send("second") {
+	c := client{conn: conn, out: make(chan frame, 1), queued: map[string]int{}}
+	if !c.send("first") || !c.sendFrom("device", "second") {
 		t.Fatal("send refused a frame within the wire limit")
 	}
-	if got := <-c.out; string(got) != `"first"` || len(c.out) != 0 {
-		t.Fatalf("queue = %s, then %d more", got, len(c.out))
+	if got := <-c.out; string(got.data) != `"first"` || got.from != "" || len(c.out) != 0 || len(c.queued) != 0 {
+		t.Fatalf("queue = %s, then %d more, shares %v", got.data, len(c.out), c.queued)
 	}
 	if err := conn.Write(context.Background(), websocket.MessageText, []byte(`{}`)); err != nil {
 		t.Fatalf("connection closed for a full queue: %v", err)
@@ -310,10 +310,10 @@ func TestFullSendQueueDropsTheFrame(t *testing.T) {
 
 func TestFailedWriteEndsTheWriter(t *testing.T) {
 	conn, _ := dial(t, fixture(t))
-	c := client{conn: conn, out: make(chan []byte, 1)}
+	c := client{conn: conn, out: make(chan frame, 1)}
 	conn.CloseNow()
 	// A failed write must return even when the queue remains open.
-	c.out <- []byte(`"after close"`)
+	c.out <- frame{data: []byte(`"after close"`)}
 	done := make(chan struct{})
 	go func() { c.write(); close(done) }()
 	select {
@@ -326,7 +326,7 @@ func TestFailedWriteEndsTheWriter(t *testing.T) {
 func TestSupersededSocketCannotDispatch(t *testing.T) {
 	s := server{online: map[string]*client{}}
 	old := &client{id: "device"}
-	current := &client{id: "device", out: make(chan []byte, 1)}
+	current := &client{id: "device", out: make(chan frame, 1)}
 	s.online["device"] = current
 	if s.handle(old, nil, "ice") {
 		t.Fatal("replaced socket still active")
@@ -334,5 +334,72 @@ func TestSupersededSocketCannotDispatch(t *testing.T) {
 	s.disconnect(old)
 	if !reflect.DeepEqual(s.online, map[string]*client{"device": current}) {
 		t.Fatal("disconnect removed replacement")
+	}
+}
+
+// One sender holds at most 16 frames in a receiver's queue; the server's own
+// frames and other senders' frames still go in, and a frame written out gives
+// its sender's place back.
+func TestSenderShareOfAQueue(t *testing.T) {
+	c := client{out: make(chan frame, 19), queued: map[string]int{}}
+	for range maxQueued + 1 {
+		c.sendFrom("a", "x")
+	}
+	c.sendFrom("b", "y")
+	c.send("presence")
+	if len(c.out) != maxQueued+2 || !reflect.DeepEqual(c.queued, map[string]int{"a": maxQueued, "b": 1}) {
+		t.Fatal(len(c.out), c.queued)
+	}
+	for range 2 {
+		c.sendFrom("b", "y")
+	}
+	// The full queue drops the frame and keeps no place for it.
+	if len(c.out) != 19 || c.queued["b"] != 2 {
+		t.Fatal(len(c.out), c.queued)
+	}
+	f := <-c.out
+	c.dequeued(f.from)
+	c.dequeued("")
+	c.sendFrom("a", "x")
+	if c.queued["a"] != maxQueued || len(c.out) != 19 {
+		t.Fatal(c.queued, len(c.out))
+	}
+	for len(c.out) != 0 {
+		c.dequeued((<-c.out).from)
+	}
+	if len(c.queued) != 0 {
+		t.Fatal(c.queued)
+	}
+}
+
+// The server knows who watches each device: a new watch list replaces the
+// old one, and a connection that is replaced or leaves watches nothing.
+func TestWatcherIndex(t *testing.T) {
+	s := &server{relay: &relay{}, online: map[string]*client{}, rooms: map[string]*room{}, watchers: map[string]map[*client]bool{}}
+	a, b := key(1).ID(), key(2).ID()
+	conn, _ := dial(t, fixture(t)) // closed when the watcher is replaced
+	watcher := &client{id: a, conn: conn, out: make(chan frame, 16), rooms: map[string]*room{}}
+	s.connect(watcher)
+	watch := func(c *client, keys ...string) {
+		t.Helper()
+		raw, _ := json.Marshal(keys)
+		if !s.watch(c, fields{"k": raw}) {
+			t.Fatal("watch refused")
+		}
+	}
+	watch(watcher, b, a)
+	watch(watcher, b)
+	if !reflect.DeepEqual(s.watchers, map[string]map[*client]bool{b: {watcher: true}}) {
+		t.Fatal(s.watchers)
+	}
+	replacement := &client{id: a, out: make(chan frame, 16), rooms: map[string]*room{}}
+	s.connect(replacement)
+	if len(s.watchers) != 0 {
+		t.Fatal("a replaced connection still watches", s.watchers)
+	}
+	watch(replacement, b)
+	s.disconnect(replacement)
+	if len(s.watchers) != 0 {
+		t.Fatal("a closed connection still watches", s.watchers)
 	}
 }

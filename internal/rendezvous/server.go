@@ -21,10 +21,11 @@ import (
 
 type server struct {
 	*relay
-	wait   time.Duration // for the answer to the challenge
-	mu     sync.Mutex
-	online map[string]*client
-	rooms  map[string]*room
+	wait     time.Duration // for the answer to the challenge
+	mu       sync.Mutex
+	online   map[string]*client
+	rooms    map[string]*room
+	watchers map[string]map[*client]bool // by watched device id
 }
 
 // Handler serves the same /rv protocol and static files on nodes and on the
@@ -38,7 +39,7 @@ func (r *relay) handler(web fs.FS) http.Handler {
 }
 
 func handler(web fs.FS, wait time.Duration, r *relay) http.Handler {
-	s := &server{relay: r, wait: wait, online: make(map[string]*client), rooms: make(map[string]*room)}
+	s := &server{relay: r, wait: wait, online: make(map[string]*client), rooms: make(map[string]*room), watchers: make(map[string]map[*client]bool)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rv", s.serve)
 	mux.Handle("/", http.FileServerFS(web))
@@ -53,13 +54,25 @@ const maxBytes = 16_384 // 16 KiB
 
 type client struct {
 	conn   *websocket.Conn
-	out    chan []byte
+	out    chan frame
 	id     string
 	watch  []string
 	rooms  map[string]*room // the rooms this connection is in
 	window [120]time.Time
 	next   int
+	mu     sync.Mutex     // guards queued, which the writer also changes
+	queued map[string]int // frames in out by the device they are from
 }
+
+// frame is a frame waiting to be written, and the device it is from when the
+// server forwards it.
+type frame struct {
+	data []byte
+	from string
+}
+
+// maxQueued is how many frames one sender may have in a receiver's queue.
+const maxQueued = 16
 
 func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, anyOrigin)
@@ -68,7 +81,7 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(maxBytes)
-	c := &client{conn: conn, out: make(chan []byte, 128), rooms: make(map[string]*room)}
+	c := &client{conn: conn, out: make(chan frame, 128), rooms: make(map[string]*room), queued: make(map[string]int)}
 	go c.write()
 	defer close(c.out)
 	if !c.authenticate(s.wait) {
@@ -88,34 +101,65 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 // failure wakes the reader, which unregisters the device.
 func (c *client) write() {
 	defer c.conn.CloseNow()
-	for frame := range c.out {
-		if c.conn.Write(context.Background(), websocket.MessageText, frame) != nil {
+	for f := range c.out {
+		c.dequeued(f.from)
+		if c.conn.Write(context.Background(), websocket.MessageText, f.data) != nil {
 			return
 		}
 	}
 }
 
+func (c *client) send(v any) bool { return c.sendFrom("", v) }
+
 // While routing, a stalled socket must not hold up other devices: a frame for
-// a receiver whose queue is full is dropped, and both connections stay open.
-// The sender's offer timeout and back-off cover the loss. send returns false
-// when the frame would exceed the wire limit. In particular, the
-// authenticated "from" wrapper is longer than "to".
-func (c *client) send(frame any) bool {
+// a receiver whose queue is full, or that already holds maxQueued frames of
+// the same sender, is dropped, and both connections stay open. The sender's
+// offer timeout and back-off cover the loss. sendFrom returns false when the
+// frame would exceed the wire limit. In particular, the authenticated "from"
+// wrapper is longer than "to".
+func (c *client) sendFrom(from string, v any) bool {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(frame); err != nil {
+	if err := enc.Encode(v); err != nil {
 		panic(err) // All outbound frames contain validated JSON.
 	}
 	data := bytes.TrimSuffix(buf.Bytes(), []byte{'\n'})
 	if len(data) > maxBytes {
 		return false
 	}
-	select {
-	case c.out <- data:
-	default:
+	if c.enqueued(from) {
+		select {
+		case c.out <- frame{data, from}:
+		default:
+			c.dequeued(from)
+		}
 	}
 	return true
+}
+
+// enqueued counts a frame of a sender in the queue, if the sender has room.
+// The server's own frames are from nobody and have no share.
+func (c *client) enqueued(from string) bool {
+	if from == "" {
+		return true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.queued[from] == maxQueued {
+		return false
+	}
+	c.queued[from]++
+	return true
+}
+
+func (c *client) dequeued(from string) {
+	if from == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	decrement(c.queued, from)
 }
 
 func (c *client) admit(now time.Time) bool {
@@ -173,6 +217,7 @@ func (s *server) connect(c *client) {
 	c.send(s.ice("ready", c.id))
 	if old != nil {
 		s.leaveRooms(old)
+		s.unwatch(old)
 		old.conn.CloseNow()
 	} else {
 		s.notify(c.id, true)
@@ -185,6 +230,7 @@ func (s *server) disconnect(c *client) {
 	if s.online[c.id] == c {
 		delete(s.online, c.id)
 		s.leaveRooms(c)
+		s.unwatch(c)
 		s.notify(c.id, false)
 	}
 }
@@ -200,7 +246,7 @@ func (s *server) dispatch(c *client, m fields, kind string) bool {
 	case "ice":
 		c.send(s.ice("ice", c.id))
 	case "quota":
-		c.send(s.quota(c.id))
+		c.send(s.quota(s.alias(c.id)))
 	case "to":
 		return s.route(c, m)
 	case "watch":
@@ -225,7 +271,7 @@ func (s *server) route(c *client, m fields) bool {
 		return false
 	}
 	if target := s.online[key]; target != nil {
-		return target.send(proto.Route{Type: "from", Key: c.id, Env: m["env"]})
+		return target.sendFrom(c.id, proto.Route{Type: "from", Key: c.id, Env: m["env"]})
 	}
 	c.send(proto.Offline{Type: "offline", Key: key})
 	return true
@@ -236,19 +282,39 @@ func (s *server) watch(c *client, m fields) bool {
 	if proto.Decode(m["k"], &keys) != nil || len(keys) > 64 || slices.ContainsFunc(keys, notDevice) {
 		return false
 	}
+	s.unwatch(c)
 	c.watch = keys
 	for _, key := range keys {
+		s.index(key, c)
 		c.send(proto.Presence{Type: "presence", Key: key, On: s.online[key] != nil})
 	}
 	return true
 }
 
+// The server keeps, for each watched device, who watches it, so that a
+// change of presence does not look at every connection.
+func (s *server) index(key string, c *client) {
+	set := s.watchers[key]
+	if set == nil {
+		set = make(map[*client]bool)
+		s.watchers[key] = set
+	}
+	set[c] = true
+}
+
+func (s *server) unwatch(c *client) {
+	for _, key := range c.watch {
+		set := s.watchers[key]
+		if delete(set, c); len(set) == 0 {
+			delete(s.watchers, key)
+		}
+	}
+}
+
 func notDevice(id string) bool { return !identity.IsDevice(id) }
 
 func (s *server) notify(key string, online bool) {
-	for _, c := range s.online {
-		if slices.Contains(c.watch, key) {
-			c.send(proto.Presence{Type: "presence", Key: key, On: online})
-		}
+	for c := range s.watchers[key] {
+		c.send(proto.Presence{Type: "presence", Key: key, On: online})
 	}
 }

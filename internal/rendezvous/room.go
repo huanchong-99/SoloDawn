@@ -34,7 +34,7 @@ func (s *server) roomFrame(c *client, m fields, kind string) bool {
 func (r *room) forward(sender *client, msg proto.RoomData) {
 	for member := range r.members {
 		if member != sender {
-			member.send(msg)
+			member.sendFrom(sender.id, msg)
 		}
 	}
 }
