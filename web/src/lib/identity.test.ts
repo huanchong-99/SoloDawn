@@ -151,8 +151,11 @@ describe('weak keys', () => {
   it('fail check 1 as k, before WebCrypto is asked', async () => {
     const spy = vi.spyOn(crypto.subtle, 'verify');
     const importing = vi.spyOn(crypto.subtle, 'importKey');
-    // The forgery under the identity point: R is the identity point and S is zero.
-    const forged = encode(new Uint8Array([1, ...new Array(63).fill(0)]));
+    // A forgery under the identity point that only the check of k stops: R is the base point,
+    // which is not weak, and S is one. Go and the three browser engines verify it for any text;
+    // OpenSSL, which runs these tests, does not, so only the spies can tell.
+    const base = [0x58, ...new Array<number>(31).fill(0x66)];
+    const forged = encode(new Uint8Array([...base, 1, ...new Array<number>(31).fill(0)]));
     for (const point of weak) {
       expect(await verify(crypto, encode(point), 'any text', forged)).toBe(false);
     }
