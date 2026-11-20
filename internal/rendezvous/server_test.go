@@ -150,14 +150,14 @@ func TestHandshakeRefusals(t *testing.T) {
 }
 
 func TestChallengeDeadline(t *testing.T) {
-	s := httptest.NewServer(handler(fstest.MapFS{}, 100*time.Millisecond))
+	s := httptest.NewServer(handler(fstest.MapFS{}, 100*time.Millisecond, &relay{}))
 	t.Cleanup(s.Close)
 	idle, _ := dial(t, s.URL)
 	active := login(t, s.URL, key(1))
 	closed(t, idle)
 	// The deadline is over, and it was for the answer to the challenge only.
 	send(t, active, proto.RVFrame{Type: "ice"})
-	expect(t, active, config("ice"))
+	expect(t, active, proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600})
 }
 
 func TestRoutePresenceAndReplacement(t *testing.T) {
@@ -256,7 +256,7 @@ func TestForwardedFrameSize(t *testing.T) {
 	closed(t, sender)
 	// The target never gets a partial or oversized frame and stays connected.
 	send(t, receiver, proto.RVFrame{Type: "ice"})
-	expect(t, receiver, config("ice"))
+	expect(t, receiver, proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600})
 }
 
 func TestInvalidServerFramePanics(t *testing.T) {

@@ -1,0 +1,10 @@
+{
+  "name": "firefox136-provider",
+  "private": true,
+  "type": "module",
+  "exports": "./index.js",
+  "dependencies": {
+    "@vitest/browser-playwright": "5.1.1",
+    "playwright": "1.55.1"
+  }
+}
