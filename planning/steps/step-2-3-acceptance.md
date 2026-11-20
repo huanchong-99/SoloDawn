@@ -291,10 +291,10 @@ The answers are silent on these; the contract of each group decides.
 | --- | --- | --- |
 | A9.4 | a person whose AI holds an unfinished task cannot be removed | `contracts/commands.md` 1.2, `member remove` |
 | A9.11 | a `review` item needs the owner's signature as an `assign` item does | D-2 says "an item" |
-| A9.14 | for an AI on a team plan and a person not on its list, the owner is asked with the same card | D-2; D-8 names personal subscriptions only |
-| A9.17 | an item shows both who caused the task and the owner's permission | D-1 with D-2; one `cause` field holds one envelope |
+| A9.14 | decided on 2026-11-20: for an AI on a team plan and a person not on its list, the owner is asked with the same card | D-2; D-8 names personal subscriptions only. For C2-1 |
+| A9.17 | decided: the owner's `act confirm` envelope, the `cause`, names the confirmed message, and that message's signer caused the task | D-1 with D-2; C2-1 defines it |
 | A9.20 | there is a terminal to watch only during a takeover | D-14, "the bridge of step 1" |
 | A9.23 | a secretary's node may post in a team group although no AI is a member of it | D-15 refuses `host.join` there |
-| A9.27 to A9.32 | the new home is another node of the group's owner | D-7: the owner is the home's owner |
+| A9.27 to A9.32 | decided: the new home is another node of the group's owner | D-7: the owner is the home's owner. For C2-6 |
 | A9.28 | receipts travel in the snapshot | `contracts/commands.md`, "Once only" |
-| A9.40 | an owner need not accept a check list they signed themselves | D-3; otherwise the A5 tests gain one step |
+| A9.40 | decided: an owner need not accept a check list they signed themselves | D-3; otherwise the A5 tests gain one step. For C2-5 |
