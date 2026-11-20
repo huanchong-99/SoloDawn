@@ -97,10 +97,9 @@ func updateTarget(goos, arch string) string {
 	return target
 }
 
-const releaseNumber = `(0|[1-9][0-9]*)`
-const versionPattern = releaseNumber + `\.` + releaseNumber + `\.` + releaseNumber
+const versionPattern = `(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){2}`
 
-var releaseVersion = regexp.MustCompile(`^v?` + versionPattern + `$`)
+var releaseVersion = regexp.MustCompile(fmt.Sprintf(`^v?%s$`, versionPattern))
 
 func findRelease(body io.Reader, target string) (*releaseFile, error) {
 	line := regexp.MustCompile(`^([[:xdigit:]]{64}) [ *](solodawn_v?(` + versionPattern + `)_` + regexp.QuoteMeta(target) + `)$`)
