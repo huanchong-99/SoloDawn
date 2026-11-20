@@ -18,11 +18,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the notice is mounted by the same bundle (`web/src/lib/boot.ts:17-19`) and styled by the same tokens (`web/src/styles/tokens.css`, every colour a `light-dark()` pair) and nested rules (`web/src/styles/base.css`) as the application.
 - Status: open, accepted by the coordinator on 2026-11-20 as a known limitation.
 
-### 2026-11-20 · deviation · Web mock does not answer `host.info`
+### 2026-11-20 · deviation · Web mock does not answer `host.info` or push `groups`
 
-- Symptom: F-02 in `planning/steps/step-1-frontend.md` asks for a mock that answers `hello`, `sync`, `fetch` and `host.info`. `mockCtl` answers `hello`, `sync`, `fetch` and `cmd`, and `proto.ts` has no `host.info` type.
-- Cause: `host.info` is in batch (c) of B-01, which has no Go type and no wire example yet (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:372-377`).
-- Status: open. Left out by the coordinator's decision of 2026-11-20; to be added once batch (c) is merged.
+- Symptom: F-02 in `planning/steps/step-1-frontend.md` asks for a mock that answers `hello`, `sync`, `fetch` and `host.info`; the settled plan (PR #58) adds that it pushes `groups`. `mockCtl` answers `hello`, `sync`, `fetch` and `cmd`, and pushes only `reset` and `rows`. `proto.ts` has no `host.info` type; it has a `Groups` type, written from the contract.
+- Cause: neither frame has a Go type or a wire example yet, and the mock answers from wire examples only (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:94-96`, `web/src/lib/proto.ts:372-377`). Both are frozen by backend task B-10 (`planning/steps/step-1-backend.md`; PR #58, `contracts/conventions.md` section 5), not by a slice of B-01.
+- Status: open. `host.info` was left out by the coordinator's decision of 2026-11-20, until it has an example; the `groups` push was found in the review of PR #61 and not changed there.
 
 ### 2026-11-20 · deviation · Web note rows refuse `pos` until the Go type has it
 
