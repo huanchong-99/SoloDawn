@@ -252,7 +252,8 @@ func (g *runGroup) putItems(tx *store.Tx, res Result, now int64) error {
 		}
 		stored := store.Item{Group: g.state.ID, AI: it.AI, Host: host, Why: it.Why, Msg: runText(it.Msg), Task: runText(it.Task),
 			Commit: runText(it.Commit), Cause: runCause(it.Cause), NotBefore: it.NotBefore, Created: now}
-		if _, err := tx.Enqueue(stored, func(id int64) (json.RawMessage, error) { return runSeal(it, id) }); err != nil {
+		seal := func(id int64) (json.RawMessage, error) { return runSeal(it, id) }
+		if _, err := tx.Enqueue(stored, seal); err != nil {
 			return err
 		}
 	}
