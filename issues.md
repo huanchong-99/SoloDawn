@@ -230,6 +230,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:41-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
 
+### 2026-11-20 · limitation · Cards and home-written rows are one line each in the chat main line
+
+- Symptom: in the main line of the web client a brief, an approval, a decision, a summary and a call are one outlined line that names the kind and the card's subject, with the dawn edge and "Waiting on you" when the card waits for the reader. It has no buttons: the reader cannot confirm, approve or choose there. A row the home wrote (`task`, `system`) is a quiet centred line; a `system` row shows its `code` as it is on the wire, not a sentence.
+- Cause: F-07 is the row layout and text messages (`planning/steps/step-1-frontend.md`). The line is drawn in `web/src/components/chat/Message.svelte`; `subject` in `web/src/lib/groups.svelte.ts` gives the subject.
+- Status: open. The card units replace the line (U-4 approvals, U-7 brief, decision and summary, U-8 task, U-9 the wording of `system` rows, U-10 calls).
+
+### 2026-11-20 · deviation · An open chat hides the shell's top bar on a phone from its own styles
+
+- Symptom: below 768 px an open chat shows no top bar and no bottom navigation; its own head, with a back button and the group's name, stands where the bar was, as the design asks (`web/design/README.md` 3.4). At every other width the top bar stays "Chats" and the group's name is in the chat's head below it, where the design has one bar with the group's name.
+- Cause: the shell has no place yet where a page says what the top bar shows or that the navigation is hidden. `web/src/routes/Groups.svelte` hides both with `.app:has(.groups.open)` in its own styles, and reads the group id from the address itself, because `route` carries only the page (`web/src/lib/route.svelte.ts`).
+- Status: open, for U-0 (mounting points of the shell, the route table).
+
+### 2026-11-20 · limitation · `group create` is sent as the contract describes it, with no wire example yet
+
+- Symptom: the create-group dialog sends `{"t":"group","n":…,"ts":…,"g":<n>,"op":"create","name":…,"repo":…,"base":…,"forge":…,"checks":[…],"member_name":…,"kind":"project"}`: `g` equal to `n`, as `planning/contracts/commands.md` 1.1 says the group's id is the nonce. Whether a home wants `g` in a `create` is not frozen.
+- Cause: P-1 freezes the payload of `group` (`planning/contracts/conventions.md` section 5); `Home.create` in `web/src/lib/groups.svelte.ts` was written before it. The dialog asks for the repository address also with `forge: none`, since `repo` is absent only for a group without a repository (`planning/contracts/rows.md` section 1).
+- Status: open until P-1 lands; then `create` and its test follow the example.
+
+### 2026-11-20 · limitation · In Safari the main line moves when a message arrives while the reader is scrolled back
+
+- Symptom: not observed, expected from the engine. The main line is a reversed scroller, whose offset is counted from its bottom. A message that arrives at the bottom while the reader is scrolled back pushes what they read up by its height, unless the browser anchors the scroll position. Chrome and Firefox do; Safari has no scroll anchoring.
+- Cause: `web/src/components/chat/Chat.svelte`, `.scroller` (`flex-direction: column-reverse`). The reversed scroller is what keeps a page added above from moving anything, in every browser.
+- Status: open. No correction in script was added, because it could not be tried in Safari here.
+
 ## Resolved
 
 ### 2026-11-20 · limitation · The own-address rule knows the interface addresses of the start only

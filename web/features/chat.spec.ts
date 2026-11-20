@@ -1,0 +1,331 @@
+import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
+import { flushSync } from 'svelte';
+import { expect, vi } from 'vitest';
+import { homes, type Group } from '../src/lib/groups.svelte';
+import * as p from '../src/lib/proto';
+import { browser, example, owner, TestHome } from './home';
+import {
+  all,
+  closePage,
+  field,
+  one,
+  openPage,
+  press,
+  scrollToTop,
+  send,
+  texts,
+  type,
+} from './page';
+
+const feature = await loadFeature('../features/web_chat.feature');
+
+const website = 'rZNvy-1jH6Z-BcPqA5U5BQ';
+
+describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
+  let home: TestHome;
+  let first: ReturnType<typeof browser>;
+  let second: ReturnType<typeof browser>;
+  let group: Group;
+
+  const posts = () =>
+    home.asked
+      .filter((req) => req.t === 'cmd')
+      .map((req) => ({ ...JSON.parse((req.env as p.Envelope).p), k: (req.env as p.Envelope).k }));
+  const sendButton = () => one<HTMLButtonElement>('.composer .send');
+  const said = () => texts('.composer [role=status]');
+  /** What the home did with a command has reached the page. */
+  const settled = async (count: number) => {
+    await vi.waitFor(() => expect(posts()).toHaveLength(count));
+    await new Promise((applied) => setTimeout(applied, 5));
+    flushSync();
+  };
+
+  async function read(reader: ReturnType<typeof browser>) {
+    const answered = home.synced + home.groups.size;
+    await reader.connect();
+    await vi.waitFor(() => expect(home.synced).toBe(answered));
+    await new Promise((applied) => setTimeout(applied));
+    flushSync();
+  }
+
+  AfterEachScenario(closePage);
+
+  Background(({ Given }) => {
+    Given(
+      'the chat of the group "Website" open in a browser of its owner, set to English',
+      async () => {
+        home = new TestHome();
+        home.add(website, 'Website');
+        home.write(website, example('row-member-ai', { id: 'codex', name: 'Codex' }));
+        home.write(
+          website,
+          example('row-member-ai', { id: 'claude', name: 'Claude Code', cli: 'claude' }),
+        );
+        first = browser(home);
+        homes.push(first.store);
+        await read(first);
+        group = first.store.groups[0];
+        openPage(`#/groups/${website}`);
+        expect(texts('.chat-head h2')).toEqual(['Website']);
+      },
+    );
+  });
+
+  Scenario(
+    'A message written in the composer appears in the main line of both browsers',
+    ({ Given, When, Then, And }) => {
+      Given('a second browser of the same person reads the group', async () => {
+        second = browser(home);
+        await read(second);
+      });
+      When('the person writes "The path is direct." and sends it', async () => {
+        type('  The path is direct.\n');
+        expect(sendButton().disabled).toBe(false);
+        send();
+        await settled(1);
+      });
+      Then('the home is sent a post of kind "text" to the main line, signed by this device', () => {
+        expect(posts()).toEqual([
+          {
+            t: 'post',
+            n: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
+            ts: expect.any(Number),
+            g: website,
+            kind: 'text',
+            thread: null,
+            main: false,
+            text: 'The path is direct.',
+            mentions: [],
+            re: null,
+            body: {},
+            k: 'this-browser',
+          },
+        ]);
+      });
+      And('the message "The path is direct." appears under the name "Alex", marked "You"', () => {
+        expect(texts('.msg .text')).toEqual(['The path is direct.']);
+        expect(texts('.msg-head b')).toEqual(['Alex']);
+        expect(texts('.msg-head .badge')).toEqual(['You']);
+        expect(one('.msg').id).toBe(`m-${posts()[0].n}`);
+      });
+      And('the second browser holds the message too', () => {
+        expect(second.store.groups[0].main.map((msg) => msg.text)).toEqual(['The path is direct.']);
+      });
+      And('the composer is empty again', () => {
+        expect(field().value).toBe('');
+        expect(sendButton().disabled).toBe(true);
+      });
+    },
+  );
+
+  Scenario(
+    'A mention is completed from the members and named in the post',
+    ({ When, Then, And }) => {
+      When('the person types "ask @c"', () => type('ask @c'));
+      Then('the composer offers "Claude Code" and "Codex"', () => {
+        expect(texts('[role=option] .cut')).toEqual(['Claude Code', 'Codex']);
+        expect(all('[role=option]').map((o) => o.getAttribute('aria-selected'))).toEqual([
+          'true',
+          'false',
+        ]);
+        expect(field().getAttribute('aria-expanded')).toBe('true');
+        expect(field().getAttribute('aria-activedescendant')).toBe(all('[role=option]')[0].id);
+      });
+      When('the person moves down once and presses Enter', async () => {
+        press('ArrowDown');
+        expect(field().getAttribute('aria-activedescendant')).toBe(all('[role=option]')[1].id);
+        press('Enter');
+        await vi.waitFor(() => expect(field().value).not.toBe('ask @c'));
+        flushSync();
+      });
+      Then('the composer reads "ask @Codex " and offers nothing', () => {
+        expect(field().value).toBe('ask @Codex ');
+        expect(field().selectionStart).toBe(11);
+        expect(all('[role=option]')).toEqual([]);
+        expect(field().getAttribute('aria-expanded')).toBe('false');
+        expect(posts()).toEqual([]);
+      });
+      When('the person adds "for the fields" and sends the message', async () => {
+        type('ask @Codex for the fields');
+        send();
+        await settled(1);
+      });
+      Then('the post names the member "Codex" in its mentions', () => {
+        expect(posts()[0]).toMatchObject({
+          text: 'ask @Codex for the fields',
+          mentions: ['codex'],
+        });
+      });
+      And('the message shows "@Codex" as a mention', () => {
+        expect(texts('.msg .text .at')).toEqual(['@Codex']);
+        expect(texts('.msg .text')).toEqual(['ask @Codex for the fields']);
+      });
+    },
+  );
+
+  Scenario('The composer tells the writer before a message is too long', ({ When, Then, And }) => {
+    When('the person writes a message of 5800 letters', () => {
+      type('a'.repeat(5733));
+      expect(said()).toEqual([]);
+      type('a'.repeat(5800));
+    });
+    Then('the composer says "Long message: 76% of what one message can hold."', () => {
+      expect(said()).toEqual(['Long message: 76% of what one message can hold.']);
+    });
+    And('the message can be sent', () => {
+      expect(sendButton().disabled).toBe(false);
+    });
+    When('the person writes a message of 9000 letters', () => type('a'.repeat(9000)));
+    Then(
+      'the composer says "Too long to send: 115% of what one message can hold. Shorten it, or send it in parts."',
+      () => {
+        expect(said()).toEqual([
+          'Too long to send: 115% of what one message can hold. Shorten it, or send it in parts.',
+        ]);
+      },
+    );
+    And('the message cannot be sent', async () => {
+      expect(sendButton().disabled).toBe(true);
+      send();
+      press('Enter');
+      await new Promise((later) => setTimeout(later, 5));
+      expect(posts()).toEqual([]);
+    });
+  });
+
+  Scenario('Messages are shown under the day they were written on', ({ Given, Then, And }) => {
+    Given(
+      'messages written yesterday at 23:50 and today at 00:10 and 00:12 by the same member',
+      () => {
+        const today = new Date().setHours(0, 0, 0, 0);
+        home.say(website, 'codex', 'one', { ts: today - 10 * 60_000 });
+        home.say(website, 'codex', 'two', { ts: today + 10 * 60_000 });
+        home.say(website, 'codex', 'three', { ts: today + 12 * 60_000 });
+        flushSync();
+      },
+    );
+    Then(
+      'the main line shows a day that begins with "yesterday" and a day that begins with "today"',
+      () => {
+        expect(texts('.sep').map((day) => day.split(' ')[0])).toEqual(['yesterday', 'today']);
+        expect(all('.day').map((day) => day.querySelectorAll('.msg').length)).toEqual([1, 2]);
+        expect(all('.sep time').map((time) => time.getAttribute('datetime'))).toEqual(
+          [-1, 0].map((days) => {
+            const day = new Date();
+            day.setHours(0, 0, 0, 0);
+            day.setDate(day.getDate() + days);
+            return day.toISOString();
+          }),
+        );
+      },
+    );
+    And('the last message is joined to the one before it, and the first of today is not', () => {
+      expect(all('.msg').map((msg) => msg.classList.contains('joined'))).toEqual([
+        false,
+        false,
+        true,
+      ]);
+      expect(texts('.msg-head b')).toEqual(['Codex', 'Codex']);
+      expect(texts('.msg .text')).toEqual(['one', 'two', 'three']);
+    });
+  });
+
+  Scenario('A message shows its mentions and its code as written', ({ Given, Then, And }) => {
+    Given('"Codex" wrote "@Alex run `go test ./...` first" and mentioned the reader', () => {
+      home.say(website, 'codex', '@Alex run `go test ./...` first', { mentions: [owner] });
+      home.say(website, 'codex', '@Alex is named here but not mentioned');
+      flushSync();
+    });
+    Then('the message shows the mention "@Alex" and the code "go test ./..."', () => {
+      expect(texts('.msg .text .at')).toEqual(['@Alex']);
+      expect(texts('.msg .text code')).toEqual(['go test ./...']);
+    });
+    And('the rest of its text is shown as written', () => {
+      expect(texts('.msg .text')).toEqual([
+        '@Alex run go test ./... first',
+        '@Alex is named here but not mentioned',
+      ]);
+    });
+  });
+
+  Scenario(
+    'Scrolling back fetches the pages before, one at a time',
+    ({ Given, When, Then, And }) => {
+      const numbered = Array.from({ length: 120 }, (_, i) => `message ${i + 1}`);
+      Given('the group holds 120 messages and the browser has read the newest 50', async () => {
+        first.drop();
+        for (const text of numbered) home.say(website, owner, text);
+        // More rows than a delta carries would be needed here; a new browser reads from nothing.
+        await closePage();
+        first = browser(home);
+        homes.push(first.store);
+        await read(first);
+        group = first.store.groups[0];
+        openPage(`#/groups/${website}`);
+        expect(texts('.msg .text')).toEqual(numbered.slice(-50));
+        expect(home.asked.filter((req) => req.t === 'fetch')).toEqual([]);
+      });
+      When('the top of the main line comes into view', () => scrollToTop());
+      Then('the browser fetches pages until the home has no more', async () => {
+        await vi.waitFor(() => expect(group.paging().more).toBe(false));
+        flushSync();
+        const lowest = (text: string) => group.main.find((msg) => msg.text === text)!.pos;
+        expect(home.asked.filter((req) => req.t === 'fetch')).toEqual([
+          { t: 'fetch', g: website, thread: null, before: 0, limit: 50 },
+          { t: 'fetch', g: website, thread: null, before: lowest('message 71'), limit: 50 },
+          { t: 'fetch', g: website, thread: null, before: lowest('message 21'), limit: 50 },
+        ]);
+      });
+      And('the main line shows all 120 messages in the order they were written', () => {
+        expect(texts('.msg .text')).toEqual(numbered);
+      });
+      And('it says "This is where the group starts."', () => {
+        expect(texts('.edge')).toEqual(['This is where the group starts.']);
+      });
+    },
+  );
+
+  Scenario('Enter sends a message, but not while an input method composes', ({ When, Then }) => {
+    When('the person types "你好" and presses Enter while the input method composes', async () => {
+      type('你好');
+      press('Enter', { isComposing: true });
+      press('Enter', { shiftKey: true });
+      await new Promise((later) => setTimeout(later, 5));
+    });
+    Then('nothing is sent', () => {
+      expect(posts()).toEqual([]);
+      expect(field().value).toBe('你好');
+    });
+    When('the person presses Enter again', async () => {
+      press('Enter');
+      await settled(1);
+    });
+    Then('the home is sent the post "你好"', () => {
+      expect(posts().map((post) => post.text)).toEqual(['你好']);
+      expect(texts('.msg .text')).toEqual(['你好']);
+    });
+  });
+
+  Scenario(
+    'A command that the home refuses is told to the writer',
+    ({ Given, When, Then, And }) => {
+      Given('the home refuses posts', () => {
+        home.refuse = 'bad_request';
+      });
+      When('the person writes "hello" and sends it', async () => {
+        type('hello');
+        send();
+        await settled(1);
+      });
+      Then('the composer says "Not sent: the home refused it as too long or malformed."', () => {
+        expect(texts('.composer [role=alert]')).toEqual([
+          'Not sent: the home refused it as too long or malformed.',
+        ]);
+      });
+      And('the text stays in the composer', () => {
+        expect(field().value).toBe('hello');
+        expect(texts('.msg .text')).toEqual([]);
+      });
+    },
+  );
+});
