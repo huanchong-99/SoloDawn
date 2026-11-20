@@ -57,7 +57,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
-  vi.restoreAllMocks();
 });
 
 function connect(urls = [remote]) {
@@ -191,15 +190,6 @@ it('rejects a frame out of handshake order on just its path', async () => {
   expect(lan.readyState).toBe(FakeSocket.CLOSING);
   client.send({ t: 'ice' });
   expect(lan.frames().slice(1)).toStrictEqual([{ t: 'ice' }, { t: 'watch', k: [] }]);
-});
-
-it('closes the path when its challenge cannot be signed', async () => {
-  vi.spyOn(browser, 'signChallenge').mockRejectedValue(new Error('key unavailable'));
-  const { receive, rv } = connect();
-  await rv.deliver({ t: 'challenge', nonce: 'LdAL134CIs7YgmZUganB2Q' });
-  expect(rv.readyState).toBe(FakeSocket.CLOSING);
-  expect(rv.sent).toStrictEqual([]);
-  expect(receive.mock.calls).toStrictEqual([]);
 });
 
 it('does not authenticate if a premature ready arrives during signing', async () => {

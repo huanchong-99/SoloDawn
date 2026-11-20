@@ -41,12 +41,7 @@ function path(url: string, device: Device, known: Known, receive: Receive) {
     const challenge = v.safeParse(RVChallenge, read(data));
     if (!challenge.success) return socket.close();
     socket.onmessage = () => socket.close();
-    let s: string;
-    try {
-      s = await device.signChallenge(challenge.output.nonce);
-    } catch {
-      return socket.close();
-    }
+    const s = await device.signChallenge(challenge.output.nonce);
     if (socket.readyState !== WebSocket.OPEN) return;
     socket.onmessage = ready;
     socket.send(JSON.stringify({ t: 'auth', k: device.id, s } satisfies RVAuth));
@@ -73,10 +68,7 @@ function path(url: string, device: Device, known: Known, receive: Receive) {
     return k === env.k && 'header' in (await openSignal(crypto, env, device.id, known, Date.now()));
   }
 
-  socket.onclose = () => {
-    pending = undefined;
-    receive(url, { t: 'closed' });
-  };
+  socket.onclose = () => receive(url, { t: 'closed' });
 
   return {
     send(text: string) {
