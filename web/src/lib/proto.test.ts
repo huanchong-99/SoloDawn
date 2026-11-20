@@ -217,14 +217,21 @@ describe('Id', () => {
     expect(is(text)).toBe(false);
   });
 
-  it('is the type of n and g in a signed payload, and of no other example field', () => {
+  it('is the type of n, g and conn in a signed payload, and of no other example field', () => {
     const offer = JSON.parse(goldens.offer);
     expect(accepts('offer', offer)).toBe(true);
     expect(accepts('offer', { ...offer, g: id })).toBe(true);
     expect(accepts('offer', { ...offer, n: 'offer-1' })).toBe(false);
     expect(accepts('offer', { ...offer, g: 'Website' })).toBe(false);
     expect(accepts('offer', { ...offer, g: '' })).toBe(false);
-    expect(accepts('offer', { ...offer, conn: 'c1', to: 'anyone' })).toBe(true);
+    expect(accepts('offer', { ...offer, to: 'anyone' })).toBe(true);
+    // A conn that is no random id is refused, as internal/peer/signal.go refuses it.
+    expect(accepts('offer', { ...offer, conn: 'c1' })).toBe(false);
+    for (const name of ['answer', 'ice']) {
+      const signal = JSON.parse(goldens[name]);
+      expect(accepts(name, signal)).toBe(true);
+      expect(accepts(name, { ...signal, conn: 'c' })).toBe(false);
+    }
     // The by of a message row may be "system", and a device row's id is no random id.
     const msg = JSON.parse(goldens['row-msg-system']);
     expect(msg.by).toBe('system');
@@ -406,5 +413,29 @@ describe('decode', () => {
 
   it('refuses text that is not JSON', () => {
     expect(() => p.decode(p.Frame, '{"t":')).toThrow(SyntaxError);
+  });
+});
+
+describe('objects and errors as Go reads them', () => {
+  it('refuses an array for usage and checks, whose fields are all optional', () => {
+    const member = JSON.parse(goldens['row-member-ai']);
+    const task = JSON.parse(goldens['row-task']);
+    expect(accepts('row-member-ai', member)).toBe(true);
+    expect(accepts('row-task', task)).toBe(true);
+    expect(accepts('row-member-ai', { ...member, usage: [] })).toBe(false);
+    expect(accepts('row-member-ai', { ...member, usage: {} })).toBe(true);
+    expect(accepts('row-task', { ...task, checks: [] })).toBe(false);
+    expect(accepts('row-task', { ...task, checks: {} })).toBe(true);
+  });
+
+  it('reads a frame with err as an error, whatever ok says', () => {
+    const text = '{"re":1,"ok":true,"err":{"code":"conflict","msg":"Decided."}}';
+    expect(p.decode(p.Frame, text)).toStrictEqual({
+      re: 1,
+      err: { code: 'conflict', msg: 'Decided.' },
+    });
+    expect(v.is(p.CmdResult, JSON.parse(text))).toBe(false);
+    expect(v.is(p.CmdResult, { re: 1, ok: true })).toBe(true);
+    expect(() => p.decode(p.Frame, '{"re":1,"ok":true,"err":"conflict"}')).toThrow();
   });
 });

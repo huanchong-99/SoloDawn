@@ -14,6 +14,15 @@ const int = v.pipe(num, v.safeInteger());
 const bool = v.boolean();
 const strs = v.array(str);
 
+/** An object with these fields. valibot's object also accepts an array, which Go refuses: with
+ *  only optional fields, [] would pass. */
+const record = <E extends v.ObjectEntries>(entries: E) =>
+  v.pipe(
+    v.unknown(),
+    v.check((x) => !Array.isArray(x)),
+    v.object(entries),
+  );
+
 // The signed payload `p` is kept as the exact string received: its bytes are what is signed.
 export const Envelope = v.object({ p: str, k: str, s: str });
 export type Envelope = v.InferOutput<typeof Envelope>;
@@ -24,7 +33,7 @@ export type Envelope = v.InferOutput<typeof Envelope>;
 export const Id = v.pipe(str, v.regex(/^[A-Za-z0-9_-]{21}[AQgw]$/));
 
 const PayloadHeader = { n: Id, ts: int, g: v.optional(Id), to: v.optional(str) };
-const SignalHeader = { ...PayloadHeader, conn: str };
+const SignalHeader = { ...PayloadHeader, conn: Id };
 
 export const Offer = v.object({
   t: v.literal('offer'),
@@ -127,7 +136,8 @@ export type RVRoom = v.InferOutput<typeof RVRoom>;
 
 // Session (datachannel.md section 3)
 
-const Success = { re: int, ok: v.literal(true) };
+// A frame with `err` is an error, whatever else it holds (contracts/conventions.md section 3).
+const Success = { re: int, ok: v.literal(true), err: v.optional(v.never()) };
 
 export const Hello = v.object({
   t: v.literal('hello'),
@@ -232,7 +242,7 @@ export const AIMemberRow = v.object({
   task: v.optional(str),
   since: int,
   path: str,
-  usage: v.object({
+  usage: record({
     window_pct: v.optional(num),
     window_resets: v.optional(int),
     day_cap_pct: v.optional(num),
@@ -272,7 +282,7 @@ export const TaskRow = v.object({
   branch: v.optional(str),
   pr: v.optional(int),
   pr_url: v.optional(str),
-  checks: v.object({ local: v.optional(Check), cloud: v.optional(Check) }),
+  checks: record({ local: v.optional(Check), cloud: v.optional(Check) }),
   review: v.optional(v.object({ round: int, score: int, ok: bool, by: str, commit: str, at: int })),
   wait: v.nullable(
     v.object({ kind: str, msg: v.optional(str), who: v.optional(strs), since: int }),
@@ -290,12 +300,7 @@ export type TaskRow = v.InferOutput<typeof TaskRow>;
 
 const optionalText = v.optional(str);
 const optionalInt = v.optional(int);
-// valibot's object({}) also accepts arrays; the body on the wire must be an object.
-const EmptyBody = v.pipe(
-  v.unknown(),
-  v.check((x) => !Array.isArray(x)),
-  v.object({}),
-);
+const EmptyBody = record({});
 
 const BriefTask = v.object({
   title: str,
