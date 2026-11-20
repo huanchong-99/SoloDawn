@@ -25,18 +25,22 @@ rendezvous.
 7. The node authenticates to the rendezvous service and joins the room. The
    service sends `joined` to both sides.
 8. Both sides send their `pair` message and verify the other's `mac`. The
-   page shows the node's label, system, version and fingerprint.
+   page shows the node's label and fingerprint, which its `pair` message
+   carries; the node's version arrives with `welcome` and its system with
+   `host.info` (steps 10 and 11).
 9. The browser sends a signed `offer` to the node; the node answers; ICE
    runs (`flows/connect.md`); the `ctl` channel opens.
-10. Until the next step is done the connection carries only `hello` and
-    `devlog`. The browser writes log entry 1 (genesis, itself) and entry 2
-    (`add` the node) and sends both in a `devlog` frame. The node, which
-    belongs to nobody yet, adopts that person because the log is valid and
-    the entry that adds the node is signed by the browser at the other end
-    of this pairing connection (`contracts/envelope.md` section 6). The
-    browser sends `hello` again and the new `welcome` says `owner: true`.
-11. The node registers itself to start at login, then reports over `ctl` the
-    AI CLIs it found on the machine.
+10. Until the node has adopted the person, the connection carries only
+    `hello` and `devlog`. The browser writes log entry 1 (genesis, itself)
+    and entry 2 (`add` the node) and sends both in a `devlog` frame. The
+    node, which belongs to nobody yet, adopts that person because the log
+    is valid and the entry that adds the node is signed by the browser at
+    the other end of this pairing connection (`contracts/envelope.md`
+    section 6). The browser sends `hello` again and the new `welcome` says
+    `owner: true`.
+11. The node registers itself to start at login, then reports the AI CLIs
+    it found on the machine in `host.info` (`contracts/datachannel.md`
+    section 7).
 12. For each CLI the owner picks an account type (R-50); the browser sends
     `agent.set`. The page moves on to "create your first group".
 13. `solodawn pair` prints the result (label, fingerprint, path in use) and

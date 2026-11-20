@@ -285,10 +285,10 @@ change writes no message: the row shows it.
 
 | Part | Folded into |
 | --- | --- |
-| sections 1 and 2 | `contracts/commands.md` 1.2, and a section for `invite` and `join` |
-| section 3 | `contracts/envelope.md` section 6; `contracts/vectors.md` |
+| sections 1 and 2; section 7, point 2 | `contracts/commands.md` 1.2, a section for `invite` and `join`, and section 2 (`home.add`); the link of `invite` among the results that live only in memory ("Once only"; `contracts/storage.md` section 2, `receipt`) |
+| section 3 | `contracts/envelope.md` section 3 (check 2: a joining peer) and section 6; `contracts/vectors.md` |
 | section 4 | a new `flows/joining.md` |
-| section 5 | `contracts/datachannel.md` sections 3.1 and 8 |
+| section 5; section 7, point 2 | `contracts/datachannel.md` sections 3.1, 7 (`home` in each entry of `homes`) and 8 |
 | section 6 | `contracts/messages.md` 2.11 |
 
 Unit P-4 freezes the wire shapes: the payloads of `invite` (with its

@@ -67,8 +67,8 @@ Node to client:
   it (`contracts/rendezvous.md` 2.3; hello timeout: `flows/connect.md` step
   11). Nothing is carried over: the client reads again with `sync`.
 - A `hello` on a connection that has already had one is answered with a
-  fresh `welcome`. A client sends it again when pairing has put it in the
-  owner's log, and reads `owner: true` from the answer.
+  fresh `welcome`. A client sends it again when pairing has enrolled the
+  newcomer, whichever side that is, and reads `owner: true` from the answer.
 - Each side decides what its path is from the candidate pair its own stack
   selected. Nothing a peer says about the path is used for a rule.
 
