@@ -21,6 +21,20 @@ jobs:
       - run: go test ./...
       - run: go test -tags acceptance -count=1 ./features/...
 
+  # The network simulation needs root and the kernel's netns and nftables.
+  # Its tests are built with the tag "netsim" and run as root here only.
+  netsim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nftables miniupnpd-nftables miniupnpc
+      - run: go vet -tags netsim ./features/netsim
+      - run: go test -c -tags netsim -o netsim.test ./features/netsim
+      - run: sudo ./netsim.test -test.v -test.count=1
+
   web:
     runs-on: ubuntu-latest
     defaults:
