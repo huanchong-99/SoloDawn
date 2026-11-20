@@ -192,7 +192,7 @@ Patterns:
   | --- | --- | --- | --- |
   | Anthropic API key | `sk-ant-` | 32 of `A-Za-z0-9_-` | [Claude docs][ak] |
   | OpenAI API keys, project keys included | `sk-` (`sk-proj-` for a project key) | 32 of `A-Za-z0-9_-` | [OpenAPI spec][oa], [Cookbook][op] |
-  | GitHub personal access token (classic) | `ghp_` | 36 of `A-Za-z0-9` | [GitHub docs][gh]; the length as HS-6 has it |
+  | GitHub personal access token (classic) | `ghp_` | 36 of `A-Za-z0-9_` | [GitHub docs][gh], [changelog][ghc]: `A-Za-z0-9_`, and lengths will grow |
   | GitHub fine-grained personal access token | `github_pat_` | 30 of `A-Za-z0-9_` | [GitHub docs][gh] |
   | GitHub OAuth, user, installation and refresh tokens | `gho_`, `ghu_`, `ghs_`, `ghr_` | 30 of `A-Za-z0-9_.-` | [GitHub docs][gh] |
   | AWS access key id | `AKIA`, `ASIA` | 16 of `A-Z0-9` | as HS-6 has it |
@@ -246,3 +246,4 @@ no special trust: it pairs like any browser (`solodawn open`).
 [oa]: https://github.com/openai/openai-openapi/blob/manual_spec/openapi.yaml
 [op]: https://developers.openai.com/cookbook/examples/agents_sdk/context_personalization
 [gh]: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github
+[ghc]: https://github.blog/changelog/2021-03-04-authentication-token-format-updates/

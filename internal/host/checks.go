@@ -19,10 +19,10 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
-// CheckRunner uses the host's shared outbound secret checker on added lines.
-type CheckRunner struct {
-	CheckSecret func(text string) error
-}
+// CheckRunner runs a task's project checks and both hard checks. The secrets
+// check applies CheckOutboundSecret, the patterns of local.md section 8, to
+// the added lines.
+type CheckRunner struct{}
 
 var ErrDirtyCheckTree = errors.New("conflict: the worktree has uncommitted changes")
 
@@ -164,7 +164,7 @@ func (r CheckRunner) hardChecks(ctx context.Context, dir, revisions string) ([]p
 		return nil, err
 	}
 	return []proto.CheckItem{
-		checkedItem("secrets", r.checkAddedLines(patch)),
+		checkedItem("secrets", checkAddedLines(patch)),
 		checkedItem("tests", checkTestFiles(names)),
 	}, nil
 }
@@ -173,9 +173,9 @@ func (r CheckRunner) hardChecks(ctx context.Context, dir, revisions string) ([]p
 // so the multiline secret matcher never combines unrelated additions.
 var addedCheckLines = regexp.MustCompile(`(?m)^(?:>[^\n]*\n?)+`)
 
-func (r CheckRunner) checkAddedLines(patch string) error {
+func checkAddedLines(patch string) error {
 	for _, run := range addedCheckLines.FindAllString(patch, -1) {
-		if err := r.CheckSecret(strings.ReplaceAll(run[1:], "\n>", "\n")); err != nil {
+		if err := CheckOutboundSecret(strings.ReplaceAll(run[1:], "\n>", "\n")); err != nil {
 			return err
 		}
 	}

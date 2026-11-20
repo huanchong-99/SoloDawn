@@ -38,22 +38,19 @@ func checkTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	checkTestGit(t, dir, "init", "-b", "base")
-	checkTestFile(t, dir, "guide", "old marked secret\n")
+	checkTestFile(t, dir, "guide", "old "+checkTestSecret+"\n")
 	checkTestGit(t, dir, "add", ".")
 	checkTestGit(t, dir, "commit", "-m", "base")
 	checkTestGit(t, dir, "switch", "-c", "task")
 	return dir
 }
 
+// checkTestSecret matches the PEM pattern of CheckOutboundSecret; split so
+// this file does not hold the header itself.
+const checkTestSecret = "-----BEGIN " + "PRIVATE KEY-----"
+
 func checkTestRunner() CheckRunner {
-	return CheckRunner{
-		CheckSecret: func(text string) error {
-			if strings.Contains(text, "marked secret") {
-				return errors.New("secret detected")
-			}
-			return nil
-		},
-	}
+	return CheckRunner{}
 }
 
 func checkTestGroup(checks ...string) proto.GroupRow {
@@ -62,7 +59,7 @@ func checkTestGroup(checks ...string) proto.GroupRow {
 
 func TestProjectChecksAndBothHardChecks(t *testing.T) {
 	dir := checkTestRepo(t)
-	checkTestFile(t, dir, "source.go", "a marked secret\n")
+	checkTestFile(t, dir, "source.go", "a "+checkTestSecret+"\n")
 	checkTestGit(t, dir, "add", ".")
 	checkTestGit(t, dir, "commit", "-m", "task")
 	commands := []string{"echo one > first", "exit 12", "git hash-object first"}
@@ -83,7 +80,7 @@ func TestProjectChecksAndBothHardChecks(t *testing.T) {
 		{Name: commands[0], OK: true},
 		{Name: commands[1], Detail: new("exit status 12")},
 		{Name: commands[2], OK: true, Detail: new(digest + "\n")},
-		{Name: "secrets", Detail: new("secret detected")},
+		{Name: "secrets", Detail: new(errSecret.Error())},
 		{Name: "tests", Detail: new("source changed without a test file")},
 	}}
 	if err != nil || !reflect.DeepEqual(got, want) {
@@ -183,14 +180,18 @@ func TestProjectCheckPlatformEnvironment(t *testing.T) {
 }
 
 func TestChecksOnlyConsecutiveAddedLinesReachSecretMatcher(t *testing.T) {
-	var got []string
-	runner := CheckRunner{CheckSecret: func(text string) error { got = append(got, text); return nil }}
-	patch := "+++ b/file\n@@ -1 +1,3 @@\n-old\n>++literal\n>>text\n>\n@@ -9,0 +12 @@\n>last"
-	if err := runner.checkAddedLines(patch); err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"++literal\n>text\n\n", "last"}; !slices.Equal(got, want) {
-		t.Fatalf("matcher inputs %q, want %q", got, want)
+	for _, tc := range []struct {
+		patch string
+		want  error
+	}{
+		{"+++ b/file\n@@ -1 +1,3 @@\n>A=1\n>B=2\n>MY_KEY=3\n", errSecret},
+		{"+++ b/file\n@@ -1,2 +1,3 @@\n>A=1\n>B=2\n-old\n>MY_KEY=3", nil},
+		{"+++ b/file\n@@ -1 +1,2 @@\n>A=1\n>B=2\n@@ -9,0 +12 @@\n>MY_KEY=3", nil},
+		{"+++ b/file\n@@ -1 +1,3 @@\n A=1\n>B=2\n>MY_KEY=3", nil},
+	} {
+		if err := checkAddedLines(tc.patch); err != tc.want {
+			t.Errorf("%q: got %v, want %v", tc.patch, err, tc.want)
+		}
 	}
 }
 
