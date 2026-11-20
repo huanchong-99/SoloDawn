@@ -235,6 +235,10 @@ func TestDefaultMapConfigAndLocalHelpers(t *testing.T) {
 	eq(t, eligibleIP(net.ParseIP("169.254.1.1")), true)
 	eq(t, eligibleIP(net.ParseIP("2001:db8::1")), true)
 	eq(t, eligibleIP(net.ParseIP("fe80::1")), false)
+	eq(t, afterUsed(47800, nil), uint16(47801))
+	eq(t, afterUsed(47800, map[uint16]bool{47801: true}), uint16(47802))
+	eq(t, afterUsed(47800, map[uint16]bool{47805: true}), uint16(47806))
+	eq(t, afterUsed(47805, map[uint16]bool{47801: true}), uint16(47806))
 	sListen, err := Listen(0, 0)
 	check(t, err)
 	check(t, sListen.Close())
@@ -451,15 +455,20 @@ func TestUPnPIGDv2FallbackCollisionAndClose(t *testing.T) {
 	eq(t, len(v1Srv.recorded()), 0)
 
 	// Because tcpPort (47801) was granted external 47800, signalPort (47800) saw
-	// used["tcp"][47800] == true and went straight to AddAnyPortMapping without
-	// calling AddPortMapping(47800), avoiding miniupnpd's same-client overwrite.
+	// used["tcp"][47800] == true and went straight to AddAnyPortMapping(47801)
+	// without calling AddPortMapping(47800), avoiding miniupnpd's same-client overwrite.
 	var sawSignalAddSpecific bool
+	var anyStarts []uint16
 	for _, a := range srv.recorded() {
 		if a.action == "AddPortMapping" && a.proto == "TCP" && a.internal == 47800 {
 			sawSignalAddSpecific = true
 		}
+		if a.action == "AddAnyPortMapping" {
+			anyStarts = append(anyStarts, a.ext)
+		}
 	}
 	eq(t, sawSignalAddSpecific, false)
+	eq(t, anyStarts, []uint16{47801, 47802, 47801})
 
 	check(t, pm.Close())
 	eq(t, pm.Mapped(), false)
@@ -493,8 +502,9 @@ func TestUPnPIGDv1AndPPPFallbackAndErrors(t *testing.T) {
 				return 0 // takes TCP 47801
 			}
 			if a.proto == "TCP" && a.internal == 47800 {
-				// 47800 returns 718; step 1 (47801) is in used["tcp"], step 2 (47802) returns 718, step 3 (47803) succeeds!
-				if a.ext == 47800 || a.ext == 47802 {
+				// 47800 returns 718; 47801 is in used["tcp"] so fallback starts at 47802:
+				// step 0 (47802) and step 1 (47803) return 718, step 2 (47804) succeeds!
+				if a.ext == 47800 || a.ext == 47802 || a.ext == 47803 {
 					return upnpConflict
 				}
 				return 0
@@ -517,7 +527,7 @@ func TestUPnPIGDv1AndPPPFallbackAndErrors(t *testing.T) {
 	pm := s.mapPorts(47800, cfg)
 	<-pm.Ready()
 	eq(t, pm.Mapped(), true)
-	eq(t, pm.SignalURL(), "ws://203.0.113.9:47803/rv")
+	eq(t, pm.SignalURL(), "ws://203.0.113.9:47804/rv")
 	check(t, pm.Close())
 }
 
@@ -620,12 +630,23 @@ func TestGatewayBoundaryRejectionsAndTimeouts(t *testing.T) {
 	_, _, err = igErrAny.mapPort(t.Context(), netip.MustParseAddr("10.0.0.2"), "udp", 47800, 47800, map[uint16]bool{}, 60)
 	eq(t, err == nil, false)
 
-	// IGDv1 exhausting all 3 steps (including when all 3 are already in used).
+	// IGDv1 exhausting all 3 steps (47801..47803 fail; 47804 would succeed if tried).
+	srv.add = func(a upnpAction) int {
+		if a.ext <= 47803 {
+			return upnpConflict
+		}
+		return 0
+	}
 	igNoAny := newIGDGateway(&c2[0].ServiceClient, c2[0], nil, cfg).(*igdGateway)
 	_, _, err = igNoAny.mapPort(t.Context(), netip.MustParseAddr("10.0.0.2"), "udp", 47800, 47800, map[uint16]bool{}, 60)
 	eq(t, err == nil, false)
-	_, _, err = igNoAny.mapPort(t.Context(), netip.MustParseAddr("10.0.0.2"), "tcp", 47800, 47800, map[uint16]bool{47800: true, 47801: true, 47802: true, 47803: true}, 60)
-	eq(t, err == nil, false)
+	// Also verify AddAnyPortMapping starts past used={47801:true} (at 47802) when 47800 conflicts.
+	var gotAnyExt uint16
+	srv.any = func(a upnpAction) (uint16, int) { gotAnyExt = a.ext; return a.ext, 0 }
+	gotPort, _, err := ig.mapPort(t.Context(), netip.MustParseAddr("10.0.0.2"), "tcp", 47800, 47800, map[uint16]bool{47801: true}, 60)
+	check(t, err)
+	eq(t, gotAnyExt, uint16(47802))
+	eq(t, gotPort, uint16(47802))
 
 	// Hanging UPnP server is bounded by cfg.timeout.
 	hang := make(chan struct{})

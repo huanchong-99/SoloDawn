@@ -23,14 +23,12 @@ type Sockets struct {
 // candidates of answered connections, and opens the passive ICE-TCP listener
 // on tcpPort for both roles (contracts/rendezvous.md section 5.1, point 3).
 func Listen(udpPort, tcpPort int) (*Sockets, error) {
-	var engine webrtc.SettingEngine
-	engine.SetIPFilter(eligibleIP)
-	return listen(udpPort, ":"+strconv.Itoa(tcpPort), engine, ice.UDPMuxFromPortWithIPFilter(eligibleIP))
+	return listen(udpPort, ":"+strconv.Itoa(tcpPort), webrtc.SettingEngine{}, ice.UDPMuxFromPortWithIPFilter(eligibleIP))
 }
 
-// eligibleIP skips IPv6 link-local addresses, which pion never publishes with
-// mDNS gathering off (RFC 8445 §5.1.1.1) and which fail bind on Linux while
-// duplicate address detection is still tentative.
+// eligibleIP skips IPv6 link-local addresses in the answering UDP mux: pion
+// never publishes them with mDNS gathering off (RFC 8445 §5.1.1.1) and Linux
+// rejects bind while duplicate address detection is still tentative.
 func eligibleIP(ip net.IP) bool {
 	return ip.To4() != nil || !ip.IsLinkLocalUnicast()
 }

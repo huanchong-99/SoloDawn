@@ -593,31 +593,37 @@ func (g *igdGateway) mapPort(ctx context.Context, local netip.Addr, proto string
 }
 
 func (g *igdGateway) fallbackPort(ctx context.Context, suggested uint16, proto string, internal uint16, client string, used map[uint16]bool, lease uint32) (uint16, uint32, error) {
+	start := afterUsed(suggested, used)
 	if g.any != nil {
 		callCtx, cancel := context.WithTimeout(ctx, g.timeout)
 		defer cancel()
-		port, err := g.any.AddAnyPortMappingCtx(callCtx, "", suggested, proto, internal, client, true, "SoloDawn", lease)
+		port, err := g.any.AddAnyPortMappingCtx(callCtx, "", start, proto, internal, client, true, "SoloDawn", lease)
 		if err != nil || port == 0 {
 			return 0, 0, cmp.Or(err, errors.New("empty UPnP reserved port"))
 		}
 		return port, lease, nil
 	}
-	return g.tryNextPorts(ctx, proto, internal, client, used, lease)
+	return g.tryNextPorts(ctx, start, proto, internal, client, lease)
 }
 
-func (g *igdGateway) tryNextPorts(ctx context.Context, proto string, internal uint16, client string, used map[uint16]bool, lease uint32) (uint16, uint32, error) {
+func (g *igdGateway) tryNextPorts(ctx context.Context, start uint16, proto string, internal uint16, client string, lease uint32) (uint16, uint32, error) {
 	var lastErr error
-	for step := uint16(1); step <= 3; step++ {
-		ext := internal + step
-		if used[ext] {
-			continue
-		}
+	for step := uint16(0); step < 3; step++ {
+		ext := start + step
 		lastErr = g.addSpecific(ctx, ext, proto, internal, client, lease)
 		if lastErr == nil {
 			return ext, lease, nil
 		}
 	}
-	return 0, 0, cmp.Or(lastErr, errors.New("no free UPnP port"))
+	return 0, 0, lastErr
+}
+
+func afterUsed(suggested uint16, used map[uint16]bool) uint16 {
+	next := suggested + 1
+	for p := range used {
+		next = max(next, p+1)
+	}
+	return next
 }
 
 func (g *igdGateway) addSpecific(ctx context.Context, ext uint16, proto string, internal uint16, client string, lease uint32) error {
