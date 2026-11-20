@@ -8,6 +8,14 @@ Feature: Rendezvous signalling
   Background:
     Given a local rendezvous
 
+  Scenario: A1.7 A device spends one daily quota across two open TURN allocations
+    Given a local TLS rendezvous with a 1 MiB relay quota
+    When the browser signs the challenge and allocates a UDP and a TLS relay
+    And each allocation forwards 256 KiB to a peer and 256 KiB back
+    Then neither open allocation forwards another byte in either direction
+    When the browser sends {"t":"quota"}
+    Then the browser receives {"t":"quota","used":1048576,"limit":1048576}
+
   Scenario: A device that signs the challenge is told the ICE servers
     When the browser answers the challenge with its signature of that challenge
     Then the browser receives {"t":"ready","ice":[],"ttl":3600}

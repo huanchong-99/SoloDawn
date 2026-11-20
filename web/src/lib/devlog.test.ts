@@ -86,6 +86,20 @@ describe('DeviceLog.apply', () => {
     expect(log.entries).toStrictEqual([one, two]);
   });
 
+  // The signed bytes are p as TextEncoder encodes it, a lone surrogate as U+FFFD, and a Go node
+  // reads the escape "\ud800" in p as U+FFFD: to both, these are the entry already held.
+  it.each([
+    ['U+FFFD, then a lone surrogate', '�', '\uD800'],
+    ['a lone surrogate, then U+FFFD', '\uDC00', '�'],
+  ])('takes the same entry again whose p has %s', async (_, held, again) => {
+    const p = (name: string) => change(1, 'add', first.id).replace('workstation', name);
+    const one = await first.sign(p(held));
+    const log = await logWith(Promise.resolve(one));
+    expect(await log.apply({ ...one, p: p(again) })).toBe(false);
+    expect(await refusal(log.apply({ ...one, p: p(again + again) }))).toBe('bad_sig');
+    expect(log.entries).toStrictEqual([one]);
+  });
+
   it('refuses an entry signed by a device that is not valid before it', async () => {
     const log = await logWith(genesis(), signed(first, 2, 'add', second));
     expect(await refusal(log.apply(await signed(third, 3, 'add', third)))).toBe('unknown_device');

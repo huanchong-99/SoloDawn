@@ -3,7 +3,6 @@ package node
 import (
 	"embed"
 	"io/fs"
-	"net/http"
 
 	"github.com/huanchong-99/SoloDawn/internal/rendezvous"
 )
@@ -13,8 +12,10 @@ import (
 //go:embed webdist/*
 var assets embed.FS
 
-// Rendezvous runs the standalone signalling and static HTTP server.
-func Rendezvous(addr string) error {
+type RendezvousOptions = rendezvous.Options
+
+// Rendezvous runs the standalone signalling, static file and ICE service.
+func Rendezvous(opts RendezvousOptions) error {
 	web, _ := fs.Sub(assets, "webdist") // a valid, constant fs path
-	return http.ListenAndServe(addr, rendezvous.Handler(web))
+	return opts.Serve(web)
 }

@@ -86,6 +86,12 @@ export type RVReady = v.InferOutput<typeof RVReady>;
 export const RVICERequest = v.object({ t: v.literal('ice') });
 export type RVICERequest = v.InferOutput<typeof RVICERequest>;
 
+export const RVQuotaRequest = v.object({ t: v.literal('quota') });
+export type RVQuotaRequest = v.InferOutput<typeof RVQuotaRequest>;
+
+export const RVQuotaAnswer = v.object({ t: v.literal('quota'), used: int, limit: int });
+export type RVQuotaAnswer = v.InferOutput<typeof RVQuotaAnswer>;
+
 export const RVICEAnswer = v.object({ t: v.literal('ice'), ...iceConfig });
 export type RVICEAnswer = v.InferOutput<typeof RVICEAnswer>;
 
