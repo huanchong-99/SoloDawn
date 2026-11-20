@@ -320,12 +320,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: F-07 is the row layout and text messages (`planning/steps/step-1-frontend.md`). The line is drawn in `web/src/components/chat/Message.svelte`; `subject` in `web/src/lib/groups.svelte.ts` gives the subject.
 - Status: open. The card units replace the line (U-4 approvals, U-7 brief, decision and summary, U-8 task, U-9 the wording of `system` rows, U-10 calls).
 
-### 2026-11-20 · deviation · An open chat hides the shell's top bar on a phone from its own styles
-
-- Symptom: below 768 px an open chat shows no top bar and no bottom navigation; its own head, with a back button and the group's name, stands where the bar was, as the design asks (`web/design/README.md` 3.4). At every other width the top bar stays "Chats" and the group's name is in the chat's head below it, where the design has one bar with the group's name.
-- Cause: the shell has no place yet where a page says what the top bar shows or that the navigation is hidden. `web/src/routes/Groups.svelte` hides both with `.app:has(.groups.open)` in its own styles, and reads the group id from the address itself, because `route` carries only the page (`web/src/lib/route.svelte.ts`).
-- Status: open, for U-0 (mounting points of the shell, the route table).
-
 ### 2026-11-20 · limitation · In Safari the main line moves when a message arrives while the reader is scrolled back
 
 - Symptom: not observed, expected from the engine. The main line is a reversed scroller, whose offset is counted from its bottom. A message that arrives at the bottom while the reader is scrolled back pushes what they read up by its height, unless the browser anchors the scroll position. Chrome and Firefox do; Safari has no scroll anchoring.
@@ -344,7 +338,25 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `(*State).known` asks the logs of one group's `State` (`internal/home/check.go:88`), which hold the node owner's log and those of that group's people.
 - Status: open, without effect in step 1, where every group on a node has the same one person. For step 2, by the coordinator's decision of 2026-11-20 after the review of #160.
 
+### 2026-11-21 · deviation · From 768 px the top bar of an open chat names the page, not the group
+
+- Symptom: at 768 px and wider, the shell's top bar over an open chat says "Chats", and the chat's own head with the group's name, its members and its home is below it. The design has one bar with the group's name (`web/design/chat.html`).
+- Cause: the top bar's title is the page's (`page.<page>` in `web/src/App.svelte`), and no mounting point lets a page put its own head into the shell's bar (`web/src/lib/mounts.svelte.ts`). Below 768 px the chat's route has the whole screen, so its head is the only bar there.
+- Status: open, for the lane UI-SHELL (U-15, U-16) or a follow-up of U-0.
+
+### 2026-11-21 · limitation · The texts of the development-only states sheet are in the build
+
+- Symptom: the build carries the texts of the area `states` (about 0.5 KiB), although only a development server opens `#/states`.
+- Cause: `web/src/messages/files.ts` takes every message file eagerly, and the loader merges them all (`web/src/messages/texts.ts`).
+- Status: open, accepted with U-0 (#170).
+
 ## Resolved
+
+### 2026-11-20 · deviation · An open chat hid the shell's top bar on a phone from its own styles
+
+- Symptom: below 768 px an open chat showed no top bar and no bottom navigation, because `web/src/routes/Groups.svelte` hid them with `.app:has(.groups.open)` in its own styles, and it read the group id from the address itself, because `route` carried only the page.
+- Cause: the shell had no place where a page says that it takes the whole screen, and the route table had no parameters.
+- Status: resolved in U-0 (#170): the route `chat` (`#/groups/<g>`) asks the shell for the whole screen on a phone (`full: 'phone'` in `web/src/lib/route.svelte.ts`, drawn by `.app[data-full='phone']` in `web/src/styles/base.css`), and `Groups.svelte` reads `params.g`. The title of the top bar from 768 px is the open entry of 2026-11-21.
 
 ### 2026-11-20 · deviation · Web mock does not answer `host.info` or push `groups`
 

@@ -1,52 +1,36 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import Chat from '../components/chat/Chat.svelte';
   import CreateGroup from '../components/groups/CreateGroup.svelte';
   import GroupList from '../components/groups/GroupList.svelte';
   import Waiting from '../components/groups/Waiting.svelte';
-  import { find, Home, homes } from '../lib/groups.svelte';
+  import Icon from '../components/Icon.svelte';
+  import { find } from '../lib/groups.svelte';
   import { t } from '../lib/prefs.svelte';
+  import { href } from '../lib/route.svelte';
 
-  // The group that the address names is open: #/groups/<group id>.
-  let hash = $state(location.hash);
-  const open = $derived(find(hash.split('/')[2]));
+  /** The group list (`#/groups`), and the chat of the group the address names (`#/groups/<g>`). */
+  let { params }: { params: { g?: string } } = $props();
+
+  const open = $derived(find(params.g));
   let creating = $state(false);
-
-  // Development only, until a real connection is handed to the pages: one home answered from the
-  // node's wire examples. The build leaves this out, and the examples with it.
-  onMount(async () => {
-    if (import.meta.env.MODE !== 'development' || location.search.includes('nomock')) return;
-    const [{ mockCtl, goldens }, { loadDevice }] = await Promise.all([
-      import('../lib/mock'),
-      import('../lib/identity'),
-    ]);
-    const device = await loadDevice({ crypto, idb: () => indexedDB });
-    const user: string = JSON.parse(goldens['row-member-human']).user;
-    const home = new Home({ user, sign: (payload) => device.sign(payload) });
-    const link = home.connect();
-    const ctl = mockCtl(link.push);
-    const welcome = await ctl.request({
-      t: 'hello',
-      v: 1,
-      kind: 'browser',
-      name: 'development',
-      addrs: [],
-    });
-    if (welcome.err) return;
-    homes.push(home);
-    link.online(ctl, welcome);
-  });
+  // The address names a chat: the page is laid out for it, whether or not the group has been read.
 </script>
 
-<svelte:window onhashchange={() => (hash = location.hash)} />
-
-<div class="groups" class:open>
+<div class="groups" class:open={params.g !== undefined}>
   <section class="list" aria-label={t('groups.list')}>
     <Waiting bar />
     <GroupList {open} oncreate={() => (creating = true)} />
   </section>
   {#if open}
     {#key open}<Chat group={open} />{/key}
+  {:else if params.g !== undefined}
+    <!-- A group this browser has not read: not yet, or it is homed on no computer it reaches. -->
+    <div class="missing">
+      <a class="icon-btn back" href={href('groups')} aria-label={t('chat.back')}>
+        <Icon name="back" />
+      </a>
+      <p>{t('groups.missing')}</p>
+    </div>
   {:else}
     <div class="rest"><Waiting /></div>
   {/if}
@@ -79,6 +63,34 @@
   .rest {
     overflow: auto;
   }
+  /* Where the chat will be: the way back, and a quiet word that the group is not here yet. */
+  .missing {
+    display: grid;
+    align-content: start;
+    justify-items: start;
+    gap: var(--sp-4);
+    padding: var(--sp-2) var(--sp-4);
+  }
+  .missing p {
+    max-width: 420px;
+    padding: var(--sp-4) var(--sp-5);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-lg);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    animation:
+      rise var(--dur-3) var(--ease-out),
+      appear var(--dur-2) var(--ease-out);
+  }
+  @media (min-width: 1280px) {
+    .missing .back {
+      display: none;
+    }
+    .missing {
+      place-content: center;
+      justify-items: center;
+    }
+  }
   .groups.open {
     grid-template-columns: var(--list-w) minmax(0, 1fr);
   }
@@ -105,16 +117,6 @@
       grid-template-columns: minmax(0, 1fr);
     }
     .groups.open .list {
-      display: none;
-    }
-  }
-  /* On a phone an open chat also takes the place of the top bar and the bottom navigation: its
-     own head is the bar, and the room goes to the messages and the field (design notes, 3.4). */
-  @media (max-width: 767px) {
-    :global(.app:has(.groups.open)) {
-      grid-template: 'main' minmax(0, 1fr) / minmax(0, 1fr);
-    }
-    :global(.app:has(.groups.open) > :is(.bar, .rail)) {
       display: none;
     }
   }

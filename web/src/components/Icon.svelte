@@ -18,6 +18,10 @@
     fork: '<path d="M6 4v5c0 3.5 6 3.5 6 7v4M18 4v5c0 3.5-6 3.5-6 7"/>',
     doc: '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5"/>',
     home: '<path d="M4 11l8-7 8 7v9H4zM10 20v-6h4v6"/>',
+    users:
+      '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5.2a3 3 0 0 1 0 5.6M17 14.3c2.3.8 4 3 4 5.7"/>',
+    x: '<path d="M6 6l12 12M18 6L6 18"/>',
+    terminal: '<path d="M4 5h16v14H4zM8 10l3 2-3 2M13 15h3"/>',
   };
   export type IconName = keyof typeof icons;
 </script>

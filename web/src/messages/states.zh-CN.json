@@ -1,0 +1,8 @@
+{
+  "states.lead": "节点线上示例里的每条消息在聊天里的样子，以及每个挂载点上挂了什么。只有开发服务器有这一页。",
+  "states.points": "挂载点",
+  "states.cards": "卡片",
+  "states.none": "还没有挂载",
+  "states.stub": "一行占位",
+  "states.by": "挂载方"
+}

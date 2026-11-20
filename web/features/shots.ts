@@ -1,9 +1,11 @@
-// Screenshots of the group list and the chat for a pull request: the design's four widths in
-// both themes, one sheet per screen. Run in web/ with
+// Screenshots of the client for a pull request: the design's four widths in both themes, one
+// sheet per screen. Run in web/ with
 //   node features/shots.ts <directory> [screen ...]
-// With no screen named it takes them all. `list`, `chat` and `create` are taken at every width;
-// `mention`, `long` and `readonly` are states of the chat, taken at one width. A screen named
-// with a width and a theme, as `chat:820:light`, is one picture.
+// With no screen named it takes them all. `list`, `chat`, `create`, and the shell's `shell` (the
+// settings page in its frame), `pending` (a page not built yet) and `states` (the states sheet
+// of a development server) are taken at every width; `mention`, `long` and `readonly` are states
+// of the chat, taken at one width. A screen named with a width and a theme, as `chat:820:light`,
+// is one picture.
 // It starts a development server, loads features/demo.ts into the page and uses the Chromium
 // that `pnpm exec playwright install --only-shell chromium` installs.
 import { mkdir, readFile } from 'node:fs/promises';
@@ -38,9 +40,12 @@ async function open(browser: Browser, url: string, width: number, scheme: 'light
   return { page, ids: demo };
 }
 
-/** Waits until what arrives has arrived; what breathes for ever is left alone. */
+/** Waits until what arrives has arrived; what breathes for ever is left alone. The focus that a
+ *  change of page gives the main landmark is let go, as a pointer would: a script that changes
+ *  the address counts as the keyboard, and the landmark's ring would be in every picture. */
 async function still(page: Page) {
   await page.evaluate(async () => {
+    if (document.activeElement?.matches('main')) (document.activeElement as HTMLElement).blur();
     await document.fonts.ready;
     await new Promise((frame) => requestAnimationFrame(frame));
     const ending = document
@@ -71,6 +76,18 @@ const screens: Record<string, (page: Page, ids: Record<string, string>) => Promi
   long: async (page, ids) => {
     await screens.chat(page, ids);
     await page.getByRole('combobox', { name: '发消息' }).fill('日志很长。'.repeat(450));
+  },
+  shell: async (page) => {
+    await page.evaluate(() => (location.hash = '#/settings'));
+    await page.getByRole('radio', { name: '跟随系统' }).waitFor();
+  },
+  pending: async (page) => {
+    await page.evaluate(() => (location.hash = '#/terminal/g/m'));
+    await page.locator('.pending').waitFor();
+  },
+  states: async (page) => {
+    await page.evaluate(() => (location.hash = '#/states'));
+    await page.locator('.states .kind').first().waitFor();
   },
   readonly: async (page, ids) => {
     await page.evaluate((g) => (location.hash = `#/groups/${g}`), ids.phone);
@@ -119,7 +136,7 @@ const wanted = (screen: string) =>
   named.length === 0 ? single.length === 0 : named.includes(screen);
 
 try {
-  for (const screen of ['list', 'chat', 'create'].filter(wanted)) {
+  for (const screen of ['list', 'chat', 'create', 'shell', 'pending', 'states'].filter(wanted)) {
     const rows: string[][] = [];
     for (const scheme of schemes) {
       const row: string[] = [];

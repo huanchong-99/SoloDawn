@@ -1,21 +1,10 @@
-// Browser preferences (theme, language) and the lookup of interface texts.
+// Browser preferences (theme, language, and those a unit adds with `preference`) and the lookup
+// of interface texts.
 import { MediaQuery } from 'svelte/reactivity';
-import chatEn from '../messages/chat.en.json';
-import chatZh from '../messages/chat.zh-CN.json';
-import en from '../messages/en.json';
-import groupsEn from '../messages/groups.en.json';
-import groupsZh from '../messages/groups.zh-CN.json';
-import zh from '../messages/zh-CN.json';
+import { langs, messages, type Key, type Lang } from '../messages/texts';
 import { shift } from './motion';
 
-// The shell's texts, then those of each area of the interface, which has its own two files.
-const messages = {
-  'zh-CN': { ...zh, ...groupsZh, ...chatZh },
-  en: { ...en, ...groupsEn, ...chatEn },
-};
-export type Key = keyof (typeof messages)['zh-CN'] & keyof (typeof messages)['en'];
-export type Lang = keyof typeof messages;
-export const langs = Object.keys(messages) as Lang[];
+export { langs, type Key, type Lang };
 
 export const themes = ['auto', 'light', 'dark'] as const;
 export type Theme = (typeof themes)[number];
@@ -45,6 +34,44 @@ export const prefs = $state({
   theme: stored('sd-theme', themes, themes[0]),
   lang: stored('sd-lang', langs, navigator.language.startsWith('zh') ? 'zh-CN' : 'en'),
 });
+
+/** A preference that a part of the client keeps for itself. */
+export interface Preference<T extends string> {
+  /** What the person chose, or the default. Setting it is the person's choice: remembered. */
+  value: T;
+}
+
+// The preferences made so far, by name, with what each was made with.
+const made = new Map<string, { how: string; preference: Preference<string> }>();
+
+/** A preference of this browser that a part of the client keeps for itself, as the theme and the
+ *  language are kept: one of `allowed`, `fallback` until the person chooses, stored in this
+ *  browser as `sd-<name>` only when they do, and read back on the next visit unless the stored
+ *  value is not allowed or the storage is blocked. Made again with the same values, as a module
+ *  that the development server reloads does, it is the same preference. Made with other values,
+ *  or with the name of the theme or the language, it throws: two parts never share one value. */
+export function preference<T extends string>(
+  name: string,
+  allowed: readonly T[],
+  fallback: T,
+): Preference<T> {
+  const how = JSON.stringify([allowed, fallback]);
+  const known = made.get(name);
+  if (known?.how === how) return known.preference as Preference<T>;
+  if (known || name in prefs) throw new Error(`the preference ${name} exists`);
+  const kept = $state({ value: stored(`sd-${name}`, allowed, fallback) });
+  const preference = {
+    get value() {
+      return kept.value;
+    },
+    set value(value: T) {
+      kept.value = value;
+      store(`sd-${name}`, value);
+    },
+  };
+  made.set(name, { how, preference });
+  return preference;
+}
 
 /** Sets a preference as the person chose it, and remembers it in this browser. */
 function set<K extends keyof typeof prefs>(key: K, value: (typeof prefs)[K]) {
@@ -92,13 +119,13 @@ export const otherLang = () => langs.find((lang) => lang !== prefs.lang)!;
 export const toggleTheme = () =>
   shift(() => {
     set('theme', isDark() ? 'light' : 'dark');
-    announcement.text = `${t('settings.theme')}: ${t(`settings.theme.${prefs.theme}`)}`;
+    announcement.text = `${t('pref.theme')}: ${t(`pref.theme.${prefs.theme}`)}`;
   });
 
 export const toggleLang = () =>
   shift(() => {
     set('lang', otherLang());
-    announcement.text = `${t('settings.lang')}: ${t(`settings.lang.${prefs.lang}`)}`;
+    announcement.text = `${t('pref.lang')}: ${t(`pref.lang.${prefs.lang}`)}`;
   });
 
 /** An interface text in a given language, for a text that names both languages. */
