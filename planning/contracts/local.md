@@ -15,7 +15,7 @@ Markers: `[verified]` observed in the driver experiments or in a spike;
 | --- | --- |
 | `solodawn node` | runs the node in the foreground |
 | `solodawn rendezvous …` | runs the rendezvous service (`contracts/rendezvous.md`) |
-| `solodawn pair <secret> [--name <label>]` | starts the node if needed, pairs it, prints the result (`flows/pairing.md` A). Without `--name` the label is the computer's host name |
+| `solodawn pair <secret> [--name <label>] [--rendezvous <url>]` | starts the node if needed, pairs it, prints the result (`flows/pairing.md` A). Without `--name` the label is the computer's host name; without `--rendezvous` the node uses its configured rendezvous, or the official one. A node that already has an owner refuses, and its one line points to `solodawn pair-browser` |
 | `solodawn pair-browser` | prints a pairing link for a new browser |
 | `solodawn open` | pairs and opens the local browser on the node's own web client |
 | `solodawn status` | prints version, device fingerprint, connections and their paths, open sessions |
@@ -73,8 +73,9 @@ One JSON line opens a connection:
 - `{"mcp":"<session token>"}`: the rest of the connection is the MCP
   JSON-RPC stream of that session. The shim copies its stdin to the socket
   and the socket to its stdout and does nothing else.
-- `{"cmd":"pair","secret":"…","name":"…"}` and the other commands of section
-  1: the node answers with JSON lines. Each line that the command prints
+- `{"cmd":"pair","secret":"…","name":"…"}`, with `"rendezvous":"<url>"`
+  when the option was given, and the other commands of section 1: the
+  node answers with JSON lines. Each line that the command prints
   is one line `{"text":"…"}`; the last line is `{"done":true,"ok":true}` or
   `{"done":true,"error":"…"}`.
 
@@ -274,9 +275,12 @@ is not applied to what people type.
 
 ## 10. Local web client
 
-`http://localhost:47800/` serves the embedded web client. Requests whose
-`Host` header is not `localhost` or `127.0.0.1` are refused. The page gets
-no special trust: it pairs like any browser (`solodawn open`).
+`http://localhost:47800/` serves the embedded web client. For the static
+files, requests whose `Host` header is not `localhost` or `127.0.0.1` are
+refused. `/rv` on the same port is served on the node's network addresses
+too and is authenticated by its challenge (`contracts/rendezvous.md`
+section 1). The page gets no special trust: it pairs like any browser
+(`solodawn open`).
 
 [ak]: https://platform.claude.com/docs/en/get-api-key
 [oa]: https://github.com/openai/openai-openapi/blob/manual_spec/openapi.yaml
