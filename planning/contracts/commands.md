@@ -179,8 +179,10 @@ When each is allowed, and what it does, is `contracts/task-machine.md`.
 | `resume` | `id` | the secretary, or an admin (for a `failed` task, or one paused by the round limit, an admin only); the host of the assignee, for its own pre-empted task | — |
 | `cancel` | `id` | the secretary, or an admin (at step `merge` an admin only); the host of the assignee when `origin` is `takeover` | — |
 
-`items` of `checked` and `cloud` has the shape of `items` in a `checks`
-body (`contracts/messages.md` 2.8), which the home writes from it.
+`branch` of `task branch` is `task/<num>-<slug>` (`contracts/local.md`
+section 7); any other value is `bad_request`. `items` of `checked` and
+`cloud` has the shape of `items` in a `checks` body
+(`contracts/messages.md` 2.8), which the home writes from it.
 `stats` of `submitted` and `merged` is `{"added":…,"removed":…}`, the line
 counts of `git diff --shortstat <base-ref>...<commit>` (`contracts/local.md`
 section 7), written into the task row's `stats`.

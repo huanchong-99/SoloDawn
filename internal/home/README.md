@@ -168,6 +168,8 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
 `ItemsPush`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+The task commands (`cmd_task.go`) take the names that start with `tsk`, their tests too, and their
+test functions start with `TestTaskCmd`.
 
 ## The run loop
 
@@ -392,11 +394,56 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Task commands
+
+`cmd_task.go` holds `task` `start`, `branch`, `assign`, `pause`, `resume`, `cancel`, `fail` and
+`preempted` ([commands](../../planning/contracts/commands.md) 1.5;
+[task-machine](../../planning/contracts/task-machine.md) rows 2, 3 and 10 to 16), under the keys
+`task/start`, `task/branch`, `task/assign`, `task/pause`, `task/resume`, `task/cancel`, `task/fail`
+and `task/preempted`. Checks, submissions and reviews live in `cmd_review.go` (unit HM-11), and
+merges in `cmd_merge.go` (unit HM-12). Where the contracts are silent, it does this:
+
+- **Start.** Only a working AI starts a task, else `forbidden`. An `origin` other than `direct` or
+  `takeover` is `bad_request`. An `id` already held by a task or a message is `conflict`. The row
+  gets `num` `State.Num + 1`, `slug` from `proto.MakeSlug`, `pass` `group.pass`, `depends` `[]`,
+  and `created` and `stats.started` the home's time; its `task` message in the main line has the
+  task's own `id`. The answer carries `num`.
+- **Branch.** A `branch` other than `task/<num>-<slug>` is answered `bad_request`; a missing task is
+  `not_found`.
+- **Sender.** For an existing task, `s.Secretary` maps to `BySecretary`, `s.Hosts` for the task's
+  assignee to `ByHost`, `s.Admin` to `ByAdmin`, and anything else to `ByPerson`. Checking `s.Hosts`
+  before `s.Admin` gives the assignee's host row 13b on `task resume` and the host rules on
+  `pause`, `assign` and `cancel`.
+- **Assign.** Sending neither `assignee` nor `reviewer` is `bad_request`. After `Step` checks the
+  sender, the state and that the two roles differ, each role sent must name a working AI of the
+  group, else `conflict`. When `Step` queues an `assign` item (an active task whose assignee
+  changed, or that was `failed` or waiting on `conflict`), its `msg` is the newest `checks` or
+  `review` message in the task's thread, paged through `c.Disk.Thread`, or absent when there is
+  none. On a `queued` or `paused` task `Step` queues no work item.
+- **Cards and queue.** Every step over an existing task passes the task's pending `approval` and
+  `decision` cards from `c.Disk.Pending()`, oldest first. `Retire` withdraws matching items of that
+  task from `c.Disk.Queued()` before `IfNone` checks what remains. `Cards` `reassigned` updates the
+  task's pending `approval` cards; `expired` updates its pending `approval` and `decision` cards.
+- **Cancel.** After `OnCancel`, each `queued` task whose `depends` names the cancelled task is
+  stepped with `OnOrphaned`, in sorted task id order, queuing `dependency_cancelled` notices when
+  the group has a secretary.
+- **System messages.** `task fail` refuses a `reason` other than `crash` or `timeout` with
+  `bad_request`. At `limits.failures` (row 14) it writes `system` `task_failed` under id `n` in the
+  task's thread (or answers `conflict` if `n` is taken), mentioning the brief's requester when still
+  a member and the assignee's owner without duplicates, and sets the `task_failed` notice's `msg` to
+  that message. `task preempted` reads the jump message `msg` (`not_found` if absent, `bad_request`
+  if its `by` is `"system"`) and writes `system` `preempted` under id `n` in the task's thread. Both
+  thread messages advance `task.thread.count` and `task.thread.last`. A group without a secretary
+  queues no `notice`.
+
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
-  files and the wiring of the node are separate units
+- The table of commands holds only the briefs and these eight `task` commands, and no node starts a
+  loop yet: the other command files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- A second node of an admin that does not host a task's assignee is read as `ByAdmin` when it signs
+  without `as`, because `State.Logs` and `Who` do not separate a person's browser from their other
+  nodes ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -435,3 +482,9 @@ while a task is paused and a reviewer named while it is paused.
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`cmd_task_test.go` sends `task` `start`, `branch`, `assign`, `pause`, `resume`, `cancel`, `fail`
+and `preempted` through `Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every refusal,
+card transition, retirement filter, thread-feedback page boundary and system message.
+`features/home_task.feature` holds acceptance tests A5.5, A5.7 (home half), A5.15 (`task fail`
+twice) and A5.18 (home commands) through `Commands.Apply`.
