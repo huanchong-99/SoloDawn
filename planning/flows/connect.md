@@ -126,6 +126,11 @@ opened, and it will again on the next reconnect.
 15. When ICE reports the connection failed or closed, C starts again from
     step 1. Retries back off: 1, 2, 4 … 60 seconds. The old connection
     closing during a move is not this case (step 11.1).
+    If no answer arrives within 10 seconds of sending an offer (the same
+    timeout as `hello`), or every path used for that offer reports the
+    target offline before an answer arrives, C retires that `conn` at
+    once and ignores its late answers. After the same back-off it sends
+    a new offer with a new `conn`. Once answered, negotiation is left to ICE.
 16. Back-off is skipped, and C retries at once, when a signalling path
     reports the target present (`presence` from rendezvous, a beacon on the
     local network) or when C's own network changes.
