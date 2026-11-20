@@ -1,9 +1,17 @@
+import { resolve } from 'node:path';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vitest/config';
 
 // The node embeds the built client from internal/node/webdist (architecture 8.1). The build
 // empties that directory, so the .gitignore that keeps it out of Git is written back each time.
 const webdist = '../internal/node/webdist';
+
+// The wire examples of internal/proto, which the golden-file test and the development mock import
+// as `@testdata`. Stryker runs the tests in a copy of web/ at web/.stryker-tmp/sandbox-*/, and the
+// examples are not in the copy.
+const here = import.meta.dirname;
+const repo = here.includes('.stryker-tmp') ? '../../..' : '..';
+const testdata = resolve(here, repo, 'internal/proto/testdata');
 
 export default defineConfig(({ mode }) => ({
   base: './',
@@ -23,7 +31,11 @@ export default defineConfig(({ mode }) => ({
     emptyOutDir: true,
     target: ['chrome137', 'edge137', 'firefox136', 'safari17.5', 'ios17.5'],
   },
-  // Tests mount components, so Svelte must resolve to its browser build.
-  resolve: mode === 'test' ? { conditions: ['browser'] } : {},
+  server: { fs: { allow: ['.', testdata] } },
+  resolve: {
+    alias: { '@testdata': testdata },
+    // Tests mount components, so Svelte must resolve to its browser build.
+    ...(mode === 'test' && { conditions: ['browser'] }),
+  },
   test: { environment: 'happy-dom' },
 }));
