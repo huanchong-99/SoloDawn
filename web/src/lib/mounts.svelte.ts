@@ -1,10 +1,10 @@
 // The mounting points of the shell: where each area of the interface puts its components without
 // editing the shell, the chat or another area. An area declares what it mounts in
-// `components/<area>/mounts.ts`, whose default export is a `Mounts`; mountfiles.ts finds every
+// `components/<area>/mounts.ts`, whose default export is a `Mounts`; mounts.glob.ts finds every
 // such file by its name, and `gather` here puts them in order. `Mount.svelte` draws a point.
 import type { Component } from 'svelte';
 import type { Group } from './groups.svelte';
-import { files } from './mountfiles';
+import { files } from './mounts.glob';
 import type { Net } from './net.svelte';
 import type { MsgRow } from './proto';
 

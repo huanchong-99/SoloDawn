@@ -1,9 +1,9 @@
 // The one loader of the interface texts. The shell keeps its texts in `<lang>.json`; each area
 // of the interface keeps its own in `<area>.<lang>.json`, whose keys all begin with `<area>.`,
-// and declares them for the type checker in `<area>.d.ts`. files.ts finds every file by its
+// and declares them for the type checker in `<area>.d.ts`. files.glob.ts finds every file by its
 // name; this module checks the rules of `merge` and merges them into one set per language.
 import en from './en.json';
-import { files } from './files';
+import { files } from './files.glob';
 import zh from './zh-CN.json';
 
 type Texts = Record<string, string>;

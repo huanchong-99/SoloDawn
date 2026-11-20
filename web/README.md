@@ -262,7 +262,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `chat`, `groups`, `nodes`,
-  `settings` and `states`. `src/messages/files.ts` finds every file by its name and
+  `settings` and `states`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
@@ -375,10 +375,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     the cards the areas mount replace both.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. A module that only holds an `import.meta.glob` is
-  not mutated; it holds no logic. Stryker would wrap the glob's pattern, which Vite must read
-  as written, so the glob lives alone in such a module (`src/messages/files.ts`,
-  `src/lib/mountfiles.ts`, listed in `stryker.config.json` beside `mock.ts`) and the logic that
-  reads its result takes it as an input, which the tests replace. Shared styles are global classes in
+  named `*.glob.ts` and is not mutated; it holds no logic. Stryker would wrap the glob's
+  pattern, which Vite must read as written, so the glob lives alone in such a module
+  (`src/messages/files.glob.ts`, `src/lib/mounts.glob.ts`; `stryker.config.json` leaves out
+  `src/**/*.glob.ts` beside `mock.ts`), and the logic that reads its result takes it as an
+  input, which the tests replace. Shared styles are global classes in
   `src/styles/base.css`, taken from the design; a component's own layout goes in its `<style>`.
 
 ## Understand the implementation
@@ -393,11 +394,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/payload.ts`        | the payload fields the envelope and log checks read             |
 | `src/lib/prefs.svelte.ts`   | theme, language and `preference`, their persistence, `t`        |
 | `src/messages/texts.ts`     | the one loader of the texts: checks and merges the files        |
-| `src/messages/files.ts`     | the glob of the areas' text files, read by `texts.ts`           |
+| `src/**/*.glob.ts`          | an `import.meta.glob` alone: the areas' texts and mounts        |
 | `src/lib/route.svelte.ts`   | route table, `parse`, `href`, the page open, the way it went    |
 | `src/lib/net.svelte.ts`     | where the homes come from: `sourceOf`, `start`, the mock's home |
 | `src/lib/mounts.svelte.ts`  | mounting points, `gather` of the areas' mounts, `card(kind)`    |
-| `src/lib/mountfiles.ts`     | the glob of the areas' `mounts.ts`, read by `mounts.svelte.ts`  |
 | `src/lib/motion.ts`         | `spring`, the curve of `--spring`; `shift`, the page cross-fade |
 | `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface           |
 | `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`                 |
