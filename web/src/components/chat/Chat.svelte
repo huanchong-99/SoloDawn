@@ -3,7 +3,7 @@
   import { prefersReducedMotion } from 'svelte/motion';
   import type { Group } from '../../lib/groups.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
-  import { dayLabel, days } from '../../lib/when';
+  import { dayLabel, days, now } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
   import Composer from './Composer.svelte';
@@ -15,6 +15,8 @@
   const paging = $derived(group.paging());
   const line = $derived(days(group.main));
   const newest = $derived(group.main.at(-1)?.id);
+  // Older messages may exist and cannot be had now: the home refused a page, or is not reachable.
+  const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
   let scroller: HTMLElement;
   let edge: HTMLElement;
   // The top of what has been read is in view, or nearly.
@@ -33,7 +35,7 @@
   });
   // Scroll-back: while the top is in view the page before it is fetched, one page at a time.
   $effect(() => {
-    if (atEdge && paging.more && !paging.busy && group.home.ctl) untrack(() => void group.older());
+    if (atEdge && paging.ready && group.home.ctl) untrack(() => void group.older());
   });
   $effect(() => {
     void newest;
@@ -66,7 +68,8 @@
   </header>
 
   <!-- The scroller is reversed and holds one child: its start is the bottom, so the newest
-       message is in view when it opens and stays there, and a page added above moves nothing. -->
+       message is in view when it opens and stays there, and a page added above moves nothing.
+       Opening the chat puts focus on it, so that the keys scroll it. -->
   <div
     class="scroller"
     bind:this={scroller}
@@ -77,7 +80,9 @@
   >
     <div class="line">
       <p class="edge" bind:this={edge} role={paging.busy ? 'status' : undefined}>
-        {#if paging.more && group.home.ctl}
+        {#if stuck}
+          {t('chat.older.offline')}
+        {:else if paging.more}
           <span class="dots" class:busy={paging.busy} aria-hidden="true">
             <i></i><i></i><i></i>
           </span>
@@ -86,11 +91,11 @@
           {t('chat.start')}
         {/if}
       </p>
-      {#each line as day (day.msgs[0].msg.id)}
+      {#each line as day (day.key)}
         <section class="day">
           <p class="sep">
             <time datetime={new Date(day.day).toISOString()}>
-              {dayLabel(day.day, Date.now(), prefs.lang)}
+              {dayLabel(day.day, now(), prefs.lang)}
             </time>
           </p>
           {#each day.msgs as { msg, joined } (msg.id)}
@@ -154,7 +159,10 @@
     flex-direction: column-reverse;
     overflow-y: auto;
     overscroll-behavior: contain;
-    outline: none;
+  }
+  .scroller:focus-visible {
+    outline: var(--focus);
+    outline-offset: -2px;
   }
   .line {
     width: 100%;
@@ -196,15 +204,23 @@
       transform: translateY(-3px);
     }
   }
-  /* The day stays at the top of the line while its messages pass under it. */
+  /* The day stays at the top of the line while its messages pass under it. It stands on a band
+     of the page's colour that fades out below it, so that no text shows above the day or is cut
+     by it: the top edge of the line reads clean. */
   .sep {
     position: sticky;
-    top: var(--sp-2);
+    top: 0;
     z-index: 1;
     display: flex;
     justify-content: center;
-    margin-top: var(--sp-5);
+    margin-top: var(--sp-3);
+    padding: var(--sp-2) 0 var(--sp-3);
+    background: linear-gradient(var(--bg) 62%, transparent);
     pointer-events: none;
+  }
+  /* The band already keeps the first message of a day off the day's name. */
+  .sep + :global(.msg) {
+    margin-top: var(--sp-2);
   }
   .sep time {
     padding: 2px 12px;

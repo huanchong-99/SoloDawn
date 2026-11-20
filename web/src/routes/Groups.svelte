@@ -23,7 +23,8 @@
     const device = await loadDevice({ crypto, idb: () => indexedDB });
     const user: string = JSON.parse(goldens['row-member-human']).user;
     const home = new Home({ user, sign: (payload) => device.sign(payload) });
-    const ctl = mockCtl(home.push);
+    const link = home.connect();
+    const ctl = mockCtl(link.push);
     const welcome = await ctl.request({
       t: 'hello',
       v: 1,
@@ -33,7 +34,7 @@
     });
     if (welcome.err) return;
     homes.push(home);
-    home.online(ctl, welcome);
+    link.online(ctl, welcome);
   });
 </script>
 

@@ -9,6 +9,7 @@
   "chat.system": "System",
   "chat.older": "Earlier messages",
   "chat.older.busy": "Loading earlier messages",
+  "chat.older.offline": "Earlier messages cannot be loaded right now.",
   "chat.start": "This is where the group starts.",
   "chat.empty.title": "Nothing here yet",
   "chat.empty.body": "Write what you need. The secretary turns it into a brief and waits for your go-ahead.",

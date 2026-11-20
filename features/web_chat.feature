@@ -26,11 +26,13 @@ Feature: Chat main line of the web client
     And the message shows "@Codex" as a mention
 
   Scenario: The composer tells the writer before a message is too long
-    When the person writes a message of 5800 letters
+    When the person writes a message of 5830 letters
+    Then the composer says nothing about its length
+    When the person writes "@Codex " and 5823 letters, which is as many characters
     Then the composer says "Long message: 76% of what one message can hold."
     And the message can be sent
     When the person writes a message of 9000 letters
-    Then the composer says "Too long to send: 115% of what one message can hold. Shorten it, or send it in parts."
+    Then the composer says "Too long to send: 114% of what one message can hold. Shorten it, or send it in parts."
     And the message cannot be sent
 
   Scenario: Messages are shown under the day they were written on
@@ -48,7 +50,19 @@ Feature: Chat main line of the web client
     When the top of the main line comes into view
     Then the browser fetches pages until the home has no more
     And the main line shows all 120 messages in the order they were written
+    And the 50 messages shown before are the same parts of the page as before
     And it says "This is where the group starts."
+
+  Scenario: Without the home the top of the main line does not claim to be the start
+    Given the group holds 120 messages and the browser has read the newest 50
+    When the home stops and the top of the main line comes into view
+    Then no page is fetched
+    And the top of the main line says "Earlier messages cannot be loaded right now."
+
+  Scenario: What is typed while a message is on its way stays in the composer
+    When the person sends "first" and types " and more" before the home has answered
+    Then the home is sent the post "first"
+    And the composer holds " and more"
 
   Scenario: Enter sends a message, but not while an input method composes
     When the person types "你好" and presses Enter while the input method composes

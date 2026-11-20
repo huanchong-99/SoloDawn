@@ -34,12 +34,19 @@ const pageSize = 50;
 
 /** Where the reading of one thread, or of the main line, has got to. */
 export class Paging {
-  /** The `before` of the next page: 0 asks for the newest, then the lowest `pos` received. */
-  before = 0;
+  /** The `before` of the next page, once a page was read: the lowest `pos` received. */
+  before: number | undefined;
   /** Whether the home has older messages. Unknown, so true, until a page says. */
   more = $state(true);
   /** A page is on its way. */
   busy = $state(false);
+  /** The home refused a page: no other is asked for until the group is read again. */
+  failed = $state(false);
+
+  /** Whether a page can be asked for now. */
+  get ready() {
+    return this.more && !this.busy && !this.failed;
+  }
 }
 
 /** Whether a card waits for this person: a pending brief they asked for, a pending approval they
@@ -72,6 +79,9 @@ export class Group {
   cursor = 0;
   name = $state('');
   #live = false;
+  // What the answer to a read or a page must still find when it arrives: each read of the group
+  // makes a new one, so an answer that was overtaken changes nothing.
+  #read = {};
   // Replaced, not cleared, when the group is read again: a page still on its way from before
   // then changes a paging that nobody holds any more.
   #paging = $state.raw(new Map<string | null, Paging>());
@@ -138,36 +148,61 @@ export class Group {
 
   /** Reads the group from the cursor on and subscribes to its changes. Until `synced` the rows
    *  that arrive are not live, so a read that breaks off leaves the cursor where it was: at 0
-   *  after a `reset`, unchanged in a delta. Paging starts again with each read. */
+   *  after a `reset`, unchanged in a delta. Paging starts again with each read. An answer that
+   *  comes too late moves nothing: the read that overtook it will. */
   async sync(ctl: p.Ctl) {
+    const read = (this.#read = {});
     this.#live = false;
     this.#paging = new Map();
     const answer = await ctl
       .request({ t: 'sync', g: this.g, since: this.cursor, state_only: false })
       .catch(lost);
-    if (answer.err) return;
+    if (answer.err || this.#late(read, ctl)) return;
     this.cursor = answer.seq;
     this.#live = true;
   }
 
+  /** Whether an answer comes too late: the group was read again since it was asked for, or the
+   *  connection it was asked on is no longer the home's. */
+  #late(read: object, ctl: p.Ctl) {
+    return read !== this.#read || ctl !== this.home.ctl;
+  }
+
+  /** Where the first page of a thread, or of the main line, starts. A cold read brings the
+   *  newest 50 of the main line and, beside them, every card still pending, however old
+   *  (planning/flows/sync.md A): the oldest of the newest 50 held is the oldest message with
+   *  nothing missing after it, so the page before it is the first worth asking for. What is held
+   *  of a thread can have a gap anywhere: a thread is read from its newest page, `before: 0`. */
+  #start(thread: string | null) {
+    if (thread !== null) return 0;
+    return this.main.at(-pageSize)?.pos ?? this.main.at(0)?.pos ?? 0;
+  }
+
   /** Fetches the page of messages before the ones read so far, of a thread or of the main line.
-   *  Does nothing while a page is on its way, when the home has no more, or cannot be reached.
-   *  A page that fails ends the paging until the group is read again. */
+   *  Does nothing while a page is on its way, when the home has no more or refused one, or cannot
+   *  be reached. A page that comes too late is dropped: after a reset it could bring back a row
+   *  whose deletion the client can no longer be told about. */
   async older(thread: string | null = null) {
     const paging = this.paging(thread);
     const ctl = this.home.ctl;
-    if (!ctl || paging.busy || !paging.more) return;
+    if (!ctl || !paging.ready) return;
+    const read = this.#read;
+    const before = paging.before ?? this.#start(thread);
     paging.busy = true;
     const answer = await ctl
-      .request({ t: 'fetch', g: this.g, thread, before: paging.before, limit: pageSize })
+      .request({ t: 'fetch', g: this.g, thread, before, limit: pageSize })
       .catch(lost);
     paging.busy = false;
-    const page = answer.err ? { rows: [], more: false } : answer;
-    this.apply(page.rows, false);
+    if (this.#late(read, ctl)) return;
+    if (answer.err) {
+      paging.failed = true;
+      return;
+    }
+    this.apply(answer.rows, false);
     // An empty page is the end, whatever it says: nothing would move the next request on.
-    paging.more = page.rows.length > 0 && page.more;
-    // A page is newest first, so its last row has the lowest pos; an empty page changes nothing.
-    paging.before = (page.rows.at(-1) as p.MsgRow | undefined)?.pos ?? paging.before;
+    paging.more = answer.rows.length > 0 && answer.more;
+    // A page is newest first, so its last row has the lowest pos.
+    paging.before = (answer.rows.at(-1) as p.MsgRow | undefined)?.pos ?? before;
   }
 
   /** Posts a text message to the main line. The row comes back from the home like any other. */
@@ -196,9 +231,19 @@ export interface NewGroup {
   member_name: string;
 }
 
+/** One connection to a node, from before it exists until it is gone. */
+export interface Link {
+  /** The connection's push handler. */
+  push(frame: p.Push): void;
+  /** The node answered `hello` on this connection, which is the home's from now on: every group
+   *  is read again from its cursor. */
+  online(ctl: p.Ctl, welcome: p.Welcome): void;
+  /** This connection is gone. The rows stay. */
+  offline(): void;
+}
+
 /** One node this browser connects to, with the groups homed on it. The code that owns the
- *  connection makes one `Home` per node, gives `push` to each connection as its push handler,
- *  calls `online` after every `welcome` and `offline` when the connection is gone. */
+ *  connections makes one `Home` per node and one `connect()` per connection. */
 export class Home {
   readonly me: Me;
   /** The connection, or undefined while the node cannot be reached: its groups are then shown
@@ -209,32 +254,44 @@ export class Home {
   /** The node's name, and whether this person owns it: only then can a group be created here. */
   name = $state('');
   owner = $state(false);
+  // The connection that is the home's now: the last one to come online, until it is gone.
+  #link: Link | undefined;
 
   constructor(me: Me) {
     this.me = me;
   }
 
-  /** The node answered `hello` on a new connection: every group is read again from its cursor. */
-  online(ctl: p.Ctl, welcome: p.Welcome) {
-    this.ctl = ctl;
-    this.name = welcome.name;
-    this.owner = welcome.owner;
-    this.#list(welcome.groups);
-    this.#read(this.groups, ctl);
+  /** A connection to the node that is about to be made. Only the last one to come online counts:
+   *  what an earlier one still pushes is dropped, and its going leaves the home online. */
+  connect(): Link {
+    const link: Link = {
+      push: (frame) => {
+        if (this.#link === link) this.#push(frame);
+      },
+      online: (ctl, welcome) => {
+        this.#link = link;
+        this.ctl = ctl;
+        this.name = welcome.name;
+        this.owner = welcome.owner;
+        this.#list(welcome.groups);
+        this.#readAll(this.groups);
+      },
+      offline: () => {
+        if (this.#link !== link) return;
+        this.#link = undefined;
+        this.ctl = undefined;
+      },
+    };
+    return link;
   }
 
-  /** The connection is gone. The rows stay. */
-  offline() {
-    this.ctl = undefined;
-  }
-
-  /** A push of this node's connection, which is online. A group new in a `groups` push is read
-   *  at once; rows for a group that is not listed are dropped. */
-  push = (frame: p.Push) => {
-    if (frame.t === 'groups') this.#read(this.#list(frame.groups), this.ctl!);
+  /** A push of the home's connection. A group new in a `groups` push is read at once; rows for a
+   *  group that is not listed are dropped. */
+  #push(frame: p.Push) {
+    if (frame.t === 'groups') this.#readAll(this.#list(frame.groups));
     if (frame.t === 'rows') this.#find(frame.g)?.apply(frame.rows);
     if (frame.t === 'reset') this.#find(frame.g)?.reset();
-  };
+  }
 
   /** Sends a signed command and answers what the node answered (contracts/commands.md). `n` is
    *  its nonce: a command sent again with the same one has no second effect. */
@@ -247,9 +304,9 @@ export class Home {
 
   /** Makes this node the home of a new project group, whose id is the command's nonce. Answers
    *  with that id and what the node said; the group itself arrives in a `groups` push. */
-  async create(group: NewGroup) {
+  async create({ name, ...rest }: NewGroup) {
     const g = newId();
-    const fields = { t: 'group', g, op: 'create', ...group, kind: 'project' };
+    const fields = { t: 'group', g, op: 'create', name, kind: 'project', ...rest };
     return { g, answer: await this.command(fields, g) };
   }
 
@@ -257,7 +314,9 @@ export class Home {
     return this.groups.find((group) => group.g === g);
   }
 
-  #read(groups: Group[], ctl: p.Ctl) {
+  /** Reads groups on the home's connection, which a frame of it or its `online` vouches for. */
+  #readAll(groups: Group[]) {
+    const ctl = this.ctl!;
     for (const group of groups) void group.sync(ctl);
   }
 

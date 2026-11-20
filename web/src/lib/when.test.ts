@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { clock, dayLabel, dayOf, days, shortWhen } from './when';
+import { flushSync } from 'svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { watch } from '../../features/watch.svelte';
+import { clock, dayLabel, dayOf, days, now as timeNow, shortWhen } from './when';
 
 /** A local time, so that the tests read the same in every time zone. */
 const at = (year: number, month: number, day: number, hour = 12, minute = 0) =>
@@ -86,8 +88,13 @@ describe('days', () => {
     const b = msg('b', 'mina', at(2026, 11, 20, 0, 1));
     const c = msg('c', 'alex', at(2026, 11, 20, 9, 0));
     expect(days([a, b, c])).toEqual([
-      { day: at(2026, 11, 19, 0), msgs: [{ msg: a, joined: false }] },
       {
+        key: `${at(2026, 11, 19, 0)}:0`,
+        day: at(2026, 11, 19, 0),
+        msgs: [{ msg: a, joined: false }],
+      },
+      {
+        key: `${at(2026, 11, 20, 0)}:0`,
         day: at(2026, 11, 20, 0),
         msgs: [
           { msg: b, joined: false },
@@ -122,10 +129,76 @@ describe('days', () => {
     const late = msg('a', 'alex', at(2026, 11, 19, 23, 59));
     const early = msg('b', 'alex', at(2026, 11, 20, 0, 1));
     const back = msg('c', 'alex', at(2026, 11, 19, 23, 58));
+    const [nineteenth, twentieth] = [at(2026, 11, 19, 0), at(2026, 11, 20, 0)];
     expect(days([late, early, back])).toEqual([
-      { day: at(2026, 11, 19, 0), msgs: [{ msg: late, joined: false }] },
-      { day: at(2026, 11, 20, 0), msgs: [{ msg: early, joined: false }] },
-      { day: at(2026, 11, 19, 0), msgs: [{ msg: back, joined: false }] },
+      { key: `${nineteenth}:1`, day: nineteenth, msgs: [{ msg: late, joined: false }] },
+      { key: `${twentieth}:0`, day: twentieth, msgs: [{ msg: early, joined: false }] },
+      { key: `${nineteenth}:0`, day: nineteenth, msgs: [{ msg: back, joined: false }] },
     ]);
+  });
+
+  it('keeps the key of a day when messages are added before it or after it', () => {
+    const keys = (list: { ts: number; by: string }[]) => days(list).map((day) => day.key);
+    const today = [
+      msg('c', 'alex', at(2026, 11, 20, 9, 0)),
+      msg('d', 'alex', at(2026, 11, 20, 9, 30)),
+    ];
+    const before = [
+      msg('a', 'mina', at(2026, 11, 19, 8, 0)),
+      msg('b', 'mina', at(2026, 11, 20, 8, 0)),
+    ];
+    const after = [
+      msg('e', 'mina', at(2026, 11, 20, 23, 0)),
+      msg('f', 'mina', at(2026, 11, 21, 0, 30)),
+    ];
+    const [key] = keys(today);
+    expect(keys([...before, ...today])).toEqual([`${at(2026, 11, 19, 0)}:0`, key]);
+    expect(keys([...today, ...after])).toEqual([key, `${at(2026, 11, 21, 0)}:0`]);
+    // Three days of the same date: each has a key of its own.
+    const off = [1, 2, 1, 2, 1].map((day, i) => msg(`${i}`, 'alex', at(2026, 11, day)));
+    expect(keys(off)).toEqual([
+      `${at(2026, 11, 1, 0)}:2`,
+      `${at(2026, 11, 2, 0)}:1`,
+      `${at(2026, 11, 1, 0)}:1`,
+      `${at(2026, 11, 2, 0)}:0`,
+      `${at(2026, 11, 1, 0)}:0`,
+    ]);
+  });
+});
+
+describe('now', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('is the time, and what is drawn from it is drawn again every minute', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(at(2026, 11, 20, 23, 58));
+    const seen: number[] = [];
+    const stop = watch(() => seen.push(timeNow()));
+    flushSync();
+    expect(seen).toEqual([at(2026, 11, 20, 23, 58)]);
+    vi.advanceTimersByTime(59_999);
+    flushSync();
+    expect(seen).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    flushSync();
+    vi.advanceTimersByTime(60_000);
+    flushSync();
+    expect(seen.slice(1)).toEqual([at(2026, 11, 20, 23, 59), at(2026, 11, 21, 0, 0)]);
+    // Past midnight, what was "today" is "yesterday".
+    expect(dayLabel(at(2026, 11, 20, 12), seen[1], 'en')).toBe('today · November 20');
+    expect(dayLabel(at(2026, 11, 20, 12), seen[2], 'en')).toBe('yesterday · November 20');
+
+    stop();
+    vi.advanceTimersByTime(180_000);
+    flushSync();
+    expect(seen).toHaveLength(3);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('starts no clock for a reading that nothing draws from', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(at(2026, 11, 20, 9, 0));
+    expect(timeNow()).toBe(at(2026, 11, 20, 9, 0));
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

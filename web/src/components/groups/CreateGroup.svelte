@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { homes } from '../../lib/groups.svelte';
+  import { untrack } from 'svelte';
+  import { homes, type Home } from '../../lib/groups.svelte';
   import { t } from '../../lib/prefs.svelte';
   import Failure from '../Failure.svelte';
 
@@ -10,7 +11,9 @@
   // A group is created on a node of the person's own that can be reached.
   const owned = $derived(homes.filter((home) => home.owner && home.ctl));
   let dialog: HTMLDialogElement;
-  let at = $state(0);
+  // The computer chosen as the home: the Home itself, not its place in a list that changes as
+  // computers come and go.
+  let chosen = $state.raw<Home>();
   let name = $state('');
   let repo = $state('');
   let base = $state('main');
@@ -20,15 +23,27 @@
   let busy = $state(false);
   let failed = $state('');
 
+  const listed = () => owned.find((home) => home === chosen);
+
   $effect(() => {
-    if (open) dialog.showModal();
+    if (!open) return;
+    untrack(() => (chosen = listed() ?? owned[0]));
+    dialog.showModal();
   });
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    busy = true;
     failed = '';
-    const { g, answer } = await owned[at].create({
+    // The computer may have gone since it was chosen: nothing is sent to another in its place.
+    // The first one left is chosen for the next try, and the person sees which.
+    const home = listed();
+    if (!home) {
+      failed = 'lost';
+      chosen = owned[0];
+      return;
+    }
+    busy = true;
+    const { g, answer } = await home.create({
       name: name.trim(),
       repo: repo.trim(),
       base: base.trim(),
@@ -118,9 +133,9 @@
     </label>
     <label class="field">
       <span>{t('groups.create.home')}</span>
-      <select class="input" bind:value={at}>
-        {#each owned as home, i (home)}
-          <option value={i}>{home.name}</option>
+      <select class="input" bind:value={chosen}>
+        {#each owned as home (home)}
+          <option value={home}>{home.name}</option>
         {/each}
       </select>
     </label>

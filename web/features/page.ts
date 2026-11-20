@@ -90,3 +90,14 @@ export function fill(input: HTMLInputElement | HTMLTextAreaElement, value: strin
   input.value = value;
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
+
+/** The person chooses an option of a select. The test DOM does not match a chosen option with
+ *  `:checked`, which is where Svelte reads the choice from; Svelte then takes the first option
+ *  that is not disabled, so the other options are disabled for the moment of the choice. */
+export function choose(select: HTMLSelectElement, label: string) {
+  const others = [...select.options].filter((option) => option.textContent!.trim() !== label);
+  for (const option of others) option.setAttribute('disabled', '');
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  for (const option of others) option.removeAttribute('disabled');
+  flushSync();
+}

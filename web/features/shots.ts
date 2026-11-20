@@ -1,6 +1,8 @@
 // Screenshots of the group list and the chat for a pull request: the design's four widths in
 // both themes, one sheet per screen. Run in web/ with
-//   node features/shots.ts <directory>
+//   node features/shots.ts <directory> [screen ...]
+// With no screen named it takes them all. `list`, `chat` and `create` are taken at every width;
+// `mention`, `long` and `readonly` are states of the chat, taken at one width.
 // It starts a development server, loads features/demo.ts into the page and uses the Chromium
 // that `pnpm exec playwright install --only-shell chromium` installs.
 import { mkdir, readFile } from 'node:fs/promises';
@@ -110,8 +112,11 @@ async function shoot(screen: string, width: number, scheme: 'light' | 'dark') {
   return file;
 }
 
+const named = process.argv.slice(3);
+const wanted = (screen: string) => named.length === 0 || named.includes(screen);
+
 try {
-  for (const screen of ['list', 'chat', 'create']) {
+  for (const screen of ['list', 'chat', 'create'].filter(wanted)) {
     const rows: string[][] = [];
     for (const scheme of schemes) {
       const row: string[] = [];
@@ -120,15 +125,20 @@ try {
     }
     await sheet(browser, `sheet-${screen}`, rows);
   }
-  const states: string[][] = [];
-  for (const scheme of schemes)
-    states.push([
-      await shoot('mention', 375, scheme),
-      await shoot('mention', 1100, scheme),
-      await shoot('long', 820, scheme),
-      await shoot('readonly', 820, scheme),
-    ]);
-  await sheet(browser, 'sheet-states', states);
+  const states = [
+    ['mention', 375],
+    ['mention', 1100],
+    ['long', 820],
+    ['readonly', 820],
+  ] as const;
+  const taken: string[][] = [];
+  for (const scheme of schemes) {
+    const row: string[] = [];
+    for (const [screen, width] of states)
+      if (wanted(screen)) row.push(await shoot(screen, width, scheme));
+    taken.push(row);
+  }
+  if (taken[0].length) await sheet(browser, 'sheet-states', taken);
 } finally {
   await browser.close();
   await server.close();

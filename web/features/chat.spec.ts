@@ -164,23 +164,28 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario('The composer tells the writer before a message is too long', ({ When, Then, And }) => {
-    When('the person writes a message of 5800 letters', () => {
-      type('a'.repeat(5733));
+    When('the person writes a message of 5830 letters', () => type('a'.repeat(5830)));
+    Then('the composer says nothing about its length', () => {
       expect(said()).toEqual([]);
-      type('a'.repeat(5800));
+    });
+    When('the person writes "@Codex " and 5823 letters, which is as many characters', () => {
+      const text = `@Codex ${'a'.repeat(5823)}`;
+      expect(text).toHaveLength(5830);
+      type(text);
     });
     Then('the composer says "Long message: 76% of what one message can hold."', () => {
       expect(said()).toEqual(['Long message: 76% of what one message can hold.']);
+      expect(all('[role=option]')).toEqual([]);
     });
     And('the message can be sent', () => {
       expect(sendButton().disabled).toBe(false);
     });
     When('the person writes a message of 9000 letters', () => type('a'.repeat(9000)));
     Then(
-      'the composer says "Too long to send: 115% of what one message can hold. Shorten it, or send it in parts."',
+      'the composer says "Too long to send: 114% of what one message can hold. Shorten it, or send it in parts."',
       () => {
         expect(said()).toEqual([
-          'Too long to send: 115% of what one message can hold. Shorten it, or send it in parts.',
+          'Too long to send: 114% of what one message can hold. Shorten it, or send it in parts.',
         ]);
       },
     );
@@ -248,30 +253,36 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     });
   });
 
+  const numbered = Array.from({ length: 120 }, (_, i) => `message ${i + 1}`);
+  const fetches = () => home.asked.filter((req) => req.t === 'fetch');
+  let shown: HTMLElement[];
+
+  /** The group holds 120 messages, and a browser that held nothing has read it. */
+  async function newest50() {
+    first.drop();
+    for (const text of numbered) home.say(website, owner, text);
+    await closePage();
+    first = browser(home);
+    homes.push(first.store);
+    await read(first);
+    group = first.store.groups[0];
+    openPage(`#/groups/${website}`);
+    expect(texts('.msg .text')).toEqual(numbered.slice(-50));
+    expect(fetches()).toEqual([]);
+    shown = all('.msg');
+  }
+
   Scenario(
     'Scrolling back fetches the pages before, one at a time',
     ({ Given, When, Then, And }) => {
-      const numbered = Array.from({ length: 120 }, (_, i) => `message ${i + 1}`);
-      Given('the group holds 120 messages and the browser has read the newest 50', async () => {
-        first.drop();
-        for (const text of numbered) home.say(website, owner, text);
-        // More rows than a delta carries would be needed here; a new browser reads from nothing.
-        await closePage();
-        first = browser(home);
-        homes.push(first.store);
-        await read(first);
-        group = first.store.groups[0];
-        openPage(`#/groups/${website}`);
-        expect(texts('.msg .text')).toEqual(numbered.slice(-50));
-        expect(home.asked.filter((req) => req.t === 'fetch')).toEqual([]);
-      });
+      Given('the group holds 120 messages and the browser has read the newest 50', newest50);
       When('the top of the main line comes into view', () => scrollToTop());
       Then('the browser fetches pages until the home has no more', async () => {
         await vi.waitFor(() => expect(group.paging().more).toBe(false));
         flushSync();
         const lowest = (text: string) => group.main.find((msg) => msg.text === text)!.pos;
-        expect(home.asked.filter((req) => req.t === 'fetch')).toEqual([
-          { t: 'fetch', g: website, thread: null, before: 0, limit: 50 },
+        // The first page is the one before the oldest message held, not the newest again.
+        expect(fetches()).toEqual([
           { t: 'fetch', g: website, thread: null, before: lowest('message 71'), limit: 50 },
           { t: 'fetch', g: website, thread: null, before: lowest('message 21'), limit: 50 },
         ]);
@@ -279,8 +290,56 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And('the main line shows all 120 messages in the order they were written', () => {
         expect(texts('.msg .text')).toEqual(numbered);
       });
+      And('the 50 messages shown before are the same parts of the page as before', () => {
+        const now = all('.msg').slice(-50);
+        expect(now.filter((part, i) => part !== shown[i])).toEqual([]);
+      });
       And('it says "This is where the group starts."', () => {
         expect(texts('.edge')).toEqual(['This is where the group starts.']);
+      });
+    },
+  );
+
+  Scenario(
+    'Without the home the top of the main line does not claim to be the start',
+    ({ Given, When, Then, And }) => {
+      Given('the group holds 120 messages and the browser has read the newest 50', newest50);
+      When('the home stops and the top of the main line comes into view', () => {
+        home.stop();
+        first.drop();
+        flushSync();
+        scrollToTop();
+      });
+      Then('no page is fetched', async () => {
+        await new Promise((later) => setTimeout(later, 5));
+        expect(fetches()).toEqual([]);
+      });
+      And('the top of the main line says "Earlier messages cannot be loaded right now."', () => {
+        expect(texts('.edge')).toEqual(['Earlier messages cannot be loaded right now.']);
+      });
+    },
+  );
+
+  Scenario(
+    'What is typed while a message is on its way stays in the composer',
+    ({ When, Then, And }) => {
+      When(
+        'the person sends "first" and types " and more" before the home has answered',
+        async () => {
+          type('first');
+          send();
+          expect(posts()).toEqual([]);
+          type('first and more');
+          await settled(1);
+        },
+      );
+      Then('the home is sent the post "first"', () => {
+        expect(posts().map((post) => post.text)).toEqual(['first']);
+        expect(texts('.msg .text')).toEqual(['first']);
+      });
+      And('the composer holds " and more"', () => {
+        expect(field().value).toBe(' and more');
+        expect(field().selectionStart).toBe(9);
       });
     },
   );

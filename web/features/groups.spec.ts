@@ -4,7 +4,7 @@ import { expect, vi } from 'vitest';
 import { homes, type Group } from '../src/lib/groups.svelte';
 import * as p from '../src/lib/proto';
 import { browser, example, owner, TestHome, user } from './home';
-import { all, closePage, field, fill, go, one, openPage, texts } from './page';
+import { all, choose, closePage, field, fill, go, one, openPage, texts } from './page';
 
 const feature = await loadFeature('../features/web_groups.feature');
 
@@ -105,10 +105,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And('"Website" shows that 1 card waits for the reader, and "Docs" shows none', () => {
         const [docsRow, websiteRow] = all('.glist a');
         expect(docsRow.querySelector('.badge')).toBeNull();
-        expect(websiteRow.querySelector('.badge')!.textContent!.trim()).toBe('1');
-        expect(websiteRow.querySelector('.badge')!.getAttribute('aria-label')).toBe(
-          'Waiting on you 1',
-        );
+        // The count is part of the link's name, with what it counts in words.
+        expect(texts('.glist a .badge')).toEqual(['Waiting on you 1']);
+        expect(websiteRow.querySelector('.badge .sr')!.textContent).toBe('Waiting on you');
         expect(texts('.needbar a')).toEqual(['Confirm start · Show connection paths']);
       });
     },
@@ -176,6 +175,98 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     },
   );
 
+  let laptop: TestHome;
+  let onLaptop: ReturnType<typeof browser>;
+  const commands = (of: TestHome) => of.asked.filter((req) => req.t === 'cmd');
+
+  async function secondComputer() {
+    laptop = new TestHome('laptop');
+    onLaptop = browser(laptop);
+    homes.push(onLaptop.store);
+    await onLaptop.connect();
+  }
+
+  /** The dialog, filled in, with the computer of that name chosen as the home. */
+  function dialogFor(computer: string) {
+    openPage();
+    one('.head button').click();
+    flushSync();
+    const [name, repo, , member] = all<HTMLInputElement>('dialog input');
+    fill(name, 'Notes');
+    fill(repo, 'https://git.example/team/notes.git');
+    fill(member, 'Alex');
+    const select = all<HTMLSelectElement>('dialog select')[1];
+    expect([...select.options].map((option) => option.textContent!.trim())).toEqual([
+      'workstation',
+      'laptop',
+    ]);
+    choose(select, computer);
+  }
+
+  function create() {
+    one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    flushSync();
+  }
+
+  Scenario(
+    'The dialog sends to the computer that was chosen, whatever happens to the others',
+    ({ Given, When, Then }) => {
+      Given('the person owns a second computer, "laptop", which is connected', secondComputer);
+      When(
+        'the person chooses "laptop" in the dialog, the first computer goes away, and they create the group "Notes"',
+        async () => {
+          dialogFor('laptop');
+          home.stop();
+          first.drop();
+          flushSync();
+          create();
+          await vi.waitFor(() => expect(commands(laptop)).toHaveLength(1));
+        },
+      );
+      Then(
+        '"laptop" has made the group "Notes", and the first computer was sent no command',
+        () => {
+          expect([...laptop.groups.values()].map((made) => made.name)).toEqual(['Notes']);
+          expect(commands(home)).toEqual([]);
+        },
+      );
+    },
+  );
+
+  Scenario('A group is not created on a computer that went away', ({ Given, When, Then }) => {
+    Given('the person owns a second computer, "laptop", which is connected', secondComputer);
+    When(
+      'the person chooses "laptop" in the dialog, "laptop" goes away, and they press create',
+      async () => {
+        dialogFor('laptop');
+        laptop.stop();
+        onLaptop.drop();
+        flushSync();
+        create();
+        await new Promise((later) => setTimeout(later, 5));
+        flushSync();
+      },
+    );
+    Then(
+      'no command is sent, and the dialog says "Not sent: the group home cannot be reached."',
+      () => {
+        expect([...commands(home), ...commands(laptop)]).toEqual([]);
+        expect(texts('dialog [role=alert]')).toEqual([
+          'Not sent: the group home cannot be reached.',
+        ]);
+        expect(one<HTMLButtonElement>('dialog .btn-primary').disabled).toBe(false);
+      },
+    );
+    When('the person presses create again', async () => {
+      create();
+      await vi.waitFor(() => expect(commands(home)).toHaveLength(1));
+    });
+    Then('the computer that is left has made the group "Notes"', () => {
+      expect([...home.groups.values()].map((made) => made.name)).toEqual(['Website', 'Notes']);
+      expect(commands(laptop)).toEqual([]);
+    });
+  });
+
   Scenario(
     'A browser that was away receives exactly the messages it missed, in order',
     ({ Given, When, Then, And }) => {
@@ -226,17 +317,17 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         await group.older();
       });
       Then(
-        'the browser has asked for the newest page and then for the page before its lowest message',
+        'the browser has asked for the page before the oldest message it held, and then for the one before that',
         () => {
-          const lowest = group.main.find((msg) => msg.text === 'message 1481')!.pos;
+          const pos = (text: string) => group.main.find((msg) => msg.text === text)!.pos;
           expect(home.asked.filter((req) => req.t === 'fetch')).toEqual([
-            { t: 'fetch', g: website, thread: null, before: 0, limit: 50 },
-            { t: 'fetch', g: website, thread: null, before: lowest, limit: 50 },
+            { t: 'fetch', g: website, thread: null, before: pos('message 1481'), limit: 50 },
+            { t: 'fetch', g: website, thread: null, before: pos('message 1431'), limit: 50 },
           ]);
         },
       );
-      And('its main line holds the newest 100 messages in the order they were written', () => {
-        expect(mainLine()).toEqual(numbered(1431, 1530));
+      And('its main line holds the newest 150 messages in the order they were written', () => {
+        expect(mainLine()).toEqual(numbered(1381, 1530));
         expect(group.cursor).toBe(home.groups.get(website)!.seq);
       });
     },
@@ -264,6 +355,21 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       });
       And('its main line holds the decision and the newest 50 messages', () => {
         expect(mainLine(cold)).toEqual(['Choose a location.', ...numbered(31, 80)]);
+      });
+      When('the reader of that browser scrolls back', () => cold.older());
+      Then(
+        'the browser asks for the page before the oldest of those 50, not for the one before the card',
+        () => {
+          const oldest = cold.main.find((msg) => msg.text === 'message 31')!.pos;
+          expect(cold.main[0].pos).toBeLessThan(oldest);
+          expect(home.asked.filter((req) => req.t === 'fetch')).toEqual([
+            { t: 'fetch', g: website, thread: null, before: oldest, limit: 50 },
+          ]);
+        },
+      );
+      And('its main line holds the decision and all 80 messages', () => {
+        expect(mainLine(cold)).toEqual(['Choose a location.', ...numbered(1, 80)]);
+        expect(cold.paging().more).toBe(false);
       });
     },
   );

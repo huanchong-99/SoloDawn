@@ -260,12 +260,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the shell has no place yet where a page says what the top bar shows or that the navigation is hidden. `web/src/routes/Groups.svelte` hides both with `.app:has(.groups.open)` in its own styles, and reads the group id from the address itself, because `route` carries only the page (`web/src/lib/route.svelte.ts`).
 - Status: open, for U-0 (mounting points of the shell, the route table).
 
-### 2026-11-20 · limitation · `group create` is sent as the contract describes it, with no wire example yet
-
-- Symptom: the create-group dialog sends `{"t":"group","n":…,"ts":…,"g":<n>,"op":"create","name":…,"repo":…,"base":…,"forge":…,"checks":[…],"member_name":…,"kind":"project"}`: `g` equal to `n`, as `planning/contracts/commands.md` 1.1 says the group's id is the nonce. Whether a home wants `g` in a `create` is not frozen.
-- Cause: P-1 freezes the payload of `group` (`planning/contracts/conventions.md` section 5); `Home.create` in `web/src/lib/groups.svelte.ts` was written before it. The dialog asks for the repository address also with `forge: none`, since `repo` is absent only for a group without a repository (`planning/contracts/rows.md` section 1).
-- Status: open until P-1 lands; then `create` and its test follow the example.
-
 ### 2026-11-20 · limitation · In Safari the main line moves when a message arrives while the reader is scrolled back
 
 - Symptom: not observed, expected from the engine. The main line is a reversed scroller, whose offset is counted from its bottom. A message that arrives at the bottom while the reader is scrolled back pushes what they read up by its height, unless the browser anchors the scroll position. Chrome and Firefox do; Safari has no scroll anchoring.
@@ -273,6 +267,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open. No correction in script was added, because it could not be tried in Safari here.
 
 ## Resolved
+
+### 2026-11-20 · limitation · `group create` was sent as the contract describes it, before its wire example
+
+- Symptom: the create-group dialog of the web client was written before P-1 froze the payload of `group`, with `g` equal to `n` as `planning/contracts/commands.md` 1.1 reads.
+- Cause: the order of the units; `Home.create` in `web/src/lib/groups.svelte.ts`.
+- Status: resolved in #164. P-1 (#162) froze `group-create.json` with `g` equal to `n`; `create` sends the fields of that example in its order, and its test reads the payload with the `GroupCreate` schema. The dialog still asks for the repository address with `forge: none`, since `repo` is absent only for a group without a repository (`planning/contracts/rows.md` section 1).
 
 ### 2026-11-20 · bug · The signalling client could set off the rendezvous's own limits
 

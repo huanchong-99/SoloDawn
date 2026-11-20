@@ -84,33 +84,47 @@ export const mentioned = (text: string, members: Named[]) => [
   ...new Set(parts(text, members).flatMap((part) => part.id ?? [])),
 ];
 
+/** What is left in the field once `taken`, the text it held when a message was sent, is sent:
+ *  what the writer typed after it since. A writer who changed the sent text itself keeps it all. */
+export const unsent = (text: string, taken: string) =>
+  text.startsWith(taken) ? text.slice(taken.length) : text;
+
 /** The most a row may hold: 16 KiB (contracts/conventions.md section 4). */
 export const rowLimit = 16 * 1024;
 /** From here on the composer tells the writer how full the row is: three quarters of the limit. */
 export const nearLimit = 12 * 1024;
-/** What a message row holds besides its text: about 0.8 KiB (contracts/rows.md section 5). */
-const overhead = 820;
+/** What the row of a person's text message holds besides its text and its mentions, measured on
+ *  the wire example row-msg-text.json. That row is 673 bytes: 38 are its text and 34 the `as`
+ *  that only an AI's post has, which leaves 601. Its `seq` and `pos` have three digits each and
+ *  can have sixteen, 26 bytes more. */
+const fixed = 627;
+/** What each mention adds: the member's id once in the row's `mentions` and once more, escaped,
+ *  inside `env.p`. The first costs 50 bytes and each one after it 52. */
+const perMention = 52;
 
 const size = (text: string) => utf8(text).length;
 
 /** The size of the row that a text message would make, by the rule of contracts/rows.md section
  *  5. The row holds the text twice: as `text`, and inside `env.p`, where it is escaped once more,
  *  so a letter costs 2 bytes, a line break 5, a quote or a backslash 6, a Chinese character 6.
- *  An estimate: the size the node measures decides. */
-export function rowSize(text: string) {
+ *  An estimate that is never under a row with those numbers of digits: the size the node measures
+ *  decides. */
+export function rowSize(text: string, mentions = 0) {
   const once = JSON.stringify(text);
   // Without the quotes around each: two bytes outside, and inside p two escaped ones more.
-  return overhead + size(once) - 2 + size(JSON.stringify(once)) - 6;
+  const said = size(once) - 2 + size(JSON.stringify(once)) - 6;
+  return fixed + perMention * mentions + said;
 }
 
 /** How full the row of a text would be, in hundredths of the limit, rounded up: a text that is
  *  over the limit is never told as 100. */
-export const fill = (text: string) => Math.ceil((rowSize(text) / rowLimit) * 100);
+export const fill = (text: string, mentions = 0) =>
+  Math.ceil((rowSize(text, mentions) / rowLimit) * 100);
 
 /** Whether a text fits a row with room to spare (`ok`), fits but nears the limit (`near`), or
  *  is too long to send (`over`). */
-export function room(text: string) {
-  const bytes = rowSize(text);
+export function room(text: string, mentions = 0) {
+  const bytes = rowSize(text, mentions);
   if (bytes > rowLimit) return 'over';
   return bytes >= nearLimit ? 'near' : 'ok';
 }

@@ -9,6 +9,7 @@
   "chat.system": "系统",
   "chat.older": "更早的消息",
   "chat.older.busy": "正在加载更早的消息",
+  "chat.older.offline": "更早的消息现在加载不了。",
   "chat.start": "群从这里开始。",
   "chat.empty.title": "还没有消息",
   "chat.empty.body": "把需求写下来。秘书会整理成任务说明，等你确认以后再开工。",

@@ -10,6 +10,7 @@ import {
   rowLimit,
   rowSize,
   typing,
+  unsent,
 } from './compose';
 import { goldens } from './mock';
 
@@ -145,11 +146,42 @@ describe('mentioned', () => {
   });
 });
 
+describe('unsent', () => {
+  it('is what was typed after the text that was sent', () => {
+    expect(unsent('first and more', 'first')).toBe(' and more');
+    expect(unsent('first', 'first')).toBe('');
+    expect(unsent(' first \nnext', ' first ')).toBe('\nnext');
+  });
+
+  it('is the whole text when the sent text itself was changed meanwhile', () => {
+    expect(unsent('fist', 'first')).toBe('fist');
+    expect(unsent('the first', 'first')).toBe('the first');
+    expect(unsent('', 'first')).toBe('');
+  });
+});
+
 describe('the size of a row', () => {
+  /** The row a home would write for a person's post, from the wire example of one: its size as
+   *  the home measures it. `number` is its `seq` and its `pos`: three digits in the example. */
+  function real(text: string, mentions: string[], number = 790) {
+    const row = JSON.parse(goldens['row-msg-text']);
+    const payload = JSON.parse(row.env.p);
+    delete payload.as;
+    payload.text = row.text = text;
+    payload.mentions = row.mentions = mentions;
+    row.env.p = JSON.stringify(payload);
+    row.seq = row.pos = number;
+    return new TextEncoder().encode(JSON.stringify(row)).length;
+  }
+  const member = JSON.parse(goldens['row-member-ai']).id as string;
+  const named = (count: number) => Array.from({ length: count }, () => member);
+  // The longest a sequence number can be: sixteen digits.
+  const longest = Number.MAX_SAFE_INTEGER;
+
   // The contract's own figures (contracts/rows.md section 5).
   it('counts 2 bytes for a letter, 5 for a line break, 6 for a quote, a backslash or a Chinese character', () => {
     const rest = rowSize('');
-    expect(rest).toBe(820);
+    expect(rest).toBe(627);
     expect(rowSize('a') - rest).toBe(2);
     expect(rowSize('<&>') - rest).toBe(6);
     expect(rowSize('\n') - rest).toBe(5);
@@ -159,33 +191,60 @@ describe('the size of a row', () => {
     expect(rowSize('a "中"\n\\') - rest).toBe(2 + 2 + 6 + 6 + 6 + 5 + 6);
   });
 
-  it('is no less than a real row holds, and within a quarter KiB of it', () => {
-    const row = JSON.parse(goldens['row-msg-text']);
-    const real = new TextEncoder().encode(JSON.stringify(row)).length;
-    const over = rowSize(row.text) - real;
-    expect(over).toBeGreaterThan(0);
-    expect(over).toBeLessThan(256);
+  it('counts 52 bytes for each member mentioned', () => {
+    expect(rowSize('', 1) - rowSize('')).toBe(52);
+    expect(rowSize('@Codex', 3) - rowSize('@Codex')).toBe(156);
+    expect(rowSize('a', 20)).toBe(627 + 1040 + 2);
+  });
+
+  it('is the size of the real row with the longest numbers, give or take a mention', () => {
+    const text = 'Run `go test ./...`,\n then "say" 完成 \\o/';
+    for (const count of [0, 1, 5, 20]) {
+      const over = rowSize(text, count) - real(text, named(count), longest);
+      expect([count, over >= 0, over <= 2]).toEqual([count, true, true]);
+    }
+    // The numbers of the wire example are short: 26 bytes less.
+    expect(rowSize(text) - real(text, [])).toBe(26);
+  });
+
+  it('never allows a text whose row would be over the limit, with 20 members mentioned', () => {
+    const allowed = Array.from({ length: 100 }, (_, i) => 'a'.repeat(7300 + i)).filter(
+      (text) => room(text, 20) !== 'over',
+    );
+    expect(allowed.map((text) => text.length)).toEqual(
+      Array.from({ length: 59 }, (_, i) => 7300 + i),
+    );
+    expect(allowed.filter((text) => real(text, named(20), longest) > rowLimit)).toEqual([]);
+    // The longest one allowed makes a row three bytes under the limit; two letters more do not fit.
+    expect(real('a'.repeat(7358), named(20), longest)).toBe(16381);
+    expect(real('a'.repeat(7360), named(20), longest)).toBe(16385);
+    // Without its mentions counted, a text that makes a row over the limit would pass.
+    expect(room('a'.repeat(7400))).toBe('near');
+    expect(real('a'.repeat(7400), named(20), longest)).toBeGreaterThan(rowLimit);
   });
 
   it('is at most 16 KiB', () => {
     expect([rowLimit, nearLimit]).toEqual([16384, 12288]);
   });
 
-  it('is told as hundredths of the limit', () => {
-    expect(fill('')).toBe(6);
-    expect(fill('a'.repeat(7782))).toBe(100);
-    expect(fill('a'.repeat(7783))).toBe(101);
-    expect(fill('a'.repeat(3686))).toBe(50);
-    expect(fill('中'.repeat(5188))).toBe(195);
+  it('is told as hundredths of the limit, rounded up', () => {
+    // 627 + 5 + 2 n bytes for a line break and n letters.
+    expect(fill('')).toBe(4);
+    expect(fill('\n' + 'a'.repeat(3780))).toBe(50);
+    expect(fill('\n' + 'a'.repeat(7876))).toBe(100);
+    expect(fill('\n' + 'a'.repeat(7877))).toBe(101);
+    expect(fill('中'.repeat(5188))).toBe(194);
+    expect(fill('', 20)).toBe(11);
   });
 
   it('has room to spare, nears the limit, or is over it', () => {
-    // 820 + 2 n bytes for n letters.
     expect(room('')).toBe('ok');
-    expect(room('a'.repeat(5733))).toBe('ok');
-    expect(room('a'.repeat(5734))).toBe('near');
-    expect(room('a'.repeat(7782))).toBe('near');
-    expect(room('a'.repeat(7783))).toBe('over');
-    expect(room('中'.repeat(2600))).toBe('over');
+    expect(room('\n' + 'a'.repeat(5827))).toBe('ok');
+    expect(room('\n' + 'a'.repeat(5828))).toBe('near');
+    expect(room('\n' + 'a'.repeat(7876))).toBe('near');
+    expect(room('\n' + 'a'.repeat(7877))).toBe('over');
+    expect(room('中'.repeat(2700))).toBe('over');
+    expect(room('\n' + 'a'.repeat(5802), 1)).toBe('near');
+    expect(room('\n' + 'a'.repeat(5801), 1)).toBe('ok');
   });
 });

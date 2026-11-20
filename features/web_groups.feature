@@ -22,6 +22,18 @@ Feature: Group list and group cache of the web client
     And both browsers list "Handbook" without a reload
     And the first browser has opened its chat
 
+  Scenario: The dialog sends to the computer that was chosen, whatever happens to the others
+    Given the person owns a second computer, "laptop", which is connected
+    When the person chooses "laptop" in the dialog, the first computer goes away, and they create the group "Notes"
+    Then "laptop" has made the group "Notes", and the first computer was sent no command
+
+  Scenario: A group is not created on a computer that went away
+    Given the person owns a second computer, "laptop", which is connected
+    When the person chooses "laptop" in the dialog, "laptop" goes away, and they press create
+    Then no command is sent, and the dialog says "Not sent: the group home cannot be reached."
+    When the person presses create again
+    Then the computer that is left has made the group "Notes"
+
   Scenario: A browser that was away receives exactly the messages it missed, in order
     Given the browser has read the group up to its last row
     When the connection is lost, 20 messages are written, and the browser connects again
@@ -34,14 +46,17 @@ Feature: Group list and group cache of the web client
     When the connection is lost, 1500 messages are written, and the browser connects again
     Then the browser is told to reset and holds the newest 50 messages of the main line
     When the reader scrolls back twice
-    Then the browser has asked for the newest page and then for the page before its lowest message
-    And its main line holds the newest 100 messages in the order they were written
+    Then the browser has asked for the page before the oldest message it held, and then for the one before that
+    And its main line holds the newest 150 messages in the order they were written
 
   Scenario: A card that is still pending is there after a cold start, however old
     Given a decision in "Website" waits for the reader, and 80 messages were written after it
     When a browser that holds nothing reads the group
     Then the decision waits for the reader in that browser
     And its main line holds the decision and the newest 50 messages
+    When the reader of that browser scrolls back
+    Then the browser asks for the page before the oldest of those 50, not for the one before the card
+    And its main line holds the decision and all 80 messages
 
   Scenario: A reset that breaks off after its first batch starts again from nothing
     Given the browser has read the group up to its last row

@@ -141,7 +141,8 @@
   .joined {
     margin-top: var(--sp-1);
   }
-  /* The time of a joined message shows in the gutter while the pointer is on the message. */
+  /* The time of a joined message shows in the gutter while the pointer is on the message. A
+     screen reader reads it at any time. */
   .aside {
     grid-column: 1;
     align-self: start;
@@ -151,8 +152,11 @@
     opacity: 0;
     transition: opacity var(--dur-1) var(--ease);
   }
+  /* For someone at the keyboard the times of all joined messages show while focus is on the
+     main line or on a button of the chat: no message is a stop of its own for the Tab key. Not
+     while it is in the field, which shows focus however it was reached. */
   .joined:hover .aside,
-  .joined:focus-within .aside {
+  :global(.chat:has(:focus-visible:not(textarea))) .aside {
     opacity: 1;
   }
   .note {

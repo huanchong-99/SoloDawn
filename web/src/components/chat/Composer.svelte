@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { complete, fill, matching, mentioned, room, typing } from '../../lib/compose';
+  import { complete, fill, matching, mentioned, room, typing, unsent } from '../../lib/compose';
   import type { Group, Member } from '../../lib/groups.svelte';
   import { t } from '../../lib/prefs.svelte';
   import Avatar from '../Avatar.svelte';
@@ -30,7 +30,9 @@
   const found = $derived(
     mention && mention.at !== closed ? matching(group.members, mention.query) : [],
   );
-  const length = $derived(room(text));
+  // The members a text mentions make its row longer too.
+  const named = $derived(mentioned(text, group.members).length);
+  const length = $derived(room(text, named));
   const sendable = $derived(text.trim() !== '' && length !== 'over' && !busy && !readonly);
 
   // The field is as tall as its text, up to its limit in the styles.
@@ -67,11 +69,17 @@
     if (!sendable) return;
     busy = true;
     failed = '';
-    const sent = text.trim();
+    const taken = text;
+    const sent = taken.trim();
     const answer = await group.post(sent, mentioned(sent, group.members));
     busy = false;
-    if (answer.err) failed = answer.err.code;
-    else await put({ text: '', caret: 0 });
+    if (answer.err) {
+      failed = answer.err.code;
+      return;
+    }
+    // Only what was sent leaves the field: what the writer typed meanwhile stays, caret and all.
+    const left = unsent(text, taken);
+    await put({ text: left, caret: Math.max(0, caret - (text.length - left.length)) });
   }
 
   function listKey(event: KeyboardEvent) {
@@ -100,8 +108,8 @@
     <p class="state down" role="status"><i></i>{t('chat.readonly')}</p>
   {:else if length !== 'ok'}
     <p class="state" class:over={length === 'over'} role="status">
-      <span class="meter" style:--v={Math.min(fill(text), 100) / 100}></span>
-      {t(`chat.length.${length}`).replace('{n}', String(fill(text)))}
+      <span class="meter" style:--v={Math.min(fill(text, named), 100) / 100}></span>
+      {t(`chat.length.${length}`).replace('{n}', String(fill(text, named)))}
     </p>
   {/if}
   {#if failed}<Failure code={failed} />{/if}

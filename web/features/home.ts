@@ -215,16 +215,20 @@ export function browser(home: TestHome) {
   const store = new Home({ user, sign });
   /** The type of every push received, in order. */
   const seen: string[] = [];
-  let close = () => {};
+  let drop = () => {};
   return {
     store,
     seen,
     async connect() {
+      const link = store.connect();
       const connection = home.connect((frame) => {
         seen.push(frame.t);
-        store.push(frame);
+        link.push(frame);
       });
-      close = connection.close;
+      drop = () => {
+        connection.close();
+        link.offline();
+      };
       const welcome = await connection.ctl.request({
         t: 'hello',
         v: 1,
@@ -232,11 +236,8 @@ export function browser(home: TestHome) {
         name: 'test',
         addrs: [],
       });
-      store.online(connection.ctl, welcome as p.Welcome);
+      link.online(connection.ctl, welcome as p.Welcome);
     },
-    drop() {
-      close();
-      store.offline();
-    },
+    drop: () => drop(),
   };
 }

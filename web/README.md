@@ -190,28 +190,37 @@ development dependency, an IndexedDB for the tests.
   from the rule for every part, which a browser without view transitions would otherwise drop); the logo does not turn to
   the pointer and a press does not sink a button, which shows the press by its layer alone.
 - **Group caches.** `src/lib/groups.svelte.ts` holds what `planning/flows/sync.md` asks of a
-  client. The code that owns a connection makes one `Home` per node, with the person's user id
-  and a `sign` for their commands, puts it in `homes`, gives `home.push` to every connection of
-  that node as its push handler, and calls `home.online(ctl, welcome)` after each `welcome` and
-  `home.offline()` when the connection is gone.
-  - `online` lists the node's groups and reads each with `sync` from its cursor; a `groups` push
-    replaces the list, keeps the rows of a group listed before and reads a new one at once.
+  client. The code that owns the connections makes one `Home` per node, with the person's user id
+  and a `sign` for their commands, and puts it in `homes`. For every connection to that node it
+  calls `home.connect()` before the connection exists, gives the link's `push` to the connection
+  as its push handler, and calls the link's `online(ctl, welcome)` after `welcome` and its
+  `offline()` when the connection is gone.
+  - Only the last connection to come online is the home's: what an earlier one still pushes is
+    dropped, and its going leaves the home online, so a move to a better path cannot mix two
+    reads. `online` lists the node's groups and reads each with `sync` from its cursor; a `groups`
+    push replaces the list, keeps the rows of a group listed before and reads a new one at once.
   - A `Group` applies a row only with a higher `seq` than the copy it holds, and keeps a `gone`
     marker in place of its row, unseen. Its `cursor`, the `since` of its next `sync`, is 0 at the
     start and from every `reset`, S at `synced`, then the `seq` of each live row applied; rows
     before `synced` and pages never move it, so a reset that breaks off starts again from nothing
-    and a delta that breaks off keeps its place.
-  - `older(thread)` fetches one page of a thread, or of the main line: the first asks `before: 0`,
-    the next the lowest `pos` received. An empty page, an error or a lost connection ends the
-    paging until the group is read again; `paging(thread)` says whether more may exist and
-    whether a page is on its way.
+    and a delta that breaks off keeps its place. The answer to a read moves the cursor only when
+    no later read of the group was started and its connection is still the home's.
+  - `older(thread)` fetches one page of a thread, or of the main line, and then the page before
+    the lowest `pos` received. The main line starts before the oldest of the newest 50 messages
+    held, which a cold read brings without a gap; not before the oldest message held, which can be
+    a card still pending from long ago. A thread starts at its newest page, `before: 0`. An empty
+    page ends the paging; a page the home refuses stops it (`failed`) until the group is read
+    again; a page that arrives after a later read, or after its connection is gone, is dropped.
+    `paging(thread)` says whether more may exist, whether a page is on its way, and whether one
+    can be asked for (`ready`).
   - The lists: `main` and `thread(task)` in `pos` order, `members` by name, `me`, `waiting` (the
     pending brief the person asked for, the pending approvals and decisions put to them), `info`
     (the group row), `latest`. `recent()` is every group, the newest main line first.
-  - `post` and `create` send signed commands and answer what the node answered; the client draws
-    from the rows that come back, never from its own command. A request whose connection is lost
-    is answered `lost()`, a code of the client's own. While `home.ctl` is undefined the group is
-    shown from the rows held, read-only.
+  - `post` and `create` send signed commands, shaped as the wire examples `post-text.json` and
+    `group-create.json`, and answer what the node answered; the client draws from the rows that
+    come back, never from its own command. A request whose connection is lost is answered
+    `lost()`, a code of the client's own. While `home.ctl` is undefined the group is shown from
+    the rows held, read-only.
 - **Group pages.** `#/groups` is the group list and `#/groups/<group id>` the chat of that group;
   `routes/Groups.svelte` reads the address itself until the route table carries the rest of a
   fragment.
@@ -222,15 +231,27 @@ development dependency, an IndexedDB for the tests.
     page's styles hide them with `:has()`, because the shell has no place yet for a page to say so.
   - The main line is a reversed scroller with one child, so the newest message is in view when it
     opens, and a page added above moves nothing. While the top of what is read is in view, or
-    within 600 px of it, the page before is fetched. Messages stand under the day they were
-    written on, whose name stays at the top while they pass; a message within five minutes of the
-    one before it, by the same author, is drawn under it without a head.
+    within 600 px of it, the page before is fetched; when it cannot be, because the home refused
+    a page or cannot be reached, the top says so and never claims to be the start. Messages stand
+    under the day they were written on. A day keeps its key when messages are added before or
+    after it, so the messages already drawn stay as they are. Its name stays at the top of the
+    line on a band of the page's colour, under which the messages pass. A message within five
+    minutes of the one before it, by the same author, is drawn under it without a head; its time
+    shows under the pointer, and for all such messages while keyboard focus is on the main line
+    or on a button of the chat.
+  - "Today" and "yesterday" are read from `now()` of `when.ts`, one clock that moves once a
+    minute while something drawn reads it.
   - A text shows its code spans and the mentions of the members its row names. The composer
     completes a mention from the members as it is typed (arrow keys, Enter or Tab, Escape),
     sends with Enter where the person has a keyboard and with the button on a touch screen, and
-    never on a key that an input method is composing with. It estimates the row by
-    `contracts/rows.md` section 5 (`rowSize` in `compose.ts`), tells the writer from three
-    quarters of the 16 KiB and does not send beyond them; the size the node measures decides.
+    never on a key that an input method is composing with. What is typed while a message is on
+    its way stays in the field. It estimates the row by `contracts/rows.md` section 5 (`rowSize`
+    in `compose.ts`): the text twice, 52 bytes for each member mentioned, and 627 for the rest of
+    a row, measured on the wire example with the longest sequence numbers. It tells the writer
+    from three quarters of the 16 KiB and does not send beyond them; the size the node measures
+    decides.
+  - The create-group dialog holds the computer chosen as the home, not its place in the list, and
+    sends nothing when that computer is no longer among those that can be reached.
   - Only text messages are drawn in full. A card is one line that names its kind and its subject,
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
     the units of the cards replace both.
@@ -269,6 +290,7 @@ development dependency, an IndexedDB for the tests.
 | `features/chat.spec.ts`     | steps of `../features/web_chat.feature`                         |
 | `features/home.ts`          | a home in memory for those steps; `page.ts` drives the page     |
 | `features/demo.ts`          | groups with a morning of talk, for a development page           |
+| `features/watch.svelte.ts`  | an effect outside a component, for tests of what is reactive    |
 | `features/shots.ts`         | screenshots of the group pages from that demo, four widths      |
 | `e2e/config.ts`             | end-to-end projects per engine, `launch`, the build of a run    |
 | `e2e/nodes.ts`              | `startNet`: rendezvous and nodes per test, stop, teardown sweep |
@@ -296,9 +318,8 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 - No page has a connection to a node yet, so the built client lists no group. A development
   server (`pnpm dev`) shows the one group of the wire examples, unless the address has `?nomock`;
   the mock accepts a post and pushes no row, so a message sent there does not appear.
-- Cards and the rows a home writes are one line each in the main line; `group create` is typed
-  from the contract, with no wire example yet; Safari moves the main line when a message arrives
-  while the reader is scrolled back (`issues.md`).
+- Cards and the rows a home writes are one line each in the main line, and Safari moves the main
+  line when a message arrives while the reader is scrolled back (`issues.md`).
 - The end-to-end harness runs on macOS and Linux only. Until the node runtime is wired (N-4),
   `solodawn node` exits right after making its data directory, so a test cannot await a running
   node yet, and a node has no address but its local socket (`issues.md`).
@@ -337,7 +358,10 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   `routes/Groups.svelte` in the test DOM against `features/home.ts`, which answers `sync`,
   `fetch` and `cmd` as `planning/flows/sync.md` says; no node ran. The test DOM lays nothing out:
   whether the top of the main line is in view, and whether the person has a keyboard, are stood
-  in for (`features/page.ts`).
+  in for (`features/page.ts`); it does not report the chosen option of a select either, so the
+  steps choose one by disabling the others for that moment. `compose.test.ts` holds `rowSize` to
+  rows built from the wire example, with up to 20 members mentioned: never under, at most 2 bytes
+  over.
 - Both pages were looked at in headless Chromium at 375, 820, 1100 and 1440 px in both themes,
   with `features/demo.ts` loaded into a development page, on 2026-11-20. They have not been opened
   in Safari or Firefox, nor on a real phone, and nobody walked through them with a screen reader.

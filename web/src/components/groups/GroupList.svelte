@@ -3,7 +3,7 @@
   import { prefersReducedMotion } from 'svelte/motion';
   import { homes, recent, subject, type Group } from '../../lib/groups.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
-  import { shortWhen } from '../../lib/when';
+  import { now, shortWhen } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
 
@@ -56,16 +56,14 @@
           <span class="gside">
             {#if last}
               <time datetime={new Date(last.ts).toISOString()}>
-                {shortWhen(last.ts, Date.now(), prefs.lang)}
+                {shortWhen(last.ts, now(), prefs.lang)}
               </time>
             {/if}
             {#if group.waiting.length}
               {#key group.waiting.length}
-                <span
-                  class="badge solid count"
-                  data-tone="dawn"
-                  aria-label={`${t('groups.waiting')} ${group.waiting.length}`}
-                >
+                <!-- Part of the link's name: "Waiting on you 2". -->
+                <span class="badge solid count" data-tone="dawn">
+                  <span class="sr">{t('groups.waiting')}</span>
                   {group.waiting.length}
                 </span>
               {/key}

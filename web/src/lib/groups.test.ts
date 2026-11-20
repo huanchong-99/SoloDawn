@@ -6,6 +6,7 @@ import * as p from './proto';
 const user = 'akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs';
 const website = 'rZNvy-1jH6Z-BcPqA5U5BQ';
 const task = 'DrtCn6htSBwmMPrFPbHJHA';
+const codex = '1PC8WineBrUQ-apCjx7tug';
 
 /** A wire example as a row, with some fields changed. */
 const row = (name: string, changes: object = {}) =>
@@ -13,6 +14,8 @@ const row = (name: string, changes: object = {}) =>
 const text = (id: string, seq: number, changes: object = {}) =>
   row('row-msg-text', { id, seq, pos: seq, ...changes }) as p.MsgRow;
 const gone = (r: string, id: string, seq: number): p.GoneRow => ({ r, id, seq, gone: true });
+const rows = (...of: p.Row[]): p.Push => ({ t: 'rows', g: website, rows: of });
+const reset: p.Push = { t: 'reset', g: website };
 
 interface Asked {
   req: Record<string, unknown>;
@@ -47,19 +50,41 @@ const welcome = (groups: p.Welcome['groups'], changes: object = {}): p.Welcome =
   ...changes,
 });
 const listed = (g: string, name = 'Website') => ({ g, name, seq: 0 });
+const synced = (seq: number) => ({ t: 'synced', re: 1, ok: true, g: website, seq });
+const fetched = (page: p.Row[], more: boolean) => ({
+  t: 'fetched',
+  re: 2,
+  ok: true,
+  rows: page,
+  more,
+});
+const sync = (since: number, g = website) => ({ t: 'sync', g, since, state_only: false });
+const fetch = (before: number, thread: string | null = null) => ({
+  t: 'fetch',
+  g: website,
+  thread,
+  before,
+  limit: 50,
+});
+
+/** A new connection of a home, on which the node has answered `hello`. */
+function connect(home: Home, groups = [listed(website)], changes: object = {}) {
+  const { ctl, asked } = connection();
+  const link = home.connect();
+  link.online(ctl, welcome(groups, changes));
+  return { ctl, asked, link };
+}
 
 /** A home whose one group has been listed, and the request of its first read. */
 function joined() {
   const home = new Home(me);
-  const { ctl, asked } = connection();
-  home.online(ctl, welcome([listed(website)]));
-  return { home, group: home.groups[0], ctl, asked };
+  return { home, ...connect(home), group: home.groups[0] };
 }
 
 /** The same, read to the end at sequence number S. */
-async function synced(seq = 815) {
+async function read(seq = 815) {
   const all = joined();
-  all.asked[0].answer({ t: 'synced', re: 1, ok: true, g: website, seq });
+  all.asked[0].answer(synced(seq));
   await settle();
   return all;
 }
@@ -101,7 +126,7 @@ describe('rows', () => {
   });
 
   it('keep a deletion marker, unseen, so that an older copy cannot bring the row back', async () => {
-    const { home, group, asked } = await synced();
+    const { group, asked, link } = await read();
     const message = text('a', 700, { thread: task });
     const member = row('row-member-ai', { seq: 700 });
     group.apply([message, member]);
@@ -109,11 +134,7 @@ describe('rows', () => {
     expect(group.thread(task)).toEqual([message]);
     expect(group.members).toEqual([member]);
 
-    home.push({
-      t: 'rows',
-      g: website,
-      rows: [gone('msg', 'a', 816), gone('member', member.id, 817)],
-    });
+    link.push(rows(gone('msg', 'a', 816), gone('member', member.id, 817)));
     expect(group.rows.get('msg a')).toEqual(gone('msg', 'a', 816));
     expect(group.thread(task)).toEqual([]);
     expect(group.members).toEqual([]);
@@ -121,7 +142,7 @@ describe('rows', () => {
 
     // A page asked for before the deletion arrives after it.
     void group.older(task);
-    asked[1].answer({ t: 'fetched', re: 2, ok: true, rows: [message], more: false });
+    asked[1].answer(fetched([message], false));
     await settle();
     expect(group.rows.get('msg a')).toEqual(gone('msg', 'a', 816));
     expect(group.thread(task)).toEqual([]);
@@ -139,191 +160,322 @@ describe('the cursor', () => {
   it('is 0 at the start and asks for everything', () => {
     const { group, asked } = joined();
     expect(group.cursor).toBe(0);
-    expect(asked.map((ask) => ask.req)).toEqual([
-      { t: 'sync', g: website, since: 0, state_only: false },
-    ]);
+    expect(asked.map((ask) => ask.req)).toEqual([sync(0)]);
   });
 
   it('is not moved by rows that arrive before synced, and becomes S at synced', async () => {
-    const { home, group, asked } = joined();
-    home.push({ t: 'reset', g: website });
-    home.push({ t: 'rows', g: website, rows: [text('a', 700), text('b', 710)] });
+    const { group, asked, link } = joined();
+    link.push(reset);
+    link.push(rows(text('a', 700), text('b', 710)));
     expect(group.main.map((msg) => msg.id)).toEqual(['a', 'b']);
     expect(group.cursor).toBe(0);
-    asked[0].answer({ t: 'synced', re: 1, ok: true, g: website, seq: 815 });
+    asked[0].answer(synced(815));
     await settle();
     expect(group.cursor).toBe(815);
   });
 
   it('then follows each live row applied, and no row that changes nothing', async () => {
-    const { home, group } = await synced();
-    home.push({ t: 'rows', g: website, rows: [text('a', 816), text('b', 817)] });
+    const { group, link } = await read();
+    link.push(rows(text('a', 816), text('b', 817)));
     expect(group.cursor).toBe(817);
-    home.push({ t: 'rows', g: website, rows: [text('a', 816)] });
+    link.push(rows(text('a', 816)));
     expect(group.cursor).toBe(817);
-    home.push({ t: 'rows', g: website, rows: [text('b', 800)] });
+    link.push(rows(text('b', 800)));
     expect(group.cursor).toBe(817);
-    home.push({ t: 'rows', g: website, rows: [gone('msg', 'a', 818)] });
+    link.push(rows(gone('msg', 'a', 818)));
     expect(group.cursor).toBe(818);
   });
 
   it('is never moved by a page', async () => {
-    const { group, asked } = await synced();
+    const { group, asked } = await read();
     void group.older();
-    asked[1].answer({ t: 'fetched', re: 2, ok: true, rows: [text('z', 900)], more: false });
+    asked[1].answer(fetched([text('z', 900)], false));
     await settle();
     expect(group.main.map((msg) => msg.id)).toEqual(['z']);
     expect(group.cursor).toBe(815);
   });
 
   it('returns to 0 with the cache at a reset, also when the read breaks off after its first batch', async () => {
-    const { home, group } = await synced();
-    home.push({ t: 'rows', g: website, rows: [text('a', 816)] });
-    home.offline();
+    const { home, group, link } = await read();
+    link.push(rows(text('a', 816)));
+    link.offline();
 
-    const again = connection();
-    home.online(again.ctl, welcome([listed(website)]));
-    expect(again.asked[0].req).toEqual({ t: 'sync', g: website, since: 816, state_only: false });
-    home.push({ t: 'reset', g: website });
+    const again = connect(home);
+    expect(again.asked[0].req).toEqual(sync(816));
+    again.link.push(reset);
     expect(group.rows.size).toBe(0);
     expect(group.cursor).toBe(0);
-    home.push({ t: 'rows', g: website, rows: [text('n', 2400), text('o', 2401)] });
+    again.link.push(rows(text('n', 2400), text('o', 2401)));
     // The connection is lost here: no synced.
-    home.offline();
+    again.link.offline();
     expect(group.cursor).toBe(0);
 
-    const third = connection();
-    home.online(third.ctl, welcome([listed(website)]));
-    expect(third.asked[0].req).toEqual({ t: 'sync', g: website, since: 0, state_only: false });
+    const third = connect(home);
+    expect(third.asked[0].req).toEqual(sync(0));
   });
 
   it('keeps its place when a delta breaks off', async () => {
-    const { home, group } = await synced();
-    home.offline();
-    const again = connection();
-    home.online(again.ctl, welcome([listed(website)]));
-    home.push({ t: 'rows', g: website, rows: [text('a', 816), text('b', 817)] });
-    home.offline();
+    const { home, group, link } = await read();
+    link.offline();
+    const again = connect(home);
+    again.link.push(rows(text('a', 816), text('b', 817)));
+    again.link.offline();
     expect(group.main.map((msg) => msg.id)).toEqual(['a', 'b']);
     expect(group.cursor).toBe(815);
   });
 
   it('keeps its place when the home refuses the read or the connection loses it', async () => {
-    const { home, group, asked } = await synced();
+    const { home, group, asked, link } = await read();
     void group.sync(home.ctl!);
     asked[1].answer({ re: 2, err: { code: 'forbidden', msg: 'no' } });
     await settle();
     expect(group.cursor).toBe(815);
-    home.push({ t: 'rows', g: website, rows: [text('a', 816)] });
+    link.push(rows(text('a', 816)));
     expect(group.cursor).toBe(815);
 
     void group.sync(home.ctl!);
     asked[2].fail();
     await settle();
     expect(group.cursor).toBe(815);
-    home.push({ t: 'rows', g: website, rows: [text('b', 817)] });
+    link.push(rows(text('b', 817)));
     expect(group.cursor).toBe(815);
   });
 });
 
-describe('pages', () => {
-  it('ask for the newest first, then for what is before the lowest pos received', async () => {
-    const { group, asked } = await synced();
+describe('an answer that comes too late', () => {
+  // Round 3, R3-5, with two connections: the first is replaced while its read is still open.
+  it('of a connection that was replaced does not end the reset of the one that replaced it', async () => {
+    const { home, group, asked } = joined();
+    const second = connect(home);
+    second.link.push(reset);
+    second.link.push(rows(text('n', 2400), text('o', 2401)));
+    asked[0].answer(synced(815));
+    await settle();
+    expect(group.cursor).toBe(0);
+    // Nothing is live yet either: the second read has no synced.
+    second.link.push(rows(text('p', 2402)));
+    expect(group.cursor).toBe(0);
+    second.link.offline();
+
+    const third = connect(home);
+    expect(third.asked[0].req).toEqual(sync(0));
+  });
+
+  it('to a read that was overtaken on the same connection moves nothing', async () => {
+    const { home, group, asked, link } = joined();
+    void group.sync(home.ctl!);
+    asked[0].answer(synced(700));
+    await settle();
+    expect(group.cursor).toBe(0);
+    link.push(rows(text('a', 701)));
+    expect(group.cursor).toBe(0);
+
+    asked[1].answer(synced(815));
+    await settle();
+    expect(group.cursor).toBe(815);
+    link.push(rows(text('b', 816)));
+    expect(group.cursor).toBe(816);
+  });
+
+  it('to a read whose connection is gone moves nothing', async () => {
+    const { group, asked, link } = joined();
+    link.offline();
+    asked[0].answer(synced(815));
+    await settle();
+    expect(group.cursor).toBe(0);
+  });
+
+  it('with a page is dropped when the group was read again, on the same connection or another', async () => {
+    const { home, group, asked } = await read();
+    const before = group.paging();
+    const sameConnection = group.older();
+    void group.sync(home.ctl!);
+    asked[1].answer(fetched([text('a', 300)], false));
+    await sameConnection;
+    expect([...group.rows.keys()]).toEqual([]);
+    expect(group.paging()).not.toBe(before);
+    expect(group.paging()).toMatchObject({ before: undefined, more: true, busy: false });
+
+    const fresh = group.paging();
+    const otherConnection = group.older();
+    const again = connect(home);
+    asked[3].answer(fetched([text('b', 400)], false));
+    await otherConnection;
+    expect([...group.rows.keys()]).toEqual([]);
+    expect(group.paging()).not.toBe(fresh);
+    expect(group.paging()).toMatchObject({ before: undefined, more: true, busy: false });
+    void group.older();
+    expect(again.asked[1].req).toEqual(fetch(0));
+  });
+
+  it('with a page is dropped when the connection is gone, and the paging stays as it was', async () => {
+    const { group, asked, link } = await read();
+    const page = group.older();
     const paging = group.paging();
-    expect([paging.before, paging.more, paging.busy]).toEqual([0, true, false]);
+    link.offline();
+    asked[1].answer(fetched([text('a', 300)], false));
+    await page;
+    expect([...group.rows.keys()]).toEqual([]);
+    expect(group.paging()).toBe(paging);
+    expect([paging.before, paging.more, paging.busy, paging.failed]).toEqual([
+      undefined,
+      true,
+      false,
+      false,
+    ]);
+  });
+});
+
+describe('pages', () => {
+  it('are asked for one before the other, each before the lowest pos of the last', async () => {
+    const { group, asked } = await read();
+    const paging = group.paging();
+    expect([paging.before, paging.more, paging.busy, paging.failed, paging.ready]).toEqual([
+      undefined,
+      true,
+      false,
+      false,
+      true,
+    ]);
 
     const first = group.older();
-    expect(asked[1].req).toEqual({ t: 'fetch', g: website, thread: null, before: 0, limit: 50 });
-    expect(paging.busy).toBe(true);
-    const page = [text('c', 790), text('b', 760), text('a', 720)];
-    asked[1].answer({ t: 'fetched', re: 2, ok: true, rows: page, more: true });
+    expect(asked[1].req).toEqual(fetch(0));
+    expect([paging.busy, paging.ready]).toEqual([true, false]);
+    asked[1].answer(fetched([text('c', 790), text('b', 760), text('a', 720)], true));
     await first;
-    expect([paging.before, paging.more, paging.busy]).toEqual([720, true, false]);
+    expect([paging.before, paging.more, paging.busy, paging.ready]).toEqual([
+      720,
+      true,
+      false,
+      true,
+    ]);
     expect(group.main.map((msg) => msg.id)).toEqual(['a', 'b', 'c']);
 
     void group.older();
-    expect(asked[2].req).toEqual({ t: 'fetch', g: website, thread: null, before: 720, limit: 50 });
-    asked[2].answer({ t: 'fetched', re: 3, ok: true, rows: [], more: false });
+    expect(asked[2].req).toEqual(fetch(720));
+    asked[2].answer(fetched([text('0', 700)], false));
     await settle();
-    expect([paging.before, paging.more, paging.busy]).toEqual([720, false, false]);
+    expect([paging.before, paging.more, paging.busy, paging.ready]).toEqual([
+      700,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it('of the main line start before the oldest of the newest 50 held, whatever older card is held', async () => {
+    const { group, asked } = await read();
+    // A cold read: a card still pending from long ago, and the newest 50 of the main line.
+    const card = row('row-msg-decision-pending', { id: 'card', seq: 5, pos: 5, thread: null });
+    const newest = Array.from({ length: 50 }, (_, i) => text(`m${i}`, 700 + i));
+    group.apply([card, ...newest]);
+    void group.older();
+    expect(asked[1].req).toEqual(fetch(700));
+    // A message that arrives afterwards does not move the start of a page already asked for.
+    group.apply([text('late', 800)]);
+    asked[1].answer(fetched([text('l', 690)], true));
+    await settle();
+    expect(group.paging().before).toBe(690);
+  });
+
+  it('of the main line start before the oldest message held when fewer than 50 are held', async () => {
+    const { group, asked } = await read();
+    group.apply([text('b', 720), text('c', 790), text('a', 705)]);
+    void group.older();
+    expect(asked[1].req).toEqual(fetch(705));
+    // An empty page is the end, and leaves the place where it was asked from.
+    asked[1].answer(fetched([], false));
+    await settle();
+    expect(group.paging()).toMatchObject({ before: 705, more: false, busy: false });
   });
 
   it('end at an empty page, whatever it says of more', async () => {
-    const { group, asked } = await synced();
+    const { group, asked } = await read();
     const page = group.older();
-    asked[1].answer({ t: 'fetched', re: 2, ok: true, rows: [], more: true });
+    asked[1].answer(fetched([], true));
     await page;
-    expect(group.paging()).toMatchObject({ before: 0, more: false, busy: false });
+    expect(group.paging()).toMatchObject({ before: 0, more: false, busy: false, failed: false });
   });
 
-  it('of a thread are read apart from the main line', async () => {
-    const { group, asked } = await synced();
+  it('of a thread are read from its newest page, apart from the main line', async () => {
+    const { group, asked } = await read();
+    group.apply([text('main', 600), text('held', 650, { thread: task })]);
     void group.older(task);
-    expect(asked[1].req).toEqual({ t: 'fetch', g: website, thread: task, before: 0, limit: 50 });
-    asked[1].answer({
-      t: 'fetched',
-      re: 2,
-      ok: true,
-      rows: [text('b', 760, { thread: task }), text('a', 720, { thread: task })],
-      more: true,
-    });
+    expect(asked[1].req).toEqual(fetch(0, task));
+    const page = [text('b', 760, { thread: task }), text('a', 720, { thread: task })];
+    asked[1].answer(fetched(page, true));
     await settle();
     expect(group.paging(task).before).toBe(720);
     expect(group.paging(task)).toBe(group.paging(task));
     expect(group.paging()).toBe(group.paging(null));
-    expect(group.paging().before).toBe(0);
-    expect(group.thread(task).map((msg) => msg.id)).toEqual(['a', 'b']);
+    expect(group.paging().before).toBeUndefined();
+    expect(group.thread(task).map((msg) => msg.id)).toEqual(['held', 'a', 'b']);
+
+    void group.older(task);
+    expect(asked[2].req).toEqual(fetch(720, task));
   });
 
   it('are not asked for while one is on its way, when there are no more, or with no connection', async () => {
-    const { home, group, asked } = await synced();
+    const { group, asked, link } = await read();
     void group.older();
     void group.older();
     expect(asked).toHaveLength(2);
-    asked[1].answer({ t: 'fetched', re: 2, ok: true, rows: [text('a', 720)], more: false });
+    asked[1].answer(fetched([text('a', 720)], false));
     await settle();
     void group.older();
     expect(asked).toHaveLength(2);
 
     void group.older(task);
     expect(asked).toHaveLength(3);
-    home.offline();
+    link.offline();
     await group.older('another');
     expect(asked).toHaveLength(3);
     expect(group.paging('another').busy).toBe(false);
   });
 
-  it('end, with nothing changed, when the home refuses one or the connection loses it', async () => {
-    const { group, asked } = await synced();
+  it('stop, with nothing changed, when the home refuses one or the connection fails it', async () => {
+    const { group, asked } = await read();
     group.apply([text('a', 720)]);
     const refused = group.older();
     asked[1].answer({ re: 2, err: { code: 'not_found', msg: 'no such group' } });
     await refused;
-    expect(group.paging()).toMatchObject({ before: 0, more: false, busy: false });
+    expect(group.paging()).toMatchObject({
+      before: undefined,
+      more: true,
+      busy: false,
+      failed: true,
+      ready: false,
+    });
+    void group.older();
+    expect(asked).toHaveLength(2);
 
-    const lostPage = group.older(task);
+    const failing = group.older(task);
     asked[2].fail();
-    await lostPage;
-    expect(group.paging(task)).toMatchObject({ before: 0, more: false, busy: false });
+    await failing;
+    expect(group.paging(task)).toMatchObject({ more: true, busy: false, failed: true });
     expect([...group.rows.keys()]).toEqual(['msg a']);
   });
 
-  it('start again when the group is read again, whatever a page from before brings', async () => {
-    const { home, group, asked } = await synced();
+  it('start again when the group is read again', async () => {
+    const { home, group, asked, link } = await read();
+    const refused = group.older();
+    asked[1].answer({ re: 2, err: { code: 'internal', msg: 'no' } });
+    await refused;
     const before = group.paging();
-    const stale = group.older();
-    home.offline();
-    const again = connection();
-    home.online(again.ctl, welcome([listed(website)]));
+    expect(before.failed).toBe(true);
+
+    link.offline();
+    const again = connect(home);
     const fresh = group.paging();
     expect(fresh).not.toBe(before);
-
-    asked[1].answer({ t: 'fetched', re: 2, ok: true, rows: [text('a', 300)], more: false });
-    await stale;
-    expect(group.paging()).toBe(fresh);
-    expect([fresh.before, fresh.more, fresh.busy]).toEqual([0, true, false]);
+    expect([fresh.before, fresh.more, fresh.busy, fresh.failed]).toEqual([
+      undefined,
+      true,
+      false,
+      false,
+    ]);
     void group.older();
-    expect(again.asked[1].req).toMatchObject({ t: 'fetch', before: 0 });
+    expect(again.asked[1].req).toEqual(fetch(0));
   });
 });
 
@@ -357,11 +509,11 @@ describe('the lists of a group', () => {
   it('list the members by name, and find one by id', () => {
     const { group } = joined();
     const owner = row('row-member-human') as p.HumanMemberRow;
-    const codex = row('row-member-ai') as p.AIMemberRow;
+    const ai = row('row-member-ai') as p.AIMemberRow;
     const claude = row('row-member-ai', { id: 'claude', name: 'Claude Code' });
-    group.apply([owner, codex, text('a', 1), claude]);
-    expect(group.members).toEqual([claude, codex, owner]);
-    expect(group.member(codex.id)).toBe(codex);
+    group.apply([owner, ai, text('a', 1), claude]);
+    expect(group.members).toEqual([claude, ai, owner]);
+    expect(group.member(ai.id)).toBe(ai);
     expect(group.member('system')).toBeUndefined();
   });
 
@@ -369,10 +521,10 @@ describe('the lists of a group', () => {
     const { group } = joined();
     expect(group.me).toBeUndefined();
     // An AI carries its owner's user id too, and comes first by name.
-    const codex = row('row-member-ai');
+    const ai = row('row-member-ai');
     const stranger = row('row-member-human', { id: 'other', user: 'someone', name: 'mina' });
     const owner = row('row-member-human');
-    group.apply([codex, stranger, owner]);
+    group.apply([ai, stranger, owner]);
     expect(group.me).toBe(owner);
   });
 
@@ -487,73 +639,99 @@ describe('a home', () => {
     const home = new Home(me);
     expect([home.ctl, home.groups, home.name, home.owner]).toEqual([undefined, [], '', false]);
     expect(home.me).toBe(me);
-    const { ctl, asked } = connection();
-    home.online(ctl, welcome([listed('one', 'One'), listed('two', 'Two')]));
+    const { ctl, asked } = connect(home, [listed('one', 'One'), listed('two', 'Two')]);
     expect(home.ctl).toBe(ctl);
     expect([home.name, home.owner]).toEqual(['workstation', true]);
     expect(home.groups.map((group) => [group.g, group.name])).toEqual([
       ['one', 'One'],
       ['two', 'Two'],
     ]);
-    expect(asked.map((ask) => ask.req)).toEqual([
-      { t: 'sync', g: 'one', since: 0, state_only: false },
-      { t: 'sync', g: 'two', since: 0, state_only: false },
-    ]);
+    expect(asked.map((ask) => ask.req)).toEqual([sync(0, 'one'), sync(0, 'two')]);
   });
 
   it('says whose node it is not', () => {
     const home = new Home(me);
-    home.online(connection().ctl, welcome([], { name: 'laptop', owner: false }));
+    connect(home, [], { name: 'laptop', owner: false });
     expect([home.name, home.owner]).toEqual(['laptop', false]);
   });
 
   it('shows its groups from the rows held while the node cannot be reached, and reads on when it returns', async () => {
-    const { home, group } = await synced();
-    home.push({ t: 'rows', g: website, rows: [text('a', 816)] });
-    home.offline();
+    const { home, group, link } = await read();
+    link.push(rows(text('a', 816)));
+    link.offline();
     expect(home.ctl).toBeUndefined();
     expect(home.groups).toEqual([group]);
     expect(group.main.map((msg) => msg.id)).toEqual(['a']);
 
-    const again = connection();
-    home.online(again.ctl, welcome([listed(website, 'Website 2')]));
+    const again = connect(home, [listed(website, 'Website 2')]);
+    expect(home.ctl).toBe(again.ctl);
     expect(home.groups).toEqual([group]);
     expect(group.name).toBe('Website 2');
-    expect(again.asked.map((ask) => ask.req)).toEqual([
-      { t: 'sync', g: website, since: 816, state_only: false },
-    ]);
+    expect(again.asked.map((ask) => ask.req)).toEqual([sync(816)]);
   });
 
   it('replaces its list at a groups push and reads only the group that is new', async () => {
-    const { home, group, asked } = await synced();
-    home.push({ t: 'groups', groups: [listed('new', 'Docs'), listed(website, 'Site')] });
+    const { home, group, asked, link } = await read();
+    link.push({ t: 'groups', groups: [listed('new', 'Docs'), listed(website, 'Site')] });
     expect(home.groups.map((each) => [each.g, each.name])).toEqual([
       ['new', 'Docs'],
       [website, 'Site'],
     ]);
     expect(home.groups[1]).toBe(group);
-    expect(asked.slice(1).map((ask) => ask.req)).toEqual([
-      { t: 'sync', g: 'new', since: 0, state_only: false },
-    ]);
+    expect(asked.slice(1).map((ask) => ask.req)).toEqual([sync(0, 'new')]);
 
-    home.push({ t: 'groups', groups: [] });
+    link.push({ t: 'groups', groups: [] });
     expect(home.groups).toEqual([]);
     expect(asked).toHaveLength(2);
   });
 
   it('gives each push to the group it names and drops the others', async () => {
     const home = new Home(me);
-    home.online(connection().ctl, welcome([listed('one'), listed('two')]));
+    const { link } = connect(home, [listed('one'), listed('two')]);
     const [one, two] = home.groups;
-    home.push({ t: 'rows', g: 'two', rows: [text('a', 5)] });
-    home.push({ t: 'rows', g: 'one', rows: [text('b', 6)] });
-    home.push({ t: 'rows', g: 'gone', rows: [text('c', 7)] });
-    home.push({ t: 'reset', g: 'gone' });
-    home.push({ t: 'devlog', user, entries: [] });
+    link.push({ t: 'rows', g: 'two', rows: [text('a', 5)] });
+    link.push({ t: 'rows', g: 'one', rows: [text('b', 6)] });
+    link.push({ t: 'rows', g: 'gone', rows: [text('c', 7)] });
+    link.push({ t: 'reset', g: 'gone' });
+    link.push({ t: 'devlog', user, entries: [] });
     expect([...one.rows.keys()]).toEqual(['msg b']);
     expect([...two.rows.keys()]).toEqual(['msg a']);
-    home.push({ t: 'reset', g: 'two' });
+    link.push({ t: 'reset', g: 'two' });
     expect([one.rows.size, two.rows.size]).toEqual([1, 0]);
+  });
+
+  it('takes pushes from the last connection to come online and from no other', async () => {
+    const home = new Home(me);
+    const early = home.connect();
+    const first = connect(home);
+    const group = home.groups[0];
+    // A connection on which the node has not answered hello is not the home's yet.
+    early.push(rows(text('early', 1)));
+    expect(group.rows.size).toBe(0);
+    first.link.push(rows(text('a', 2)));
+    expect([...group.rows.keys()]).toEqual(['msg a']);
+
+    const second = connect(home);
+    first.link.push(rows(text('stale', 3)));
+    first.link.push(reset);
+    first.link.push({ t: 'groups', groups: [] });
+    expect([...group.rows.keys()]).toEqual(['msg a']);
+    expect(home.groups).toEqual([group]);
+    second.link.push(rows(text('b', 4)));
+    expect([...group.rows.keys()]).toEqual(['msg a', 'msg b']);
+  });
+
+  it('stays online when a connection that was replaced goes, and takes nothing from one that is gone', () => {
+    const home = new Home(me);
+    const first = connect(home);
+    const second = connect(home);
+    first.link.offline();
+    expect(home.ctl).toBe(second.ctl);
+
+    second.link.offline();
+    expect(home.ctl).toBeUndefined();
+    second.link.push(rows(text('a', 2)));
+    expect(home.groups[0].rows.size).toBe(0);
   });
 });
 
@@ -563,12 +741,13 @@ describe('commands', () => {
     vi.setSystemTime(1763600000000);
   });
 
+  const keysOf = (example: string) => Object.keys(JSON.parse(goldens[example]));
+
   it('are signed by this device and answered by the node', async () => {
     const { home, group, asked } = joined();
-    const sending = group.post('Hello @Codex', ['codex']);
+    const sending = group.post('Hello @Codex', [codex]);
     await vi.waitFor(() => expect(asked).toHaveLength(2));
-    const payload = JSON.parse(signed[0]);
-    expect(Object.keys(payload).slice(0, 4)).toEqual(['t', 'n', 'ts', 'g']);
+    const payload = p.decode(p.Post, signed[0]);
     expect(payload).toEqual({
       t: 'post',
       n: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
@@ -578,10 +757,14 @@ describe('commands', () => {
       thread: null,
       main: false,
       text: 'Hello @Codex',
-      mentions: ['codex'],
+      mentions: [codex],
       re: null,
       body: {},
     });
+    // The fields of the wire example of a post, in its order; only an AI's post has `as`.
+    expect(Object.keys(JSON.parse(signed[0]))).toEqual(
+      keysOf('post-text').filter((field) => field !== 'as'),
+    );
     expect(asked[1].req).toEqual({
       t: 'cmd',
       env: { p: signed[0], k: 'device', s: 'signature' },
@@ -595,7 +778,7 @@ describe('commands', () => {
     expect(await refused).toEqual({ re: 3, err: { code: 'conflict', msg: 'nothing to jump' } });
   });
 
-  it('create a project group that the nonce names', async () => {
+  it('create a project group that the nonce names, as the wire example of the command has it', async () => {
     const { home, asked } = joined();
     const creating = home.create({
       name: 'Docs',
@@ -606,7 +789,7 @@ describe('commands', () => {
       member_name: 'Alex',
     });
     await vi.waitFor(() => expect(asked).toHaveLength(2));
-    const payload = JSON.parse(signed[0]);
+    const payload = p.decode(p.GroupCreate, signed[0]);
     expect(payload).toEqual({
       t: 'group',
       n: expect.any(String),
@@ -621,7 +804,7 @@ describe('commands', () => {
       checks: ['pnpm test'],
       member_name: 'Alex',
     });
-    expect(p.decode(p.Id, JSON.stringify(payload.g))).toBe(payload.n);
+    expect(Object.keys(JSON.parse(signed[0]))).toEqual(keysOf('group-create'));
     asked[1].answer({ re: 2, ok: true });
     expect(await creating).toEqual({ g: payload.n, answer: { re: 2, ok: true } });
   });
@@ -638,13 +821,13 @@ describe('commands', () => {
   });
 
   it('are answered as lost when the node cannot be reached or the connection breaks', async () => {
-    const { home, group, asked } = joined();
+    const { group, asked, link } = joined();
     const breaking = group.post('one', []);
     await vi.waitFor(() => expect(asked).toHaveLength(2));
     asked[1].fail();
     expect(await breaking).toEqual(lost());
 
-    home.offline();
+    link.offline();
     expect(await group.post('two', [])).toEqual(lost());
     expect(signed).toHaveLength(2);
     expect(asked).toHaveLength(2);
@@ -654,10 +837,17 @@ describe('commands', () => {
 describe('every group', () => {
   const home = (...groups: string[]) => {
     const made = new Home(me);
-    made.online(connection().ctl, welcome(groups.map((g) => listed(g, g))));
+    connect(
+      made,
+      groups.map((g) => listed(g, g)),
+    );
     homes.push(made);
     return made;
   };
+
+  it('starts with no home', () => {
+    expect(homesAtFirst).toEqual([]);
+  });
 
   it('is listed with the newest main line first', () => {
     const first = home('quiet', 'old');
@@ -668,10 +858,6 @@ describe('every group', () => {
     second.groups[1].apply([text('a', 1, { ts: 200 })]);
     expect(recent().map((group) => group.g)).toEqual(['busy', 'new', 'old', 'quiet']);
     expect(first.groups.map((group) => group.g)).toEqual(['quiet', 'old']);
-  });
-
-  it('starts with no home', () => {
-    expect(homesAtFirst).toEqual([]);
   });
 
   it('is found by its id', () => {
