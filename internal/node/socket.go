@@ -2,7 +2,9 @@ package node
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,7 +19,7 @@ var errRunning = errors.New("a node is already running")
 // which only the current user can open (local.md 3). A socket file left by a
 // node that stopped is removed first.
 func ListenLocal(dir string) (*net.UnixListener, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := privateDir(dir); err != nil {
 		return nil, err
 	}
 	path := filepath.Join(dir, "sock")
@@ -75,6 +77,52 @@ func ReadOpening(r *bufio.Reader) (Opening, []byte, error) {
 	}
 	// The caller continues the MCP stream from r, including any buffered bytes.
 	return open, line, nil
+}
+
+// AcceptOpening reads the first line of a local connection. A line that is
+// neither a command nor an MCP token gets one error line, and the connection
+// is closed (local.md 3). The caller continues from the returned reader.
+func AcceptOpening(conn io.ReadWriteCloser) (Opening, []byte, *bufio.Reader, error) {
+	r := bufio.NewReader(conn)
+	open, line, err := ReadOpening(r)
+	if err != nil {
+		json.NewEncoder(conn).Encode(localReply{Done: true, Error: err.Error()}) // the client may be gone already
+		conn.Close()
+	}
+	return open, line, r, err
+}
+
+// ErrOwned refuses pair on a node that already has an owner (local.md 1).
+var ErrOwned = errors.New("this node already has an owner; to add a browser, run solodawn pair-browser")
+
+// PairRequest is a pair command as the node reads it.
+type PairRequest struct {
+	Secret     string
+	Name       string
+	Rendezvous []string
+}
+
+// ReadPair reads the opening line of a pair command. owner is the "owner"
+// setting, empty before the first pairing; configured is the "rendezvous"
+// setting. A rendezvous given with the command replaces the configured ones
+// for this pairing (local.md 1, 3; storage.md 2).
+func ReadPair(line []byte, owner string, configured []string) (PairRequest, error) {
+	if owner != "" {
+		return PairRequest{}, ErrOwned
+	}
+	var c struct {
+		Secret     string `json:"secret"`
+		Name       string `json:"name"`
+		Rendezvous string `json:"rendezvous,omitempty"`
+	}
+	if err := proto.Decode(line, &c); err != nil {
+		return PairRequest{}, err
+	}
+	req := PairRequest{Secret: c.Secret, Name: c.Name, Rendezvous: configured}
+	if c.Rendezvous != "" {
+		req.Rendezvous = []string{c.Rendezvous}
+	}
+	return req, nil
 }
 
 // startNode runs the node on its data directory and local listener. The

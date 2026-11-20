@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 // The node embeds the built client from internal/node/webdist (architecture 8.1). The build
 // empties that directory, so the .gitignore that keeps it out of Git is written back each time.
@@ -37,5 +37,6 @@ export default defineConfig(({ mode }) => ({
     // Tests mount components, so Svelte must resolve to its browser build.
     ...(mode === 'test' && { conditions: ['browser'] }),
   },
-  test: { environment: 'happy-dom' },
+  // The end-to-end tests need Go, a build and browsers; only e2e/config.ts runs them.
+  test: { environment: 'happy-dom', exclude: [...configDefaults.exclude, 'e2e/**'] },
 }));

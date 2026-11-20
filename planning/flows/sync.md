@@ -33,13 +33,14 @@ Actors: C, a client (browser or host); H, the group home.
 Because the rows of step 5 come from the view at S and the subscription
 starts after S, nothing written while H was sending is lost, hidden or sent
 twice. C applies a row only if its `seq` is higher than the one it holds
-for that row.
+for that row. A row with an equal `seq` is the same row: no change.
 
 **C's cursor**, the `since` of its next `sync`: 0 at the start, and 0 again
 from the moment a `reset` makes C drop its cache; S at the `synced` that
-follows; after that the `seq` of each live row C applies. Pages from
-`fetch` never move it. So a reset that breaks off half-way starts again
-from nothing, and a delta that breaks off keeps the cursor it had.
+follows; after that the `seq` of each live row C applies. A row that is no
+change does not move it, and pages from `fetch` never move it. So a reset
+that breaks off half-way starts again from nothing, and a delta that breaks
+off keeps the cursor it had.
 
 A task row carries a summary of its thread (count, last message, AI round
 counter), so the collapsed thread line needs no thread messages. Pending

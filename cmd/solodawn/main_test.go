@@ -53,6 +53,8 @@ func TestRun(t *testing.T) {
 		{[]string{"pair", "--name"}, 2, "", usage},
 		{[]string{"pair", "secret", "--name"}, 2, "", usage},
 		{[]string{"pair", "secret", "--other", "name"}, 2, "", usage},
+		{[]string{"pair", "secret", "--rendezvous"}, 2, "", usage},
+		{[]string{"pair", "secret", "extra"}, 2, "", usage},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := run(tc.args, &stdout, &stderr)
@@ -65,6 +67,7 @@ func TestRun(t *testing.T) {
 func TestLocalArgumentsReachTheSocket(t *testing.T) {
 	dir := testDataDir(t)
 	l := testListener(t, dir)
+	host, _ := os.Hostname()
 	for _, tc := range []struct {
 		args []string
 		line string
@@ -72,8 +75,10 @@ func TestLocalArgumentsReachTheSocket(t *testing.T) {
 		{[]string{"status"}, `{"cmd":"status"}`},
 		{[]string{"open"}, `{"cmd":"open"}`},
 		{[]string{"pair-browser"}, `{"cmd":"pair-browser"}`},
-		{[]string{"pair", "secret"}, `{"cmd":"pair","secret":"secret","name":""}`},
+		{[]string{"pair", "secret"}, `{"cmd":"pair","secret":"secret","name":"` + host + `"}`},
 		{[]string{"pair", "secret", "--name", "label with spaces"}, `{"cmd":"pair","secret":"secret","name":"label with spaces"}`},
+		{[]string{"pair", "secret", "--rendezvous", "https://rv.example"}, `{"cmd":"pair","secret":"secret","name":"` + host + `","rendezvous":"https://rv.example"}`},
+		{[]string{"pair", "secret", "--rendezvous", "https://rv.example", "--name", "laptop"}, `{"cmd":"pair","secret":"secret","name":"laptop","rendezvous":"https://rv.example"}`},
 	} {
 		received := replyToCommand(l)
 		var out, stderr bytes.Buffer

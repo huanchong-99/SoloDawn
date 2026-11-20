@@ -62,8 +62,10 @@ Item 5, the merge (after step 9), to host A itself, naming the commit:
 ```
 
 Items 1, 3 and 6 are `mention`, `confirmed` and `notice` for the secretary,
-with the same envelope shape and the message that caused them; item 3 also
-carries the confirmation of step 3 as its `cause`. Every envelope is built
+with the same envelope shape and the message that caused them: `M1`, `M2`,
+and the `system` message `task_merged`. Item 3 also carries the
+confirmation of step 3 as its `cause`; item 6 has `code` `task_merged` and
+`task` `t1` (`contracts/datachannel.md` section 6). Every envelope is built
 and signed when its item is queued, and sent as it was signed.
 
 ## What each host checks before acting

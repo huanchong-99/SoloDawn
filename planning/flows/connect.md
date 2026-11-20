@@ -86,9 +86,12 @@ answering node; RV, any signalling path.
     with the interval doubling up to 5 minutes, C sends a signed `offer`
     with `probe: true` and a new `conn`. Both ends omit TURN on a probe.
     N keeps one pending probe beside the current inbound connection; a
-    later probe offer supersedes a pending one.
-11. If the probe's `ctl` opens, C moves. A move is a reconnect in which
-    the old connection serves until N has accepted the new one:
+    later probe offer supersedes a pending one. C closes its own pending
+    probe before it sends the next.
+11. A probe has 15 seconds from its offer to open its `ctl`; one that has
+    not opened by then has failed (step 14). If the probe's `ctl` opens, C
+    moves. A move is a reconnect in which the old connection serves until N
+    has accepted the new one:
     1. C sends `hello` on the probe and starts a 10-second timer. While it
        waits for `welcome`, closure of the old connection does not start an
        ordinary reconnect. A matching `welcome` completes the move and cancels
@@ -103,8 +106,11 @@ answering node; RV, any signalling path.
        it. Then C sends `sync` for each group with the last sequence
        number it **applied** (`flows/sync.md` A). Rows that were on their
        way on the old connection are simply read again.
-12. C sends again every command that has had no response. The receipt on
-    the other side makes a repeat harmless (`contracts/commands.md`).
+12. C sends again, under new `id`s, every request that has had no
+    response: each `cmd`, `fetch` and `host.info`, and each `sync`, which
+    is the `sync` of step 11.3 for its group. The receipt on the other side
+    makes a repeated command harmless (`contracts/commands.md`); the other
+    requests only read.
 13. Both sides classify the new path. The indicator changes within one
     second and the relay notice disappears.
 14. C closes the failed or timed-out probe and ignores a late `welcome` from
@@ -123,9 +129,11 @@ opened, and it will again on the next reconnect.
 
 ## C. Losing and regaining a connection
 
-15. When ICE reports the connection failed or closed, C starts again from
-    step 1. Retries back off: 1, 2, 4 … 60 seconds. The old connection
-    closing during a move is not this case (step 11.1).
+15. When ICE reports the connection failed or closed, or its `ctl` channel
+    closes, C starts again from step 1. Retries back off: 1, 2, 4 … 60
+    seconds, and start again from 1 second after a connection that stayed
+    open for 60 seconds. The old connection closing during a move is not
+    this case (step 11.1).
     If no answer arrives within 10 seconds of sending an offer (the same
     timeout as `hello`), or every path used for that offer reports the
     target offline before an answer arrives, C retires that `conn` at
@@ -137,7 +145,7 @@ opened, and it will again on the next reconnect.
 17. After `welcome`, C resumes exactly as in step 11.3: `sync` with the last
     sequence number it applied for each group. A host that restarted has
     nothing cached and starts from zero.
-18. Commands in flight when the connection died are sent again after
+18. Requests in flight when the connection died are sent again after
     `welcome`, as in step 12. A host also sends the current `member status`
     of each of its AIs, so that the home shows what is true now.
 
@@ -153,9 +161,10 @@ signer, and leave alone the connection N itself offered
   service. A relayed connection ends with the relay.
 - Node to node: step 1 still yields local-network and remembered addresses.
   If one of them is reachable the connection opens exactly as above.
-- Browser: can connect only through a node on the same machine
-  (`http://localhost:47800/`). That node is its signalling path to itself
-  and, by forwarding `to`/`from`, to nodes it can reach.
+- Browser: can connect only to the node on its own machine, from the page
+  that node serves (`http://localhost:47800/`), through that node's own
+  handler (`contracts/rendezvous.md` section 1, "Local delivery"). Step 1
+  forwards no signalling to other nodes.
 - Two devices that are both behind NAT, on different networks, with no
   remembered address that still works, cannot find each other until some
   rendezvous is reachable. This is the stated limit of R-133; see
