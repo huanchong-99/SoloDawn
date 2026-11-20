@@ -12,11 +12,20 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `pair` (`cmd/solodawn/main.go:61`) only sends the command through `Command.send` (`internal/node/cmd.go:40`). No unit owned starting the node.
 - Status: open. Added to N-4's row in `planning/steps/parallel-plan-units.md` by the coordinator's decision of 2026-11-20 (independent review of `internal/node`).
 
-### 2026-11-20 · deviation · A second node is stopped by a lock, not by the dial of `local.md` section 3
+### 2026-11-20 · bug · Two nodes starting together could each remove the other's socket
 
-- Symptom: `local.md` section 3 says a starting node dials a `sock` it finds and removes it when the dial is refused. Two nodes that started together both did so: one removed the other's live socket, and the first one's close then removed the second's (89 of 3000 rounds in the review).
-- Cause: the dial and the removal were not one step (`internal/node/socket.go`, before this fix).
-- Status: resolved in code by the coordinator's decision of 2026-11-20: `ListenLocal` (`internal/node/socket.go:36`) first takes an exclusive lock on `lock` in the data directory (`lockData`, `:54`; `flock` on Unix, `LockFileEx` on Windows), held while the node runs. Without it the node says "a node is already running"; with it, a `sock` it finds is stale and is removed. The text of `local.md` section 3 still describes the dial and is to be updated by a contract change.
+- Symptom: two nodes that started together on one data directory both ran over a stale `sock`: one removed the other's live socket, and the first one's close then removed the second's (89 of 3000 rounds in the independent review of `internal/node`).
+- Cause: the dial of `sock` and its removal were not one step (`internal/node/socket.go`, before this fix).
+- Status: resolved. `local.md` section 3, "One node per data directory", now holds the rule: an exclusive lock on `lock` in the data directory, taken by `ListenLocal` (`internal/node/socket.go:36`, `lockData` at `:54`) before the socket is touched.
+
+### 2026-11-20 · limitation · The start-at-login entries are not run by a real service manager
+
+- Symptom: the tests check the files and the task definition that `solodawn service install` writes, not a service manager starting the node from them. Not verified:
+  1. a systemd user unit started by a real user manager, with the escaping of `ExecStart` (`$$`, `%%`) and the `Environment="PATH=…"` line (`internal/node/service_linux.go`);
+  2. launchd loading the agent with its `EnvironmentVariables` (`internal/node/service_darwin.go`);
+  3. the scheduled task running the node headless through `conhost.exe --headless` (`internal/node/service_windows.go`); Windows CI only builds the action.
+- Cause: nothing is installed on the development machine, by the coordinator's decision of 2026-11-20.
+- Status: open. Candidate for a CI smoke job on GitHub's throwaway runners (Linux, macOS, Windows) after the quota reset: install, log in or start the manager, check that the node runs with the expected PATH, remove.
 
 ### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
 
