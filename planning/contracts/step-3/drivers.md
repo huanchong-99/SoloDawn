@@ -163,7 +163,7 @@ The name is not `caps`: that field holds the owner's usage caps.
   the coordinator decided on 2026-11-20. The Fable interface unit U3-3
   shows it: the account choice, the level control, the cap units and the
   terminal button. The parallel plan lists both; T3-1 puts nothing on the
-  wire.
+  wire, and T3-2 puts `driver` into `host.info` after P-5.
 
 ## 7. Acceptance
 

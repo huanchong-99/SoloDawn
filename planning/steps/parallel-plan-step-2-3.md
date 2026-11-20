@@ -98,8 +98,8 @@ are complete only when S-10 and T3-0 have reported.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | T3-0 | 1 | Desk research: terms and capabilities of each candidate CLI, each claim with its source (no code; the answer goes into C3-1) | — | pull request description | — | A | S |
 | P-5 | 5 | Wire shapes: note types `preset` and `kb`, the brief's preset field, `kb_put`, `kb_search`; the `driver` object of `host.info` (`contracts/step-3/drivers.md` section 6) | golden round trip | lane PROTO | P-4, C3-1, C3-2 | F | S |
-| T3-1 | 4 | The capability table and the switches it drives, and nothing on the wire: `driver` in `host.info` waits for P-5 | A10 capabilities | `host/caps.go` | C3-1, HS-1, HS-2 | A | S |
-| T3-2, T3-3 | 5+ | One driver and one fake CLI each for OpenCode and Qwen Code, the CLIs that passed T3-0, one at a time | M3, M4, M7 tests for that CLI | `host/<cli>.go`, `host/fakecli/<cli>/` | T3-1, captures | A | 2 × M |
+| T3-1 | 4 | The capability table and the switches it drives, and nothing on the wire: `driver` in `host.info` comes with T3-2, after P-5 | A10 capabilities | `host/caps.go` | C3-1, HS-1, HS-2 | A | S |
+| T3-2, T3-3 | 5+ | One driver and one fake CLI each for OpenCode and Qwen Code, the CLIs that passed T3-0, one at a time. T3-2 also puts the declaration into `host.info` as `driver`, in the shape P-5 froze | M3, M4, M7 tests for that CLI | `host/<cli>.go`, `host/fakecli/<cli>/` | T3-1, captures; T3-2 also P-5 | A | 2 × M |
 | T3-4 | — | Amp: not scheduled. T3-0 found no approval channel for R-43 | — | — | — | — | — |
 | T3-5 | 6 | Presets: the note type, the brief field, the turn text | A10 presets | `home/preset.go`, `host/turn_preset.go` | P-5 | A | S |
 | T3-6 | 6 | Knowledge base: index, `kb_put`, `kb_search`, exempt from retention | A10 knowledge | `internal/store/kb.go`, `home/kb.go`, `host/tools_kb.go` | P-5 | A | M |
