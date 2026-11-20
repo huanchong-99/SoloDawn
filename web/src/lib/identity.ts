@@ -231,24 +231,21 @@ export class StorageBlocked extends Error {
 export interface KeyStore {
   crypto: Crypto;
   idb: () => IDBFactory;
-  storage: Pick<StorageManager, 'persist'>;
 }
 
 /** This browser's device, its key kept in IndexedDB (database `solodawn`, store `device`, key
  *  `key`) and created on first run. Each call makes a candidate key and stores it only when none
- *  is stored, in one transaction, so two pages opened at once keep one key. After storing a new
- *  key it asks once that the site's storage be persistent, whatever the answer. Rejects with
+ *  is stored, in one transaction, so two pages opened at once keep one key. The transaction is
+ *  durable: a new device key must not be lost to a power cut. It does not ask for persistent
+ *  storage: Firefox would prompt the person on a first visit; enrolment (F-04) asks. Rejects with
  *  StorageBlocked when IndexedDB fails. */
-export async function loadDevice({ crypto, idb, storage }: KeyStore): Promise<Device> {
+export async function loadDevice({ crypto, idb }: KeyStore): Promise<Device> {
   const fresh = await crypto.subtle.generateKey(ed25519, false, ['sign', 'verify']);
   const kept = await keep(idb, fresh).catch((cause: unknown) => {
     throw new StorageBlocked(cause);
   });
-  if (kept === fresh) storage.persist().catch(ignore);
   return Device.of(crypto, kept);
 }
-
-const ignore = () => undefined;
 
 function keep(idb: () => IDBFactory, fresh: CryptoKeyPair): Promise<CryptoKeyPair> {
   return new Promise((resolve, reject) => {
@@ -257,7 +254,8 @@ function keep(idb: () => IDBFactory, fresh: CryptoKeyPair): Promise<CryptoKeyPai
     opening.onerror = () => reject(opening.error);
     opening.onsuccess = () => {
       const db = opening.result;
-      const tx = db.transaction('device', 'readwrite');
+      // A browser without the durability option ignores it.
+      const tx = db.transaction('device', 'readwrite', { durability: 'strict' });
       const store = tx.objectStore('device');
       const stored = store.get('key');
       let kept = fresh;

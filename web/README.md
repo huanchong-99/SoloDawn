@@ -51,9 +51,11 @@ development dependency, an IndexedDB for the tests.
 - **Device key.** `loadDevice` keeps this browser's non-extractable Ed25519 key pair in IndexedDB
   (database `solodawn`, store `device`, key `key`) and creates it on first run. Each call makes a
   candidate key and stores it only when none is stored, in one transaction, so two pages opened at
-  once keep one key. After storing a new key it asks once for persistent storage
-  (`navigator.storage.persist()`) and ignores the answer. When IndexedDB cannot be reached, opened,
-  read or written it rejects with `StorageBlocked`. A `Device` has the `id` (the public key,
+  once keep one key; the transaction is durable (`durability: 'strict'`, ignored by a browser
+  without the option), so a new key is not lost to a power cut. It does not ask for persistent
+  storage: in Firefox `navigator.storage.persist()` opens a permission prompt, which a first
+  visit should not show. Onboarding (F-04) asks for it once the device is enrolled. When
+  IndexedDB cannot be reached, opened, read or written it rejects with `StorageBlocked`. A `Device` has the `id` (the public key,
   base64url, 43 characters) and the `fingerprint` of `contracts/envelope.md` section 2, and signs
   envelopes and rendezvous answers. `boot` loads it and drops it; the connection code will load it
   again.
@@ -152,9 +154,10 @@ are hidden; both choices are on the settings page at every width.
   to every object, which is dropped (so a golden file with a field the schema lacks fails the exact
   comparison), and removes every field in turn. Fields that appear in no example are not
   covered by those variants.
-- `src/lib/vectors.test.ts` holds the client to `internal/proto/testdata/crypto.json`. Where
-  WebCrypto signs deterministically, as Node does, it also compares signature bytes; elsewhere
-  (Safari) it checks that the new signature verifies. The vectors, and every other identity test,
+- `src/lib/vectors.test.ts` holds the client to every part of
+  `internal/proto/testdata/crypto.json` (`planning/contracts/vectors.md`). It never compares
+  signature bytes, since Safari's signatures are random: it verifies the vectors' signatures and
+  the ones the client makes itself. The vectors, and every other identity test,
   have run in Node only; IndexedDB has run as `fake-indexeddb` only. Running them in the three
   browsers is task F-01c.
 - Importing `decode` and `Frame` adds about 7.6 KiB to the bundle, 2.6 KiB gzipped (measured
