@@ -3,7 +3,9 @@
 The one table of how a task row changes. `contracts/commands.md` names the
 commands; this file says when each is allowed and what it does to a task.
 Field shapes are in `contracts/rows.md` section 4. Rules: R-22 to R-24,
-R-60, R-63, R-72, R-90.
+R-60, R-63, R-72, R-90. In code the table is `Step` in
+`internal/home/machine.go`: one task row and one event in, the row and what
+the home does beside writing it out.
 
 ## 1. The fields that change
 
@@ -29,9 +31,14 @@ R-60, R-63, R-72, R-90.
 - **Refusal.** A command that arrives when its row does not allow it is
   answered `conflict` and changes nothing; it is answered `paused` instead
   when the row would allow it for an `active` task and the task is
-  `paused` (rows 7, 10, 12, 16, 17).
+  `paused` (rows 7, 10, 12, 16, 17). The sender is checked first: a command
+  from a sender its row never names is answered `forbidden`, and so is one
+  that the task, as it is, allows from another sender only (the secretary's
+  resume or reassignment of a `failed` task, its cancel at step `merge`, a
+  host's resume of a task it did not pre-empt).
 - **Roles.** Assignee and reviewer are working AIs of the group, never the
-  secretary, and never the same AI.
+  secretary, and never the same AI. A command that would make them the same
+  AI is answered `conflict`.
 - **Work items go to active tasks only.** The work items are `assign`,
   `checks`, `reviewed`, `review`, `resume` and `merge`. A queued, paused or
   failed task gets none. It gets the work item for its current step when it
@@ -50,14 +57,16 @@ R-60, R-63, R-72, R-90.
   pointless (another assignee, another reviewer, another commit, a cancelled
   task), the home deletes that item in the same transaction.
 - **"Wait cleared" means recomputed.** The wait becomes the task's oldest
-  pending approval card, else its pending decision card, else `null`. So a
-  card that is still open is never forgotten by a pause and a resume. A
+  pending approval card, else its oldest pending decision card, else `null`.
+  So a card that is still open is never forgotten by a pause and a resume. A
   card sets or clears the wait only when the wait is `null` or already a
   card wait (`approval`, `decision`): a `reviewer` or `conflict` wait stays
   until the row that ends it (5, 6, 11). This happens only for an `active`
   task: deciding a card of a `paused` task changes the card and leaves the
   paused wait as it is; the card waits are recomputed when the task becomes
-  active.
+  active, by whichever row (8, 11, 13, 13b, 22). The `since` of a card wait
+  is the card's `ts`; the `since` of any other wait is the time of the row
+  that set it, a restored `kept` wait included.
 - **Every pause keeps the wait it replaced.** Rows 12, 16 and 21 write
   into the paused wait (`manual`, `preempted`, `rounds`) one field, `kept`:
   the kind of the wait it replaced, when that was `reviewer` or `conflict`
@@ -86,10 +95,10 @@ is a person with role `owner` or `admin`. Items are inbox items
 | 5 | `task submitted`, by host | `active` or `paused`; step `local_check`, `cloud_check` or `review`; `checks.local.ok` and `checks.local.commit` = the submitted `commit` | `commit` set; a queued `review` item for the old commit is retired; a `reviewer` or `conflict` wait is cleared, or dropped from `kept`. With a remote: step `cloud_check`. Without: as row 6, passed | without a remote: as row 6, passed | without a remote: as row 6, passed |
 | 6 | `task cloud`, by host | `active` or `paused`, `cloud_check`, same `commit` | `checks.cloud` recorded. Passed: step `review`; without a reviewer, wait `reviewer`. Not passed: step `local_check`, a `checks` message, and row 14 if the limit is reached | passed: `review` [reviewer], or `notice` [SEC] if none. Not passed, below the limit: `checks` [assignee] | passed: `failures` = 0. Not passed: `failures` + 1 |
 | 7 | `post` kind `review`, by the reviewer | `active`, `review`, wait not `reviewer`; `body.commit` = the task's `commit` | passed: step `merge`. Not passed, `review.failed` ≤ `limits.review_rounds`: step `local_check`. Not passed, above it: row 14 | passed: `merge` [the host], naming the commit and the pull request. Not passed, within the limit: `reviewed` [assignee] | `review.round` + 1; not passed: `review.failed` + 1 |
-| 8 | `task merged`, by host | `active`, `merge`, same `commit` | `merged`, wait `null`; pending cards of the task become `expired`; a `system` message `task_merged`; every queued task whose dependencies are now all merged becomes `active`/`branch`/`null` | `assign` [assignee] per task made active, with the cause of row 1; `notice` [SEC] | — |
+| 8 | `task merged`, by host | `active`, `merge`, same `commit` | `merged`, wait `null`; pending cards of the task become `expired`; a `system` message `task_merged`; every queued task whose dependencies are now all merged becomes `active` at step `branch`, its wait recomputed (section 2) | `assign` [assignee] per task made active, with the cause of row 1; `notice` [SEC] | — |
 | 9 | `task conflict`, by host | `active`, `merge`, same `commit` | step `local_check`, wait `conflict`; a `checks` message with `stage: merge` | `notice` [SEC] | not counted |
 | 10 | `task fail` (reason `crash` or `timeout`), by host | `active`, not at step `merge` | unchanged, or row 14 if the limit is reached | below the limit: `notice` [SEC] with the detail | `failures` + 1 |
-| 11 | `task assign`, by SEC or an admin; from `failed`, by an admin only | not final; not at step `merge` | fields set. Assignee changed: every pending approval card of the task becomes `reassigned`; the old assignee's queued items for the task are retired. Reviewer changed: the old reviewer's queued `review` item is retired. From `failed`: `active`, whichever field changed. Then, if the task is `active`: wait `conflict` cleared; at step `review`, wait `reviewer` cleared when the task now has a reviewer. If it is `paused`, the same applies to `kept` | if `active`: `assign` [assignee] with the latest `checks` or `review` message, when the assignee changed or the wait was `conflict`; `review` [reviewer], when the reviewer changed at step `review` | from `failed`: `failures` = 0, `review.failed` = 0 |
+| 11 | `task assign`, by SEC or an admin; from `failed`, by an admin only | not final; not at step `merge` | fields set. Assignee changed: every pending approval card of the task becomes `reassigned`, and an `approval` wait is cleared; the old assignee's queued items for the task are retired. Reviewer changed: the old reviewer's queued `review` item is retired. From `failed`: `active`, whichever field changed. Then, if the task is `active`: wait `conflict` cleared; at step `review`, wait `reviewer` cleared when the task now has a reviewer. If it is `paused`, the same applies to `kept` | if `active`: `assign` [assignee] with the latest `checks` or `review` message, when the assignee changed, the wait was `conflict` or the task was `failed`; `review` [reviewer], when the reviewer changed at step `review`; from `failed` at step `review`, what section 2 says about activation | from `failed`: `failures` = 0, `review.failed` = 0 |
 | 12 | `task pause`, by SEC or an admin | `active`, not at step `merge` | `paused`, wait `manual`, with `kept` (section 2) | — | — |
 | 13 | `task resume`, by SEC or an admin; from `failed` or from wait `rounds`, by an admin only | `paused`, or `failed` | `active`, with the wait that `kept` names if there is one, else wait cleared; from wait `rounds`: `thread.rounds` = 0 | `resume` [assignee]; at step `review`, what section 2 says about activation | from `failed`: `failures` = 0, `review.failed` = 0 |
 | 13b | `task resume`, by host | `paused` with wait `preempted` | `active`, with the wait that `kept` names if there is one, else wait cleared | — (the host continues the session itself); at step `review`, what section 2 says about activation | — |
