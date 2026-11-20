@@ -185,6 +185,7 @@ button. "Use here" requests the same lock with `steal: true`. When the former
 holder's `request()` promise rejects with `AbortError`, it stops reconnects
 and probes, closes its signalling and peer connections, and shows the notice.
 It requests the lock again only on "Use here".
+
 Web Locks is within the browser baseline (`risks.md` Q-3): it is in Chrome
 from 69, Firefox from 96 and Safari from 15.4. Frontend task F-03
 implements this rule (`steps/step-1-frontend.md`).
