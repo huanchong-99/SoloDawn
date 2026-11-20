@@ -33,7 +33,7 @@ func storeSteps(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		if err := readWireExample("row-msg", &card); err != nil {
+		if err := readWireExample("row-msg-decision-decided", &card); err != nil {
 			return err
 		}
 		decision, card.State = card.State, &proto.CardState{Status: "pending"}

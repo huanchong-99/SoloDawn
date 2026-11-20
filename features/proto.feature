@@ -10,3 +10,8 @@ Feature: Protocol wire compatibility
     Then it sees task 12 at step "review"
     And the decision created at position 790 is now "decided" at sequence 814
     And the note at sequence 815 is a deletion marker
+
+  Scenario: An approval keeps its original request after a person approves it
+    When a client reads the pending approval and its approved update
+    Then both show the same signed request for "pnpm exec playwright install chromium"
+    And the update carries the approver's signed "approve" action for that card

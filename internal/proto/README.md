@@ -7,7 +7,13 @@ peers, apply rows or execute commands. The source of truth is
 
 An envelope's `p` is a **string**: its original UTF-8 bytes are signed. A batch
 can mix row types, so its elements stay as JSON until the consumer reads `r`
-(and `gone` for a deletion). Message bodies similarly depend on `kind`.
+(and `gone` for a deletion). Message bodies depend on `kind`. For a known
+shape, e.g. an answered call, use `MessageRow[CallBody, CallAnsweredState]`.
+The body is fixed at creation; only the card state changes.
+
+Sender tests can pass their encoded JSON to `UnexpectedNulls`, with the JSON
+Pointers allowed to be null for that shape (e.g. `/thread`, `/re`, and
+`/state` for text messages). It reports every other null, including in lists.
 
 The examples in [testdata](testdata/) are shared with the web client.
 `go test ./internal/proto` checks encoding and decoding against them.

@@ -46,12 +46,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: neither frame has a Go type or a wire example yet, and the mock answers from wire examples only (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:94-96`, `web/src/lib/proto.ts:372-377`). Both are frozen by backend task B-10 (`planning/steps/step-1-backend.md`; PR #58, `contracts/conventions.md` section 5), not by a slice of B-01.
 - Status: open. `host.info` was left out by the coordinator's decision of 2026-11-20, until it has an example; the `groups` push was found in the review of PR #61 and not changed there.
 
-### 2026-11-20 · deviation · Web note rows refuse `pos` until the Go type has it
-
-- Symptom: the settled row contract (PR #58) gives note rows a `pos`; `decode` refuses a note row that carries one.
-- Cause: `NoteRow` mirrors the merged Go `NoteRow` and `internal/proto/testdata/row-note.json`, which have no `pos` (`web/src/lib/proto.ts:261-270`).
-- Status: open. Changes with the backend change that adds the field to the Go type and the example.
-
 ### 2026-11-20 · limitation · An empty `to` in a signed payload is read as no `to`
 
 - Symptom: an envelope whose payload carries `"to":""` passes the `not_for_me` check on every receiver, although `contracts/envelope.md` section 3 says a `to` that is present must equal the receiver's device id.
@@ -71,6 +65,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, for the planning lead: whether a device id must not be a small-order point, so that both implementations refuse it. Such a key is trusted only after a valid device adds it or a secret holder pairs it, so nobody can use it against a device that is not theirs.
 
 ## Resolved
+
+### 2026-11-20 · deviation · Web note rows refuse `pos` until the Go type has it
+
+- Symptom: the settled row contract (PR #58) gives note rows a `pos`; `decode` refuses a note row that carries one.
+- Cause: `NoteRow` mirrors the merged Go `NoteRow` and `internal/proto/testdata/row-note.json`, which have no `pos` (`web/src/lib/proto.ts:261-270`).
+- Status: resolved in B-01 slice (d). Both wire types require the creation position and the shared note example includes it.
 
 ### 2026-11-20 · limitation · Web client does not start when the browser blocks site storage
 

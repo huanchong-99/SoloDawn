@@ -2,7 +2,6 @@ package proto
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 )
 
@@ -52,18 +51,8 @@ func TestGroupGoldens(t *testing.T) {
 	}
 	golden(t, "row-task-waiting", waiting)
 
-	msgID := id("decision")
-	body := fmt.Sprintf(`{"task":%q,"question":"Where should the path appear?","context":"Only space for one label.","options":[{"id":"A","label":"Header","effect":"Always visible."}],"recommended":"A","to":[%q]}`, task, user)
-	post := fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"as":%q,"kind":"decision","thread":%q,"main":true,"text":"Choose a location.","mentions":[],"re":null,"body":%s}`, msgID, ts-500, group, ai, task, body)
-	act := fmt.Sprintf(`{"t":"act","n":%q,"ts":%d,"g":%q,"msg":%q,"action":"choose","arg":"A","text":"Header works."}`, id("act"), ts, group, msgID)
-	msg := MsgRow{
-		RowHeader: RowHeader{"msg", msgID, 814}, Pos: 790, Group: group, Thread: &task, Main: true, By: ai,
-		Kind: "decision", Timestamp: ts - 500, Text: "Choose a location.", Mentions: []string{}, Body: json.RawMessage(body),
-		State: &CardState{Status: "decided", By: human, At: ts, Choice: "A", Text: "Header works.", Act: new(signed(browser, act))},
-		Env:   new(signed(node, post)),
-	}
-	golden(t, "row-msg", msg)
-	note := NoteRow{RowHeader{"note", id("note"), 640}, group, nil, "Path events include the connection id.", human, ts - 4000}
+	msg := decidedExample(t)
+	note := NoteRow{RowHeader{"note", id("note"), 640}, 640, group, nil, "Path events include the connection id.", human, ts - 4000}
 	golden(t, "row-note", note)
 	gone := GoneRow{RowHeader{"note", note.ID, 815}, true}
 	golden(t, "row-gone", gone)
@@ -79,9 +68,10 @@ func TestGroupGoldens(t *testing.T) {
 	golden(t, "fetch-kind", FetchKind{page, "note"})
 	golden(t, "fetched", Fetched{"fetched", Success{3, true}, []json.RawMessage{wireJSON(t, msg)}, false})
 
-	golden(t, "cmd", Cmd{Request{"cmd", 4}, signed(browser, act)})
+	act := msg.State.Act
+	golden(t, "cmd", Cmd{Request{"cmd", 4}, act})
 	var header PayloadHeader
-	if err := json.Unmarshal([]byte(act), &header); err != nil {
+	if err := json.Unmarshal([]byte(act.Payload), &header); err != nil {
 		t.Fatal(err)
 	}
 	if want := (PayloadHeader{Type: "act", Nonce: id("act"), Timestamp: ts, Group: group}); header != want {
