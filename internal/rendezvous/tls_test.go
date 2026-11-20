@@ -4,11 +4,15 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/pem"
 	"errors"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 	"testing/synctest"
@@ -41,13 +45,23 @@ func closedAfter(c net.Conn) <-chan time.Duration {
 	return done
 }
 
-// HTTPS on the shared port waits 10 seconds for a request's headers and closes
-// a keep-alive connection idle for 120 seconds. An upgraded WebSocket is cut
-// by neither.
-func TestHTTPSTimeouts(t *testing.T) {
+// HTTPS on the shared port and plain HTTP with --listen alone wait 10 seconds
+// for a request's headers and close a keep-alive connection idle for 120
+// seconds. An upgraded WebSocket is cut by neither.
+func TestHTTPTimeouts(t *testing.T) {
+	web := fstest.MapFS{"index.html": {Data: []byte("x")}}
+	for name, serve := range map[string]func(net.Listener){
+		"shared TLS port": func(l net.Listener) { httpServer(Handler(web)).Serve(l) },
+		"plain HTTP":      func(l net.Listener) { Options{}.serve(web, l) },
+	} {
+		t.Run(name, func(t *testing.T) { testHTTPTimeouts(t, serve) })
+	}
+}
+
+func testHTTPTimeouts(t *testing.T, serve func(net.Listener)) {
 	synctest.Test(t, func(t *testing.T) {
 		e := newEndpoint(&net.TCPAddr{})
-		go httpsServer(Handler(fstest.MapFS{"index.html": {Data: []byte("x")}})).Serve(e)
+		go serve(e)
 		dial := func() net.Conn {
 			a, b := net.Pipe()
 			go e.deliver(a)
@@ -152,5 +166,60 @@ func TestTURNByALPN(t *testing.T) {
 		if err := <-done; !errors.Is(err, net.ErrClosed) {
 			t.Fatal(err)
 		}
+	}
+}
+
+// --acme-directory and --acme-ca choose the ACME server of the automatic
+// certificates and the roots its HTTPS is checked against.
+func TestACMEServer(t *testing.T) {
+	requests := make(chan string, 4)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Method + " " + r.URL.Path
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	for _, name := range []string{"HOME", "XDG_CACHE_HOME", "LocalAppData"} {
+		t.Setenv(name, dir) // the certificate cache
+	}
+	write := func(name string, data []byte) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	ca := write("ca.pem", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
+	o := Options{Domain: "rv.example", TurnDomain: "turn.rv.example", ACMEDirectory: srv.URL + "/dir"}
+	hello := &tls.ClientHelloInfo{ServerName: "rv.example"}
+	for _, trusted := range []bool{false, true} {
+		if trusted {
+			o.ACMECA = ca
+		}
+		cfg, err := o.certificates()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cfg.GetCertificate(hello); err == nil {
+			t.Fatal("certificate from a directory that has none")
+		}
+		select {
+		case got := <-requests:
+			if !trusted || got != "GET /dir" {
+				t.Fatalf("trusted %v: request %q", trusted, got)
+			}
+		default:
+			if trusted {
+				t.Fatal("the ACME server was not asked")
+			}
+		}
+	}
+	o.ACMECA = filepath.Join(dir, "missing.pem")
+	if _, err := o.certificates(); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	o.ACMECA = write("empty.pem", []byte("no certificate"))
+	if _, err := o.certificates(); err == nil || err.Error() != "--acme-ca holds no certificate" {
+		t.Fatal(err)
 	}
 }

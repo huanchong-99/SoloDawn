@@ -3,6 +3,8 @@ package rendezvous
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -35,10 +37,36 @@ func (o Options) certificates() (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	manager := &autocert.Manager{Prompt: autocert.AcceptTOS, Cache: autocert.DirCache(filepath.Join(dir, "solodawn", "certs")), HostPolicy: autocert.HostWhitelist(tlsName(o.Domain), tlsName(o.TurnDomain))}
+	client, err := o.acmeClient()
+	if err != nil {
+		return nil, err
+	}
+	manager := &autocert.Manager{Prompt: autocert.AcceptTOS, Client: client, Cache: autocert.DirCache(filepath.Join(dir, "solodawn", "certs")), HostPolicy: autocert.HostWhitelist(tlsName(o.Domain), tlsName(o.TurnDomain))}
 	config.GetCertificate = manager.GetCertificate
 	config.NextProtos = append(config.NextProtos, acme.ALPNProto)
 	return config, nil
+}
+
+// acmeClient talks to the ACME server of --acme-directory, Let's Encrypt when
+// it is empty. With --acme-ca, that server's HTTPS is checked against those
+// roots in place of the system's; nothing else trusts them.
+func (o Options) acmeClient() (*acme.Client, error) {
+	client := &acme.Client{DirectoryURL: o.ACMEDirectory}
+	if o.ACMECA == "" {
+		return client, nil
+	}
+	data, err := os.ReadFile(o.ACMECA)
+	if err != nil {
+		return nil, err
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(data) {
+		return nil, errors.New("--acme-ca holds no certificate")
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{RootCAs: roots}
+	client.HTTPClient = &http.Client{Transport: transport}
+	return client, nil
 }
 
 // Both protocols have one TCP listener; only completed TLS handshakes
@@ -93,10 +121,11 @@ func (c idleStream) Read(p []byte) (int, error) {
 	return c.Conn.Read(p)
 }
 
-// httpsServer serves HTTPS on the shared port: a request's headers within 10
-// seconds, a keep-alive connection closed after 2 minutes idle. An upgraded
-// WebSocket belongs to its handler and is cut by neither.
-func httpsServer(h http.Handler) *http.Server {
+// httpServer serves HTTPS on the shared port and plain HTTP with --listen
+// alone: a request's headers within 10 seconds, a keep-alive connection closed
+// after 2 minutes idle. An upgraded WebSocket belongs to its handler and is
+// cut by neither.
+func httpServer(h http.Handler) *http.Server {
 	return &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 }
 

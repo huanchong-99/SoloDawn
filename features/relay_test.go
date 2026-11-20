@@ -32,6 +32,7 @@ type relayWorld struct {
 	*rvWorld
 	roots  *x509.CertPool
 	tcp    string
+	domain string // the signalling name; TURN over TLS is "turn." + domain
 	peer   net.PacketConn
 	allocs []net.PacketConn
 }
@@ -90,7 +91,7 @@ func (w *relayWorld) startTLS(mib int) error {
 	if err != nil {
 		return err
 	}
-	w.tcp = l.Addr().String()
+	w.tcp, w.domain = l.Addr().String(), "localhost"
 	l.Close()
 	cmd := exec.Command(w.bin, "rendezvous", "--listen", w.tcp, "--domain", "localhost", "--turn-domain", "TURN.localhost.", "--cert", filepath.Join(dir, "cert"), "--key", filepath.Join(dir, "key"), "--relay-quota-mb", strconv.Itoa(mib), "--udp-port", "0")
 	if err := cmd.Start(); err != nil {
@@ -114,8 +115,9 @@ func (w *relayWorld) allocateBoth() error {
 	if err != nil {
 		return err
 	}
-	frame := regexp.MustCompile(`^\{"t":"ready","ice":\[\{"urls":\["stun:localhost:(\d+)"\]\},` +
-		`\{"urls":\["turn:localhost:(\d+)\?transport=udp","turns:turn\.localhost` + regexp.QuoteMeta(w.tcp[strings.LastIndex(w.tcp, ":"):]) + `\?transport=tcp"\],` +
+	name := regexp.QuoteMeta(w.domain)
+	frame := regexp.MustCompile(`^\{"t":"ready","ice":\[\{"urls":\["stun:` + name + `:(\d+)"\]\},` +
+		`\{"urls":\["turn:` + name + `:(\d+)\?transport=udp","turns:turn\.` + name + regexp.QuoteMeta(w.tcp[strings.LastIndex(w.tcp, ":"):]) + `\?transport=tcp"\],` +
 		`"username":"(\d+):` + regexp.QuoteMeta(exampleKey("browser").ID()) + `","credential":"[A-Za-z0-9+/]{27}="\}\],"ttl":3600\}$`)
 	m := frame.FindStringSubmatch(string(b))
 	if m == nil || m[1] != m[2] {
@@ -128,7 +130,7 @@ func (w *relayWorld) allocateBoth() error {
 	if err := proto.Decode(b, &ready); err != nil {
 		return err
 	}
-	cred, addr := ready.ICE[1], "localhost:"+m[1]
+	cred, addr := ready.ICE[1], net.JoinHostPort(w.domain, m[1])
 	if w.peer, err = net.ListenPacket("udp4", "127.0.0.1:0"); err != nil {
 		return err
 	}
@@ -140,7 +142,7 @@ func (w *relayWorld) allocateBoth() error {
 	if err := w.allocate(udp, addr, cred); err != nil {
 		return err
 	}
-	secure, err := tls.Dial("tcp", w.tcp, &tls.Config{ServerName: "turn.localhost", RootCAs: w.roots})
+	secure, err := tls.Dial("tcp", w.tcp, &tls.Config{ServerName: "turn." + w.domain, RootCAs: w.roots})
 	if err != nil {
 		return err
 	}
