@@ -76,8 +76,8 @@ describe('shown', () => {
 describe('room', () => {
   it('is 32 lower-case hex digits that differ by secret', async () => {
     const a = await room(crypto, '7K2M9QXD4F8TWB3N');
-    expect(a).toMatch(/^[0-9a-f]{32}$/);
-    expect(await room(crypto, '7K2M9QXD4F8TWB3P')).not.toBe(a);
+    expect(a).toBe('23b3731de722f5b7425a41416cf5d30b');
+    expect(await room(crypto, '7K2M9QXD4F8TWB3P')).toBe('b751999c0446840796b335d1f5835428');
   });
 });
 
@@ -99,8 +99,12 @@ describe('mac', () => {
     const name = (text: string) => ({ role: 'a', k, kind: 'browser', name: text });
     expect(await mac(crypto, secret, name('café\n\ud800 🙂'))).toBe(odd);
     expect(await mac(crypto, secret, name('café\n\ufffd 🙂'))).toBe(odd);
-    expect(await mac(crypto, secret, name('cafe\u0301\n\ufffd 🙂'))).not.toBe(odd);
-    expect(await mac(crypto, secret, name(' café\n\ufffd 🙂'))).not.toBe(odd);
+    expect(await mac(crypto, secret, name('cafe\u0301\n\ufffd 🙂'))).toBe(
+      'A-hsx5rlAzaG6pwn36xs7LGt3rhIqnX23SQB70y0CBE',
+    );
+    expect(await mac(crypto, secret, name(' café\n\ufffd 🙂'))).toBe(
+      'H6Db1XrdFER5XLRDgtO_-frer4C34ryPO7OWhhv1LoM',
+    );
   });
 
   it('differs when a part moves into the next', async () => {
@@ -112,7 +116,12 @@ describe('mac', () => {
         { ...sent, name: '' },
       ].map((m) => mac(crypto, secret, m)),
     );
-    expect(new Set(macs).size).toBe(4);
+    expect(macs).toStrictEqual([
+      'iWG_BRkXCtR8OKQJz6EGeQxUUffZlDp8IOm-XRifvqw',
+      '-zwt2LQ0ZUS8mlhaVTblf32_Mm0hg1Qt3qlHomwE1e4',
+      'b1-rsjp92pNada8eUSSzIsXxJkTaX0Xz_zjd-lS0_L4',
+      'DeqxvaMS8ErxxqSwxdRf_Q29crpSwI0yoPzJ2G1RFmo',
+    ]);
   });
 });
 

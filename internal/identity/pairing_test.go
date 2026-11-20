@@ -118,8 +118,12 @@ func TestRoomAndMAC(t *testing.T) {
 			t.Errorf("mac of %+v: %q, want %q", m, got, want)
 		}
 	}
-	if other := Secret("7K2M9QXD4F8TWB3M"); other.Room() == room || pairOf(other, "a", rfcDevice, "node", "workstation").MAC == macA {
-		t.Error("another secret gives the same room or mac")
+	other := Secret("7K2M9QXD4F8TWB3M")
+	if got := other.Room(); got != "0f4f88cc3f19976deecf13f14accd6a9" {
+		t.Errorf("room for the second secret: %q", got)
+	}
+	if got := pairOf(other, "a", rfcDevice, "node", "workstation").MAC; got != "LmipQTW7zfj5yC4U4DrOfzQhnJ4_OmbI8nK9u7NjIes" {
+		t.Errorf("mac for the second secret: %q", got)
 	}
 }
 
@@ -127,22 +131,18 @@ func TestRoomAndMAC(t *testing.T) {
 // another: the three before name hold no line break.
 func TestMACCoversRoleDeviceKindAndName(t *testing.T) {
 	s := Secret(canonical)
-	seen := map[string]string{}
-	for what, m := range map[string]proto.Pair{
-		"the message":                   pairOf(s, "a", rfcDevice, "node", "workstation"),
-		"another role":                  pairOf(s, "b", rfcDevice, "node", "workstation"),
-		"another device":                pairOf(s, "a", testKey("node").ID(), "node", "workstation"),
-		"another kind":                  pairOf(s, "a", rfcDevice, "browser", "workstation"),
-		"another name":                  pairOf(s, "a", rfcDevice, "node", "workstatiom"),
-		"no name":                       pairOf(s, "a", rfcDevice, "node", ""),
-		"a name that begins on a break": pairOf(s, "a", rfcDevice, "node", "\nworkstation"),
-		"the kind moved into the name":  pairOf(s, "a", rfcDevice, "", "node\nworkstation"),
-		"the name without a separator":  pairOf(s, "a", rfcDevice, "nodeworkstation", ""),
+	for _, c := range []struct{ device, kind, name, want string }{
+		{node.id(), "node", "workstation", "wCzQ-sDqagt-Eafi91RHzBOweAxtxpkYIs7ZnE1Cl-M"},
+		{rfcDevice, "browser", "workstation", "PP1xbPe_yYph-g2y8j-87QrZVvUr7GYky1xCzgVjRPQ"},
+		{rfcDevice, "node", "workstatiom", "b9cO-OyDMSeiUG8m893sER3tllYmJ27z81PAbgawRC0"},
+		{rfcDevice, "node", "", "DeqxvaMS8ErxxqSwxdRf_Q29crpSwI0yoPzJ2G1RFmo"},
+		{rfcDevice, "node", "\nworkstation", "-g2M_cP32VKZvHWruxZUSIrp8MbvO9i8toA6RwCKqnE"},
+		{rfcDevice, "", "node\nworkstation", "-zwt2LQ0ZUS8mlhaVTblf32_Mm0hg1Qt3qlHomwE1e4"},
+		{rfcDevice, "nodeworkstation", "", "b1-rsjp92pNada8eUSSzIsXxJkTaX0Xz_zjd-lS0_L4"},
 	} {
-		if other, taken := seen[m.MAC]; taken {
-			t.Errorf("%s and %s have one mac", what, other)
+		if got := s.MAC(proto.Pair{Role: "a", Key: c.device, Kind: c.kind, Name: c.name}); got != c.want {
+			t.Errorf("mac of %q %q %q: %q, want %q", c.device, c.kind, c.name, got, c.want)
 		}
-		seen[m.MAC] = what
 	}
 }
 
@@ -151,7 +151,7 @@ func TestMACCoversRoleDeviceKindAndName(t *testing.T) {
 func TestMACIsOverTheNameAsItGoesOnTheWire(t *testing.T) {
 	s := Secret(canonical)
 	sent := pairOf(s, "a", rfcDevice, "node", "caf\xe9 \xff\xfe")
-	if want := pairOf(s, "a", rfcDevice, "node", "caf\ufffd \ufffd\ufffd").MAC; sent.MAC != want {
+	if want := "F2WdtY7ibJyBGup8ldYAQ6C6HrbIk_WuqJWxk5sZLVo"; sent.MAC != want {
 		t.Errorf("mac %q, want that of the name with U+FFFD for each byte, %q", sent.MAC, want)
 	}
 	wire, err := json.Marshal(sent)
