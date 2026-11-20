@@ -167,6 +167,9 @@ Rules:
   the service restarts: the quota limits a resource, it is not a budget.
   On a node and with `--no-relay`, `quota` answers
   `{"t":"quota","used":0,"limit":0}`.
+- The relay refuses peer addresses that are private, carrier-grade NAT
+  (100.64.0.0/10) or otherwise not global unicast. It allows loopback peers
+  only when it binds to loopback itself.
 - The relay sees DTLS ciphertext only.
 - Clients treat the relay as the lowest-priority path and leave it as soon as
   a direct path works (`flows/connect.md`).

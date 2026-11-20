@@ -51,18 +51,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: only those two fields have the type (`internal/proto/envelope.go:12-23`, `web/src/lib/proto.ts:17-22`). The contracts type `n` and `g` as ids in a field table; for the other fields `contracts/rows.md` says "random ids unless stated" without saying per field which values stand beside the id (the `by` of a message row may be `"system"`, a device row's `id` is `<user id>:<ver>`).
 - Status: open. A field gets the type (`proto.ID` in Go, `Id` in `proto.ts`) in the task that first reads it from the wire.
 
-### 2026-11-20 · limitation · A message cut between fragments is forwarded as if it were complete
+### 2026-11-20 · limitation · A message cut short by a closing transport is forwarded as if it were complete
 
-- Symptom: when a client sends a WebSocket message in several fragments and its transport closes between two of them, the rendezvous reads the fragments received so far as one complete message. If they happen to form a valid frame, it is handled like any other: a `to` is forwarded as `from`. `planning/contracts/rendezvous.md` section 2 says that a frame the server cannot read closes its sender.
-- Cause: `github.com/coder/websocket` v1.8.15, `read.go:447-449`: `msgReader.Read` takes any `io.EOF` for the end of the message, and the header of the next fragment, read by `readFrameHeader` (`frame.go:52-58`), fails with a plain `io.EOF` when the transport has closed. `Conn.Read` then returns the bytes so far without an error, to `internal/rendezvous/server.go:128`.
+- Symptom: when a client's transport closes in the middle of a WebSocket message, the rendezvous can read the bytes received so far as one complete message. This happens between two fragments of a fragmented message, and also inside one unfragmented frame when the transport closes at the boundary of a read. If those bytes happen to form a valid frame, it is handled like any other: a `to` is forwarded as `from`. `planning/contracts/rendezvous.md` section 2 says that a frame the server cannot read closes its sender.
+- Cause: `github.com/coder/websocket` v1.8.15 takes a plain `io.EOF` for the end of the message (`read.go:447-449`, `msgReader.Read`). Between fragments, the header of the next fragment fails with `io.EOF` when the transport has closed (`readFrameHeader`, `frame.go:52-58`). Inside one frame, `Conn.Read` collects the payload with `io.ReadAll`, and when no byte arrives for its next read, `io.ReadFull` returns `io.EOF`, not `io.ErrUnexpectedEOF` (`readFramePayload`, `read.go:282`). `Conn.Read` then returns the bytes so far without an error, to `internal/rendezvous/server.go:135`.
 - Why it is harmless: what is forwarded is a complete, valid frame that the same authenticated sender could have sent on purpose; the sender's connection is already gone; and the receiver checks the signed envelope itself (`planning/contracts/envelope.md` section 3).
-- Status: open, accepted by the coordinator on 2026-11-20 with no code change. Revisit if the library changes, or if the server ever acts on a frame beyond forwarding it.
+- Status: open, accepted by the coordinator on 2026-11-20 with no code change; the in-frame case was added after the rendezvous audit of the same day. Revisit if the library changes, or if the server ever acts on a frame beyond forwarding it.
 
 ### 2026-11-20 · limitation · A frame dropped for a slow receiver can leave it with stale state
 
 - Symptom: when a receiver's queue of 128 frames is full, the rendezvous drops the next frame for it and closes neither connection (`planning/contracts/rendezvous.md` section 2). A dropped `from` or `room` is covered by its sender's offer timeout and back-off. A frame the server itself generates has no sender to send it again: after a dropped `presence` a watcher shows the wrong online state until that device's next change or the next `watch`; after a dropped `joined` a pairing member waits until it joins again; a dropped `offline`, `ice` or `quota` leaves that request unanswered.
 - Cause: `client.send` drops a frame when the queue is full (`internal/rendezvous/server.go:113-116`, queue size at `:70`).
 - Status: open. Coalescing the server's own frames is not built, by the coordinator's decision of 2026-11-20.
+
+### 2026-11-20 · limitation · The rendezvous challenge is not bound to a server
+
+- Symptom: a malicious rendezvous, or any node that serves `/rv`, can hand a device that connects to it the nonce of another server's `challenge`, and answer that server with the device's signature. It is then signed in there as the device: the device's own connection there is replaced and closed, and the attacker receives the frames sent to the device, which shows who signals it and when, and can watch other devices under its id.
+- Cause: the answer signs `"solodawn/rv/1\n"` and the nonce only, nothing that names the server (`planning/contracts/rendezvous.md` section 2.1; `internal/identity/key.go:75-82`, checked at `internal/rendezvous/server.go:156-165`).
+- Status: open design issue, owner the coordinator, to be designed after the quota reset. The challenge format is unchanged until then.
 
 ## Resolved
 
