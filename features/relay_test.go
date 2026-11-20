@@ -51,8 +51,8 @@ func relaySteps(sc *godog.ScenarioContext) {
 		return w.startTLS(mib)
 	})
 	sc.Step(`^the browser signs the challenge and allocates a UDP and a TLS relay$`, w.allocateBoth)
-	sc.Step(`^each allocation forwards (\d+) KiB to a peer and (\d+) KiB back$`, w.transfer)
-	sc.Step(`^neither open allocation forwards another byte in either direction$`, w.cutOff)
+	sc.Step(`^each allocation sends (\d+) packets of (\d+) bytes to a peer and receives as many back$`, w.transfer)
+	sc.Step(`^neither open allocation forwards another packet in either direction, not even an empty one$`, w.cutOff)
 }
 
 func localCert(dir string) (*x509.CertPool, error) {
@@ -118,7 +118,7 @@ func (w *relayWorld) allocateBoth() error {
 	name := regexp.QuoteMeta(w.domain)
 	frame := regexp.MustCompile(`^\{"t":"ready","ice":\[\{"urls":\["stun:` + name + `:(\d+)"\]\},` +
 		`\{"urls":\["turn:` + name + `:(\d+)\?transport=udp","turns:turn\.` + name + regexp.QuoteMeta(w.tcp[strings.LastIndex(w.tcp, ":"):]) + `\?transport=tcp"\],` +
-		`"username":"(\d+):` + regexp.QuoteMeta(exampleKey("browser").ID()) + `","credential":"[A-Za-z0-9+/]{27}="\}\],"ttl":3600\}$`)
+		`"username":"(\d+):[A-Za-z0-9_-]{22}","credential":"[A-Za-z0-9+/]{27}="\}\],"ttl":3600\}$`)
 	m := frame.FindStringSubmatch(string(b))
 	if m == nil || m[1] != m[2] {
 		return fmt.Errorf("ready frame %s", b)
@@ -194,15 +194,15 @@ func relayPacket(src, dst net.PacketConn, b []byte, discard bool) error {
 	return nil
 }
 
-func (w *relayWorld) transfer(out, in int) error {
+// transfer sends packets of size bytes from each allocation to the peer and
+// as many back. The quota charges each packet its size and 40 bytes.
+func (w *relayWorld) transfer(packets, size int) error {
 	for i, a := range w.allocs {
-		for j := range out {
-			if err := relayPacket(a, w.peer, bytes.Repeat([]byte{byte(i + j)}, 1024), false); err != nil {
+		for j := range packets {
+			if err := relayPacket(a, w.peer, bytes.Repeat([]byte{byte(i + j)}, size), false); err != nil {
 				return err
 			}
-		}
-		for j := range in {
-			if err := relayPacket(w.peer, a, bytes.Repeat([]byte{byte(i + j + 1)}, 1024), false); err != nil {
+			if err := relayPacket(w.peer, a, bytes.Repeat([]byte{byte(i + j + 1)}, size), false); err != nil {
 				return err
 			}
 		}
@@ -212,11 +212,13 @@ func (w *relayWorld) transfer(out, in int) error {
 
 func (w *relayWorld) cutOff() error {
 	for _, a := range w.allocs {
-		if err := relayPacket(a, w.peer, []byte("!"), true); err != nil {
-			return err
-		}
-		if err := relayPacket(w.peer, a, []byte("?"), true); err != nil {
-			return err
+		for _, b := range [][]byte{[]byte("!"), nil} {
+			if err := relayPacket(a, w.peer, b, true); err != nil {
+				return err
+			}
+			if err := relayPacket(w.peer, a, b, true); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

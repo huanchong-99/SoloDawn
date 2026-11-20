@@ -245,7 +245,7 @@ func (w *acmeWorld) relayData() error {
 	if err := w.allocateBoth(); err != nil {
 		return err
 	}
-	return w.transfer(4, 4)
+	return w.transfer(4, 1024)
 }
 
 // twoThirds waits until a third of the lifetime of every first certificate is

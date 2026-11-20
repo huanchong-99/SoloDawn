@@ -1,7 +1,6 @@
 package rendezvous
 
 import (
-	"net"
 	"sync"
 	"time"
 
@@ -32,27 +31,34 @@ func (l *ledger) quota(id string) proto.Quota {
 	return proto.Quota{Type: "quota", Used: l.today()[id], Limit: l.limit}
 }
 
+// packetCost is what a relayed packet costs beside its payload: about its IP
+// and UDP headers, so that tiny packets are not nearly free.
+const packetCost = 40
+
 func (l *ledger) admit(id string, n int) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	today := l.today()
-	if int64(n) > l.limit-today[id] {
-		return false
-	}
-	today[id] += int64(n)
-	return true
+	_, ok := l.reserve(id, n)
+	return ok
 }
 
-// A UDP write either sends one whole datagram or fails. Only a successful
-// send counts. No blocking client TCP/TLS I/O runs under the ledger lock.
-func (l *ledger) write(id string, conn net.PacketConn, b []byte, dst net.Addr) (int, error) {
+// reserve charges a packet of n bytes to a device for today. It refuses a
+// packet that does not fit, an empty one included once the quota is spent.
+func (l *ledger) reserve(id string, n int) (time.Time, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	today := l.today()
-	if int64(len(b)) > l.limit-today[id] {
-		return len(b), nil
+	today, cost := l.today(), int64(n)+packetCost
+	if cost > l.limit-today[id] {
+		return time.Time{}, false
 	}
-	n, err := conn.WriteTo(b, dst)
-	today[id] += int64(n)
-	return n, err
+	today[id] += cost
+	return l.day, true
+}
+
+// refund gives back the charge of a packet that was not sent, unless a new
+// day has started since.
+func (l *ledger) refund(id string, n int, day time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if day.Equal(l.day) {
+		l.used[id] -= int64(n) + packetCost
+	}
 }
