@@ -127,8 +127,10 @@ func (c *client) authenticate() bool {
 	var b [16]byte
 	rand.Read(b[:])
 	nonce := base64.RawURLEncoding.EncodeToString(b[:])
+	c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	c.send(proto.Challenge{Type: "challenge", Nonce: nonce})
 	m, kind := c.read()
+	c.conn.SetReadDeadline(time.Time{})
 	c.id = m.text("k")
 	return kind == "auth" && identity.VerifyChallenge(c.id, nonce, m.text("s"))
 }

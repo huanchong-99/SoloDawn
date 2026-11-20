@@ -130,6 +130,21 @@ func TestHandshakeRefusals(t *testing.T) {
 	closed(t, c)
 }
 
+func TestChallengeDeadline(t *testing.T) {
+	t.Parallel()
+	url := fixture(t)
+	active := login(t, url, key(1))
+	idle, _ := dial(t, url)
+	// Give the server time to close the unauthenticated connection itself.
+	until := time.Now().Add(15 * time.Second)
+	idle.SetReadDeadline(until)
+	active.SetReadDeadline(until)
+	closed(t, idle)
+	// The first device authenticated before that deadline and remains usable.
+	send(t, active, proto.RVFrame{Type: "ice"})
+	expect(t, active, config("ice"))
+}
+
 func TestRoutePresenceAndReplacement(t *testing.T) {
 	url := fixture(t)
 	a, b := key(1), key(2)
