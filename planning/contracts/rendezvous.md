@@ -38,8 +38,9 @@ rest. The server closes a connection that sends a larger frame, more than 120
 frames in 10 seconds, a frame it cannot read, an unknown `t`, a `k` in `to` or
 `watch` that is no device id (`contracts/envelope.md` section 2), a `watch` of
 more than 64 keys, a `join` of a 17th room, or a `to` whose `from` would exceed
-16 KiB (the target gets none). A receiver too slow to take a frame loses it; no
-connection is closed, and the sender's offer timeout and back-off cover it.
+16 KiB (the target gets none). A frame for a receiver whose queue is full, or
+holds 16 frames of the same sender, is dropped for it; no connection is closed,
+and the sender's offer timeout and back-off cover the loss.
 
 ### 2.1 Handshake
 
@@ -49,12 +50,11 @@ client -> {"t":"auth","k":"<device id>","s":"<signature>"}
 server -> {"t":"ready","ice":[ … ],"ttl":3600}
 ```
 
-- `s` = Ed25519 signature over `"solodawn/rv/1\n"` followed by the nonce as it
-  stands in the `challenge` frame (its base64url text, not the bytes it
-  encodes). `k` and `s` are held to check 1 of `contracts/envelope.md` section
-  3, with this prefix in place of the envelope's. A connection not
-  authenticated 10 seconds after its `challenge` is closed; a new connection
-  for a device id replaces the previous one.
+- `s` = Ed25519 signature over `"solodawn/rv/1\n"` and the nonce's base64url
+  text as in the `challenge` frame, held to check 1 of `contracts/envelope.md`
+  section 3 with this prefix. A connection not authenticated within 10 seconds
+  of its `challenge` is closed; a new connection for a device id replaces the
+  previous one.
 - `ice` is a list in the shape of `RTCIceServer`; a node's own handler answers
   `ready` with `"ice":[]`. `username` and `credential` are present on TURN
   entries (`turn:` and `turns:` URLs) and absent on STUN entries:
@@ -63,7 +63,7 @@ server -> {"t":"ready","ice":[ … ],"ttl":3600}
 [{"urls":["stun:rv.example:3478"]},
  {"urls":["turn:rv.example:3478?transport=udp",
           "turns:turn.rv.example:443?transport=tcp"],
-  "username":"1763603600:<device id>","credential":"<mac>"}]
+  "username":"1763603600:<alias>","credential":"<mac>"}]
 ```
 
 - Relay credentials expire after `ttl` seconds. `{"t":"ice"}` gets fresh ones:
@@ -99,56 +99,55 @@ message only after `joined`, and again after each later `joined`.
 a `from` whose `k` is not the `k` of its envelope. Rules:
 
 - **Who offers.** The client side: a browser to a node (pairing included), a
-  host to a home; a home never does, so there is no glare. Two nodes that are
-  each a client of the other each offer a connection under its own `conn`, and
-  neither replaces the other (section 5.1, points 3 and 5).
+  host to a home; never a home, so there is no glare. Two nodes that are each a
+  client of the other each offer under their own `conn`; neither replaces the
+  other (section 5.1, points 3 and 5).
 - **Fan-out.** The offerer sends its offer and candidates on every signalling
-  path it has for the target (section 4). The answerer answers each copy of the
-  offer on the path that delivered it, and sends each candidate on every path
-  it has for the offerer when the candidate is gathered. Copies are told apart
-  by authenticated sender and `conn`, never by arrival order.
-- **Trickle.** Each side sends its local description as soon as it is set and
-  trickles its candidates as `ice` payloads; nobody waits for gathering to end
-  (evidence 12). No end-of-candidates is sent or awaited. A receiver holds
-  candidates that arrive before their description by authenticated sender and
-  `conn`, at most 64 per connection attempt for at most 30 seconds, applies
-  each distinct candidate once and drops retired ones.
+  path it has for the target (section 4). The answerer answers each copy on the
+  path that delivered it, and sends each candidate on every path it has for the
+  offerer when gathered. Copies are told apart by sender and `conn`.
+- **Trickle.** Descriptions go out as soon as set and candidates trickle as
+  `ice` payloads; nobody waits for gathering (evidence 12), and no
+  end-of-candidates is sent or awaited. A receiver holds candidates that come
+  before their description, by sender and `conn`, at most 64 per attempt for at
+  most 30 seconds, applies each distinct one once and drops retired ones.
 - **Acceptance.** The receiver applies an offer only if the envelope passes
   `contracts/envelope.md` section 3; anything else gets no answer.
 - **Once only.** A receiver remembers each processed (signer, `conn`) until its
-  clock is strictly later than the offer's `ts + 120000` milliseconds
-  (`contracts/envelope.md` section 3, check 5), also after the connection
-  closes or the receiver restarts. A remembered offer starts and closes
-  nothing: for a live connection or pending probe a copy gets the same answer
-  on its own path once that exists; copies for retired ones are ignored.
-- **One inbound connection per device** (why: section 5.1, point 4). On first
-  applying a valid offer that is not a probe, the node closes that signer's
-  previous inbound connection and pending inbound probe before the new checks,
-  serialised per signer; the connection it offered to that device stays. A
-  probe waits beside the inbound connection until its first valid `hello`
-  promotes it (section 5.1, point 10).
+  clock is strictly past the offer's `ts + 120000` ms (`contracts/envelope.md`
+  section 3, check 5), across a close or a restart. A remembered offer starts
+  and closes nothing: a copy for a live connection or pending probe gets the
+  same answer on its own path once there is one; a retired one is ignored.
+- **One inbound connection per device** (section 5.1, point 4). First applying
+  a valid non-probe offer, the node closes that signer's previous inbound
+  connection and pending inbound probe before the new checks, serialised per
+  signer, but not the connection it offered to that device. A probe waits
+  beside it until its first valid `hello` (section 5.1, point 10).
 - The offer creates one data channel labelled `ctl`, ordered and reliable.
 
 ## 3. Relay
 
 - Standard TURN with time-limited credentials: `username` = expiry (Unix
-  seconds) + `:` + device id, which the library's issuer and verifier take
-  `[verified, S-6]`; `credential` = base64 HMAC-SHA1(secret, username), an
-  opaque password to the client, the secret random per process start.
-- The expiry is checked only when a credential opens an allocation. Later
-  requests on it (refresh, permission, channel binding) pass while the HMAC
-  matches: a relayed connection outlives its credential, bounded by the daily
-  quota.
+  seconds) + `:` + alias, the device's alias being the first 16 bytes of
+  HMAC-SHA256(secret, device id) in base64url; `credential` = base64
+  HMAC-SHA1(secret, username). The secret is random per process start; the
+  library's issuer and verifier take the alias `[verified, S-6]`. Expiry is
+  checked when a credential opens an allocation; later requests on it pass
+  while the HMAC matches.
+- **Limits**: 8 allocations per device and 32 per source IP, 486 beyond;
+  permissions for 64 peer IPs per client address, refreshes always allowed.
 - **Quota**: bytes relayed for a device, both directions, all its allocations,
-  per UTC day; default 50 MB, set by a flag. Counted where relayed data is read
-  and written, so an open allocation stops forwarding once it is used; refusing
-  new allocations is not enough. Counters live in memory and restart with the
-  service: the quota limits a resource, it is not a budget. A node and
-  `--no-relay` answer `{"t":"quota","used":0,"limit":0}`.
-- The relay refuses private, carrier-grade NAT (100.64.0.0/10) and other
-  non-global peer addresses, loopback ones unless it binds to loopback. It sees
-  DTLS ciphertext only. Clients use it as the lowest-priority path and leave it
-  as soon as a direct path works (`flows/connect.md`).
+  per UTC day; default 50 MB, set by a flag. A packet counts its payload and 40
+  bytes; once the quota is spent nothing passes, empty packets included. It is
+  counted where data is read and written, so an open allocation stops; refusing
+  new allocations is not enough. Counters live in memory, a limit, not a
+  budget. A node and `--no-relay` answer `{"t":"quota","used":0,"limit":0}`.
+- Refused peers: non-global, private, carrier-grade NAT, 0.0.0.0/8,
+  192.0.0.0/24, 198.18.0.0/15, 240.0.0.0/4, 64:ff9b::/96, 64:ff9b:1::/48,
+  ::/96, 2002::/16, 2001::/32, fec0::/10, documentation ranges; loopback only
+  when the relay binds to loopback (tests). A packet to the server's own
+  addresses goes only to its relay allocations. The relay sees DTLS
+  ciphertext; clients leave it once a direct path works (`flows/connect.md`).
 
 ## 4. Finding a peer without the server
 
@@ -283,17 +282,18 @@ what it would gain (`risks.md` Q-1).
 solodawn rendezvous --domain rv.example --turn-domain turn.rv.example
 ```
 
-- Obtains certificates automatically for both names, or takes `--cert` and
-  `--key`, one certificate that covers both names. `--acme-directory <url>`
-  (default Let's Encrypt) chooses the ACME server, such as a private step-ca;
-  `--acme-ca <pem file>` holds the roots that server's HTTPS is checked
-  against, in place of the system's and for nothing else.
+- Certificates for both names come from Let's Encrypt, or from the ACME server
+  of `--acme-directory <url>` (a private step-ca, say), whose HTTPS is checked
+  against the roots of `--acme-ca <pem file>` in place of the system's and for
+  nothing else; or `--cert` and `--key` give one certificate for both names.
 - `--relay-quota-mb 50`; `--no-relay`: TLS signalling and STUN only.
   `--listen <address>`: where signalling and the static files are served;
   alone, over plain HTTP without STUN or TURN, with the HTTP limits below.
-- Shared TLS port: the handshake within 10 seconds; ALPN `stun.turn` (RFC 7443)
-  to TURN, anything else by server name; HTTPS headers within 10 seconds, a
-  keep-alive connection closed after 120 idle seconds, never an upgraded
-  WebSocket; a TURN stream closed after 10 silent minutes.
+- Shared TLS port: at most 256 open connections per source IP; the handshake
+  within 10 seconds; ALPN `stun.turn` (RFC 7443) to TURN, anything else by
+  server name; HTTPS headers within 10 seconds, a keep-alive connection closed
+  after 120 idle seconds, never an upgraded WebSocket; a TURN stream closed
+  after 10 silent minutes, a write to it after 30 s unread. An accept error
+  pauses accepting, 5 ms doubling to 1 s.
 - No database, configuration file or accounts. Nodes and web clients reach it
   by a rendezvous URL; the web client it serves defaults to its own origin.
