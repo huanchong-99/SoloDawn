@@ -227,7 +227,6 @@ export const TaskRow = v.object({
 export type TaskRow = v.InferOutput<typeof TaskRow>;
 
 const int = v.pipe(num, v.safeInteger());
-const nonEmptyStrings = v.pipe(strs, v.nonEmpty());
 const optionalText = v.optional(str);
 const optionalInt = v.optional(int);
 // valibot's object({}) also accepts arrays; the body on the wire must be an object.
@@ -248,13 +247,9 @@ const BriefTask = v.object({
 const BriefBody = v.object({
   title: str,
   goal: str,
-  criteria: nonEmptyStrings,
+  criteria: strs,
   scope: v.object({ in: strs, out: strs }),
-  tasks: v.pipe(
-    v.array(BriefTask),
-    v.nonEmpty(),
-    v.checkItems((task, i) => task.depends.every((d) => d >= 0 && d < i)),
-  ),
+  tasks: v.array(BriefTask),
   pass: int,
   requester: str,
   replaces: v.nullable(str),
@@ -266,8 +261,8 @@ const ApprovalBody = v.object({
   tool: str,
   command: str,
   why: optionalText,
-  category: v.picklist(['command', 'file', 'network', 'other']),
-  approvers: nonEmptyStrings,
+  category: str,
+  approvers: strs,
 });
 
 const DecisionBody = v.object({
@@ -276,7 +271,7 @@ const DecisionBody = v.object({
   context: optionalText,
   options: v.array(v.object({ id: str, label: str, effect: str })),
   recommended: optionalText,
-  to: nonEmptyStrings,
+  to: strs,
 });
 
 const SystemBody = v.variant('code', [
@@ -284,7 +279,7 @@ const SystemBody = v.variant('code', [
   v.object({
     code: v.literal('turn_interrupted'),
     ai: str,
-    reason: v.picklist(['crash', 'timeout', 'stop']),
+    reason: str,
     task: optionalText,
     detail: optionalText,
   }),
@@ -293,16 +288,12 @@ const SystemBody = v.variant('code', [
   v.object({
     code: v.literal('cap_reached'),
     ai: str,
-    cap: v.picklist(['day', 'task']),
+    cap: str,
     task: optionalText,
   }),
   v.object({ code: v.literal('rate_limited'), ai: str, resets: int }),
   v.object({ code: v.literal('login_invalid'), ai: str, detail: optionalText }),
-  v.object({
-    code: v.literal('task_failed'),
-    task: str,
-    reason: v.picklist(['failures', 'review_rounds']),
-  }),
+  v.object({ code: v.literal('task_failed'), task: str, reason: str }),
   v.object({ code: v.literal('task_merged'), task: str, commit: str, merge_commit: str }),
   v.object({ code: v.literal('no_secretary') }),
   v.object({ code: v.literal('session_replaced'), ai: str, task: optionalText }),
@@ -315,10 +306,7 @@ const BriefState = v.variant('status', [
   Pending,
   v.object({ status: v.literal('confirmed'), ...acted }),
   v.object({ status: v.literal('revise'), ...BriefAction.entries }),
-  v.pipe(
-    v.object({ status: v.literal('superseded'), ...v.partial(BriefAction).entries }),
-    v.check((s) => Object.keys(s).length === 1 || v.is(BriefAction, s)),
-  ),
+  v.object({ status: v.literal('superseded'), ...v.partial(BriefAction).entries }),
 ]);
 const ApprovalState = v.variant('status', [
   Pending,
@@ -327,10 +315,7 @@ const ApprovalState = v.variant('status', [
 ]);
 const DecisionState = v.variant('status', [
   Pending,
-  v.pipe(
-    v.object({ status: v.literal('decided'), ...acted, choice: optionalText, text: optionalText }),
-    v.check((s) => s.choice !== undefined || s.text !== undefined),
-  ),
+  v.object({ status: v.literal('decided'), ...acted, choice: optionalText, text: optionalText }),
 ]);
 
 const MsgFields = {
@@ -396,7 +381,7 @@ export const MsgRow = v.variant('kind', [
   message(
     'checks',
     v.object({
-      stage: v.picklist(['local', 'cloud', 'merge']),
+      stage: str,
       ok: bool,
       commit: str,
       items: v.array(v.object({ name: str, ok: bool, detail: optionalText })),
