@@ -68,7 +68,7 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
 - **A1.12** A second tab of one browser, which has the same device key, shows
   that SoloDawn is open in another tab and offers no connection. After "Use
   here" in it, it connects, and the first tab closes its connections and shows
-  the notice (`flows/connect.md` F). Run with a valid device ID beginning with
+  the notice (`flows/connect.md` F). Run with a valid device id beginning with
   `-`. After takeover, a reconnect trigger in the first tab opens no
   signalling or peer connection.
 - **A1.13** Force a move through a probe. Close the old connection after C

@@ -109,12 +109,13 @@ Rules:
   the checks in `contracts/envelope.md` section 3. Anything else is dropped
   without an answer.
 - **Once only.** Remember each processed (signer, `conn`) until the receiver's
-  clock is strictly later than the offer's `ts + 120000` milliseconds,
-  including after the connection closes. An answering-node restart does not
-  shorten that interval. A remembered offer never starts checks or closes
-  anything. For a live connection or a pending probe, return the same answer
-  on the path that delivered the copy, once the answer is available. Ignore
-  copies for retired connections.
+  clock is strictly later than the offer's `ts + 120000` milliseconds
+  (`contracts/envelope.md` section 3, check 5), including after the connection
+  closes. An answering-node restart does not shorten that interval. A
+  remembered offer never starts checks or closes anything. For a live
+  connection or a pending probe, return the same answer on the path that
+  delivered the copy, once the answer is available. Ignore copies for retired
+  connections.
 - **One inbound connection per device.** A restart or an expired NAT
   mapping can make a new offerer appear at an endpoint still registered to
   an old connection (section 5.1, point 4). On first application of a
@@ -181,12 +182,13 @@ the review of section 5.1 measured. "Evidence n" is entry n of
   connections a node answers and for those it offers `[verified, S-1]`.
 - IPv4 and IPv6 host candidates, server-reflexive through STUN, relay
   through TURN.
-- The node requests mappings for the answering UDP socket, the TCP signalling
-  listener and the passive ICE-TCP listener. It publishes the external TCP
-  signalling port in the signalling URL and each mapped ICE endpoint only for
-  the socket it serves. Pion's address rewrite rule has no external-port
-  field. S-8 verifies publication and reachability when a router grants a
-  different port.
+- The node requests mappings (UPnP, NAT-PMP) for the answering UDP socket, the
+  TCP signalling listener and the passive ICE-TCP listener. It publishes the
+  external TCP signalling port in the signalling URL and each mapped ICE
+  endpoint only for the socket it serves (section 5.1, point 8). pion's
+  address rewrite rule has no external-port field. Router mapping is
+  `[unverified]`: S-8 verifies publication and reachability when a router
+  grants a different port.
 - Queries the `.local` names that browsers give instead of their host
   addresses (`SetICEMulticastDNSMode`, query only). A name that does not
   resolve is no obstacle: in S-1 the connections used the browser's

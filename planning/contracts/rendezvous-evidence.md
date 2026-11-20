@@ -89,7 +89,7 @@ Entries 1 to 10 belong to the points of section 5.1 with the same number.
     yet the probe missed its deadline of 15.042 seconds while the old
     relay still echoed. A later probe, translated to 40556, opened in 13
     ms, and both connections echoed.
-11. **Each side's own selected pair** (A.1). In both Pion runs with the
+11. **Each side's own selected pair** (A.1). In both pion runs with the
     answerer's relay candidate delayed, and echoes already crossing TURN, the
     offerer saw host and peer-reflexive, and the answerer relay and host. When
     the candidate was delivered the offerer reported host and relay at the
