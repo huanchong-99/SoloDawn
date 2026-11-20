@@ -205,7 +205,8 @@ func TestForgeGHCannotStart(t *testing.T) {
 	forgeOK(os.WriteFile(gh, []byte("invalid executable"), 0700))
 	pr, err := f.Submit(t.Context(), head, "base", "t", "s")
 	assertForge(t, pr, (*ForgePullRequest)(nil))
-	assertForge(t, err.Error(), "fork/exec "+gh+": exec format error")
+	// The system's own refusal: "exec format error" on Unix, another text on Windows.
+	assertForge(t, err.Error(), fmt.Sprint(exec.Command(gh).Run()))
 	calls()
 }
 

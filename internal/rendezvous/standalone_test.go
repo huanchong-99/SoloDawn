@@ -202,7 +202,8 @@ func TestServeFailures(t *testing.T) {
 	udp := udpLocal(t)
 	o.UDPPort = udp.LocalAddr().(*net.UDPAddr).Port
 	l := listenLocal(t)
-	if err := o.serveICE(web, l); !errors.Is(err, syscall.EADDRINUSE) {
+	// Windows answers WSAEADDRINUSE (10048), which syscall.EADDRINUSE does not match there.
+	if err := o.serveICE(web, l); !errors.Is(err, syscall.EADDRINUSE) && !errors.Is(err, syscall.Errno(10048)) {
 		t.Fatal(err)
 	}
 	o.Domain = "invalid domain%"
