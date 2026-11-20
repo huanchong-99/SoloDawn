@@ -162,6 +162,7 @@ func TestGenerator(t *testing.T) {
 		want       bool
 	}{
 		{"0.0.0.0", "8.8.8.8", true}, {"0.0.0.0", "10.0.0.1", false}, {"0.0.0.0", "127.0.0.1", false}, {"::", "fe80::1", false}, {"127.0.0.1", "127.0.0.1", true}, {"127.0.0.1", "8.8.8.8", false},
+		{"::", "100.64.0.0", false}, {"::", "100.127.255.255", false}, {"::", "100.128.0.0", true},
 	} {
 		g.bind = net.ParseIP(tc.bind)
 		if got := g.permitPeer(nil, net.ParseIP(tc.peer)); got != tc.want {

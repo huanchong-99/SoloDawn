@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -126,8 +127,11 @@ func (g *generator) permitPeer(_ net.Addr, peer net.IP) bool {
 	if g.bind.IsLoopback() {
 		return peer.IsLoopback()
 	}
-	return peer.IsGlobalUnicast() && !peer.IsPrivate()
+	ip, _ := netip.AddrFromSlice(peer)
+	return peer.IsGlobalUnicast() && !peer.IsPrivate() && !sharedIPv4.Contains(ip.Unmap())
 }
+
+var sharedIPv4 = netip.MustParsePrefix("100.64.0.0/10") // RFC 6598 carrier-grade NAT
 
 // The client transport can be TLS/TCP; ICE requests a UDP relay socket.
 // Do not offer an unmetered RFC 6062 TCP relay.
