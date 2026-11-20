@@ -113,6 +113,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the rule was settled after B-02c and F-01d (#136). The identity code has the two kinds only: `internal/identity/envelope.go:30` and `:37`, and `web/src/lib/identity.ts:185-195`. `planning/contracts/vectors.md` section 3 lets `received` be `command` or `signal` only, and `internal/proto/testdata/crypto.json` has no beacon case.
 - Status: open. PR-2 adds a beacon case to `received` in `vectors.md` and `crypto.json`, and a third envelope kind in both identity implementations, before it reads beacons.
 
+### 2026-11-20 · deviation · The web client does not handle `full` yet
+
+- Symptom: a browser that joins a pairing room that already has two members is answered `{"t":"full","room":"<room id>"}` (`planning/contracts/rendezvous.md` section 2.2), but the web client drops the frame without telling the page, so a third browser keeps waiting for `joined`.
+- Cause: `full` is not among the frames the web rendezvous client reads (`web/src/lib/rendezvous.ts:20`); a frame that does not parse is ignored (`web/src/lib/rendezvous.ts:55-56`). The server sends it from `internal/rendezvous/room.go` (`join`).
+- Status: open, owner W-2.
+
 ## Resolved
 
 ### 2026-11-20 · deviation · Two host check tests skipped themselves on Windows
