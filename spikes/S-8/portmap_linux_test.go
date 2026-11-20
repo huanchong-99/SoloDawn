@@ -97,9 +97,11 @@ func (r *router) mappings(t *testing.T) []string {
 	return list
 }
 
-func TestMiniupnpdVersion(t *testing.T) {
-	out, _ := exec.Command("miniupnpd", "--version").CombinedOutput() // exits 0 or 1 by version
-	t.Logf("miniupnpd --version:\n%s", out)
+func TestVersions(t *testing.T) {
+	for _, args := range [][]string{{"miniupnpd", "--version"}, {"nft", "--version"}, {"conntrack", "--version"}, {"uname", "-srm"}} {
+		out, err := exec.Command(args[0], args[1:]...).CombinedOutput() // miniupnpd may exit 1 here
+		t.Logf("%v (err %v):\n%s", args, err, out)
+	}
 }
 
 // Question 1 with go-nat as X-1 added it: discovery, external address,

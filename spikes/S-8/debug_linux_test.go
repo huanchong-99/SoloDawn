@@ -4,6 +4,7 @@ package s8
 
 import (
 	"os/exec"
+	"strconv"
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/features/netsim"
@@ -24,18 +25,17 @@ func dump(t *testing.T, n netsim.Network) {
 	}
 }
 
-// One run of the answerer-mapped matrix, a restricted-cone offerer and a
-// port-restricted answerer, took the relay. This repeats that pair with the
-// ICE trace and the gateways' state, with and without TURN.
+// The answerer-mapped matrix took the relay in some runs of one pair, a
+// restricted-cone offerer and a port-restricted answerer, all of them under
+// parallel load. This repeats that pair ten times in parallel with the ICE
+// trace and the gateways' state.
 func TestMappedRestrictedToPortRestricted(t *testing.T) {
-	for _, relay := range []bool{true, false} {
-		for i := range 3 {
-			name := map[bool]string{true: "relay", false: "no-relay"}[relay]
-			t.Run(name+"/"+string(rune('0'+i)), func(t *testing.T) {
-				o := punch(t, netsim.Restricted, netsim.PortRestricted, variant{relay: relay, mapAnswer: true, debug: true})
-				t.Logf("restricted -> port-restricted, answerer mapped, TURN %v: path %s at %d ms; offerer %s; answerer %s; %s%s",
-					relay, o.path(), o.ms, o.offer, o.answer, o.mapped, o.failure)
-			})
-		}
+	for i := range 10 {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			t.Parallel()
+			o := punch(t, netsim.Restricted, netsim.PortRestricted, variant{relay: true, mapAnswer: true, debug: true})
+			t.Logf("restricted -> port-restricted, answerer mapped: path %s at %d ms; offerer %s; answerer %s; %s%s",
+				o.path(), o.ms, o.offer, o.answer, o.mapped, o.failure)
+		})
 	}
 }

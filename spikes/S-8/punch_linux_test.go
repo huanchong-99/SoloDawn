@@ -20,13 +20,14 @@ var nats = []netsim.NAT{netsim.FullCone, netsim.Restricted, netsim.PortRestricte
 // behind the left gateway and the answerer behind the right.
 type variant struct {
 	name                string
-	relay               bool // TURN offered to both ends (a node's ordinary connection)
-	mapOffer, mapAnswer bool // that end maps its host candidate's port by NAT-PMP
-	occupied            bool // another mapping holds 47800/UDP on the right gateway
-	tcp, mapTCP         bool // both ends listen for ICE-TCP; the answerer maps that port
-	blockUDP            bool // NET-1 drops UDP between the two gateways
-	runs                int  // repetitions of each pair (1 if zero)
-	debug               bool // ICE trace and the gateways' conntrack tables
+	relay               bool   // TURN offered to both ends (a node's ordinary connection)
+	mapOffer, mapAnswer bool   // that end maps its host candidate's port by NAT-PMP
+	occupied            bool   // another mapping holds 47800/UDP on the right gateway
+	tcp, mapTCP         bool   // both ends listen for ICE-TCP; the answerer maps that port
+	tcpType             string // how the mapped ICE-TCP endpoint is published: srflx or host
+	blockUDP            bool   // NET-1 drops UDP between the two gateways
+	runs                int    // repetitions of each pair (1 if zero)
+	debug               bool   // ICE trace and the gateways' conntrack tables
 }
 
 // outcome is what one run saw within the deadline.
@@ -54,7 +55,7 @@ const deadline = 15 * time.Second
 // punch opens one connection in a fresh network and reports what happened.
 func punch(t *testing.T, left, right netsim.NAT, v variant) outcome {
 	n := netsim.Start(t, left, right)
-	env := []string{"S8_TURN=" + flag(v.relay), "S8_TCP=" + flag(v.tcp), "S8_MAP_TCP=" + on(v.mapTCP)}
+	env := []string{"S8_TURN=" + flag(v.relay), "S8_TCP=" + flag(v.tcp), "S8_MAP_TCP=" + on(v.mapTCP), "S8_TCP_TYP=" + v.tcpType}
 	if v.blockUDP {
 		n.SetBlocked(t, true, 0)
 	}
@@ -168,7 +169,10 @@ func cell(runs []outcome) string {
 			parts = append(parts, fmt.Sprintf("%s %d/%d", p, count[p], len(runs)))
 		}
 	}
-	if lo >= 0 {
+	switch {
+	case lo == hi:
+		parts = append(parts, fmt.Sprintf("%d ms", lo))
+	case lo >= 0:
 		parts = append(parts, fmt.Sprintf("%d-%d ms", lo, hi))
 	}
 	return strings.Join(parts, ", ")
