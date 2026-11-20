@@ -156,14 +156,26 @@ func TestStandaloneTLS(t *testing.T) {
 
 func TestServeFailures(t *testing.T) {
 	web := fstest.MapFS{}
-	if err := (Options{NoRelay: true}).Serve(web); err == nil || err.Error() != "--domain is required for TLS and STUN" {
+	// Misconfigured services must return, not enter a serving loop.
+	start := func(o Options) error {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { done <- o.Serve(web) }()
+		select {
+		case err := <-done:
+			return err
+		case <-time.After(time.Second):
+			return errors.New("invalid service did not stop")
+		}
+	}
+	if err := start(Options{NoRelay: true}); err == nil || err.Error() != "--domain is required for TLS and STUN" {
 		t.Fatal(err)
 	}
-	if err := (Options{Domain: "rv", NoRelay: true, Listen: "bad"}).Serve(web); err == nil || err.Error() != "listen tcp: address bad: missing port in address" {
+	if err := start(Options{Domain: "rv", NoRelay: true, Listen: "bad"}); err == nil || err.Error() != "listen tcp: address bad: missing port in address" {
 		t.Fatal(err)
 	}
 	o := Options{Domain: "localhost", TurnDomain: "turn.localhost", Cert: "bad", Key: "bad", Listen: "127.0.0.1:0"}
-	if err := o.Serve(web); !errors.Is(err, os.ErrNotExist) {
+	if err := start(o); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal(err)
 	}
 	o.Cert, o.Key = "", ""
