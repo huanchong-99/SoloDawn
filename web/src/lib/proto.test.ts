@@ -64,13 +64,6 @@ function objects(value: unknown, path: string[] = []): string[][] {
   return Array.isArray(value) ? inner : [path, ...inner];
 }
 
-function schemaObjects(name: string) {
-  // Room data belongs to the pairing peers and can contain arbitrary keys.
-  return objects(JSON.parse(goldens[name])).filter(
-    (path) => name !== 'rv-room' || path[0] !== 'data',
-  );
-}
-
 const at = (value: unknown, path: string[]) => path.reduce((o, k) => (o as Obj)[k], value) as Obj;
 const named = (path: string[]) => path.filter((k) => !/^\d+$/.test(k)).join('.');
 const accepts = (name: string, value: unknown) => v.safeParse(schemaOf[name], value).success;
@@ -92,7 +85,7 @@ describe('wire examples', () => {
   });
 
   it.each(examples)('%s drops an unknown field in any object', (name) => {
-    for (const path of schemaObjects(name)) {
+    for (const path of objects(JSON.parse(goldens[name]))) {
       const extra = variant(name, path, (o) => (o.extra = 1));
       const read = p.decode(schemaOf[name], JSON.stringify(extra));
       expect(read, `extra field at ${path.join('.')}`).toStrictEqual(JSON.parse(goldens[name]));
@@ -103,7 +96,7 @@ describe('wire examples', () => {
 
   it.each(examples)('%s is refused without a field that Go always writes', (name) => {
     // Rows inside rows and fetched are checked through their own examples.
-    const paths = schemaObjects(name).filter((path) => path[0] !== 'rows');
+    const paths = objects(JSON.parse(goldens[name])).filter((path) => path[0] !== 'rows');
     for (const path of paths) {
       for (const key of Object.keys(at(JSON.parse(goldens[name]), path))) {
         const field = named([...path, key]);
@@ -224,15 +217,6 @@ describe('message contracts', () => {
 });
 
 describe('rendezvous frames', () => {
-  it('preserves the entire room data object and refuses other JSON types', () => {
-    const room = JSON.parse(goldens['rv-room']);
-    room.data = JSON.parse('{"constructor":{"Unknown":null},"__proto__":["pair"]}');
-    expect(JSON.stringify(p.decode(p.RVRoom, JSON.stringify(room)))).toBe(JSON.stringify(room));
-    for (const data of [null, false, 2, 'pair', []]) {
-      expect(accepts('rv-room', { ...room, data })).toBe(false);
-    }
-  });
-
   it.each(['rv-join', 'rv-joined', 'rv-room'])('%s takes a 32-digit lowercase hex room', (name) => {
     const frame = JSON.parse(goldens[name]);
     const room = '0123456789abcdef'.repeat(2);

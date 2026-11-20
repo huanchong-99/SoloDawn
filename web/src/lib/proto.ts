@@ -106,13 +106,8 @@ export type RVJoin = v.InferOutput<typeof RVJoin>;
 export const RVJoined = v.object({ t: v.literal('joined'), room: roomId });
 export type RVJoined = v.InferOutput<typeof RVJoined>;
 
-export const RVRoom = v.object({
-  t: v.literal('room'),
-  room: roomId,
-  data: v.custom<Record<string, unknown>>(
-    (value) => value !== null && typeof value === 'object' && !Array.isArray(value),
-  ),
-});
+// What two devices send each other through a pairing room is their pair message (envelope.md 6).
+export const RVRoom = v.object({ t: v.literal('room'), room: roomId, data: Pair });
 export type RVRoom = v.InferOutput<typeof RVRoom>;
 
 // Session (datachannel.md section 3)
