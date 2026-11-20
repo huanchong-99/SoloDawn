@@ -55,7 +55,11 @@ func workspaceSteps(sc *godog.ScenarioContext, f fixtures) {
 	tree := func(n int) string { return filepath.Join(project, "wt", taskName(n)) }
 	review := func(n int) string { return filepath.Join(project, "review", strconv.Itoa(n)) }
 	sc.Step(`^a member joins a workspace group with a local repository$`, func() error {
-		root := f.t.TempDir()
+		// Git reports real paths; the temporary folder may be behind a symlink (macOS).
+		root, err := filepath.EvalSymlinks(f.t.TempDir())
+		if err != nil {
+			return err
+		}
 		project, source = filepath.Join(root, "projects", "group"), filepath.Join(root, "source")
 		if _, err := workspaceCommand(root, "init", "-b", "trunk", source); err != nil {
 			return err
@@ -63,12 +67,11 @@ func workspaceSteps(sc *godog.ScenarioContext, f fixtures) {
 		if _, err := workspaceCommand(source, "commit", "--allow-empty", "-m", "initial"); err != nil {
 			return err
 		}
-		var err error
-		repo, err = host.EnsureGroupWorkspace(project, source)
+		repo, err = host.EnsureGroupWorkspace(project, source, "trunk")
 		return err
 	})
 	sc.Step(`^another member joins the workspace group$`, func() error {
-		_, err := host.EnsureGroupWorkspace(project, source)
+		_, err := host.EnsureGroupWorkspace(project, source, "trunk")
 		return err
 	})
 	sc.Step(`^the group clone is the only registered worktree$`, func() error {
