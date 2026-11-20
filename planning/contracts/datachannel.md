@@ -238,7 +238,8 @@ handled by `internal/node`, AIs and sessions by `internal/host`
 ### `host.info` (request, then pushes)
 
 The response to `{"t":"host.info","id":5}`, and a push whenever one of its
-fields changes, carry the whole object:
+fields changes, carry the whole object. The push is the same object with `t`
+and without `re` and `ok` (`contracts/conventions.md` section 3):
 
 ```json
 {"t":"host.info","re":5,"ok":true,"device":"…","name":"workstation",
@@ -257,8 +258,13 @@ fields changes, carry the whole object:
   the node keeps them in its settings under `homes` (`contracts/storage.md`
   section 2), so they survive a restart.
 - `relay`: the `quota` answer of the rendezvous the node is connected to
-  (`contracts/rendezvous.md` section 2). `account` is `null` until the
+  (`contracts/rendezvous.md` section 2), without its `t`; `null` while the
+  node has no such answer. `account` is `null` until the
   owner has declared it. `agents` lists every supported CLI found here.
+- `caps`: the agent's caps as `settings.set` sets them (`contracts/commands.md`
+  section 2): `day` and `task` are optional, a cap that is not there is not
+  set, and `{}` is an agent with none. `max` may be a fraction (`usd`,
+  `window_pct`).
 - `update`: `null`, or `{"version":"v0.3.2","status":"pending"}` after an
   update check (`contracts/local.md` section 9): `pending` when that version
   is installed and waits for a restart, `mismatch` when its file failed the
@@ -269,10 +275,18 @@ fields changes, carry the whole object:
 
 ### `audit` (request)
 
-`{"t":"audit","id":6,"before":1763600000000,"limit":50}` is answered with
+`{"t":"audit","id":6,"before":413,"limit":50}` is answered with
 `{"re":6,"ok":true,"rows":[…]}`, each row shaped as
-`{"ts":1763599000000,"g":"Qm1…","ai":"claude","what":"approval","detail":"git push origin other-branch","by":"<device id>","result":"approved"}`.
-`g`, `ai`, `by` and `result` are optional.
+`{"id":412,"ts":1763599000000,"g":"Qm1…","ai":"claude","what":"approval","detail":"git push origin other-branch","by":"<device id>","result":"approved"}`.
+`g`, `ai`, `by` and `result` are optional. `ai` is the agent (`claude`), not a
+member id; `what` is one of the values of `contracts/storage.md` section 3.
+`id` is the row's number on this node (the `id` of the `audit` table,
+`contracts/storage.md` section 3), which grows with every row. `before` is
+the `id` of the oldest row the client already holds: the answer holds the
+rows whose `id` is lower, newest first, and `before: 0` asks for the newest.
+Ids are never reused, so no row is skipped or repeated between pages, as
+paging by time could do for rows with the same `ts`. `limit` is at most
+100. `rows` is `[]` when there is nothing.
 
 ### Terminal
 

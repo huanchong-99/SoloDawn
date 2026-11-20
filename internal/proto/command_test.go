@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -212,8 +213,15 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 			want = "item-" + fields["why"].(string)
 		case "jump", "note", "forget", "ack", "inbox":
 			want = kind
-		case "host.join", "host.leave":
-			want = "host-" + kind[len("host."):]
+		case "host.join", "host.leave", "host.offline", "host.online", "settings.set", "pair.browser", "agent.set", "perm.set",
+			"takeover.start", "takeover.end", "pty.resize":
+			want = strings.ReplaceAll(kind, ".", "-")
+		case "groups", "beacon":
+			want = kind
+		case "host.info", "audit": // a request, its answer, a push
+			if want = strings.ReplaceAll(kind, ".", "-") + "-"; strings.HasPrefix(name, want) {
+				continue
+			}
 		default:
 			continue
 		}

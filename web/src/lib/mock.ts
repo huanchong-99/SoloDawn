@@ -15,9 +15,12 @@ export const goldens: Record<string, string> = Object.fromEntries(
   Object.entries(files).map(([path, text]) => [path.split('/').pop()!.slice(0, -5), text]),
 );
 
-// crypto.json holds signature test vectors for identity.ts, and wire.json what the two readers of
-// the wire agree on, for proto.test.ts: neither is a message.
-export const examples = Object.keys(goldens).filter((name) => !['crypto', 'wire'].includes(name));
+// crypto.json holds signature test vectors for identity.ts, tools.json the MCP tool lists of each
+// kind of session, and wire.json what the two readers of the wire agree on, for proto.test.ts:
+// none is a message.
+export const examples = Object.keys(goldens).filter(
+  (name) => !['crypto', 'tools', 'wire'].includes(name),
+);
 
 /** The schema of each wire example, by file name. */
 export const schemaOf: Record<string, GenericSchema> = {
@@ -27,7 +30,11 @@ export const schemaOf: Record<string, GenericSchema> = {
   'act-confirm': p.Act,
   'act-deny': p.Act,
   'act-revise': p.Act,
+  'agent-set': p.AgentSet,
   answer: p.Answer,
+  'audit-answer': p.AuditAnswer,
+  'audit-request': p.Audit,
+  beacon: p.Beacon,
   cmd: p.Cmd,
   'cmd-error': p.ErrorResponse,
   'cmd-ok': p.CmdResult,
@@ -48,9 +55,15 @@ export const schemaOf: Record<string, GenericSchema> = {
   'group-pause': p.GroupCommand,
   'group-resume': p.GroupCommand,
   'group-set': p.GroupSet,
+  groups: p.Groups,
   hello: p.Hello,
+  'host-info-answer': p.HostInfo,
+  'host-info-push': p.HostInfoPush,
+  'host-info-request': p.HostInfoRequest,
   'host-join': p.HostJoin,
   'host-leave': p.HostLeave,
+  'host-offline': p.HostCommandOnly,
+  'host-online': p.HostCommandOnly,
   ice: p.ICECandidate,
   inbox: p.Inbox,
   'item-assign': p.Item,
@@ -77,6 +90,8 @@ export const schemaOf: Record<string, GenericSchema> = {
   note: p.Note,
   offer: p.Offer,
   pair: p.Pair,
+  'pair-browser': p.HostCommandOnly,
+  'perm-set': p.PermSet,
   'post-approval': p.Post,
   'post-brief': p.Post,
   'post-call': p.Post,
@@ -89,6 +104,7 @@ export const schemaOf: Record<string, GenericSchema> = {
   'post-review': p.Post,
   'post-summary': p.Post,
   'post-text': p.Post,
+  'pty-resize': p.PTYResize,
   'push-off': p.PushOff,
   'push-on': p.PushOn,
   'push-reminder': p.Reminder,
@@ -129,23 +145,26 @@ export const schemaOf: Record<string, GenericSchema> = {
   'row-task-paused': p.TaskRow,
   'row-task-waiting': p.TaskRow,
   rows: p.Rows,
-  'rv-challenge': p.RVChallenge,
   'rv-auth': p.RVAuth,
-  'rv-ready': p.RVReady,
-  'rv-ice-request': p.RVICERequest,
-  'rv-quota-request': p.RVQuotaRequest,
-  'rv-quota-answer': p.RVQuotaAnswer,
-  'rv-ice-answer': p.RVICEAnswer,
-  'rv-to': p.RVTo,
+  'rv-challenge': p.RVChallenge,
   'rv-from': p.RVFrom,
-  'rv-offline': p.RVOffline,
-  'rv-watch': p.RVWatch,
-  'rv-presence': p.RVPresence,
+  'rv-ice-answer': p.RVICEAnswer,
+  'rv-ice-request': p.RVICERequest,
   'rv-join': p.RVJoin,
   'rv-joined': p.RVJoined,
+  'rv-offline': p.RVOffline,
+  'rv-presence': p.RVPresence,
+  'rv-quota-answer': p.RVQuotaAnswer,
+  'rv-quota-request': p.RVQuotaRequest,
+  'rv-ready': p.RVReady,
   'rv-room': p.RVRoom,
+  'rv-to': p.RVTo,
+  'rv-watch': p.RVWatch,
+  'settings-set': p.SettingsSet,
   sync: p.Sync,
   synced: p.Synced,
+  'takeover-end': p.TakeoverEnd,
+  'takeover-start': p.TakeoverStart,
   'task-assign': p.TaskAssign,
   'task-branch': p.TaskBranch,
   'task-cancel': p.TaskCommand,
@@ -162,20 +181,38 @@ export const schemaOf: Record<string, GenericSchema> = {
   welcome: p.Welcome,
 };
 
-const answers = { hello: 'welcome', sync: 'synced', fetch: 'fetched', cmd: 'cmd-ok' } as const;
+/** The example that answers each request. */
+const answers = {
+  hello: 'welcome',
+  sync: 'synced',
+  fetch: 'fetched',
+  cmd: 'cmd-ok',
+  'host.info': 'host-info-answer',
+  audit: 'audit-answer',
+} as const satisfies Record<p.RequestType, string>;
 
-/** A connection to a node that knows the examples' one group. `sync` pushes `reset` and `rows`,
- *  then answers `synced`; every command is accepted. Frames pass through `decode` as real ones do. */
+/** Whether a command creates a group, after which a node pushes the list of groups again. */
+function createsGroup(env: p.Envelope) {
+  const { t, op } = JSON.parse(env.p) as { t?: unknown; op?: unknown };
+  return t === 'group' && op === 'create';
+}
+
+/** A connection to a node that knows the examples' one group and is the owner's: it answers
+ *  `host.info` and `audit`. `sync` pushes `reset` and `rows`, then answers `synced`; every command
+ *  is accepted, and a `group create` pushes `groups` before its answer. Frames are read as real
+ *  ones are: answers with `decodeAnswer`, pushes with `Frame`. */
 export function mockCtl(onpush: (push: p.Push) => void): p.Ctl {
   let id = 0;
   return {
-    async request(req: { t: keyof typeof answers }) {
+    async request(req: { t: keyof typeof answers; env?: p.Envelope }) {
       id += 1;
+      const push = (name: string) => onpush(p.decode(p.Frame, goldens[name]) as p.Push);
       if (req.t === 'sync') {
-        onpush(p.decode(p.Reset, goldens.reset));
-        onpush(p.decode(p.Rows, goldens.rows));
+        push('reset');
+        push('rows');
       }
-      return { ...p.decode(p.Frame, goldens[answers[req.t]]), re: id };
+      if (req.t === 'cmd' && createsGroup(req.env!)) push('groups');
+      return { ...p.decodeAnswer(req.t, goldens[answers[req.t]]), re: id };
     },
   } as p.Ctl;
 }
