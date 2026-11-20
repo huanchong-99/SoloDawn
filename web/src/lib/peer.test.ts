@@ -355,6 +355,24 @@ describe('signalling paths', () => {
   });
 });
 
+describe('a session that closes', () => {
+  it('closes a path that is signed in', () => {
+    start([rv, lan]);
+    clients[0].ready([turn]);
+    session.close();
+    expect(clients.map((client) => client.closed)).toStrictEqual([true, true]);
+  });
+
+  it('stops asking a path that is signed in for ICE servers', async () => {
+    start();
+    clients[0].ready([turn], 3600);
+    await wait(1_799_999);
+    session.close();
+    await wait(3_600_000);
+    expect(clients[0].count('ice')).toBe(0);
+  });
+});
+
 describe('an offer', () => {
   it('waits for a signalling path, and goes out at once when the node is reported present', async () => {
     start([rv, lan]);
@@ -695,6 +713,16 @@ describe('ctl', () => {
     expect(pc.ctl.sent).toHaveLength(1);
   });
 
+  it('lets go of its deadline when it closes before the answer comes', async () => {
+    const { peer } = await served();
+    const timers = vi.getTimerCount();
+    const conn = peer.dial(false);
+    await flush();
+    expect(vi.getTimerCount()).toBe(timers + 1);
+    conn.close();
+    expect(vi.getTimerCount()).toBe(timers);
+  });
+
   it('closes once, says how long ctl was open, and applies nothing afterwards', async () => {
     const { pc, conn } = await dialled();
     clients[0].hear(answer(conn.conn));
@@ -1032,6 +1060,17 @@ describe('a peer', () => {
     expect(pcs()).toHaveLength(2);
   });
 
+  it('closes while its reconnect waits for the back-off: nothing is offered then', async () => {
+    const { peer } = await attempting();
+    clients[0].hear({ t: 'offline', k: node });
+    await flush();
+    const offered = pcs().length;
+    peer.close();
+    await wait(120_000);
+    expect(pcs()).toHaveLength(offered);
+    expect(clients[0].signals('offer')).toHaveLength(offered);
+  });
+
   it('gives way to a second peer for the same node', async () => {
     const { peer, pc } = await served();
     const second = session.peer(node, hearing().listen);
@@ -1042,6 +1081,7 @@ describe('a peer', () => {
     const watches = clients[0].count('watch');
     peer.close();
     expect(clients[0].count('watch')).toBe(watches);
+    expect(pcs()[1].closes).toBe(0);
     clients[0].hear({ t: 'offline', k: node });
     await flush();
     clients[0].hear({ t: 'presence', k: node, on: true });

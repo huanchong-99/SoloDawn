@@ -183,6 +183,8 @@ interface Hub {
   signal(target: string, env: Envelope): string[];
   add(conn: Connection): void;
   drop(conn: Connection): void;
+  /** The connections of `peer` that are not gone. */
+  dialled(peer: Peer): Connection[];
   unlink(peer: Peer): void;
 }
 
@@ -191,6 +193,8 @@ interface Hub {
 export class Connection {
   /** The random id that tells this connection's signals from every other's. */
   readonly conn = newId();
+  /** The node it is offered to. */
+  readonly target: string;
   /** Resolves when ctl opens. */
   readonly opened: Promise<void>;
   /** Resolves when the connection is gone, with how long its ctl stayed open in ms. */
@@ -227,10 +231,12 @@ export class Connection {
 
   constructor(
     hub: Hub,
-    readonly target: string,
+    /** The peer that dialled it. */
+    readonly owner: Peer,
     probe: boolean,
   ) {
     this.#hub = hub;
+    this.target = owner.target;
     this.opened = this.#opening.promise;
     this.closed = this.#closing.promise;
     this.#pc = new RTCPeerConnection({ iceServers: hub.servers(probe) });
@@ -399,12 +405,13 @@ export class Connection {
    *  fails the request: nothing else will answer it. */
   #settle(re: number, data: string) {
     const waiting = this.#waiting.get(re);
-    if (!waiting) return;
-    this.#waiting.delete(re);
+    // Taking the entry out is what claims it: a second response with the same `re` finds none.
+    if (!this.#waiting.delete(re)) return;
+    const { t, resolve, reject } = waiting!;
     try {
-      waiting.resolve(decodeAnswer(waiting.t, data));
+      resolve(decodeAnswer(t, data));
     } catch {
-      waiting.reject(new Error('unreadable answer'));
+      reject(new Error('unreadable answer'));
     }
   }
 
@@ -444,8 +451,6 @@ export class Peer {
   #conn: Connection | undefined;
   #listener: Listener | undefined;
   #attempt: Connection | undefined;
-  /** Every connection this peer dialled that is not gone: those two and the probes. */
-  readonly #dialled = new Set<Connection>();
   #closed = false;
   /** The requests without a response, in the order they were first made. */
   readonly #asked = new Set<Ask>();
@@ -509,8 +514,7 @@ export class Peer {
    *  peer closes it when it closes itself. A closed peer offers nothing: it throws. */
   dial(probe: boolean) {
     if (this.#closed) throw new Error('peer closed');
-    const conn = new Connection(this.#hub, this.target, probe);
-    this.#dialled.add(conn);
+    const conn = new Connection(this.#hub, this, probe);
     conn.closed.then((open) => this.#ended(conn, open));
     return conn;
   }
@@ -576,7 +580,7 @@ export class Peer {
   #end(keep?: Connection) {
     if (this.#conn) this.#offline();
     this.#attempt = undefined;
-    for (const conn of this.#dialled) if (conn !== keep) conn.close();
+    for (const conn of this.#hub.dialled(this)) if (conn !== keep) conn.close();
   }
 
   #offline() {
@@ -591,7 +595,6 @@ export class Peer {
    *  an attempt whose hello the node refused for good: its listener hears why, and the peer
    *  stops. */
   #ended(conn: Connection, open: number) {
-    this.#dialled.delete(conn);
     if (conn === this.#conn) this.#offline();
     else if (conn !== this.#attempt) return;
     this.#attempt = undefined;
@@ -755,6 +758,10 @@ class Signalling implements Hub, Session {
 
   drop(conn: Connection) {
     this.#conns.delete(`${conn.target} ${conn.conn}`);
+  }
+
+  dialled(peer: Peer) {
+    return [...this.#conns.values()].filter((conn) => conn.owner === peer);
   }
 
   unlink(peer: Peer) {
