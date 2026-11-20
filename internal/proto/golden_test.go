@@ -123,7 +123,9 @@ func TestPairingAndSessionGoldens(t *testing.T) {
 	golden(t, "answer", Answer{signal("answer", user), sdp + "a=ice-ufrag:abc2\r\na=ice-pwd:abcdefghijklmnopqrstuv02\r\na=setup:active\r\n" +
 		"a=fingerprint:sha-256 AB:9F:14:A9:1B:0B:71:6F:BF:BE:34:DA:42:E0:68:EF:14:36:E4:A6:04:0C:15:22:31:E8:0A:E3:89:92:50:2A\r\n"})
 	golden(t, "ice", ICECandidate{signal("ice", host), "candidate:1 1 UDP 2130706431 192.0.2.1 47800 typ host", "0"})
-	golden(t, "pair", Pair{"pair", user, "browser", "phone browser", "a", "zBXTlY4O9eFeMUexu7JpBROUooUwjouJpxZt4h8eBI4"})
+	pair := Pair{"pair", user, "browser", "phone browser", "a", "zBXTlY4O9eFeMUexu7JpBROUooUwjouJpxZt4h8eBI4"}
+	golden(t, "pair", pair)
+	rendezvousGoldens(t, signed(browser, string(wireJSON(t, offer))), pair)
 
 	golden(t, "device-add", addNode)
 	golden(t, "device-revoke", DeviceEntry{PayloadHeader{Type: "device", Nonce: id("revoke"), Timestamp: ts + 1}, DeviceChange{User: user, Version: 3, Op: "revoke", Device: host}})

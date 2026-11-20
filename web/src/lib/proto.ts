@@ -63,6 +63,54 @@ export const DeviceEntry = v.object({
 });
 export type DeviceEntry = v.InferOutput<typeof DeviceEntry>;
 
+// WebSocket signalling (rendezvous.md section 2)
+
+const iceServer = v.object({ urls: strs, username: v.optional(str), credential: v.optional(str) });
+const iceConfig = { ice: v.array(iceServer), ttl: num };
+
+export const RVChallenge = v.object({ t: v.literal('challenge'), nonce: str });
+export type RVChallenge = v.InferOutput<typeof RVChallenge>;
+
+export const RVAuth = v.object({ t: v.literal('auth'), k: str, s: str });
+export type RVAuth = v.InferOutput<typeof RVAuth>;
+
+export const RVReady = v.object({ t: v.literal('ready'), ...iceConfig });
+export type RVReady = v.InferOutput<typeof RVReady>;
+
+export const RVICERequest = v.object({ t: v.literal('ice') });
+export type RVICERequest = v.InferOutput<typeof RVICERequest>;
+
+export const RVICEAnswer = v.object({ t: v.literal('ice'), ...iceConfig });
+export type RVICEAnswer = v.InferOutput<typeof RVICEAnswer>;
+
+export const RVTo = v.object({ t: v.literal('to'), k: str, env: Envelope });
+export type RVTo = v.InferOutput<typeof RVTo>;
+
+export const RVFrom = v.object({ t: v.literal('from'), k: str, env: Envelope });
+export type RVFrom = v.InferOutput<typeof RVFrom>;
+
+export const RVOffline = v.object({ t: v.literal('offline'), k: str });
+export type RVOffline = v.InferOutput<typeof RVOffline>;
+
+export const RVWatch = v.object({ t: v.literal('watch'), k: strs });
+export type RVWatch = v.InferOutput<typeof RVWatch>;
+
+export const RVPresence = v.object({ t: v.literal('presence'), k: str, on: bool });
+export type RVPresence = v.InferOutput<typeof RVPresence>;
+
+export const RVJoin = v.object({ t: v.literal('join'), room: str });
+export type RVJoin = v.InferOutput<typeof RVJoin>;
+
+export const RVJoined = v.object({ t: v.literal('joined'), room: str });
+export type RVJoined = v.InferOutput<typeof RVJoined>;
+
+export const RVRoom = v.object({
+  t: v.literal('room'),
+  room: str,
+  data: v.record(str, v.unknown()),
+});
+export type RVRoom = v.InferOutput<typeof RVRoom>;
+
 // Session (datachannel.md section 3)
 
 const Success = { re: num, ok: v.literal(true) };

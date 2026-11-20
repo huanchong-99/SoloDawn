@@ -6,6 +6,8 @@ import * as p from './proto';
 /** Fields of the examples that the contracts mark optional and Go tags omitempty: the only ones
  *  that may be left out. */
 const omitempty: Record<string, string[]> = {
+  'rv-ready': ['ice.username', 'ice.credential'],
+  'rv-ice-answer': ['ice.username', 'ice.credential'],
   answer: ['to'],
   ice: ['to'],
   offer: ['to'],
@@ -40,11 +42,11 @@ function usage() {
 
 type Obj = Record<string, unknown>;
 
-/** Paths to every object in an example, except message bodies, which are any JSON. */
+/** Paths to every object in an example, except opaque room data and message bodies. */
 function objects(value: unknown, path: string[] = []): string[][] {
   if (typeof value !== 'object' || value === null) return [];
   const inner = Object.entries(value)
-    .filter(([k]) => k !== 'body')
+    .filter(([k]) => k !== 'body' && k !== 'data')
     .flatMap(([k, x]) => objects(x, [...path, k]));
   return Array.isArray(value) ? inner : [path, ...inner];
 }
