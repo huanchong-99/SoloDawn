@@ -49,6 +49,7 @@ and a step 1 acceptance test shows each. A CLI that lacks one waits.
 | a documented structured mode in which one process takes turn after turn and reports the end of each | R-1, R-120, R-124 | A3.1 |
 | a session resumed by its id in that mode, with its history | R-121 | A3.4 |
 | an MCP client that takes, at each start, one stdio server with its arguments, and calls that server's tools without a request for each call | the session token names the caller; `post` is the only way an AI speaks (`contracts/mcp-tools.md`) | A3.1, A3.7 |
+| an approval channel that is not a terminal prompt: the CLI's own permission request reaches the node and waits for its answer (section 4, `approvals`) | R-42, R-43 | A4.1, A4.2 |
 | level 1: settings under which the session changes no file | every group session, review session and secretary is level 1 (`sessions.md`) | A4.4 |
 | repository configuration kept out unless the owner enabled it | R-45 | A3.8 |
 
@@ -80,7 +81,7 @@ node was built for. The table holds only what a switch of section 5 reads.
 | --- | --- | --- | --- |
 | `accounts` | list of `personal`, `team`, `api_key`; at least one | the terms allow that account type (section 2) | a type not listed cannot be declared for this CLI |
 | `levels` | list of `1`, `2`, `3`; always holds `1` | `2`: a sandbox of the CLI's own that lets it write inside the session's folder and stops writes outside it. `3`: a mode in which the CLI asks nothing | a level not listed is not offered. Without `2` and `3` the AI can be a secretary, a reviewer and answer questions, and cannot produce a submission (`contracts/drivers.md` section 2) |
-| `approvals` | `tool`, `conn` or `none` | an approval channel that is not a terminal prompt (R-43). `tool`: the CLI calls the node's MCP tool `approve`. `conn`: requests arrive on the driver's own connection | `none`: this AI produces no approval card. At level 2 what its sandbox stops stays stopped; the owner raises the level or takes over the terminal |
+| `approvals` | `tool` or `conn` | how the required approval channel (section 3, R-43) reaches the node. `tool`: the CLI calls the node's MCP tool `approve`. `conn`: requests arrive on the driver's own connection | never missing: a CLI without a channel is not built |
 | `takeover` | `new`, `resume` or `none` | an interactive command that resumes the same session in a terminal, with the level, the repository setting and the node's MCP server holding there as in structured mode. `new`: it can also start a session there with an id the node chose | `none`: no "open terminal" for this AI, and nothing to watch (step 2). `resume`: a working AI without an unfinished task gets its `assign` turn in structured mode first (`flows/takeover.md` A) |
 | `usage` | list of `tokens`, `usd`, `window_pct`; may be empty | the CLI reports that figure in structured mode | a cap in a unit not listed cannot be set. `turns` always can: the node counts them |
 
@@ -90,9 +91,6 @@ Rules for a declaration:
   not stand for level 2. Decided for Claude Code on native Windows, where
   the vendor provides no sandbox (`risks.md` Q-4): the node refuses level 2
   there and says why. WSL2 is a later option.
-- With `approvals` `none`, `levels` holds `2` only if the CLI can be
-  started so that an action its sandbox stops fails by itself: no prompt,
-  and no wait for one.
 - `takeover` is not `none` only if all of it holds. A terminal that drops
   the level or loads the repository's configuration is no takeover.
 - A value is declared from what was run with the real CLI. A capability
@@ -115,14 +113,10 @@ would be refused. The home knows nothing of it, and no row changes.
 | the level of a task session | the highest level in `levels` that is not above the level the other rules give: `contracts/commands.md` section 2, and from step 2 the cap of R-44 |
 | `settings.set` | a cap for this CLI whose `unit` is neither `turns` nor in `usage` is refused with `bad_request` |
 | the tool list of a session | `approve` is listed only to a structured session of a driver with `approvals` `tool` (`contracts/mcp-tools.md` section 3) |
-| the instructions of a task session | with `approvals` `none`, the sentence on asking through the CLI's own permission request is replaced by: "When the sandbox blocks something the task needs, say so with `post` and end your turn; do not work around it." |
 | `takeover.start` | refused with `conflict` when `takeover` is `none`, before the checks that answer `relay`, `busy` or `cli` |
 | `takeover.start` for a working AI without an unfinished task | `new`: the session starts in the terminal. `resume`: the structured `assign` turn comes first |
 
 - Each refusal names the field of the declaration in `msg`.
-- `approvals` `none` needs no refusal: no request ever reaches the node.
-  The owner reads what was stopped in the group, and raises the level with
-  `perm.set` or takes over, as the owner decides.
 - From step 2, a task that someone other than the owner caused runs at
   level 2 at most (R-44). On a CLI whose `levels` are `1` and `3` that is
   level 1: such a task can be read and reported on, and not submitted.
@@ -149,7 +143,7 @@ The name is not `caps`: that field holds the owner's usage caps.
 | --- | --- | --- |
 | `accounts` | always, never `[]` | the account types offered when an AI is registered |
 | `levels` | always, never `[]` | the levels offered where a level is chosen |
-| `approvals` | always | the sentence beside level 2 when it is `none`: nothing beyond the workspace can be approved for this AI |
+| `approvals` | always | nothing: every driver has a channel (section 3) |
 | `takeover` | always | "open terminal" is absent when it is `none` |
 | `usage` | always; `[]` when the CLI reports none | the cap units offered beside `turns` |
 
@@ -177,11 +171,13 @@ the test of the switch takes their place:
 | Declaration | Step 1 tests that do not run for this CLI |
 | --- | --- |
 | no level 2 | A4.1, A4.2, A4.3, A4.6, A4.10 |
-| level 2 with `approvals` `none` | A4.1, A4.2, A4.3, A4.6. A4.10 runs with the outcome of section 4: no card, the write fails within the turn, and no file exists |
 | no level 3 | A4.5 |
 | `takeover` `none` | A7.1 to A7.9 |
 | `takeover` `resume` | A7.7 runs with the structured `assign` turn first |
 
+- Containment at level 2 is tested on every driver that declares it,
+  through refusals: A4.2 and A4.10, where a refused request leaves no
+  effect on disk.
 - The switches of section 5 are tested once, with declarations made up in
   the test: no shipped CLI is needed to show a refusal. Those are the
   capability tests among A10.x of `steps/step-2-3-acceptance.md`.
@@ -224,9 +220,8 @@ is in that description. `[documented]` means read there and not run.
 1. Decided: P-5 freezes `driver` and U3-3 shows it (section 6).
 2. `[unverified]` Every capability of OpenCode and Qwen Code: T3-0 read
    them, and nothing was run.
-3. `[unverified]` That any CLI without an approval channel can be started
-   so that a stopped action fails by itself (section 4). If none can,
-   `approvals` `none` always comes with no level 2.
+3. Decided: every driver has an approval channel (section 3);
+   `approvals` `none` does not exist.
 4. `[unverified]` The values on Windows, for the step 1 drivers too
    (spike S-5).
 5. The capability tests are A10.1 to A10.4 of
@@ -234,8 +229,4 @@ is in that description. `[documented]` means read there and not run.
 6. The answers of `steps/parallel-plan-step-2-3.md` section 1 that this
    file rests on: D-16 only. The level cap of D-1 is used as R-44 states
    it.
-7. **Open: is an approval channel required?** Amp is deferred because it has
-   no approval channel, yet section 4 lets a driver declare `approvals`
-   `none`. Needs the coordinator's word. Recommended: move the channel to
-   the required list of section 3 and drop `none`, with its instruction
-   sentence (section 5), its A4.10 row (section 7) and point 3 above.
+7. Decided on 2026-11-20: the approval channel is required (point 3).
