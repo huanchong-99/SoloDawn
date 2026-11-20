@@ -47,15 +47,17 @@ that is waiting for them.
    no turn in the session of a `failed` task.
 4. If the target session does not exist yet, N creates it: prepares the
    folder (worktree for a task session, read-only checkout for a review
-   session, `flows/task.md`), and records a new session row with a fresh
-   session id.
+   session, `flows/task.md`), and records a new session row. The CLI's
+   session id is stored at its first start (`contracts/drivers.md`
+   section 1).
 5. If S is `dormant`, N wakes it:
    1. if the number of open sessions on this node, those in `takeover`
       included, equals `max_open`, N closes the open session that has been
       `waiting` longest. If every open session is `working` or in
       `takeover`, the item waits until one is free;
-   2. N starts the CLI in the session's folder with the session id and the
-      level of the session kind (`contracts/drivers.md`);
+   2. N starts the CLI in the session's folder with the session id, when
+      it has one, and the level of the session kind
+      (`contracts/drivers.md`);
    3. state becomes `working`; N reports `member status`.
 6. N takes **all** held items for S, in order. Each item that asks for work
    on a task is checked now against the task as N holds it after reading
