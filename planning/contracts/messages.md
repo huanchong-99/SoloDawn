@@ -95,7 +95,7 @@ card is drawn from the task row.
 | --- | --- |
 | `tool` | what the CLI names: Claude Code's tool (`Bash`, `Write`, …), or the type of Codex's item (`commandExecution`, `fileChange`) |
 | `command` | the request as the CLI presented it (table below), or its beginning: at most 3 KiB as JSON text in the payload, cut at a character |
-| `full` | optional: the size in bytes of the whole request, there when `command` holds only its beginning. The card then says that it shows a part, and how long the whole is |
+| `full` | optional: the size in bytes of the whole request, there when `command` holds only its beginning. The card then says that it shows a part, how long the whole is, and what `risks.md` K-21 recommends |
 | `why` | optional: the justification the CLI attached; at most 256 bytes as JSON text, cut like `command` |
 | `category` | `command`, `file`, `network`, `other`: the kind of request the CLI made, taken from the type of the request and never from the text of a command (C-10, `risks.md` Q-18). A display hint; it decides nothing |
 | `approvers` | user ids, at least one |
@@ -118,8 +118,8 @@ Signed: every field. Added by the home: nothing.
 A long request is shown in part and not refused: with these two limits the
 card fits the row of a card (`contracts/conventions.md` section 4).
 The owner's decision still covers the whole request, whose digest the host
-recorded (`flows/approval.md` step 5); the whole text stays on the host,
-and the owner reads it by opening the AI's terminal (`risks.md` K-21).
+recorded (`flows/approval.md` step 5). In the first version nobody can
+read the rest of it (`risks.md` K-21).
 
 ### 2.4 `decision`
 

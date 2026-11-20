@@ -46,7 +46,8 @@ which fields of the card is in `contracts/messages.md` 2.3.
    and the list of approvers. Audit row `requested`. A request too long
    for a card is not refused: the card carries its beginning and says how
    long the whole is (`contracts/messages.md` 2.3). The record, and so the
-   owner's decision, is about the whole request.
+   owner's decision, is about the whole request, of which N keeps the
+   digest and not the text (`risks.md` K-21).
 6. H stores the card with `state.status = pending`, sets the task's wait to
    `approval`, and pushes the rows. The card appears in the main line under
    the secretary's name and mentions the approvers; the thread shows the
@@ -100,7 +101,7 @@ or ends.
 ## F. What is recorded on the owner's node (R-139)
 
 One audit row per request and per decision: time, group, AI, tool, request
-text, who decided (device id), result.
+text as the card shows it, who decided (device id), result.
 
 ## G. Levels at a glance
 
