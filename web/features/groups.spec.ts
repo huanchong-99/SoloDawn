@@ -4,7 +4,8 @@ import { expect, vi } from 'vitest';
 import { homes, type Group } from '../src/lib/groups.svelte';
 import * as p from '../src/lib/proto';
 import { browser, example, owner, TestHome, user } from './home';
-import { all, choose, closePage, field, fill, go, one, openPage, texts } from './page';
+import CreateGroup from '../src/components/groups/CreateGroup.svelte';
+import { all, choose, closePage, field, fill, go, one, openPage, show, texts } from './page';
 
 const feature = await loadFeature('../features/web_groups.feature');
 
@@ -266,6 +267,36 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       expect(commands(laptop)).toEqual([]);
     });
   });
+
+  Scenario(
+    'A computer that connects while the dialog is open is the one chosen',
+    ({ Given, When, Then }) => {
+      Given('the dialog is open while no computer is connected', () => {
+        first.drop();
+        show(CreateGroup, { open: true });
+        expect(one<HTMLDialogElement>('dialog').open).toBe(true);
+        expect([...all<HTMLSelectElement>('dialog select')[1].options]).toEqual([]);
+      });
+      When('the computer connects and the person creates the group "Notes"', async () => {
+        await read();
+        const [name, repo, , member] = all<HTMLInputElement>('dialog input');
+        fill(name, 'Notes');
+        fill(repo, 'https://git.example/team/notes.git');
+        fill(member, 'Alex');
+        create();
+        await new Promise((later) => setTimeout(later, 5));
+        flushSync();
+      });
+      Then(
+        'the computer has made the group "Notes", and the dialog says nothing of a home out of reach',
+        () => {
+          expect(texts('dialog [role=alert]')).toEqual([]);
+          expect([...home.groups.values()].map((made) => made.name)).toEqual(['Website', 'Notes']);
+          expect(commands(home)).toHaveLength(1);
+        },
+      );
+    },
+  );
 
   Scenario(
     'A browser that was away receives exactly the messages it missed, in order',

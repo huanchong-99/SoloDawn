@@ -87,6 +87,13 @@ describe('parts', () => {
       { kind: 'text', text: '.' },
     ]);
     expect(parts('ask @Codex', [claude])).toEqual([{ kind: 'text', text: 'ask @Codex' }]);
+    // A name is a mention only after an @, wherever it stands.
+    expect(parts('xCodex', members)).toEqual([{ kind: 'text', text: 'xCodex' }]);
+    expect(parts('@x Codex', members)).toEqual([{ kind: 'text', text: '@x Codex' }]);
+    expect(parts('Codex @Codex', members)).toEqual([
+      { kind: 'text', text: 'Codex ' },
+      { kind: 'at', text: '@Codex', id: 'x' },
+    ]);
     expect(parts('ask @Codex', members)).toEqual([
       { kind: 'text', text: 'ask ' },
       { kind: 'at', text: '@Codex', id: 'x' },

@@ -34,6 +34,11 @@ Feature: Group list and group cache of the web client
     When the person presses create again
     Then the computer that is left has made the group "Notes"
 
+  Scenario: A computer that connects while the dialog is open is the one chosen
+    Given the dialog is open while no computer is connected
+    When the computer connects and the person creates the group "Notes"
+    Then the computer has made the group "Notes", and the dialog says nothing of a home out of reach
+
   Scenario: A browser that was away receives exactly the messages it missed, in order
     Given the browser has read the group up to its last row
     When the connection is lost, 20 messages are written, and the browser connects again

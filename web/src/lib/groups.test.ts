@@ -285,7 +285,7 @@ describe('an answer that comes too late', () => {
     expect(group.cursor).toBe(0);
   });
 
-  it('with a page is dropped when the group was read again, on the same connection or another', async () => {
+  it('with a page is dropped when the group is read again, on the same connection or another', async () => {
     const { home, group, asked } = await read();
     const before = group.paging();
     const sameConnection = group.older();
@@ -293,17 +293,24 @@ describe('an answer that comes too late', () => {
     asked[1].answer(fetched([text('a', 300)], false));
     await sameConnection;
     expect([...group.rows.keys()]).toEqual([]);
-    expect(group.paging()).not.toBe(before);
-    expect(group.paging()).toMatchObject({ before: undefined, more: true, busy: false });
-
+    // Until the read ends the paging is the one of before, and as it was.
+    expect(group.paging()).toBe(before);
+    expect(before).toMatchObject({ before: undefined, more: true, busy: false, failed: false });
+    asked[2].answer(synced(900));
+    await settle();
     const fresh = group.paging();
+    expect(fresh).not.toBe(before);
+
     const otherConnection = group.older();
     const again = connect(home);
     asked[3].answer(fetched([text('b', 400)], false));
     await otherConnection;
     expect([...group.rows.keys()]).toEqual([]);
+    expect(group.paging()).toBe(fresh);
+    expect(fresh).toMatchObject({ before: undefined, more: true, busy: false, failed: false });
+    again.asked[0].answer(synced(950));
+    await settle();
     expect(group.paging()).not.toBe(fresh);
-    expect(group.paging()).toMatchObject({ before: undefined, more: true, busy: false });
     void group.older();
     expect(again.asked[1].req).toEqual(fetch(0));
   });
@@ -376,6 +383,35 @@ describe('pages', () => {
     asked[1].answer(fetched([text('l', 690)], true));
     await settle();
     expect(group.paging().before).toBe(690);
+  });
+
+  // The probe of the review: 100 messages read, 1500 written while away, and a page asked for the
+  // moment the browser is back. The rows held then are about to be dropped by a reset.
+  it('are not asked for while the group is being read, and then start from what the read brought', async () => {
+    const { home, group, link } = await read();
+    link.push(rows(...Array.from({ length: 100 }, (_, i) => text(`old${i}`, 816 + i))));
+    const held = group.paging();
+    link.offline();
+
+    const again = connect(home);
+    void group.older();
+    expect(again.asked.map((ask) => ask.req)).toEqual([sync(915)]);
+    expect(group.paging()).toBe(held);
+    again.link.push(reset);
+    void group.older();
+    again.link.push(rows(...Array.from({ length: 50 }, (_, i) => text(`new${i}`, 2366 + i))));
+    void group.older();
+    expect(again.asked).toHaveLength(1);
+
+    again.asked[0].answer(synced(2415));
+    await settle();
+    const fresh = group.paging();
+    expect(fresh).not.toBe(held);
+    void group.older();
+    expect(again.asked[1].req).toEqual(fetch(2366));
+    again.asked[1].answer(fetched([text('between', 2365)], true));
+    await settle();
+    expect([fresh.before, fresh.more]).toEqual([2365, true]);
   });
 
   it('of the main line start before the oldest message held when fewer than 50 are held', async () => {
@@ -456,7 +492,7 @@ describe('pages', () => {
     expect([...group.rows.keys()]).toEqual(['msg a']);
   });
 
-  it('start again when the group is read again', async () => {
+  it('start again when a read of the group ends, not before', async () => {
     const { home, group, asked, link } = await read();
     const refused = group.older();
     asked[1].answer({ re: 2, err: { code: 'internal', msg: 'no' } });
@@ -466,6 +502,9 @@ describe('pages', () => {
 
     link.offline();
     const again = connect(home);
+    expect(group.paging()).toBe(before);
+    again.asked[0].answer(synced(900));
+    await settle();
     const fresh = group.paging();
     expect(fresh).not.toBe(before);
     expect([fresh.before, fresh.more, fresh.busy, fresh.failed]).toEqual([
@@ -476,6 +515,18 @@ describe('pages', () => {
     ]);
     void group.older();
     expect(again.asked[1].req).toEqual(fetch(0));
+  });
+
+  it('do not start again when the read is refused', async () => {
+    const { home, group, asked } = await read();
+    const before = group.paging();
+    void group.sync(home.ctl!);
+    asked[1].answer({ re: 2, err: { code: 'forbidden', msg: 'no' } });
+    await settle();
+    expect(group.paging()).toBe(before);
+    // Nor is a page asked for after a read that did not end: nothing says what is held is whole.
+    void group.older();
+    expect(asked).toHaveLength(2);
   });
 });
 

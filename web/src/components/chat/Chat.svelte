@@ -24,6 +24,10 @@
   // The reader has scrolled back from the newest message, and one arrived since.
   let away = $state(false);
   let unseen = $state(false);
+  // The person is using the keyboard: a key was pressed since the pointer was last used. The
+  // focus that the main line is given when a chat opens counts as seen by the keyboard to a
+  // browser after a page load; this does not.
+  let keys = $state(false);
 
   $effect(() => {
     const seen = new IntersectionObserver(([entry]) => (atEdge = entry.isIntersecting), {
@@ -53,7 +57,9 @@
     scroller.scrollTo({ top: 0, behavior: prefersReducedMotion.current ? 'auto' : 'smooth' });
 </script>
 
-<section class="chat" aria-label={group.name}>
+<svelte:window onkeydown={() => (keys = true)} onpointerdown={() => (keys = false)} />
+
+<section class="chat" class:keys aria-label={group.name}>
   <header class="chat-head">
     <a class="icon-btn back" href="#/groups" aria-label={t('chat.back')}><Icon name="back" /></a>
     <Avatar id={group.g} name={group.name} group size="sm" />
@@ -159,8 +165,11 @@
     flex-direction: column-reverse;
     overflow-y: auto;
     overscroll-behavior: contain;
+    outline: none;
   }
-  .scroller:focus-visible {
+  /* The ring of the main line shows to someone at the keyboard, not for the focus it is given
+     when the chat opens. */
+  .keys .scroller:focus-visible {
     outline: var(--focus);
     outline-offset: -2px;
   }

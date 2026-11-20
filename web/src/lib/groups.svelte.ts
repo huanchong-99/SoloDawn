@@ -82,8 +82,8 @@ export class Group {
   // What the answer to a read or a page must still find when it arrives: each read of the group
   // makes a new one, so an answer that was overtaken changes nothing.
   #read = {};
-  // Replaced, not cleared, when the group is read again: a page still on its way from before
-  // then changes a paging that nobody holds any more.
+  // Replaced when a read of the group ends: whoever draws from a paging then holds a new one, and
+  // asks for its first page from the rows that the read brought.
   #paging = $state.raw(new Map<string | null, Paging>());
 
   constructor(home: Home, g: string) {
@@ -148,18 +148,18 @@ export class Group {
 
   /** Reads the group from the cursor on and subscribes to its changes. Until `synced` the rows
    *  that arrive are not live, so a read that breaks off leaves the cursor where it was: at 0
-   *  after a `reset`, unchanged in a delta. Paging starts again with each read. An answer that
-   *  comes too late moves nothing: the read that overtook it will. */
+   *  after a `reset`, unchanged in a delta. An answer that comes too late moves nothing: the read
+   *  that overtook it will. Paging starts again at `synced`, from what the read brought. */
   async sync(ctl: p.Ctl) {
     const read = (this.#read = {});
     this.#live = false;
-    this.#paging = new Map();
     const answer = await ctl
       .request({ t: 'sync', g: this.g, since: this.cursor, state_only: false })
       .catch(lost);
     if (answer.err || this.#late(read, ctl)) return;
     this.cursor = answer.seq;
     this.#live = true;
+    this.#paging = new Map();
   }
 
   /** Whether an answer comes too late: the group was read again since it was asked for, or the
@@ -178,13 +178,20 @@ export class Group {
     return this.main.at(-pageSize)?.pos ?? this.main.at(0)?.pos ?? 0;
   }
 
+  /** The connection a page can be asked on now. None while the group is being read: the rows a
+   *  first page would start from may be about to be dropped by a `reset`, and the page would
+   *  then leave a gap that nothing fills. None while the home cannot be reached. */
+  #pageable() {
+    return this.#live ? this.home.ctl : undefined;
+  }
+
   /** Fetches the page of messages before the ones read so far, of a thread or of the main line.
-   *  Does nothing while a page is on its way, when the home has no more or refused one, or cannot
-   *  be reached. A page that comes too late is dropped: after a reset it could bring back a row
-   *  whose deletion the client can no longer be told about. */
+   *  Does nothing while the group is being read, while a page is on its way, when the home has
+   *  no more or refused one, or cannot be reached. A page that comes too late is dropped: after
+   *  a reset it could bring back a row whose deletion the client can no longer be told about. */
   async older(thread: string | null = null) {
     const paging = this.paging(thread);
-    const ctl = this.home.ctl;
+    const ctl = this.#pageable();
     if (!ctl || !paging.ready) return;
     const read = this.#read;
     const before = paging.before ?? this.#start(thread);
@@ -236,7 +243,9 @@ export interface Link {
   /** The connection's push handler. */
   push(frame: p.Push): void;
   /** The node answered `hello` on this connection, which is the home's from now on: every group
-   *  is read again from its cursor. */
+   *  is read again from its cursor. The last connection to call this wins, so the code that owns
+   *  the connections calls it only for the one that is to become the home's: for a probe of a
+   *  better path, when it takes over, not while the connection it may replace still serves. */
   online(ctl: p.Ctl, welcome: p.Welcome): void;
   /** This connection is gone. The rows stay. */
   offline(): void;
@@ -261,8 +270,8 @@ export class Home {
     this.me = me;
   }
 
-  /** A connection to the node that is about to be made. Only the last one to come online counts:
-   *  what an earlier one still pushes is dropped, and its going leaves the home online. */
+  /** A connection to the node that is about to be made. Only the last one to call `online`
+   *  counts: what an earlier one still pushes is dropped, and its going leaves the home online. */
   connect(): Link {
     const link: Link = {
       push: (frame) => {

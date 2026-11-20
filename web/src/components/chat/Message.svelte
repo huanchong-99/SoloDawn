@@ -152,11 +152,11 @@
     opacity: 0;
     transition: opacity var(--dur-1) var(--ease);
   }
-  /* For someone at the keyboard the times of all joined messages show while focus is on the
-     main line or on a button of the chat: no message is a stop of its own for the Tab key. Not
-     while it is in the field, which shows focus however it was reached. */
+  /* For someone at the keyboard (`keys` in Chat.svelte) the times of all joined messages show
+     while focus is on the main line or on a button of the chat: no message is a stop of its own
+     for the Tab key. Not while focus is in the field, where the keys are for writing. */
   .joined:hover .aside,
-  :global(.chat:has(:focus-visible:not(textarea))) .aside {
+  :global(.chat.keys:has(:focus-visible:not(textarea))) .aside {
     opacity: 1;
   }
   .note {

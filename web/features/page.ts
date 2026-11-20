@@ -1,13 +1,14 @@
 // The group pages mounted in the test DOM, and what a person does on them. happy-dom lays
 // nothing out and has no input devices, so the two things the pages ask the browser are stood in
 // for: whether the top of the main line is in view, and whether the person has a keyboard.
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, unmount, type Component } from 'svelte';
 import { vi } from 'vitest';
 import { homes } from '../src/lib/groups.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
 import Groups from '../src/routes/Groups.svelte';
 
 let page: Record<string, never> | undefined;
+const parts: Record<string, never>[] = [];
 let inView: ((entries: { isIntersecting: boolean }[]) => void) | undefined;
 
 /** Opens the group pages at an address, in English, in a browser with a keyboard. */
@@ -31,9 +32,16 @@ export function openPage(hash = '#/groups') {
   flushSync();
 }
 
+/** Mounts one part of the pages on its own. */
+export function show<Props extends Record<string, unknown>>(part: Component<Props>, props: Props) {
+  parts.push(mount(part, { target: document.body, props }) as Record<string, never>);
+  flushSync();
+}
+
 export async function closePage() {
   if (page) await unmount(page);
   page = undefined;
+  for (const part of parts.splice(0)) await unmount(part);
   homes.length = 0;
   location.hash = '';
   vi.unstubAllGlobals();

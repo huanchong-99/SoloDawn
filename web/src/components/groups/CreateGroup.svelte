@@ -24,11 +24,21 @@
   let failed = $state('');
 
   const listed = () => owned.find((home) => home === chosen);
+  /** The computer chosen before, when it is still to be had, or else the first. */
+  const pick = () => (chosen = listed() ?? owned[0]);
 
   $effect(() => {
     if (!open) return;
-    untrack(() => (chosen = listed() ?? owned[0]));
+    untrack(pick);
     dialog.showModal();
+  });
+  // A computer that appears while there was none to choose from is chosen: the select shows it,
+  // and what the select shows is what is sent to.
+  let none = true;
+  $effect(() => {
+    const some = owned.length > 0;
+    if (some && none) untrack(pick);
+    none = !some;
   });
 
   async function submit(event: SubmitEvent) {

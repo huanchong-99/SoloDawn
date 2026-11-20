@@ -53,6 +53,13 @@ Feature: Chat main line of the web client
     And the 50 messages shown before are the same parts of the page as before
     And it says "This is where the group starts."
 
+  Scenario: No page is asked for while the group is being read again
+    Given the group holds 120 messages and the browser has read the newest 50
+    And the reader has scrolled back to the start, with the top of the main line still in view
+    When the home stops, 1500 messages are written, and the home returns
+    Then the first page the browser asks for is the one before the oldest message that the new read brought
+    And the main line shows the newest messages without a gap
+
   Scenario: Without the home the top of the main line does not claim to be the start
     Given the group holds 120 messages and the browser has read the newest 50
     When the home stops and the top of the main line comes into view
@@ -63,6 +70,13 @@ Feature: Chat main line of the web client
     When the person sends "first" and types " and more" before the home has answered
     Then the home is sent the post "first"
     And the composer holds " and more"
+
+  Scenario: The main line is marked as focused by the keyboard only once a key was used
+    Then the chat is not marked as used with the keyboard, although its main line has focus
+    When the person presses a key
+    Then the chat is marked as used with the keyboard
+    When the person uses the pointer
+    Then the chat is not marked as used with the keyboard any more
 
   Scenario: Enter sends a message, but not while an input method composes
     When the person types "你好" and presses Enter while the input method composes

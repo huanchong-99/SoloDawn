@@ -195,9 +195,10 @@ development dependency, an IndexedDB for the tests.
   calls `home.connect()` before the connection exists, gives the link's `push` to the connection
   as its push handler, and calls the link's `online(ctl, welcome)` after `welcome` and its
   `offline()` when the connection is gone.
-  - Only the last connection to come online is the home's: what an earlier one still pushes is
+  - Only the last connection to call `online` is the home's: what an earlier one still pushes is
     dropped, and its going leaves the home online, so a move to a better path cannot mix two
-    reads. `online` lists the node's groups and reads each with `sync` from its cursor; a `groups`
+    reads. The owner of the connections therefore calls `online` only for the connection that is
+    to become the home's: for a probe, when it takes over. `online` lists the node's groups and reads each with `sync` from its cursor; a `groups`
     push replaces the list, keeps the rows of a group listed before and reads a new one at once.
   - A `Group` applies a row only with a higher `seq` than the copy it holds, and keeps a `gone`
     marker in place of its row, unseen. Its `cursor`, the `since` of its next `sync`, is 0 at the
@@ -206,7 +207,8 @@ development dependency, an IndexedDB for the tests.
     and a delta that breaks off keeps its place. The answer to a read moves the cursor only when
     no later read of the group was started and its connection is still the home's.
   - `older(thread)` fetches one page of a thread, or of the main line, and then the page before
-    the lowest `pos` received. The main line starts before the oldest of the newest 50 messages
+    the lowest `pos` received. No page is asked for while the group is being read: the paging
+    starts again at `synced`, from the rows the read brought. The main line starts before the oldest of the newest 50 messages
     held, which a cold read brings without a gap; not before the oldest message held, which can be
     a card still pending from long ago. A thread starts at its newest page, `before: 0`. An empty
     page ends the paging; a page the home refuses stops it (`failed`) until the group is read
@@ -238,7 +240,9 @@ development dependency, an IndexedDB for the tests.
     line on a band of the page's colour, under which the messages pass. A message within five
     minutes of the one before it, by the same author, is drawn under it without a head; its time
     shows under the pointer, and for all such messages while keyboard focus is on the main line
-    or on a button of the chat.
+    or on a button of the chat. That, and the focus ring of the main line, are for someone who
+    has pressed a key since they last used the pointer, not for the focus the main line is given
+    when a chat opens.
   - "Today" and "yesterday" are read from `now()` of `when.ts`, one clock that moves once a
     minute while something drawn reads it.
   - A text shows its code spans and the mentions of the members its row names. The composer
@@ -251,7 +255,8 @@ development dependency, an IndexedDB for the tests.
     from three quarters of the 16 KiB and does not send beyond them; the size the node measures
     decides.
   - The create-group dialog holds the computer chosen as the home, not its place in the list, and
-    sends nothing when that computer is no longer among those that can be reached.
+    sends nothing when that computer is no longer among those that can be reached. A computer
+    that appears while there was none to choose from is chosen.
   - Only text messages are drawn in full. A card is one line that names its kind and its subject,
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
     the units of the cards replace both.

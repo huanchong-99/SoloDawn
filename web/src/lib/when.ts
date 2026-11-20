@@ -68,23 +68,26 @@ const together = 5 * 60 * 1000;
  *  day and how many times that day comes again after it. Messages added before or after leave
  *  the keys of the days already there as they are. */
 export function days<M extends { ts: number; by: string }>(msgs: M[]) {
-  const out: { key: string; day: number; msgs: { msg: M; joined: boolean }[] }[] = [];
+  const out: { day: number; msgs: { msg: M; joined: boolean }[] }[] = [];
   let last: M | undefined;
   for (const msg of msgs) {
     const day = dayOf(msg.ts);
     if (out.at(-1)?.day !== day) {
-      out.push({ key: '', day, msgs: [] });
+      out.push({ day, msgs: [] });
       last = undefined;
     }
     const joined = last?.by === msg.by && msg.ts - last.ts < together;
     out.at(-1)!.msgs.push({ msg, joined });
     last = msg;
   }
+  // Counted from the last day back, so that a day added before leaves the keys as they are.
   const later = new Map<number, number>();
-  for (const each of out.toReversed()) {
-    const times = later.get(each.day) ?? 0;
-    each.key = `${each.day}:${times}`;
-    later.set(each.day, times + 1);
-  }
-  return out;
+  return out
+    .toReversed()
+    .map((each) => {
+      const times = later.get(each.day) ?? 0;
+      later.set(each.day, times + 1);
+      return { key: `${each.day}:${times}`, ...each };
+    })
+    .reverse();
 }

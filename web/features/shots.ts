@@ -2,7 +2,8 @@
 // both themes, one sheet per screen. Run in web/ with
 //   node features/shots.ts <directory> [screen ...]
 // With no screen named it takes them all. `list`, `chat` and `create` are taken at every width;
-// `mention`, `long` and `readonly` are states of the chat, taken at one width.
+// `mention`, `long` and `readonly` are states of the chat, taken at one width. A screen named
+// with a width and a theme, as `chat:820:light`, is one picture.
 // It starts a development server, loads features/demo.ts into the page and uses the Chromium
 // that `pnpm exec playwright install --only-shell chromium` installs.
 import { mkdir, readFile } from 'node:fs/promises';
@@ -112,8 +113,10 @@ async function shoot(screen: string, width: number, scheme: 'light' | 'dark') {
   return file;
 }
 
-const named = process.argv.slice(3);
-const wanted = (screen: string) => named.length === 0 || named.includes(screen);
+const named = process.argv.slice(3).filter((name) => !name.includes(':'));
+const single = process.argv.slice(3).filter((name) => name.includes(':'));
+const wanted = (screen: string) =>
+  named.length === 0 ? single.length === 0 : named.includes(screen);
 
 try {
   for (const screen of ['list', 'chat', 'create'].filter(wanted)) {
@@ -139,6 +142,10 @@ try {
     taken.push(row);
   }
   if (taken[0].length) await sheet(browser, 'sheet-states', taken);
+  for (const name of single) {
+    const [screen, width, scheme] = name.split(':');
+    await shoot(screen, Number(width), scheme === 'dark' ? 'dark' : 'light');
+  }
 } finally {
   await browser.close();
   await server.close();

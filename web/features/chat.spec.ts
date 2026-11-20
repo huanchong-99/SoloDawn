@@ -301,6 +301,56 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
+    'No page is asked for while the group is being read again',
+    ({ Given, When, Then, And }) => {
+      const after = Array.from({ length: 1500 }, (_, i) => `message ${i + 121}`);
+      let asked: number;
+      Given('the group holds 120 messages and the browser has read the newest 50', newest50);
+      And(
+        'the reader has scrolled back to the start, with the top of the main line still in view',
+        async () => {
+          scrollToTop();
+          await vi.waitFor(() => expect(group.paging().more).toBe(false));
+          flushSync();
+          expect(texts('.msg .text')).toEqual(numbered);
+        },
+      );
+      When('the home stops, 1500 messages are written, and the home returns', async () => {
+        home.stop();
+        first.drop();
+        for (const text of after) home.say(website, owner, text);
+        asked = fetches().length;
+        await read(first);
+        // One page is enough to see where the paging starts: the top leaves the view.
+        await vi.waitFor(() => expect(fetches().length).toBeGreaterThan(asked));
+        scrollToTop(false);
+        await vi.waitFor(() => expect(group.paging().busy).toBe(false));
+        flushSync();
+      });
+      Then(
+        'the first page the browser asks for is the one before the oldest message that the new read brought',
+        () => {
+          const oldest = group.main.find((msg) => msg.text === 'message 1571')!.pos;
+          expect(first.seen.filter((frame) => frame === 'reset')).toHaveLength(2);
+          expect(fetches()[asked]).toEqual({
+            t: 'fetch',
+            g: website,
+            thread: null,
+            before: oldest,
+            limit: 50,
+          });
+        },
+      );
+      And('the main line shows the newest messages without a gap', () => {
+        const shownNow = texts('.msg .text');
+        expect(shownNow.length).toBeGreaterThanOrEqual(100);
+        expect(shownNow).toEqual([...numbered, ...after].slice(-shownNow.length));
+        expect(texts('.edge')).toEqual(['Earlier messages']);
+      });
+    },
+  );
+
+  Scenario(
     'Without the home the top of the main line does not claim to be the start',
     ({ Given, When, Then, And }) => {
       Given('the group holds 120 messages and the browser has read the newest 50', newest50);
@@ -340,6 +390,34 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And('the composer holds " and more"', () => {
         expect(field().value).toBe(' and more');
         expect(field().selectionStart).toBe(9);
+      });
+    },
+  );
+
+  Scenario(
+    'The main line is marked as focused by the keyboard only once a key was used',
+    ({ When, Then }) => {
+      const marked = () => one('.chat').classList.contains('keys');
+      Then(
+        'the chat is not marked as used with the keyboard, although its main line has focus',
+        () => {
+          expect(document.activeElement).toBe(one('.scroller'));
+          expect(marked()).toBe(false);
+        },
+      );
+      When('the person presses a key', () => {
+        one('.scroller').dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+        flushSync();
+      });
+      Then('the chat is marked as used with the keyboard', () => {
+        expect(marked()).toBe(true);
+      });
+      When('the person uses the pointer', () => {
+        one('.scroller').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+        flushSync();
+      });
+      Then('the chat is not marked as used with the keyboard any more', () => {
+        expect(marked()).toBe(false);
       });
     },
   );
