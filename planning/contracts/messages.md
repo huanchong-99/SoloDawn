@@ -93,19 +93,26 @@ card is drawn from the task row.
 
 | Field | Value |
 | --- | --- |
-| `command` | the request exactly as the CLI presented it |
+| `tool` | what the CLI names: Claude Code's tool (`Bash`, `Write`, …), or the type of Codex's item (`commandExecution`, `fileChange`) |
+| `command` | the request as the CLI presented it (table below) |
 | `why` | optional: the justification the CLI attached |
 | `category` | `command`, `file`, `network`, `other`: the kind of request the CLI made, taken from the type of the request and never from the text of a command (C-10, `risks.md` Q-18). A display hint; it decides nothing |
 | `approvers` | user ids, at least one |
 
-The card's label is `category` plus `why`.
+The card's label is `category` plus `why`. The host fills the body from the
+CLI's request (`contracts/drivers.md` 1.1 and 1.2); the first, second and
+last two rows were seen in spikes S-2 and S-3:
 
-Signed: every field; the host takes them from the CLI's request. Added by
-the home: nothing.
+| Request | `tool` | `category` | `command` | `why` |
+| --- | --- | --- | --- | --- |
+| Claude Code `approve`, `tool_name` `Bash` | `Bash` | `command` | `input.command` | `input.description` |
+| the same with `Write`, `Edit`, `NotebookEdit`, `Read` | the tool name | `file` | `input` as JSON text | — |
+| the same with `WebFetch`, `WebSearch` | the tool name | `network` | `input` as JSON text | — |
+| the same with any other tool | the tool name | `other` | `input` as JSON text | — |
+| Codex `item/commandExecution/requestApproval` | `commandExecution` | `command` | `command` | `reason` |
+| Codex `item/fileChange/requestApproval` | `fileChange` | `file` | for each change of the item: `kind`, `path`, then its `diff` | `reason`, when it is not `null` |
 
-The values of `tool` and `category` are provisional. They are aligned with
-the request types the two CLIs really have in the planning change that
-records spikes S-2 and S-3, and the approval golden files follow it.
+Signed: every field. Added by the home: nothing.
 
 ### 2.4 `decision`
 

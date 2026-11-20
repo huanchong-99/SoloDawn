@@ -5,11 +5,10 @@ at each permission level, what a turn looks like, and what every session is
 told. Session kinds are in `sessions.md`; folders and Git commands in
 `contracts/local.md`.
 
-Markers: `[verified]` observed in the driver experiments (Claude Code
-2.1.311, Codex CLI 0.164.0, macOS); `[documented]` in the vendor's
-documentation but not run by us (flags marked "round 1" were supplied by
-the round-1 review from the vendors' published references); `[unverified]`
-an assumption that a spike must settle (`steps/step-1.md`).
+Markers: `[verified]` observed in the driver experiments and in spikes S-2,
+S-3 and S-4 (Claude Code 2.1.311, Codex CLI 0.164.0, macOS);
+`[documented]` in the vendor's documentation or generated schema but not
+run by us; `[unverified]` not shown yet. Windows waits for spike S-5.
 
 ## 1. Starting the CLIs
 
@@ -29,63 +28,116 @@ instead of inheriting the user's defaults.
 ```
 claude -p --verbose
   --input-format stream-json --output-format stream-json
-  --session-id <uuid>            (first start)   [verified]
-  --resume <uuid>                (later starts)  [verified]
-  --mcp-config <file>                            [verified]
-  --strict-mcp-config                            [documented]
+  --session-id <uuid>            (first start)    [verified]
+  --resume <uuid>                (later starts)   [verified]
+  --mcp-config <file>                             [verified]
+  --strict-mcp-config                             [verified]
   --permission-prompt-tool mcp__solodawn__approve [verified]
-  --setting-sources user                         [documented]
-  --append-system-prompt <instructions>          [documented]
-  --permission-mode <mode>                       [documented]
-  --model <model>                                (if the owner set one)
+  --allowedTools mcp__solodawn                    [verified]
+  --setting-sources user                          [verified]
+  --append-system-prompt <instructions>           [verified]
+  --permission-mode <mode>                        [verified]
+  --model <model>                                 (if the owner set one)
 ```
 
 - `<file>` is a temporary MCP configuration with one server: command
-  `solodawn`, arguments `mcp --token <t>`.
-- `--setting-sources user` keeps project settings and hooks out (R-45). When
-  the owner enabled repository configuration for the project it becomes
-  `user,project`.
+  `solodawn`, arguments `mcp --token <t>`. Every start reads the file it is
+  given, so after a resume the token of that start is the one in force.
+- `--allowedTools mcp__solodawn` is needed at every level: without it each
+  call of the node's own tools goes to `approve` first.
+- `--setting-sources user` keeps project settings and hooks out (R-45), and
+  the project's `CLAUDE.md` with them. What the owner configured for
+  themselves still loads: their own `CLAUDE.md`, skills, plugins, agents
+  and memory. When the owner enabled repository configuration for the
+  project it becomes `user,project` (`risks.md` Q-24).
+- Instructions are fixed per session: the system prompt is recorded at the
+  first request of a session id, and another text given on `--resume` is
+  ignored.
 - A user turn is one line on stdin:
   `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"…"}]}}`.
-- A turn ends with an event of `type` `result` `[verified]`; usage is read
-  from it.
-- Interrupt: a `control_request` with subtype `interrupt` on stdin
-  `[verified]`, used only if the `system/init` event lists the capability;
-  otherwise close stdin, wait for exit, and start again with `--resume`.
-- Close: close stdin and wait for exit (observed under 0.5 s `[verified]`).
+- A turn ends with an event of `type` `result`; usage is read from it, and
+  the rate-limit window from the `rate_limit_event` of each turn.
+- Interrupt: a `control_request` with subtype `interrupt` on stdin. The CLI
+  answers with a `control_response` and ends the turn with a `result` of
+  subtype `error_during_execution`; the next turn works in the same
+  process. It is sent when `system/init` lists a capability whose name
+  starts with `interrupt_` (2.1.311 lists `interrupt_receipt_v1` and three
+  more, and no plain `interrupt`); otherwise the node closes stdin, waits
+  for exit, and starts again with `--resume`.
+- Close: close stdin and wait for exit (observed 0.6 to 1.2 s).
 
-| Level | Flags |
-| --- | --- |
-| 1 | `--permission-mode default --tools Read,Glob,Grep` `[documented, round 1]`. `--allowedTools` alone does not restrict the tool set. `approve` answers deny |
-| 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true `[documented, round 1]`; everything else reaches `approve`. Spike S-2 must show the effective file and network limits, not only that the flags parse. On native Windows, where the CLI has no sandbox: open, decided after spike S-5 (`risks.md` Q-4) |
-| 3 | `--permission-mode bypassPermissions` `[documented]` |
+| Level | Flags | What it gives `[verified]` |
+| --- | --- | --- |
+| 1 | `--permission-mode default --tools Read,Glob,Grep`; `approve` answers deny. (`default` is accepted and reported by `system/init`, though `--help` of 2.1.311 no longer lists it.) | the tool set is those three and the node's tools: no Write, no Bash. Reading inside the folder needs no request; reading outside it reaches `approve` and is denied |
+| 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true; everything else reaches `approve`. Native Windows, where the CLI has no sandbox: open until spike S-5 (`risks.md` Q-4) | file tools: inside the folder without asking, outside it through `approve`. Sandboxed Bash: writes in the folder and in the sandbox's own temp folder, which cannot be closed; **reads anywhere**; the network is blocked with no request and no event, and the command waits for its own timeout |
+| 3 | `--permission-mode bypassPermissions`; in the terminal also `--settings '{"skipDangerousModePermissionPrompt":true}'`, without which the terminal asks the owner to accept the mode and stores the answer in the owner's configuration | no requests |
+
+`[unverified]` That a command the model asks to run outside the sandbox
+reaches `approve`. It is how a network action would become a card at level
+2 (`risks.md` Q-25).
 
 ### 1.2 Codex, structured
 
 ```
 codex app-server
   -c mcp_servers.solodawn.command="solodawn"
-  -c mcp_servers.solodawn.args=["mcp","--token","<t>"]     [unverified]
+  -c mcp_servers.solodawn.args=["mcp","--token","<t>"]            [verified]
+  -c mcp_servers.solodawn.default_tools_approval_mode="approve"   [verified]
+  -c mcp_servers.solodawn.tool_timeout_sec=<seconds>              [verified]
+  -c notify=[]
 ```
+
+- `default_tools_approval_mode="approve"`: without it a call of the node's
+  own tools needs an approval, and under `approvalPolicy: never` fails.
+- `tool_timeout_sec`: Codex ends a tool call after 300 seconds by default,
+  and progress notifications do not extend that; with 900 a call of 600
+  seconds completed. The node sets it to the group's `limits.turn_minutes`
+  in seconds, so that the turn limit is what ends a long call.
+- `notify=[]` keeps the owner's own notification program from running for
+  the node's sessions (it ran in the spike).
 
 JSON-RPC over stdio, one JSON object per line `[verified]`:
 
 1. `initialize`, then `initialized`.
-2. `thread/start` (first time) or `thread/resume` with the stored thread id.
-   Working folder (`cwd`), model, `sandbox`, `approvalPolicy` and
-   instructions are **thread parameters**, not launch flags
-   `[documented, round 1]`.
-3. `turn/start` with the turn text. The turn ends with `turn/completed`.
-4. Approval requests arrive as server requests
-   (`item/commandExecution/requestApproval` and the file-change equivalent);
-   the node answers `accept` or `decline` `[verified]`.
-5. `turn/interrupt` interrupts `[verified]`.
+2. `thread/start` (first time) or `thread/resume` with the stored thread
+   id. Thread parameters, not launch flags: `cwd`, `model` (if the owner
+   set one), `sandbox`, `approvalPolicy`, `developerInstructions` (the
+   instructions of section 4) and `config`. Codex creates the thread id.
+3. `turn/start` with the turn text. The turn ends with `turn/completed`;
+   usage arrives in `thread/tokenUsage/updated` and the rate-limit windows
+   in `account/rateLimits/updated`.
+4. Approval requests arrive as server requests, and the node answers
+   `accept` or `decline`. `item/commandExecution/requestApproval` carries
+   `command`, `cwd` and `reason`. `item/fileChange/requestApproval` carries
+   ids only: the change is in the `fileChange` item sent just before it
+   (`changes[]` with `path`, `kind`, `diff`). The schema has more request
+   types (permissions, MCP elicitation, user input, dynamic tools)
+   `[documented]`; none was seen, and the node declines them.
+5. `turn/interrupt` interrupts: `turn/completed` with status `interrupted`
+   follows at once and the process stays usable.
+6. A silent turn is interrupted. In the spike 2 turns of about 25 stopped
+   sending anything for more than 170 seconds, for no known reason. When a
+   turn has sent no notification for 5 minutes while no approval request
+   and no call of one of the node's tools is open, the node interrupts it
+   and reports `turn_interrupted` with reason `timeout`.
 
-| Level | `sandbox` | `approvalPolicy` |
-| --- | --- | --- |
-| 1 | `read-only` | `never` |
-| 2 | `workspace-write` | `on-request` |
-| 3 | `danger-full-access` | `never` |
+| Level | `sandbox` | `approvalPolicy` | What it gives `[verified]` |
+| --- | --- | --- | --- |
+| 1 | `read-only` | `never` | a shell tool exists and runs: reading works inside and outside the folder, a write fails. Level 1 on Codex means "no writes", not "no execute tool" |
+| 2 | `workspace-write`, with `config.sandbox_workspace_write` = `{"exclude_slash_tmp":true,"exclude_tmpdir_env_var":true}` | `on-request` | writes inside the folder without a request; a write outside it fails and the model asks. Without that `config`, `/tmp` and `$TMPDIR` are writable as well. The network is closed with no request |
+| 3 | `danger-full-access` | `never` | no requests |
+
+- What the owner configured for themselves applies to the node's sessions
+  too: `~/.codex/AGENTS.md`, the service tier, reasoning effort, their own
+  MCP servers. The node neither reads nor changes it. Tools of those
+  servers keep Codex's own rule, which asks for an approval: under `never`
+  the call fails, and at level 2 the request is of a type the node
+  declines `[unverified]`.
+- A project's `AGENTS.md` is loaded by default;
+  `config.project_doc_max_bytes = 0` keeps it out. The node passes that
+  unless the owner enabled repository configuration (`risks.md` Q-24).
+- One `app-server` with one thread took about 340 MB with its child
+  processes.
 
 Field names are taken from `codex app-server generate-json-schema` for the
 installed version. A CI job regenerates the schema and fails when a method
@@ -93,15 +145,34 @@ or field the node uses has changed.
 
 ### 1.3 Interactive (takeover)
 
-In a pseudo-terminal, in the session's folder:
+In a pseudo-terminal, in the session's folder `[verified]`:
 
-- `claude --resume <uuid>` `[documented]`
-- `codex resume <thread id>` `[verified]`
+```
+claude --resume <uuid> --mcp-config <file> --strict-mcp-config
+  --setting-sources user --allowedTools mcp__solodawn <level flags of 1.1>
+codex resume <thread id> --no-alt-screen --no-daemon -C <folder>
+  <the -c settings of 1.2> -s <sandbox> -a <approvalPolicy>
+  -c sandbox_workspace_write.exclude_slash_tmp=true
+  -c sandbox_workspace_write.exclude_tmpdir_env_var=true
+```
 
-with the same level, the same setting sources and the same MCP configuration
-as the structured start, and without the permission prompt tool: in the
-terminal the CLI asks the owner itself. `[unverified]` The exact flags for
-this on each CLI; spike S-4.
+- The level, the setting sources and the MCP configuration are those of the
+  structured start, without the permission prompt tool: in the terminal the
+  CLI asks the owner itself. On both CLIs, at levels 1, 2 and 3, one
+  session went from structured to the terminal and back with its history
+  intact, and the level held.
+- The MCP configuration of an interactive start carries a token of its own
+  kind, for which the node does not list `approve`: nothing names it as
+  the permission prompt tool there, and Claude Code would show it to the
+  model as an ordinary tool.
+- Trust. Claude Code asks whether the folder is trusted on its first
+  interactive start in each folder, so on the first takeover of every
+  worktree, with `--setting-sources user` as well. The owner answers in
+  the terminal. Codex does not ask.
+- A session that does not exist yet: Claude Code starts one in the
+  terminal with `--session-id <uuid>`. Codex cannot: it takes no id, and a
+  thread that has had no turn is not saved (`flows/takeover.md` section A).
+- `[unverified]` `project_doc_max_bytes=0` on Codex's interactive CLI.
 
 ### 1.4 Detecting CLIs and sign-in
 
@@ -189,7 +260,9 @@ reviewed like code. Contents:
 - **Task session**: work only in this folder, on this branch. Commit your
   work. Report progress briefly. `push_branch` pushes your branch. When
   done: `run_checks`, then `submit_task`. Do not open or merge pull requests
-  yourself.
+  yourself. When the sandbox blocks something the task needs (the network,
+  a path outside this folder), ask for it with your CLI's own permission
+  request; do not work around it.
 - **Review session**: the diff is in `.solodawn-review.diff`, the code in
   this folder. Score against the criteria with `submit_review`. A fake test
   or a missing test is a veto.

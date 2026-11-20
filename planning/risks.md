@@ -15,7 +15,7 @@ decision now lives.
 | --- | --- | --- | --- |
 | Q-1 | R-131 names TCP. Two nodes that are both behind NAT would need TCP simultaneous open, which pion does not do `[unverified]`. | Step 1 tries together: UDP hole punching, IPv6, TCP to a port the other node has open, forwarded or mapped (UPnP, NAT-PMP), with the relay on 443 as last resort. Simultaneous open is an experiment (S-9), built in step 3 only if it shows a clear benefit. | `product-rules.md` R-131; `contracts/rendezvous.md` 5; `flows/connect.md` step 5; `steps/step-1.md` S-9; `steps/step-2-3.md` 3.4 |
 | Q-2 | The mock-up shows an 8-character pairing code. | 16 characters. No extra key-exchange algorithm for the sake of 8. The onboarding copy changes to 16. | `product-rules.md` R-152; `contracts/envelope.md` 6; `steps/step-1-frontend.md` F-04 |
-| Q-3 | Ed25519 in WebCrypto is newer than the design's browser baseline `[unverified]`. | Raise the baseline to versions with native support; a spike finds the exact versions; no signature library is bundled. | `product-rules.md` R-164; `architecture.md` C-9; `contracts/envelope.md` 2; `steps/step-1.md` S-7; `steps/step-1-frontend.md` F-00, F-01a to F-01c |
+| Q-3 | Ed25519 in WebCrypto is newer than the design's browser baseline. | Raise the baseline to versions with native support; no signature library is bundled. Closed by spike S-7: Chrome and Edge 137, Firefox 136, Safari 17.5, recorded in `docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md`. | `product-rules.md` R-164; `architecture.md` C-9; `contracts/envelope.md` 2; `steps/step-1.md` S-7; `steps/step-1-frontend.md` F-00, F-01a to F-01c |
 | Q-4 | Level 2 on Claude Code for native Windows, where the CLI has no sandbox. | Wait for spike S-5, then decide. | `contracts/drivers.md` 1.1; `flows/approval.md` H; `steps/step-1.md` S-5 |
 | Q-5 | Reminders while the page is closed pass through the browser vendor's push service. | Accepted: ciphertext only, and little content. What the content may be was then fixed in Q-17. | `product-rules.md` R-163; `contracts/commands.md` 1.7; `steps/step-1.md` A8.3 |
 | Q-6 | R-42 says the secretary posts the approval card. | The platform writes the card and shows it under the secretary's name. No AI turn. | `product-rules.md` R-42; `flows/approval.md` step 6; `contracts/messages.md` 1 |
@@ -45,8 +45,15 @@ may cancel it.
 
 ## Q. Open
 
-None at present. Q-4 is settled as "wait for spike S-5" and comes back when
-that spike has an answer.
+Q-4 is settled as "wait for spike S-5" and comes back when that spike has
+an answer. Three questions came out of the spikes. Each has a proposed
+answer; the coordinator decides.
+
+| Id | Question | Proposed |
+| --- | --- | --- |
+| Q-23 | A `device` row holds its log entry, and no rule limits the size of an entry. A valid device can therefore write an entry whose row fits no message (`contracts/conventions.md` section 4). | One more log rule, judged by every implementation: an entry whose `p` is longer than 2 KiB is refused. It costs one comparison on each side and one vector. Not applied yet. |
+| Q-24 | With repository configuration off (R-45), is a project's own instruction file (`CLAUDE.md`, `AGENTS.md`) loaded? Claude Code cannot load it without the project's hooks and settings; Codex loads it by default and can be told not to `[verified]`. | Not loaded on either CLI until the owner enables repository configuration: the file is AI configuration shipped in the repository, and the two CLIs then behave alike. `contracts/drivers.md` 1.1 and 1.2 are written this way. |
+| Q-25 | What the levels really confine `[verified]`. Level 2 confines writes (to the worktree; Claude Code also keeps its own temp folder writable) and closes the network. No level confines reads: Claude Code's sandboxed commands and Codex's shell read any file the owner can. And a blocked network action makes no request by itself; a card appears only if the model then asks to run the command outside the sandbox, which was seen on Codex for a write and not at all for the network. R-41 reads as if touching any file outside the workspace, installing software and pushing each produced a card. | Keep the CLIs' sandboxes as they are, and say where levels are chosen what they do: level 2 limits what the AI changes and where it connects, not what it reads. Secrets stay guarded by the closed network at levels 1 and 2 and by the outbound check (R-137). Sessions are told to ask through their CLI when the sandbox blocks something they need (`contracts/drivers.md` section 4), and a `live` test shows on each CLI whether that produces a card. No list of folders to hide. |
 
 ## K. Known limits
 
@@ -70,6 +77,8 @@ that spike has an answer.
 | K-16 | Go's JSON decoder refuses more than 10,000 levels of nesting; browsers have other limits. A payload nested that deep could be read by one implementation and refused by the other. | No rule. Only the signer of a payload can write one. |
 | K-17 | A JSON string may hold the escape of a lone surrogate (`"\ud800"`). Go reads it as U+FFFD; a browser keeps the surrogate. Ids cannot hold one (`contracts/conventions.md` section 2), but free text can: a message, the name of a device. | No rule. The node and the browser then hold different characters for that text; signatures and the pairing `mac` still agree, because a browser turns a lone surrogate into the same three bytes when it encodes the text. Only the signer of a payload can write one. |
 | K-18 | A number that is not an integer, such as a usage percentage, can be written `1e400`: Go refuses the payload and a browser reads infinity. | No rule. No honest sender writes it, and no such field is on a path that authenticates anything. |
+| K-19 | A node's mapped or forwarded UDP port serves only the connections it answers (`contracts/rendezvous.md` section 5.1). When the node that offers is the one with an open port, and the answering node sits behind a NAT that defeats hole punching, the direct path left is TCP to the offering node's port 47801, if that works between two nodes `[unverified]`, and otherwise the relay. | Spike S-8 measures the TCP case. A group's home is meant to be the machine that can be reached (K-1). |
+| K-20 | Safari deletes everything a site has stored, IndexedDB and the browser's device key with it, after seven days of Safari use without a visit to the site. A web app added to the home screen is exempt (`docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md`). | That browser comes back as a new device and is paired again (`flows/pairing.md` C); the owner revokes its old entry. After pairing the client asks the browser to keep its storage (`navigator.storage.persist()`), which Safari grants by rules of its own, and the settings page explains adding the app to the home screen (frontend tasks F-04, F-13). |
 
 ## T. Technical risks
 
@@ -77,18 +86,19 @@ that spike has an answer.
 | --- | --- | --- |
 | T-1 | Claude Code's control messages on stdin (interrupt) and the event shapes are not a published contract; Codex app-server is marked experimental. Either can change in any release. | The node uses a handful of messages; fake CLIs pin the expected shapes; a CI job diffs the Codex schema; `live` tests before each release; the CLI version is shown next to each AI. |
 | T-2 | Claude Code may make its bare mode the default for `-p`, which does not use subscription sign-in `[documented]`. | The node reports `login_invalid` and does nothing else (R-56). The owner chooses API key or waits. |
-| T-3 | How long a permission prompt call or a long tool call may stay open is unknown for both CLIs; so is whether a retried request has byte-identical input, which the late-approval record relies on. | Spikes S-2, S-3. The flows already work with a short wait; a retry that is not recognised produces a new card. |
+| T-3 | How long a permission prompt call or a long tool call may stay open; whether a retried request has byte-identical input, which the late-approval record relies on. | Answered by spikes S-2 and S-3: a request stayed open 630 seconds on both CLIs, a tool call 600 seconds (Codex with `tool_timeout_sec`), and a retried input was identical in two of two tries on each. Longer was not tried. The flows work with a short wait; a retry that is not recognised produces a new card. |
 | T-4 | Windows is unverified everywhere: ConPTY, sockets, interrupt, sandbox. | Spike S-5; Windows runs in CI from M1. |
-| T-5 | Browser and pion interoperability: ICE-TCP from Safari, `.local` candidates, message size. | Spike S-1. |
-| T-6 | About 240 MB of memory per open CLI session `[verified for Claude Code]`. With a session per task there are more sessions, though most are dormant. | `max_open` and dormancy; one turn at a time per AI per group. Measured in A8.6. |
+| T-5 | Browser and pion interoperability: ICE-TCP, `.local` candidates, message size. | Answered by spike S-1 for Chromium, Firefox and WebKit on Linux: UDP, ICE-TCP and the relay each carried a 60 KiB message, and `.local` candidates were no obstacle. Not shown: Safari itself, macOS and Windows, real NATs. Those wait for spike S-8 and for the end-to-end suite (F-14). |
+| T-6 | About 240 MB of memory per open Claude Code session, and about 340 MB per Codex session with its child processes `[verified]`. With a session per task there are more sessions, though most are dormant. | `max_open` and dormancy; one turn at a time per AI per group. Measured in A8.6. |
 | T-7 | Anyone can obtain relay credentials by presenting any key; the quota is per device id. | A second quota per source address on the rendezvous. Small, and at a boundary. |
 | T-8 | Subscriptions are sold for ordinary individual use; heavy automated use may be rate-limited by the vendor. | Limits R-60 to R-62; `limited` state; nothing hidden from the owner. |
 | T-9 | Unsigned binaries trigger warnings when downloaded by hand. | The AI installs from the command line; documentation covers the manual case (R-151). |
 | T-10 | Plan size against "least code". A desk estimate before this plan was 7,000 to 12,000 lines for node, rendezvous and web client together. | Every pull request is reviewed for code that can be deleted. The backend list names what not to build. |
 | T-11 | Port 443 shared by HTTPS and TURN. | Spike S-6; fallback is a second address or port for TURN. |
 | T-12 | (Settled in round 1: the home's quiet-task timer, `contracts/task-machine.md` row 23.) | — |
-| T-13 | Starting a brand-new session directly in interactive mode with a chosen id (takeover of an AI without a task) is untested on both CLIs. | Spike S-4. |
-| T-14 | A row, or an inbox item with the rows it carries, can outgrow one `ctl` message: the limits on a message, on a payload and on a message's `text` were set one by one, and a message row repeats its text inside an escaped envelope, a decided card holds a second envelope, and an inbox item wraps both. | Spike S-1 measures the message size both stacks accept; the limits of `contracts/conventions.md` section 4 are then set so that the largest row and the largest inbox item fit. |
+| T-13 | Starting a brand-new session directly in interactive mode with a chosen id (takeover of an AI without a task). | Answered by spike S-4: Claude Code can, Codex cannot (`flows/takeover.md` section A). |
+| T-14 | A row, or an inbox item with the rows it carries, can outgrow one `ctl` message. | Settled with spike S-1, which showed 60 KiB messages on every path: one limit of 16 KiB per row is enough (`contracts/conventions.md` section 4). The size of a device-log entry is Q-23. |
+| T-15 | Codex turns can stop sending anything: 2 of about 25 in spike S-3, cause unknown. | The driver interrupts a turn that has been silent for 5 minutes (`contracts/drivers.md` 1.2). The number is a first value. |
 
 ## Assumptions that would change the design if false
 

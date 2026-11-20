@@ -4,7 +4,8 @@ Status: **plan converged after three review rounds; implementation
 started.**
 
 Three review rounds are answered in `reviews/`; the last ended with "ready
-to start". The coordinator has settled Q-1 to Q-22 (`risks.md`). Next:
+to start". The coordinator has settled Q-1 to Q-22 (`risks.md`); Q-23 to
+Q-25, from the spikes, are open. Next:
 
 1. Work proceeds by `steps/step-1.md`: the backend by
    `steps/step-1-backend.md`, starting with B-00; the frontend by
@@ -15,7 +16,8 @@ to start". The coordinator has settled Q-1 to Q-22 (`risks.md`). Next:
    that needs a contract changed says so in its description; the planning
    lead changes the contract. Code does not silently depart from it.
 4. The answers of the spikes (M0) are recorded here by the planning lead.
-   Q-4 waits for spike S-5.
+   S-1, S-2, S-3, S-4 and S-7 are answered and recorded
+   (`steps/step-1.md`, M0). Q-4 waits for spike S-5.
 5. Questions that implementation raises about a contract are settled in
    the contract itself. The first batches, from the reviews of backend
    tasks B-01 and B-02, are in `contracts/conventions.md`,

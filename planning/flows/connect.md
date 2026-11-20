@@ -12,7 +12,10 @@ answering node; RV, any signalling path.
    remembered addresses, rendezvous URLs. A browser has only rendezvous URLs
    and, when served from a node, that node.
 2. C creates a peer connection with a `ctl` data channel, picks a new `conn`
-   id, and sends a signed `offer` on **every** path at once.
+   id, and sends a signed `offer` on **every** path at once, without
+   waiting for its candidates (`contracts/rendezvous.md` 2.3, "Trickle").
+   A node that offers uses UDP sockets of its own for this connection,
+   never its fixed port (section 5.1 there).
 3. N receives the first copy, checks the envelope
    (`contracts/envelope.md` section 3) and creates its peer connection. It
    sends its signed `answer` on every path on which a copy of that offer
@@ -34,14 +37,28 @@ answering node; RV, any signalling path.
 
 | Path | Selected pair |
 | --- | --- |
-| `lan` | both candidates are host candidates in private or link-local ranges |
-| `direct` | any other pair without a relay candidate; `udp` or `tcp`, `v4` or `v6` |
-| `relay` | either candidate is a relay candidate |
+| `relay` | the local or the remote candidate has type `relay` |
+| `direct` | any other pair; `udp` or `tcp`, `v4` or `v6` |
 
-   Each side classifies from what its own stack selected. The path, its
+   Each side classifies from the candidate types of the pair its own stack
+   selected, which every stack reports `[verified, S-1]`. The path, its
    round-trip time and the time it was established are shown in the
    connection indicator; a host reports its path to the home in member
    status.
+
+   There is no separate path for a local network. Chromium and Firefox
+   give a `.local` name instead of their host address, so the node sees
+   them as peer-reflexive; Chromium hides its own address in its
+   statistics, and WebKit hides both `[verified, S-1]`. "Both ends are
+   private host addresses" cannot be told on both sides. Nothing depends
+   on it either: a local network is a direct path with a short round-trip
+   time.
+
+   A relayed path always has a relay candidate as the *local* candidate of
+   at least one side, and a side always knows the type of its own
+   candidates. So the two sides never both take a relayed path for a
+   direct one, and a terminal needs both: the browser offers it and the
+   node accepts it.
 
 ## B. While relayed
 
@@ -67,6 +84,12 @@ answering node; RV, any signalling path.
 14. If the probe fails, nothing changes; the relayed connection was never
     touched. C waits for the next interval.
 
+A relayed connection may also find a direct pair by itself: with the
+direct path back, Chromium and WebKit moved within 5 seconds and Firefox
+did not in 30 `[verified, S-1]`. Each side therefore classifies again
+whenever its stack selects another pair, and C stops probing as soon as its
+path is `direct`.
+
 Probing happens only while relayed. A connection that is already direct is
 not probed for a "more direct" path; ICE chose the best pair when it was
 opened, and it will choose again on the next reconnect.
@@ -88,6 +111,8 @@ opened, and it will choose again on the next reconnect.
 Two nodes may each host an AI in a group homed on the other. Each then opens
 its own connection as a client of the other, and the two connections live
 side by side; step 11.2 concerns only inbound connections from one device.
+They do not disturb each other because a node offers from sockets of its
+own (`contracts/rendezvous.md` section 5.1).
 
 ## D. With no rendezvous service reachable
 
@@ -107,7 +132,7 @@ side by side; step 11.2 concerns only inbound connections from one device.
 
 | State | Indicator | Extra |
 | --- | --- | --- |
-| path `lan` or `direct` | green, latency | — |
+| path `direct` | green, latency | — |
 | path `relay` | warm colour, "relayed, limited" | terminal button disabled with the reason; "ask the AI to diagnose the network" |
 | reconnecting | blue, breathing | — |
 | home unreachable | red hollow ring | the group is read-only until the home returns |

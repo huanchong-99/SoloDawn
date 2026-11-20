@@ -67,7 +67,7 @@ AI:
 | `allow` | user ids that may direct this AI without confirmation (step 2, R-53) |
 | `approvers` | user ids that may decide its approvals: the owner, plus delegates |
 | `state` | `working`, `waiting`, `dormant`, `takeover`, `paused`, `limited`, `offline` |
-| `path` | path between the AI's host and the home: `local` (same node), `lan`, `direct`, `relay` |
+| `path` | path between the AI's host and the home: `local` (same node), `direct`, `relay` (`flows/connect.md` step 8) |
 | `usage` | what the CLI reports. Always an object; `{}` when nothing was reported |
 
 Optional, AI only: `task` (absent when its state names no task); every key
@@ -172,7 +172,7 @@ What the mock-up badges map to:
 | `thread` | task id, or `null` for a main-line message |
 | `main` | `true` if it also appears in the main line (cards raised from a thread) |
 | `by` | member id, or `"system"` for rows written by the home |
-| `text` | at most 16 KiB of UTF-8; plain text with Markdown code spans; `""` when the message is only a card |
+| `text` | plain text with Markdown code spans; `""` when the message is only a card. Its length is bounded by the size of the row (`contracts/conventions.md` section 4): about 7 KiB of ordinary text, because the row holds it twice, once inside `env` |
 | `mentions` | member ids |
 | `re` | the message this one answers, or `null` |
 | `body` | always an object, fixed after creation; its shape depends on `kind`, and it is `{}` for kinds without one |

@@ -117,18 +117,30 @@ A client tells a success from an error by the presence of `err`, never by
 
 ## 4. Sizes
 
-- A `ctl` message is at most 60 KiB. `[unverified]` This assumes both
-  WebRTC stacks accept SCTP messages of that size; spike S-1 measures it.
-- The payload `p` of an envelope is at most 24 KiB.
-- A row, and an inbox item with the rows it carries, must fit one message.
-  The two numbers above do not yet guarantee it: a message row repeats its
-  text inside `env.p`, where it is escaped a second time, a decided card
-  holds a second envelope in `state.act`, and an inbox item wraps all of
-  that once more. The limits that do guarantee it are set together with the
-  result of spike S-1 (`risks.md` T-14).
+- A `ctl` message is at most 60 KiB `[verified]`: in spike S-1 a pion node
+  and each of the three browser engines exchanged one 61,440-byte text
+  message, over UDP, over ICE-TCP and through the relay.
+- A row is at most 16 KiB as JSON text. The home is the only writer of
+  rows: it answers `bad_request` to a command that would write a larger
+  row, or would make a row grow beyond that (a decided card holds the
+  signed `act`; a task row holds the text of the last message of its
+  thread).
+- That one number is enough for what a home sends. A `rows` or `fetched`
+  frame always has room for a row. An inbox item
+  (`contracts/datachannel.md` section 6) carries at most one message row,
+  one task row and one `cause`, and a `cause` is an envelope that already
+  sits inside the row of the card it decided: with the item's own small
+  envelope that is under 50 KiB.
+- Whoever builds a list fills a frame only as far as it fits, and sends
+  the rest in another frame (`rows`, `devlog`) or as another page
+  (`fetched`).
+- A node that writes free text into a command of its own (the `detail` of
+  a check, of a failure, of a host event) shortens it so that the row
+  fits, and keeps the end of an output.
+- Not settled: a `device` row holds its log entry, and nothing limits the
+  size of an entry yet (`risks.md` Q-23).
 
-The limit of a signalling frame is in `contracts/rendezvous.md` section 2;
-that of a message's `text` in `contracts/rows.md` section 5.
+The limit of a signalling frame is in `contracts/rendezvous.md` section 2.
 
 ## 5. Where each shape is frozen
 

@@ -16,7 +16,7 @@ already live in a task's worktree, so the rule is:
 | --- | --- |
 | a working AI, and `takeover.start` names a task it is assigned | that task session |
 | a working AI, no task named, with an unfinished task | the task session it used last |
-| a working AI with no unfinished task | a new task session: N first sends `task start` with `origin: takeover`, and creates the session as in `flows/task.md` step 6 |
+| a working AI with no unfinished task | a new task session: N first sends `task start` with `origin: takeover`, and creates the session as in `flows/task.md` step 6. Claude Code is then started in the terminal with the new session id. Codex cannot be: it takes no id and does not keep a thread that has had no turn `[verified]`, so N first delivers the task's `assign` turn in structured mode (for a task of origin `takeover` it says only that the owner is about to work with the AI in the terminal) and takes over when it has ended |
 | the secretary | its group session, in the project clone, still read only: the secretary changes no file, in the terminal either (R-21) |
 
 ## B. Taking over
@@ -39,7 +39,9 @@ already live in a task's worktree, so the rule is:
 7. N answers `ok`. B opens the data channel `pty:<g>:<member>` and sends
    `pty.resize`. From here bytes flow both ways untouched.
 8. If the folder has never been trusted in the interactive CLI, the CLI asks
-   O in the terminal. N does not answer for O.
+   O in the terminal. N does not answer for O. Claude Code asks on its first
+   interactive start in each folder, so on the first takeover of every
+   worktree; Codex does not ask `[verified]`.
 
 ## C. During takeover
 
@@ -81,19 +83,21 @@ terminal as well, so there are no changed files to report.
 | the pseudo-terminal process exits by itself (O typed the CLI's exit command) | same as step 12 |
 | N restarts during takeover | on start, a session recorded as `takeover` is treated as handed back from step 14 |
 
-## F. Not verified yet
+## F. What spike S-4 showed, and what is still open
 
-- `[verified]` for Codex: structured to interactive and back on one session
-  id, history intact both ways.
-- `[documented]`, not tested: the same for Claude Code. The test was
-  stopped by the workspace trust prompt. Spike S-4.
-- `[unverified]` That the interactive CLI accepts the same level settings
-  as the structured one (read only for the secretary; sandbox and
-  repository-configuration rules for a task session). Spike S-4.
-- `[unverified]` Starting a brand-new session directly in interactive mode
-  with an id chosen by the node, for both CLIs (section A, third row).
-  Spike S-4. If a CLI cannot, N creates the session with one empty
-  structured start first.
+- `[verified]` On both CLIs, at levels 1, 2 and 3: structured, then the
+  terminal, then structured again on one session id, history intact both
+  ways; the level holds in the terminal; project hooks stay off for Claude
+  Code; the MCP token names the right session in each phase. The commands
+  are in `contracts/drivers.md` 1.3.
+- `[verified]` Level 1 in the terminal: reading and the node's tools work
+  and no file changes. Codex keeps its shell there too (it can read and
+  cannot write), which the secretary's terminal therefore has.
+- `[verified]` A session that does not exist yet can be started in the
+  terminal by Claude Code and not by Codex (section A, third row).
+- `[unverified]` Whether trusting a parent folder covers Claude Code's
+  worktrees below it; `project_doc_max_bytes=0` on Codex's interactive
+  CLI.
 - `[unverified]` Pseudo-terminal behaviour on Windows (ConPTY) with both
   CLIs. Spike S-5.
 
