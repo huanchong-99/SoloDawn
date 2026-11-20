@@ -26,6 +26,20 @@ func readWireExample(name string, v any) error {
 }
 
 func protocolSteps(sc *godog.ScenarioContext) {
+	sc.Step(`^the quota answer example reports (\d+) of (\d+) bytes$`, func(used, limit int64) error {
+		b, err := os.ReadFile("../internal/proto/testdata/rv-quota-answer.json")
+		if err != nil {
+			return err
+		}
+		var q proto.Quota
+		if err := proto.Decode(b, &q); err != nil {
+			return err
+		}
+		if q != (proto.Quota{Type: "quota", Used: used, Limit: limit}) {
+			return fmt.Errorf("unexpected quota: %+v", q)
+		}
+		return nil
+	})
 	approvalSteps(sc)
 	var forwarded []byte
 	sc.Step(`^a peer decodes and re-encodes the enrollment log$`, func() error {

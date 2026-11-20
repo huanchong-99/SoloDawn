@@ -5,7 +5,7 @@ import (
 )
 
 func TestRendezvousListenError(t *testing.T) {
-	err := Rendezvous("bad")
+	err := Rendezvous(RendezvousOptions{Listen: "bad"})
 	if err == nil || err.Error() != "listen tcp: address bad: missing port in address" {
 		t.Fatalf("Rendezvous returned %v", err)
 	}
