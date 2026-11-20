@@ -11,8 +11,8 @@ Feature: Rendezvous signalling
   Scenario: A1.7 A device spends one daily quota across two open TURN allocations
     Given a local TLS rendezvous with a 1 MiB relay quota
     When the browser signs the challenge and allocates a UDP and a TLS relay
-    And each allocation forwards 256 KiB to a peer and 256 KiB back
-    Then neither open allocation forwards another byte in either direction
+    And each allocation sends 256 packets of 984 bytes to a peer and receives as many back
+    Then neither open allocation forwards another packet in either direction, not even an empty one
     When the browser sends {"t":"quota"}
     Then the browser receives {"t":"quota","used":1048576,"limit":1048576}
 

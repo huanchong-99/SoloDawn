@@ -2,20 +2,57 @@ package rendezvous
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
+	"log"
 	"net"
 	"strconv"
+	"strings"
 )
 
 // Options names the endpoints of the standalone service, not a node's handler.
 // ACMEDirectory and ACMECA choose the ACME server of the automatic certificates
 // (Let's Encrypt when empty) and the roots its HTTPS is checked against.
+// RelayPorts is the range of relay allocation ports, DefaultRelayPorts when
+// it is not a valid range.
 type Options struct {
 	Listen, Domain, TurnDomain, Cert, Key string
 	ACMEDirectory, ACMECA                 string
 	UDPPort                               int
+	RelayPorts                            PortRange
 	QuotaMB                               int64
 	NoRelay                               bool
+}
+
+// PortRange is a range of ports, written first-last.
+type PortRange struct{ First, Last int }
+
+// DefaultRelayPorts lies outside the ephemeral port ranges of Linux, macOS
+// and Windows.
+var DefaultRelayPorts = PortRange{20000, 29999}
+
+var errPortRange = errors.New("want first-last, two ports from 1 to 65535 in order")
+
+func (r *PortRange) String() string { return fmt.Sprintf("%d-%d", r.First, r.Last) }
+
+func (r *PortRange) Set(text string) error {
+	first, last, _ := strings.Cut(text, "-")
+	a, errFirst := strconv.Atoi(first)
+	b, errLast := strconv.Atoi(last)
+	if errors.Join(errFirst, errLast) != nil || !(PortRange{a, b}).valid() {
+		return errPortRange
+	}
+	*r = PortRange{a, b}
+	return nil
+}
+
+func (r PortRange) valid() bool { return 0 < r.First && r.First <= r.Last && r.Last <= 65535 }
+
+func (o Options) relayPorts() PortRange {
+	if o.RelayPorts.valid() {
+		return o.RelayPorts
+	}
+	return DefaultRelayPorts
 }
 
 func (o Options) validate() error {
@@ -89,7 +126,7 @@ func (o Options) serveICE(web fs.FS, l net.Listener) error {
 	defer udp.Close()
 	httpEndpoint := newEndpoint(l.Addr())
 	defer httpEndpoint.Close()
-	port := &sharedPort{config: cfg, names: map[string]*endpoint{tlsName(o.Domain): httpEndpoint}}
+	port := &sharedPort{config: cfg, names: map[string]*endpoint{tlsName(o.Domain): httpEndpoint}, conns: map[string]int{}}
 	var turnListener net.Listener
 	if !o.NoRelay {
 		port.turn = newEndpoint(l.Addr())
@@ -101,6 +138,9 @@ func (o Options) serveICE(web fs.FS, l net.Listener) error {
 		return err
 	}
 	defer server.Close()
+	stop := make(chan struct{})
+	defer close(stop)
+	go r.report(stop, log.Printf)
 	go httpServer(r.handler(web)).Serve(httpEndpoint)
 	return port.serve(l)
 }

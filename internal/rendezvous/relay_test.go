@@ -5,9 +5,12 @@ import (
 	"errors"
 	"net"
 	"net/http/httptest"
+	"net/netip"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"testing/fstest"
@@ -29,58 +32,75 @@ func TestRESTLifetime(t *testing.T) {
 				t.Fatalf("ice = %+v; want %+v", got, want)
 			}
 		}
-		const user = "946688400:device"
-		const password = "7ZUC+m0DOLVWukPUPjqFfOz+vDw="
+		// The username carries the device's alias, never its id.
+		const alias = "ePJYJhd6mUJpL1AoUNXQmg"
+		const user = "946688400:" + alias
+		const password = "28hFL6b2YhaUPCt5AFkCzIMsnGg="
 		check("ready", user, password)
 		time.Sleep(123 * time.Second)
-		check("ice", "946688523:device", "ay+89oSv4H/J4DZABOURaF+mr80=")
+		check("ice", "946688523:"+alias, "J2UC04a0O5bBRjiTqrhQTU0jVAA=")
 		// An allocation is opened with the library's verifier: it accepts
 		// until the end of the expiry second and refuses from the next one.
 		// Every other request keeps the same device and key after expiry.
 		allocate := &turn.RequestAttributes{Username: user, Realm: "rv", Method: stun.MethodAllocate}
 		refresh := &turn.RequestAttributes{Username: user, Realm: "rv", Method: stun.MethodRefresh}
-		auth := restAuth("secret")
+		var refused atomic.Int64
+		auth := restAuth("secret", &refused)
 		key := turn.GenerateAuthKey(user, "rv", password)
 		time.Sleep(3478*time.Second - time.Nanosecond)
 		for _, req := range []*turn.RequestAttributes{allocate, refresh} {
-			if id, k, ok := auth(req); !ok || id != "device" || !bytes.Equal(k, key) {
+			if id, k, ok := auth(req); !ok || id != alias || !bytes.Equal(k, key) {
 				t.Fatalf("%v before expiry: %q %x %v", req.Method, id, k, ok)
 			}
 		}
 		time.Sleep(time.Nanosecond)
-		if id, k, ok := auth(allocate); ok || k != nil || id != "" {
-			t.Fatalf("allocate after expiry: %q %x %v", id, k, ok)
+		if id, k, ok := auth(allocate); ok || k != nil || id != "" || refused.Load() != 1 {
+			t.Fatalf("allocate after expiry: %q %x %v, %d refused", id, k, ok, refused.Load())
 		}
-		if id, k, ok := auth(refresh); !ok || id != "device" || !bytes.Equal(k, key) {
-			t.Fatalf("refresh after expiry: %q %x %v", id, k, ok)
+		if id, k, ok := auth(refresh); !ok || id != alias || !bytes.Equal(k, key) || refused.Load() != 1 {
+			t.Fatalf("refresh after expiry: %q %x %v, %d refused", id, k, ok, refused.Load())
 		}
 	})
 }
 
+// Each packet costs its payload and 40 bytes; once the quota is spent nothing
+// passes, an empty packet included. A failed send gives its charge back, on
+// the day it was made.
 func TestDailyLedger(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		l := ledger{limit: 10}
-		if !l.admit("a", 4) || l.admit("a", 7) || !l.admit("a", 6) || l.admit("a", 1) || !l.admit("b", 3) {
+		l := ledger{limit: 100}
+		if !l.admit("a", 4) || l.admit("a", 17) || !l.admit("a", 16) || l.admit("a", 0) || !l.admit("b", 3) {
 			t.Fatal("wrong admissions")
 		}
 		for _, tc := range []struct {
 			id   string
 			used int64
-		}{{"a", 10}, {"b", 3}, {"c", 0}} {
-			if got := l.quota(tc.id); got != (proto.Quota{Type: "quota", Used: tc.used, Limit: 10}) {
+		}{{"a", 100}, {"b", 43}, {"c", 0}} {
+			if got := l.quota(tc.id); got != (proto.Quota{Type: "quota", Used: tc.used, Limit: 100}) {
 				t.Fatal(got)
 			}
 		}
+		day, ok := l.reserve("b", 7)
+		if !ok || l.quota("b").Used != 90 {
+			t.Fatal(ok, l.quota("b"))
+		}
+		l.refund("b", 7, day)
+		if got := l.quota("b").Used; got != 43 {
+			t.Fatal(got)
+		}
+		day, _ = l.reserve("b", 7)
 		time.Sleep(24*time.Hour - time.Nanosecond)
-		if got := l.quota("a").Used; got != 10 {
+		if got := l.quota("a").Used; got != 100 {
 			t.Fatal(got)
 		}
 		time.Sleep(time.Nanosecond)
 		if got := l.quota("a").Used; got != 0 {
 			t.Fatal(got)
 		}
-		if !l.admit("b", 10) || l.quota("b").Used != 10 {
-			t.Fatal("budget did not reset")
+		l.admit("b", 10)
+		l.refund("b", 7, day) // yesterday's charge
+		if got := l.quota("b").Used; got != 50 {
+			t.Fatal(got)
 		}
 	})
 }
@@ -95,45 +115,45 @@ func udpLocal(t *testing.T) net.PacketConn {
 	return c
 }
 
+func testGenerator(l *ledger, bind net.IP, public ...net.IP) *generator {
+	return newGenerator(public, bind, map[netip.Addr]bool{}, DefaultRelayPorts, l, new(atomic.Int64))
+}
+
 func TestMeteredSocket(t *testing.T) {
-	l := ledger{limit: 5}
-	g := generator{ledger: &l, bind: net.IPv4(127, 0, 0, 1), public: []net.IP{net.IPv4(127, 0, 0, 1)}}
+	l := ledger{limit: 85} // "hi" and "yes": 2 + 40 + 3 + 40
+	g := testGenerator(&l, net.IPv4(127, 0, 0, 1), net.IPv4(127, 0, 0, 1))
 	raw, endpoint, err := g.AllocatePacketConn(turn.AllocateListenerConfig{Network: "udp4", UserID: "device"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer raw.Close()
 	peer := udpLocal(t)
-	readOne := func(c net.PacketConn, want string) {
+	nothing := func(c net.PacketConn, b []byte) {
 		t.Helper()
-		c.SetReadDeadline(time.Now().Add(time.Second))
-		var b [32]byte
-		n, _, err := c.ReadFrom(b[:])
-		if err != nil || string(b[:n]) != want {
-			t.Fatalf("read %q, %v; want %q", b[:n], err, want)
+		c.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+		if n, src, err := c.ReadFrom(b); n != 0 || src != nil || !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("read %d from %v, %v; want nothing", n, src, err)
 		}
 	}
 	// An unpermitted packet queued before the permission must not spend quota.
 	peer.WriteTo([]byte("bad"), endpoint)
-	raw.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
 	var b [32]byte
-	if n, src, err := raw.ReadFrom(b[:]); n != 0 || src != nil || err == nil {
-		t.Fatalf("unpermitted packet: %d %v %v", n, src, err)
-	}
+	nothing(raw, b[:])
 	if got := l.quota("device").Used; got != 0 {
 		t.Fatal(got)
 	}
 	ip := peer.LocalAddr().(*net.UDPAddr).IP
-	g.events().OnPermissionCreated(nil, nil, "", "", "", endpoint, ip)
-	// Never forward or charge a prefix when Pion's destination buffer is smaller.
+	g.events().OnPermissionCreated(peer.LocalAddr(), nil, "", "", "", endpoint, ip)
+	// Never forward or charge a prefix when Pion's destination buffer is
+	// smaller; the socket reads one byte more than that buffer.
 	peer.WriteTo([]byte("large"), endpoint)
 	peer.WriteTo([]byte("hi"), endpoint)
 	raw.SetReadDeadline(time.Now().Add(time.Second))
 	if n, _, err := raw.ReadFrom(b[:2]); err != nil || n != 2 || string(b[:n]) != "hi" {
 		t.Fatal(n, err, b[:n])
 	}
-	if got := l.quota("device").Used; got != 2 {
-		t.Fatal(got)
+	if got, size := l.quota("device").Used, len(raw.(*allocation).packet); got != 42 || size != 3 {
+		t.Fatal(got, size)
 	}
 	// A failed send is not charged.
 	if n, err := raw.WriteTo([]byte("x"), &net.UDPAddr{IP: ip, Port: -1}); n != 0 || !errors.Is(err, syscall.EINVAL) {
@@ -141,11 +161,21 @@ func TestMeteredSocket(t *testing.T) {
 	}
 	raw.WriteTo([]byte("drop"), peer.LocalAddr())
 	raw.WriteTo([]byte("yes"), peer.LocalAddr())
-	readOne(peer, "yes")
-	if got := l.quota("device").Used; got != 5 {
+	peer.SetReadDeadline(time.Now().Add(time.Second))
+	if n, _, err := peer.ReadFrom(b[:]); err != nil || string(b[:n]) != "yes" {
+		t.Fatal(n, err)
+	}
+	if got := l.quota("device").Used; got != 85 {
 		t.Fatal(got)
 	}
-	g.events().OnPermissionDeleted(nil, nil, "", "", "", endpoint, ip)
+	// With the quota spent, empty packets pass in neither direction.
+	if n, err := raw.WriteTo(nil, peer.LocalAddr()); n != 0 || err != nil {
+		t.Fatal(n, err)
+	}
+	nothing(peer, b[:])
+	peer.WriteTo(nil, endpoint)
+	nothing(raw, b[:])
+	g.events().OnPermissionDeleted(peer.LocalAddr(), nil, "", "", "", endpoint, ip)
 	if _, ok := g.permissions.Load(permission{endpoint, ip.String()}); ok {
 		t.Fatal("permission not removed")
 	}
@@ -153,7 +183,7 @@ func TestMeteredSocket(t *testing.T) {
 
 func TestGenerator(t *testing.T) {
 	v4, v6 := net.ParseIP("192.0.2.1"), net.ParseIP("2001:db8::1")
-	g := generator{public: []net.IP{v4, v6}}
+	g := testGenerator(&ledger{}, net.IPv6unspecified, v4, v6)
 	if !g.publicIP("udp4").Equal(v4) || !g.publicIP("udp6").Equal(v6) {
 		t.Fatal("wrong public address family")
 	}
@@ -171,8 +201,9 @@ func TestGenerator(t *testing.T) {
 		t.Fatal(got)
 	}
 	g.public = []net.IP{v4}
-	if c, a, err := g.AllocatePacketConn(turn.AllocateListenerConfig{Network: "udp4", RequestedPort: -1}); c != nil || a != nil || err == nil || err.Error() != "listen udp4: address -1: invalid port" {
-		t.Fatalf("invalid port: %v, %v, %v", c, a, err)
+	g.portRange = PortRange{0, -1}
+	if c, a, err := g.AllocatePacketConn(turn.AllocateListenerConfig{Network: "udp4"}); c != nil || a != nil || err != errNoPort {
+		t.Fatalf("no relay ports: %v, %v, %v", c, a, err)
 	}
 	if c, a, err := g.AllocateListener(turn.AllocateListenerConfig{}); c != nil || a != nil || !errors.Is(err, errTransport) {
 		t.Fatal(c, a, err)
@@ -180,15 +211,42 @@ func TestGenerator(t *testing.T) {
 	if c, err := g.AllocateConn(turn.AllocateConnConfig{}); c != nil || !errors.Is(err, errTransport) {
 		t.Fatal(c, err)
 	}
+}
+
+// A bound address serves the families it can bind: "::" both, any other its
+// own. A family it cannot serve has no relay address, whatever DNS says.
+func TestServedFamilies(t *testing.T) {
+	v4, v6 := net.ParseIP("192.0.2.1"), net.ParseIP("2001:db8::1")
+	for _, tc := range []struct {
+		bind     string
+		ipv4, v6 bool
+	}{{"0.0.0.0", true, false}, {"192.0.2.1", true, false}, {"::", true, true}, {"2001:db8::1", false, true}} {
+		g := testGenerator(&ledger{}, net.ParseIP(tc.bind), v4, v6)
+		if (g.publicIP("udp4") != nil) != tc.ipv4 || (g.publicIP("udp6") != nil) != tc.v6 {
+			t.Errorf("bound to %s: IPv4 %v, IPv6 %v", tc.bind, g.publicIP("udp4"), g.publicIP("udp6"))
+		}
+	}
+}
+
+// Peers on the relay's private network and in special-purpose ranges are
+// refused. A loopback-only relay, used in tests, allows loopback peers only.
+func TestPeerFilter(t *testing.T) {
+	g := testGenerator(&ledger{}, nil)
+	src := &net.UDPAddr{IP: net.IPv4(198, 51, 100, 9), Port: 1}
 	for _, tc := range []struct {
 		bind, peer string
 		want       bool
 	}{
 		{"0.0.0.0", "8.8.8.8", true}, {"0.0.0.0", "10.0.0.1", false}, {"0.0.0.0", "127.0.0.1", false}, {"::", "fe80::1", false}, {"127.0.0.1", "127.0.0.1", true}, {"127.0.0.1", "8.8.8.8", false},
 		{"::", "100.64.0.0", false}, {"::", "100.127.255.255", false}, {"::", "100.128.0.0", true},
+		{"::", "0.1.2.3", false}, {"::", "192.0.0.9", false}, {"::", "198.18.0.1", false}, {"::", "198.19.255.255", false}, {"::", "198.20.0.0", true},
+		{"::", "240.0.0.1", false}, {"::", "255.255.255.254", false}, {"::", "192.0.2.1", false}, {"::", "198.51.100.1", false}, {"::", "203.0.113.1", false},
+		{"::", "64:ff9b::808:808", false}, {"::", "64:ff9b:1::1", false}, {"::", "::808:808", false}, {"::", "2002:808:808::1", false},
+		{"::", "2001:0:4136:e378::1", false}, {"::", "2001:1::1", true}, {"::", "fec0::1", false}, {"::", "2001:db8::1", false}, {"::", "2606:4700::1111", true},
+		{"::", "::ffff:8.8.8.8", true}, {"::", "::ffff:10.0.0.1", false}, {"::", "::ffff:0:808:808", false},
 	} {
 		g.bind = net.ParseIP(tc.bind)
-		if got := g.permitPeer(nil, net.ParseIP(tc.peer)); got != tc.want {
+		if got := g.permitPeer(src, net.ParseIP(tc.peer)); got != tc.want {
 			t.Errorf("%s to %s = %v", tc.bind, tc.peer, got)
 		}
 	}

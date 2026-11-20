@@ -70,7 +70,9 @@ func after(s *server, d time.Duration) map[*client]bool {
 	return nil
 }
 
-func newTestClient() *client { return &client{rooms: make(map[string]*room)} }
+func newTestClient() *client {
+	return &client{rooms: make(map[string]*room), queued: make(map[string]int)}
+}
 
 func join(s *server, c *client) {
 	s.mu.Lock()

@@ -31,6 +31,8 @@ func TestRun(t *testing.T) {
 	signalling address (TLS :443 or local HTTP 127.0.0.1:8080)
   -no-relay
 	offer STUN but no relay
+  -relay-ports first-last
+	relay allocation UDP ports, first-last (default 20000-29999)
   -relay-quota-mb int
 	per-device UTC daily limit in MiB (default 50)
   -turn-domain string
@@ -182,8 +184,11 @@ func TestRelayFlags(t *testing.T) {
 		want node.RendezvousOptions
 	}{
 		{nil, node.RendezvousOptions{UDPPort: 3478, QuotaMB: 50}},
-		{strings.Fields("--listen :443 --domain a --turn-domain b --cert c --key d --udp-port 123 --relay-quota-mb 9 --no-relay --acme-directory e --acme-ca f"), node.RendezvousOptions{Listen: ":443", Domain: "a", TurnDomain: "b", Cert: "c", Key: "d", ACMEDirectory: "e", ACMECA: "f", UDPPort: 123, QuotaMB: 9, NoRelay: true}},
+		{strings.Fields("--listen :443 --domain a --turn-domain b --cert c --key d --udp-port 123 --relay-quota-mb 9 --no-relay --acme-directory e --acme-ca f --relay-ports 30000-30010"), node.RendezvousOptions{Listen: ":443", Domain: "a", TurnDomain: "b", Cert: "c", Key: "d", ACMEDirectory: "e", ACMECA: "f", UDPPort: 123, QuotaMB: 9, NoRelay: true}},
 	} {
+		if len(tc.args) != 0 {
+			tc.want.RelayPorts.First, tc.want.RelayPorts.Last = 30000, 30010
+		}
 		var stderr bytes.Buffer
 		code := rendezvous(tc.args, &stderr, func(got node.RendezvousOptions) error {
 			if got != tc.want {

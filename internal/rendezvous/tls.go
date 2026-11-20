@@ -121,6 +121,14 @@ func (c idleStream) Read(p []byte) (int, error) {
 	return c.Conn.Read(p)
 }
 
+// A client that stops reading must not hold a relay write for ever.
+func (c idleStream) Write(p []byte) (int, error) {
+	if err := c.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		return 0, err
+	}
+	return c.Conn.Write(p)
+}
+
 // httpServer serves HTTPS on the shared port and plain HTTP with --listen
 // alone: a request's headers within 10 seconds, a keep-alive connection closed
 // after 2 minutes idle. An upgraded WebSocket belongs to its handler and is
@@ -130,12 +138,17 @@ func httpServer(h http.Handler) *http.Server {
 }
 
 // sharedPort hands each TLS connection on the signalling port to HTTPS or
-// TURN: by ALPN stun.turn, otherwise by server name.
+// TURN: by ALPN stun.turn, otherwise by server name. A source, an IPv4
+// address or an IPv6 /64, has at most maxConnsPerIP connections open on it.
 type sharedPort struct {
 	config *tls.Config
 	names  map[string]*endpoint
 	turn   *endpoint // nil without the relay
+	mu     sync.Mutex
+	conns  map[string]int // open connections by source IP
 }
+
+const maxConnsPerIP = 256
 
 func (p *sharedPort) route(conn net.Conn) {
 	c := tls.Server(conn, p.config)
@@ -157,12 +170,55 @@ func (p *sharedPort) endpoint(state tls.ConnectionState) *endpoint {
 	return p.names[tlsName(state.ServerName)]
 }
 
+// serve accepts until the listener is closed. After any other error it waits,
+// from 5 ms doubling to 1 s, and goes on, as net/http does.
 func (p *sharedPort) serve(listener net.Listener) error {
+	var delay time.Duration
 	for {
 		c, err := listener.Accept()
-		if err != nil {
+		if errors.Is(err, net.ErrClosed) {
 			return err
 		}
-		go p.route(c)
+		if err != nil {
+			delay = min(max(2*delay, 5*time.Millisecond), time.Second)
+			time.Sleep(delay)
+			continue
+		}
+		delay = 0
+		p.admit(c)
 	}
+}
+
+// admit routes a connection unless its source already has maxConnsPerIP.
+func (p *sharedPort) admit(c net.Conn) {
+	ip := source(c.RemoteAddr())
+	p.mu.Lock()
+	full := p.conns[ip] == maxConnsPerIP
+	if !full {
+		p.conns[ip]++
+	}
+	p.mu.Unlock()
+	if full {
+		c.Close()
+		return
+	}
+	go p.route(&counted{Conn: c, done: func() { p.closed(ip) }})
+}
+
+func (p *sharedPort) closed(ip string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	decrement(p.conns, ip)
+}
+
+// counted calls done once, when the connection is first closed.
+type counted struct {
+	net.Conn
+	once sync.Once
+	done func()
+}
+
+func (c *counted) Close() error {
+	c.once.Do(c.done)
+	return c.Conn.Close()
 }
