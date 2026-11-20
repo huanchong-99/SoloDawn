@@ -6,6 +6,9 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+// A batch holds the candidates of one (sender, conn) until the remote
+// description is set, and applies each distinct candidate exactly once
+// (contracts/rendezvous.md section 2.3, "Trickle").
 type candidate struct{ mid, text string }
 type batch struct {
 	seen    map[candidate]bool
@@ -30,10 +33,8 @@ func (p *Peer) receiveCandidate(k link, data []byte, now int64) error {
 	}
 	v := candidate{i.MID, i.Candidate}
 	if c := p.live[k]; c != nil {
-		if c.isClosed() {
-			return nil
-		}
-		return c.candidates.receive(v, c.pc.AddICECandidate)
+		c.candidates.receive(v, c.addCandidate)
+		return nil
 	}
 	return p.hold(k, v, i.Timestamp, now)
 }
@@ -51,32 +52,27 @@ func (p *Peer) hold(k link, v candidate, ts, now int64) error {
 		p.early[k] = b
 	}
 	b.expires = max(b.expires, ts+120000)
-	return b.receive(v, nil)
+	b.receive(v, nil)
+	return nil
 }
-func (b *batch) receive(v candidate, add func(webrtc.ICECandidateInit) error) error {
+func (b *batch) receive(v candidate, add func(webrtc.ICECandidateInit)) {
 	if b.seen[v] {
-		return nil
+		return
 	}
 	b.seen[v] = true
 	if b.ready {
-		return v.add(add)
+		v.add(add)
+		return
 	}
 	b.pending = append(b.pending, v)
-	return nil
 }
-func (b *batch) flush(add func(webrtc.ICECandidateInit) error) error {
+func (b *batch) flush(add func(webrtc.ICECandidateInit)) {
 	b.ready = true
 	for _, v := range b.pending {
-		if err := v.add(add); err != nil {
-			return err
-		}
+		v.add(add)
 	}
 	b.pending = nil
-	return nil
 }
-func (v candidate) add(f func(webrtc.ICECandidateInit) error) error {
-	if err := f(webrtc.ICECandidateInit{Candidate: v.text, SDPMid: &v.mid}); err != nil {
-		return identity.BadRequest
-	}
-	return nil
+func (v candidate) add(f func(webrtc.ICECandidateInit)) {
+	f(webrtc.ICECandidateInit{Candidate: v.text, SDPMid: &v.mid})
 }

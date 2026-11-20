@@ -147,3 +147,37 @@ func TestFanoutEveryPath(t *testing.T) {
 	eq(t, broadcast(t.Context(), paths[:1], "", proto.Envelope{}).Error(), "first")
 	eq(t, broadcast(t.Context(), nil, "", proto.Envelope{}).Error(), "no signalling path")
 }
+
+// A path ends when its connection ends or the node fails at something other
+// than an envelope check; a refused ICE lifetime ends it too.
+func TestPathEnds(t *testing.T) {
+	_, err := Dial(t.Context(), "ws://127.0.0.1:1/rv", testKey(t))
+	eq(t, err == nil, false)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ws, err := websocket.Accept(w, r, nil); err == nil {
+			ws.CloseNow()
+		}
+	}))
+	t.Cleanup(srv.Close)
+	_, err = Dial(t.Context(), "ws"+strings.TrimPrefix(srv.URL, "http"), testKey(t))
+	eq(t, err == nil, false)
+
+	p, ws, err := testPath(t, challenge, ready)
+	check(t, err)
+	f := newPair(t)
+	eq(t, p.handle(t.Context(), "ice", []byte(`{"t":"ice","ice":[],"ttl":0}`), f.b, nil, nil).Error(), "invalid ICE credential lifetime")
+	f.b.paths = func(string) []Route { return []Route{{ICE: []proto.ICEServer{{URLs: []string{"bogus"}}}}} }
+	offer := f.a.sign(proto.Offer{SignalHeader: f.a.header(link{f.b.key.ID(), randomID()}, "offer"), SDP: "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n"})
+	err = p.from(t.Context(), f.b, encode(frame(offer)))
+	var code identity.Code
+	eq(t, err != nil && !errors.As(err, &code), true)
+	done := make(chan error, 1)
+	go func() { done <- p.Serve(t.Context(), f.b, nil) }()
+	check(t, ws.CloseNow())
+	eq(t, recv(t, done) == nil, false)
+}
+func TestMustStopsOnError(t *testing.T) {
+	must(nil)
+	defer func() { eq(t, recover(), any(errors.New("mistake"))) }()
+	must(errors.New("mistake"))
+}

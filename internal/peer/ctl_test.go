@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
+	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -49,6 +50,7 @@ func TestCtlSizeAndReplyRouting(t *testing.T) {
 	n := f.open(t, 0)
 	payload := map[string]string{"t": "push", "data": ""}
 	payload["data"] = strings.Repeat("a", 61440-len(encode(payload)))
+	oversize := map[string]string{"t": "push", "data": payload["data"] + "a"}
 	check(t, n.client.Send(payload))
 	data, err := n.server.Read(t.Context())
 	check(t, err)
@@ -61,6 +63,19 @@ func TestCtlSizeAndReplyRouting(t *testing.T) {
 	data, err = n.server.Read(t.Context())
 	check(t, err)
 	eq(t, string(data), `{"t":"one","id":1}`)
+	_, err = n.client.Request(t.Context(), func(int64) any { return oversize })
+	eq(t, err.Error(), "ctl frame exceeds 60 KiB")
+	waiting := make(chan error, 1)
+	go func() {
+		_, err := n.client.Request(t.Context(), func(id int64) any { return proto.Request{Type: "two", ID: id} })
+		waiting <- err
+	}()
+	_, err = n.server.Read(t.Context())
+	check(t, err)
+	// A binary message on ctl ends the connection, and with it the request.
+	check(t, n.server.dc.Send([]byte("binary")))
+	eq(t, recv(t, waiting), io.EOF)
+	recv(t, n.server.Done())
 }
 func TestBackoffSequenceAndWake(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -80,30 +95,10 @@ func TestBackoffSequenceAndWake(t *testing.T) {
 		eq(t, backoff(ctx, nil, delay), time.Duration(0))
 	})
 }
-func TestPresenceRestartsUnansweredNegotiationImmediately(t *testing.T) {
-	f := newPair(t)
-	wake := make(chan struct{}, 1)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	done := make(chan struct{})
-	go func() { f.a.Connect(ctx, f.b.key.ID(), wake, func(*Connection) {}); close(done) }()
-	a := recv(t, f.aMail["offer"])
-	wake <- struct{}{}
-	b := recv(t, f.aMail["offer"])
-	var x, y proto.Offer
-	check(t, proto.Decode([]byte(a.Payload), &x))
-	check(t, proto.Decode([]byte(b.Payload), &y))
-	if x.Conn == y.Conn {
-		t.Fatal("new attempt reused the old conn")
-	}
-	cancel()
-	recv(t, done)
-}
-
 func TestNoRouteFailsBeforeOpeningSession(t *testing.T) {
 	f := newPair(t)
 	f.a.paths = func(string) []Route { return nil }
-	eq(t, f.a.attempt(t.Context(), f.b.key.ID(), nil, func(*Connection) { t.Error("called session with no route") }), failed)
+	eq(t, f.a.attempt(t.Context(), f.b.key.ID(), func(*Connection) { t.Error("called session with no route") }), false)
 }
 
 func TestRejectedCtlChannels(t *testing.T) {
@@ -134,6 +129,13 @@ func TestRejectedCtlChannels(t *testing.T) {
 		}
 		eq(t, c.dc, (*webrtc.DataChannel)(nil))
 	}
+	c := &Connection{close: func() error { return nil }}
+	for _, want := range []webrtc.DataChannelState{webrtc.DataChannelStateConnecting, webrtc.DataChannelStateClosing} {
+		dc, err := pc.CreateDataChannel("ctl", nil)
+		check(t, err)
+		c.acceptCtl(dc, func(*Connection) {})
+		eq(t, dc.ReadyState(), want)
+	}
 }
 
 func TestReconnectAfterOpen(t *testing.T) {
@@ -155,13 +157,8 @@ func TestReconnectAfterOpen(t *testing.T) {
 			node        *Peer
 			mail, reply mailbox
 		}{{f.a, f.bMail, f.aMail}, {f.b, f.aMail, f.bMail}} {
-			for {
-				e, i := hostUDP(t, side.mail)
-				if i.Conn == o.Conn {
-					deliver(t, side.node, side.reply.route(), e)
-					break
-				}
-			}
+			e, _ := hostUDP(t, side.mail, o.Conn)
+			deliver(t, side.node, side.reply.route(), e)
 		}
 		n := negotiation{recv(t, opened), recv(t, f.opened), offer, answer}
 		n.info(t)
@@ -171,4 +168,64 @@ func TestReconnectAfterOpen(t *testing.T) {
 	}
 	cancel()
 	recv(t, done)
+}
+
+func TestPathClassification(t *testing.T) {
+	host, prflx, srflx, relay := webrtc.ICECandidateTypeHost, webrtc.ICECandidateTypePrflx, webrtc.ICECandidateTypeSrflx, webrtc.ICECandidateTypeRelay
+	for _, tc := range []struct {
+		local, remote webrtc.ICECandidateType
+		want          string
+	}{{relay, host, "relay"}, {host, relay, "relay"}, {relay, relay, "relay"}, {host, prflx, "direct"}, {srflx, host, "direct"}} {
+		eq(t, classify(tc.local, tc.remote), tc.want)
+	}
+	c := &Connection{pathChanged: make(chan struct{}, 1)}
+	c.reclassify()
+	c.reclassify()
+	eq(t, len(c.PathChanged()), 1)
+}
+
+// Each remote candidate applied after ctl opened signals PathChanged.
+func TestPathChangedOnCandidate(t *testing.T) {
+	f := newPair(t)
+	n := f.open(t, 0)
+	recv(t, n.client.PathChanged())
+	k := offerLink(t, f.b.key.ID(), n.offer)
+	for {
+		env := recv(t, f.bMail["ice"])
+		var c proto.ICECandidate
+		check(t, proto.Decode([]byte(env.Payload), &c))
+		if c.Conn == k.conn && strings.Contains(c.Candidate, " tcp ") {
+			deliver(t, f.a, f.aMail.route(), env)
+			break
+		}
+	}
+	recv(t, n.client.PathChanged())
+	eq(t, n.client.Path(), "direct")
+}
+
+func TestListenFailures(t *testing.T) {
+	_, err := Listen(-1, 0)
+	eq(t, err == nil, false)
+	_, err = listen(0, "127.0.0.1:-1", loopbackEngine(), ice.UDPMuxFromPortWithLoopback(), ice.UDPMuxFromPortWithIPFilter(loopback))
+	eq(t, err == nil, false)
+}
+
+// Ending the caller's context while the offer is being sent ends the attempt.
+func TestOfferEndsWithItsContext(t *testing.T) {
+	f := newPair(t)
+	sending := make(chan struct{}, 1)
+	f.a.paths = func(string) []Route {
+		return []Route{{Send: func(ctx context.Context, _ string, _ proto.Envelope) error {
+			select {
+			case sending <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}}}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() { <-sending; cancel() }()
+	_, err := f.a.Offer(ctx, f.b.key.ID())
+	eq(t, err, context.Canceled)
 }

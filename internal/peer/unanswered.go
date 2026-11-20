@@ -2,11 +2,11 @@ package peer
 
 import "time"
 
-// pending is set only on an outbound offer, under the peer lock.
+// answerWait is set only on an offered connection, under the peer lock, until
+// its answer is applied (flows/connect.md step 15).
 type answerWait struct {
-	until time.Time
 	timer *time.Timer
-	paths map[string]bool
+	paths map[string]bool // the paths that have not reported the target offline
 }
 
 func (p *Peer) waitForAnswer(c *Connection, paths []Route) {
@@ -14,9 +14,8 @@ func (p *Peer) waitForAnswer(c *Connection, paths []Route) {
 	for _, path := range paths {
 		w.paths[path.ID] = true
 	}
+	w.timer = time.AfterFunc(10*time.Second, func() { p.retirePending(c) })
 	c.pending = w
-	w.until = time.Now().Add(10 * time.Second)
-	w.timer = time.AfterFunc(time.Until(w.until), func() { p.retirePending(c) })
 }
 
 func (c *Connection) endWait() {
@@ -26,30 +25,25 @@ func (c *Connection) endWait() {
 	}
 }
 
-func (p *Peer) retirePending(c *Connection) bool {
+func (p *Peer) retirePending(c *Connection) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if c.pending == nil {
-		return false
+	if c.pending != nil {
+		c.Close()
 	}
-	c.Close()
-	return true
 }
 
-// Offline records the target-only report from this particular path.
+// Offline records that the path pathID reported target offline. An offer
+// still unanswered when every path it was sent on did so is retired at once.
 func (p *Peer) Offline(pathID, target string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, c := range p.live {
 		if c.Device == target && c.pending != nil {
-			c.pending.offline(c, pathID)
+			delete(c.pending.paths, pathID)
+			if len(c.pending.paths) == 0 {
+				c.Close()
+			}
 		}
-	}
-}
-
-func (w *answerWait) offline(c *Connection, pathID string) {
-	delete(w.paths, pathID)
-	if len(w.paths) == 0 {
-		c.Close()
 	}
 }

@@ -15,25 +15,26 @@ import (
 const ctlLimit = 61_440 // 60 KiB
 
 type Connection struct {
-	Device     string
-	pc         *webrtc.PeerConnection
-	ctx        context.Context
-	close      func() error
-	ready      chan struct{}
-	incoming   chan json.RawMessage
-	mu         sync.Mutex
-	dc         *webrtc.DataChannel
-	next       int64
-	waiting    map[int64]chan json.RawMessage
-	answer     *proto.Envelope
-	pending    *answerWait
-	candidates *batch
+	Device      string
+	pc          *webrtc.PeerConnection
+	ctx         context.Context
+	close       func() error
+	ready       chan struct{}
+	pathChanged chan struct{}
+	incoming    chan json.RawMessage
+	mu          sync.Mutex
+	dc          *webrtc.DataChannel
+	next        int64
+	waiting     map[int64]chan json.RawMessage
+	answer      *proto.Envelope
+	pending     *answerWait
+	candidates  *batch
 }
 
 func newConnection(pc *webrtc.PeerConnection, device string) *Connection {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Connection{
-		Device: device, pc: pc, ctx: ctx, ready: make(chan struct{}),
+		Device: device, pc: pc, ctx: ctx, ready: make(chan struct{}), pathChanged: make(chan struct{}, 1),
 		incoming: make(chan json.RawMessage, 16), waiting: make(map[int64]chan json.RawMessage),
 		close: sync.OnceValue(func() error { cancel(); return pc.Close() }),
 	}

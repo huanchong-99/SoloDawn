@@ -38,3 +38,16 @@ func TestMigrateOffersAndExpireStrictlyAfterWindow(t *testing.T) {
 		}
 	}
 }
+
+func TestRememberOfferFailures(t *testing.T) {
+	s := openDB(t, ":memory:")
+	_, err := s.db.Exec("CREATE TRIGGER refuse BEFORE INSERT ON processed_offer BEGIN SELECT RAISE(ABORT, 'refused'); END")
+	check(t, err)
+	first, err := s.RememberOffer("a", "1", 0, 0)
+	equal(t, first, false)
+	equal(t, err.Error(), "constraint failed: refused (1811)")
+	_, err = s.db.Exec("DROP TABLE processed_offer")
+	check(t, err)
+	_, err = s.RememberOffer("a", "1", 0, 0)
+	equal(t, err.Error(), "SQL logic error: no such table: processed_offer (1)")
+}

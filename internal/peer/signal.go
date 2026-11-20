@@ -142,16 +142,12 @@ func (p *Peer) firstOffer(k link, o proto.Offer, now int64) (*proto.Envelope, er
 	if err != nil || !first {
 		return nil, err
 	}
-	if err := p.closeInbound(k.device); err != nil {
-		return nil, err
+	if old := p.slot[k.device]; old != nil {
+		// Close returns once pion has released the old mux registration; its
+		// error concerns only the old connection.
+		old.Close()
 	}
 	return p.answer(k, desc)
-}
-func (p *Peer) closeInbound(device string) error {
-	if old := p.slot[device]; old != nil {
-		return old.Close()
-	}
-	return nil
 }
 func (p *Peer) answer(k link, desc webrtc.SessionDescription) (*proto.Envelope, error) {
 	c, err := p.create(k, p.sockets.answer)
@@ -189,9 +185,6 @@ func (p *Peer) receiveAnswer(k link, data []byte) error {
 	if c == nil || c.pending == nil || c.isClosed() {
 		return nil
 	}
-	if !time.Now().Before(c.pending.until) {
-		return c.Close()
-	}
 	return c.remote(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: a.SDP})
 }
 func (c *Connection) remote(desc webrtc.SessionDescription) error {
@@ -199,7 +192,14 @@ func (c *Connection) remote(desc webrtc.SessionDescription) error {
 		return identity.BadRequest
 	}
 	c.endWait()
-	return c.candidates.flush(c.pc.AddICECandidate)
+	c.candidates.flush(c.addCandidate)
+	return nil
+}
+
+// addCandidate applies a remote candidate; one the stack refuses is dropped.
+func (c *Connection) addCandidate(i webrtc.ICECandidateInit) {
+	c.pc.AddICECandidate(i)
+	c.reclassify()
 }
 
 // Offer starts gathering without waiting for it to finish. Ready signals when
@@ -211,6 +211,8 @@ func (p *Peer) Offer(ctx context.Context, device string) (*Connection, error) {
 	if err != nil {
 		return nil, err
 	}
+	// ctx ends the attempt while the offer is being sent; the copies on slower
+	// paths go on for as long as the connection lives.
 	stop := context.AfterFunc(ctx, func() { c.Close() })
 	defer stop()
 	if err := broadcast(c.ctx, paths, device, offer); err != nil {
@@ -226,20 +228,13 @@ func (p *Peer) makeOffer(k link, paths []Route) (*Connection, proto.Envelope, er
 	if err != nil {
 		return nil, proto.Envelope{}, err
 	}
+	// A new connection refuses none of these.
 	dc, err := c.pc.CreateDataChannel("ctl", nil)
-	if err != nil {
-		c.Close()
-		return nil, proto.Envelope{}, err
-	}
+	must(err)
 	c.bind(dc, func(*Connection) {})
 	offer, err := c.pc.CreateOffer(nil)
-	if err == nil {
-		err = c.pc.SetLocalDescription(offer)
-	}
-	if err != nil {
-		c.Close()
-		return nil, proto.Envelope{}, err
-	}
+	must(err)
+	must(c.pc.SetLocalDescription(offer))
 	env := p.sign(proto.Offer{SignalHeader: p.header(k, "offer"), SDP: offer.SDP})
 	p.waitForAnswer(c, paths)
 	return c, env, nil
@@ -259,6 +254,7 @@ func (p *Peer) create(k link, api *webrtc.API) (*Connection, error) {
 			_ = broadcast(c.ctx, p.paths(k.device), k.device, p.sign(msg))
 		}
 	})
+	pc.SCTP().Transport().ICETransport().OnSelectedCandidatePairChange(func(*webrtc.ICECandidatePair) { c.reclassify() })
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
 			go c.Close()

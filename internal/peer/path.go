@@ -22,10 +22,15 @@ func encode(v any) []byte {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
+	must(enc.Encode(v))
+	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'})
+}
+
+// must stops the node on an error that only a programming mistake can cause.
+func must(err error) {
+	if err != nil {
 		panic(err)
 	}
-	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'})
 }
 
 // Route is one applicable signalling path (a WebSocket or node-local delivery).
@@ -64,10 +69,8 @@ func (p *Path) handshake(ctx context.Context, key identity.Key) error {
 	if err := p.expect(ctx, "challenge", &challenge); err != nil {
 		return err
 	}
-	auth := proto.Auth{Type: "auth", Key: key.ID(), Signature: key.SignChallenge(challenge.Nonce)}
-	if err := p.Write(ctx, auth); err != nil {
-		return err
-	}
+	// A write that fails leaves the connection unusable: reading ready reports it.
+	p.Write(ctx, proto.Auth{Type: "auth", Key: key.ID(), Signature: key.SignChallenge(challenge.Nonce)})
 	if err := p.expect(ctx, "ready", &p.config); err != nil {
 		return err
 	}
