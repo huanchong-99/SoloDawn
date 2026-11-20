@@ -153,7 +153,11 @@ opened, and it will again on the next reconnect.
       still unanswered, as a path that reported the target offline: an
       answer comes back on the path that delivered the offer.
     - A browser ends a connection whose `hello` the node refuses or does
-      not answer within 10 seconds; it is then lost like any other.
+      not answer within 10 seconds; it is then lost like any other. But a
+      `hello` refused with `version` or `forbidden` ends the attempts: the
+      browser offers that node nothing more, and tells the page the code.
+      Offering again cannot change either answer; the person has to update
+      or pair again first.
     - A browser opens a signalling path that closed again by the same
       rule: 1, 2, 4 … 60 seconds, from 1 second again after a path that
       stayed signed in for 60 seconds, and at once when its own network

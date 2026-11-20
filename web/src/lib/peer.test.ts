@@ -753,6 +753,7 @@ describe('hello', () => {
     pc.ctl.deliver({ re: 1, err: { code: 'version', msg: 'too new' } });
     await expect(greeted).rejects.toThrow(new Error('hello refused: version'));
     expect(pc.closes).toBe(1);
+    expect(conn.refused).toBe('version');
   });
 
   it('gives up a connection whose welcome it cannot read', async () => {
@@ -848,17 +849,61 @@ describe('a peer', () => {
     expect(pcs()).toHaveLength(2);
   });
 
-  it('retries a connection whose hello fails', async () => {
-    await attempting();
+  /** The node answers the attempt's offer and refuses its hello. */
+  async function refuseHello(code: string) {
     clients[0].hear(answer(connOf(last())));
     await flush();
     last().ctl.open();
     await flush();
-    last().ctl.deliver({ re: 1, err: { code: 'forbidden', msg: 'revoked' } });
+    last().ctl.deliver({ re: 1, err: { code, msg: 'no' } });
     await flush();
+  }
+
+  it('retries a connection whose hello fails for a reason that may pass', async () => {
+    const { listen } = await attempting();
+    await refuseHello('internal');
     expect(last().closes).toBe(1);
+    expect(listen).not.toHaveBeenCalled();
     await wait(1000);
     expect(pcs()).toHaveLength(2);
+  });
+
+  it.each(['version', 'forbidden'])(
+    'stops offering to a node that refuses its hello with %s, and says why',
+    async (code) => {
+      start();
+      clients[0].ready();
+      const refused = vi.fn();
+      const listener = { online: vi.fn(), push: vi.fn(), offline: vi.fn(), refused };
+      const peer = session.peer(node, () => listener);
+      const hold = peer.hold();
+      await flush();
+      await refuseHello(code);
+      expect(last().closes).toBe(1);
+      expect(refused.mock.calls).toStrictEqual([[code]]);
+      expect(listener.online).not.toHaveBeenCalled();
+      expect(listener.offline).not.toHaveBeenCalled();
+      hold();
+      clients[0].hear({ t: 'presence', k: node, on: true });
+      dispatchEvent(new Event('online'));
+      await wait(120_000);
+      expect(pcs()).toHaveLength(1);
+      await expect(peer.request({ t: 'cmd', env: { p: '', k: '', s: '' } })).rejects.toThrow(
+        new Error('connection lost'),
+      );
+    },
+  );
+
+  it('stops as well when its listener does not hear refusals', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    const { listen } = await attempting();
+    await refuseHello('forbidden');
+    process.off('unhandledRejection', unhandled);
+    expect(listen).toHaveBeenCalledTimes(1);
+    expect(unhandled).not.toHaveBeenCalled();
+    await wait(120_000);
+    expect(pcs()).toHaveLength(1);
   });
 
   it('hands pushes to the listener of the connection that serves, and to none before', async () => {

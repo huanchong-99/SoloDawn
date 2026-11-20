@@ -66,6 +66,10 @@ export interface Listener {
   push(frame: Push): void;
   /** The connection is gone, or another took its place. */
   offline(): void;
+  /** The node refused this browser's hello with `version` or `forbidden`, the code given here.
+   *  No connection serves this listener, and the peer offers that node nothing more: only a new
+   *  peer tries again. */
+  refused?(code: string): void;
 }
 
 export interface Options {
@@ -91,6 +95,10 @@ const answers = new Map<string, v.GenericSchema<unknown, Response>>([
 ]);
 
 const Signal = v.variant('t', [Answer, ICECandidate]);
+
+/** The refusals of a hello that trying again cannot change (contracts/datachannel.md section 9):
+ *  the node does not speak this protocol version, or does not accept this device. */
+const final = (code: string | undefined) => code === 'version' || code === 'forbidden';
 
 const newId = () => encode(crypto.getRandomValues(new Uint8Array(16)));
 
@@ -198,6 +206,8 @@ export class Connection {
   readonly closed: Promise<number>;
   /** The path read last, or undefined: ctl is not open, or no pair can be read. */
   path: Path | undefined;
+  /** The code with which the node refused this connection's hello, when it did. */
+  refused: string | undefined;
   /** Hears the node's pushes. */
   onpush: (frame: Push) => void = () => {};
   /** Hears the path each time it is read: when ctl opens, and every second after. */
@@ -345,8 +355,9 @@ export class Connection {
     const hello = { t: 'hello', v: 1, kind: 'browser', name: this.#hub.name, addrs: [] };
     try {
       const answer = (await this.request(hello)) as Welcome | ErrorResponse;
-      if (answer.err) throw new Error(`hello refused: ${answer.err.code}`);
-      return answer;
+      if (!answer.err) return answer;
+      this.refused = answer.err.code;
+      throw new Error(`hello refused: ${this.refused}`);
     } catch (error) {
       this.close();
       throw error;
@@ -419,7 +430,8 @@ interface Ask {
 }
 
 /** One node this browser keeps a connection to (flows/connect.md sections A and C). It offers,
- *  says hello, and after each loss offers again with the back-off of step 15. It is the `Ctl` of
+ *  says hello, and after each loss offers again with the back-off of step 15, until the node
+ *  refuses its hello with `version` or `forbidden`. It is the `Ctl` of
  *  that node for as long as it lives: a request whose connection is lost before its response is
  *  sent again after the next welcome under a new id (steps 12 and 18), except a `sync`, which
  *  rejects, because the listener reads again from its cursor after every welcome. A request made
@@ -563,11 +575,14 @@ export class Peer {
   }
 
   /** The end of a connection this peer dialled. Only that of the one that serves, or of its own
-   *  attempt, leads to a reconnect: a probe and a connection that was replaced do not. */
+   *  attempt, leads to a reconnect: a probe and a connection that was replaced do not. Nor does
+   *  an attempt whose hello the node refused for good: its listener hears why, and the peer
+   *  stops. */
   #ended(conn: Connection, open: number) {
     if (conn === this.#conn) this.#offline();
     else if (conn !== this.#attempt) return;
     this.#attempt = undefined;
+    if (final(conn.refused)) return this.#listen().refused?.(conn.refused!);
     this.#lost = open;
     this.#again();
   }

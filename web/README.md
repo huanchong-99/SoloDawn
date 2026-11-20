@@ -162,10 +162,12 @@ development dependency, an IndexedDB for the tests.
     first copy of the answer is used. A candidate of the node waits for the answer and is applied
     once, 64 at most for a connection; one for a connection the browser did not offer is dropped,
     as a browser answers none. When `ctl` opens the peer says `hello`; a refusal, an unreadable
-    `welcome` or 10 seconds without one closes the connection. After a failure or a loss (`ctl`
-    closed, the connection `failed`) it offers again after 1, 2, 4 … 60 seconds, from 1 second
-    again only after `ctl` stayed open for 60 seconds, and at once when a path reports the node
-    present or the window gets `online`.
+    `welcome` or 10 seconds without one closes the connection. A `hello` refused with `version`
+    or `forbidden` also stops the peer: a listener from `listen()` hears `refused(code)`, when it
+    has one, and that node is offered nothing more until a new peer is made for it. After any
+    other failure or a loss (`ctl` closed, the connection `failed`) it offers again after 1, 2,
+    4 … 60 seconds, from 1 second again only after `ctl` stayed open for 60 seconds, and at once
+    when a path reports the node present or the window gets `online`.
   - **Listeners.** `listen()` is called for each connection the node has welcomed and returns
     what hears it: `online(ctl, welcome)`, `push(frame)`, `offline()`. A `Home.connect` of the
     group caches is one. `ctl` is the peer itself, the same for every connection.
