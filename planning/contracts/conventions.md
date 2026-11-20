@@ -140,8 +140,8 @@ A client tells a success from an error by the presence of `err`, never by
 - A node that writes free text into a command of its own (the `detail` of
   a check, of a failure, of a host event) shortens it so that the row
   fits, and keeps the end of an output.
-- Not settled: a `device` row holds its log entry, and nothing limits the
-  size of an entry yet (`risks.md` Q-23).
+- A `device` row holds its log entry, which is why the `p` of an entry is
+  at most 2 KiB (`contracts/envelope.md` section 4).
 
 The limit of a signalling frame is in `contracts/rendezvous.md` section 2.
 

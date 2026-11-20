@@ -35,6 +35,9 @@ decision now lives.
 | Q-20 | Round 1, F-10. During a takeover the secretary could be made to edit files outside any task branch. | Accepted: the secretary's terminal keeps its read-only level. The secretary writes no code; to change code the owner takes over a working AI. | `product-rules.md` R-21; `flows/takeover.md` A, B; `contracts/drivers.md` 1.3; `steps/step-1.md` A7.8 |
 | Q-21 | Round 2, F-1. What happens to the tasks of an AI that leaves a group. | Accepted: an AI cannot leave a group while it is assignee or reviewer of a task that is not final; the tasks are reassigned or cancelled first. | `contracts/commands.md` 1.2, 2 (`host.leave`); `contracts/task-machine.md` 4; `steps/step-1.md` A5.18 |
 | Q-22 | Round 2, F-2. What may change a task between a passed review and the host's report of the merge. | Accepted: nothing but a person's cancel. No extra command for the host to claim the merge. K-14 stays as written. | `contracts/task-machine.md` 2, row 15, section 4; `flows/task.md` steps 17, 18; `risks.md` K-14; `steps/step-1.md` A5.18 |
+| Q-23 | From spike S-1 and the size of a row. A `device` row holds its log entry, and no rule limited the size of an entry: a valid device could write one whose row fits no message. | Accepted: an entry whose `p` is longer than 2 KiB is refused, by every implementation. | `contracts/envelope.md` 4; `contracts/conventions.md` 4; `contracts/vectors.md` (`devlogs`); `steps/step-1-backend.md` B-02c; `steps/step-1-frontend.md` F-01d |
+| Q-24 | From spikes S-2 and S-3. With repository configuration off (R-45), is a project's own instruction file (`CLAUDE.md`, `AGENTS.md`) loaded? Claude Code cannot load it without the project's hooks and settings; Codex loads it by default and can be told not to. | Accepted: not loaded on either CLI until the owner enables repository configuration. | `product-rules.md` R-45; `contracts/drivers.md` 1.1, 1.2 |
+| Q-25 | From spikes S-2 and S-3: what the levels really confine. Level 2 confines writes (to the worktree; Claude Code also keeps its own temp folder writable) and closes the network. No level confines reads. A blocked network action makes no request by itself; a card appears only if the AI then asks to run the command outside the sandbox, which was seen on Codex for a write and not for the network. R-41 read as if touching any file outside the workspace, installing software and pushing each produced a card. | Accepted: the CLIs' sandboxes stay as they are, with no list of folders to hide. R-41 is rewritten to promise only what was measured. Where levels are chosen the product says that level 2 limits what the AI changes and where it connects, not what it reads. Sessions are told to ask through their CLI when the sandbox blocks something they need; a `live` test shows whether that produces a card. | `product-rules.md` R-41; `contracts/drivers.md` 1.1, 1.2, 4; `flows/approval.md` G, H; `flows/task.md` step 8; `steps/step-1-frontend.md` F-09; `steps/step-1.md` A4.1 |
 
 Also confirmed by the coordinator, as defaults: a quiet task wakes the
 secretary after 30 minutes; receipts are kept 24 hours; when a task changes
@@ -45,15 +48,8 @@ may cancel it.
 
 ## Q. Open
 
-Q-4 is settled as "wait for spike S-5" and comes back when that spike has
-an answer. Three questions came out of the spikes. Each has a proposed
-answer; the coordinator decides.
-
-| Id | Question | Proposed |
-| --- | --- | --- |
-| Q-23 | A `device` row holds its log entry, and no rule limits the size of an entry. A valid device can therefore write an entry whose row fits no message (`contracts/conventions.md` section 4). | One more log rule, judged by every implementation: an entry whose `p` is longer than 2 KiB is refused. It costs one comparison on each side and one vector. Not applied yet. |
-| Q-24 | With repository configuration off (R-45), is a project's own instruction file (`CLAUDE.md`, `AGENTS.md`) loaded? Claude Code cannot load it without the project's hooks and settings; Codex loads it by default and can be told not to `[verified]`. | Not loaded on either CLI until the owner enables repository configuration: the file is AI configuration shipped in the repository, and the two CLIs then behave alike. `contracts/drivers.md` 1.1 and 1.2 are written this way. |
-| Q-25 | What the levels really confine `[verified]`. Level 2 confines writes (to the worktree; Claude Code also keeps its own temp folder writable) and closes the network. No level confines reads: Claude Code's sandboxed commands and Codex's shell read any file the owner can. And a blocked network action makes no request by itself; a card appears only if the model then asks to run the command outside the sandbox, which was seen on Codex for a write and not at all for the network. R-41 reads as if touching any file outside the workspace, installing software and pushing each produced a card. | Keep the CLIs' sandboxes as they are, and say where levels are chosen what they do: level 2 limits what the AI changes and where it connects, not what it reads. Secrets stay guarded by the closed network at levels 1 and 2 and by the outbound check (R-137). Sessions are told to ask through their CLI when the sandbox blocks something they need (`contracts/drivers.md` section 4), and a `live` test shows on each CLI whether that produces a card. No list of folders to hide. |
+None at present. Q-4 is settled as "wait for spike S-5" and comes back when
+that spike has an answer.
 
 ## K. Known limits
 
@@ -97,7 +93,7 @@ answer; the coordinator decides.
 | T-11 | Port 443 shared by HTTPS and TURN. | Spike S-6; fallback is a second address or port for TURN. |
 | T-12 | (Settled in round 1: the home's quiet-task timer, `contracts/task-machine.md` row 23.) | — |
 | T-13 | Starting a brand-new session directly in interactive mode with a chosen id (takeover of an AI without a task). | Answered by spike S-4: Claude Code can, Codex cannot (`flows/takeover.md` section A). |
-| T-14 | A row, or an inbox item with the rows it carries, can outgrow one `ctl` message. | Settled with spike S-1, which showed 60 KiB messages on every path: one limit of 16 KiB per row is enough (`contracts/conventions.md` section 4). The size of a device-log entry is Q-23. |
+| T-14 | A row, or an inbox item with the rows it carries, can outgrow one `ctl` message. | Settled with spike S-1, which showed 60 KiB messages on every path: one limit of 16 KiB per row is enough (`contracts/conventions.md` section 4), together with a limit on a device-log entry (Q-23). |
 | T-15 | Codex turns can stop sending anything: 2 of about 25 in spike S-3, cause unknown. | The driver interrupts a turn that has been silent for 5 minutes (`contracts/drivers.md` 1.2). The number is a first value. |
 
 ## Assumptions that would change the design if false

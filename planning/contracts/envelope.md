@@ -157,7 +157,10 @@ that come after are judged against that unchanged log.
 1. `k` is a device id and `s` verifies (section 3, check 1). No other check
    of section 3 applies: an entry is addressed to nobody and is replayed
    long after it was signed.
-2. `p` is a JSON object in which `t` is `"device"`, `user` is this log's
+2. `p` is at most 2 KiB: 2,048 bytes when encoded as `TextEncoder` encodes
+   text. That keeps the `device` row of an entry within the size of a row
+   (`contracts/conventions.md` section 4).
+   `p` is a JSON object in which `t` is `"device"`, `user` is this log's
    user id, `op` is `"add"` or `"revoke"`, `dev` is a device id, and `ver`
    is an integer. On an `add`, `kind` is `"node"` or `"browser"` and `name`
    is a string. Nothing else is read: not `n` or `ts`, not `kind` or `name`

@@ -4,8 +4,7 @@ Status: **plan converged after three review rounds; implementation
 started.**
 
 Three review rounds are answered in `reviews/`; the last ended with "ready
-to start". The coordinator has settled Q-1 to Q-22 (`risks.md`); Q-23 to
-Q-25, from the spikes, are open. Next:
+to start". The coordinator has settled Q-1 to Q-25 (`risks.md`). Next:
 
 1. Work proceeds by `steps/step-1.md`: the backend by
    `steps/step-1-backend.md`, starting with B-00; the frontend by
