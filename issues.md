@@ -6,6 +6,31 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
+
+- Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
+- Cause: `startNode` is a stub that returns that error until N-4 assembles the runtime (`internal/node/socket.go:80-84`); `cmd/solodawn/main.go:26-28` registers `node` without arguments.
+- Status: open until N-4. What I-8 needs from N-4 is listed in the pull request of E-0.
+
+### 2026-11-20 · limitation · A node's socket does not fit under a long HOME on macOS
+
+- Symptom: with a HOME of more than about 60 bytes, `solodawn node` exits with `listen unix <HOME>/Library/Application Support/solodawn/sock: bind: invalid argument`. Seen on macOS with HOME under a session's temporary directory of over 100 bytes.
+- Cause: a Unix socket path holds at most 103 bytes on macOS (107 on Linux), and on macOS the socket is 41 bytes below HOME (`internal/node/dir.go:23-24`, `internal/node/socket.go:23-27`). The system's temporary directory there (`/var/folders/…/T/`, 49 bytes) leaves room for a short name only, so `t.TempDir()` as HOME fails. `internal/node/socket_test.go:175-179`, `features/cmd_local_test.go:29-34` and `web/e2e/nodes.ts` create their directories under `/tmp` on macOS for this reason.
+- Effect: none for an ordinary home directory such as `/Users/<name>`.
+- Status: open, accepted for tests; a test that sets HOME for a node on macOS keeps it under `/tmp`.
+
+### 2026-11-20 · deviation · End-to-end steps are not in a `.spec.ts` file, and `pnpm test` would run `web/e2e/*.spec.ts`
+
+- Symptom: the feature-file convention (`planning/steps/parallel-plan.md` section 2, `planning/contracts/conventions.md` section 5) puts a web slice's steps in `web/features/<slice>.spec.ts`. The steps of `features/web_e2e.feature` are in `web/features/e2e.ts`, and the acceptance gate's `vitest run features` does not run them; the `Browser end-to-end` workflow does. The plan names I-8's file `web/e2e/connect.spec.ts`, which `web/e2e/config.ts` includes.
+- Cause: `pnpm test` and the gates use `web/vite.config.ts`, which sets no `include` or `exclude`, so Vitest's default pattern runs every `*.spec.ts` under `web/` without the global setup, Go and the browsers that end-to-end tests need. F-01c keeps `web/features/browser-crypto.ts` out of that run the same way.
+- Status: open. Before I-8 adds `web/e2e/connect.spec.ts`, `web/vite.config.ts` needs `exclude: [...configDefaults.exclude, 'e2e/**']` in `test` (a file E-0 does not own), or the end-to-end files need another suffix.
+
+### 2026-11-20 · limitation · The end-to-end harness runs on macOS and Linux only
+
+- Symptom: the global setup of `web/e2e/config.ts` throws on Windows.
+- Cause: `web/e2e/nodes.ts` starts every process as the leader of its own process group, stops it with `process.kill(-pgid)`, and finds what a dead test process left with `ps`; Windows has neither.
+- Status: open. The browser workflows run on Linux and macOS; I-11 decides whether end-to-end tests run on Windows.
+
 ### 2026-11-20 · limitation · Fake CLIs lack invalid-login and exhausted-limit captures
 
 - Symptom: neither scripted CLI covers an invalid-login startup error or an exhausted rate limit.
