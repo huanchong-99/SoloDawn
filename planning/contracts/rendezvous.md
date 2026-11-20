@@ -181,11 +181,12 @@ the review of section 5.1 measured. "Evidence n" is entry n of
   connections a node answers and for those it offers `[verified, S-1]`.
 - IPv4 and IPv6 host candidates, server-reflexive through STUN, relay
   through TURN.
-- Asks the router (UPnP, NAT-PMP) to map 47800/udp, 47800/tcp and
-  47801/tcp, and publishes the address and port the router granted as
-  candidates and as signalling addresses (section 5.1, point 8). That is
-  the node's own work: `SetICEAddressRewriteRules` rewrites an address
-  and has no field for an external port `[unverified]`, spike S-8.
+- The node requests mappings for the answering UDP socket, the TCP signalling
+  listener and the passive ICE-TCP listener. It publishes the external TCP
+  signalling port in the signalling URL and each mapped ICE endpoint only for
+  the socket it serves. Pion's address rewrite rule has no external-port
+  field. S-8 verifies publication and reachability when a router grants a
+  different port.
 - Queries the `.local` names that browsers give instead of their host
   addresses (`SetICEMulticastDNSMode`, query only). A name that does not
   resolve is no obstacle: in S-1 the connections used the browser's
