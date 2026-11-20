@@ -43,7 +43,7 @@ func (o Options) start(udp net.PacketConn, tlsListener net.Listener, tlsPort int
 	local := udp.LocalAddr().(*net.UDPAddr)
 	addr := net.JoinHostPort(o.Domain, strconv.Itoa(local.Port))
 	r := &relay{stun: "stun:" + addr}
-	cfg := turn.ServerConfig{Realm: o.Domain, PacketConnConfigs: []turn.PacketConnConfig{{PacketConn: udp}}}
+	cfg := turn.ServerConfig{Realm: o.Domain, StrictAddressFamily: true, PacketConnConfigs: []turn.PacketConnConfig{{PacketConn: udp}}}
 	if tlsListener != nil {
 		ips, err := net.LookupIP(o.Domain)
 		if err != nil {

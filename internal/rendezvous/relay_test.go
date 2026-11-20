@@ -223,3 +223,39 @@ func TestNodeQuota(t *testing.T) {
 	send(t, c, proto.RVFrame{Type: "quota"})
 	expect(t, c, proto.Quota{Type: "quota", Used: 0, Limit: 0})
 }
+
+func TestOmittedFamilyOnIPv6Stream(t *testing.T) {
+	l, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := Options{Domain: "127.0.0.1", TurnDomain: "turn.localhost"}
+	r, s, err := o.start(udpLocal(t), l, l.Addr().(*net.TCPAddr).Port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	conn, err := net.Dial("tcp6", l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	cred := r.ice("ready", "device").ICE[1]
+	// Pion omits REQUESTED-ADDRESS-FAMILY for an IPv4 allocation.
+	c, err := turn.NewClient(&turn.ClientConfig{Conn: turn.NewSTUNConn(conn), TURNServerAddr: l.Addr().String(), Username: cred.Username, Password: cred.Credential, RequestedAddressFamily: turn.RequestedAddressFamilyIPv4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	a, err := c.AllocateWithContext(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if got := a.LocalAddr().(*net.UDPAddr).IP; !got.Equal(net.IPv4(127, 0, 0, 1)) {
+		t.Fatal(got)
+	}
+}
