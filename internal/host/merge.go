@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ReviewedMerge identifies a merge item taken by the host after checking
@@ -17,6 +19,10 @@ type ReviewedMerge struct {
 	Task, Commit       string
 	PR                 int    // zero for a local-only group
 	GitHubRepo         string // <owner>/<repo> of the group's GitHub repository
+	// Taken is when the node took the merge, the time of its audit row
+	// merge. After a restart a merge still pending on the forge waits until
+	// 60 minutes after it; zero counts from the restart.
+	Taken time.Time
 }
 
 // MergeResult supplies the squash commit for task merged, or the detail for
@@ -41,45 +47,75 @@ func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 		}
 		return m.inspectLocal(ctx)
 	}
+	return m.applyPR(ctx)
+}
+
+// applyPR merges through the forge. A merge command that succeeds may leave
+// the PR pending in a merge queue or auto-merge (awaitPR).
+func (m ReviewedMerge) applyPR(ctx context.Context) (MergeResult, error) {
+	taken := time.Now()
+	_, mergeErr := m.mergePR(ctx)
+	if mergeErr == nil {
+		return m.awaitPR(ctx, taken)
+	}
 	// gh can exit unsuccessfully deleting the remote branch after the server
 	// has already merged the PR. Inspect its state even on a command error.
-	_, mergeErr := m.mergePR(ctx)
-	result, err := m.inspectPR(ctx)
+	_, result, err := m.readPR(ctx)
 	if err != nil {
 		return MergeResult{}, errors.Join(mergeErr, err)
 	}
-	if result.Conflict != "" && mergeErr != nil {
+	if result.Conflict != "" {
 		result.Conflict = redactSecrets(mergeErr.Error())
 	}
 	return result, nil
 }
 
 // DeleteBranch deletes the local task branch after a successful merge and
-// the removal of the task's worktree; Git refuses while a worktree still has
-// the branch checked out. A squash leaves the branch unmerged into the base,
-// hence -D. It runs under the clone's lock.
-func (m ReviewedMerge) DeleteBranch(ctx context.Context) error {
+// the removal of the task's worktree, only while the branch is still the
+// merged commit: update-ref deletes it only from that value. A branch that
+// has moved since is kept, and deleted is false, so no unreviewed commit is
+// lost. It runs under the clone's lock.
+func (m ReviewedMerge) DeleteBranch(ctx context.Context) (deleted bool, err error) {
 	lock := cloneLock(m.Repo)
 	lock.Lock()
 	defer lock.Unlock()
-	_, err := m.run(ctx, "git", "branch", "-D", m.Branch)
-	return err
+	ref := "refs/heads/" + m.Branch
+	head, err := m.run(ctx, "git", "rev-parse", "--verify", ref)
+	if err != nil || head != m.Commit {
+		return false, err
+	}
+	_, err = m.run(ctx, "git", "update-ref", "-d", ref, m.Commit)
+	return err == nil, err
 }
 
 func (m ReviewedMerge) message() string {
 	return fmt.Sprintf("Merge task %s at %s", m.Task, m.Commit)
 }
 
+// noHooks makes the empty folder that the local merge's Git commands take as
+// core.hooksPath, so that no hook of the project runs in them (local.md 7),
+// and returns that setting for -c.
+func (m ReviewedMerge) noHooks() (string, error) {
+	dir := filepath.Join(m.Repo, ".git", "solodawn-no-hooks")
+	return "core.hooksPath=" + dir, os.MkdirAll(dir, 0o700)
+}
+
+// squashLocal squashes and commits without the project's hooks, and without
+// signing, which could wait for a person; a failure is reset the same way.
 func (m ReviewedMerge) squashLocal(ctx context.Context) error {
 	if err := m.checkLocal(ctx); err != nil {
 		return err
 	}
-	_, err := m.run(ctx, "git", "merge", "--squash", "--", m.Commit)
+	hooks, err := m.noHooks()
+	if err != nil {
+		return err
+	}
+	_, err = m.run(ctx, "git", "-c", hooks, "merge", "--squash", "--", m.Commit)
 	if err == nil {
-		_, err = m.run(ctx, "git", "commit", "--allow-empty", "-m", m.message())
+		_, err = m.run(ctx, "git", "-c", hooks, "commit", "--allow-empty", "--no-verify", "--no-gpg-sign", "-m", m.message())
 	}
 	if err != nil {
-		_, resetErr := m.run(context.WithoutCancel(ctx), "git", "reset", "--merge")
+		_, resetErr := m.run(context.WithoutCancel(ctx), "git", "-c", hooks, "reset", "--merge")
 		return errors.Join(err, resetErr)
 	}
 	return nil
@@ -103,13 +139,18 @@ func (m ReviewedMerge) expectGit(ctx context.Context, want string, args ...strin
 	return nil
 }
 
-// Inspect reads the last commit on the local base or the state of the PR.
-// It never attempts a merge. Without a remote, a base that does not record
-// the merge gets the reset of a failed merge, which undoes a squash
-// interrupted before its commit.
+// Inspect looks for the merge on the local base, or reads the PR and waits
+// while it is still pending (awaitPR), from Taken or else from now. It never
+// attempts a merge. Without a remote, a base that does not record the merge
+// gets the reset of a failed merge, which undoes a squash interrupted before
+// its commit.
 func (m ReviewedMerge) Inspect(ctx context.Context) (MergeResult, error) {
 	if m.PR != 0 {
-		return m.inspectPR(ctx)
+		since := m.Taken
+		if since.IsZero() {
+			since = time.Now()
+		}
+		return m.awaitPR(ctx, since)
 	}
 	lock := cloneLock(m.Repo)
 	lock.Lock()
@@ -118,28 +159,72 @@ func (m ReviewedMerge) Inspect(ctx context.Context) (MergeResult, error) {
 	if result.Conflict == "" {
 		return result, err
 	}
-	if _, err := m.run(ctx, "git", "reset", "--merge"); err != nil {
+	if err := m.resetLocal(ctx); err != nil {
 		return MergeResult{}, err
 	}
 	return result, nil
 }
 
-func (m ReviewedMerge) inspectLocal(ctx context.Context) (MergeResult, error) {
-	last, err := m.run(ctx, "git", "log", "-1", "--no-show-signature", "--format=%H%n%B", "refs/heads/"+m.Base, "--")
-	if err != nil {
-		return MergeResult{}, err
+func (m ReviewedMerge) resetLocal(ctx context.Context) error {
+	hooks, err := m.noHooks()
+	if err == nil {
+		_, err = m.run(ctx, "git", "-c", hooks, "reset", "--merge")
 	}
-	oid, message, _ := strings.Cut(last, "\n")
-	if message != m.message() {
-		return MergeResult{Conflict: fmt.Sprintf("last commit on %s does not record %s", m.Base, m.message())}, nil
-	}
-	return MergeResult{MergeCommit: oid}, nil
+	return err
 }
 
-func (m ReviewedMerge) inspectPR(ctx context.Context) (MergeResult, error) {
-	out, err := m.run(ctx, "gh", "pr", "view", strconv.Itoa(m.PR), "--json", "state,mergeCommit,headRefOid")
+// inspectLocal finds the merge commit on the first-parent history of the
+// base: the newest commit whose message is exactly the merge message.
+func (m ReviewedMerge) inspectLocal(ctx context.Context) (MergeResult, error) {
+	log, err := m.run(ctx, "git", "log", "-z", "--first-parent", "--no-show-signature", "--fixed-strings",
+		"--grep="+m.message(), "--format=%H%n%B", "refs/heads/"+m.Base, "--")
 	if err != nil {
 		return MergeResult{}, err
+	}
+	for entry := range strings.SplitSeq(log, "\x00") {
+		oid, message, _ := strings.Cut(entry, "\n")
+		if strings.TrimRight(message, "\n") == m.message() {
+			return MergeResult{MergeCommit: oid}, nil
+		}
+	}
+	return MergeResult{Conflict: fmt.Sprintf("no commit on %s records %s", m.Base, m.message())}, nil
+}
+
+// awaitPR reads the PR every 30 s while it is still OPEN after the merge
+// command succeeded, as a merge queue or auto-merge merges it later. 60
+// minutes after since it is a conflict.
+func (m ReviewedMerge) awaitPR(ctx context.Context, since time.Time) (MergeResult, error) {
+	deadline := since.Add(60 * time.Minute)
+	for {
+		state, result, err := m.readPR(ctx)
+		if err != nil || state != "OPEN" {
+			return result, err
+		}
+		if !time.Now().Before(deadline) {
+			return MergeResult{Conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"}, nil
+		}
+		if err := pollWait(ctx); err != nil {
+			return MergeResult{}, err
+		}
+	}
+}
+
+// pollWait waits the 30 s between two reads, or returns ctx's error.
+func pollWait(ctx context.Context) error {
+	nextPoll := time.After(30 * time.Second)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-nextPoll:
+		return nil
+	}
+}
+
+// readPR reads the PR once and returns its state with the outcome it gives.
+func (m ReviewedMerge) readPR(ctx context.Context) (string, MergeResult, error) {
+	out, err := m.run(ctx, "gh", "pr", "view", strconv.Itoa(m.PR), "--json", "state,mergeCommit,headRefOid")
+	if err != nil {
+		return "", MergeResult{}, err
 	}
 	var pr struct {
 		State       string
@@ -147,15 +232,15 @@ func (m ReviewedMerge) inspectPR(ctx context.Context) (MergeResult, error) {
 		MergeCommit struct{ OID string }
 	}
 	if err := json.Unmarshal([]byte(out), &pr); err != nil {
-		return MergeResult{}, fmt.Errorf("gh pr view: %w", err)
+		return "", MergeResult{}, fmt.Errorf("gh pr view: %w", err)
 	}
 	if pr.State != "MERGED" {
-		return MergeResult{Conflict: fmt.Sprintf("pull request %d is %s", m.PR, pr.State)}, nil
+		return pr.State, MergeResult{Conflict: fmt.Sprintf("pull request %d is %s", m.PR, pr.State)}, nil
 	}
 	if pr.HeadRefOID != m.Commit {
-		return MergeResult{Conflict: fmt.Sprintf("pull request %d merged head %s, expected %s", m.PR, pr.HeadRefOID, m.Commit)}, nil
+		return pr.State, MergeResult{Conflict: fmt.Sprintf("pull request %d merged head %s, expected %s", m.PR, pr.HeadRefOID, m.Commit)}, nil
 	}
-	return MergeResult{MergeCommit: pr.MergeCommit.OID}, nil
+	return pr.State, MergeResult{MergeCommit: pr.MergeCommit.OID}, nil
 }
 
 // mergePR runs gh with --repo from the folder that holds the clone, not

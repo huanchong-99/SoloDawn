@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/host"
 )
@@ -63,6 +64,11 @@ func mergeFixture(t *testing.T) host.ReviewedMerge {
 	return host.ReviewedMerge{Repo: repo, Base: "base", Branch: "task/7", Task: "t7", Commit: commit}
 }
 
+// noHooks is the setting the host's local merge passes to Git with -c.
+func noHooks(m host.ReviewedMerge) string {
+	return "core.hooksPath=" + filepath.Join(m.Repo, ".git", "solodawn-no-hooks")
+}
+
 func TestLocalReviewedMerge(t *testing.T) {
 	m := mergeFixture(t)
 	base := mergeGit(t, m.Repo, "rev-parse", "HEAD")
@@ -82,7 +88,7 @@ func TestLocalReviewedMerge(t *testing.T) {
 	m.Task = "t71"
 	observed, err = m.Inspect(t.Context())
 	mergeOK(t, err)
-	mergeEqual(t, observed, host.MergeResult{Conflict: "last commit on base does not record Merge task t71 at " + m.Commit})
+	mergeEqual(t, observed, host.MergeResult{Conflict: "no commit on base records Merge task t71 at " + m.Commit})
 }
 
 func TestLocalMergeRefusal(t *testing.T) {
@@ -124,8 +130,10 @@ func TestLocalConflictAndCommitFailureResetIndex(t *testing.T) {
 				mergeFile(t, m.Repo, "item", "base advanced\n")
 				mergeGit(t, m.Repo, "commit", "-qam", "overlapping change")
 			} else {
-				mergeGit(t, m.Repo, "config", "commit.gpgsign", "true")
-				mergeGit(t, m.Repo, "config", "gpg.program", "missing-fixture-program")
+				// No identity: the commit fails after the squash has applied.
+				mergeGit(t, m.Repo, "config", "--unset", "user.name")
+				mergeGit(t, m.Repo, "config", "--unset", "user.email")
+				mergeGit(t, m.Repo, "config", "user.useConfigOnly", "true")
 			}
 			base := mergeGit(t, m.Repo, "rev-parse", "HEAD")
 			result, err := m.Apply(t.Context())
@@ -134,10 +142,10 @@ func TestLocalConflictAndCommitFailureResetIndex(t *testing.T) {
 			mergeEqual(t, mergeGit(t, m.Repo, "rev-parse", "HEAD"), base)
 			var want string
 			if stage == "merge" {
-				want = gitFailure(t, m.Repo, "merge", "--squash", "--", m.Commit)
+				want = gitFailure(t, m.Repo, "-c", noHooks(m), "merge", "--squash", "--", m.Commit)
 			} else {
 				mergeGit(t, m.Repo, "merge", "--squash", "--", m.Commit)
-				want = gitFailure(t, m.Repo, "commit", "--allow-empty", "-m", "Merge task t7 at "+m.Commit)
+				want = gitFailure(t, m.Repo, "-c", noHooks(m), "commit", "--allow-empty", "--no-verify", "--no-gpg-sign", "-m", "Merge task t7 at "+m.Commit)
 			}
 			mergeEqual(t, result, host.MergeResult{Conflict: want})
 		})
@@ -152,7 +160,7 @@ func TestInterruptedLocalSquash(t *testing.T) {
 	mergeGit(t, m.Repo, "merge", "--squash", m.Commit)
 	result, err := m.Inspect(t.Context())
 	mergeOK(t, err)
-	mergeEqual(t, result, host.MergeResult{Conflict: "last commit on base does not record Merge task t7 at " + m.Commit})
+	mergeEqual(t, result, host.MergeResult{Conflict: "no commit on base records Merge task t7 at " + m.Commit})
 	mergeEqual(t, mergeGit(t, m.Repo, "rev-parse", "base"), base)
 	mergeEqual(t, mergeGit(t, m.Repo, "status", "--porcelain"), "")
 	result, err = m.Apply(t.Context())
@@ -166,7 +174,7 @@ func TestInterruptedLocalSquashResetFailure(t *testing.T) {
 	mergeFile(t, m.Repo, filepath.Join(".git", "index.lock"), "")
 	result, err := m.Inspect(t.Context())
 	mergeEqual(t, result, host.MergeResult{})
-	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "reset", "--merge"))
+	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "-c", noHooks(m), "reset", "--merge"))
 }
 
 func TestMergeChangeAlreadyOnBase(t *testing.T) {
@@ -208,7 +216,8 @@ func TestMergeMissingRefs(t *testing.T) {
 	m.Base = "absent"
 	result, err = m.Inspect(t.Context())
 	mergeEqual(t, result, host.MergeResult{})
-	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "log", "-1", "--no-show-signature", "--format=%H%n%B", "refs/heads/absent", "--"))
+	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "log", "-z", "--first-parent", "--no-show-signature", "--fixed-strings",
+		"--grep=Merge task t7 at "+m.Commit, "--format=%H%n%B", "refs/heads/absent", "--"))
 }
 
 // Re-execute this test binary as gh. Each invocation records the folder it
@@ -317,7 +326,7 @@ func TestMergePRUnknownOutcome(t *testing.T) {
 
 func TestMergePRInspection(t *testing.T) {
 	for _, tc := range []struct{ out, fail, conflict, problem string }{
-		{out: `{"state":"OPEN","mergeCommit":null}`, conflict: "pull request 32 is OPEN"},
+		{out: `{"state":"OPEN","mergeCommit":null}`, conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"},
 		{out: `{"state":"CLOSED","mergeCommit":null}`, conflict: "pull request 32 is CLOSED"},
 		{out: `{"state":"MERGED","mergeCommit":{"oid":"def"},"headRefOid":"abc1"}`, conflict: "pull request 32 merged head abc1, expected abc"},
 		{out: "{", problem: "gh pr view: unexpected end of JSON input"},
@@ -325,6 +334,8 @@ func TestMergePRInspection(t *testing.T) {
 	} {
 		t.Run(tc.out+tc.fail, func(t *testing.T) {
 			m := mergeForgeFixture(t)
+			// The merge was taken long ago: a PR still OPEN is read once.
+			m.Taken = time.Unix(1, 0)
 			t.Setenv("GH_FIXTURE_OUTPUT", tc.out)
 			t.Setenv("FAIL_GH_COMMAND", tc.fail)
 			result, err := m.Inspect(t.Context())
@@ -339,29 +350,122 @@ func TestMergePRInspection(t *testing.T) {
 	}
 }
 
-func TestDeleteBranchAfterWorktreeRemoval(t *testing.T) {
+// The branch is deleted only while it is still the merged commit; a branch
+// that has moved since keeps its unreviewed commits.
+func TestDeleteBranchOnlyAtTheMergedCommit(t *testing.T) {
 	m := mergeFixture(t)
 	_, err := m.Apply(t.Context())
 	mergeOK(t, err)
-	worktree := filepath.Join(t.TempDir(), "wt")
-	mergeGit(t, m.Repo, "worktree", "add", worktree, m.Branch)
-	mergeEqual(t, m.DeleteBranch(t.Context()).Error(), gitFailure(t, m.Repo, "branch", "-D", m.Branch))
-	mergeGit(t, m.Repo, "worktree", "remove", worktree)
-	mergeOK(t, m.DeleteBranch(t.Context()))
+	mergeGit(t, m.Repo, "switch", "-q", m.Branch)
+	mergeGit(t, m.Repo, "commit", "--allow-empty", "-qm", "unreviewed")
+	moved := mergeGit(t, m.Repo, "rev-parse", "HEAD")
+	mergeGit(t, m.Repo, "switch", "-q", "base")
+	deleted, err := m.DeleteBranch(t.Context())
+	mergeOK(t, err)
+	mergeEqual(t, deleted, false)
+	mergeEqual(t, mergeGit(t, m.Repo, "rev-parse", m.Branch), moved)
+	mergeGit(t, m.Repo, "branch", "-f", m.Branch, m.Commit)
+	deleted, err = m.DeleteBranch(t.Context())
+	mergeOK(t, err)
+	mergeEqual(t, deleted, true)
 	mergeEqual(t, mergeGit(t, m.Repo, "for-each-ref", "--format=%(refname)", "refs/heads/task"), "")
 }
 
+func TestDeleteBranchFailures(t *testing.T) {
+	m := mergeFixture(t)
+	mergeFile(t, m.Repo, filepath.Join(".git", "refs", "heads", "task", "7.lock"), "")
+	deleted, err := m.DeleteBranch(t.Context())
+	mergeEqual(t, deleted, false)
+	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "update-ref", "-d", "refs/heads/task/7", m.Commit))
+	mergeEqual(t, mergeGit(t, m.Repo, "rev-parse", m.Branch), m.Commit)
+	m.Branch = "absent"
+	deleted, err = m.DeleteBranch(t.Context())
+	mergeEqual(t, deleted, false)
+	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "rev-parse", "--verify", "refs/heads/absent"))
+}
+
+// The local merge runs no hook of the project and does not sign. Husky, for
+// example, sets core.hooksPath in the clone's config once a check has run
+// npm install.
+func TestLocalMergeRunsNoProjectHooks(t *testing.T) {
+	for name, hook := range map[string]string{
+		"prepare-commit-msg": "#!/bin/sh\nprintf '\\nTrailer: added\\n' >> \"$1\"\n",
+		"commit-msg":         "#!/bin/sh\necho rejected >&2\nexit 1\n",
+		"pre-commit":         "#!/bin/sh\nexit 1\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				return
+			}
+			m := mergeFixture(t)
+			hooks := t.TempDir()
+			mergeOK(t, os.WriteFile(filepath.Join(hooks, name), []byte(hook), 0700))
+			mergeGit(t, m.Repo, "config", "core.hooksPath", hooks)
+			mergeGit(t, m.Repo, "config", "commit.gpgsign", "true")
+			mergeGit(t, m.Repo, "config", "gpg.program", "missing-fixture-program")
+			result, err := m.Apply(t.Context())
+			mergeOK(t, err)
+			head := mergeGit(t, m.Repo, "rev-parse", "base")
+			mergeEqual(t, result, host.MergeResult{MergeCommit: head})
+			mergeEqual(t, mergeGit(t, m.Repo, "log", "-1", "--format=%B", "base"), "Merge task t7 at "+m.Commit)
+			observed, err := m.Inspect(t.Context())
+			mergeOK(t, err)
+			mergeEqual(t, observed, result)
+		})
+	}
+}
+
+// The empty hooks folder cannot be made: the merge is a conflict with the
+// error, and an inspection after a restart returns it.
+func TestLocalMergeWithoutHooksFolder(t *testing.T) {
+	m := mergeFixture(t)
+	folder := filepath.Join(m.Repo, ".git", "solodawn-no-hooks")
+	mergeFile(t, m.Repo, filepath.Join(".git", "solodawn-no-hooks"), "")
+	want := "mkdir " + folder + ": not a directory"
+	result, err := m.Apply(t.Context())
+	mergeOK(t, err)
+	mergeEqual(t, result, host.MergeResult{Conflict: want})
+	result, err = m.Inspect(t.Context())
+	mergeEqual(t, result, host.MergeResult{})
+	mergeEqual(t, err.Error(), want)
+}
+
+// After a restart the merge is found on the base's first-parent history even
+// when another task has merged after it.
+func TestInspectFindsAnEarlierLocalMerge(t *testing.T) {
+	m := mergeFixture(t)
+	first, err := m.Apply(t.Context())
+	mergeOK(t, err)
+	mergeGit(t, m.Repo, "switch", "-qc", "task/8")
+	mergeFile(t, m.Repo, "other", "eight\n")
+	mergeGit(t, m.Repo, "add", "other")
+	mergeGit(t, m.Repo, "commit", "-qm", "eight")
+	second := host.ReviewedMerge{Repo: m.Repo, Base: "base", Branch: "task/8", Task: "t8", Commit: mergeGit(t, m.Repo, "rev-parse", "HEAD")}
+	mergeGit(t, m.Repo, "switch", "-q", "base")
+	_, err = second.Apply(t.Context())
+	mergeOK(t, err)
+	observed, err := m.Inspect(t.Context())
+	mergeOK(t, err)
+	mergeEqual(t, observed, first)
+}
+
 // The detail of task conflict goes to the group, so a secret in Git's output
-// is redacted. A signing program named like a token puts one there.
+// is redacted. A conflict in a file named like a token puts one there.
 func TestConflictDetailIsRedacted(t *testing.T) {
 	m := mergeFixture(t)
 	token := "ghp_" + strings.Repeat("a", 36)
-	mergeGit(t, m.Repo, "config", "commit.gpgsign", "true")
-	mergeGit(t, m.Repo, "config", "gpg.program", token)
+	mergeGit(t, m.Repo, "switch", "-q", m.Branch)
+	mergeFile(t, m.Repo, token, "task\n")
+	mergeGit(t, m.Repo, "add", token)
+	mergeGit(t, m.Repo, "commit", "-qm", "task file")
+	m.Commit = mergeGit(t, m.Repo, "rev-parse", "HEAD")
+	mergeGit(t, m.Repo, "switch", "-q", "base")
+	mergeFile(t, m.Repo, token, "base\n")
+	mergeGit(t, m.Repo, "add", token)
+	mergeGit(t, m.Repo, "commit", "-qm", "base file")
 	result, err := m.Apply(t.Context())
 	mergeOK(t, err)
-	mergeGit(t, m.Repo, "merge", "--squash", "--", m.Commit)
-	raw := gitFailure(t, m.Repo, "commit", "--allow-empty", "-m", "Merge task t7 at "+m.Commit)
+	raw := gitFailure(t, m.Repo, "-c", noHooks(m), "merge", "--squash", "--", m.Commit)
 	mergeEqual(t, strings.Contains(raw, token), true)
 	mergeEqual(t, result, host.MergeResult{Conflict: strings.ReplaceAll(raw, token, "[redacted]")})
 }
