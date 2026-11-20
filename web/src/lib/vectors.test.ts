@@ -61,19 +61,14 @@ const { subtle } = crypto;
 const everyone = () => true;
 const now = 1763600000000;
 
-/** Import the seed alone. Signing with it must verify under the vector's public key. */
+/** The device of a seed and of the vector's public key: Firefox 136 cannot export the public key
+ *  of a seed imported as PKCS #8. */
 async function device(seed: string, id: string): Promise<Device> {
   const pkcs8 = new Uint8Array([
     ...[0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04],
     ...[0x20, ...decode(seed)!],
   ]);
-  const privateKey = await subtle.importKey('pkcs8', pkcs8, 'Ed25519', true, ['sign']);
-  const exported = subtle.exportKey('jwk', privateKey);
-  if (/Firefox\/136\./.test(navigator.userAgent)) {
-    await expect(exported).rejects.toMatchObject({ name: 'OperationError' });
-  } else {
-    expect((await exported).x).toBe(id);
-  }
+  const privateKey = await subtle.importKey('pkcs8', pkcs8, 'Ed25519', false, ['sign']);
   const publicKey = await subtle.importKey('raw', decode(id)!, 'Ed25519', true, ['verify']);
   return Device.of(crypto, { privateKey, publicKey });
 }
@@ -100,6 +95,7 @@ describe('the shared crypto vectors', () => {
     const d = await device(c.seed, c.device);
     expect(d.id).toBe(c.device);
     expect(d.fingerprint).toBe(c.fingerprint);
+    // The seed belongs to the device id: what the seed signs verifies under the id.
     expect(await verifyEnvelope(crypto, await d.sign('key vector'))).toBe(true);
     devices.set(d.id, d);
   });

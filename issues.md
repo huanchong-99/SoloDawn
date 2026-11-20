@@ -109,22 +109,25 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Effect: relying on WebCrypto alone would admit invalid signers. The envelope contract requires rejection before WebCrypto.
 - Status: resolved for the web client in F-01b: the settled contract (PR #58, `contracts/envelope.md` section 2) makes the fourteen weak values no device id, and the client compares the bytes itself before WebCrypto is asked, for `k`, `dev`, `user`, a pair message's `k` and the first half of a signature (`web/src/lib/identity.ts:104-136`). The Go side follows in B-02b.
 
-F-01c measurements. The first two results are native `subtle.verify`; the last is SoloDawn's receiver result for **each** of the fourteen weak-key vectors.
+F-01c measurements. The first two results are native `subtle.verify`; the last is SoloDawn's receiver result for **each** of the fourteen weak-key vectors. CI runs four builds on every pull request; the others ran by hand on macOS 26.6.2.
 
-| Browser (Playwright) | OS | Identity-point vector | Valid empty message (RFC 8032 §7.1 test 1) | Receiver |
+| Browser | Run by | Identity-point vector | Valid empty message (RFC 8032 §7.1 test 1) | Receiver |
 | --- | --- | --- | --- | --- |
-| Chrome for Testing 137.0.7151.119 | Linux, macOS | true | true | `bad_sig` |
-| Edge 137.0.3296.93 | Linux | true | true | `bad_sig` |
-| Chromium 156.0.8078.4 | macOS | true | true | `bad_sig` |
-| Firefox 136.0 | Linux, macOS | true | true | `bad_sig` |
-| Firefox 157.0 | macOS | true | true | `bad_sig` |
-| Apple WebKit 27.2 (2370) | macOS | true | false | `bad_sig` |
+| Chrome for Testing 137.0.7151.119 | CI, Ubuntu 24.04; by hand, macOS | true | true | `bad_sig` |
+| Edge 137.0.3296.93 | CI, Ubuntu 24.04 | true | true | `bad_sig` |
+| Firefox 136.0 (Playwright build 1478) | CI, Ubuntu 24.04; by hand, macOS | true | true | `bad_sig` |
+| WebKit 27.2 (Playwright build 2370) | CI, macOS 26; by hand, macOS | true | false | `bad_sig` |
+| Chromium 156.0.8078.4 (Playwright) | by hand, macOS | true | true | `bad_sig` |
+| Firefox 157.0 (Playwright) | by hand, macOS | true | true | `bad_sig` |
+| Safari 26.6.2 | by hand, macOS, once, with Vitest's preview provider, which is not in the repository | true | false | `bad_sig` |
+
+No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all. Playwright's WebKit is a current build of Apple's port, so its row shows that the vectors pass on Apple's Ed25519 implementation of today, not on that of Safari 17.5. For Safari 17.5 the baseline still rests on the sources cited in the browser-baseline decision, not on a run.
 
 ### 2026-11-20 · limitation · Firefox 136 cannot export the JWK of a seed imported as PKCS #8
 
 - Symptom: on Firefox 136.0, importing an Ed25519 seed succeeds and it signs, but exporting the imported private key as JWK rejects with `OperationError`. The other builds above export the expected public coordinate.
 - Effect: the original shared test used that export to construct a key pair. SoloDawn does not export its private device keys.
-- Status: handled in F-01c. The suite asserts the export outcome and proves that **each** independently imported seed signs for its vector's public key. No signature bytes are compared.
+- Status: handled in F-01c. The suite does not export: it imports the public key of the vector and proves that **each** seed signs for it. No signature bytes are compared.
 
 ### 2026-11-20 · limitation · Web client does not start when the browser blocks site storage
 
