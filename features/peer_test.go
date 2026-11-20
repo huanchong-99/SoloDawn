@@ -31,6 +31,10 @@ type peersWorld struct {
 	cleanup []func()
 }
 
+func init() {
+	stepSets["peer"] = func(sc *godog.ScenarioContext, _ fixtures) { peerSteps(sc) }
+}
+
 func peerSteps(sc *godog.ScenarioContext) {
 	w := &peersWorld{}
 	sc.After(func(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
