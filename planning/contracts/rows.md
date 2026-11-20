@@ -145,7 +145,7 @@ Optional:
 | `checks.local`, `checks.cloud` | after that check has run |
 | `thread.last` | when the thread has a message |
 | `wait.msg`, `wait.who` | when the wait is about a card, and about people |
-| `wait.kept` | on a `manual` wait that replaced a `reviewer` or `conflict` wait: that `kind`, restored on resume (`contracts/task-machine.md` section 2) |
+| `wait.kept` | on a wait of a paused task (`manual`, `rounds`, `preempted`) that replaced a `reviewer` or `conflict` wait: that `kind`, restored when the pause ends (`contracts/task-machine.md` section 2) |
 
 What the mock-up badges map to. A task shows one badge: the first row,
 from the top, whose condition holds.
