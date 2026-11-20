@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/coder/websocket"
@@ -180,4 +182,31 @@ func TestMustStopsOnError(t *testing.T) {
 	must(nil)
 	defer func() { eq(t, recover(), any(errors.New("mistake"))) }()
 	must(errors.New("mistake"))
+}
+
+// One rendezvous connection carries fewer than 100 frames in any 10 seconds;
+// the rest wait their turn, in order, and a frame given up on takes no turn.
+func TestPathPacesFrames(t *testing.T) {
+	p, ws, err := testPath(t, challenge, ready)
+	check(t, err)
+	eq(t, p.pace.next, 1) // auth, counted on the real clock: start the fake one afresh
+	p.pace = pacer{}
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		for i := range 99 {
+			check(t, p.Write(context.Background(), i))
+		}
+		eq(t, time.Since(start), time.Duration(0))
+		canceled, cancel := context.WithCancel(context.Background())
+		cancel()
+		eq(t, p.Write(canceled, "given up"), context.Canceled)
+		time.Sleep(time.Second)
+		check(t, p.Write(context.Background(), 99))
+		eq(t, time.Since(start), 10*time.Second)
+	})
+	for i := range 100 {
+		_, data, err := ws.Read(t.Context())
+		check(t, err)
+		eq(t, string(data), fmt.Sprint(i))
+	}
 }

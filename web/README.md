@@ -44,6 +44,23 @@ and Playwright Firefox 136 (`FIREFOX136_PATH`) on Linux; on macOS it uses Playwr
 WebKit, not a version-matched Safari release. Firefox 136 needs a separate Playwright driver:
 the current driver's viewport and WebSocket protocol differs from that build's.
 
+`pnpm exec vitest run --config e2e/config.ts --project chromium|firefox|webkit` runs the
+end-to-end tests in Node against real processes, with the browsers of `test:vectors`; it also
+needs Go. Its global setup (`e2e/nodes.ts`) builds the client into `solodawn`, and the fake Claude
+Code and Codex beside it, once per run into a short directory under `/tmp`; a Go overlay embeds the
+build, so nothing is written into `internal/node/webdist/`. A test calls `startNet({ nodes })`: a
+rendezvous on a free 127.0.0.1 port and nodes, each process the leader of its own process group,
+each node with a HOME, a data directory and a `SOLODAWN_FAKECLI_LOG` of its own and the binaries
+first on its PATH. It waits until every node answers on its local socket, unless `awaitNodes` is
+false, and hands over the addresses: the rendezvous's `url` and `signal`, each node's `home`,
+`dataDir`, `socket` and `env`, and `run` for any program on the node's PATH. The test stops them in
+an after-hook (`AfterEachScenario`, `afterEach`), which also runs when it fails or times out:
+`stop` sends each group SIGTERM, then SIGKILL once its leader has exited or 3 s have passed, and
+removes the directory. The run's teardown kills what a test process that died left running.
+`launch(inject('browser'))` from `e2e/config.ts` opens the project's browser. `pnpm test` leaves
+`e2e/` out. The tests change nothing of the test process's own environment; the scenarios of
+`../features/web_e2e.feature` check that.
+
 The one runtime dependency is `valibot`, for the wire types. Signatures, hashes and macs use the
 browser's WebCrypto only; no signature library is bundled (R-164). `fake-indexeddb` is a
 development dependency, an IndexedDB for the tests.
@@ -181,6 +198,9 @@ development dependency, an IndexedDB for the tests.
 | `src/styles/`               | `tokens.css` (design tokens) and `base.css` (shared classes)    |
 | `public/`                   | manifest, icon and `fonts/`, copied as they are                 |
 | `features/web.spec.ts`      | steps of `../features/web.feature`                              |
+| `e2e/config.ts`             | end-to-end projects per engine, `launch`, the build of a run    |
+| `e2e/nodes.ts`              | `startNet`: rendezvous and nodes per test, stop, teardown sweep |
+| `features/e2e.ts`           | steps of `../features/web_e2e.feature`, run by `e2e/config.ts`  |
 
 Below 768 px the navigation is the bottom bar and the theme and language buttons of the top bar
 are hidden; both choices are on the settings page at every width.
@@ -201,6 +221,9 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 - Nothing yet stores a device log or uses the device key beyond `boot`; the connection code
   (F-03) and onboarding (F-04) will.
 - The manifest has an SVG icon only and there is no service worker yet.
+- The end-to-end harness runs on macOS and Linux only. Until the node runtime is wired (N-4),
+  `solodawn node` exits right after making its data directory, so a test cannot await a running
+  node yet, and a node has no address but its local socket (`issues.md`).
 
 ## Verification and sources
 

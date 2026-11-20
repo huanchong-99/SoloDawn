@@ -8,7 +8,8 @@ import (
 
 // A batch holds the candidates of one (sender, conn) until the remote
 // description is set, and applies each distinct candidate exactly once
-// (contracts/rendezvous.md section 2.3, "Trickle").
+// (contracts/rendezvous.md section 2.3, "Trickle"). It holds at most
+// earlyCount, for at most earlyMillis from the first, and drops the rest.
 type candidate struct{ mid, text string }
 type batch struct {
 	seen    map[candidate]bool
@@ -16,6 +17,11 @@ type batch struct {
 	ready   bool
 	expires int64
 }
+
+const (
+	earlyCount  = 64
+	earlyMillis = 30000
+)
 
 func (p *Peer) take(k link) *batch {
 	b := p.early[k]
@@ -36,9 +42,9 @@ func (p *Peer) receiveCandidate(k link, data []byte, now int64) error {
 		c.candidates.receive(v, c.addCandidate)
 		return nil
 	}
-	return p.hold(k, v, i.Timestamp, now)
+	return p.hold(k, v, now)
 }
-func (p *Peer) hold(k link, v candidate, ts, now int64) error {
+func (p *Peer) hold(k link, v candidate, now int64) error {
 	if _, old := p.retired[k]; old {
 		return nil
 	}
@@ -49,14 +55,14 @@ func (p *Peer) hold(k link, v candidate, ts, now int64) error {
 	b := p.early[k]
 	if b == nil {
 		b = newBatch()
+		b.expires = now + earlyMillis
 		p.early[k] = b
 	}
-	b.expires = max(b.expires, ts+120000)
 	b.receive(v, nil)
 	return nil
 }
 func (b *batch) receive(v candidate, add func(webrtc.ICECandidateInit)) {
-	if b.seen[v] {
+	if b.seen[v] || !b.ready && len(b.pending) == earlyCount {
 		return
 	}
 	b.seen[v] = true

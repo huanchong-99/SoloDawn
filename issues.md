@@ -15,8 +15,14 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · bug · The Git helper of the host-check steps can still end the whole suite
 
 - Symptom: when its Git command fails, the remaining scenarios do not run and go test reports "subtest may have called FailNow on a parent test" (reproduced with commit signing in the global Git configuration: 8 of 70 scenarios ran).
-- Cause: `features/host_checks_test.go:36` calls `f.t.Fatalf` on the suite's test from a scenario; see the resolved entry "A failing step could end the whole Go acceptance suite". The file was left out of the audit fixes because it belonged to another fix at the time.
+- Cause: `features/host_checks_test.go:36` calls `f.t.Fatalf` on the suite's test from a scenario; see the resolved entry "Go acceptance steps acted beyond their own scenario". The file was left out of the audit fixes because it belonged to another fix at the time.
 - Status: open. Return the error from the step, as `features/host_forge_test.go` does.
+
+### 2026-11-20 · limitation · Three peer scenarios time out on a Mac with its firewall on
+
+- Symptom: "Both nodes can offer over the same two signalling paths", "A replayed offer is not processed" and "Early and repeated candidates" fail with `context deadline exceeded` after 20 s on macOS with the application firewall enabled, on `rebuild` as merged (815c52aa6) and with the audit fixes; the other 77 scenarios pass. CI runs them on Linux only.
+- Cause, not verified: `features/peer_test.go` makes each node's sockets with `peer.Listen(0, 0)`, which listens on every interface (`internal/peer/sockets.go:22-23`), and the firewall holds incoming traffic to the unsigned test binary on addresses other than loopback. The package's own tests keep the sockets on loopback (`internal/peer/sockets.go:26-27`).
+- Status: open. Bind the acceptance nodes to loopback as the unit tests do, or exclude the scenarios on macOS by tag.
 
 ### 2026-11-20 · limitation · Rendezvous steps reserve a port by closing it
 
@@ -29,6 +35,37 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: with 14 busy loops on 12 cores, `web/src/main.test.ts:4`, `web/src/lib/motion.test.ts:29` and `web/src/lib/prefs.test.ts:26` exceeded Vitest's 5 s test limit; one idle run right after `pnpm install` also failed two tests in two files (output not kept). CI passed.
 - Cause: each is the first test of its file to import the client's modules afresh inside the test, so their transformation counts against the test's limit.
 - Status: open; the gate can fail spuriously while other work loads the machine.
+
+### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
+
+- Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
+- Cause: `startNode` is a stub that returns that error until N-4 assembles the runtime (`internal/node/socket.go:80-84`); `cmd/solodawn/main.go:26-28` registers `node` without arguments.
+- Status: open until N-4. What I-8 needs from N-4 is listed in [#132](https://github.com/huanchong-99/SoloDawn/pull/132).
+
+### 2026-11-20 · limitation · A node's socket does not fit under a long HOME on macOS
+
+- Symptom: with a HOME of more than about 60 bytes, `solodawn node` exits with `listen unix <HOME>/Library/Application Support/solodawn/sock: bind: invalid argument`. Seen on macOS with HOME under a session's temporary directory of over 100 bytes.
+- Cause: a Unix socket path holds at most 103 bytes on macOS (107 on Linux), and on macOS the socket is 41 bytes below HOME (`internal/node/dir.go:23-24`, `internal/node/socket.go:23-27`). The system's temporary directory there (`/var/folders/…/T/`, 49 bytes) leaves room for a short name only, so `t.TempDir()` as HOME fails. `internal/node/socket_test.go:175-179`, `features/cmd_local_test.go:29-34` and `web/e2e/nodes.ts` create their directories under `/tmp` on macOS for this reason.
+- Effect: none for an ordinary home directory such as `/Users/<name>`.
+- Status: open, accepted for tests; a test that sets HOME for a node on macOS keeps it under `/tmp`.
+
+### 2026-11-20 · deviation · End-to-end steps are not in a `.spec.ts` file
+
+- Symptom: the feature-file convention (`planning/steps/parallel-plan.md` section 2, `planning/contracts/conventions.md` section 5) puts a web slice's steps in `web/features/<slice>.spec.ts`. The steps of `features/web_e2e.feature` are in `web/features/e2e.ts`, and the acceptance gate's `vitest run features` does not run them; the `Browser end-to-end` workflow does.
+- Cause: `pnpm test` and the gates use `web/vite.config.ts`, whose Vitest default pattern would run a `web/features/*.spec.ts` without the global setup, Go and the browsers that end-to-end tests need. F-01c keeps `web/features/browser-crypto.ts` out of that run the same way.
+- Status: open, accepted by the coordinator on 2026-11-20. `web/vite.config.ts` excludes `e2e/**` ([#132](https://github.com/huanchong-99/SoloDawn/pull/132)), so `web/e2e/*.spec.ts`, I-8's `connect.spec.ts` included, run only under `web/e2e/config.ts`.
+
+### 2026-11-20 · limitation · Two workflows download the same pinned browsers
+
+- Symptom: `.github/workflows/e2e.yml` repeats the download steps of `.github/workflows/browser-vectors.yml`: Chrome for Testing 137, Edge 137 and Firefox 136 with their URLs and SHA-256 sums. A change of version has to be made in both files.
+- Cause: E-0 added the end-to-end workflow beside F-01c's without changing it.
+- Status: open. A composite action that both workflows use can replace the steps later (coordinator, 2026-11-20).
+
+### 2026-11-20 · limitation · The end-to-end harness runs on macOS and Linux only
+
+- Symptom: the global setup of `web/e2e/config.ts` throws on Windows.
+- Cause: `web/e2e/nodes.ts` starts every process as the leader of its own process group, stops it with `process.kill(-pgid)`, and finds what a dead test process left with `ps`; Windows has neither.
+- Status: open. The browser workflows run on Linux and macOS; I-11 decides whether end-to-end tests run on Windows.
 
 ### 2026-11-20 · limitation · Fake CLIs lack invalid-login and exhausted-limit captures
 
@@ -96,47 +133,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
-### 2026-11-20 · bug · A failing step could end the whole Go acceptance suite
+### 2026-11-20 · bug · Go acceptance steps acted beyond their own scenario
 
-- Symptom: `go test -tags acceptance -count=2 ./features/` ran the suite once, then stopped at the first node-update scenario of the second run: the scenarios after it did not run, their After hooks neither, godog printed no summary, and go test reported "subtest may have called FailNow on a parent test".
-- Cause: godog runs each scenario as a subtest of `TestFeatures`; steps called `Fatal` on the suite's own test (`features/node_update_test.go:98`, `:104` and `features/host_forge_test.go:26` before the fix), which from the subtest's goroutine ends the parent test.
-- Status: resolved on branch `test/audit-harness-ci`: these steps return errors, and the comment of `fixtures.t` states the rule. One helper remains (open entry above).
-
-### 2026-11-20 · bug · go test -count=2 failed in the node-update scenarios
-
-- Symptom: the second run failed with `open …/TestFeatures4075543788/017/v0.3.1: no such file or directory`.
-- Cause: the cache of release builds was a package variable (`features/node_update_test.go:89` before the fix) and outlived the TempDir of the run that filled it.
-- Status: resolved on branch `test/audit-harness-ci`: the cache is `fixtures.stamped`, one per run; `-count=2` passes 70 of 70 scenarios twice.
-
-### 2026-11-20 · bug · A scenario's listener and servers lived until the suite ended
-
-- Symptom: after "Status prints the fingerprint reported by the running node" the fake node kept its socket listening through every later scenario, and each node-update scenario left an HTTP server listening, five by the end (lsof of the test process after each scenario).
-- Cause: the steps registered their cleanup on the suite's test (`f.t.Cleanup` in `features/cmd_local_test.go:38`, `:44` and `features/node_update_test.go:54` before the fix).
-- Status: resolved on branch `test/audit-harness-ci`: `afterScenario` (`features/acceptance_test.go`) undoes them in the scenario's After hook; no scenario now ends with a socket or TCP listener of the test process.
-
-### 2026-11-20 · bug · The login-service scenarios did nothing under go test -run
-
-- Symptom: `go test -tags acceptance -run 'TestFeatures/Remove_an_installed_login_service|TestFeatures/Register_the_node_at_login' ./features/` failed "Register" (got false, want true) and passed "Remove" without installing or removing anything.
-- Cause: the steps set HOME inside a subtest of the suite's test (`features/node_service_test.go:30` before the fix); `-run` matched no `login_profile` subtest, so go test skipped it, the operation with it, and returned success.
-- Status: resolved on branch `test/audit-harness-ci`: the two variables are set and restored around each operation.
-
-### 2026-11-20 · bug · A scenario's other changes to the process reached later scenarios
-
-- Symptom: a scenario that set a variable other than HOME, or changed the working directory, left it for every later scenario; the guard of PR #121 checked HOME only and did not restore it, so later scenarios failed as well.
-- Cause: `features/acceptance_test.go:67-80` before the fix.
-- Status: resolved on branch `test/audit-harness-ci`: after each scenario the suite compares every variable and the working directory with the state at its start, fails the scenario naming what changed (not the values) and restores it; godog's own variables are read after it sets them.
-
-### 2026-11-20 · bug · A developer's Git configuration reached the acceptance suite
-
-- Symptom: with `commit.gpgsign = true` in the global Git configuration, "Uncommitted changes prevent any project check from starting" failed with "gpg failed to sign the data". CI has no such configuration.
-- Cause: the steps and `internal/host` run git with the user's and the system's configuration.
-- Status: resolved on branch `test/audit-harness-ci`: `TestFeatures` sets `GIT_CONFIG_GLOBAL` to the null device and `GIT_CONFIG_NOSYSTEM`; the suite passes with that configuration.
-
-### 2026-11-20 · bug · A failed step was reported three times as an After hook failure
-
-- Symptom: a step error X appeared as "after scenario hook failed: X, step error: X, X, step error: X".
-- Cause: the After hooks of the identity, rendezvous and peer steps, registered for every scenario, returned the error they were given (`features/identity_test.go:72`, `features/rendezvous_test.go:101`, `features/peer_test.go:61` before the fix), which godog takes for the hook's own.
-- Status: resolved on branch `test/audit-harness-ci`.
+Found in the audit of the harness; each was reproduced before the fix (lines are those before it).
+- A failing step could end the whole suite: later scenarios and their After hooks did not run, godog printed no summary, go test said "subtest may have called FailNow on a parent test". Steps called `Fatal` on the suite's own test from a scenario's subtest (`features/node_update_test.go:98`, `:104`, `features/host_forge_test.go:26`).
+- `go test -tags acceptance -count=2 ./features/` failed with `open …/TestFeatures…/017/v0.3.1: no such file or directory`: the cache of release builds was a package variable that outlived the TempDir of the first run (`features/node_update_test.go:89`).
+- The fake node's socket stayed listening through every later scenario, and each node-update scenario left an HTTP server listening (five by the end): cleanups were registered with `f.t.Cleanup` (`features/cmd_local_test.go:38`, `:44`, `features/node_update_test.go:54`).
+- Under `go test -run` naming the two login-service scenarios, "Register" failed and "Remove" passed without doing anything: HOME was set in a subtest of the suite's test that `-run` skipped (`features/node_service_test.go:30`).
+- A scenario that changed a variable other than HOME, or the working directory, changed every later scenario: the guard of PR #121 checked HOME only and did not restore it (`features/acceptance_test.go:67-80`).
+- With `commit.gpgsign = true` in the global Git configuration, a host-check scenario failed with "gpg failed to sign the data": git ran with the user's and the system's configuration.
+- A step error X was printed as "after scenario hook failed: X, step error: X, X, step error: X": After hooks returned the step's error as their own (`features/identity_test.go:72`, `features/rendezvous_test.go:101`, `features/peer_test.go:61`).
+- Status: resolved on branch `test/audit-harness-ci`: steps return errors (the comment on `fixtures.t` states the rule); `afterScenario` undoes per scenario; the build cache is `fixtures.stamped`; the login steps set and restore the variables around each operation; after each scenario the suite compares every variable and the working directory with their state at its start, names what changed (never values) and restores it; `TestFeatures` sets `GIT_CONFIG_GLOBAL` to the null device and `GIT_CONFIG_NOSYSTEM`; the hooks return nil. One `Fatal` remains (open entry above).
 
 ### 2026-11-20 · bug · The web acceptance file failed on a busy machine although its tests passed
 

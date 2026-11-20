@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"path/filepath"
 	"reflect"
@@ -442,12 +443,13 @@ func TestEarlyAndRetiredCutoffs(t *testing.T) {
 	p := f.b
 	k := link{f.a.key.ID(), randomID()}
 	v := candidate{"0", "local fixture"}
-	check(t, p.hold(k, v, 110000, 100000))
-	check(t, p.hold(k, v, 100000, 100000))
-	eq(t, p.early[k].expires, int64(230000))
-	p.prune(230000)
-	eq(t, p.early[k].pending, []candidate{v})
-	p.prune(230001)
+	later := candidate{"0", "later"}
+	check(t, p.hold(k, v, 100000))
+	check(t, p.hold(k, later, 110000))
+	eq(t, p.early[k].expires, int64(130000))
+	p.prune(130000)
+	eq(t, p.early[k].pending, []candidate{v, later})
+	p.prune(130001)
 	eq(t, len(p.early), 0)
 	f.now.Store(800000)
 	old := &Connection{ctx: context.Background(), close: func() error { return nil }}
@@ -462,7 +464,7 @@ func TestEarlyAndRetiredCutoffs(t *testing.T) {
 	eq(t, len(p.live), 0)
 	eq(t, p.retired[k], int64(920000))
 	p.prune(920000)
-	check(t, p.hold(k, v, 920000, 920000))
+	check(t, p.hold(k, v, 920000))
 	eq(t, len(p.early), 0)
 	p.prune(920001)
 	eq(t, len(p.retired), 0)
@@ -473,6 +475,47 @@ func TestEarlyAndRetiredCutoffs(t *testing.T) {
 	first, err := p.db.RememberOffer(remembered.device, remembered.conn, 920000, 920000)
 	check(t, err)
 	eq(t, first, true)
-	check(t, p.hold(remembered, v, 920000, 920000))
+	check(t, p.hold(remembered, v, 920000))
 	eq(t, len(p.early), 0)
+}
+
+// Early candidates of one connection attempt: at most 64 are held, a copy of
+// one held counts once, and those past the limit are dropped.
+func TestEarlyCandidatesAtMost64(t *testing.T) {
+	f := newPair(t)
+	conn := randomID()
+	send := func(text string) {
+		deliver(t, f.b, Route{}, f.a.sign(proto.ICECandidate{SignalHeader: f.a.header(link{f.b.key.ID(), conn}, "ice"), Candidate: text, MID: "0"}))
+	}
+	for i := range 65 {
+		send(fmt.Sprint("candidate ", i))
+	}
+	send("candidate 0")
+	k := link{f.a.key.ID(), conn}
+	eq(t, len(f.b.early[k].pending), 64)
+	eq(t, f.b.early[k].pending[63], candidate{"0", "candidate 63"})
+	var added []candidate
+	add := func(i webrtc.ICECandidateInit) { added = append(added, candidate{*i.SDPMid, i.Candidate}) }
+	f.b.early[k].flush(add)
+	f.b.early[k].receive(candidate{"0", "candidate 64"}, add)
+	eq(t, len(added), 65)
+}
+
+// Early candidates are held for at most 30 seconds of the receiver's clock
+// from the first of them, then dropped.
+func TestEarlyCandidatesAtMost30Seconds(t *testing.T) {
+	f := newPair(t)
+	k := link{f.a.key.ID(), randomID()}
+	send := func(conn, text string) {
+		deliver(t, f.b, Route{}, f.a.sign(proto.ICECandidate{SignalHeader: f.a.header(link{f.b.key.ID(), conn}, "ice"), Candidate: text, MID: "0"}))
+	}
+	send(k.conn, "first")
+	f.now.Add(10000)
+	send(k.conn, "second")
+	f.now.Add(20000)
+	send(randomID(), "other")
+	eq(t, len(f.b.early[k].pending), 2)
+	f.now.Add(1)
+	send(randomID(), "other")
+	eq(t, f.b.early[k], (*batch)(nil))
 }

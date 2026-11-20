@@ -45,9 +45,10 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 
 ## The secretary
 
-- **R-20** `[S1]` Each group has exactly one secretary. It is an AI member
-  kept alive by some node, with the secretary instructions loaded. Secretary
-  contexts of different groups never mix.
+- **R-20** `[S1]` Each project group has exactly one secretary; the team group
+  of step 2 has none (R-14; 2026-11-20). It is an AI member kept alive by some
+  node, with the secretary instructions loaded. Secretary contexts of
+  different groups never mix.
 - **R-21** `[S1]` The secretary coordinates and never writes code, in its
   terminal either: to change code the owner takes over a working AI (Q-20).
 - **R-22** `[S1]` Workflow: take the request; ask only if unclear; post a
@@ -64,7 +65,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 ## Main line and threads
 
 - **R-30** `[S1]` The main line carries only: requests, task briefs, task
-  cards, decision requests, approval cards, summaries.
+  cards, decision requests, approval cards, summaries; and confirm cards and
+  bulletins `[S2]` (2026-11-20, for step 2: R-51, the team group).
 - **R-31** `[S1]` Progress, AI-to-AI discussion and review remarks go in the
   thread of the task they belong to.
 - **R-32** `[S1]` Message kinds in a thread: progress, question, call,
@@ -76,11 +78,10 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 ## Permissions and approvals
 
 - **R-40** `[S1]` Three levels, set per project and per AI by the owner of the
-  machine: (1) read only; (2) work inside the workspace, the default;
-  (3) unrestricted. The owner may set level 3 for all projects at once.
-  Level 2 limits what the AI itself does. The project's own check commands
-  run outside the sandbox; the product says so where levels are chosen
-  (Q-19).
+  machine: (1) read only; (2) work inside the workspace, the default; (3)
+  unrestricted. The owner may set level 3 for all projects at once. Level 2
+  limits what the AI itself does. The project's own check commands run outside
+  the sandbox; the product says so where levels are chosen (Q-19).
 - **R-41** `[S1]` At level 2 the AI changes files in the workspace without
   asking. What reaches further (a change outside the workspace, or the
   network: installing software, pushing code) is meant to happen only
@@ -234,10 +235,9 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   is an experiment (spike S-9) and is built in step 3 only if it shows a
   clear benefit (Q-1).
 - **R-132** `[S1]` Relay is a bridge and a last resort. While relayed, direct
-  attempts continue; on success the connection moves and the relay is
-  dropped. Relay carries small data only (chat, tasks); terminal streams are
-  direct only. Relay content is end-to-end encrypted. The user is told when
-  relayed.
+  attempts continue; on success the connection moves and the relay is dropped.
+  Relay carries small data only (chat, tasks); terminal streams are direct
+  only. Relay content is end-to-end encrypted. The user is told when relayed.
 - **R-133** `[S1]` The system must work without the server: existing direct
   connections continue, nodes remember last addresses, devices on one local
   network find each other, self-hosters run the same programs.

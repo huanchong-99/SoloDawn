@@ -121,10 +121,10 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 
 ### Calls across owners (D-2, D-8; `contracts/step-2/confirm.md`)
 
-- **A9.18** P's working AI calls Q-personal with `ask`. A `confirm` card for Q
-  appears and the caller gets a receipt after the wait; after Q confirms, the
-  answer reaches the caller as a turn. A call to Q-team, which lists P, is
-  answered in the open tool call with no card. So is one between Q's AIs.
+- **A9.18** P's working AI calls Q-personal with `ask`: a `confirm` card for Q
+  appears, a receipt comes after the wait, and the answer as a turn once Q
+  confirms; denied, a turn says so. A call to Q-team, which lists P, is
+  answered in the open tool call with no card, as is one between Q's AIs.
 
 ### Approver delegates (D-13; `contracts/step-2/authority.md`)
 
@@ -150,8 +150,8 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 ### Team-wide group (D-15; `contracts/step-2/watch-team.md`)
 
 - **A9.22** `group create` with kind `team` makes a group without `repo`. In
-  it `task start`, `post` of kind `brief`, `host.join` and `member add_ai` are
-  refused, and no node holds a clone for it.
+  it `task start`, `post` of kind `brief`, `host.join`, `member add_ai` and
+  `group set` with `checks` are refused, and no node holds a clone for it.
 - **A9.23** The secretary of a project group posts a notice with the `post`
   tool and the team group's id; it appears in that group's main line under the
   secretary's name. The same call by a working AI is refused. A person's
