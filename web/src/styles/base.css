@@ -1,5 +1,5 @@
 /* SoloDawn shared styles. Colours and sizes come from tokens.css only.
-   Sections: 1 base  2 utilities  3 shell  4 buttons  5 cards  6 forms  7 motion.
+   Sections: 1 base  2 utilities  3 shell  4 buttons  5 cards  6 forms  7 motion  8 forced colours.
    Styles of one component (badges, avatars, chat, thread, terminal, dialog) arrive with it. */
 
 /* 1 base */
@@ -748,4 +748,21 @@ kbd,
 ::view-transition-old(root) {
   animation-duration: var(--dur-3);
   animation-timing-function: var(--ease);
+}
+
+/* 8 forced colours: the system drops backgrounds and shadows, and with them the mark of the
+   current page and the thumb of a segmented control. System colours mark them instead, so that a
+   choice is not told by the weight of its text alone. */
+@media (forced-colors: active) {
+  .tabs a[aria-current],
+  .seg label:has(:checked) {
+    /* As set: the system would put a backplate of its page colour behind the text. */
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  /* The hover layer, which the system paints in its page colour, would cover the highlight. */
+  .tabs a[aria-current]::before {
+    display: none;
+  }
 }

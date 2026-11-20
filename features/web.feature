@@ -65,6 +65,19 @@ Feature: Web client
     And the page is marked as "en"
     And the focused language button announces "Language: English"
 
+  Scenario: The language button is named by its visible text, each part in its own language
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client
+    Then the language button is named "EN Switch language / 切换语言"
+    And its parts are "EN" in "en", "Switch language" in "en" and "切换语言" in "zh-CN"
+
+  Scenario: Under forced colours the chosen options and the current page are marked in system colours
+    Given the browser supports Ed25519 in WebCrypto
+    And the system forces its colours
+    And the person opens the client at "#/settings"
+    Then the chosen theme, the chosen language and the current page have the system highlight
+    And the current page keeps it under the pointer
+
   Scenario: The mark of the current page moves to the entry that is opened
     Given the browser supports Ed25519 in WebCrypto
     And the person opens the client
