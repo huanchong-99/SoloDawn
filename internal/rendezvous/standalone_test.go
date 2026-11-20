@@ -37,10 +37,12 @@ func TestStandaloneOptions(t *testing.T) {
 		{Options{Cert: "c"}, pair}, {Options{Key: "k"}, pair}, {Options{Cert: "c", Key: "k"}, noDomain},
 		{Options{TurnDomain: "turn.localhost"}, noDomain}, {Options{NoRelay: true}, noDomain},
 		{Options{Domain: "localhost"}, distinct}, {Options{Domain: "localhost", TurnDomain: "LOCALHOST"}, distinct},
+		{Options{Domain: "localhost.", TurnDomain: "localhost"}, distinct},
+		{Options{Domain: ".", NoRelay: true}, "TLS needs a hostname, not the DNS root"},
 		{Options{UDPPort: -1}, port}, {Options{UDPPort: 65536}, port},
 		{Options{QuotaMB: -1}, quota}, {Options{QuotaMB: 1 << 33}, quota},
 	} {
-		err := tc.o.validate()
+		err := tc.o.configure()
 		if tc.msg == "" {
 			if err != nil {
 				t.Fatal(tc.o, err)
@@ -48,6 +50,10 @@ func TestStandaloneOptions(t *testing.T) {
 		} else if err == nil || err.Error() != tc.msg {
 			t.Fatal(tc.o, err)
 		}
+	}
+	o := Options{Domain: "Rv.Example.", TurnDomain: "Turn.Rv.Example."}
+	if err := o.configure(); err != nil || o.Domain != "rv.example" || o.TurnDomain != "turn.rv.example" {
+		t.Fatal(o, err)
 	}
 	for _, tc := range []struct {
 		o    Options
