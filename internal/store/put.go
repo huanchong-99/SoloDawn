@@ -11,44 +11,15 @@ type wireRow interface {
 		proto.TaskRow | proto.MsgRow | proto.NoteRow | proto.GoneRow
 }
 
-// Put stores a wire row with its assigned seq. The index columns are derived
-// from the same JSON readers receive. Updates retain the original pos and ts.
+// Put stores a wire row with its assigned seq, encoded as it is. The index
+// columns are derived from that JSON. Updates retain the original pos and ts.
 func Put[R wireRow](tx *Tx, group string, modified int64, row R) error {
-	data, err := json.Marshal(forStorage(row))
+	data, err := json.Marshal(row)
 	if err != nil {
 		return err
 	}
 	_, err = tx.Exec(putRow, group, modified, string(data))
 	return err
-}
-
-func list(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
-}
-
-func forStorage[R wireRow](row R) any {
-	switch v := any(row).(type) {
-	case proto.GroupRow:
-		v.Checks = list(v.Checks)
-		return v
-	case proto.AIMemberRow:
-		v.Allow, v.Approvers = list(v.Allow), list(v.Approvers)
-		return v
-	case proto.TaskRow:
-		v.Depends = list(v.Depends)
-		return v
-	case proto.MsgRow:
-		v.Mentions = list(v.Mentions)
-		if v.Body == nil {
-			v.Body = json.RawMessage("{}")
-		}
-		return v
-	default:
-		return row
-	}
 }
 
 const putRow = `

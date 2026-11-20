@@ -15,7 +15,8 @@ func header(r, id string, seq int64) proto.RowHeader {
 }
 
 func msg(id string, seq int64, thread *string, main bool, kind string) proto.MsgRow {
-	return proto.MsgRow{RowHeader: header("msg", id, seq), Group: "g", Pos: seq, Timestamp: 10, Kind: kind, Thread: thread, Main: main}
+	return proto.MsgRow{RowHeader: header("msg", id, seq), Group: "g", Pos: seq, Timestamp: 10, Kind: kind, Thread: thread, Main: main,
+		Mentions: []string{}, Body: json.RawMessage("{}")}
 }
 
 func put[R wireRow](t *testing.T, s *Store, g string, mt int64, row R) {
@@ -66,8 +67,6 @@ func TestPagesAndDelta(t *testing.T) {
 	equal(t, ids(t, rows, err), []string{"card"})
 	var updated proto.MsgRow
 	check(t, json.Unmarshal(rows[0], &updated))
-	card.Mentions = []string{}
-	card.Body = json.RawMessage("{}")
 	equal(t, updated, card)
 	rows, err = v.PageThread(nil, 8, 2)
 	equal(t, ids(t, rows, err), []string{"card", "main"})
@@ -151,24 +150,6 @@ func TestStoredWireRows(t *testing.T) {
 	roundTripGolden[proto.MsgRow](t, "msg")
 	roundTripGolden[proto.NoteRow](t, "note")
 	roundTripGolden[proto.GoneRow](t, "gone")
-}
-
-func TestEmptyCollections(t *testing.T) {
-	s := openDB(t, ":memory:")
-	put(t, s, "g", 1, proto.GroupRow{RowHeader: header("group", "g", 1)})
-	put(t, s, "g", 2, proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: header("member", "m", 2)}})
-	put(t, s, "g", 3, proto.TaskRow{RowHeader: header("task", "t", 3)})
-	put(t, s, "g", 4, msg("m", 4, nil, true, "text"))
-	rows, err := snapshot(t, s, "g").AfterSeqUpTo(0, 4)
-	check(t, err)
-	equal(t, len(rows), 4)
-	for i, fields := range []map[string]string{{"checks": "[]", "paused": "null"}, {"allow": "[]", "approvers": "[]", "usage": "{}"}, {"depends": "[]", "checks": "{}", "wait": "null"}, {"mentions": "[]", "body": "{}", "state": "null", "thread": "null", "re": "null"}} {
-		var got map[string]json.RawMessage
-		check(t, json.Unmarshal(rows[i], &got))
-		for k, want := range fields {
-			equal(t, string(got[k]), want)
-		}
-	}
 }
 
 func TestInvalidBodyNotWritten(t *testing.T) {

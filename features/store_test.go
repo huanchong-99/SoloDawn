@@ -43,7 +43,7 @@ func storeSteps(sc *godog.ScenarioContext) {
 		}
 		return save(proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: "later"},
 			Group: card.Group, By: "system", Kind: "system", Main: true, Pos: 2,
-			Timestamp: card.Timestamp + 1, Body: json.RawMessage(`{"code":"group_resumed"}`)})
+			Timestamp: card.Timestamp + 1, Mentions: []string{}, Body: json.RawMessage(`{"code":"group_resumed"}`)})
 	})
 	sc.Step(`^the card is decided$`, func() error {
 		card.State = decision
