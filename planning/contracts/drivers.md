@@ -123,8 +123,18 @@ JSON-RPC over stdio, one JSON object per line `[verified]`:
    `approvalPolicy`, `developerInstructions` (the instructions of section
    4) and `config`; no `model` (section 1). Codex creates the thread id.
 3. `turn/start` with the turn text. The turn ends with `turn/completed`;
-   usage arrives in `thread/tokenUsage/updated` and the rate-limit windows
-   in `account/rateLimits/updated`.
+   usage arrives in `thread/tokenUsage/updated` (`last.totalTokens` summed
+   over notifications of the active `turnId`, ignoring replayed notifications
+   of earlier turns `[verified]`) and the rate-limit windows in
+   `account/rateLimits/updated` (between `primary` and `secondary` the node
+   keeps the window with the higher `usedPercent`, `primary` on a tie, and
+   converts `resetsAt` from Unix seconds to milliseconds). A `thread/resume`
+   for a missing rollout fails with a JSON-RPC error (`no rollout found for
+   thread id …`) and is reported as `no_session` `[verified]`; an
+   unauthenticated turn ends with `turn/completed` status `failed` and
+   `turn.error.codexErrorInfo` `"unauthorized"` or HTTP status `401` (or a
+   startup authentication error) and is reported as `login_invalid`
+   `[verified]`.
 4. Approval requests arrive as server requests, and the node answers
    `accept` or `decline`. `item/commandExecution/requestApproval` carries
    `command`, `cwd` and `reason`. `item/fileChange/requestApproval` carries
