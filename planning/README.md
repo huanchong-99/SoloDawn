@@ -146,6 +146,10 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/task-machine.md` | the one table of task transitions |
 | `contracts/drivers.md` | how each CLI is started, levels, turn format, instructions |
 | `contracts/local.md` | local interfaces: command line, MCP shim socket, Git commands, outbound secret check, self-update |
+| `contracts/step-2/authority.md` | step 2: whose word a host accepts on someone else's home, the list its owner signs, the level cap, delegates, the fork rule of the device log (D-1, D-2, D-4, D-13) |
+| `contracts/step-2/authority-record.md` | step 2: where `authority.md` is folded, what the coordinator settled, what is not verified |
+| `contracts/step-2/fork-vectors.md` | step 2: the shared vectors of the fork rule, split from `authority.md` (D-4) |
+| `contracts/step-2/labels.md` | step 2: the two labels of a turn, split from `confirm.md` (D-9) |
 | `contracts/step-2/people.md` | step 2: a second person in a group, the three roles, leaving and removal (D-7) |
 | `contracts/step-2/browser-trust.md` | step 2: what a browser checks before it shows who wrote or decided something (D-5, D-6) |
 | `contracts/step-2/confirm.md` | step 2: the owner's `confirm` card before an AI works for someone else, and the `information` label (D-8, D-9) |
@@ -158,7 +162,8 @@ Change: <files and sections edited, or the reason for rejecting>
 | `steps/step-1-backend.md` | step 1 backend task list |
 | `steps/step-1-frontend.md` | step 1 frontend task list |
 | `steps/step-2-3.md` | outline of steps 2 and 3 |
-| `steps/step-2-3-acceptance.md` | acceptance tests of step 2 (A9.x) and step 3 (A10.x) |
+| `steps/step-2-3-acceptance.md` | acceptance tests of step 2 (A9.x); how they are tested |
+| `steps/step-3-acceptance.md` | acceptance tests of step 3 (A10.x), split from the file above |
 | `steps/parallel-plan.md` | the rest of version 1 as parallel units: seams, lanes, waves, critical path, what needs the owner |
 | `steps/parallel-plan-units.md` | the units of step 1, by lane |
 | `steps/parallel-plan-step-2-3.md` | steps 2 and 3: design points with proposed answers, contract units, code units |
