@@ -67,7 +67,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · deviation · Nothing resumes hosted checks after a node restart yet
 
 - Symptom: after a restart, a task at step `cloud_check` is not polled again, so it stays there until something else moves it (decision D3 of the host-contract audit).
-- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and the time the 60-minute limit runs from, but no code runs at node start yet to call it and then `WaitHostedChecks` for each.
+- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and `checks.local.at`, where the 60-minute limit counts from, but no code runs at node start yet to call it and then `WaitHostedChecks` for each.
 - Status: open. The node must call it at start; owner N-4, or HS-0 if it lands first.
 
 ## Resolved

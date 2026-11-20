@@ -259,7 +259,7 @@ func TestHostedChecksNoChecks(t *testing.T) {
 	waitHosted(t, 0, []forgeAnswer{hostedView("new", ""), {Stderr: "login required", Code: 1}, hostedView("new", ""),
 		hostedView("stale", ""), hostedView("new", ""), {Stdout: "{"}, hostedView("new", ""), hostedView("new", queuedRun),
 		hostedView("new", ""), hostedView("new", "")},
-		&proto.ChecksBody{Stage: "cloud", Commit: "new", OK: true, Items: []proto.CheckItem{}}, 9*hostedPoll)
+		&proto.ChecksBody{Stage: "cloud", Commit: "new", OK: true, Items: []proto.CheckItem{}}, 270*time.Second)
 }
 
 // After sixty minutes the last read's items stay as they were and the reason
@@ -270,7 +270,7 @@ func TestHostedChecksTimeOut(t *testing.T) {
 		hostedView("new", passedRun+","+fmt.Sprintf(lintStatus, "EXPECTED")), {Stderr: "login required", Code: 1}},
 		&proto.ChecksBody{Stage: "cloud", Commit: "new", OK: false, Items: []proto.CheckItem{
 			{Name: "build", OK: true, Detail: new("SUCCESS")}, {Name: "lint", Detail: new("EXPECTED")}, timedOut}}, time.Minute)
-	waitHosted(t, hostedLimit, []forgeAnswer{hostedView("stale", passedRun)},
+	waitHosted(t, time.Hour, []forgeAnswer{hostedView("stale", passedRun)},
 		&proto.ChecksBody{Stage: "cloud", Commit: "new", OK: false, Items: []proto.CheckItem{timedOut}}, 0)
 }
 

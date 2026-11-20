@@ -55,8 +55,11 @@ func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 // DeleteBranch deletes the local task branch after a successful merge and
 // the removal of the task's worktree; Git refuses while a worktree still has
 // the branch checked out. A squash leaves the branch unmerged into the base,
-// hence -D.
+// hence -D. It runs under the clone's lock.
 func (m ReviewedMerge) DeleteBranch(ctx context.Context) error {
+	lock := cloneLock(m.Repo)
+	lock.Lock()
+	defer lock.Unlock()
 	_, err := m.run(ctx, "git", "branch", "-D", m.Branch)
 	return err
 }

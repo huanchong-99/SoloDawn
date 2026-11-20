@@ -115,21 +115,17 @@ func pullRequest(url string) (*ForgePullRequest, error) {
 	return &ForgePullRequest{Number: n, URL: url}, nil
 }
 
-const (
-	hostedPoll  = 30 * time.Second
-	hostedLimit = 60 * time.Minute
-)
-
 // WaitHostedChecks reads the head and checks together every 30 s and returns
 // the result for commit once every check has finished. A read that fails or
 // shows another head counts as unfinished. No checks pass only on a second
 // consecutive empty read, because a forge may register its checks a few
-// seconds late. The first unfinished read at or after sixty minutes from since
-// (the submission, or after a restart the local check it rests on) fails the
-// checks as timed out. The error is ctx's: cancel ctx on supersession.
+// seconds late. The first unfinished read at or after sixty minutes from since,
+// checks.local.at of the submitted commit, fails the checks as timed out with
+// the items of the last read at that commit. The error is ctx's: cancel ctx
+// on supersession.
 func (f TaskForge) WaitHostedChecks(ctx context.Context, pr int, commit string, since time.Time) (*proto.ChecksBody, error) {
 	w := hostedWait{commit: commit}
-	deadline := since.Add(hostedLimit)
+	deadline := since.Add(60 * time.Minute)
 	for {
 		if result := w.next(f.readHostedChecks(ctx, pr, commit)); result != nil {
 			return result, nil
@@ -137,10 +133,11 @@ func (f TaskForge) WaitHostedChecks(ctx context.Context, pr int, commit string, 
 		if !time.Now().Before(deadline) {
 			return w.timedOut(), nil
 		}
+		nextPoll := time.After(30 * time.Second)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(hostedPoll):
+		case <-nextPoll:
 		}
 	}
 }
@@ -210,7 +207,7 @@ func (w *hostedWait) body(items []proto.CheckItem) *proto.ChecksBody {
 type HostedCheck struct {
 	Task, Branch, Commit string
 	PR                   int
-	Since                time.Time // the local check the submission rests on
+	Since                time.Time // checks.local.at, where the 60 minutes count from
 }
 
 // HostedChecksToResume selects, from the task rows, the tasks a restarted
