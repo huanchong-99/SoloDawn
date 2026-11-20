@@ -74,4 +74,4 @@ Every field is always present. Cases the part must hold:
 ## 4. Not verified
 
 Nothing here was run. The cases were worked by hand and in the throwaway
-model that `contracts/step-2/authority.md` section 12 describes.
+model that `contracts/step-2/authority-record.md` section 3 describes.

@@ -7,8 +7,8 @@ the device log with its vectors (D-4). The design points are in
 `steps/parallel-plan-step-2-3.md` section 1. Rules: R-42, R-44, R-51, R-53,
 R-115, R-136, R-138.
 
-This file adds to the step 1 contracts; section 9 lists what is folded into
-which file and what changed in other step 2 files. Presence follows
+This file adds to the step 1 contracts; `authority-record.md` lists what is
+folded into which file and what changed in other files. Presence follows
 `contracts/conventions.md` section 2.
 
 Not here, all in `contracts/step-2/`: when a home asks an owner, the digest
@@ -85,12 +85,12 @@ connection ("Still current" there), the row of its `why`:
 | `mention` | `msg.env` is a `post`, and one of: its signer's person is O; that person is listed for X; `cause` is O's confirmation of `msg.env` for X, not acted on before (`contracts/step-2/confirm.md` section 6); its `thread` is a task for which X has a task or review session here (R-52) |
 | `assign`, `review` | X has the session of that role for the task here, which makes the item a continuation; otherwise, the proof of a role below |
 | `reviewed`, `checks`, `resume` | X has the task session of that task here |
-| `merge` | the same, and with a remote: `pr` is the pull request N opened for that task at `submit_task`, whose number N keeps, and N has read it first (`gh pr view <pr> --json baseRefName,headRefName`): its base is the `base` O accepted (`contracts/step-2/checks-forge.md` section 2), its head the task's branch. If not, N reports `task conflict`. With `forge: custom` N hands its own request to the accepted template and can read no base |
+| `merge` | the same, and with a remote: `pr` is the pull request N opened or reused for that task at `submit_task` (`contracts/local.md` section 7), whose number N keeps, and N has read it first (`gh pr view <pr> --json baseRefName,headRefName`): its base is the `base` O accepted (`contracts/step-2/checks-forge.md` section 2), its head the task's branch. If not, N reports `task conflict`. With `forge: custom` N hands its own request to the accepted template and can read no base |
 | `decided` on an approval | section 5 |
 | `watch` | `contracts/step-2/watch-team.md` section 2 |
 | `reply` | the call it answers is one X posted and N still holds open: the `re` of `msg`, a reply or the `confirm` card of a denial, names it. N keeps each call it posts until its answer is delivered |
-| `decided` on a decision | `msg` is a card X posted, by N's own signature on its `env`, or its signed `body.task` is a task whose task session X has here; and `cause` is an `act choose` on that card |
-| `confirmed`, `notice` | O joined X as the secretary (the flag of `host.join`). For `confirmed` also: `msg` is a brief X posted, and `cause` is an `act` on it |
+| `decided` on a decision | `msg` is a card X posted (N's own signature on its `env`, with `as` = X), or its signed `body.task` is a task whose task session X has here; and `cause` is an `act choose` on that card |
+| `confirmed`, `notice` | X is the secretary by O's consent (below). For `confirmed` also: `msg` is a brief and `cause` is an `act` on it. A brief that X did not post (not N's signature with `as` = X) is one an earlier secretary left: the item is then `information` |
 
 **O's confirmation** of an envelope for X: an `act confirm` signed by O as
 a person, whose `arg` is the digest for X of that envelope.
@@ -107,20 +107,25 @@ with that task as `id`. R is the brief's `env`, or that `body.start`.
 | 4 | R is a `task start` whose signer's person is listed for X | capped |
 | 5 | `cause` is O's confirmation of R for X | capped |
 
-- **Proofs 1 and 2 need the role.** An entry of R's `body.tasks` with the
-  task row's `title` names X as `assignee` for `assign`, as `reviewer` for
-  `review`; or the item is signed by a device valid in O's log, which is
-  O's own home speaking. A role the brief does not give X needs proof 5.
+- **Proofs 1 and 2 need the role.** The one entry of R's `body.tasks` with
+  the task row's `title` names X as `assignee` for `assign`, as `reviewer`
+  for `review`. Or the item is signed by a device valid in O's log: O's
+  own home, which queues such an item without a card only when a device of
+  O signed the `task assign` that gave the role (section 6). Any other
+  role the brief does not give X needs proof 5.
+- **The secretary by consent.** N treats X as a group's secretary (its
+  tools and instructions, `notice`, `confirmed`) only when the group row
+  names X and O consented: O joined X as the secretary (the flag of
+  `host.join`), or the row's `secretary_by` is a `group set` naming X that
+  O signed as a person.
 - Anything else is refused as in step 1: audit `refused`, then `ack`.
   Nothing tells the home. An honest home queues nothing a host refuses,
   unless a list or a log changed in between; such a task stays quiet, and
   `contracts/task-machine.md` row 23 brings the secretary.
-- **Labels.** A `why` gives no authority to what the item carries. A
-  carried `msg`, and the `cause` of a `decided` or `confirmed`, is labelled
-  by its own signer (`contracts/step-2/confirm.md` section 8): `instruction`
-  only when that signer, as a person, is O or listed for X, or when O's
-  confirmation covers it; for a `decided`, also a person in the signed
-  `body.to` of a card X posted. No `member` row makes an `instruction`.
+- **Labels** (`contracts/step-2/labels.md`). The header of an item N acts
+  on has the label of its kind. What the item carries beside its request
+  (`msg`, the `cause` of a `decided` or `confirmed`) is shown under a line
+  of its own, labelled by its own signer and by nothing else.
 - The owner's word covers the request. Which task of it is the home's row.
   What a first turn says of the request (the brief; the title and plan of
   a `task start`) is read from R.
@@ -187,6 +192,16 @@ node's `settings.approvers`. A delegate decides approval cards of X only.
 - **A request is kept** while a task from it is not final: the exemption
   of `contracts/storage.md` section 4 for a confirmed brief with a queued
   task covers the brief and the `task` message of every such task.
+- **A role the brief does not give** asks the AI's owner by a card
+  (`contracts/step-2/confirm.md` section 7), except on that owner's own
+  home when a device of that owner signed the `task assign`, as a person
+  or through one of their AIs. A `brief` whose `body.tasks` holds one
+  `title` twice is `bad_request`: a task's title names one entry.
+- **The secretary.** `group set` with `secretary` is accepted from the
+  owner of that AI, or for an AI that was added with `secretary: true`
+  (a mark the home keeps, not on the wire); else `forbidden`. The group
+  row gains `secretary_by`, optional: the signed `group set` that named
+  the secretary, absent when `member add_ai` did.
 - `member set` with `allow` is accepted from the AI's host, as `approvers`.
 
 ## 7. The fork rule of the device log (D-4)
@@ -207,7 +222,8 @@ the log holds, and which is not the entry H held there:
 
 - The outcome depends only on the entries before v and on E and H. Two
   receivers that have applied each other's whole log hold the same log
-  (modelled, section 12). Entries travel as in step 1; no frame is added.
+  (modelled, `contracts/step-2/authority-record.md` section 3). Entries
+  travel as in step 1; no frame is added.
 - **After a replacement** a receiver forwards E like any accepted entry
   and, when the frame is applied, closes the connections of devices that
   are no longer valid (`flows/pairing.md` D). A home writes the `device`
@@ -240,55 +256,18 @@ In `contracts/step-2/fork-vectors.md`: what the part `devlogs` of
 `crypto.json` keeps and what changes in it, the new part `forks`, and the
 files unit T2-4 changes.
 
-## 9. Where this goes, and what changed elsewhere
+## 9. Folding, decisions, what is not verified
 
-| File | Gains |
-| --- | --- |
-| `contracts/envelope.md`, `contracts/vectors.md` | section 4: the fork rule; `fork-vectors.md`; the part `accept` with `repo` and `base` (`contracts/step-2/checks-forge.md` section 2) |
-| `contracts/commands.md` | 1.2: `allow` from the host; 1.4: `arg` on a brief's `confirm`, who may `approve` and `deny`; section 2: `allow.set`, the cap under "Levels" |
-| `contracts/datachannel.md`, `contracts/conventions.md` | section 6: `req`, and section 3 here in place of "What a host accepts (step 1)"; section 7: the lists in `host.info`. Section 4: an item with `req` stays under 54 KiB |
-| `contracts/messages.md`, `contracts/storage.md` | 2.2: `start` in the `task` body. Host table `allow`; the open calls and, on a task session, `capped` and the pull request it opened; the exemption of section 6 |
-| `flows/approval.md`, `flows/agent-turn.md`, `flows/task.md` | steps 9 and 10; step 2, the level of step 5 and the labels of step 6; E: the check before a merge; G: the `re` of section 4 |
-| `flows/pairing.md`, `flows/takeover.md` | D: where a client writes a `revoke`, and adding again what it dropped. A: a task registered for a takeover is O's own; a capped session stays capped in the terminal |
-
-Changed with this file: `confirm.md` (the request and the word behind a task
-without a brief; a brief's `arg`; a role the brief does not give; labels),
-`browser-trust.md` (a `task` request; 8.1), `checks-forge.md` (the hash) and
-`watch-team.md` here; `contracts/step-3/knowledge.md` section 8 (`v` 1 from a
-host); the acceptance tests; `risks.md` K-4. P-4 freezes `allow.set`, `req`,
-`body.start`, a brief's `arg` and the lists in `host.info`. T2-3 builds
-sections 2 to 5 on the host, T2-2 the home's side (sections 5 and 6), T2-4
-section 7 and its vectors.
+In `contracts/step-2/authority-record.md`: what is folded into which step 1
+file, what changed in other files, the points the coordinator settled with
+the other answer for each, and what was modelled and not run.
 
 ## 10. Limits
 
 | | Limit | Consequence |
 | --- | --- | --- |
-| 1 | The home still says which task of a request an AI has, its role in a task without a brief, what a review said and when a merge is due, and it supplies what a session reads: notes, threads, task rows | a session trusts that home with its context; labels are the only guard (`contracts/step-2/confirm.md` section 8). Where level 3 is chosen for a group on someone else's home, the interface says so. A merge goes only into the `repo` and `base` the owner accepted (`contracts/step-2/checks-forge.md` section 2), and only through the pull request N opened |
+| 1 | The home still says which task of a request an AI has, its role in a task without a brief, what a review said and when a merge is due, and it supplies what a session reads: notes, threads, task rows | a session trusts that home with its context; labels are the only guard (`contracts/step-2/confirm.md` section 8). Where level 3 is chosen for a group on someone else's home, the interface says so. A merge goes only into the `repo` and `base` the owner accepted (`contracts/step-2/checks-forge.md` section 2), and only through the pull request N opened or reused |
 | 2 | A home can deliver again what was authorised once: an owner's or a listed person's message, the tasks of a confirmed brief | no new authority; a confirmed `mention` is acted on once |
 | 3 | The logs of other people are in memory and come through homes | a home that holds a `revoke` back keeps that device's word good at N until the entry comes from elsewhere |
 | 4 | A signer must be valid when N judges | after the device that confirmed a brief is revoked (`risks.md` K-20), its tasks start no new session; the secretary posts a new brief |
 | 5 | A delegate removed while their `act` is on the way: the home may accept what the host refuses | the card reads approved and the request stays open; the AI asks again and a new card appears |
-
-## 11. Settled by the coordinator (2026-11-20)
-
-| | Written here | The other answer |
-| --- | --- | --- |
-| 1 | The signed list is a host command; the member row is a copy | a list signed into the row: a home could show an old one, so the host would need versions |
-| 2 | A brief's `confirm` carries the digest of the brief, a change to a step 1 command under `v` 2 | `msg` alone: a home can put another brief under the same id, and with it its own work at the owner's level |
-| 3 | The request of a task without a brief is its signed `task start`, shown in the `task` message | the message that led to it: a home could hang any plan on an old message of the owner |
-| 4 | D-4 refined: after a replacement the entries that followed are applied again, not all dropped; one signer: the lower `s`. Record: `docs/decisions/proposed/architecture/2026-11-20-device-log-fork-rule.md` | all dropped: a receiver that saw the winner first keeps an entry that another has dropped |
-| 5 | Where a `revoke` is written, and adding again what it dropped | always the next version: the revoked device replaces an older entry and is valid again |
-| 6 | Only O's signature as a person carries O's level | "O's word", also through O's AIs: a capped task could raise itself by a call |
-| 7 | The hash of `checks.accept` covers `repo` and `base`; N merges only the pull request it opened, after reading its base and head (T2-3, `internal/host/merge.go`) | a limit: a node merges into whatever the group row and the item name |
-| 8 | Not settled yet: a role the brief does not give an AI needs its owner's card, except on that owner's own home, whose item is the owner's device speaking | a card on every home: a one-person group would ask its owner at each reassignment and cap the task, against A9.40 |
-
-## 12. Not verified
-
-- Nothing here was run in the product. A throwaway model of section 7 (no
-  keys, random logs and orders) ended with one log on every receiver in
-  10,000 runs; after a `revoke` written as that section says, no entry of
-  the revoked device changed a log in 2,896.
-- `[unverified]` Read against `contracts/`, not the host code of step 1.
-  `gh pr view --json baseRefName,headRefName` was not run; step 1 reads
-  `baseRefName` in the same way (`internal/host/forge.go`).

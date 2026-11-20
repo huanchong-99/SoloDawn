@@ -45,7 +45,7 @@ folded into the main contract files after step 1 is built.
 
 | Id | Writes | Settles | Owns |
 | --- | --- | --- | --- |
-| C2-0 | Acceptance tests of steps 2 and 3, numbered A9.x (step 2) and A10.x (step 3) | what "done" means | `planning/steps/step-2-3-acceptance.md` |
+| C2-0 | Acceptance tests of steps 2 and 3, numbered A9.x (step 2) and A10.x (step 3) | what "done" means | `planning/steps/step-2-3-acceptance.md`, `planning/steps/step-3-acceptance.md` |
 | C2-1 | Authority across owners: the host's rule, the signed list with `allow` and delegates, the level cap, the fork rule of the device log with its vectors. Inputs from the audit (coordinator, 2026-11-20): A9.19 has the home answer `forbidden` to `act approve` by a delegate removed after the card was posted, which the step 1 rule (a person in the card's `body.approvers`, `contracts/commands.md` 1.4) does not give; how a host gets the request to check the digest of a role after a reassignment (`contracts/step-2/confirm.md` section 11); the `devlogs` case "for a version already held, a different entry" of `contracts/vectors.md` changes its outcome under D-4 | D-1, D-2, D-4, D-13 | `planning/contracts/step-2/authority.md` |
 | C2-2 | People: `invite`, `join`, roles, `member remove`; the joining flow | D-7 | `planning/contracts/step-2/people.md` |
 | C2-3 | The `confirm` card: body, states, `act confirm`; the `information` label | D-8, D-9 | `planning/contracts/step-2/confirm.md` |
@@ -73,7 +73,7 @@ are complete only when S-10 and T3-0 have reported.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P-4 | 4 | Wire shapes of step 2: `invite`, `join`, role and removal, `confirm` body and states, group kind `team`, `checks.accept`, templates, the snapshot, `watch`, and the rest that each step 2 contract assigns to P-4; protocol `v` 2, with the rule that a `v` 2 home lets only its owner's own devices connect with `v` 1 (`contracts/step-3/knowledge.md` section 8) | golden round trip | lane PROTO | P-3, C2-1 to C2-6 | F | L |
 | T2-1 | 5 | Home: invitations, joining, roles, removing a member; admission of a joiner by the node and the browser; the `v` 2 negotiation of `hello` in node and browser, and the home's refusal of `v` 1 from devices of others | A9 people | `home/cmd_people.go`, `node/admit.go`, `node/version.go`, `lib/join.ts`, `lib/version.ts` | P-4, HM-5, N-2, W-2 | A | M |
-| T2-2 | 5 | Home: the `confirm` card and `act confirm`; who must be asked; the home's side of `contracts/step-2/authority.md` (sections 5 and 6) | A9 confirm | `home/cmd_confirm.go` | P-4, HM-10 | F | M |
+| T2-2 | 5 | Home: the `confirm` card and `act confirm`; who must be asked; the home's side of `contracts/step-2/authority.md` (sections 5 and 6), with who may set `secretary` and unique titles in a brief | A9 confirm | `home/cmd_confirm.go` | P-4, HM-10 | F | M |
 | T2-3 | 5 | Host: the owner-signature rule, the signed list, the level cap, delegates; in `host/merge.go`, merging only the pull request the host opened, after reading its base and head (`contracts/step-2/authority.md` section 3) | A9 authority | `host/authority.go` | P-4, HS-13, HS-16a | F | M |
 | T2-4 | 5 | Device log fork rule in Go and in the web client, with the vector generator and the fork vectors in the same pull request; where a client writes a revoke (`contracts/step-2/authority.md` section 7, `fork-vectors.md`) | the new vectors | `internal/identity/devlog.go`, `lib/devlog.ts`, the fork vectors of `crypto.json` and their generator | P-4 | F | M |
 | T2-5 | 5 | Browser: verify row envelopes for homes of others | A9 trust | `lib/verify.ts` | P-4, C2-7 | A | S |
@@ -84,7 +84,7 @@ are complete only when S-10 and T3-0 have reported.
 | T2-10 | 5 | Moving a group to another home | A9 move | `home/move.go`, `node/move.go` | P-4, HM-1, N-4 | F | M |
 | T2-11 | 5 | A copy of a group on a second node | A9 copy | `home/copy.go` | P-4, HM-1 | A | M |
 | T2-12 | 5 | Checks inside the system's sandbox on Linux and macOS, only where S-10 showed both compatibility and isolation | A9 sandbox | `host/sandbox_linux.go`, `host/sandbox_darwin.go` | S-10, HS-5 | A | M |
-| T2-13 | 5 | The `information` label in turn text | A9 label | `host/turn_info.go` | P-4, HS-14 | A | S |
+| T2-13 | 5 | The labels in turn text: the item's, and a line for what it carries (`contracts/step-2/labels.md`) | A9 label | `host/turn_info.go` | P-4, HS-14 | A | S |
 | U2-1 | 5 | Members, roles and the invitation dialog | A9 as seen | `cmp/people/` | U-0, P-4 | F | M |
 | U2-2 | 5 | The `confirm` card; the allow list and delegates editor | A9 as seen | `cmp/confirm/`, `cmp/allow/` | U-0, P-4 | F | M |
 | U2-3 | 5 | Watching a terminal; team-wide group screens | A9 as seen | `cmp/watch/`, `cmp/team/` | U-11, P-4 | F | M |

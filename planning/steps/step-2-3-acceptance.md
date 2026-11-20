@@ -1,7 +1,8 @@
 # Steps 2 and 3: acceptance tests
 
-The acceptance tests of step 2 (A9.x) and step 3 (A10.x), one group per
-feature of `steps/step-2-3.md`. They rest on the design answers D-1 to D-19 of
+The acceptance tests of step 2 (A9.x), one group per feature of
+`steps/step-2-3.md`; those of step 3 (A10.x) are in
+`steps/step-3-acceptance.md`. They rest on the design answers D-1 to D-19 of
 `steps/parallel-plan-step-2-3.md` section 1; each heading names the answers
 and the contract of its group. Exact shapes, names and error codes are in
 those contracts; where they differ from this file, the contract holds.
@@ -89,7 +90,7 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   confirms, no `assign` or `review` item reaches `Q1` and no worktree exists
   there. In the browser: the card, its actions for Q only, each end state.
 
-### After a task started (D-9; `contracts/step-2/confirm.md`)
+### After a task started (D-9; `contracts/step-2/labels.md`)
 
 - **A9.12** Q-personal has a task that P's brief and Q's confirmation started.
   P mentions the AI in its thread: no card appears, and the turn's header
@@ -98,6 +99,14 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 - **A9.13** P confirms a brief that replaces the first and changes the task. A
   new `confirm` card for Q appears; until Q confirms it, no turn labelled
   `instruction` from that brief reaches Q-personal.
+- **A9.42** Two labels. In a task of Q-team on `Q1`, a `reviewed` item reads
+  `instruction` in its header and `information` on the line of the review,
+  which P's AI wrote. On a decision that Q-team posted to Q, a choice by P as
+  admin reads `information` on its line and a choice by Q `instruction`; the
+  header reads `instruction` both times. The secretary's `confirmed` for a
+  brief that Q confirmed reads `information` on its line unless P listed Q for
+  it. In a one-person group the owner's own choices and confirmations read
+  `instruction` on their lines.
 
 ### Allow lists (D-2; `contracts/step-2/authority.md`)
 
@@ -136,6 +145,27 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   P, `act approve` by P is answered `forbidden`, and the same envelope
   injected at the home is ignored by `Q1` with audit `refused`. A delegate for
   Q-team decides nothing for Q-personal.
+
+### What a host accepts (D-2; `contracts/step-2/authority.md`)
+
+- **A9.43** A role the brief does not give. P makes Q `admin` and confirms a
+  brief that names only Q's AIs. Q gives its task to P's working AI with
+  `task assign`: a `confirm` card for P appears, and with P's level at 3 the
+  task starts on `P2` at level 2 once P confirms. When P gives it, or P's
+  secretary with `set_task`: no card, and level 3.
+- **A9.44** The secretary serves by its owner's consent. `group set` with
+  `secretary` naming Q-team is answered `forbidden` to P and `ok` to Q as
+  admin; `Q1` then lists the secretary's tools for Q-team and delivers a
+  `notice`. With the row's `secretary` set to Q-team by the test hook alone,
+  `Q1` refuses the `notice`, with audit `refused`. In a one-person group the
+  owner names another of their AIs with `group set`: the quiet-task `notice`
+  of A5.16 and a brief sent back reach it.
+- **A9.45** A merge goes where the owner accepted. The test hook queues on
+  `P1`, for tasks of Q-team, a `merge` item that names a pull request `Q1`
+  neither opened nor reused, and one whose pull request has another base than
+  the accepted `base`. The fake `gh` records the read and no merge, and each
+  task reports a conflict. A task that came to Q-team after P's AI had
+  submitted it merges through the pull request `Q1` reused.
 
 ### Watching (D-14; `contracts/step-2/watch-team.md`)
 
@@ -245,45 +275,7 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 
 ## Step 3: extensions (A10)
 
-TCP simultaneous open (3.4, D-19) has no test: it is not in the first version.
-If spike S-9 shows a clear benefit, its tests are written with its plan.
-
-### More CLIs (D-16; `contracts/step-3/drivers.md`)
-
-- **A10.1** Every driver declares the capability table; Claude Code and Codex
-  declare the values of section 8 of that contract, and A9.40 still holds.
-  With a declaration made up in the test that varies each field in turn,
-  each switch of its section 5 holds, A3.1 passes, and in the browser what
-  is switched off is not offered. On native Windows, `perm.set` level 2 for
-  Claude Code is refused and the browser offers no level 2 (`risks.md` Q-4).
-- **A10.2** For a CLI whose terms allow API keys only, `agent.set` takes
-  `api_key`; any other type is refused, and the browser offers none (R-54).
-- **A10.3** For each CLI added, the M3, M4 and M7 tests of step 1 that are not
-  `live` pass with its fake CLI, except those of a feature its table switches
-  off. The fake's message shapes are copied from captures of the real program;
-  until A10.4 has run, its level tables carry `[unverified]`.
-- **A10.4** For each CLI added: A3.8, the second half of A4.1, A4.10, A7.1 and
-  A7.8 with the real program, except those its table switches off. (`live`)
-
-### Style presets (D-17; `contracts/step-3/knowledge.md`)
-
-- **A10.5** A preset is a note of type `preset`. The secretary's brief names
-  it; after the confirm, the `assign` turn of every task of that brief holds
-  the preset's text unchanged, and a brief without one holds none. A brief
-  naming a preset the group lacks is refused, with no brief row. A5.14 holds
-  for presets. In the browser: the brief card names the preset; an editor
-  lists, creates and changes them.
-
-### Knowledge base (D-18; `contracts/step-3/knowledge.md`)
-
-- **A10.6** `kb_put` by an AI stores a document. `kb_search` for a word that
-  is in it returns it; for a word that is in none, an empty list; from an AI
-  of another group homed on the same node, not this document. After the home
-  restarts the search answers the same. In the browser: the group information
-  lists the documents, and its search shows what `kb_search` returns.
-- **A10.7** A5.14 holds for a document; after `forget` no search finds it. A
-  `kb_put` whose text holds a test secret pattern fails with `secret`, and the
-  home has no row for it.
+In `steps/step-3-acceptance.md`.
 
 ## What these tests assume beyond the design answers
 
