@@ -16,9 +16,13 @@ const (
 // terminal (contracts/datachannel.md section 1) and, from step 2, watch.
 //
 // Read returns the bytes of the channel's messages in order, and io.EOF once
-// the channel has closed. A message waits until it is read, and the
-// connection's channels share one receive window, so a stream that is not
-// read until it ends, or closed, holds back the others, ctl included.
+// the channel or its connection has ended. Its handler keeps reading until
+// Read returns an error, and one that needs no input runs
+// io.Copy(io.Discard, s): a message waits until it is read, so a single
+// unread message keeps both sides from seeing the channel close, and the
+// connection's channels share one receive window, so unread messages hold
+// back the others, ctl included. Ctl recovers only seconds after the stream
+// is read again, the later the longer it was held back (0.2 to 5 s measured).
 //
 // Write waits until the channel is open, sends p as messages of at most
 // 16 KiB, and waits while more than 1 MiB is queued, so that a writer fed
@@ -29,6 +33,8 @@ type Stream struct {
 	dc            *webrtc.DataChannel
 	buffered      func() uint64
 	limit         uint64
+	ctx           context.Context // ends with the connection or with Close
+	cancel        context.CancelFunc
 	r             *io.PipeReader
 	open          chan struct{}
 	low           chan struct{} // signalled when the queue falls to limit
@@ -36,17 +42,18 @@ type Stream struct {
 }
 
 // newStream hooks every callback of dc before the channel opens; pion opens
-// it only after the channel's handler has returned.
+// it only after the call that announced it has returned.
 func newStream(c *Connection, dc *webrtc.DataChannel) *Stream {
 	r, w := io.Pipe()
-	s := &Stream{label: dc.Label(), device: c.Device, dc: dc, buffered: dc.BufferedAmount, limit: streamLimit, r: r,
+	ctx, cancel := context.WithCancel(c.ctx)
+	s := &Stream{label: dc.Label(), device: c.Device, dc: dc, buffered: dc.BufferedAmount, limit: streamLimit, ctx: ctx, cancel: cancel, r: r,
 		open: make(chan struct{}), low: make(chan struct{}, 1), done: make(chan struct{})}
 	dc.SetBufferedAmountLowThreshold(s.limit)
 	dc.OnBufferedAmountLow(s.signal)
 	dc.OnOpen(func() { close(s.open) })
-	// A message nobody reads would keep pion's read loop, and with it the
-	// closing of this channel, waiting after the connection has ended.
-	context.AfterFunc(c.ctx, func() { r.Close() })
+	// The end of the connection ends Read with io.EOF, and frees pion's read
+	// loop from a message nobody reads, so that the channel can close.
+	context.AfterFunc(c.ctx, func() { w.Close() })
 	dc.OnMessage(func(m webrtc.DataChannelMessage) { w.Write(m.Data) })
 	dc.OnClose(func() { w.Close(); close(s.done) })
 	return s
@@ -92,17 +99,24 @@ func (s *Stream) ready() error {
 	}
 	return err
 }
+
+// await ends with ch, or with the channel, the connection or Close: pion fires
+// neither OnOpen nor OnClose for a channel closed while it is being opened.
 func (s *Stream) await(ch <-chan struct{}) error {
 	select {
 	case <-ch:
 		return nil
 	case <-s.done:
 		return io.ErrClosedPipe
+	case <-s.ctx.Done():
+		return io.ErrClosedPipe
 	}
 }
 
-// Close closes the channel; a Read after it returns io.ErrClosedPipe.
+// Close closes the channel; a Read or Write after it returns
+// io.ErrClosedPipe.
 func (s *Stream) Close() error {
 	s.r.Close()
+	s.cancel()
 	return s.dc.Close()
 }

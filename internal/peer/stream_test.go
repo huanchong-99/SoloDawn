@@ -2,6 +2,7 @@ package peer
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"sync/atomic"
 	"testing"
@@ -33,7 +34,7 @@ func openRemote(t *testing.T, c *Connection, label string) remote {
 func TestStreamWaitsForRoom(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var queued atomic.Uint64
-		s := &Stream{buffered: queued.Load, limit: 10, open: make(chan struct{}), low: make(chan struct{}, 1), done: make(chan struct{})}
+		s := &Stream{buffered: queued.Load, limit: 10, ctx: context.Background(), open: make(chan struct{}), low: make(chan struct{}, 1), done: make(chan struct{})}
 		ready := func() chan error {
 			result := make(chan error, 1)
 			go func() { result <- s.ready() }()
@@ -74,7 +75,7 @@ func TestStreamWaitsForRoom(t *testing.T) {
 func TestStreamWriteStopsWhenClosed(t *testing.T) {
 	closed := make(chan struct{})
 	close(closed)
-	s := &Stream{open: make(chan struct{}), done: closed}
+	s := &Stream{ctx: context.Background(), open: make(chan struct{}), done: closed}
 	sent, err := writeWithin(t, s, []byte("never sent"))
 	eq(t, []any{sent, err}, []any{0, io.ErrClosedPipe})
 	// An empty write sends nothing and waits for nothing.
@@ -86,9 +87,47 @@ func TestStreamWriteStopsWhenClosed(t *testing.T) {
 	t.Cleanup(func() { pc.Close() })
 	dc, err := pc.CreateDataChannel("test:", nil)
 	check(t, err)
-	s = &Stream{dc: dc, buffered: dc.BufferedAmount, limit: streamLimit, open: closed, done: make(chan struct{})}
+	s = &Stream{dc: dc, buffered: dc.BufferedAmount, limit: streamLimit, ctx: context.Background(), open: closed, done: make(chan struct{})}
 	sent, err = writeWithin(t, s, []byte("never sent"))
 	eq(t, []any{sent, err}, []any{0, io.ErrClosedPipe})
+}
+
+// readError reads one byte from s, failing the test after five seconds.
+func readError(t *testing.T, s io.Reader) error {
+	t.Helper()
+	got := make(chan error, 1)
+	go func() {
+		_, err := s.Read(make([]byte, 1))
+		got <- err
+	}()
+	return recv(t, got)
+}
+
+// Pion fires neither OnOpen nor OnClose for a channel closed while it is
+// being opened. A write that waits for the open still ends with Close or
+// with the connection, and the end of the connection ends a read with EOF.
+func TestStreamEndsWithoutPionEvents(t *testing.T) {
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	check(t, err)
+	t.Cleanup(func() { pc.Close() })
+	stream := func(ctx context.Context) *Stream {
+		dc, err := pc.CreateDataChannel("test:", nil)
+		check(t, err)
+		return newStream(&Connection{Device: "device", ctx: ctx}, dc)
+	}
+	s := stream(t.Context())
+	wrote := make(chan error, 1)
+	go func() { _, err := s.Write([]byte("never sent")); wrote <- err }()
+	check(t, s.Close())
+	eq(t, recv(t, wrote), io.ErrClosedPipe)
+	eq(t, readError(t, s), io.ErrClosedPipe)
+
+	ctx, end := context.WithCancel(t.Context())
+	s = stream(ctx)
+	go func() { _, err := s.Write([]byte("never sent")); wrote <- err }()
+	end()
+	eq(t, recv(t, wrote), io.ErrClosedPipe)
+	eq(t, readError(t, s), io.EOF)
 }
 
 func TestStreamOverAConnection(t *testing.T) {
@@ -130,8 +169,7 @@ func TestStreamOverAConnection(t *testing.T) {
 	// Closed by the other side: the stream ends.
 	check(t, a.dc.Close())
 	recv(t, s.done)
-	_, err = s.Read(make([]byte, 1))
-	eq(t, err, io.EOF)
+	eq(t, readError(t, s), io.EOF)
 	_, err = writeWithin(t, s, []byte("late"))
 	eq(t, err, io.ErrClosedPipe)
 
@@ -141,8 +179,7 @@ func TestStreamOverAConnection(t *testing.T) {
 	recv(t, b.open)
 	check(t, s.Close())
 	recv(t, b.closed)
-	_, err = s.Read(make([]byte, 1))
-	eq(t, err, io.ErrClosedPipe)
+	eq(t, readError(t, s), io.ErrClosedPipe)
 
 	// A message nobody reads does not keep the channel from closing with its
 	// connection.
@@ -153,4 +190,5 @@ func TestStreamOverAConnection(t *testing.T) {
 	n.info(t)
 	check(t, n.server.Close())
 	recv(t, s.done)
+	eq(t, readError(t, s), io.EOF)
 }

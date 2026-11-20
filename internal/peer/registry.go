@@ -34,10 +34,8 @@ func kindOf(o proto.Offer) string {
 // up to and including their first colon, such as "pty:" for every
 // "pty:<g>:<member>"; a key "ctl" is never used.
 //
-// A handler is called on the connection's loop that accepts data channels,
-// not under the peer lock. Pion opens the channel, and accepts the
-// connection's next one, only after the handler has returned, so a handler
-// returns at once and works with the stream on a goroutine of its own.
+// A handler runs on a goroutine of its own, not under the peer lock. Its
+// stream is set up before the channel opens, so it misses no message.
 type Channels map[string]func(*Stream)
 
 func (p *Peer) dispatch(c *Connection, dc *webrtc.DataChannel) {
@@ -50,7 +48,9 @@ func (p *Peer) dispatch(c *Connection, dc *webrtc.DataChannel) {
 		key = family + ":"
 	}
 	if take := p.channels[key]; take != nil {
-		take(newStream(c, dc))
+		// Before pion opens the channel, which it does once dispatch returns.
+		s := newStream(c, dc)
+		go take(s)
 		return
 	}
 	dc.Close()
