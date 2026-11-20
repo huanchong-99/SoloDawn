@@ -41,6 +41,13 @@ Feature: Web client
     And the page is marked as "en"
     And the navigation reads "Chats", "Computers", "Settings" after the client is opened again
 
+  Scenario: Each language option is marked with the language it is written in
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client at "#/settings"
+    Then the option "English" is marked as "en" and the option "简体中文" as "zh-CN"
+    When the person chooses the language "English"
+    Then both options are still marked so in the English interface
+
   Scenario: The theme choice is applied and remembered
     Given the browser supports Ed25519 in WebCrypto
     And the person opens the client at "#/settings"

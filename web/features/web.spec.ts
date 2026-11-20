@@ -168,6 +168,29 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     },
   );
 
+  Scenario(
+    'Each language option is marked with the language it is written in',
+    ({ Given, When, Then, And }) => {
+      // A screen reader speaks a radio's name in the language of the radio (WCAG 2.2 SC 3.1.2).
+      const marks = () =>
+        ['English', '简体中文'].map((name) =>
+          [...document.querySelectorAll('input')]
+            .find((i) => i.labels![0].textContent!.trim() === name)!
+            .closest('[lang]')!
+            .getAttribute('lang'),
+        );
+      Given('the browser supports Ed25519 in WebCrypto', supported);
+      And('the person opens the client at "#/settings"', () => open('#/settings'));
+      Then('the option "English" is marked as "en" and the option "简体中文" as "zh-CN"', () => {
+        expect(marks()).toEqual(['en', 'zh-CN']);
+      });
+      When('the person chooses the language "English"', () => choose('English'));
+      Then('both options are still marked so in the English interface', () => {
+        expect(marks()).toEqual(['en', 'zh-CN']);
+      });
+    },
+  );
+
   Scenario('The theme choice is applied and remembered', ({ Given, When, Then, And }) => {
     Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client at "#/settings"', () => open('#/settings'));

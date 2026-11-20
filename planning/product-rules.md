@@ -250,13 +250,13 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   exempt (R-102). Moving a group to another home, and copies for
   safekeeping, come in step 2 (Q-12).
 - **R-136** `[S1]` A node acts only on instructions signed by its owner.
-- **R-137** `[S1]` Secrets never leave the machine. The node does not read AI
-  credentials. Project secret files are never posted to a group. One small
-  outbound check enforces this: whatever an AI sends to the group is refused
-  when it matches common secret formats or looks like the content of an
-  environment file (Q-11). For Git and the forge the node only runs the
-  `git` and `gh` programs the owner has installed and signed in; it never
-  reads a token or a credential (Q-16).
+- **R-137** `[S1]` Secrets never leave the machine. The node reads no AI
+  credential, and project secret files are never posted to a group. An
+  outbound check refuses what an AI sends to the group when it matches
+  common secret formats or looks like an environment file (Q-11). For Git
+  and the forge the node runs only `git`, `gh` and, from step 2, a forge
+  program its owner accepted for that group (widened 2026-11-20 for D-10),
+  each signed in by the owner; it never reads a token or credential (Q-16).
 - **R-138** `[S1]` Every computer and every browser has its own identity key.
   A lost device can be revoked from another device.
 - **R-139** `[S1]` Each node keeps a local audit record of who made its AIs

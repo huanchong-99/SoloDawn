@@ -16,7 +16,7 @@ decision now lives.
 | Q-1 | R-131 names TCP. Two nodes that are both behind NAT would need TCP simultaneous open, which pion does not do `[unverified]`. | Step 1 tries together: UDP hole punching, IPv6, TCP to a port the other node has open, forwarded or mapped (UPnP, NAT-PMP), with the relay on 443 as last resort. Simultaneous open is an experiment (S-9), built in step 3 only if it shows a clear benefit. | `product-rules.md` R-131; `contracts/rendezvous.md` 5; `flows/connect.md` step 5; `steps/step-1.md` S-9; `steps/step-2-3.md` 3.4 |
 | Q-2 | The mock-up shows an 8-character pairing code. | 16 characters. No extra key-exchange algorithm for the sake of 8. The onboarding copy changes to 16. | `product-rules.md` R-152; `contracts/envelope.md` 6; `steps/step-1-frontend.md` F-04 |
 | Q-3 | Ed25519 in WebCrypto is newer than the design's browser baseline. | Raise the baseline to versions with native support; no signature library is bundled. Closed by spike S-7: Chrome and Edge 137, Firefox 136, Safari 17.5, recorded in `docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md`. | `product-rules.md` R-164; `architecture.md` C-9; `contracts/envelope.md` 2; `steps/step-1.md` S-7; `steps/step-1-frontend.md` F-00, F-01a to F-01c |
-| Q-4 | Level 2 on Claude Code for native Windows, where the CLI has no sandbox. | Wait for spike S-5, then decide. | `contracts/drivers.md` 1.1; `flows/approval.md` H; `steps/step-1.md` S-5 |
+| Q-4 | Level 2 on Claude Code for native Windows, where the CLI has no sandbox. | On native Windows the vendor provides no sandbox for Claude Code, so the node refuses level 2 for Claude Code with a clear reason and offers only the levels it can enforce. WSL2 is a later option. From spike S-5 ([#99](https://github.com/huanchong-99/SoloDawn/pull/99)) and the vendor's [sandboxing page](https://code.claude.com/docs/en/sandboxing), read on 2026-11-20. | `contracts/drivers.md` 1.1; `flows/approval.md` H; `steps/step-1.md` S-5 |
 | Q-5 | Reminders while the page is closed pass through the browser vendor's push service. | Accepted: ciphertext only, and little content. What the content may be was then fixed in Q-17. | `product-rules.md` R-163; `contracts/commands.md` 1.7; `steps/step-1-acceptance.md` A8.3 |
 | Q-6 | R-42 says the secretary posts the approval card. | The platform writes the card and shows it under the secretary's name. No AI turn. | `product-rules.md` R-42; `flows/approval.md` step 6; `contracts/messages.md` 1 |
 | Q-7 | R-24 says the secretary merges. | When checks and review pass, the platform merges deterministically and shows it as the secretary's merge. On a conflict the secretary assigns an AI to resolve it. | `product-rules.md` R-24; `contracts/commands.md` 1.5, 1.8; `contracts/mcp-tools.md` 2; `flows/task.md` E; `steps/step-1-acceptance.md` A5.10, A5.12 |
@@ -51,8 +51,7 @@ may cancel it.
 
 ## Q. Open
 
-None at present. Q-4 is settled as "wait for spike S-5" and comes back when
-that spike has an answer.
+None at present.
 
 ## K. Known limits
 
@@ -89,18 +88,20 @@ that spike has an answer.
 | T-1 | Claude Code's control messages on stdin (interrupt) and the event shapes are not a published contract; Codex app-server is marked experimental. Either can change in any release. | The node uses a handful of messages; fake CLIs pin the expected shapes; a CI job diffs the Codex schema; `live` tests before each release; the CLI version is shown next to each AI. |
 | T-2 | Claude Code may make its bare mode the default for `-p`, which does not use subscription sign-in `[documented]`. | The node reports `login_invalid` and does nothing else (R-56). The owner chooses API key or waits. |
 | T-3 | How long a permission prompt call or a long tool call may stay open; whether a retried request has byte-identical input, which the late-approval record relies on. | Answered by spikes S-2 and S-3 (`flows/approval.md` H; `contracts/mcp-tools.md` section 1). Longer waits were not tried: the flows work with a short wait, and a retry that is not recognised produces a new card. |
-| T-4 | Windows is unverified everywhere: ConPTY, sockets, interrupt, sandbox. | Spike S-5; Windows runs in CI from M1. |
+| T-4 | Windows is unverified everywhere: ConPTY, sockets, interrupt, sandbox. | Spike S-5 answered the socket and the sandbox (Q-4; N-0 in `steps/parallel-plan-units.md`); ConPTY through go-pty waits for HS-19. Windows runs in CI from M1. |
 | T-5 | Browser and pion interoperability: ICE-TCP, `.local` candidates, message size. | Answered by spike S-1, and by the A.1 design review for ports and reconnecting, for Chromium, Firefox and WPE WebKit on Linux (`contracts/rendezvous.md` section 5; `contracts/conventions.md` section 4). What is not shown is listed in `contracts/rendezvous-evidence.md` section 3; it waits for spike S-8 and for the end-to-end suite (F-14). |
 | T-6 | About 240 MB of memory per open Claude Code session `[verified]`, and more per Codex session (`contracts/drivers.md` 1.2). With a session per task there are more sessions, though most are dormant. | `max_open` and dormancy; one turn at a time per AI per group. Measured in A8.6. |
 | T-7 | Anyone can obtain relay credentials by presenting any key; the quota is per device id. | A second quota per source address on the rendezvous. Small, and at a boundary. |
 | T-8 | Subscriptions are sold for ordinary individual use; heavy automated use may be rate-limited by the vendor. | Limits R-60 to R-62; `limited` state; nothing hidden from the owner. |
 | T-9 | Unsigned binaries trigger warnings when downloaded by hand. | The AI installs from the command line; documentation covers the manual case (R-151). |
 | T-10 | Plan size against "least code". A desk estimate before this plan was 7,000 to 12,000 lines for node, rendezvous and web client together. | Every pull request is reviewed for code that can be deleted. The backend list names what not to build. |
-| T-11 | Port 443 shared by HTTPS and TURN. | Spike S-6; fallback is a second address or port for TURN. |
+| T-11 | Port 443 shared by HTTPS and TURN. | Spike S-6 ([#97](https://github.com/huanchong-99/SoloDawn/pull/97)) showed it works, verified against Pebble only, not a public certificate authority. Refreshing an allocation after its credentials expire is not measured. Fallback is a second address or port for TURN. |
 | T-12 | (Settled in round 1: the home's quiet-task timer, `contracts/task-machine.md` row 23.) | — |
 | T-13 | Starting a brand-new session directly in interactive mode with a chosen id (takeover of an AI without a task). | Answered by spike S-4 (`contracts/drivers.md` 1.3). |
 | T-14 | A row, or an inbox item with the rows it carries, can outgrow one `ctl` message. | Settled in `contracts/conventions.md` section 4, with a limit on a device-log entry (Q-23). |
 | T-15 | Codex turns can stop sending anything: 2 of about 25 in spike S-3, cause unknown. | The driver interrupts a turn that has been silent for 5 minutes (`contracts/drivers.md` 1.2). The number is a first value. |
+| T-16 | Checks in a sandbox (S-10, [#90](https://github.com/huanchong-99/SoloDawn/pull/90), [#88](https://github.com/huanchong-99/SoloDawn/pull/88)): `sandbox-exec` is deprecated on macOS; AppArmor on Ubuntu 24.04 can block user namespaces, and the sandbox then fails closed; Windows has no sandbox. | D-12 and T2-12 (`steps/parallel-plan-step-2-3.md`); K-8 stays a stated limit where no sandbox runs. |
+| T-17 | The captures for T3-2 and T3-3 (T3-0, [#91](https://github.com/huanchong-99/SoloDawn/pull/91)) need keys from the owner: an Anthropic API key to drive OpenCode and a QwenCloud key to drive Qwen Code. | Without the keys the drivers follow the documented protocol and are marked unverified (`steps/parallel-plan.md` section 6). |
 
 ## Assumptions that would change the design if false
 
