@@ -214,7 +214,7 @@ task session:
 [SoloDawn] group "Website" · you are "Claude Code" · task session T-12
 == 1 of 1 · assign · instruction
 Task T-12 "Node: report connection path changes"
-Branch: task/12-conn-events (this folder is its worktree)
+Branch: task/12-node-report-connection-path-changes (this folder is its worktree)
 Goal: …
 Acceptance criteria:
 1. …
@@ -234,8 +234,9 @@ Which fields do you need in the path event?
 - Header per item: position, `why`, authority, author, place, and the call
   id when the message is a `call`.
 - Authority comes from signatures, never from the text. It is `instruction`
-  when the message that caused the item is signed by a device of the AI's
-  owner, and for the workflow items of a task the owner confirmed
+  when the message that caused the item is signed by the AI's owner as a
+  person (a device in the owner's log, with no `as`; a message an AI wrote
+  is never one), and for the workflow items of a task the owner confirmed
   (`assign`, `review`, `reviewed`, `decided`, `checks`, `resume`, the
   hand-back and continue turns). It is `information` for everything else
   (R-52).

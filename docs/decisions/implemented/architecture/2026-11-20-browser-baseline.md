@@ -144,6 +144,10 @@ requires a non-extractable key.
   on the release notes, bug trackers, source and compatibility data linked above. In particular,
   that `structuredClone()` of a key fails in Firefox 129 to 135 is stated in bug 1939993 and
   follows from the source; it was not observed.
+- F-01c, CI run 44687053047 (2026-11-20): the shared identity vectors (`crypto.json`) passed in
+  Chrome for Testing 137.0.7151.119, Edge 137.0.3296.93 and Firefox 136.0 on Ubuntu 24.04, and in
+  Playwright WebKit 27.2 on macOS 26.7.2; no Safari release ran, so Safari 17.5 still rests on the
+  sources above.
 - The build with these targets keeps `light-dark()` and nesting in the CSS output (checked in
   `internal/node/webdist/assets/*.css` after `vite build`). `web/src/lib/boot.test.ts` and
   `features/web.feature` cover each reason for the upgrade notice with stand-ins for the browser.

@@ -20,6 +20,7 @@ import (
 )
 
 type server struct {
+	*relay
 	wait   time.Duration // for the answer to the challenge
 	mu     sync.Mutex
 	online map[string]*client
@@ -29,11 +30,15 @@ type server struct {
 // Handler serves the same /rv protocol and static files on nodes and on the
 // standalone rendezvous. Signalling alone advertises an empty ICE list.
 func Handler(web fs.FS) http.Handler {
-	return handler(web, 10*time.Second)
+	return (&relay{}).handler(web)
 }
 
-func handler(web fs.FS, wait time.Duration) http.Handler {
-	s := &server{wait: wait, online: make(map[string]*client), rooms: make(map[string]*room)}
+func (r *relay) handler(web fs.FS) http.Handler {
+	return handler(web, 10*time.Second, r)
+}
+
+func handler(web fs.FS, wait time.Duration, r *relay) http.Handler {
+	s := &server{relay: r, wait: wait, online: make(map[string]*client), rooms: make(map[string]*room)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rv", s.serve)
 	mux.Handle("/", http.FileServerFS(web))
@@ -158,16 +163,12 @@ func (c *client) authenticate(wait time.Duration) bool {
 	return kind == "auth" && identity.VerifyChallenge(c.id, nonce, m.text("s"))
 }
 
-func config(kind string) proto.ICEConfig {
-	return proto.ICEConfig{Type: kind, ICE: []proto.ICEServer{}, TTL: 3600}
-}
-
 func (s *server) connect(c *client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old := s.online[c.id]
 	s.online[c.id] = c
-	c.send(config("ready"))
+	c.send(s.ice("ready", c.id))
 	if old != nil {
 		s.leaveRooms(old)
 		old.conn.CloseNow()
@@ -195,7 +196,9 @@ func (s *server) handle(c *client, m fields, kind string) bool {
 func (s *server) dispatch(c *client, m fields, kind string) bool {
 	switch kind {
 	case "ice":
-		c.send(config("ice"))
+		c.send(s.ice("ice", c.id))
+	case "quota":
+		c.send(s.quota(c.id))
 	case "to":
 		return s.route(c, m)
 	case "watch":

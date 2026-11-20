@@ -36,6 +36,14 @@ Before the first `pnpm test`, install the headless browser with
 `pnpm exec playwright install --with-deps --only-shell chromium`. The five motion scenarios run
 against a temporary production build in Chromium.
 
+`pnpm test:vectors` runs the unit suite for `crypto.json` in Playwright browsers. Install
+Chromium and Firefox with `pnpm exec playwright install --with-deps --only-shell chromium firefox`;
+on macOS also install `webkit`. Select one engine with `--project chromium|firefox|webkit`.
+WebKit is available only on macOS. CI pins Chrome for Testing and Edge 137 (`CHROMIUM_PATH`),
+and Playwright Firefox 136 (`FIREFOX136_PATH`) on Linux; on macOS it uses Playwright's bundled
+WebKit, not a version-matched Safari release. Firefox 136 needs a separate Playwright driver:
+the current driver's viewport and WebSocket protocol differs from that build's.
+
 The one runtime dependency is `valibot`, for the wire types. Signatures, hashes and macs use the
 browser's WebCrypto only; no signature library is bundled (R-164). `fake-indexeddb` is a
 development dependency, an IndexedDB for the tests.
@@ -74,7 +82,9 @@ development dependency, an IndexedDB for the tests.
   `not_for_me`, `stale`), with both ends of the window accepted; `DeviceLog.apply` accepts or
   refuses an entry by section 4 and leaves the log unchanged when it refuses: an entry whose `p`
   is more than 2,048 bytes as UTF-8 is refused, and a `dev` is judged by its bytes and never
-  imported as a key, so one that is no point of the curve is added; `adopts` is the log's half of
+  imported as a key, so one that is no point of the curve is added; the entry already held at a
+  version is recognised by `p` as it is signed, a lone surrogate counting as U+FFFD, as a Go node
+  reads it, and by `k` and `s`; `adopts` is the log's half of
   adoption; a pairing secret is read by removing hyphens and upper-casing a to z only; the `mac`
   of a pair message covers its `role`, `k`, `kind` and `name` as `TextEncoder` encodes them, and
   `verifyPair` ignores a message whose `kind` is neither `node` nor `browser`.
@@ -112,7 +122,9 @@ development dependency, an IndexedDB for the tests.
   browser downloads a face only when text uses it and shows the system fonts until it arrives.
 - **Texts.** Every interface string is a key in both `src/messages/zh-CN.json` and
   `src/messages/en.json` and is read with `t(key)`; a test fails when the key sets differ. Chat
-  content is never translated.
+  content is never translated. The options of the language choice are named in their own
+  language in both files and carry its `lang`, so a screen reader speaks each in its language
+  (WCAG 2.2 SC 3.1.2).
 - **Motion.** No animation library is bundled: CSS transitions and keyframes move the parts, the
   browser's View Transitions cross-fade the page, and `svelte/motion` reads the system setting.
   The tokens are in `tokens.css` beside the others: four durations (`--dur-1` 120 ms hover and
