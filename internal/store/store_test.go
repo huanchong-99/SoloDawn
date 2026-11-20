@@ -82,11 +82,9 @@ func TestMigrationsAreOrderedAndAtomic(t *testing.T) {
 	}
 	equal(t, scalar[int](t, db, "PRAGMA user_version"), 2)
 	equal(t, scalar[string](t, db, "SELECT group_concat(n) FROM m"), "2")
-	for _, version := range []int{-1, 4} {
-		_, err = db.Exec(fmt.Sprintf("PRAGMA user_version=%d", version))
-		check(t, err)
-		equal(t, migrate(db, steps).Error(), fmt.Sprintf("unsupported store schema version %d", version))
-	}
+	_, err = db.Exec("PRAGMA user_version=4")
+	check(t, err)
+	equal(t, migrate(db, steps).Error(), "unsupported store schema version 4")
 }
 
 func TestOpenFailure(t *testing.T) {

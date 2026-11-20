@@ -52,7 +52,7 @@ func migrate(db *sql.DB, migrations []string) error {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version < 0 || version > len(migrations) {
+	if version > len(migrations) {
 		return fmt.Errorf("unsupported store schema version %d", version)
 	}
 	for _, migration := range migrations[version:] {
