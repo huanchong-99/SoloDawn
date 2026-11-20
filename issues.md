@@ -230,6 +230,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:41-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
 
+### 2026-11-20 · deviation · No unit measures a row against its size limit
+
+- Symptom: `planning/contracts/conventions.md` section 4 has the home answer `bad_request`, naming the limit and the size, to a command that would write a row above 16 KiB, or a card above 12 KiB when it is created. Nothing does: `Table.Apply` hands the rows of a command's function to its caller unmeasured.
+- Cause: the rule holds for every command, and no row of `planning/steps/parallel-plan-units.md` names it. HM-0 built the seam from the sections its row lists (`contracts/commands.md` head, `contracts/datachannel.md` 5 and 8). The one place every command passes after its function is `Table.run` (`internal/home/home.go:242`).
+- Status: open. For the coordinator to give to a unit.
+
+### 2026-11-20 · limitation · A device in the logs of two people is read as the device of the lower user id
+
+- Symptom: nothing stops a person from adding to their own log a device that another person's log already holds. A home then reads that device's commands as coming from whichever of the two people has the lower user id (`planning/contracts/commands.md`, "Who"). A member could so turn the commands of another member's device into their own, which that device's person did not ask for.
+- Cause: `(*State).user` walks the logs in the order of their user ids and returns the first that holds the device as valid (`internal/home/check.go:91`). `planning/contracts/envelope.md` section 4 says nothing about one device in two logs.
+- Status: open, without effect in step 1, where a group has one person. Step 2, which adds people, has to settle it.
+
 ## Resolved
 
 ### 2026-11-20 · bug · The signalling client could set off the rendezvous's own limits

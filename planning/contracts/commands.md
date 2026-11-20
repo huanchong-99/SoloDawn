@@ -18,6 +18,17 @@ member id.
 "Admin" is a person with role `owner` or `admin`. "Secretary" is the AI that
 `group.secretary` names.
 
+A signer with no `as` is the person whose log holds it and, when it is a
+node, also a host: a row of the tables is met by whichever of the two it
+names. A home takes a command only from a device of a member of the group,
+and `group create` only from a device of its own owner; any other signer
+that passed the envelope checks is answered `forbidden`. An `as` that is no
+text, or an empty one, is `bad_request`; one that does not name an AI whose
+`host` is the signer is `forbidden` (`contracts/envelope.md` section 5).
+Should the logs of two people hold one device, a home reads it as a device
+of the person with the lower user id; step 2, which brings the second
+person, settles what such a device may do.
+
 **Once only.** The receiver stores a receipt for every command it accepts,
 keyed by signer and `n`, with the outcome (ok and its result fields, or the
 error code), in the same transaction as the change. A command that arrives
@@ -25,6 +36,13 @@ again gets that outcome, under the request id of the new request, and has
 no second effect. A command whose `ts` is more than 24 hours from the
 receiver's clock is refused with `stale`; receipts are kept for that long
 (`contracts/storage.md`).
+
+A command is accepted, in this sense, once it arrived on the connection of
+its signer and passed the envelope checks (`contracts/datachannel.md`
+section 5). Whatever the receiver answers after that, a refusal included,
+is the outcome its receipt keeps; a command refused before that leaves no
+receipt. The answer to a repeated refusal has the same code. Its `msg` is
+not kept, and need not be the same.
 
 Two results name something that lives only in memory: the link of
 `pair.browser` and the terminal of `takeover.start`. Their receipts record
