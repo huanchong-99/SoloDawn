@@ -50,7 +50,7 @@ func (o Options) start(udp net.PacketConn, tlsListener net.Listener, tlsPort int
 			return nil, nil, err
 		}
 		r.limit, r.secret = o.QuotaMB<<20, rand.Text()
-		r.urls = []string{"turn:" + addr + "?transport=udp", "turns:" + net.JoinHostPort(o.TurnDomain, strconv.Itoa(tlsPort)) + "?transport=tcp"}
+		r.urls = []string{"turn:" + addr + "?transport=udp", "turns:" + net.JoinHostPort(tlsName(o.TurnDomain), strconv.Itoa(tlsPort)) + "?transport=tcp"}
 		g := &generator{public: ips, bind: local.IP, ledger: &r.ledger}
 		// Use the RFC IPv4 default when available. On IPv6-only hosts let
 		// Pion use the transport family for clients that omit the attribute.

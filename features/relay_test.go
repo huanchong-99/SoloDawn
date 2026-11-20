@@ -81,7 +81,7 @@ func (w *relayWorld) startTLS(mib int) error {
 	}
 	w.tcp = l.Addr().String()
 	l.Close()
-	cmd := exec.Command(w.bin, "rendezvous", "--listen", w.tcp, "--domain", "localhost", "--turn-domain", "turn.localhost", "--cert", filepath.Join(dir, "cert"), "--key", filepath.Join(dir, "key"), "--relay-quota-mb", strconv.Itoa(mib), "--udp-port", "0")
+	cmd := exec.Command(w.bin, "rendezvous", "--listen", w.tcp, "--domain", "localhost", "--turn-domain", "TURN.localhost.", "--cert", filepath.Join(dir, "cert"), "--key", filepath.Join(dir, "key"), "--relay-quota-mb", strconv.Itoa(mib), "--udp-port", "0")
 	if err := cmd.Start(); err != nil {
 		return err
 	}
