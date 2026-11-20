@@ -44,11 +44,13 @@ func privateDir(dir string) error {
 // ownerOnly replaces the socket's inherited DACL with a protected one that
 // grants the current user, and nobody else, full access. An AF_UNIX socket
 // file is a reparse point and opens only with FILE_FLAG_OPEN_REPARSE_POINT.
+// SetSecurityInfo reads the descriptor it changes, so the handle needs
+// READ_CONTROL besides WRITE_DAC; with WRITE_DAC alone it is refused.
 // A bound socket path holds no NUL, so its conversion cannot fail.
 func ownerOnly(path string) error {
 	name, _ := windows.UTF16PtrFromString(path)
 	share := uint32(windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE)
-	h, err := windows.CreateFile(name, windows.WRITE_DAC, share, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	h, err := windows.CreateFile(name, windows.READ_CONTROL|windows.WRITE_DAC, share, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
 		return err
 	}

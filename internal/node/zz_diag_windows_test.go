@@ -32,7 +32,7 @@ func TestZZDiagSocketDACL(t *testing.T) {
 		h, err := windows.CreateFile(name, access, share, nil, windows.OPEN_EXISTING, flags, 0)
 		note("%s: %v", label, err)
 		if err == nil {
-			if label == "write_dac" || label == "write_dac+backup" {
+			if strings.HasPrefix(label, "write_dac") {
 				note("  SetSecurityInfo: %v", windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, ownerDACL(""), nil))
 			}
 			windows.CloseHandle(h)
@@ -43,6 +43,13 @@ func TestZZDiagSocketDACL(t *testing.T) {
 	open("read_attributes", windows.FILE_READ_ATTRIBUTES, windows.FILE_FLAG_OPEN_REPARSE_POINT)
 	open("write_dac+backup", windows.WRITE_DAC, windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS)
 	open("write_dac", windows.WRITE_DAC, windows.FILE_FLAG_OPEN_REPARSE_POINT)
+	open("write_dac", windows.READ_CONTROL|windows.WRITE_DAC, windows.FILE_FLAG_OPEN_REPARSE_POINT)
+	note("ownerOnly (fixed): %v", ownerOnly(path))
+	if h, err := windows.CreateFile(name, windows.READ_CONTROL, share, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0); err == nil {
+		d, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+		note("handle readback after fixed ownerOnly: %v %v", d, err)
+		windows.CloseHandle(h)
+	}
 	note("SetNamedSecurityInfo: %v", windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, ownerDACL(""), nil))
 	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	note("after: %v %v", sd, err)
