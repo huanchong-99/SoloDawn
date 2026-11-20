@@ -1,9 +1,9 @@
 # Flow: a task from request to merge
 
 Contracts: `contracts/task-machine.md` (every transition),
-`contracts/commands.md`, `contracts/rows.md`, `contracts/mcp-tools.md`,
-`contracts/local.md` section 7 (Git commands). Rules: R-12, R-20 to R-24,
-R-41, R-90 to R-92, R-100 to R-103, R-63.
+`contracts/commands.md`, `contracts/rows.md`, `contracts/messages.md`,
+`contracts/mcp-tools.md`, `contracts/local.md` section 7 (Git commands).
+Rules: R-12, R-20 to R-24, R-41, R-90 to R-92, R-100 to R-103, R-63.
 
 Actors: P, the person asking; SEC, the secretary AI; H, the home; A, the
 assignee AI on host NA; R, the reviewer AI on host NR.

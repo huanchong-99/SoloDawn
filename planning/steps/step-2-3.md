@@ -61,7 +61,8 @@ Several people in one group, each with their own computers and AIs.
 
 - `contracts/commands.md`: `invite`, `join`, `member set role`,
   `member remove` for people; card kind `confirm` with `act confirm`.
-- `contracts/rows.md`: `msg` kind `confirm`; group kind `team`.
+- `contracts/messages.md`: kind `confirm`. `contracts/rows.md`: group kind
+  `team`.
 - `contracts/datachannel.md`: section 8 row "a device of another member"
   becomes active; receive-only terminal channel.
 - Nothing in the step 1 shapes changes meaning.

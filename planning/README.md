@@ -17,8 +17,9 @@ to start". The coordinator has settled Q-1 to Q-22 (`risks.md`). Next:
 4. The answers of the spikes (M0) are recorded here by the planning lead.
    Q-4 waits for spike S-5.
 5. Questions that implementation raises about a contract are settled in
-   the contract itself. The first batch, from the review of backend task
-   B-01, is in `contracts/conventions.md` and `contracts/messages.md`.
+   the contract itself. The first batches, from the reviews of backend
+   tasks B-01 and B-02, are in `contracts/conventions.md`,
+   `contracts/messages.md` and `contracts/envelope.md`.
 
 SoloDawn is being rebuilt from an empty tree. This directory holds the plan
 that the implementation will follow. It is written for two readers: the

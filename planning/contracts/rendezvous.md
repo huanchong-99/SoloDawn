@@ -28,9 +28,7 @@ choosing on the TLS server name. Spike S-6 in `steps/step-1.md`.
 WebSocket, text frames, one JSON object per frame, at most 16 KiB per frame.
 The server closes a connection that sends a larger frame or more than 120
 frames in 10 seconds. Field presence follows `contracts/conventions.md`
-section 2: every field shown for a frame is always present. The frames are
-frozen, with golden files, by backend tasks B-06 (`quota` by B-07, the
-`beacon` payload of section 4 by B-09).
+section 2: every field shown for a frame is always present.
 
 ### 2.1 Handshake
 
@@ -40,7 +38,11 @@ client -> {"t":"auth","k":"<device id>","s":"<signature>"}
 server -> {"t":"ready","ice":[ … ],"ttl":3600}
 ```
 
-- `s` = Ed25519 signature over `"solodawn/rv/1\n"` + nonce.
+- `s` = Ed25519 signature over `"solodawn/rv/1\n"` followed by the nonce
+  as it stands in the `challenge` frame: the ASCII characters of that
+  base64url text, not the bytes they encode. `k` and `s` are held to check
+  1 of `contracts/envelope.md` section 3, with this prefix in place of the
+  envelope's.
 - A new connection for a device id replaces the previous one.
 - `ice` is a list in the shape of `RTCIceServer`:
 
@@ -61,12 +63,13 @@ server -> {"t":"ready","ice":[ … ],"ttl":3600}
 | --- | --- |
 | `{"t":"to","k":"<target>","env":{…}}` | if the target is connected, sends it `{"t":"from","k":"<sender>","env":{…}}`; otherwise answers `{"t":"offline","k":"<target>"}` |
 | `{"t":"watch","k":["<id>",…]}` (at most 64) | replaces the watch list; sends `{"t":"presence","k":"<id>","on":true}` or `false` now and on every change |
-| `{"t":"join","room":"<hex>"}` | puts the client in a pairing room of at most two; when the second arrives sends both `{"t":"joined","room":"<hex>"}` |
-| `{"t":"room","room":"<hex>","data":{…}}` | forwards the same object to the other member of the room |
+| `{"t":"join","room":"<room id>"}` | puts the client in a pairing room of at most two; when the second arrives sends both `{"t":"joined","room":"<room id>"}` |
+| `{"t":"room","room":"<room id>","data":{…}}` | forwards the same object to the other member of the room |
 | `{"t":"quota"}` | answers `{"t":"quota","used":3250000,"limit":52428800}` for this device, today |
 
-The server never reads `env` or `data`. Rooms disappear when empty or after
-15 minutes.
+The server never reads `env` or `data`. A room id is the 32 lower-case hex
+characters of `contracts/envelope.md` section 6. Rooms disappear when empty
+or after 15 minutes.
 
 ### 2.3 Signalling payloads (inside `env`)
 

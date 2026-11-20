@@ -11,11 +11,7 @@ Every row has:
 | `seq` | group sequence number at the row's last change |
 | `gone` | optional: `true` on the marker of a row that was removed on purpose. A marker has `r`, `id`, `seq`, `gone` and nothing else. A client keeps it and shows nothing for it (`flows/sync.md` G) |
 
-**Presence** follows `contracts/conventions.md` section 2. Every field shown
-below is in every row of its type; an empty list is `[]`, an empty object
-`{}`, and a value marked "or `null`" is `null` when there is none. Only the
-fields listed as **optional** under each row type may be left out, and when
-they are there they are never `null`.
+**Presence** follows `contracts/conventions.md` section 2.
 
 Ids of members, tasks and messages are random ids unless stated.
 

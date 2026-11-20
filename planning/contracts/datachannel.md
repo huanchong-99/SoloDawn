@@ -26,12 +26,8 @@ peer is (section 8).
 - The rules for every frame are in `contracts/conventions.md`: which fields
   are always present and which may be left out (section 2); requests,
   answers and pushes (section 3); size limits (section 4).
-- In short. A **request** has `id`. A **success** has `re` and `ok: true`,
-  and a `t` where one is named below. An **error** is always
-  `{"re": <id>, "err": {"code": "…", "msg": "…"}}`, with no `t`, whatever
-  the request was. A **push** has neither `id` nor `re`.
-- A message is at most 60 KiB; larger results are split by the sender
-  (`rows` batches, `fetch` pages).
+- A result that does not fit one message is split by the sender (`rows`
+  batches, `fetch` pages).
 
 ## 3. Session
 
@@ -148,7 +144,8 @@ before `synced` and rows from `fetch` never move it.
 
 The home stops filling the answer when the next row would exceed the message
 limit; `more` says whether older rows exist. `rows` is `[]` when there is
-nothing.
+nothing. An answer never holds a `gone` marker, with `kind: note` as with
+any other scope: a marker has no `pos` (`contracts/rows.md`).
 
 ## 5. Commands
 
@@ -243,10 +240,13 @@ carry the whole object:
 ```
 
 `agents` lists every supported CLI found on the machine. `account` is `null`
-until the owner has declared it; `update` is `null` or what the last update
-check found. In `groups`, `state` and `task` are the AI's derived state
-(`contracts/rows.md` section 2; `task` is optional), `level` is the level
-of its task sessions, and `queued` counts held items.
+until the owner has declared it. `update` is `null`, or
+`{"version":"0.3.2","status":"pending"}` after an update check
+(`contracts/local.md` section 9): `pending` when that version is installed
+and waits for a restart, `mismatch` when its file failed the checksum and
+nothing was replaced. In `groups`, `state` and `task` are the AI's derived
+state (`contracts/rows.md` section 2; `task` is optional), `level` is the
+level of its task sessions, and `queued` counts held items.
 
 ### `audit` (request)
 
@@ -293,6 +293,7 @@ of its task sessions, and `queued` counts held items.
 | `cli` | the CLI program failed; `msg` carries its error text |
 | `secret` | host only: text from an AI matched the outbound secret check and was not sent (R-137) |
 | `home_unreachable` | host only: the home of that group is not connected |
+| `internal` | the node itself failed; the cause is in its log, not in `msg` |
 
-Every boundary failure maps to exactly one of these. Internal failures are
-not mapped: the node logs them and the request fails with `internal`.
+Every boundary failure maps to exactly one of the codes above `internal`;
+any other failure is logged by the node and answered with `internal`.

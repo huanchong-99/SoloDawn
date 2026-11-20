@@ -84,6 +84,7 @@ that spike has an answer.
 | T-11 | Port 443 shared by HTTPS and TURN. | Spike S-6; fallback is a second address or port for TURN. |
 | T-12 | (Settled in round 1: the home's quiet-task timer, `contracts/task-machine.md` row 23.) | — |
 | T-13 | Starting a brand-new session directly in interactive mode with a chosen id (takeover of an AI without a task) is untested on both CLIs. | Spike S-4. |
+| T-14 | A row, or an inbox item with the rows it carries, can outgrow one `ctl` message: the limits on a message, on a payload and on a message's `text` were set one by one, and a message row repeats its text inside an escaped envelope, a decided card holds a second envelope, and an inbox item wraps both. | Spike S-1 measures the message size both stacks accept; the limits of `contracts/conventions.md` section 4 are then set so that the largest row and the largest inbox item fit. |
 
 ## Assumptions that would change the design if false
 

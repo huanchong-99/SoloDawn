@@ -4,37 +4,48 @@ A message is a `msg` row (`contracts/rows.md` section 5). Its `kind` selects
 the shape of `body`, which never changes after creation, and of `state`,
 which is the only part that changes. Presence follows
 `contracts/conventions.md` section 2: every field below is always present
-unless marked optional.
-
-Frozen by B-01 slice (d): typed bodies and states in `internal/proto`, and
-one golden message row per kind, `row-msg-<kind>.json`.
+unless marked optional. Section 5 of that file says which task freezes
+these shapes.
 
 ## 1. Kinds
 
-| `kind` | Where | Who writes | `body` | `state` |
+| `kind` | Where | Signed by | `body` | `state` |
 | --- | --- | --- | --- | --- |
-| `text` | main, thread | anyone | `{}` | `null` |
-| `progress` | thread | AI | `{}` | `null` |
-| `question` | main, thread | AI | `{}` | `null` |
-| `reply` | thread | AI (`re` is the call) | `{}` | `null` |
-| `brief` | main | secretary | 2.1 | 3.1 |
-| `task` | main | the home (`by` is `"system"`) | 2.2 | `null` |
-| `approval` | thread + main | the AI's host | 2.3 | 3.2 |
+| `text` | main, thread | a person, or an AI | `{}` | `null` |
+| `progress` | thread | an AI | `{}` | `null` |
+| `question` | main, thread | an AI | `{}` | `null` |
+| `reply` | thread | an AI (`re` is the call) | `{}` | `null` |
+| `brief` | main | the secretary | 2.1 | 3.1 |
+| `task` | main | nobody: the home writes it | 2.2 | `null` |
+| `approval` | thread + main | an AI | 2.3 | 3.2 |
 | `decision` | main, or thread + main | an AI | 2.4 | 3.3 |
-| `summary` | thread + main | secretary, completed by the home | 2.5 | `null` |
-| `call` | thread, or main when the caller has no task | AI | 2.6 | 3.4 |
-| `report` | thread | AI, completed by its host | 2.7 | `null` |
-| `checks` | thread | the home | 2.8 | `null` |
-| `review` | thread | reviewer AI, completed by its host and the home | 2.9 | `null` |
-| `handback` | thread (main for the secretary) | the AI, completed by its host | 2.10 | `null` |
-| `system` | main, thread | the home | 2.11 | `null` |
+| `summary` | thread + main | the secretary | 2.5 | `null` |
+| `call` | thread, or main when the caller has no task | an AI | 2.6 | 3.4 |
+| `report` | thread | an AI | 2.7 | `null` |
+| `checks` | thread | nobody: the home writes it | 2.8 | `null` |
+| `review` | thread | an AI, the reviewer | 2.9 | `null` |
+| `handback` | thread (main for the secretary) | an AI | 2.10 | `null` |
+| `system` | main, thread | nobody: the home writes it | 2.11 | `null` |
 
-"Completed by" means the stored row's `body` holds more than the author's
-signed command did. The author's own bytes stay in `env`.
+A signed message reaches the home as a `post` command
+(`contracts/commands.md` 1.3). "An AI" signs through its host
+(`contracts/envelope.md` section 5): whatever the model gave to a tool, the
+host completes the body before it signs. For each kind, section 2 says:
 
-Approval cards are written by the AI's host and presented in the main line
-under the secretary's name with a mention of the approvers (R-42). No AI
-turn is spent on presenting them.
+- **signed**: the fields that `body` holds in the `post`. An optional
+  field may be missing there as in the row; the home answers `bad_request`
+  to a `post` that lacks any other;
+- **added by the home**: the fields the home adds when it writes the row. A
+  `post` does not carry them, and the home does not read them if it does.
+
+The home builds the row's `body` from the signed fields it has checked and
+the fields it adds. The author's own bytes stay in `env`. A message the
+home writes itself has no `post` behind it: its `by` is `"system"` and it
+has no `env`.
+
+An `approval` is posted by the AI's host on its own, when the CLI asks for
+permission; no AI turn is spent on it. It is presented in the main line
+under the secretary's name with a mention of the approvers (R-42).
 
 ## 2. Bodies
 
@@ -64,9 +75,12 @@ Assignee and reviewer are working AIs, not the secretary, and differ.
 Confirming the brief creates exactly these tasks; the task rows then carry
 `depends` as task ids (`contracts/rows.md` section 4).
 
+Signed: every field. Added by the home: nothing.
+
 ### 2.2 `task`
 
-`{"task":"<task id>"}`. The card is drawn from the task row.
+`{"task":"<task id>"}`. Written by the home when it creates the task. The
+card is drawn from the task row.
 
 ### 2.3 `approval`
 
@@ -85,6 +99,13 @@ Confirming the brief creates exactly these tasks; the task rows then carry
 | `approvers` | user ids, at least one |
 
 The card's label is `category` plus `why`.
+
+Signed: every field; the host takes them from the CLI's request. Added by
+the home: nothing.
+
+The values of `tool` and `category` are provisional. They are aligned with
+the request types the two CLIs really have in the planning change that
+records spikes S-2 and S-3, and the approval golden files follow it.
 
 ### 2.4 `decision`
 
@@ -106,20 +127,32 @@ The card's label is `category` plus `why`.
 
 A decision may be answered with an option, with free text, or both.
 
+Signed: every field. Added by the home: nothing.
+
 ### 2.5 `summary`
 
 `{"task":"<task id>","score":94,"rounds":2,"minutes":72,"added":318,"removed":42,"pr":28}`.
-`pr` is optional (absent without a remote). The secretary sends `{}`; the
-home fills every field from the task row.
+`pr` is optional (absent without a remote).
+
+Signed: `{}`. Added by the home: every field, from the task row.
 
 ### 2.6 `call`
 
 `{"to":"<member id>","depth":1,"wait":true}`.
 
+Signed: every field; `depth` is counted by the host (`flows/ask.md`). Added
+by the home: nothing.
+
 ### 2.7 `report`
 
 `{"commit":"9f2c1ab","files":4,"added":212,"removed":18,"pr":31}`. `pr` is
-optional. The AI sends `{}`; its host fills every field at `submit_task`.
+optional.
+
+Signed: every field; the host fills them at `submit_task`. `commit` is the
+head of the task branch at that moment, the commit the `task submitted`
+that follows names. It is in the body because a task is submitted again
+after every failed review: each report says which commit it describes.
+Added by the home: nothing.
 
 ### 2.8 `checks`
 
@@ -132,6 +165,13 @@ optional. The AI sends `{}`; its host fills every field at `submit_task`.
 `merge` there is one item, named `merge`, whose `detail` is the output of
 the failed merge.
 
+Written by the home from the host's `task checked` (`local`), `task cloud`
+(`cloud`) or `task conflict` (`merge`); `commit` is the one that command
+names. It is in the body because a task is checked again after every
+change, and what passes review and is merged is one commit
+(`contracts/task-machine.md` section 4): each result says which commit it
+is about.
+
 ### 2.9 `review`
 
 ```json
@@ -141,37 +181,43 @@ the failed merge.
            "file":"conn/switch.go","line":88}]}
 ```
 
-`items[].file` and `items[].line` are optional. A `veto` item forces `score`
-0 (R-101). The reviewer sends `score` and `items`; its host adds `task` and
-`commit`; the home adds `num`, `title`, `round`, `pass` and `ok`, so that a
-ledger entry still reads well after its task row has been removed by
-retention.
+`items[].file` and `items[].line` are optional.
+
+Signed: `task`, `commit`, `score` and `items`. The reviewer gives `score`
+and `items`; its host adds `task` and the commit of the review checkout
+before it signs. Added by the home: `num`, `title`, `round`, `pass` and
+`ok`, so that a ledger entry still reads well after its task row has been
+removed by retention. The home also writes `score` as 0 when an item has
+`veto` (R-101).
 
 ### 2.10 `handback`
 
 `{"files":["a.go"],"commits":[{"sha":"9f2c1ab","subject":"…"}],"added":40,"removed":3}`.
-The AI sends `{}`; its host fills every field from Git.
+
+Signed: every field; the host fills them from Git. Added by the home:
+nothing.
 
 ### 2.11 `system`
 
-`{"code":"…", …}`. The client localises the text from `code` and the other
-fields. `turn_interrupted`, `session_replaced`, `login_invalid`,
-`cap_reached` and `rate_limited` are facts a host reported
-(`contracts/commands.md` 1.9); the others are written by the home itself.
+`{"code":"…", …}`. Written by the home; the client localises the text from
+`code` and the other fields. Some codes are the home's own. The others
+start as a fact that a host reports in `member status`
+(`contracts/commands.md` 1.9): the host sends the fields that the code's
+row lists below, except `ai`, which the home adds.
 
-| `code` | Always present | Optional |
-| --- | --- | --- |
-| `rounds_limit` | `task`, `n` | — |
-| `turn_interrupted` | `ai`, `reason` (`crash`, `timeout`, `stop`) | `task`, `detail` |
-| `group_paused`, `group_resumed` | `by` | — |
-| `preempted` | `task`, `by` | — |
-| `cap_reached` | `ai`, `cap` (`day`, `task`) | `task` |
-| `rate_limited` | `ai`, `resets` | — |
-| `login_invalid` | `ai` (R-56) | `detail` |
-| `task_failed` | `task`, `reason` (`failures`, `review_rounds`) | — |
-| `task_merged` | `task`, `commit`, `merge_commit`; shown under the secretary's name (R-24) | — |
-| `no_secretary` | — | — |
-| `session_replaced` | `ai` (a new session took over from notes, R-123) | `task` |
+| `code` | From | Always present | Optional |
+| --- | --- | --- | --- |
+| `rounds_limit` | home | `task`, `n` | — |
+| `turn_interrupted` | host | `ai`, `reason` (`crash`, `timeout`, `stop`) | `task`, `detail` |
+| `group_paused`, `group_resumed` | home | `by` | — |
+| `preempted` | home | `task`, `by` | — |
+| `cap_reached` | host | `ai`, `cap` (`day`, `task`) | `task` |
+| `rate_limited` | host | `ai`, `resets` | — |
+| `login_invalid` | host | `ai` (R-56) | `detail` |
+| `task_failed` | home | `task`, `reason` (`failures`, `review_rounds`) | — |
+| `task_merged` | home | `task`, `commit`, `merge_commit`; shown under the secretary's name (R-24) | — |
+| `no_secretary` | home | — | — |
+| `session_replaced` | host | `ai` (a new session took over from notes, R-123) | `task` |
 
 `ai` and `by` are member ids.
 
