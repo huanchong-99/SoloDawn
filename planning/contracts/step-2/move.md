@@ -48,10 +48,11 @@ group g when all of this holds:
    and an integer `epoch` of at least 1.
 2. In the log of the group's owner, R's signer is a currently valid device
    of kind `browser` (the kind of its latest `add`), `home` a currently
-   valid device of kind `node`, and `from` is or was a device. That log is,
-   for H1 and H2, their own owner's; for a client, that of the person in
-   whose log the node it reads the group from is valid, or of the owner it
-   searches in 7.2.
+   valid device of kind `node`, and `from` is or was a device: valid,
+   revoked, or with its `add` dropped by the fork rule (`authority.md` 7).
+   That log is H1's and H2's own owner's; for a client, that of the person
+   in whose log the node it reads the group from is valid, or of the owner
+   it searches in 7.2.
 3. `epoch` is above every epoch the receiver holds for g: from its group
    row, from redirects it accepted or installed, from a copy it holds.
 4. For a client: R came from the node it reads g from, with that node as
@@ -294,7 +295,6 @@ body; the codes `moving` and `unreachable`; and the shapes of `copy.md`.
   only with the next move or restore.
 - A client and a revoked node that both missed the `revoke` (both offline
   then) meet and go on; what is written there is lost when the node gets
-  the entry. A browser that never saw a node P added later does not look
-  for the group there (7.2).
+  it. A browser never shown a node P added later does not look there (7.2).
 - Nothing here was run. `[unverified]` That 60 minutes moves a large group
   on a direct path, and that a home holds a read view open that long.

@@ -72,9 +72,11 @@ Host commands (`contracts/commands.md` section 2), by P as every one:
    `epoch` is above the copy's `head.epoch`; it has the command's signer,
    the copy's `head.from` as `from`, H2 as `home`, and the copy's `seq`:
    else `bad_request`.
-3. `from` is revoked in P's log: else `conflict`. A home that may still run
-   is moved, not restored; a revoked node stops being a home
-   (`move.md` section 8), and its peers refuse it.
+3. P's log holds a `revoke` entry of `from`: else `conflict`. An `add`
+   dropped by the fork rule (`authority.md` section 7) is no revoke and
+   does not do. A home that may still run is moved, not restored; a
+   revoked node stops being a home (`move.md` section 8), and its peers
+   refuse it.
 4. H2 is not the home of g: else `conflict`.
 5. The copy verifies again, by checks 1 and 2 of `move.md` section 3 with
    `copy` as the kind: else `bad_request` or `bad_sig` (A9.32).
@@ -91,10 +93,11 @@ move, refuses the redirect: a stale copy cannot pull it back.
   and from `copies` of the home's `host.info` the last copy's time and any
   error.
 - **Restore** is normative for every browser of P, not only a screen rule.
-  B sends `copy.restore` only when all of this holds: the copy's `from` is
-  revoked in P's log; a look for the group by `move.md` 7.2, made just
-  before, found no node of P that lists it; and B signs the redirect with
-  an `epoch` above the copy's and above every epoch B holds for the group.
+  B sends `copy.restore` only when all of this holds: P's log holds a
+  `revoke` entry of the copy's `from` (section 4, point 3); a look for the
+  group by `move.md` 7.2, made just before, found no node of P that lists
+  it; and B signs the redirect with an `epoch` above the copy's and above
+  every epoch B holds for the group.
   Otherwise the page says why: the lost computer is not revoked yet, or
   the group has a home, which it names.
 
