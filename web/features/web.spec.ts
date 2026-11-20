@@ -5,6 +5,7 @@ import { DeviceLog, Refused } from '../src/lib/devlog';
 import { Device, ed25519, loadDevice, openCommand, type KeyStore } from '../src/lib/identity';
 import { mac, newSecret, parseSecret, room, shown, verifyPair } from '../src/lib/pairing';
 import { examples, goldens, mockCtl, schemaOf } from '../src/lib/mock';
+import * as motion from './motion';
 import * as proto from '../src/lib/proto';
 
 const feature = await loadFeature('../features/web.feature');
@@ -72,18 +73,6 @@ function go(hash: string) {
   svelte.flushSync();
 }
 
-/** A custom property that a part's motion reads, such as the place of a mark. */
-const motionOf = (selector: string, property: string) =>
-  document.querySelector<HTMLElement>(selector)!.style.getPropertyValue(property);
-
-/** The changes the browser was asked to cross-fade, in a browser with view transitions. */
-let crossFades: (() => void)[];
-
-function viewTransitions() {
-  crossFades = [];
-  Object.assign(document, { startViewTransition: (change: () => void) => crossFades.push(change) });
-}
-
 function press(label: string) {
   const button = document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)!;
   button.focus();
@@ -99,7 +88,6 @@ function expectMainFocus(title: string) {
 
 describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScenario }) => {
   AfterEachScenario(() => {
-    Reflect.deleteProperty(document, 'startViewTransition');
     vi.restoreAllMocks();
     localStorage.clear();
   });
@@ -219,14 +207,17 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
   Scenario(
     'The mark of the current page moves to the entry that is opened',
     ({ Given, When, Then, And }) => {
-      Given('the browser supports Ed25519 in WebCrypto', supported);
-      And('the person opens the client', () => open());
-      When('the address fragment becomes "#/settings"', () => go('#/settings'));
-      Then('the mark of the current page is on entry 3 of the navigation', () => {
-        expect(motionOf('nav .tabs', '--at')).toBe('2');
+      let direction: number[];
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the person opens the client', () => motion.open());
+      When('the address fragment becomes "#/settings"', async () => {
+        direction = await motion.arrival('#/settings');
       });
+      Then('the mark of the current page is on entry 3 of the navigation', () =>
+        motion.expectMark('nav .tabs', 'a', 2),
+      );
       And('the page arrives from the side of the later entries', () => {
-        expect(motionOf('.app', '--dir')).toBe('1');
+        expect(direction).toEqual([0, 1]);
       });
     },
   );
@@ -234,46 +225,49 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
   Scenario(
     'A page opened from a later one arrives from the other side',
     ({ Given, When, Then, And }) => {
-      Given('the browser supports Ed25519 in WebCrypto', supported);
-      And('the person opens the client at "#/settings"', () => open('#/settings'));
-      When('the address fragment becomes "#/nodes"', () => go('#/nodes'));
-      Then('the mark of the current page is on entry 2 of the navigation', () => {
-        expect(motionOf('nav .tabs', '--at')).toBe('1');
+      let direction: number[];
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the person opens the client at "#/settings"', () => motion.open('#/settings'));
+      When('the address fragment becomes "#/nodes"', async () => {
+        direction = await motion.arrival('#/nodes');
       });
+      Then('the mark of the current page is on entry 2 of the navigation', () =>
+        motion.expectMark('nav .tabs', 'a', 1),
+      );
       And('the page arrives from the side of the earlier entries', () => {
-        expect(motionOf('.app', '--dir')).toBe('-1');
+        expect(direction).toEqual([0, -1]);
       });
     },
   );
 
   Scenario('The mark of the chosen option moves with the choice', ({ Given, When, Then, And }) => {
-    Given('the browser supports Ed25519 in WebCrypto', supported);
-    And('the person opens the client at "#/settings"', () => open('#/settings'));
-    When('the person chooses the theme "深色"', () => choose('深色'));
-    And('the person chooses the language "English"', () => choose('English'));
-    Then('the mark of the theme is on option 3', () => {
-      expect(motionOf('fieldset:has([name=theme])', '--at')).toBe('2');
-    });
-    And('the mark of the language is on option 2', () => {
-      expect(motionOf('fieldset:has([name=lang])', '--at')).toBe('1');
-    });
+    Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+    And('the person opens the client at "#/settings"', () => motion.open('#/settings'));
+    When('the person chooses the theme "深色"', () => motion.choose('深色'));
+    And('the person chooses the language "English"', () => motion.choose('English'));
+    Then('the mark of the theme is on option 3', () =>
+      motion.expectMark('fieldset:has([name=theme])', 'label', 2),
+    );
+    And('the mark of the language is on option 2', () =>
+      motion.expectMark('fieldset:has([name=lang])', 'label', 1),
+    );
   });
 
   Scenario(
     'The page cross-fades to a new theme in a browser with view transitions',
     ({ Given, When, Then, And }) => {
-      Given('the browser supports Ed25519 in WebCrypto', supported);
-      And('the browser has view transitions', viewTransitions);
-      And('the person opens the client', () => open());
-      When('the person presses "切换深色 / 浅色"', () => press('切换深色 / 浅色'));
+      let themes: (string | undefined)[];
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the browser has view transitions', motion.viewTransitions);
+      And('the person opens the client', () => motion.open());
+      When('the person presses "切换深色 / 浅色"', async () => {
+        themes = await motion.crossFade();
+      });
       Then('the page uses the "auto" theme until the cross-fade has its first picture', () => {
-        expect(crossFades).toHaveLength(1);
-        expect(document.documentElement.dataset.theme).toBe('auto');
+        expect(themes[0]).toBe('auto');
       });
       And('the page uses the "dark" theme in the cross-fade', () => {
-        crossFades[0]();
-        svelte.flushSync();
-        expect(document.documentElement.dataset.theme).toBe('dark');
+        expect(themes[1]).toBe('dark');
       });
     },
   );
@@ -281,25 +275,20 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
   Scenario(
     'The theme changes at once when the system asks for reduced motion',
     ({ Given, When, Then, And }) => {
-      Given('the browser supports Ed25519 in WebCrypto', supported);
-      And('the browser has view transitions', viewTransitions);
-      And('the system asks for reduced motion', () => {
-        vi.spyOn(window, 'matchMedia').mockImplementation(
-          (query) =>
-            ({
-              matches: query === '(prefers-reduced-motion: reduce)',
-              addEventListener() {},
-              removeEventListener() {},
-            }) as unknown as MediaQueryList,
-        );
+      let result: Awaited<ReturnType<typeof motion.reducedThemeChange>>;
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the browser has view transitions', motion.viewTransitions);
+      And('the system asks for reduced motion', motion.reduce);
+      And('the person opens the client', () => motion.open());
+      When('the person presses "切换深色 / 浅色"', async () => {
+        result = await motion.reducedThemeChange();
       });
-      And('the person opens the client', () => open());
-      When('the person presses "切换深色 / 浅色"', () => press('切换深色 / 浅色'));
       Then('the page uses the "dark" theme', () => {
-        expect(document.documentElement.dataset.theme).toBe('dark');
+        expect(result.theme).toBe('dark');
       });
       And('the page has not cross-faded', () => {
-        expect(crossFades).toEqual([]);
+        expect(result.transitions).toBe(0);
+        expect(result.animations).toBe(0);
       });
     },
   );

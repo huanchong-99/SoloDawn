@@ -32,6 +32,10 @@ Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-l
 | `pnpm format`      | Prettier                                                           |
 | `pnpm stryker run` | mutation tests of every `.ts` module outside routes and components |
 
+Before the first `pnpm test`, install the headless browser with
+`pnpm exec playwright install --with-deps --only-shell chromium`. The five motion scenarios run
+against a temporary production build in Chromium.
+
 The one runtime dependency is `valibot`, for the wire types. Signatures, hashes and macs use the
 browser's WebCrypto only; no signature library is bundled (R-164). `fake-indexeddb` is a
 development dependency, an IndexedDB for the tests.
