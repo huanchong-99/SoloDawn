@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · limitation · Fake CLIs lack invalid-login and exhausted-limit captures
+
+- Symptom: neither scripted CLI covers an invalid-login startup error or an exhausted rate limit.
+- Cause: the [macOS driver spike](https://github.com/huanchong-99/SoloDawn/pull/57) captured signed-in sessions and rate-limit updates, not these failures.
+- Status: open. Add scripts from real captures before B-14 handles either failure.
+
 ### 2026-11-20 · limitation · Web client can paint one frame in the wrong theme
 
 - Symptom: when the theme chosen in the browser (`sd-theme` = `light` or `dark`) is the opposite of the system setting, the page can paint one frame in the system theme while it loads, then switches.
