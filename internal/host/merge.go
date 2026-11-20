@@ -56,16 +56,18 @@ func (m ReviewedMerge) applyPR(ctx context.Context) (MergeResult, error) {
 	taken := time.Now()
 	_, mergeErr := m.mergePR(ctx)
 	if mergeErr == nil {
-		return m.awaitPR(ctx, taken)
+		// GitHub's read can lag its own write: right after the merge an OPEN
+		// PR with nothing pending is final only from the second read on.
+		return m.awaitPR(ctx, taken, false)
 	}
 	// gh can exit unsuccessfully deleting the remote branch after the server
 	// has already merged the PR. Inspect its state even on a command error.
-	pending, result, err := m.readPR(ctx)
+	settled, result, err := m.readPR(ctx, true)
 	if err != nil {
 		return MergeResult{}, errors.Join(mergeErr, err)
 	}
-	if pending {
-		return m.awaitPR(ctx, taken)
+	if !settled {
+		return m.awaitPR(ctx, taken, true)
 	}
 	if result.Conflict != "" {
 		result.Conflict = redactSecrets(mergeErr.Error())
@@ -155,7 +157,7 @@ func (m ReviewedMerge) Inspect(ctx context.Context) (MergeResult, error) {
 		if since.IsZero() {
 			since = time.Now()
 		}
-		return m.awaitPR(ctx, since)
+		return m.awaitPR(ctx, since, true)
 	}
 	lock := cloneLock(m.Repo)
 	lock.Lock()
@@ -198,21 +200,34 @@ func (m ReviewedMerge) inspectLocal(ctx context.Context) (MergeResult, error) {
 // awaitPR reads the PR every 30 s while its merge is pending: OPEN with a
 // merge queue entry or auto-merge, which merges it later. A read that fails
 // counts as unfinished too: only an outcome (merged, closed, or OPEN with
-// nothing pending) or the limit, 60 minutes after since, ends the wait.
-func (m ReviewedMerge) awaitPR(ctx context.Context, since time.Time) (MergeResult, error) {
+// nothing pending, which counts from the first read only when idleFinal) or
+// the limit, 60 minutes after since, ends the wait.
+func (m ReviewedMerge) awaitPR(ctx context.Context, since time.Time, idleFinal bool) (MergeResult, error) {
 	deadline := since.Add(60 * time.Minute)
 	for {
-		pending, result, err := m.readPR(ctx)
-		if err == nil && !pending {
+		settled, result, err := m.readPR(ctx, idleFinal)
+		if err == nil && settled {
 			return result, nil
 		}
+		idleFinal = true
 		if !time.Now().Before(deadline) {
-			return MergeResult{Conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"}, nil
+			return stillPending(err)
 		}
 		if err := pollWait(ctx); err != nil {
 			return MergeResult{}, err
 		}
 	}
+}
+
+// stillPending is the outcome at the limit. When the last read failed, the
+// outcome is unknown: its error is returned and the node reads again later,
+// since a merged PR must not become a conflict because the forge was out of
+// reach. Only a read that showed the merge still pending is a conflict.
+func stillPending(lastRead error) (MergeResult, error) {
+	if lastRead != nil {
+		return MergeResult{}, lastRead
+	}
+	return MergeResult{Conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"}, nil
 }
 
 // pollWait waits the 30 s between two reads, or returns ctx's error.
@@ -230,8 +245,9 @@ func pollWait(ctx context.Context) error {
 const prQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { state headRefOid mergeCommit { oid } autoMergeRequest { enabledAt } mergeQueueEntry { id } } } }`
 
 // readPR reads the PR once, from the folder that holds the clone, and returns
-// whether its merge is pending, else the outcome.
-func (m ReviewedMerge) readPR(ctx context.Context) (bool, MergeResult, error) {
+// whether it has settled, with the outcome; idleFinal settles an OPEN PR with
+// nothing pending.
+func (m ReviewedMerge) readPR(ctx context.Context, idleFinal bool) (bool, MergeResult, error) {
 	owner, name, _ := strings.Cut(m.GitHubRepo, "/")
 	out, err := commandText(ctx, filepath.Dir(m.Repo), "gh", "api", "graphql", "-f", "query="+prQuery,
 		"-f", "owner="+owner, "-f", "name="+name, "-F", "number="+strconv.Itoa(m.PR), "--jq", ".data.repository.pullRequest")
@@ -242,8 +258,8 @@ func (m ReviewedMerge) readPR(ctx context.Context) (bool, MergeResult, error) {
 	if err := json.Unmarshal([]byte(out), &pr); err != nil {
 		return false, MergeResult{}, fmt.Errorf("gh api graphql: %w", err)
 	}
-	pending, result := pr.outcome(m)
-	return pending, result, nil
+	settled, result := pr.outcome(m, idleFinal)
+	return settled, result, nil
 }
 
 // forgeMergeState is the PR as prQuery reads it; a null field is nil.
@@ -254,18 +270,18 @@ type forgeMergeState struct {
 	MergeQueueEntry   *struct{}
 }
 
-func (pr forgeMergeState) outcome(m ReviewedMerge) (bool, MergeResult) {
+func (pr forgeMergeState) outcome(m ReviewedMerge, idleFinal bool) (bool, MergeResult) {
 	if pr.State == "MERGED" {
-		return false, pr.merged(m)
+		return true, pr.merged(m)
 	}
 	if pr.State == "OPEN" && (pr.AutoMergeRequest != nil || pr.MergeQueueEntry != nil) {
-		return true, MergeResult{}
+		return false, MergeResult{}
 	}
-	detail := fmt.Sprintf("pull request %d is %s", m.PR, pr.State)
+	detail, settled := fmt.Sprintf("pull request %d is %s", m.PR, pr.State), true
 	if pr.State == "OPEN" {
-		detail += ", with no merge queue entry and no auto-merge"
+		detail, settled = detail+", with no merge queue entry and no auto-merge", idleFinal
 	}
-	return false, MergeResult{Conflict: detail}
+	return settled, MergeResult{Conflict: detail}
 }
 
 func (pr forgeMergeState) merged(m ReviewedMerge) MergeResult {

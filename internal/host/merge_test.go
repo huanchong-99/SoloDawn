@@ -328,9 +328,9 @@ func TestMergePRInspection(t *testing.T) {
 		{out: `{"state":"OPEN","mergeCommit":null,"autoMergeRequest":null,"mergeQueueEntry":null}`, conflict: "pull request 32 is OPEN, with no merge queue entry and no auto-merge"},
 		{out: `{"state":"CLOSED","mergeCommit":null}`, conflict: "pull request 32 is CLOSED"},
 		{out: `{"state":"MERGED","mergeCommit":{"oid":"def"},"headRefOid":"abc1"}`, conflict: "pull request 32 merged head abc1, expected abc"},
-		// A read that fails counts as unfinished; the limit has passed.
-		{out: "{", conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"},
-		{fail: "graphql", conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"},
+		// The limit has passed, but the last read failed: the outcome is unknown.
+		{out: "{", problem: "gh api graphql: unexpected end of JSON input"},
+		{fail: "graphql", problem: "gh api graphql -f query=" + prQuery + " -f owner=team -f name=website -F number=32 --jq .data.repository.pullRequest: exit status 1: forge refused"},
 	} {
 		t.Run(tc.out+tc.fail, func(t *testing.T) {
 			m := mergeForgeFixture(t)
