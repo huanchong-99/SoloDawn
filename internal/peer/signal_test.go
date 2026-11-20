@@ -277,6 +277,10 @@ func TestEveryPathChecksEnvelope(t *testing.T) {
 
 func TestCertificateMismatchEndsPendingConnection(t *testing.T) {
 	f := newPair(t)
+	// Isolate the failure from an incidental CloseNotify from the other end.
+	var engine webrtc.SettingEngine
+	engine.DisableCloseByDTLS(true)
+	f.a.sockets.offer = webrtc.NewAPI(webrtc.WithSettingEngine(engine))
 	c, err := f.a.Offer(t.Context(), f.b.key.ID())
 	check(t, err)
 	t.Cleanup(func() { c.Close() })
