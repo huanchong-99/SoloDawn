@@ -552,3 +552,15 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: a note with 16,000 `<` characters was stored as 96,124 bytes, though `planning/contracts/conventions.md` section 4 counts a row's size on its JSON without HTML escaping and the home accepts rows up to 16 KiB on that count. A row the home accepts could be stored above the 60 KiB limit of a `ctl` message, so a `rows` or `fetched` frame built from it could not be sent. No node wrote rows yet, so nothing was broken.
 - Cause: `Put` encoded the row with `json.Marshal` (`internal/store/put.go:17` before the fix), which escapes `<`, `>` and `&` as six-byte `<`, `>`, `&`. `internal/peer` encodes frames without escaping and leaves stored escapes as they are.
 - Status: resolved in PR #163. `Put` and `PutReceipt` encode through `encode` (`internal/store/put.go:29`, a `json.Encoder` with `SetEscapeHTML(false)`, newline trimmed); `internal/store/put.go:18` and `internal/store/receipt.go:16` call it. Raw JSON the store returns (read paths, signed envelopes in the inbox) is never re-encoded. Test: `TestPutStoresWithoutHTMLEscapes` in `internal/store/read_test.go`. `internal/proto/decode.go:64` has the same `json.Marshal` pattern but is an intermediate that is decoded again at once; not changed (owned by P-1).
+
+### 2026-11-20 · bug · A refused read left the top of the main line loading forever
+
+- Symptom: when the home refused the `sync` of a group with `forbidden` while the group was still listed, the chat top showed the idle loading dots for good instead of "Earlier messages cannot be loaded right now."
+- Cause: `Group.sync` returned on `answer.err` without touching the paging (`web/src/lib/groups.svelte.ts:160-170` before the fix), so `more=true` and `failed=false` stayed while the connection was up, and `stuck` in `web/src/components/chat/Chat.svelte:19` stayed false. No page is asked for after a refused read (the group is not live), which is intended.
+- Status: resolved in PR #165: a refused read sets `paging().failed` (`web/src/lib/groups.svelte.ts:163`), a read that comes too late does not. The next successful read starts a fresh paging. Tests in `web/src/lib/groups.test.ts` (refused read, late refusal).
+
+### 2026-11-20 · bug · `plain` copied its list at every mention
+
+- Symptom: 2300 mentions in one text took about 69 ms to cut into parts, and it runs on every key press; 6000 overflowed the stack.
+- Cause: `plain` (`web/src/lib/compose.ts` before the fix) was recursive and spread the result of the rest of the text into a new list at each mention, so the cost grew with the square of the mentions and the depth with their number.
+- Status: resolved in PR #165: `plain` builds the list with a loop (`web/src/lib/compose.ts:53`), same output. Test in `web/src/lib/compose.test.ts` (2300 mentions give the same parts; 6000 take under ten times what 1500 do).

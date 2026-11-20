@@ -240,6 +240,28 @@ describe('the cursor', () => {
     link.push(rows(text('b', 817)));
     expect(group.cursor).toBe(815);
   });
+
+  it('marks the paging as failed when the home refuses the read, so that the top does not wait', async () => {
+    const { home, group, asked } = await read();
+    expect(group.paging()).toMatchObject({ more: true, failed: false });
+    void group.sync(home.ctl!);
+    asked[1].answer({ re: 2, err: { code: 'forbidden', msg: 'no' } });
+    await settle();
+    expect(group.paging().failed).toBe(true);
+    expect(group.paging().ready).toBe(false);
+    // No page is asked for: only the read was.
+    await group.older();
+    expect(asked).toHaveLength(2);
+  });
+
+  it('does not mark the paging when a refusal comes too late', async () => {
+    const { home, group, asked } = await read();
+    void group.sync(home.ctl!);
+    void group.sync(home.ctl!);
+    asked[1].answer({ re: 2, err: { code: 'forbidden', msg: 'no' } });
+    await settle();
+    expect(group.paging().failed).toBe(false);
+  });
 });
 
 describe('an answer that comes too late', () => {
