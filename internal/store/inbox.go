@@ -39,11 +39,8 @@ func (s *Store) Inbox(host string, now int64) ([]Item, error) {
 	items := []Item{}
 	for rows.Next() {
 		var i Item
-		err := rows.Scan(&i.ID, &i.Group, &i.AI, &i.Host, &i.Why, &i.Msg, &i.Task, &i.Commit,
+		_ = rows.Scan(&i.ID, &i.Group, &i.AI, &i.Host, &i.Why, &i.Msg, &i.Task, &i.Commit,
 			(*[]byte)(&i.Env), (*[]byte)(&i.Cause), &i.NotBefore, &i.Created)
-		if err != nil {
-			return nil, err
-		}
 		items = append(items, i)
 	}
 	return items, rows.Err()

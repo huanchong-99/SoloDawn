@@ -76,9 +76,7 @@ func (v *Snapshot) rows(query string, args ...any) ([]json.RawMessage, error) {
 	result := []json.RawMessage{}
 	for rows.Next() {
 		var data string
-		if err := rows.Scan(&data); err != nil {
-			return nil, err
-		}
+		_ = rows.Scan(&data)
 		result = append(result, json.RawMessage(data))
 	}
 	return result, rows.Err()

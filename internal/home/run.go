@@ -289,8 +289,13 @@ func (l *Loop) Detach(c *Conn) {
 // (planning/contracts/datachannel.md section 3). The list is read and the
 // frame is queued in one step, and c is pushed its groups only from then on:
 // so no groups push comes before the welcome, and none that is older than
-// the welcome comes after it. A node calls it for every hello. build runs
-// under the lock of the loop and must not call the loop.
+// the welcome comes after it. A node calls it for every hello.
+//
+// build runs under the lock of the loop. It only puts the frame together
+// from the list and from values the node worked out before it called
+// Welcome, such as time and addrs: it takes no lock, waits for nothing and
+// calls nothing, the loop least of all. A build that waits for a lock of the
+// node which another goroutine holds while it calls Cmd waits for ever.
 func (l *Loop) Welcome(c *Conn, build func(groups []proto.GroupSummary) any) {
 	l.mu.Lock()
 	c.welcomed = true
