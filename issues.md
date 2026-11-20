@@ -10,7 +10,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
 - Cause: `startNode` is a stub that returns that error until N-4 assembles the runtime (`internal/node/socket.go:80-84`); `cmd/solodawn/main.go:26-28` registers `node` without arguments.
-- Status: open until N-4. What I-8 needs from N-4 is listed in the pull request of E-0.
+- Status: open until N-4. What I-8 needs from N-4 is listed in [#132](https://github.com/huanchong-99/SoloDawn/pull/132).
 
 ### 2026-11-20 · limitation · A node's socket does not fit under a long HOME on macOS
 
