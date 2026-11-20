@@ -49,6 +49,13 @@ func workspaceAbsent(path string) error {
 	return nil
 }
 
+// The member ids of the AIs in the workspace scenarios, all on one node.
+const (
+	assignee  = "assignee"
+	successor = "successor"
+	reviewer  = "reviewer"
+)
+
 func workspaceSteps(sc *godog.ScenarioContext, f fixtures) {
 	var project, source, repo, commit, merged string
 	taskName := func(n int) string { return strconv.Itoa(n) + "-change" }
@@ -67,11 +74,11 @@ func workspaceSteps(sc *godog.ScenarioContext, f fixtures) {
 		if _, err := workspaceCommand(source, "commit", "--allow-empty", "-m", "initial"); err != nil {
 			return err
 		}
-		repo, err = host.EnsureGroupWorkspace(project, source, "trunk")
+		repo, err = host.EnsureGroupWorkspace(f.t.Context(), project, source, "trunk")
 		return err
 	})
 	sc.Step(`^another member joins the workspace group$`, func() error {
-		_, err := host.EnsureGroupWorkspace(project, source, "trunk")
+		_, err := host.EnsureGroupWorkspace(f.t.Context(), project, source, "trunk")
 		return err
 	})
 	sc.Step(`^the group clone is the only registered worktree$`, func() error {
@@ -89,7 +96,7 @@ func workspaceSteps(sc *godog.ScenarioContext, f fixtures) {
 		return workspaceGitEquals(repo, "", "branch", "--list", "task/"+taskName(n))
 	})
 	sc.Step(`^workspace task (\d+) starts$`, func(n int) error {
-		_, err := host.CreateTaskWorkspace(project, n, "change", "trunk", false, false)
+		_, err := host.CreateTaskWorkspace(f.t.Context(), project, n, "change", assignee, "trunk", false)
 		return err
 	})
 	sc.Step(`^workspace task (\d+) is on its own branch$`, func(n int) error {
@@ -111,7 +118,7 @@ func workspaceSteps(sc *godog.ScenarioContext, f fixtures) {
 		return err
 	})
 	sc.Step(`^the reviewer opens the submitted commit of task (\d+)$`, func(n int) error {
-		_, err := host.PrepareReviewWorkspace(project, n, commit, "trunk", false)
+		_, err := host.PrepareReviewWorkspace(f.t.Context(), project, n, reviewer, commit, "trunk", false)
 		return err
 	})
 	sc.Step(`^review (\d+) is detached at that commit and contains its diff$`, func(n int) error {
@@ -129,16 +136,29 @@ func workspaceSteps(sc *godog.ScenarioContext, f fixtures) {
 		return workspaceGitEquals(repo, strings.TrimSuffix(string(diff), "\n"), "diff", "trunk..."+commit)
 	})
 	sc.Step(`^the host releases the task and review folders for task (\d+)$`, func(n int) error {
-		if err := host.RemoveTaskWorkspace(project, n, "change", host.TaskMerged); err != nil {
+		if err := host.RemoveTaskWorkspace(f.t.Context(), project, n, "change", assignee, host.TaskMerged); err != nil {
 			return err
 		}
-		return host.RemoveReviewWorkspace(project, n)
+		return host.RemoveReviewWorkspace(f.t.Context(), project, n, reviewer)
 	})
 	sc.Step(`^task (\d+) leaves an uncommitted change$`, func(n int) error {
 		return os.WriteFile(filepath.Join(tree(n), "change.txt"), []byte("unsaved\n"), 0644)
 	})
 	sc.Step(`^the host removes the worktree of cancelled task (\d+)$`, func(n int) error {
-		return host.RemoveTaskWorkspace(project, n, "change", host.TaskCancelled)
+		return host.RemoveTaskWorkspace(f.t.Context(), project, n, "change", assignee, host.TaskCancelled)
+	})
+	sc.Step(`^task (\d+) is given to another AI of this node before the first AI's worktree is released$`, func(n int) error {
+		_, err := host.CreateTaskWorkspace(f.t.Context(), project, n, "change", successor, "trunk", false)
+		return err
+	})
+	sc.Step(`^the host releases the first AI's worktree of task (\d+)$`, func(n int) error {
+		return host.RemoveTaskWorkspace(f.t.Context(), project, n, "change", assignee, host.TaskGivenAway)
+	})
+	sc.Step(`^the worktree of task (\d+) has that commit and none of the first AI's uncommitted change$`, func(n int) error {
+		if err := workspaceGitEquals(tree(n), commit, "rev-parse", "HEAD"); err != nil {
+			return err
+		}
+		return workspaceGitEquals(tree(n), "", "status", "--porcelain", "--untracked-files=all")
 	})
 	sc.Step(`^the branch of task (\d+) is at that commit$`, func(n int) error {
 		return workspaceGitEquals(repo, commit, "rev-parse", "task/"+taskName(n))

@@ -57,14 +57,11 @@ func runGroupChecks(ctx context.Context, dir string, group proto.GroupRow) []pro
 }
 
 func checkGit(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(exit.Stderr)))
+	out, stderr, err := runIn(ctx, dir, "git", args...)
+	if _, ok := errors.AsType[*exec.ExitError](err); ok {
+		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr))
 	}
-	return string(out), err
+	return out, err
 }
 
 func cleanCheckHead(ctx context.Context, dir string) (string, error) {

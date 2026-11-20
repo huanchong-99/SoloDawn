@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · deviation · P-1's task row decoder must refuse a slug the home cannot produce
+
+- Symptom: none yet. The host now refuses a `slug` that does not match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 40 characters, and a `num` below 1 (`internal/host/workspace.go:115`, `taskName`), because both go into paths and branch names. A task row that carries such a slug is accepted on the wire today.
+- Cause: the decoder of the task row (P-1, `internal/proto`) checks no form of `slug`; `planning/contracts/local.md` section 7, "Slug", gives the only form the home produces.
+- Status: open. P-1 refuses such a row when it decodes it, so the refusal comes before any host sees the row.
+
 ### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
 
 - Symptom: `crap.py` gives `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reports `internal/peer` at 100% of statements.
@@ -195,6 +201,48 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
 
 ## Resolved
+
+### 2026-11-20 · bug · Crash recovery of the host's worktrees decided on the folder alone
+
+- Symptom: the independent review of `internal/host` reproduced four states. (a) A SIGKILL of `worktree add -b` during checkout, held there by a slow smudge filter, left a folder with only `.git` and `.gitattributes`, locked `initializing`; `CreateTaskWorkspace` reused it, `git status` there showed every file staged as deleted, and `RemoveTaskWorkspace(TaskCancelled)` failed with "cannot remove a locked working tree". (b) After `add -b` failed past the branch's creation, every retry failed with "a branch named 'task/1-x' already exists". (c) A kill inside `worktree remove` left "missing but already registered worktree" for good, and a half-deleted folder without `.git` was returned as the task's folder. (d) After a killed clone, `EnsureGroupWorkspace` accepted an empty `repo/`, and every later command failed with "not a git repository".
+- Cause: `internal/host/workspace.go:41`, `:89`, `:122` and `:157-161` before the fix took an existing folder as a good worktree or clone, and `add -b` assumed the branch did not exist.
+- Status: resolved in branch `fix/host-workspace-review`. Under the clone's lock the host prunes, reuses a folder only when `git worktree list` shows it on its branch (or detached, for a review), not `locked initializing`, and recorded for the same AI, and otherwise deletes it and adds it again, with `--force --force` while it is still registered and without `-b` when the branch exists (`internal/host/workspace.go:150-222`, `:266-300`, `:330-345`). The clone is made in `.repo-clone` and renamed to `repo`; a `repo` that is not a Git repository is an error that names it (`:53-74`). Tests: `TestWorkspaceAfterAKilledAdd` (a real SIGKILL through the runner during a slow smudge filter), `TestWorkspaceAfterAnAddThatFailedInCheckout`, `TestWorkspaceAfterAStoppedRemove`, `TestWorkspaceCloneAfterAStoppedClone`, `TestWorkspaceRefusesARepoFolderThatIsNotAClone`. `planning/contracts/local.md` section 7, "A worktree left by a crash".
+
+### 2026-11-20 · bug · Two AIs on one node shared a task's worktree and a review checkout
+
+- Symptom: when the new holder's create ran before the old holder's removal, the new AI got the old AI's uncommitted file, and the removal then force-deleted the new session's folder.
+- Cause: `CreateTaskWorkspace` and the removals did not know which AI held the folder (`internal/host/workspace.go:84-97` and `:176-192` before the fix); the host relied on N-4 ordering them.
+- Status: resolved in branch `fix/host-workspace-review`. Create and Remove, for tasks and reviews, take the member id of the AI that holds the folder; the host records it after the add, in the worktree's own admin folder (`internal/host/workspace.go:178-196`). A create adds a folder recorded for another AI, or with no record, again; a removal leaves a folder recorded for another AI untouched (`:224-240`). Tests: `TestWorkspaceTaskHandedToAnotherAIOnTheSameNode`, `TestWorkspaceReviewerChangedOnTheSameNode`, `TestWorkspaceWithoutAHolderRecord`, and the scenario "A task given to another AI of the same node carries over only its commits".
+
+### 2026-11-20 · bug · Host Git commands could wait for ever
+
+- Symptom: workspace commands had no context and no limit, so a fetch that hung held the clone lock until a restart, and ssh could prompt on `/dev/tty`. The host had four runners for its Git and gh commands.
+- Cause: `workspaceGit` (`internal/host/workspace.go:47`), `checkGit` (`internal/host/checks.go:59`), `runIn` (`internal/host/forge.go:26`) and `commandText` (`internal/host/merge.go:176`) before the fix; only the last two took a context.
+- Status: resolved in branch `fix/host-workspace-review`. One runner, `runIn` (`internal/host/command.go:27`), runs every git and gh command of the host within the caller's context and its own limit of 60 minutes for `git clone` and `git push` and 10 minutes for any other, with `GIT_TERMINAL_PROMPT=0`, `GH_PROMPT_DISABLED=1`, `SSH_ASKPASS_REQUIRE=never` and `GCM_INTERACTIVE=never` added to the node's environment, in a new session on Unix and without a console window on Windows, killing the whole session or process tree when it stops (`command_unix.go`, `command_windows.go`). The other three call it; every exported workspace function takes a context. Tests: `TestCommandLimits`, `TestCommandsNeverWaitForAPerson`, `TestCommandStopsAtItsLimit`. `planning/contracts/local.md` section 7, "Commands never wait for a person".
+
+### 2026-11-20 · bug · A task slug went into paths unchecked
+
+- Symptom: the slug `x/../../../../outside` gave a folder outside the project, with a nil error.
+- Cause: `internal/host/workspace.go:87-90` before the fix joined `<num>-<slug>` into paths and the branch name as given.
+- Status: resolved in branch `fix/host-workspace-review`: `taskName` refuses a slug that does not match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 40 characters, and a `num` below 1, before any path or branch is built (`internal/host/workspace.go:115`); `reviewSlot` refuses a `num` below 1 (`:387`). Test: `TestWorkspaceRefusesSlugsTheHomeCannotProduce`. The open entry for P-1 above covers the decoder.
+
+### 2026-11-20 · bug · The review diff followed the owner's diff settings
+
+- Symptom: with `diff.external` set, the review diff was the external program's output; `textconv` and `color.ui=always` changed it too.
+- Cause: `internal/host/workspace.go:154` before the fix ran `git diff --no-color` only.
+- Status: resolved in branch `fix/host-workspace-review` with `--no-ext-diff --no-textconv --no-color` (`internal/host/workspace.go:310`). Test: `TestWorkspaceReviewDiffIgnoresDiffSettings`.
+
+### 2026-11-20 · bug · A tracked `.solodawn-review.diff` stopped the next review round
+
+- Symptom: when the reviewed commit tracks `.solodawn-review.diff`, the untracked diff of the previous round made `checkout --detach` fail.
+- Cause: `internal/host/workspace.go:161` before the fix.
+- Status: resolved in branch `fix/host-workspace-review` with `git -C review/<num> checkout --force --detach <commit>` (`internal/host/workspace.go:330`); `planning/contracts/local.md` section 7 marks the name as reserved. Test: `TestWorkspaceReviewOfACommitThatTracksTheDiffName`.
+
+### 2026-11-20 · bug · Two spellings of one clone path took two locks
+
+- Symptom: a clone reached through a symbolic link and through its real path had two locks.
+- Cause: `cloneLock` keyed by `filepath.Clean` only; `internal/host/merge.go:36`, `:62` and `:114` lock `m.Repo` and `internal/host/workspace.go:29` locked `filepath.Join(projectDir, "repo")`.
+- Status: resolved in branch `fix/host-workspace-review`: `cloneLock`, the one helper both use, keys by the real path of the longest existing prefix (`internal/host/workspace.go:23-35`), so a clone has one key before and after it exists. A relative and an absolute spelling still differ; the node passes absolute paths. Test: `TestCloneLockFollowsSymbolicLinks`.
 
 ### 2026-11-20 · limitation · The own-address rule knows the interface addresses of the start only
 
