@@ -277,9 +277,19 @@ Code on native Windows), `perm.set` and `default_level` follow
 
 `caps`, per agent: `{"day":{"unit":"turns","max":200},"task":{"unit":
 "turns","max":60}}`. `unit` is `turns` always, and `tokens`, `usd` or
-`window_pct` where the CLI reports that figure. A day cap is released at
-the next local midnight or when the owner raises it; a task cap when the
-owner raises it. Reaching one is the host event `cap_reached`.
+`window_pct` where the CLI reports that figure; `max` may be a fraction. In
+`settings.set`, `caps` has a member for each agent whose caps change,
+`claude` or `codex`, holding that agent's caps whole: `day` and `task` are
+optional, a cap that is not there is no longer set, and `{}` sets none. An
+agent that is not there keeps its caps. `host.info` shows each agent's caps
+in its entry of `agents`. A day cap is released at the next local midnight
+or when the owner raises it; a task cap when the owner raises it. Reaching
+one is the host event `cap_reached`.
+
+`pair.browser`, `host.offline` and `host.online` carry `t`, `n`, `ts` and
+`to` only. In `takeover.start` and `takeover.end`, `member` is the member id
+of the AI in group `g`, as in the label `pty:<g>:<member>`
+(`contracts/datachannel.md` section 1); `task`, when there, is a task id.
 
 Except where a Result is named, effects are observed through `host.info`.
 
