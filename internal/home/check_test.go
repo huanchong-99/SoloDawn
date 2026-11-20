@@ -54,6 +54,7 @@ func TestACommandCarriesItsEnvelopeAndTheClock(t *testing.T) {
 		Env:           env,
 		Who:           home.Who{Device: laptop.ID(), User: browser.ID(), Human: ownerID, AI: aiID},
 		Now:           clock,
+		Disk:          disk(nil),
 	})
 	var p struct {
 		As string `json:"as"`

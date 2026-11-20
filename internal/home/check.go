@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/identity"
@@ -109,9 +110,9 @@ func (s *State) human(user string) string {
 
 // find returns the function of a command and fills in who sent it.
 func (t Table) find(s *State, c *Command) (Func, *Refusal) {
-	key := c.key()
+	key, named := c.key()
 	f := t[key]
-	if f == nil {
+	if !named || f == nil {
 		return nil, &Refusal{"bad_request", "the home has no such command"}
 	}
 	if s.Group.ID == "" && key != keyCreate {
@@ -150,14 +151,17 @@ func (s *State) member(w Who) bool {
 	return w.Human != ""
 }
 
-// key is where the table holds the function of a command.
-func (c Command) key() string {
+// key is where the table holds the function of a command. named is false
+// for a payload that names none. The "/" of a key is made here and nowhere
+// else: a t or a selector field that holds one names nothing, and a type
+// with a selector needs that field.
+func (c Command) key() (key string, named bool) {
 	name, selected := keySelector[c.Type]
 	if !selected {
-		return c.Type
+		return c.Type, !strings.Contains(c.Type, "/")
 	}
-	sub, _ := c.field(name)
-	return c.Type + "/" + sub
+	sub, ok := c.field(name)
+	return c.Type + "/" + sub, ok && sub != "" && !strings.Contains(sub, "/")
 }
 
 // field reads a text of the payload that may be left out: "" when it is. ok

@@ -137,7 +137,8 @@ func (w *homeWorld) send(connection identity.Key) error {
 	var res home.Result
 	err := w.db.Write(func(tx *store.Tx) error {
 		var err error
-		if res, err = w.table.Apply(w.state, tx, connection.ID(), w.command, w.now); err != nil {
+		// The command of these scenarios reads nothing from disk.
+		if res, err = w.table.Apply(w.state, nil, tx, connection.ID(), w.command, w.now); err != nil {
 			return err
 		}
 		for _, row := range res.Rows {

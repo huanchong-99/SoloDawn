@@ -160,10 +160,11 @@ never a `gone` marker, which has no `pos` (`contracts/rows.md`).
   These leave no receipt. Then the receipt answers a command that was
   answered before. Then, with the outcome kept as the receipt: the type
   and, for `group`, `member`, `task`, `post` and `act`, the `op`, `kind`
-  or `action` name a command, else `bad_request`; the node is home to the
-  group, else `not_found`, for every command but `group create`; `as` and
-  the signer (`contracts/commands.md`, "Who"); and what the command's own
-  table says.
+  or `action` name a command, else `bad_request`, which is also the answer
+  when that field is missing or when `t` or that field holds a `/`; the
+  node is home to the group, else `not_found`, for every command but
+  `group create`; `as` and the signer (`contracts/commands.md`, "Who");
+  and what the command's own table says.
 
 ## 6. Inbox (home to host)
 

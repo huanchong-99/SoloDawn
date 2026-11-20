@@ -140,7 +140,15 @@ func (d disk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d disk) Pending() []proto.MsgRow                   { return nil }
 func (d disk) Queued() []store.Item                      { return nil }
 
-func note(id string, seq int64, text, by string) proto.NoteRow {
+// setting is a fake of home.Write: a row of the setting table.
+type setting struct{ key, value string }
+
+func (w setting) Put(tx *store.Tx) error {
+	_, err := tx.Exec("INSERT INTO setting(key, value) VALUES(?, ?)", w.key, w.value)
+	return err
+}
+
+func noteRow(id string, seq int64, text, by string) proto.NoteRow {
 	return proto.NoteRow{RowHeader: proto.RowHeader{Type: "note", ID: id, Seq: seq}, Pos: seq, Group: groupID, Text: text, By: by, Timestamp: clock}
 }
 
@@ -158,15 +166,17 @@ func writeNote(calls *int) home.Func {
 		if p.Text == "" {
 			return home.Result{}, &home.Refusal{Code: "conflict", Msg: "a note has a text"}
 		}
-		row := note(string(c.Nonce), 0, p.Text, c.Who.Member())
+		row := noteRow(string(c.Nonce), 0, p.Text, c.Who.Member())
 		row.Timestamp = c.Now
 		return home.Result{Rows: []home.Row{home.RowOf(row)}, Answer: store.Outcome{Num: 7}}, nil
 	}
 }
 
+// apply sends a command on the connection of its signer, in a transaction
+// with nothing on disk.
 func apply(t *testing.T, table home.Table, s *home.State, r home.Receipts, by identity.Key, env proto.Envelope) home.Result {
 	t.Helper()
-	res, err := table.Apply(s, r, by.ID(), env, now)
+	res, err := table.Apply(s, disk(nil), r, by.ID(), env, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +192,7 @@ func TestApplyAnswersARepeatedCommandFromItsReceipt(t *testing.T) {
 	first := apply(t, table, s, held, browser, env)
 	equal(t, first.Answer, store.Outcome{OK: true, Num: 7})
 	equal(t, len(first.Rows), 1)
-	equal(t, first.Rows[0].Value(), any(note(id(1), 11, "remember this", ownerID)))
+	equal(t, first.Rows[0].Value(), any(noteRow(id(1), 11, "remember this", ownerID)))
 	equal(t, held[[2]string{browser.ID(), id(1)}], receipt{clock, first.Answer})
 	s.Commit(first)
 	equal(t, s.Seq, int64(11))
@@ -240,6 +250,8 @@ func TestApplyKeepsARefusalAsTheReceipt(t *testing.T) {
 		"a kind the table does not have":        {browser, "post", `,"kind":"poem"`, "bad_request", 0},
 		"a kind that is no text":                {browser, "post", `,"kind":5`, "bad_request", 0},
 		"a post without a kind":                 {browser, "post", ``, "bad_request", 0},
+		"a key in place of a type":              {browser, "post/text", `,"kind":"brief"`, "bad_request", 0},
+		"a kind that holds a key":               {browser, "post", `,"kind":"text/more"`, "bad_request", 0},
 		"an as that is no text":                 {laptop, "note", `,"text":"x","as":5`, "bad_request", 0},
 		"an as that is null":                    {laptop, "note", `,"text":"x","as":null`, "bad_request", 0},
 		"an empty as":                           {laptop, "note", `,"text":"x","as":""`, "bad_request", 0},
@@ -251,7 +263,9 @@ func TestApplyKeepsARefusalAsTheReceipt(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, held, calls := group(t), receipts{}, 0
-			table := home.Table{"note": writeNote(&calls), "post/text": writeNote(&calls)}
+			// The keys "post/" and "post/text/more" are in the table to show
+			// that no payload reaches them.
+			table := home.Table{"note": writeNote(&calls), "post/text": writeNote(&calls), "post/": writeNote(&calls), "post/text/more": writeNote(&calls)}
 			env := signed(c.by, c.t, 1, c.more)
 
 			first := apply(t, table, s, held, c.by, env)
@@ -292,28 +306,33 @@ func TestApplyFindsTheFunctionByItsKey(t *testing.T) {
 
 func TestApplyNumbersTheRowsOfAResult(t *testing.T) {
 	s := group(t)
-	s.Disk = disk{id(20): {RowHeader: proto.RowHeader{Type: "msg", ID: id(20), Seq: 5}, Pos: 3, Kind: "decision"}}
+	onDisk := disk{id(20): {RowHeader: proto.RowHeader{Type: "msg", ID: id(20), Seq: 5}, Pos: 3, Kind: "decision"}}
 	table := home.Table{"act/choose": func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-		card, _ := s.Disk.Msg(id(20))
+		card, _ := c.Disk.Msg(id(20))
 		return home.Result{
 			Rows: []home.Row{
 				home.RowOf(proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Kind: "system"}),
 				home.RowOf(card),
 				home.RowOf(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(21)}, Num: 4}),
 			},
-			Items:  []home.Item{{AI: aiID, Why: "decided", Msg: card.ID, Cause: &c.Env}},
-			Retire: []int64{17},
+			Items:         []home.Item{{AI: aiID, Why: "decided", Msg: card.ID, Cause: &c.Env, NotBefore: c.Now + 60000}},
+			Retire:        []int64{17},
+			Writes:        []home.Write{setting{"hm0", "1"}},
+			GroupsChanged: true,
 		}, nil
 	}}
 	env := signed(browser, "act", 1, `,"action":"choose"`)
 
-	res := apply(t, table, s, receipts{}, browser, env)
+	res, err := table.Apply(s, onDisk, receipts{}, browser.ID(), env, now)
+	equal(t, err, nil)
 	created, decided := res.Rows[0].Value().(proto.MsgRow), res.Rows[1].Value().(proto.MsgRow)
 	equal(t, []int64{created.Seq, created.Pos}, []int64{11, 11})
 	equal(t, []int64{decided.Seq, decided.Pos}, []int64{12, 3})
 	equal(t, res.Rows[2].Value().(proto.TaskRow).Seq, int64(13))
-	equal(t, res.Items, []home.Item{{AI: aiID, Why: "decided", Msg: id(20), Cause: &env}})
+	equal(t, res.Items, []home.Item{{AI: aiID, Why: "decided", Msg: id(20), Cause: &env, NotBefore: clock + 60000}})
 	equal(t, res.Retire, []int64{17})
+	equal(t, res.Writes, []home.Write{setting{"hm0", "1"}})
+	equal(t, res.GroupsChanged, true)
 	equal(t, s.Seq, int64(10))
 
 	s.Commit(res)
@@ -339,7 +358,7 @@ func TestApplyRefusesARowAboveItsLimit(t *testing.T) {
 				row := c.row
 				row.Text = text
 				table := home.Table{"post/text": func(*home.State, home.Command) (home.Result, *home.Refusal) {
-					return home.Result{Rows: []home.Row{home.RowOf(note(id(30), 0, "", ownerID)), home.RowOf(row)}}, nil
+					return home.Result{Rows: []home.Row{home.RowOf(noteRow(id(30), 0, "", ownerID)), home.RowOf(row)}}, nil
 				}}
 				return apply(t, table, group(t), receipts{}, browser, signed(browser, "post", 1, `,"kind":"text"`))
 			}
@@ -368,12 +387,12 @@ func TestApplyFailsWhenItsReceiptCannotBeReadOrWritten(t *testing.T) {
 	table := home.Table{"note": writeNote(&calls)}
 	env := signed(browser, "note", 1, `,"text":"x"`)
 
-	res, err := table.Apply(group(t), broken{read: failure}, browser.ID(), env, now)
+	res, err := table.Apply(group(t), disk(nil), broken{read: failure}, browser.ID(), env, now)
 	equal(t, err, failure)
 	equal(t, res, home.Result{})
 	equal(t, calls, 0)
 
-	_, err = table.Apply(group(t), broken{read: sql.ErrNoRows, write: failure}, browser.ID(), env, now)
+	_, err = table.Apply(group(t), disk(nil), broken{read: sql.ErrNoRows, write: failure}, browser.ID(), env, now)
 	equal(t, err, failure)
 }
 
@@ -396,6 +415,10 @@ func TestApplyCreatesAGroup(t *testing.T) {
 	equal(t, res.Answer, store.Outcome{Code: "not_found"})
 	res = apply(t, table, s, held, guest, signed(guest, "group", 2, `,"op":"create","kind":"project"`))
 	equal(t, res.Answer, store.Outcome{Code: "forbidden"})
+	// The key of group create is no type: only t and op together reach it.
+	res = apply(t, table, s, held, browser, signed(browser, "group/create", 6, ``))
+	equal(t, res.Answer, store.Outcome{Code: "bad_request"})
+	equal(t, founder, home.Who{})
 	equal(t, calls, 0)
 
 	res = apply(t, table, s, held, browser, signed(browser, "group", 3, `,"op":"create","kind":"project"`))
@@ -424,13 +447,23 @@ func TestApplyInATransactionOfTheStore(t *testing.T) {
 	defer db.Close()
 	s, calls := group(t), 0
 	s.Seq = 0
-	table := home.Table{"note": writeNote(&calls)}
+	note := writeNote(&calls)
+	table := home.Table{"note": func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
+		res, refusal := note(s, c)
+		res.Writes = []home.Write{setting{"hm0", "kept"}}
+		return res, refusal
+	}}
 	env := signed(browser, "note", 1, `,"text":"remember this"`)
 	send := func() (res home.Result) {
 		err := db.Write(func(tx *store.Tx) error {
 			var err error
-			if res, err = table.Apply(s, tx, browser.ID(), env, now); err != nil {
+			if res, err = table.Apply(s, disk(nil), tx, browser.ID(), env, now); err != nil {
 				return err
+			}
+			for _, w := range res.Writes {
+				if err := w.Put(tx); err != nil {
+					return err
+				}
 			}
 			for _, r := range res.Rows {
 				seq, err := tx.NextSeq(s.ID)
@@ -458,13 +491,33 @@ func TestApplyInATransactionOfTheStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer view.Close()
 	rows, err := view.AfterSeqUpTo(0, view.Seq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, _ := json.Marshal(note(id(1), 1, "remember this", ownerID))
+	want, _ := json.Marshal(noteRow(id(1), 1, "remember this", ownerID))
 	equal(t, rows, []json.RawMessage{want})
+	equal(t, view.Close(), nil)
+
+	// The write that is no row went into the same transaction, once.
+	var kept []string
+	err = db.Write(func(tx *store.Tx) error {
+		found, err := tx.Query("SELECT value FROM setting WHERE key='hm0'")
+		if err != nil {
+			return err
+		}
+		defer found.Close()
+		for found.Next() {
+			var value string
+			if err := found.Scan(&value); err != nil {
+				return err
+			}
+			kept = append(kept, value)
+		}
+		return found.Err()
+	})
+	equal(t, err, nil)
+	equal(t, kept, []string{"kept"})
 }
 
 func TestCommitHoldsTheStateRows(t *testing.T) {
@@ -509,8 +562,63 @@ func TestAddGivesAKeyOnce(t *testing.T) {
 	table.Add("note", writeNote(&calls))
 	apply(t, table, group(t), receipts{}, browser, signed(browser, "note", 1, `,"text":"x"`))
 	equal(t, calls, 1)
-	defer func() { equal(t, recover(), any("home: two functions for the command note")) }()
+	defer func() { equal(t, recover(), any("home: two functions under note")) }()
 	table.Add("note", writeNote(&calls))
+}
+
+// A timer and a handler return a result as a command does. Whoever runs one
+// seals its result, which numbers and measures the rows as Apply does.
+func TestSealFinishesTheResultOfATimerOrAnEvent(t *testing.T) {
+	onDisk := disk{id(20): {RowHeader: proto.RowHeader{Type: "msg", ID: id(20), Seq: 5}, Pos: 3, Kind: "decision", State: &proto.CardState{Status: "pending"}}}
+	timers, events := home.Rules[home.Timer]{}, home.Rules[home.Handler]{}
+	timers.Add("expire", func(s *home.State, d home.Disk, now int64) home.Result {
+		card, _ := d.Msg(id(20))
+		card.State = &proto.CardState{Status: "expired", At: &now}
+		return home.Result{Rows: []home.Row{home.RowOf(card)}}
+	})
+	events.Add("closed", func(s *home.State, _ home.Disk, now int64, event any) home.Result {
+		member := s.AIs[aiID]
+		if member.Host != event.(string) {
+			return home.Result{}
+		}
+		member.State, member.Since = "offline", now
+		system := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(31)}, Kind: "system", Timestamp: now}
+		return home.Result{Rows: []home.Row{home.RowOf(member), home.RowOf(system)}}
+	})
+
+	s := group(t)
+	res := s.Seal(timers["expire"](s, onDisk, clock))
+	equal(t, res.Answer, store.Outcome{OK: true})
+	expired := res.Rows[0].Value().(proto.MsgRow)
+	equal(t, []int64{expired.Seq, expired.Pos, *expired.State.At}, []int64{11, 3, clock})
+	s.Commit(res)
+
+	res = s.Seal(events["closed"](s, onDisk, clock, node.ID()))
+	equal(t, res, home.Result{Answer: store.Outcome{OK: true}})
+	res = s.Seal(events["closed"](s, onDisk, clock, laptop.ID()))
+	equal(t, res.Rows[0].Value().(proto.AIMemberRow).Seq, int64(12))
+	created := res.Rows[1].Value().(proto.MsgRow)
+	equal(t, []int64{created.Seq, created.Pos}, []int64{13, 13})
+	s.Commit(res)
+	equal(t, []any{s.AIs[aiID].State, s.AIs[aiID].Since, s.Seq}, []any{"offline", int64(clock), int64(13)})
+
+	// A result with a row above its limit is refused whole.
+	big := home.RowOf(noteRow(id(32), 0, strings.Repeat("x", 16384), ownerID))
+	res = s.Seal(home.Result{Rows: []home.Row{home.RowOf(noteRow(id(33), 0, "", ownerID)), big}, Items: []home.Item{{AI: aiID, Why: "notice"}}})
+	equal(t, res.Answer, store.Outcome{Code: "bad_request"})
+	equal(t, []int{len(res.Rows), len(res.Items)}, []int{0, 0})
+
+	defer func() { equal(t, recover(), any("home: two functions under closed")) }()
+	events.Add("closed", nil)
+}
+
+// The tables of a node are there for the files of the package to add to, and
+// a new state has the place for the count of the wake-up cap.
+func TestTheTablesOfANodeAndTheWakesOfAState(t *testing.T) {
+	equal(t, []bool{home.Commands != nil, home.Timers != nil, home.Events != nil}, []bool{true, true, true})
+	s := home.NewState(groupID, node.ID(), browser.ID())
+	s.Wakes[aiID] = append(s.Wakes[aiID], clock)
+	equal(t, s.Wakes, map[string][]int64{aiID: {clock}})
 }
 
 // The answers are the frames of the wire examples.

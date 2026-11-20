@@ -30,9 +30,9 @@ type Client interface {
 }
 
 // State is one group as its rules read it: the state rows, which a home
-// holds in memory (planning/contracts/storage.md section 1), and Disk for
-// the rest. The function of a command reads a State and changes nothing in
-// it; Commit takes the rows of a result.
+// holds in memory (planning/contracts/storage.md section 1). What is on
+// disk only is read through a Disk. The function of a command reads a State
+// and changes nothing in it; Commit takes the rows of a result.
 type State struct {
 	ID    string                   // the group, also before it exists
 	Home  string                   // this node's device id
@@ -46,20 +46,28 @@ type State struct {
 	Seq    int64                           // the last sequence number given out
 	Num    int                             // the last task number given out
 
-	Disk Disk
+	// Wakes holds, by AI member id, when each inbox item of the last hour was
+	// sent to that AI, in Unix milliseconds: the count of the wake-up cap,
+	// which is kept in memory and starts again with the home
+	// (planning/contracts/commands.md section 1.3). Whoever sends the items
+	// keeps it.
+	Wakes map[string][]int64
 }
 
 // NewState returns the state of a group that does not exist yet, on the home
-// with that device id and owner. Whoever makes it fills in Logs and Disk.
+// with that device id and owner. Whoever makes it fills in Logs.
 func NewState(group, home, owner string) *State {
 	return &State{ID: group, Home: home, Owner: owner, Logs: map[string]*identity.Log{},
-		People: map[string]proto.HumanMemberRow{}, AIs: map[string]proto.AIMemberRow{}, Tasks: map[string]proto.TaskRow{}}
+		People: map[string]proto.HumanMemberRow{}, AIs: map[string]proto.AIMemberRow{}, Tasks: map[string]proto.TaskRow{},
+		Wakes: map[string][]int64{}}
 }
 
 // Disk is what the rules read of a group beyond its state rows: messages,
-// notes and queued inbox items, which a home keeps on disk only. No method
+// notes and queued inbox items, which a home keeps on disk only. A Disk reads
+// inside one transaction of the store and is given to one call: Apply for a
+// command, or the timer or event that the transaction is for. No method
 // returns an error: whoever implements Disk makes a read that failed fail
-// the command.
+// that call.
 type Disk interface {
 	// Msg returns a message. ok is false when the id names none, or one that is gone.
 	Msg(id string) (msg proto.MsgRow, ok bool)
@@ -167,15 +175,33 @@ type Item struct {
 	Code   string          // notice
 	Detail string          // notice, where its case has one
 	Cause  *proto.Envelope // the signed act that led to the item
+
+	// NotBefore holds the item back until that time, in Unix milliseconds:
+	// the wake-up cap. 0 sends it at once.
+	NotBefore int64
 }
 
-// Result is what a command does, and its answer.
+// Write is a change that is no row, such as the push subscription of a
+// browser. The function that returns it stays pure: the caller of Apply
+// calls Put in the transaction of the command, after the rows.
+type Write interface {
+	Put(tx *store.Tx) error
+}
+
+// Result is what a command, a timer or an event does, and the answer to a
+// command.
 type Result struct {
 	Rows   []Row         // the changed rows, in the order of their sequence numbers
 	Items  []Item        // the inbox items to queue, after the rows
 	Retire []int64       // the queued inbox items that the change made pointless, by id
+	Writes []Write       // what changes besides rows and items
 	Answer store.Outcome // a function sets the result fields of its command and nothing else
 	Msg    string        // of a refusal: the sentence for logs
+
+	// GroupsChanged says that the list of groups a peer may read has changed:
+	// once the result is committed, every connected peer is pushed its
+	// groups again (planning/contracts/datachannel.md section 3).
+	GroupsChanged bool
 }
 
 // Frame returns the answer to the request re that carried the command
@@ -211,6 +237,7 @@ type Command struct {
 	Env                 proto.Envelope // as it was signed: the env of a row it writes, the act a card keeps
 	Who                 Who
 	Now                 int64 // the home's clock, in Unix milliseconds
+	Disk                Disk  // the reads of this command's transaction
 }
 
 // Decode reads the payload into v, the wire type of the command.
@@ -223,39 +250,64 @@ func (c Command) Decode(v any) *Refusal {
 
 // Func is the function of one command: from the state of its group and the
 // command to what it does, or to a refusal. It is pure: it reads s and c,
-// calls nothing but s.Disk, and changes neither.
+// calls nothing but c.Disk, and changes neither.
 type Func func(s *State, c Command) (Result, *Refusal)
+
+// A Timer is a rule that the clock sets off, and a Handler one that an event
+// outside the commands does: a device-log entry that was accepted, a host
+// connection that closed. Both are pure as a Func is, and return what
+// changes. event is the value that the unit of that kind of event defines.
+type (
+	Timer   func(s *State, d Disk, now int64) Result
+	Handler func(s *State, d Disk, now int64, event any) Result
+)
 
 // Table holds the function of every command under its key: the t of the
 // payload, followed for group, member and task by "/" and its op, for post by
 // its kind and for act by its action. "post/text", "task/start", "note".
 type Table map[string]Func
 
-// Commands is the table of a node. Each command file adds its functions from
-// an init of its own.
-var Commands = Table{}
+// Rules holds the functions that no command selects, each under a name its
+// file chooses.
+type Rules[F any] map[string]F
+
+// The tables of a node. Each file adds its functions from an init of its
+// own. A command is found by its key. Whoever runs the home runs every timer
+// for every group as its clock goes, and the handler of an event by the name
+// of what happened.
+var (
+	Commands = Table{}
+	Timers   = Rules[Timer]{}
+	Events   = Rules[Handler]{}
+)
 
 // Add puts a function under its key. A key is given once.
-func (t Table) Add(key string, f Func) {
-	if t[key] != nil {
-		panic("home: two functions for the command " + key)
+func (t Table) Add(key string, f Func) { addOnce(t, key, f) }
+
+// Add puts a function under its name. A name is given once.
+func (r Rules[F]) Add(name string, f F) { addOnce(r, name, f) }
+
+func addOnce[F any](table map[string]F, name string, f F) {
+	if _, taken := table[name]; taken {
+		panic("home: two functions under " + name)
 	}
-	t[key] = f
+	table[name] = f
 }
 
 // Apply answers the cmd that arrived, on the connection authenticated for
 // device, at the home's time now. It runs inside the transaction of the
-// command: the caller writes the rows, the items and the retirements of the
-// result in that transaction, commits it, and then gives the result to
-// s.Commit. An error is a receipt that could not be read or written: the
-// caller drops the transaction and answers internal.
+// command, which disk reads and which holds the receipts: the caller writes
+// the rows, the items, the retirements and the other writes of the result in
+// that transaction, commits it, and then gives the result to s.Commit. An
+// error is a receipt that could not be read or written: the caller drops the
+// transaction and answers internal.
 //
 // The checks come in this order, and the first that fails is the answer: the
 // connection and the envelope (State.open), which leave no receipt; then the
 // receipt, which answers a repeated command as the first time; then the
 // table, the group and the signer (Table.find) and the function itself. What
 // the last two answer, a refusal included, is the receipt.
-func (t Table) Apply(s *State, receipts Receipts, device string, env proto.Envelope, now time.Time) (Result, error) {
+func (t Table) Apply(s *State, disk Disk, receipts Receipts, device string, env proto.Envelope, now time.Time) (Result, error) {
 	hdr, refusal := s.open(device, env, now)
 	if refusal != nil {
 		return refused(refusal), nil
@@ -267,12 +319,11 @@ func (t Table) Apply(s *State, receipts Receipts, device string, env proto.Envel
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Result{}, err
 	}
-	res := t.run(s, Command{PayloadHeader: hdr, Env: env, Now: now.UnixMilli()})
+	res := t.run(s, Command{PayloadHeader: hdr, Env: env, Now: now.UnixMilli(), Disk: disk})
 	return res, receipts.PutReceipt(env.Key, string(hdr.Nonce), hdr.Timestamp, res.Answer)
 }
 
-// run answers a command that has no receipt. It numbers the rows the command
-// changes, and refuses the command when one of them is above its limit.
+// run answers a command that has no receipt.
 func (t Table) run(s *State, c Command) Result {
 	f, refusal := t.find(s, &c)
 	if refusal != nil {
@@ -282,6 +333,15 @@ func (t Table) run(s *State, c Command) Result {
 	if refusal != nil {
 		return refused(refusal)
 	}
+	return s.Seal(res)
+}
+
+// Seal finishes a result before it is written: it numbers the rows, from
+// Seq + 1 in their order, and refuses the result whole when a row is above
+// its limit. Apply seals the result of a command. The result of a timer or
+// of a handler is sealed by whoever ran it, and is from there on written,
+// committed and given to Commit as a command's is.
+func (s *State) Seal(res Result) Result {
 	for i, r := range res.Rows {
 		r.number(s.Seq + int64(i) + 1)
 		if refusal := rowFits(r.Value()); refusal != nil {

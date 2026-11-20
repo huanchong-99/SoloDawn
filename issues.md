@@ -232,22 +232,28 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-20 · bug · The store writes a row with HTML escaping, larger than the home measured it
 
-- Symptom: a row is at most 16 KiB as "the UTF-8 bytes of its JSON as the home encodes it, without HTML escaping" (`planning/contracts/conventions.md` section 4), and `Table.run` measures it so. The store then writes the row with `<`, `>` and `&` as six bytes each. A row of 16 KiB that is mostly such characters, source code for one, is stored at up to six times its measured size, which is above the 60 KiB of a `ctl` message: a `rows` or `fetched` frame built from the stored text cannot be sent.
+- Symptom: a row is at most 16 KiB as "the UTF-8 bytes of its JSON as the home encodes it, without HTML escaping" (`planning/contracts/conventions.md` section 4), and `State.Seal` measures it so. The store then writes the row with `<`, `>` and `&` as six bytes each. A row of 16 KiB that is mostly such characters, source code for one, is stored at up to six times its measured size, which is above the 60 KiB of a `ctl` message: a `rows` or `fetched` frame built from the stored text cannot be sent.
 - Cause: `store.Put` encodes with `json.Marshal`, which escapes for HTML (`internal/store/put.go:17`). `internal/peer` encodes frames without it (`internal/peer/path.go:28-34`), and copies a stored row into a frame as it is.
 - Status: open. Found while building the size check of HM-0; `internal/store` is not HM-0's. No row is written by a node yet: no unit has built a command or the run loop.
 
 ### 2026-11-20 · limitation · A device in the logs of two people is read as the device of the lower user id
 
 - Symptom: nothing stops a person from adding to their own log a device that another person's log already holds. A home then reads that device's commands as coming from whichever of the two people has the lower user id (`planning/contracts/commands.md`, "Who"). A member could so turn the commands of another member's device into their own, which that device's person did not ask for.
-- Cause: `(*State).user` walks the logs in the order of their user ids and returns the first that holds the device as valid (`internal/home/check.go:91`). `planning/contracts/envelope.md` section 4 says nothing about one device in two logs.
+- Cause: `(*State).user` walks the logs in the order of their user ids and returns the first that holds the device as valid (`internal/home/check.go:92`). `planning/contracts/envelope.md` section 4 says nothing about one device in two logs.
 - Status: open, without effect in step 1, where a group has one person. Step 2, which adds people, has to settle it.
+
+### 2026-11-20 · limitation · A member of another group on the same home is answered `unknown_device`, not `forbidden`
+
+- Symptom: check 2 of `planning/contracts/envelope.md` section 3 knows a device of "a member of a group it homes". A command for group A from a device whose person is a member only of group B, homed on the same node, is answered `unknown_device`, where `forbidden` is the code for a known signer that may not do this.
+- Cause: `(*State).known` asks the logs of one group's `State` (`internal/home/check.go:88`), which hold the node owner's log and those of that group's people.
+- Status: open, without effect in step 1, where every group on a node has the same one person. For step 2, by the coordinator's decision of 2026-11-20 after the review of #160.
 
 ## Resolved
 
 ### 2026-11-20 · deviation · No unit measured a row against its size limit
 
 - Symptom: `planning/contracts/conventions.md` section 4 has the home answer `bad_request`, naming the limit and the size, to a command that would write a row above 16 KiB, or a card above 12 KiB when it is created. No row of `planning/steps/parallel-plan-units.md` names the rule, and the first version of the seam handed the rows of a command's function to its caller unmeasured.
-- Status: resolved in #160 by the coordinator's decision of 2026-11-20: `Table.run` measures every row of a result after numbering it and refuses the command for one above its limit (`internal/home/home.go:276`, `rowFits` at `:135`).
+- Status: resolved in #160 by the coordinator's decision of 2026-11-20: `Table.Apply` measures every row of a result after numbering it and refuses the command for one above its limit (`State.Seal`, `internal/home/home.go:344`; `rowFits` at `:143`).
 
 ### 2026-11-20 · bug · The signalling client could set off the rendezvous's own limits
 

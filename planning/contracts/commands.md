@@ -37,12 +37,13 @@ no second effect. A command whose `ts` is more than 24 hours from the
 receiver's clock is refused with `stale`; receipts are kept for that long
 (`contracts/storage.md`).
 
-A command is accepted, in this sense, once it arrived on the connection of
-its signer and passed the envelope checks (`contracts/datachannel.md`
-section 5). Whatever the receiver answers after that, a refusal included,
-is the outcome its receipt keeps; a command refused before that leaves no
-receipt. The answer to a repeated refusal has the same code. Its `msg` is
-not kept, and need not be the same.
+A command is accepted, in this sense, once it passed the checks that
+`contracts/datachannel.md` section 5 puts before the receipt: it arrived on
+the connection of its signer, passed the envelope checks and, as a home
+command, has its `g`. Whatever the receiver answers after that, a refusal
+included, is the outcome its receipt keeps; a command that one of those
+checks refused leaves no receipt. The answer to a repeated refusal has the
+same code. Its `msg` is not kept, and need not be the same.
 
 Two results name something that lives only in memory: the link of
 `pair.browser` and the terminal of `takeover.start`. Their receipts record
