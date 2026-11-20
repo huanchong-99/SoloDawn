@@ -34,9 +34,13 @@ Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-l
   are `groups`, `nodes` and `settings`; anything else opens `groups`.
 - **Build output.** `vite build` empties `internal/node/webdist/` and writes its `.gitignore`
   back, so the directory stays out of Git and invisible to the gates.
-- **Browser support (C-9).** `boot` asks WebCrypto for a non-extractable Ed25519 signing key. When
-  that fails, or the page has no WebCrypto, the upgrade notice is mounted in place of the
-  application.
+- **Browser support (C-9).** Chrome and Edge 137, Firefox 136, Safari 17.5 (macOS and iOS) and
+  later; the build targets exactly these versions, so the CSS ships as written
+  ([decision](../docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md)). `boot`
+  asks WebCrypto for a non-extractable Ed25519 key pair, signs a message with a structured clone of
+  the private key (how IndexedDB stores it) and verifies it with the public key, and asks CSS for
+  `light-dark()`. When any step fails, or the page has no WebCrypto, the upgrade notice is mounted
+  in place of the application. `boot` does not open IndexedDB.
 - **Preferences.** `prefs.theme` is `auto`, `light` or `dark`; `prefs.lang` is `zh-CN` or `en`.
   A first visit follows the system theme and the browser language (any `zh` locale opens Chinese).
   Every change is written to `<html data-theme lang>` and to `localStorage` (`sd-theme`,
@@ -56,8 +60,8 @@ Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-l
 
 | Path                        | Role                                                         |
 | --------------------------- | ------------------------------------------------------------ |
-| `index.html`, `src/main.ts` | entry: styles, then `boot(document.body, crypto)`            |
-| `src/lib/boot.ts`           | Ed25519 detection; mounts `App` or `Upgrade`                 |
+| `index.html`, `src/main.ts` | entry: styles, then `boot(document.body, crypto, CSS)`       |
+| `src/lib/boot.ts`           | browser check; mounts `App` or `Upgrade`                     |
 | `src/lib/prefs.svelte.ts`   | theme and language state, their persistence, `t`             |
 | `src/lib/route.svelte.ts`   | current page from the address fragment                       |
 | `src/App.svelte`            | shell: skip link, navigation, top bar, the current route     |
@@ -78,6 +82,8 @@ are hidden; both choices are on the settings page at every width.
 - The upgrade notice uses the same tokens as the application. A browser without `light-dark()` or
   CSS nesting shows it with default colours; a browser too old to run the bundle shows nothing
   (`issues.md`).
+- Safari deletes the site's storage after seven days of use without a visit, unless the client was
+  added to the home screen (`issues.md`).
 - The manifest has an SVG icon only and there is no service worker yet.
 
 ## Verification and sources

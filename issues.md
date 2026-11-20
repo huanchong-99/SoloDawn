@@ -14,9 +14,31 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-20 · limitation · Older browsers get an unstyled notice or a blank page
 
-- Symptom: a browser without Ed25519 in WebCrypto sees the upgrade notice (C-9). If it also lacks `light-dark()` or CSS nesting, the notice shows as plain text with default colours; a browser too old to run the bundle shows a blank page.
-- Cause: the notice is mounted by the same bundle (`web/src/lib/boot.ts:17-19`) and styled by the same tokens (`web/src/styles/tokens.css`, every colour a `light-dark()` pair) and nested rules (`web/src/styles/base.css`) as the application.
-- Status: open, accepted by the coordinator on 2026-11-20 as a known limitation.
+- Symptom: a browser below the supported versions (Chrome and Edge 137, Firefox 136, Safari 17.5; [decision](docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md)) sees the upgrade notice. Chrome and Edge 123 to 136 and Firefox 120 to 135 show it styled. A browser without `light-dark()` (Chrome below 123, Firefox below 120, Safari below 17.5) shows it with default colours, and one without nested rules that start with a type selector (Chrome below 120, Firefox below 117, Safari below 17.2) also loses the layout those rules give; a browser that cannot run the bundle shows a blank page.
+- Cause: the notice is mounted by the same bundle (`web/src/lib/boot.ts:32-34`) and styled by the same tokens (`web/src/styles/tokens.css`, every colour a `light-dark()` pair) and nested rules (`web/src/styles/base.css`) as the application, and the build targets the supported versions (`web/vite.config.ts:21-25`), so the CSS ships as written.
+- History: until the baseline was set, `web/vite.config.ts` had no `build.target`, so Vite 8.3.8's default (`chrome111`, `edge111`, `firefox114`, `safari16.4`, `ios16.4`) applied, and Lightning CSS, which minifies the CSS for the build target, rewrote every `light-dark()` pair into two custom properties and flattened the nesting. The built notice was then styled down to those versions; only the development server served the CSS as written, which is what the first version of this entry described.
+- Status: open, accepted by the coordinator on 2026-11-20 as a known limitation; restated the same day when the coordinator chose to ship the CSS as written.
+
+### 2026-11-20 · limitation · Safari deletes the device key after seven days without a visit
+
+- Symptom: in Safari on macOS and iOS, when the person does not interact with the SoloDawn page during seven days of Safari use, Safari deletes the origin's IndexedDB, and with it the device key once the identity module keeps it there (F-01b). The browser then starts as a new device and has to be paired again. A web app added to the home screen keeps its own count and is not affected; Lockdown Mode disables IndexedDB altogether.
+- Cause: WebKit's tracking prevention deletes all script-writable storage of a site after seven days of browser use without interaction with it ([WebKit blog](https://webkit.org/blog/10218/full-third-party-cookie-blocking-and-more/)). Not a SoloDawn defect; [decision](docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md), Consequences.
+- Mitigation: F-13 shows the iOS add-to-home-screen hint; F-01b can request `navigator.storage.persist()`, which Safari grants by heuristics such as being opened as a home screen web app ([WebKit blog](https://webkit.org/blog/14403/updates-to-storage-policy/)).
+- Status: open, accepted as a limitation of the platform.
+
+### 2026-11-20 · limitation · Browsers accept small-order Ed25519 public keys
+
+- Symptom: `crypto.subtle.verify` returns true for the signature R = identity, S = 0 under the identity point as public key, over any message, in Chromium 159, Firefox 159 and WebKit 27.2 (spike S-7, 2026-11-20). WebCrypto requires false for small-order keys; web-platform-tests `eddsa_small_order_points` passes 8, 9 and 9 of 14 in Chrome 158, Firefox 160 and Safari 27.2 (wpt.fyi, 2026-11-19).
+- Cause: the engines' Ed25519 libraries do not make the small-order checks ([Firefox bug 1929022](https://bugzilla.mozilla.org/show_bug.cgi?id=1929022), [WebKit bug 280673](https://bugs.webkit.org/show_bug.cgi?id=280673), both open).
+- Effect: a device id that is a small-order point would verify forged signatures, if a device log or a pairing ever accepted one. The envelope contract does not reject such ids today.
+- Status: open. Rejecting them needs a contract change that the Go node and the browser apply alike; referred to the planning lead on 2026-11-20.
+
+### 2026-11-20 · limitation · Safari's verify() fails every signature over an empty message
+
+- Symptom: WebKit 27.2 (Playwright build, macOS) returns false from `crypto.subtle.verify` for a valid Ed25519 signature over an empty message, RFC 8032 test 1 included; its own signature of the empty message is valid (OpenSSL verifies it). Chromium 159 and Firefox 159 verify both.
+- Cause: in WebKit's `Source/WebCore/PAL/pal/crypto/CryptoKitShim.swift`, `isValidSignature` returns false when the data is empty. No bug report found; the first affected Safari version is unknown.
+- Effect: none on the protocol, whose signed bytes always start with `solodawn/1\n`; `boot` signs a non-empty message (`web/src/lib/boot.ts:8-9`). Browser tests must not verify an empty message, such as RFC 8032 test 1, in WebKit.
+- Status: open, external.
 
 ### 2026-11-20 · limitation · Web client does not start when the browser blocks site storage
 
