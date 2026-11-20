@@ -36,8 +36,8 @@ session has no terminal and there is nothing to watch.
    the AI (who may ask and the card's states: `contracts/step-2/confirm.md`).
 2. O confirms on any of O's devices: the signed `act confirm`.
 3. H queues an inbox item for N with `why: "watch"`. Like `merge`, it is for
-   the host itself and not for a session, so it is never held: not during
-   the takeover, not while the group is paused.
+   the host itself and not for a session. It is never held: not during the
+   takeover, not while the group is paused.
 
 ```json
 {"env":{"p":"{\"t\":\"item\",\"n\":\"…\",\"ts\":1763600000000,\"g\":\"Qm1…\",\"to\":\"<host device>\",\"item\":4420,\"ai\":\"<member id>\",\"why\":\"watch\",\"msg\":\"<card id>\"}",
@@ -52,7 +52,7 @@ checks the item as every item (`contracts/datachannel.md` section 6,
 
 | # | Check |
 | --- | --- |
-| 1 | `cause` passes checks 1, 3 and 5 of `contracts/envelope.md` section 3 as a command, its signer is a currently valid device of N's owner, and it is an `act` for the item's group with `action: confirm` whose `msg` is the item's `msg` |
+| 1 | `cause` passes checks 1, 3 and 5 of `contracts/envelope.md` section 3 as a command, its signer is a currently valid device of N's owner, and it is an `act` for the item's group with `action: confirm` whose `msg` is the item's `msg` and whose `arg` is the digest of `contracts/step-2/confirm.md` section 6 for the item's `ai` and `msg.env` |
 | 2 | `msg.env` passes checks 1 and 3, and is a `post` of kind `confirm` whose `n` is that id, whose `g` is the item's group, whose `body.what` is `watch` and which names the item's `ai` |
 | 3 | the signer of `msg.env` is a currently valid device in the log of a person, by the `device` rows of the group, each of which carries its signed entry (`contracts/rows.md` section 3). That person is the watcher |
 | 4 | no audit row `watch` names this card: N acts on a card once |
@@ -190,8 +190,9 @@ by the step 1 rules. No inbox item is ever queued in a team group.
 
 ## 9. People and messages
 
-- People join, get roles and are removed as in any group (`people.md`
-  beside this file); the group is moved and copied as any group (`move.md`).
+- People join, get roles and are removed as in any group
+  (`contracts/step-2/people.md`); the group is moved and copied as any
+  group (`contracts/step-2/move.md`).
 - A person writes `post` of kind `text` in the main line. Mentions name
   people, who are reminded as in any group (`contracts/commands.md` 1.7).
 - `sync`, `fetch`, `note`, `forget`, `push`, `group set` with `name`,
@@ -271,14 +272,14 @@ Unit P-4 freezes the new shapes (`contracts/conventions.md` section 5).
 1. **How a secretary reaches the team group** (section 10). The other way,
    the AI joining as a member without a clone, needs a refusal on every
    path that wakes an AI and contradicts "`host.join` is refused".
-2. **An `act` names its card by id only**, and an id is unique per signer
-   (`contracts/envelope.md` section 3). A home that is not O's could put
-   O's `act confirm` beside a card of the same id signed by another person,
-   and checks 2 and 3 of section 2 would pass. Recommended, in
-   `contracts/step-2/confirm.md` or `authority.md` and not here: the `act`
-   on a `confirm` card also carries the card's signer, and N compares it.
-3. **The item `why: watch`** (section 2): if `confirm.md` defines one item
-   for every use of the card, its name replaces `watch`; the checks stay.
+2. **The `act` does not bind the card's signer.** Its `arg` digest
+   (`contracts/step-2/confirm.md` section 6) covers `env.p` and not `env.k`.
+   A home that is not O's could put O's `act confirm` beside the same `p`
+   signed by another person, and checks 1 to 3 of section 2 would pass.
+   Recommended, in `confirm.md` and not here: the digest also covers the
+   request's `k`.
+3. **The item `why: watch`** (section 2): `confirm.md` section 5 names
+   this item for a confirmed `watch` card; no other item is defined.
 4. **Consent lasts one takeover and can be withdrawn** (sections 2, 5):
    D-14 is silent on both. The cost is one list (`watchers`) and one
    command (`watch.end`); without them the owner could neither see who may
