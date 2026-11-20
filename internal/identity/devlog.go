@@ -65,7 +65,7 @@ func entry(env proto.Envelope) (proto.DeviceEntry, error) {
 	if !verify(env.Key, envelopeContext+env.Payload, env.Signature) {
 		return e, BadSig
 	}
-	if json.Unmarshal([]byte(env.Payload), &e) != nil || e.Type != "device" || e.Op != "add" && e.Op != "revoke" {
+	if json.Unmarshal([]byte(env.Payload), &e) != nil || e.Type != "device" || e.Op != "add" && e.Op != "revoke" || !isDevice(e.Device) {
 		return e, BadRequest
 	}
 	return e, nil

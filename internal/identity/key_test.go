@@ -161,6 +161,24 @@ func TestSignCoversThePrefixAndThePayloadAsGiven(t *testing.T) {
 	}
 }
 
+// respelled gives another base64url spelling of the same bytes: the last
+// character with other unused trailing bits.
+func respelled(s string) string {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	i := strings.IndexByte(alphabet, s[len(s)-1])
+	return s[:len(s)-1] + string(alphabet[i^1])
+}
+
+func TestRespelledIsTheSameBytes(t *testing.T) {
+	for _, s := range []string{rfcDevice, rfcSignature} {
+		a, errA := b64.DecodeString(s)
+		b, errB := b64.DecodeString(respelled(s))
+		if errA != nil || errB != nil || string(a) != string(b) || respelled(s) == s {
+			t.Errorf("%q and %q: %v, %v", s, respelled(s), errA, errB)
+		}
+	}
+}
+
 func TestVerify(t *testing.T) {
 	text := envelopeContext + rfcPayload
 	other := testKey("node")
@@ -170,19 +188,22 @@ func TestVerify(t *testing.T) {
 		device, text, s string
 		want            bool
 	}{
-		"valid":                       {rfcDevice, text, rfcSignature, true},
-		"one byte of the text off":    {rfcDevice, strings.Replace(text, "hello", "hellp", 1), rfcSignature, false},
-		"without the prefix":          {rfcDevice, rfcPayload, rfcSignature, false},
-		"another device":              {other.ID(), text, rfcSignature, false},
-		"signature of another device": {rfcDevice, text, other.sign(text), false},
-		"key that is not base64url":   {rfcDevice + "!", text, rfcSignature, false},
-		"key with padding":            {rfcDevice + "=", text, rfcSignature, false},
-		"key of 31 bytes":             {short, text, rfcSignature, false},
-		"key of 33 bytes":             {long, text, rfcSignature, false},
-		"empty key":                   {"", text, rfcSignature, false},
-		"signature not base64url":     {rfcDevice, text, rfcSignature + "!", false},
-		"signature cut short":         {rfcDevice, text, rfcSignature[:80], false},
-		"empty signature":             {rfcDevice, text, "", false},
+		"valid":                         {rfcDevice, text, rfcSignature, true},
+		"one byte of the text off":      {rfcDevice, strings.Replace(text, "hello", "hellp", 1), rfcSignature, false},
+		"without the prefix":            {rfcDevice, rfcPayload, rfcSignature, false},
+		"another device":                {other.ID(), text, rfcSignature, false},
+		"signature of another device":   {rfcDevice, text, other.sign(text), false},
+		"key that is not base64url":     {rfcDevice + "!", text, rfcSignature, false},
+		"key with padding":              {rfcDevice + "=", text, rfcSignature, false},
+		"key in another spelling":       {respelled(rfcDevice), text, rfcSignature, false},
+		"key with a line break":         {rfcDevice[:20] + "\n" + rfcDevice[20:], text, rfcSignature, false},
+		"key of 31 bytes":               {short, text, rfcSignature, false},
+		"key of 33 bytes":               {long, text, rfcSignature, false},
+		"empty key":                     {"", text, rfcSignature, false},
+		"signature not base64url":       {rfcDevice, text, rfcSignature + "!", false},
+		"signature cut short":           {rfcDevice, text, rfcSignature[:80], false},
+		"signature in another spelling": {rfcDevice, text, respelled(rfcSignature), false},
+		"empty signature":               {rfcDevice, text, "", false},
 	} {
 		if got := verify(c.device, c.text, c.s); got != c.want {
 			t.Errorf("%s: verify = %v, want %v", name, got, c.want)

@@ -85,7 +85,21 @@ func (k Key) sign(text string) string {
 }
 
 func verify(device, text, s string) bool {
-	pub, errKey := b64.DecodeString(device)
-	sig, errSig := b64.DecodeString(s)
-	return errKey == nil && errSig == nil && len(pub) == ed25519.PublicKeySize && ed25519.Verify(pub, []byte(text), sig)
+	pub, okKey := decode(device)
+	sig, okSig := decode(s)
+	return okKey && okSig && len(pub) == ed25519.PublicKeySize && ed25519.Verify(pub, []byte(text), sig)
+}
+
+// decode reads a base64url value from the wire in its one canonical spelling.
+// The decoder alone also takes other values of the unused trailing bits and
+// skips line breaks, which would give one key several device ids.
+func decode(s string) ([]byte, bool) {
+	b, err := b64.DecodeString(s)
+	return b, err == nil && b64.EncodeToString(b) == s
+}
+
+// isDevice reports whether id is a device id: a public key in its canonical spelling.
+func isDevice(id string) bool {
+	pub, ok := decode(id)
+	return ok && len(pub) == ed25519.PublicKeySize
 }

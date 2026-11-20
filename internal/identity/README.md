@@ -32,7 +32,8 @@ connection, clock or database: every function works on the values it is given.
   the mode has no effect; the per-user data directory is what keeps the file private.
 - **Signature.** `Sign` covers `"solodawn/1\n"` followed by `p` exactly as given; `p` is never
   parsed and encoded again, on either side. A rendezvous answer covers `"solodawn/rv/1\n"` and the
-  nonce, so neither signature verifies as the other.
+  nonce, so neither signature verifies as the other. A device id or signature verifies only in its
+  one canonical base64url spelling, so a key has exactly one device id.
 - **Receiving.** `OpenSignal` and `OpenCommand` fail with the code of the first check that fails, in
   the contract's order: `bad_sig`, `unknown_device`, `not_for_me`, `stale`. They differ only in how
   far `ts` may be from the receiver's clock: two minutes and 24 hours; a `ts` exactly that far away
@@ -41,7 +42,7 @@ connection, clock or database: every function works on the values it is given.
   `Code` values whose text is the wire code. `known` is the caller's: this package does not know
   owners, groups or pairing peers.
 - **Device log.** `Apply` accepts an entry when its signature holds, it is a `device` payload with
-  op `add` or `revoke` for this log's person, its version is the next one, and its signer is valid
+  op `add` or `revoke` of a device id for this log's person, its version is the next one, and its signer is valid
   before it; entry 1 must be the `add` of its own signer, which is the person. An `add` of a key
   that was ever revoked is refused. For a version the log already holds, the same envelope again
   returns `added == false` without an error and any other is refused: the first accepted wins. A

@@ -185,6 +185,8 @@ func TestLogRevokedKeyIsNeverAddedAgain(t *testing.T) {
 	apply(t, l, "add the tablet after two revokes", add(browser, 6, tablet), false, errRevoked)
 	apply(t, l, "revoke a key that was never added", revoke(browser, 6, stranger), true, nil)
 	apply(t, l, "add that key", add(browser, 7, stranger), false, errRevoked)
+	respelledTablet := strings.Replace(change(browser, 7, "add", tablet), tablet.id(), respelled(tablet.id()), 1)
+	apply(t, l, "add the revoked tablet in another spelling", browser.key.Sign(respelledTablet), false, BadRequest)
 	apply(t, l, "add the node", add(browser, 7, node), true, nil)
 	if got := valid(l); got != "phone browser, workstation" {
 		t.Errorf("valid %q", got)
@@ -215,14 +217,16 @@ func TestLogRefusesWhatIsNotAnEntry(t *testing.T) {
 	l := started(t)
 	entry := change(browser, 2, "add", node)
 	for what, p := range map[string]string{
-		"text that is not JSON":     "device",
-		"a JSON list":               "[" + entry + "]",
-		"another payload type":      strings.Replace(entry, `"t":"device"`, `"t":"post"`, 1),
-		"no payload type":           strings.Replace(entry, `"t":"device",`, "", 1),
-		"an op the log lacks":       strings.Replace(entry, `"op":"add"`, `"op":"rename"`, 1),
-		"no op":                     strings.Replace(entry, `"op":"add",`, "", 1),
-		"a version that is text":    strings.Replace(entry, `"ver":2`, `"ver":"2"`, 1),
-		"a version with a fraction": strings.Replace(entry, `"ver":2`, `"ver":2.5`, 1),
+		"text that is not JSON":      "device",
+		"a JSON list":                "[" + entry + "]",
+		"another payload type":       strings.Replace(entry, `"t":"device"`, `"t":"post"`, 1),
+		"no payload type":            strings.Replace(entry, `"t":"device",`, "", 1),
+		"an op the log lacks":        strings.Replace(entry, `"op":"add"`, `"op":"rename"`, 1),
+		"no op":                      strings.Replace(entry, `"op":"add",`, "", 1),
+		"a version that is text":     strings.Replace(entry, `"ver":2`, `"ver":"2"`, 1),
+		"a version with a fraction":  strings.Replace(entry, `"ver":2`, `"ver":2.5`, 1),
+		"a dev that is no device id": strings.Replace(entry, node.id(), "workstation", 1),
+		"no dev":                     strings.Replace(entry, `"dev":"`+node.id()+`",`, "", 1),
 	} {
 		if p == entry {
 			t.Fatalf("%s: the payload was not changed", what)
