@@ -121,6 +121,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     When('the address fragment becomes "#/nodes"', () => go('#/nodes'));
     Then('the current page is "我的电脑和 AI"', () => {
       expect(texts('h1')).toEqual(['我的电脑和 AI']);
+      expect(document.title).toBe('我的电脑和 AI · SoloDawn');
       expect(texts('nav a[aria-current="page"]')).toEqual(['电脑和 AI']);
     });
     And('focus is on the main landmark named "我的电脑和 AI"', () =>
@@ -201,6 +202,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     And('the focused language button announces "Language: English"', () => {
       expect(document.activeElement?.getAttribute('aria-label')).toBe('Switch language / 切换语言');
       expect(texts('[role=status]')).toEqual(['Language: English']);
+      expect(document.title).toBe('Chats · SoloDawn');
     });
   });
 

@@ -10,6 +10,7 @@
   const views = { groups: Groups, nodes: Nodes, settings: Settings };
   const icons: Record<Page, IconName> = { groups: 'chat', nodes: 'pc', settings: 'sliders' };
   const View = $derived(views[route.page]);
+  const pageTitle = $derived(t(`${route.page}.title`));
   let main: HTMLElement;
   let previousPage = untrack(() => route.page);
 
@@ -21,7 +22,7 @@
   });
 </script>
 
-<svelte:head><title>{`${t(`${route.page}.title`)} · SoloDawn`}</title></svelte:head>
+<svelte:head><title>{`${pageTitle} · SoloDawn`}</title></svelte:head>
 
 <div class="app" style:--dir={route.dir}>
   <button class="skip" onclick={() => main.focus()}>{t('app.skip')}</button>
@@ -39,7 +40,7 @@
   </nav>
   <header class="bar">
     <div class="bar-title">
-      {#key route.page}<h1 id="page-title">{t(`${route.page}.title`)}</h1>{/key}
+      {#key route.page}<h1 id="page-title">{pageTitle}</h1>{/key}
     </div>
     <div class="global only-wide">
       <button class="icon-btn" onclick={toggleTheme} aria-label={t('bar.theme')}>
