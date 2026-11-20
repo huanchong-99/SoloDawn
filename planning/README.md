@@ -146,11 +146,19 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/task-machine.md` | the one table of task transitions |
 | `contracts/drivers.md` | how each CLI is started, levels, turn format, instructions |
 | `contracts/local.md` | local interfaces: command line, MCP shim socket, Git commands, outbound secret check, self-update |
+| `contracts/step-2/people.md` | step 2: a second person in a group, the three roles, leaving and removal (D-7) |
+| `contracts/step-2/browser-trust.md` | step 2: what a browser checks before it shows who wrote or decided something (D-5, D-6) |
+| `contracts/step-2/confirm.md` | step 2: the owner's `confirm` card before an AI works for someone else, and the `information` label (D-8, D-9) |
+| `contracts/step-2/checks-forge.md` | step 2: accepting a group's check commands, and forges other than GitHub (D-3, D-10) |
+| `contracts/step-2/watch-team.md` | step 2: watching a takeover terminal, and the group kind `team` (D-14, D-15) |
+| `contracts/step-3/drivers.md` | step 3: what a driver for a further CLI must have, its capability table (refines `steps/step-2-3.md` 3.1) |
+| `contracts/step-3/knowledge.md` | step 3: style presets and the knowledge base (D-17, D-18) |
 | `steps/step-1.md` | step 1 scope, spikes, order of the milestones |
 | `steps/step-1-acceptance.md` | step 1 milestones M1 to M8 and their acceptance tests |
 | `steps/step-1-backend.md` | step 1 backend task list |
 | `steps/step-1-frontend.md` | step 1 frontend task list |
 | `steps/step-2-3.md` | outline of steps 2 and 3 |
+| `steps/step-2-3-acceptance.md` | acceptance tests of step 2 (A9.x) and step 3 (A10.x) |
 | `steps/parallel-plan.md` | the rest of version 1 as parallel units: seams, lanes, waves, critical path, what needs the owner |
 | `steps/parallel-plan-units.md` | the units of step 1, by lane |
 | `steps/parallel-plan-step-2-3.md` | steps 2 and 3: design points with proposed answers, contract units, code units |
