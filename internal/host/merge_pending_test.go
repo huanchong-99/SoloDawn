@@ -78,9 +78,9 @@ func TestInspectResumesPendingMerge(t *testing.T) {
 	calls(ghView, ghView)
 }
 
-func TestPendingMergeStops(t *testing.T) {
+func TestPendingMergeStopsOnCancel(t *testing.T) {
 	m := pendingMerge(t)
-	calls := fakeForgeGH(t, prOpen, prOpen, forgeAnswer{Stderr: "forge down", Code: 1})
+	calls := fakeForgeGH(t, prOpen)
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
@@ -88,12 +88,17 @@ func TestPendingMergeStops(t *testing.T) {
 		assertForge(t, result, MergeResult{})
 		assertForge(t, err, context.DeadlineExceeded)
 	})
-	synctest.Test(t, func(t *testing.T) {
-		result, err := m.Inspect(t.Context())
-		assertForge(t, result, MergeResult{})
-		assertForge(t, err.Error(), "gh pr view 32 --json state,mergeCommit,headRefOid: exit status 1: forge down")
-	})
-	calls(ghView, ghView, ghView)
+	calls(ghView)
+}
+
+// A read that fails, or whose answer cannot be read, during the wait counts
+// as unfinished: the PR is read again 30 s later, and the merge the queue
+// makes later is still reported.
+func TestPendingMergeOutlastsFailedReads(t *testing.T) {
+	m := pendingMerge(t)
+	calls := fakeForgeGH(t, forgeAnswer{}, forgeAnswer{Stderr: "forge down", Code: 1}, prOpen, forgeAnswer{Stdout: "{"}, prMerged)
+	runPending(t, m.Apply, MergeResult{MergeCommit: "def"}, 90*time.Second)
+	calls(ghMerge, ghView, ghView, ghView, ghView)
 }
 
 // The merge command and the read after it both fail: the outcome is unknown.

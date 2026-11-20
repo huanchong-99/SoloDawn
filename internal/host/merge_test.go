@@ -315,22 +315,14 @@ func TestMergePRBranchDeletionFailure(t *testing.T) {
 	checkMergeCalls(t, m, "merge", "view")
 }
 
-func TestMergePRUnknownOutcome(t *testing.T) {
-	m := mergeForgeFixture(t)
-	t.Setenv("FAIL_GH_COMMAND", "view")
-	result, err := m.Apply(t.Context())
-	mergeEqual(t, result, host.MergeResult{})
-	mergeEqual(t, err.Error(), "gh pr view 32 --json state,mergeCommit,headRefOid: exit status 1: forge refused")
-	checkMergeCalls(t, m, "merge", "view")
-}
-
 func TestMergePRInspection(t *testing.T) {
 	for _, tc := range []struct{ out, fail, conflict, problem string }{
 		{out: `{"state":"OPEN","mergeCommit":null}`, conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"},
 		{out: `{"state":"CLOSED","mergeCommit":null}`, conflict: "pull request 32 is CLOSED"},
 		{out: `{"state":"MERGED","mergeCommit":{"oid":"def"},"headRefOid":"abc1"}`, conflict: "pull request 32 merged head abc1, expected abc"},
-		{out: "{", problem: "gh pr view: unexpected end of JSON input"},
-		{fail: "view", problem: "gh pr view 32 --json state,mergeCommit,headRefOid: exit status 1: forge refused"},
+		// A read that fails counts as unfinished; the limit has passed.
+		{out: "{", conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"},
+		{fail: "view", conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"},
 	} {
 		t.Run(tc.out+tc.fail, func(t *testing.T) {
 			m := mergeForgeFixture(t)

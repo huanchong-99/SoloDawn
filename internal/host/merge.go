@@ -191,14 +191,15 @@ func (m ReviewedMerge) inspectLocal(ctx context.Context) (MergeResult, error) {
 }
 
 // awaitPR reads the PR every 30 s while it is still OPEN after the merge
-// command succeeded, as a merge queue or auto-merge merges it later. 60
-// minutes after since it is a conflict.
+// command succeeded, as a merge queue or auto-merge merges it later. A read
+// that fails counts as unfinished too: only MERGED, CLOSED or the limit, 60
+// minutes after since, end the wait.
 func (m ReviewedMerge) awaitPR(ctx context.Context, since time.Time) (MergeResult, error) {
 	deadline := since.Add(60 * time.Minute)
 	for {
 		state, result, err := m.readPR(ctx)
-		if err != nil || state != "OPEN" {
-			return result, err
+		if err == nil && state != "OPEN" {
+			return result, nil
 		}
 		if !time.Now().Before(deadline) {
 			return MergeResult{Conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"}, nil
