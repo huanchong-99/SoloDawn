@@ -37,14 +37,7 @@ func hostCheckSteps(sc *godog.ScenarioContext, f fixtures) {
 		return strings.TrimSpace(string(out))
 	}
 	const marker = "-----BEGIN " + "PRIVATE KEY-----"
-	runner := host.CheckRunner{
-		CheckSecret: func(text string) error {
-			if strings.Contains(text, marker) {
-				return errors.New("secret detected")
-			}
-			return nil
-		},
-	}
+	var runner host.CheckRunner
 	run := func(commands ...string) {
 		group := proto.GroupRow{Checks: commands, Limits: proto.Limits{TurnMinutes: 1}}
 		result, runErr = runner.Run(f.t.Context(), dir, "base", group)
@@ -81,7 +74,7 @@ func hostCheckSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^the host runs checks with an empty project command list$`, func() { run() })
 	sc.Step(`^the secret check fails for the task commit and the tests check passes$`, func() error {
 		want := proto.ChecksBody{Stage: "local", Commit: head, Items: []proto.CheckItem{
-			{Name: "secrets", Detail: new("secret detected")}, {Name: "tests", OK: true},
+			{Name: "secrets", Detail: new("secret: this looks like a secret; remove it and send again")}, {Name: "tests", OK: true},
 		}}
 		return compareHostChecks(result, runErr, want)
 	})
