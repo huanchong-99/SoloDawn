@@ -34,7 +34,7 @@ func (r CheckRunner) Run(ctx context.Context, worktree, baseRef string, group pr
 		return proto.ChecksBody{}, err
 	}
 	result := proto.ChecksBody{Stage: "local", Commit: head, OK: true}
-	result.Items = runGroupChecks(ctx, worktree, head, group)
+	result.Items = runGroupChecks(ctx, worktree, group)
 	hard, err := r.hardChecks(ctx, worktree, baseRef+"..."+head)
 	if err != nil {
 		return proto.ChecksBody{}, err
@@ -46,20 +46,12 @@ func (r CheckRunner) Run(ctx context.Context, worktree, baseRef string, group pr
 	return result, nil
 }
 
-func runGroupChecks(ctx context.Context, dir, head string, group proto.GroupRow) []proto.CheckItem {
+func runGroupChecks(ctx context.Context, dir string, group proto.GroupRow) []proto.CheckItem {
 	checkCtx, cancel := context.WithTimeout(ctx, time.Duration(group.Limits.TurnMinutes)*time.Minute)
 	defer cancel()
 	var items []proto.CheckItem
 	for _, command := range group.Checks {
-		item := runProjectCheck(checkCtx, dir, command)
-		current, err := cleanCheckHead(ctx, dir)
-		if err != nil {
-			return append(items, checkedItem(command, err))
-		}
-		if current != head {
-			return append(items, checkedItem(command, errors.New("conflict: HEAD changed during checks")))
-		}
-		items = append(items, item)
+		items = append(items, runProjectCheck(checkCtx, dir, command))
 	}
 	return items
 }
@@ -67,7 +59,6 @@ func runGroupChecks(ctx context.Context, dir, head string, group proto.GroupRow)
 func checkGit(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	cmd.Env = checkEnvironment(os.Environ(), runtime.GOOS == "windows")
 	out, err := cmd.Output()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {

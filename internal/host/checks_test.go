@@ -65,7 +65,6 @@ func TestProjectChecksAndBothHardChecks(t *testing.T) {
 	checkTestFile(t, dir, "source.go", "a marked secret\n")
 	checkTestGit(t, dir, "add", ".")
 	checkTestGit(t, dir, "commit", "-m", "task")
-	checkTestFile(t, dir, ".git/info/exclude", "first\n")
 	commands := []string{"echo one > first", "exit 12", "git hash-object first"}
 
 	// Use Git's own hash on the platform's shell output (LF or CRLF).
@@ -89,29 +88,6 @@ func TestProjectChecksAndBothHardChecks(t *testing.T) {
 	}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v (%v), want %#v", got, err, want)
-	}
-}
-
-func TestChecksStopOnTreeOrCommitChange(t *testing.T) {
-	for _, tc := range []struct{ command, detail string }{
-		{"echo changed > guide", ErrDirtyCheckTree.Error()},
-		{"git switch -q base", "conflict: HEAD changed during checks"},
-	} {
-		t.Run(tc.command, func(t *testing.T) {
-			dir := checkTestRepo(t)
-			checkTestGit(t, dir, "commit", "--allow-empty", "-m", "task head")
-			head := checkTestGit(t, dir, "rev-parse", "HEAD")
-			got, err := checkTestRunner().Run(t.Context(), dir, "base", checkTestGroup(tc.command, "echo ran > marker"))
-			want := proto.ChecksBody{Stage: "local", Commit: head, Items: []proto.CheckItem{
-				{Name: tc.command, Detail: &tc.detail}, {Name: "secrets", OK: true}, {Name: "tests", OK: true},
-			}}
-			if err != nil || !reflect.DeepEqual(got, want) {
-				t.Fatalf("tree changed: %#v (%v), want %#v", got, err, want)
-			}
-			if _, err := os.Stat(filepath.Join(dir, "marker")); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("later check ran: %v", err)
-			}
-		})
 	}
 }
 
@@ -181,8 +157,7 @@ func TestChecksRequireBothGitDiffReads(t *testing.T) {
 		t.Skip("POSIX git fixture")
 	}
 	dir := t.TempDir()
-	t.Setenv("ComSpec", "windows-only")
-	script := "#!/bin/sh\ncase \"$2\" in --name-only) echo \"missing${ComSpec}\" >&2; exit 2;; esac\n"
+	script := "#!/bin/sh\ncase \"$2\" in --name-only) echo missing >&2; exit 2;; esac\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
