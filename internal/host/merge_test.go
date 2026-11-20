@@ -326,6 +326,18 @@ func TestMergePRInspection(t *testing.T) {
 	}
 }
 
+func TestDeleteBranchAfterWorktreeRemoval(t *testing.T) {
+	m := mergeFixture(t)
+	_, err := m.Apply(t.Context())
+	mergeOK(t, err)
+	worktree := filepath.Join(t.TempDir(), "wt")
+	mergeGit(t, m.Repo, "worktree", "add", worktree, m.Branch)
+	mergeEqual(t, m.DeleteBranch(t.Context()).Error(), gitFailure(t, m.Repo, "branch", "-D", m.Branch))
+	mergeGit(t, m.Repo, "worktree", "remove", worktree)
+	mergeOK(t, m.DeleteBranch(t.Context()))
+	mergeEqual(t, mergeGit(t, m.Repo, "for-each-ref", "--format=%(refname)", "refs/heads/task"), "")
+}
+
 // The detail of task conflict goes to the group, so a secret in Git's output
 // is redacted. A signing program named like a token puts one there.
 func TestConflictDetailIsRedacted(t *testing.T) {
