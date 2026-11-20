@@ -25,10 +25,10 @@ func dump(t *testing.T, n netsim.Network) {
 	}
 }
 
-// The answerer-mapped matrix took the relay in some runs of one pair, a
-// restricted-cone offerer and a port-restricted answerer, all of them under
-// parallel load. This repeats that pair ten times in parallel with the ICE
-// trace and the gateways' state.
+// The answerer-mapped matrix took the relay in some runs of a pair with a
+// restricted-cone offerer. This repeats one such pair ten times in parallel
+// with the ICE trace and the gateways' state; the trace of a relayed run
+// shows the pion race that raced describes.
 func TestMappedRestrictedToPortRestricted(t *testing.T) {
 	for i := range 10 {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
@@ -36,6 +36,9 @@ func TestMappedRestrictedToPortRestricted(t *testing.T) {
 			o := punch(t, netsim.Restricted, netsim.PortRestricted, variant{relay: true, mapAnswer: true, debug: true})
 			t.Logf("restricted -> port-restricted, answerer mapped: path %s at %d ms; offerer %s; answerer %s; %s%s",
 				o.path(), o.ms, o.offer, o.answer, o.mapped, o.failure)
+			if o.path() == "none" {
+				t.Errorf("no connection")
+			}
 		})
 	}
 }
