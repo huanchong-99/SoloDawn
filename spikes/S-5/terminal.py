@@ -13,9 +13,15 @@ def console():
     # Opt into console Ctrl+C even when the VM launcher ignores it.
     if not ctypes.windll.kernel32.SetConsoleCtrlHandler(None, False):
         raise ctypes.WinError()
+    initial = os.get_terminal_size()
+    print(f"READY {initial.columns}x{initial.lines}", flush=True)
+    deadline = time.monotonic() + 8
+    while (size := os.get_terminal_size()) == initial:
+        if time.monotonic() >= deadline:
+            raise TimeoutError("console size did not change")
+        time.sleep(0.01)
+    print(f"READY {size.columns}x{size.lines}", flush=True)
     while True:
-        size = os.get_terminal_size()
-        print(f"READY {size.columns}x{size.lines}", flush=True)
         command = input()
         if command == "quit":
             return 37
@@ -48,8 +54,6 @@ def probe():
 
     expect("READY 80x24")
     pty.set_size(100, 36)
-    pty.write("ping\r")
-    # The reply and following prompt can arrive in the same VT frame.
     expect("READY 100x36")
     pty.write("wait\r")
     expect("WORKING")
