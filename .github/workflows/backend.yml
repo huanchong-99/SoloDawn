@@ -127,11 +127,13 @@ jobs:
       - run: go test -race -covermode=atomic -coverprofile=cover.out ./...
       - run: go test -tags acceptance -count=1 ./features/...
       # Statement coverage of the files that only this system builds, from the unit tests above.
+      # The percentage comes first: setup-go's problem matcher takes "<file>.go: <text>" for an error.
       - name: Coverage of the files built only here
         run: |
           awk -F'[:, ]' 'NR > 1 && $1 ~ /_(windows|darwin|unix)\.go$/ { n[$1] += $4; if ($5 > 0) c[$1] += $4 }
-            END { for (f in n) printf "%s: %.1f%% of %d statements\n", f, 100 * c[f] / n[f], n[f] }' cover.out |
-            sort | tee -a "$GITHUB_STEP_SUMMARY"
+            END { for (f in n) { g = f; sub(/^github\.com\/huanchong-99\/SoloDawn\//, "", g)
+              printf "%.1f%% of %d statements in %s\n", 100 * c[f] / n[f], n[f], g } }' cover.out |
+            sort -k5 | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-${{ matrix.os }}
