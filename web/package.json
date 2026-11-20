@@ -9,6 +9,7 @@
     "build": "vite build",
     "check": "svelte-check --fail-on-warnings",
     "test": "vitest run",
+    "test:vectors": "vitest run --config vitest.vectors.ts",
     "format": "prettier --write ."
   },
   "prettier": {
@@ -23,8 +24,10 @@
     "@stryker-mutator/core": "10.1.1",
     "@stryker-mutator/vitest-runner": "10.1.1",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@vitest/browser-playwright": "5.1.1",
     "@vitest/coverage-v8": "5.1.1",
     "fake-indexeddb": "6.2.7",
+    "firefox136-provider": "file:features/firefox136",
     "happy-dom": "21.0.4",
     "playwright": "1.64.0",
     "prettier": "3.10.1",

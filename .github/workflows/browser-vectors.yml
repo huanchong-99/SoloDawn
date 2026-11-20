@@ -1,0 +1,63 @@
+name: Browser vectors
+
+on:
+  pull_request:
+    branches: [rebuild]
+  push:
+    branches: [rebuild]
+
+permissions:
+  contents: read
+
+jobs:
+  vectors:
+    name: ${{ matrix.name }} vectors
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Chrome 137, browser: chromium, os: ubuntu-24.04 }
+          - { name: Edge 137, browser: chromium, os: ubuntu-24.04 }
+          - { name: Firefox 136, browser: firefox, os: ubuntu-24.04 }
+          - { name: Apple WebKit, browser: webkit, os: macos-26 }
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - if: runner.os == 'Linux'
+        run: pnpm exec playwright install-deps ${{ matrix.browser }}
+      - if: matrix.name == 'Chrome 137'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSLo chrome.zip https://storage.googleapis.com/chrome-for-testing-public/137.0.7151.119/linux64/chrome-headless-shell-linux64.zip
+          echo '9dc00173ad9d156ada860b51fb4f91abe5563e7ebb84bb09c237e44f5f741c91  chrome.zip' | sha256sum -c
+          unzip -q chrome.zip
+          echo "CHROMIUM_PATH=$PWD/chrome-headless-shell-linux64/chrome-headless-shell" >> "$GITHUB_ENV"
+      - if: matrix.name == 'Edge 137'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSLo edge.deb https://packages.microsoft.com/repos/edge/pool/main/m/microsoft-edge-stable/microsoft-edge-stable_137.0.3296.93-1_amd64.deb
+          echo '482f21e9443f79ee5995058066c982d42a392b2e24697ba8329bd566d4c83074  edge.deb' | sha256sum -c
+          dpkg-deb -x edge.deb edge
+          echo "CHROMIUM_PATH=$PWD/edge/opt/microsoft/msedge/msedge" >> "$GITHUB_ENV"
+      - if: matrix.browser == 'firefox'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSLo firefox.zip https://cdn.playwright.dev/dbazure/download/playwright/builds/firefox/1478/firefox-ubuntu-24.04.zip
+          echo 'ad45969351508ab06ce0a41863a60865e2074dd1726e77ed61473c0a5be0353f  firefox.zip' | sha256sum -c
+          unzip -q firefox.zip
+          echo "FIREFOX136_PATH=$PWD/firefox/firefox" >> "$GITHUB_ENV"
+      - if: matrix.browser == 'webkit'
+        run: pnpm exec playwright install webkit
+      - run: pnpm test:vectors --project ${{ matrix.browser }}
