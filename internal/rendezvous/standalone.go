@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Options names the endpoints of the standalone service, not a node's handler.
@@ -38,6 +37,10 @@ func (o Options) validateNames() error {
 		}
 		return nil
 	}
+	return o.validateRelayName()
+}
+
+func (o Options) validateRelayName() error {
 	if !o.NoRelay && (o.TurnDomain == "" || strings.EqualFold(o.Domain, o.TurnDomain)) {
 		return errors.New("relay needs a distinct --turn-domain")
 	}
@@ -94,6 +97,6 @@ func (o Options) serveICE(web fs.FS, l net.Listener) error {
 		return err
 	}
 	defer server.Close()
-	go http.Serve(httpEndpoint, handler(web, 10*time.Second, r))
+	go http.Serve(httpEndpoint, r.handler(web))
 	return serveTLS(l, cfg, names)
 }

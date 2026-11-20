@@ -30,7 +30,11 @@ type server struct {
 // Handler serves the same /rv protocol and static files on nodes and on the
 // standalone rendezvous. Signalling alone advertises an empty ICE list.
 func Handler(web fs.FS) http.Handler {
-	return handler(web, 10*time.Second, &relay{})
+	return (&relay{}).handler(web)
+}
+
+func (r *relay) handler(web fs.FS) http.Handler {
+	return handler(web, 10*time.Second, r)
 }
 
 func handler(web fs.FS, wait time.Duration, r *relay) http.Handler {
