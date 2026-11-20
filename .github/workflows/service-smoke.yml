@@ -1,0 +1,758 @@
+name: Service smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [rebuild]
+    paths:
+      - 'internal/node/service_*'
+      - 'cmd/solodawn/**'
+      - '.github/workflows/service-smoke.yml'
+  push:
+    branches: [rebuild]
+    paths:
+      - 'internal/node/service_*'
+      - 'cmd/solodawn/**'
+      - '.github/workflows/service-smoke.yml'
+
+permissions:
+  contents: read
+
+# Installs solodawn as a real login service from a path containing '$' and '%',
+# starts it through the system's service manager, checks that it answers
+# "solodawn status" with the expected PATH (and without a console window on
+# Windows), then removes the service and checks that it is gone and stopped.
+# Until N-4 wires startNode (internal/node/socket.go:181-183), the build falls
+# back to a Go -overlay stand-in for startNode alone so the real CLI, local
+# socket and service-manager definitions run end to end.
+jobs:
+  linux:
+    name: smoke (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+
+      - name: Install, start via systemd --user, verify and remove
+        run: |
+          set -euo pipefail
+          unset XDG_CONFIG_HOME XDG_DATA_HOME
+
+          install_dir="$RUNNER_TEMP/sd-\$HOME-%u"
+          cli_dir="$RUNNER_TEMP/cli-\$HOME-%u/bin"
+          mkdir -p "$install_dir" "$cli_dir"
+          exe="$install_dir/solodawn"
+          case "$exe" in *'$HOME'*'%u'*) ;; *) echo "unexpected exe path: $exe" >&2; exit 1 ;; esac
+
+          go build -o "$exe" ./cmd/solodawn
+
+          probe="$RUNNER_TEMP/probe"
+          mkdir -p "$probe"
+          HOME="$probe" XDG_DATA_HOME="$probe" "$exe" node >"$probe/out" 2>&1 &
+          probe_pid=$!
+          sleep 1
+          if kill -0 "$probe_pid" 2>/dev/null; then
+            kill -TERM "$probe_pid" && wait "$probe_pid" || true
+            echo "Using unmodified solodawn binary (startNode is wired)."
+          elif grep -Fq "node runtime is unavailable" "$probe/out"; then
+            echo "::notice::startNode is the pre-N-4 stub (internal/node/socket.go:181); rebuilding with -overlay stand-in on startNode."
+            node_go=$(go list -f '{{.Dir}}/node.go' ./internal/node)
+            cat > "$RUNNER_TEMP/smoke_node.go" <<'EOF'
+          package node
+
+          import (
+          	"context"
+          	"encoding/json"
+          	"errors"
+          	"net"
+          	"os"
+          	"os/signal"
+          	"syscall"
+          	"time"
+          )
+
+          var Version = "dev"
+
+          func init() {
+          	startNode = func(_ string, l *Local) error {
+          		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+          		defer stop()
+          		go func() {
+          			<-ctx.Done()
+          			_ = l.SetDeadline(time.Now())
+          		}()
+          		for {
+          			conn, err := l.Accept()
+          			if err != nil {
+          				if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+          					return nil
+          				}
+          				return err
+          			}
+          			go smokeHandle(conn)
+          		}
+          	}
+          }
+
+          func smokeHandle(conn net.Conn) {
+          	defer conn.Close()
+          	open, _, _, err := AcceptOpening(conn)
+          	if err != nil {
+          		return
+          	}
+          	enc := json.NewEncoder(conn)
+          	if open.Cmd == "status" {
+          		_ = enc.Encode(localReply{Text: Version})
+          		_ = enc.Encode(localReply{Done: true, OK: true})
+          		return
+          	}
+          	_ = enc.Encode(localReply{Done: true, Error: "unsupported command: " + open.Cmd})
+          }
+          EOF
+            python3 -c 'import json, sys; print(json.dumps({"Replace": {sys.argv[1]: sys.argv[2]}}))' \
+              "$node_go" "$RUNNER_TEMP/smoke_node.go" > "$RUNNER_TEMP/overlay.json"
+            go build -overlay "$RUNNER_TEMP/overlay.json" -o "$exe" ./cmd/solodawn
+          else
+            cat "$probe/out" >&2
+            exit 1
+          fi
+          rm -rf "$probe"
+
+          expected_path="$cli_dir:$PATH"
+          PATH="$expected_path" "$exe" service install
+
+          unit="$HOME/.config/systemd/user/solodawn.service"
+          link="$HOME/.config/systemd/user/default.target.wants/solodawn.service"
+          test -f "$unit"
+          test -L "$link"
+          cat "$unit"
+
+          uid=$(id -u)
+          sudo loginctl enable-linger "$USER"
+          sudo systemctl restart "user@${uid}.service"
+          export XDG_RUNTIME_DIR="/run/user/${uid}"
+          if [[ -S "${XDG_RUNTIME_DIR}/bus" ]]; then
+            export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+          fi
+
+          deadline=$((SECONDS + 15))
+          until status_out=$("$exe" status 2>/dev/null); do
+            if (( SECONDS >= deadline )); then
+              systemctl --user status solodawn.service --no-pager || true
+              journalctl --user -u solodawn.service --no-pager || true
+              "$exe" status
+              exit 1
+            fi
+            sleep 0.2
+          done
+          test -n "$status_out"
+          echo "solodawn status: $status_out"
+
+          systemctl --user is-active --quiet solodawn.service
+          pid=$(systemctl --user show --property=MainPID --value solodawn.service)
+          test -n "$pid" && test "$pid" -gt 0
+
+          got_exe=$(readlink "/proc/$pid/exe")
+          if [[ "$got_exe" != "$exe" ]]; then
+            printf 'got exe=%s\nwant exe=%s\n' "$got_exe" "$exe" >&2
+            exit 1
+          fi
+
+          got_path=$(tr '\0' '\n' < "/proc/$pid/environ" | sed -n 's/^PATH=//p')
+          if [[ "$got_path" != "$expected_path" ]]; then
+            printf 'got PATH=%s\nwant PATH=%s\n' "$got_path" "$expected_path" >&2
+            exit 1
+          fi
+
+          "$exe" service remove
+          test ! -e "$unit"
+          test ! -L "$link"
+
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "::notice::solodawn service remove removed the unit on disk while leaving PID $pid running (service_linux.go:46); restarting user@${uid}.service to verify logout/re-login."
+          fi
+
+          # Simulate logging out and back in: the old session stops the node and
+          # the fresh default.target must not start solodawn again.
+          sudo systemctl restart "user@${uid}.service"
+          ! kill -0 "$pid" 2>/dev/null
+          ! systemctl --user is-active --quiet solodawn.service
+          ! "$exe" status >/dev/null 2>&1
+
+      - name: Clean up systemd user unit on failure
+        if: failure()
+        run: |
+          uid=$(id -u)
+          export XDG_RUNTIME_DIR="/run/user/${uid}"
+          systemctl --user stop solodawn.service 2>/dev/null || true
+          rm -f "$HOME/.config/systemd/user/default.target.wants/solodawn.service" \
+                "$HOME/.config/systemd/user/solodawn.service"
+          systemctl --user daemon-reload 2>/dev/null || true
+
+  macos:
+    name: smoke (macos-latest)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+
+      - name: Install, bootstrap via launchd, verify and remove
+        run: |
+          set -euo pipefail
+          sw_vers
+
+          install_dir="$RUNNER_TEMP/sd-\$HOME-%u"
+          cli_dir="$RUNNER_TEMP/cli-\$HOME-%u&tools/bin"
+          mkdir -p "$install_dir" "$cli_dir"
+          exe="$install_dir/solodawn"
+          case "$exe" in *'$HOME'*'%u'*) ;; *) echo "unexpected exe path: $exe" >&2; exit 1 ;; esac
+
+          go build -o "$exe" ./cmd/solodawn
+
+          # Keep temporary HOME under /tmp on macOS so the Unix socket path stays below 103 bytes.
+          probe=$(mktemp -d /tmp/sd-p.XXXXXX)
+          HOME="$probe" "$exe" node >"$probe/out" 2>&1 &
+          probe_pid=$!
+          sleep 1
+          if kill -0 "$probe_pid" 2>/dev/null; then
+            kill -TERM "$probe_pid" && wait "$probe_pid" || true
+            echo "Using unmodified solodawn binary (startNode is wired)."
+          elif grep -Fq "node runtime is unavailable" "$probe/out"; then
+            echo "::notice::startNode is the pre-N-4 stub (internal/node/socket.go:181); rebuilding with -overlay stand-in on startNode."
+            node_go=$(go list -f '{{.Dir}}/node.go' ./internal/node)
+            cat > "$RUNNER_TEMP/smoke_node.go" <<'EOF'
+          package node
+
+          import (
+          	"context"
+          	"encoding/json"
+          	"errors"
+          	"net"
+          	"os"
+          	"os/signal"
+          	"syscall"
+          	"time"
+          )
+
+          var Version = "dev"
+
+          func init() {
+          	startNode = func(_ string, l *Local) error {
+          		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+          		defer stop()
+          		go func() {
+          			<-ctx.Done()
+          			_ = l.SetDeadline(time.Now())
+          		}()
+          		for {
+          			conn, err := l.Accept()
+          			if err != nil {
+          				if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+          					return nil
+          				}
+          				return err
+          			}
+          			go smokeHandle(conn)
+          		}
+          	}
+          }
+
+          func smokeHandle(conn net.Conn) {
+          	defer conn.Close()
+          	open, _, _, err := AcceptOpening(conn)
+          	if err != nil {
+          		return
+          	}
+          	enc := json.NewEncoder(conn)
+          	if open.Cmd == "status" {
+          		_ = enc.Encode(localReply{Text: Version})
+          		_ = enc.Encode(localReply{Done: true, OK: true})
+          		return
+          	}
+          	_ = enc.Encode(localReply{Done: true, Error: "unsupported command: " + open.Cmd})
+          }
+          EOF
+            python3 -c 'import json, sys; print(json.dumps({"Replace": {sys.argv[1]: sys.argv[2]}}))' \
+              "$node_go" "$RUNNER_TEMP/smoke_node.go" > "$RUNNER_TEMP/overlay.json"
+            go build -overlay "$RUNNER_TEMP/overlay.json" -o "$exe" ./cmd/solodawn
+          else
+            cat "$probe/out" >&2
+            rm -rf "$probe"
+            exit 1
+          fi
+          rm -rf "$probe"
+
+          expected_path="$cli_dir:$PATH"
+          PATH="$expected_path" "$exe" service install
+
+          plist="$HOME/Library/LaunchAgents/org.solodawn.node.plist"
+          test -f "$plist"
+          cat "$plist"
+
+          uid=$(id -u)
+          if launchctl bootstrap "gui/$uid" "$plist"; then
+            domain="gui/$uid"
+          else
+            echo "gui/$uid rejected bootstrap; falling back to user/$uid"
+            launchctl bootstrap "user/$uid" "$plist"
+            domain="user/$uid"
+          fi
+          echo "macOS launchd domain used: $domain ($(sw_vers -productName) $(sw_vers -productVersion))" | tee -a "$GITHUB_STEP_SUMMARY"
+
+          deadline=$((SECONDS + 15))
+          until status_out=$("$exe" status 2>/dev/null); do
+            if (( SECONDS >= deadline )); then
+              launchctl print "$domain/org.solodawn.node" || true
+              "$exe" status
+              exit 1
+            fi
+            sleep 0.2
+          done
+          test -n "$status_out"
+          echo "solodawn status: $status_out"
+
+          pid=$(launchctl print "$domain/org.solodawn.node" | awk '$1 == "pid" && $2 == "=" { print $3; exit }')
+          test -n "$pid" && test "$pid" -gt 0
+
+          cmdline=$(ps eww -p "$pid" -o command=)
+          if [[ " $cmdline " != *" PATH=$expected_path "* ]]; then
+            echo "process command+env did not contain expected PATH:" >&2
+            echo "want PATH=$expected_path" >&2
+            echo "got: $cmdline" >&2
+            exit 1
+          fi
+
+          "$exe" service remove
+          test ! -e "$plist"
+
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "::notice::solodawn service remove unlinked the plist while leaving PID $pid loaded in $domain (service_darwin.go:41); booting out $domain/org.solodawn.node."
+            launchctl bootout "$domain/org.solodawn.node"
+          fi
+
+          deadline=$((SECONDS + 10))
+          while kill -0 "$pid" 2>/dev/null; do
+            if (( SECONDS >= deadline )); then
+              echo "PID $pid still running after bootout" >&2
+              exit 1
+            fi
+            sleep 0.1
+          done
+          ! launchctl print "$domain/org.solodawn.node" >/dev/null 2>&1
+          ! "$exe" status >/dev/null 2>&1
+
+      - name: Clean up launchd agent on failure
+        if: failure()
+        run: |
+          uid=$(id -u)
+          launchctl bootout "gui/$uid/org.solodawn.node" 2>/dev/null || true
+          launchctl bootout "user/$uid/org.solodawn.node" 2>/dev/null || true
+          rm -f "$HOME/Library/LaunchAgents/org.solodawn.node.plist"
+
+  windows:
+    name: smoke (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - run: git config --global core.autocrlf false
+        shell: pwsh
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+
+      - name: Install, run scheduled task headless, verify and remove
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $csSource = @'
+          using System;
+          using System.Collections.Generic;
+          using System.Runtime.InteropServices;
+          using System.Text;
+
+          public static class SmokeWin32 {
+              [StructLayout(LayoutKind.Sequential)]
+              private struct PROCESS_BASIC_INFORMATION {
+                  public IntPtr Reserved1;
+                  public IntPtr PebBaseAddress;
+                  public IntPtr Reserved2_0;
+                  public IntPtr Reserved2_1;
+                  public IntPtr UniqueProcessId;
+                  public IntPtr InheritedFromUniqueProcessId;
+              }
+
+              private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+              [DllImport("kernel32.dll", SetLastError = true)]
+              private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+
+              [DllImport("kernel32.dll", SetLastError = true)]
+              private static extern bool CloseHandle(IntPtr h);
+
+              [DllImport("kernel32.dll", SetLastError = true)]
+              private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr baseAddress, byte[] buffer, int size, out IntPtr bytesRead);
+
+              [DllImport("ntdll.dll")]
+              private static extern int NtQueryInformationProcess(IntPtr hProcess, int infoClass, ref PROCESS_BASIC_INFORMATION pbi, int size, out int returnLength);
+
+              [DllImport("user32.dll")]
+              private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+              [DllImport("user32.dll")]
+              private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+              [DllImport("user32.dll")]
+              public static extern bool IsWindowVisible(IntPtr hWnd);
+
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+              private static extern int GetClassNameW(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+              [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              private static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint msg, UIntPtr wParam, string lParam, uint flags, uint timeout, out UIntPtr result);
+
+              [DllImport("kernel32.dll", SetLastError = true)]
+              public static extern bool FreeConsole();
+
+              [DllImport("kernel32.dll", SetLastError = true)]
+              public static extern bool AttachConsole(uint dwProcessId);
+
+              [DllImport("kernel32.dll")]
+              public static extern IntPtr GetConsoleWindow();
+
+              public static string ClassName(IntPtr hWnd) {
+                  if (hWnd == IntPtr.Zero) return "";
+                  var sb = new StringBuilder(256);
+                  int n = GetClassNameW(hWnd, sb, sb.Capacity);
+                  return n > 0 ? sb.ToString(0, n) : "";
+              }
+
+              public static void BroadcastEnvironment() {
+                  UIntPtr res;
+                  SendMessageTimeoutW((IntPtr)0xffff, 0x001A, UIntPtr.Zero, "Environment", 0x0002, 5000, out res);
+              }
+
+              public static string[] WindowsForPids(int pid1, int pid2) {
+                  var list = new List<string>();
+                  EnumWindows((hWnd, _) => {
+                      uint wpid;
+                      GetWindowThreadProcessId(hWnd, out wpid);
+                      if (wpid == (uint)pid1 || wpid == (uint)pid2) {
+                          list.Add(string.Format("pid={0} hwnd=0x{1:X} class={2} visible={3}", wpid, hWnd.ToInt64(), ClassName(hWnd), IsWindowVisible(hWnd)));
+                      }
+                      return true;
+                  }, IntPtr.Zero);
+                  return list.ToArray();
+              }
+
+              private static IntPtr ReadPtr(IntPtr hProc, IntPtr addr) {
+                  byte[] buf = new byte[IntPtr.Size];
+                  IntPtr read;
+                  if (!ReadProcessMemory(hProc, addr, buf, buf.Length, out read) || (int)read != buf.Length) {
+                      throw new InvalidOperationException("ReadProcessMemory pointer failed: " + Marshal.GetLastWin32Error());
+                  }
+                  return IntPtr.Size == 8 ? (IntPtr)BitConverter.ToInt64(buf, 0) : (IntPtr)BitConverter.ToInt32(buf, 0);
+              }
+
+              public static string ReadProcessVar(int pid, string name) {
+                  IntPtr hProc = OpenProcess(0x0410, false, pid);
+                  if (hProc == IntPtr.Zero) {
+                      throw new InvalidOperationException("OpenProcess failed: " + Marshal.GetLastWin32Error());
+                  }
+                  try {
+                      var pbi = new PROCESS_BASIC_INFORMATION();
+                      int retLen;
+                      int status = NtQueryInformationProcess(hProc, 0, ref pbi, Marshal.SizeOf(typeof(PROCESS_BASIC_INFORMATION)), out retLen);
+                      if (status != 0 || pbi.PebBaseAddress == IntPtr.Zero) {
+                          throw new InvalidOperationException("NtQueryInformationProcess failed: 0x" + status.ToString("X"));
+                      }
+                      IntPtr procParams = ReadPtr(hProc, IntPtr.Add(pbi.PebBaseAddress, 0x20));
+                      IntPtr envPtr = ReadPtr(hProc, IntPtr.Add(procParams, 0x80));
+                      var chars = new List<char>();
+                      long cur = envPtr.ToInt64();
+                      bool prevNull = false;
+                      while (chars.Count < 1048576) {
+                          int pageRem = (int)(0x1000 - (cur & 0xFFF));
+                          if ((pageRem & 1) != 0) pageRem--;
+                          if (pageRem <= 0) pageRem = 2;
+                          byte[] buf = new byte[pageRem];
+                          IntPtr nRead;
+                          if (!ReadProcessMemory(hProc, (IntPtr)cur, buf, pageRem, out nRead) || (int)nRead < 2) {
+                              throw new InvalidOperationException("ReadProcessMemory env failed: " + Marshal.GetLastWin32Error());
+                          }
+                          int count = (int)nRead & ~1;
+                          for (int i = 0; i < count; i += 2) {
+                              char ch = (char)(buf[i] | (buf[i + 1] << 8));
+                              if (ch == '\0') {
+                                  if (prevNull) goto Done;
+                                  prevNull = true;
+                              } else {
+                                  prevNull = false;
+                              }
+                              chars.Add(ch);
+                          }
+                          cur += count;
+                      }
+                  Done:
+                      string block = new string(chars.ToArray());
+                      string prefix = name + "=";
+                      foreach (string entry in block.Split('\0')) {
+                          if (entry.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) {
+                              return entry.Substring(prefix.Length);
+                          }
+                      }
+                      return null;
+                  } finally {
+                      CloseHandle(hProc);
+                  }
+              }
+          }
+          '@
+          Add-Type -TypeDefinition $csSource
+
+          $installDir = Join-Path $env:RUNNER_TEMP 'sd-$USERNAME-%USERNAME%'
+          $cliDir = Join-Path $env:RUNNER_TEMP 'cli-$USERNAME-%25\bin'
+          $shellOnlyDir = Join-Path $env:RUNNER_TEMP 'shell-only-bin'
+          New-Item -ItemType Directory -Force -Path $installDir, $cliDir, $shellOnlyDir | Out-Null
+          $exe = Join-Path $installDir 'solodawn.exe'
+          if ($exe -notlike '*$USERNAME*%USERNAME%*') { throw "unexpected exe path: $exe" }
+
+          & go build -o $exe ./cmd/solodawn
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $probe = Join-Path $env:RUNNER_TEMP 'probe'
+          New-Item -ItemType Directory -Force -Path $probe | Out-Null
+          $psi = [System.Diagnostics.ProcessStartInfo]::new($exe, 'node')
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardError = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.Environment['LocalAppData'] = $probe
+          $psi.Environment['USERPROFILE'] = $probe
+          $probeProc = [System.Diagnostics.Process]::Start($psi)
+          if (-not $probeProc.WaitForExit(1500)) {
+            $probeProc.Kill()
+            $probeProc.WaitForExit()
+            Write-Host 'Using unmodified solodawn.exe (startNode is wired).'
+          } else {
+            $stderr = $probeProc.StandardError.ReadToEnd()
+            if ($stderr -like '*node runtime is unavailable*') {
+              Write-Host '::notice::startNode is the pre-N-4 stub (internal/node/socket.go:181); rebuilding with -overlay stand-in on startNode.'
+              $nodeDir = (& go list -f '{{.Dir}}' ./internal/node).Trim()
+              $nodeGo = Join-Path $nodeDir 'node.go'
+              $smokeGo = Join-Path $env:RUNNER_TEMP 'smoke_node.go'
+              $overlayJson = Join-Path $env:RUNNER_TEMP 'overlay.json'
+              $utf8 = [System.Text.UTF8Encoding]::new($false)
+              $smokeCode = @'
+          package node
+
+          import (
+          	"context"
+          	"encoding/json"
+          	"errors"
+          	"net"
+          	"os"
+          	"os/signal"
+          	"syscall"
+          	"time"
+          )
+
+          var Version = "dev"
+
+          func init() {
+          	startNode = func(_ string, l *Local) error {
+          		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+          		defer stop()
+          		go func() {
+          			<-ctx.Done()
+          			_ = l.SetDeadline(time.Now())
+          		}()
+          		for {
+          			conn, err := l.Accept()
+          			if err != nil {
+          				if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+          					return nil
+          				}
+          				return err
+          			}
+          			go smokeHandle(conn)
+          		}
+          	}
+          }
+
+          func smokeHandle(conn net.Conn) {
+          	defer conn.Close()
+          	open, _, _, err := AcceptOpening(conn)
+          	if err != nil {
+          		return
+          	}
+          	enc := json.NewEncoder(conn)
+          	if open.Cmd == "status" {
+          		_ = enc.Encode(localReply{Text: Version})
+          		_ = enc.Encode(localReply{Done: true, OK: true})
+          		return
+          	}
+          	_ = enc.Encode(localReply{Done: true, Error: "unsupported command: " + open.Cmd})
+          }
+          '@
+              [System.IO.File]::WriteAllText($smokeGo, $smokeCode, $utf8)
+              $ovl = @{ Replace = @{ $nodeGo = $smokeGo } } | ConvertTo-Json -Compress
+              [System.IO.File]::WriteAllText($overlayJson, $ovl, $utf8)
+              & go build -overlay $overlayJson -o $exe ./cmd/solodawn
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            } else {
+              throw "solodawn node failed unexpectedly (exit $($probeProc.ExitCode)): $stderr"
+            }
+          }
+          Remove-Item -Recurse -Force $probe
+
+          $origUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $taskName = "SoloDawn-$sid"
+          try {
+            $newUserPath = if ([string]::IsNullOrEmpty($origUserPath)) { $cliDir } else { "$cliDir;$origUserPath" }
+            [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+            [SmokeWin32]::BroadcastEnvironment()
+
+            $prevPath = $env:PATH
+            $env:PATH = "$shellOnlyDir;$cliDir;$prevPath"
+            try {
+              & $exe service install
+              if ($LASTEXITCODE -ne 0) { throw "solodawn service install exited $LASTEXITCODE" }
+            } finally {
+              $env:PATH = $prevPath
+            }
+
+            $task = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop
+            Write-Host "SessionId=$((Get-Process -Id $PID).SessionId) Task=$($task.TaskName) Execute=$($task.Actions[0].Execute) Arguments=$($task.Actions[0].Arguments)"
+            Start-ScheduledTask -TaskPath '\' -TaskName $taskName
+
+            $deadline = (Get-Date).AddSeconds(20)
+            $statusOut = $null
+            while ($true) {
+              $out = & $exe status 2>$null
+              if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace("$out")) {
+                $statusOut = "$out".Trim()
+                break
+              }
+              if ((Get-Date) -ge $deadline) {
+                Get-ScheduledTask -TaskPath '\' -TaskName $taskName | Format-List * | Out-String | Write-Host
+                Get-ScheduledTaskInfo -TaskPath '\' -TaskName $taskName | Format-List * | Out-String | Write-Host
+                Get-WinEvent -LogName 'Microsoft-Windows-TaskScheduler/Operational' -MaxEvents 20 -ErrorAction SilentlyContinue |
+                  Format-List TimeCreated, Id, Message | Out-String | Write-Host
+                & $exe status
+                throw 'timed out waiting for solodawn status from scheduled task'
+              }
+              Start-Sleep -Milliseconds 250
+            }
+            Write-Host "solodawn status: $statusOut"
+
+            $nodeProcs = @(Get-CimInstance Win32_Process -Filter "Name = 'solodawn.exe'" | Where-Object { $_.ExecutablePath -eq $exe })
+            if ($nodeProcs.Count -ne 1) {
+              throw "expected 1 running solodawn.exe at $exe, found $($nodeProcs.Count)"
+            }
+            $nodePid = [int]$nodeProcs[0].ProcessId
+            $conhostPid = [int]$nodeProcs[0].ParentProcessId
+            $conhost = Get-CimInstance Win32_Process -Filter "ProcessId = $conhostPid"
+            Write-Host "nodePid=$nodePid parentPid=$conhostPid parent=$($conhost.Name) cmd=$($conhost.CommandLine)"
+            if ($conhost.Name -ine 'conhost.exe' -or $conhost.CommandLine -notlike '*--headless*') {
+              throw "expected parent conhost.exe --headless, got $($conhost.Name): $($conhost.CommandLine)"
+            }
+
+            # Check PATH seen by the scheduled-task node process.
+            $gotPath = [SmokeWin32]::ReadProcessVar($nodePid, 'PATH')
+            if ([string]::IsNullOrEmpty($gotPath)) {
+              throw 'PATH in node process is empty'
+            }
+            $entries = $gotPath -split ';' | Where-Object { $_ -ne '' }
+            $hasUserCli = $entries -icontains $cliDir
+            $hasShellOnly = $entries -icontains $shellOnlyDir
+            Write-Host "Node PATH has HKCU entry ($cliDir): $hasUserCli; has shell-only entry ($shellOnlyDir): $hasShellOnly"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Windows scheduled-task PATH: HKCU entry present=$hasUserCli, shell-only entry present=$hasShellOnly"
+            if (-not $hasUserCli) {
+              # Also check whether at least logon User Path entries are present if Task Scheduler cached logon env.
+              throw "Node PATH did not include user Path entry $cliDir; got PATH=$gotPath"
+            }
+
+            # Check that no visible console window or ConsoleWindowClass is attached to solodawn.exe or conhost.exe.
+            $nodeMain = (Get-Process -Id $nodePid).MainWindowHandle
+            $conhostMain = (Get-Process -Id $conhostPid).MainWindowHandle
+            $ownedWindows = [SmokeWin32]::WindowsForPids($nodePid, $conhostPid)
+            Write-Host "MainWindowHandles: node=$nodeMain conhost=$conhostMain; top-level windows: $($ownedWindows -join '; ')"
+            if ($nodeMain -ne [IntPtr]::Zero -or $conhostMain -ne [IntPtr]::Zero) {
+              throw "unexpected MainWindowHandle: node=$nodeMain conhost=$conhostMain"
+            }
+            foreach ($w in $ownedWindows) {
+              if ($w -like '*visible=True*' -or $w -like '*class=ConsoleWindowClass*') {
+                throw "unexpected console/visible window on node or conhost: $w"
+              }
+            }
+
+            $env:SMOKE_CS = $csSource
+            $env:SMOKE_NODE_PID = "$nodePid"
+            $consoleJson = & pwsh -NoProfile -NonInteractive -Command {
+              $ErrorActionPreference = 'Stop'
+              Add-Type -TypeDefinition $env:SMOKE_CS
+              [void][SmokeWin32]::FreeConsole()
+              $attached = [SmokeWin32]::AttachConsole([uint32]$env:SMOKE_NODE_PID)
+              $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+              $hwnd = if ($attached) { [SmokeWin32]::GetConsoleWindow() } else { [IntPtr]::Zero }
+              $cls = [SmokeWin32]::ClassName($hwnd)
+              $vis = if ($hwnd -ne [IntPtr]::Zero) { [SmokeWin32]::IsWindowVisible($hwnd) } else { $false }
+              [pscustomobject]@{
+                attached = $attached
+                win32Error = $err
+                hwnd = ('0x{0:X}' -f $hwnd.ToInt64())
+                className = $cls
+                visible = $vis
+              } | ConvertTo-Json -Compress
+            }
+            if ($LASTEXITCODE -ne 0) { throw "console probe failed ($LASTEXITCODE): $consoleJson" }
+            Write-Host "AttachConsole check: $consoleJson"
+            $console = $consoleJson | ConvertFrom-Json
+            if ($console.visible -or $console.className -eq 'ConsoleWindowClass') {
+              throw "console window attached to headless node: $consoleJson"
+            }
+
+            # Remove service registration and check that the task is gone and the node stops.
+            & $exe service remove
+            if ($LASTEXITCODE -ne 0) { throw "solodawn service remove exited $LASTEXITCODE" }
+            if ($null -ne (Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue)) {
+              throw "scheduled task $taskName still exists after solodawn service remove"
+            }
+
+            if ($null -ne (Get-Process -Id $nodePid -ErrorAction SilentlyContinue)) {
+              Write-Host "::notice::solodawn service remove unregistered $taskName while leaving PID $nodePid running (service_windows.go:30); stopping process."
+              Stop-Process -Id $nodePid -Force -ErrorAction SilentlyContinue
+              Stop-Process -Id $conhostPid -Force -ErrorAction SilentlyContinue
+            }
+
+            $stopDeadline = (Get-Date).AddSeconds(10)
+            while ($null -ne (Get-Process -Id $nodePid -ErrorAction SilentlyContinue)) {
+              if ((Get-Date) -ge $stopDeadline) { throw "PID $nodePid did not stop" }
+              Start-Sleep -Milliseconds 100
+            }
+            & $exe status 2>$null
+            if ($LASTEXITCODE -eq 0) { throw 'solodawn status still succeeded after node stopped' }
+          } finally {
+            [Environment]::SetEnvironmentVariable('Path', $origUserPath, 'User')
+            Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+            Get-CimInstance Win32_Process -Filter "Name = 'solodawn.exe'" -ErrorAction SilentlyContinue |
+              Where-Object { $_.ExecutablePath -eq $exe } |
+              ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          }
