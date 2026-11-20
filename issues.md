@@ -12,6 +12,42 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the decoder of the task row (P-1, `internal/proto`) checks no form of `slug`; `planning/contracts/local.md` section 7, "Slug", gives the only form the home produces.
 - Status: open. P-1 refuses such a row when it decodes it, so the refusal comes before any host sees the row.
 
+### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
+
+- Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
+- Cause: `pair` (`cmd/solodawn/main.go:61`) only sends the command through `Command.send` (`internal/node/cmd.go:40`). No unit owned starting the node.
+- Status: open. Added to N-4's row in `planning/steps/parallel-plan-units.md` by the coordinator's decision of 2026-11-20 (independent review of `internal/node`).
+
+### 2026-11-20 · bug · Two nodes starting together could each remove the other's socket
+
+- Symptom: two nodes that started together on one data directory both ran over a stale `sock`: one removed the other's live socket, and the first one's close then removed the second's (89 of 3000 rounds in the independent review of `internal/node`).
+- Cause: the dial of `sock` and its removal were not one step (`internal/node/socket.go`, before this fix).
+- Status: resolved. `local.md` section 3, "One node per data directory", now holds the rule: an exclusive lock on `lock` in the data directory, taken by `ListenLocal` (`internal/node/socket.go:38`, `lockData` at `:61`) before the socket is touched.
+
+### 2026-11-20 · limitation · The start-at-login entries are not run by a real service manager
+
+- Symptom: the tests check the files and the task definition that `solodawn service install` writes, not a service manager starting the node from them. Not verified:
+  1. a systemd user unit started by a real user manager, with the escaping of `ExecStart` (`$$`, `%%`) and the `Environment="PATH=…"` line (`internal/node/service_linux.go`);
+  2. launchd loading the agent with its `EnvironmentVariables` (`internal/node/service_darwin.go`);
+  3. the scheduled task running the node headless through `conhost.exe --headless` (`internal/node/service_windows.go`); Windows CI only builds the action.
+- Cause: nothing is installed on the development machine, by the coordinator's decision of 2026-11-20.
+- Status: open. Candidate for a CI smoke job on GitHub's throwaway runners (Linux, macOS, Windows) after the quota reset: install, log in or start the manager, check that the node runs with the expected PATH, remove.
+
+### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
+
+- Symptom, from the independent review of `internal/node`:
+  1. `Apply` checks `Busy` and then calls `Restart` (`internal/node/update.go:98`). A turn or a takeover admitted between the two is restarted.
+  2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
+  3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
+- Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
+- Status: open, for N-4.
+
+### 2026-11-20 · limitation · `SHA256SUMS` proves the download intact, not where it came from
+
+- Symptom: the node checks the binary against `SHA256SUMS` from the same release (`local.md` section 9). Whoever can replace the binary there can replace `SHA256SUMS` too, so the check catches a damaged or cut download, not a forged release.
+- Cause: the contract has no signature over releases; binaries are not signed (decided). The download itself is https only, follows at most five redirects, each to https, is limited in size, and is given up after 60 s without data, whatever its total time (`internal/node/update.go`, `get`).
+- Status: accepted trade-off of the contract.
+
 ### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
 
 - Symptom: `crap.py` gives `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reports `internal/peer` at 100% of statements.
@@ -60,13 +96,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
 
 - Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
-- Cause: `startNode` is a stub that returns that error until N-4 assembles the runtime (`internal/node/socket.go:80-84`); `cmd/solodawn/main.go:26-28` registers `node` without arguments.
+- Cause: `startNode` is a stub that returns that error until N-4 assembles the runtime (`internal/node/socket.go:181-183`); `cmd/solodawn/main.go:26-28` registers `node` without arguments.
 - Status: open until N-4. What I-8 needs from N-4 is listed in [#132](https://github.com/huanchong-99/SoloDawn/pull/132).
 
 ### 2026-11-20 · limitation · A node's socket does not fit under a long HOME on macOS
 
 - Symptom: with a HOME of more than about 60 bytes, `solodawn node` exits with `listen unix <HOME>/Library/Application Support/solodawn/sock: bind: invalid argument`. Seen on macOS with HOME under a session's temporary directory of over 100 bytes.
-- Cause: a Unix socket path holds at most 103 bytes on macOS (107 on Linux), and on macOS the socket is 41 bytes below HOME (`internal/node/dir.go:23-24`, `internal/node/socket.go:23-27`). The system's temporary directory there (`/var/folders/…/T/`, 49 bytes) leaves room for a short name only, so `t.TempDir()` as HOME fails. `internal/node/socket_test.go:175-179`, `features/cmd_local_test.go:29-34` and `web/e2e/nodes.ts` create their directories under `/tmp` on macOS for this reason.
+- Cause: a Unix socket path holds at most 103 bytes on macOS (107 on Linux), and on macOS the socket is 41 bytes below HOME (`internal/node/dir.go:23-24`, `internal/node/socket.go:46`). The system's temporary directory there (`/var/folders/…/T/`, 49 bytes) leaves room for a short name only, so `t.TempDir()` as HOME fails. `internal/node/socket_test.go:289-298`, `features/cmd_local_test.go:29-34` and `web/e2e/nodes.ts` create their directories under `/tmp` on macOS for this reason.
 - Effect: none for an ordinary home directory such as `/Users/<name>`.
 - Status: open, accepted for tests; a test that sets HOME for a node on macOS keeps it under `/tmp`.
 
@@ -127,10 +163,10 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: neither frame has a Go type or a wire example yet, and the mock answers from wire examples only (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:94-96`, `web/src/lib/proto.ts:372-377`). Both are frozen by unit P-2 (`planning/contracts/conventions.md` section 5; `planning/steps/parallel-plan-units.md` section 1), which also adds the mock answers for `host.info` and `groups`; B-10 named them before the parallel plan.
 - Status: open. `host.info` was left out by the coordinator's decision of 2026-11-20, until it has an example; the `groups` push was found in the review of PR #61 and not changed there.
 
-### 2026-11-20 · limitation · Random ids are checked in `n` and `g` of a signed payload only
+### 2026-11-20 · limitation · Random ids are checked in `n`, `g` and a signal's `conn` only
 
-- Symptom: `contracts/conventions.md` section 2 makes any text that is no random id a wrong type in every field that holds one. `proto.Decode` and `decode` check it for `n` and `g` of a signed payload, which is what the envelope check reads (`contracts/envelope.md` section 3, check 3). A row, a frame or a command field that holds an id (`g` of `sync` or of a row, `thread`, `re`, `task`, `mentions`, a row's own `id`) still takes any text.
-- Cause: only those two fields have the type (`internal/proto/envelope.go:12-23`, `web/src/lib/proto.ts:17-22`). The contracts type `n` and `g` as ids in a field table; for the other fields `contracts/rows.md` says "random ids unless stated" without saying per field which values stand beside the id (the `by` of a message row may be `"system"`, a device row's `id` is `<user id>:<ver>`).
+- Symptom: `contracts/conventions.md` section 2 makes any text that is no random id a wrong type in every field that holds one. `proto.Decode` and `decode` check it for `n` and `g` of a signed payload, which is what the envelope check reads (`contracts/envelope.md` section 3, check 3), and for `conn` of a signalling payload, which a node drops otherwise (`internal/peer/signal.go:104-109`) and so does the browser (`web/src/lib/rendezvous.ts:175-180`). A row, a frame or a command field that holds an id (`g` of `sync` or of a row, `thread`, `re`, `task`, `mentions`, a row's own `id`) still takes any text.
+- Cause: only those fields have the type (`internal/proto/envelope.go:12-23`, `web/src/lib/proto.ts:33-36`). The contracts type `n` and `g` as ids in a field table; for the other fields `contracts/rows.md` says "random ids unless stated" without saying per field which values stand beside the id (the `by` of a message row may be `"system"`, a device row's `id` is `<user id>:<ver>`).
 - Status: open. A field gets the type (`proto.ID` in Go, `Id` in `proto.ts`) in the task that first reads it from the wire.
 
 ### 2026-11-20 · limitation · A message cut short by a closing transport is forwarded as if it were complete
@@ -173,7 +209,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · deviation · The web client does not handle `full` yet
 
 - Symptom: a browser that joins a pairing room that already has two members is answered `{"t":"full","room":"<room id>"}` (`planning/contracts/rendezvous.md` section 2.2), but the web client drops the frame without telling the page, so a third browser keeps waiting for `joined`.
-- Cause: `full` is not among the frames the web rendezvous client reads (`web/src/lib/rendezvous.ts:20`); a frame that does not parse is ignored (`web/src/lib/rendezvous.ts:55-56`). The server sends it from `internal/rendezvous/room.go` (`join`).
+- Cause: `full` is not among the frames the web rendezvous client reads (`web/src/lib/rendezvous.ts:21`); a frame that does not parse is ignored (`web/src/lib/rendezvous.ts:165-168`). The server sends it from `internal/rendezvous/room.go` (`join`).
 - Status: open, owner W-2.
 
 ### 2026-11-20 · limitation · `ReviewedMerge.GitHubRepo` is not filled from the group's repository yet
@@ -243,6 +279,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a clone reached through a symbolic link and through its real path had two locks.
 - Cause: `cloneLock` keyed by `filepath.Clean` only; `internal/host/merge.go:36`, `:62` and `:114` lock `m.Repo` and `internal/host/workspace.go:29` locked `filepath.Join(projectDir, "repo")`.
 - Status: resolved in branch `fix/host-workspace-review`: `cloneLock`, the one helper both use, keys by the real path of the longest existing prefix (`internal/host/workspace.go:21-33`), so a clone has one key before and after it exists. A relative and an absolute spelling still differ; the node passes absolute paths. Test: `TestCloneLockFollowsSymbolicLinks`.
+
+### 2026-11-20 · bug · The independent review of `web/src/lib` found ten faults in signalling, the tab lock, the device log and the wire types, and its re-check five more
+
+- Symptom: none showed in use, as no module has a caller outside tests yet (W-2, U-15). F1: a path sent every frame at once and any size; 150 `send` calls in one tick reached the socket, and the server closes a connection at its 121st frame in 10 seconds or at a frame over 16 KiB. F2: one URL the browser refuses (`ws://` from an HTTPS page, a malformed URL) made `rendezvous()` throw and left the sockets already opened. F3: `DeviceLog.apply` called for entries 1, 2, 3 at once refused a later one as `gap` when its signature was checked first. F4: a path closed before `ready` kept every frame sent to it, and `receive` was still called after `close()`. F5: a frame of a path could reach `receive` before a `from` that arrived ahead of it. F6: an `AbortError` of the session itself was read as a stolen lock. F7: `usage` and `checks` took `[]`, which Go refuses. F8: a `from` whose `conn` is no random id was delivered; Go drops it. F9: a `ready` with `ttl` below 1 was taken, and ICE entries pion and the browser refuse were passed on. F10: `{"re":1,"ok":true,"err":{…}}` was read as a success. The re-check of the first fix found: N1, one exception in `receive` or in `known` silenced a path for good; N2, a backlog left in bursts exactly at the server's 10-second boundary, so jitter closes the path; N3, a `to` of 16,383 or 16,384 bytes passed, whose `from` the server refuses; N4, the pace followed the wall clock, and setting it back an hour held a frame for 61 minutes; N5, TURN entries with an empty username or credential and ports outside 1 to 65535 were kept, on which Chromium throws.
+- Cause: `web/src/lib/rendezvous.ts:33`, `:35`, `:45-52`, `:63-72`, `:88-93`, `web/src/lib/devlog.ts:50-51`, `web/src/lib/tablock.ts:13-17`, `web/src/lib/proto.ts:27`, `:77-78`, `:235-242`, `:275`, `:569-582` before the fix.
+- Status: resolved in branch `fix/web-lib-review`. A path keeps 90 frames in any 11 seconds, a second inside the server's 10, by `performance.now()`, and queues the rest in order behind one timer; a frame over 16,384 UTF-8 bytes, or a `to` over 16,382 (its `from` is 2 bytes longer), throws `RangeError` before any path sends it (`web/src/lib/rendezvous.ts:26-34`, `:107-145`, `:219-224`); `internal/peer/path.go:53-78`, `:135-148` pace at 10 seconds and is fixed apart. A refused URL is a path that sends nothing and reports `closed` after the call (`:93-105`). Each path delivers through one promise chain, its `closed` last, and nothing after `close()` (`:77-91`, `:142-145`, `:182-198`); a check or a `receive` that throws is passed to `reportError`, its frame counts as dropped, and the frames after it still come (`:63`, `:83-91`). `DeviceLog.apply` checks entries one after another in the order of the calls (`web/src/lib/devlog.ts:46-57`). Only a rejection of `request()` is a steal; a session's error is thrown after `request()` resolves (`web/src/lib/tablock.ts:3-31`). `usage`, `checks` and empty bodies refuse an array through `record` (`web/src/lib/proto.ts:17-25`); `conn` is an `Id` (`:36`) and the browser drops a `from` whose `conn` is not (`web/src/lib/rendezvous.ts:175-180`); a success frame has no `err` (`web/src/lib/proto.ts:139-140`). A `ready` with `ttl` below 1 closes its path, such an `ice` answer is dropped, and only usable ICE entries go on (`web/src/lib/rendezvous.ts:37-61`): the entries Go drops (`internal/peer/path.go:245-270`), and also an empty URL list, TURN without a username or credential or with an empty one, and a port outside 1 to 65535, on which a browser's `RTCPeerConnection` throws (WebRTC, "validate an ICE server"; Chromium for the empty values and the port). Upper-case schemes and ports with leading zeros are dropped, which pion takes. Tests: `web/src/lib/rendezvous.test.ts`, `devlog.test.ts`, `tablock.test.ts`, `proto.test.ts`, `web/features/rendezvous.spec.ts`.
 
 ### 2026-11-20 · limitation · The own-address rule knows the interface addresses of the start only
 

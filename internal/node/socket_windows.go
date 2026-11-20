@@ -4,13 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/sys/windows"
 )
-
-const connRefused = windows.WSAECONNREFUSED
 
 // ownerDACL is a protected DACL with one entry: full access for the current
 // user, with the given inheritance flags. The ignored errors cannot occur:
@@ -39,6 +38,25 @@ func privateDir(dir string) error {
 		return err
 	}
 	return windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, ownerDACL("OICI"), nil)
+}
+
+// lockHeld is LockFileEx's answer when another process holds the lock.
+const lockHeld = windows.ERROR_LOCK_VIOLATION
+
+func lockExclusive(f *os.File) error {
+	return windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, new(windows.Overlapped))
+}
+
+// unlockFile releases the lock at once: Windows releases a lock left on a
+// closed handle only when its resources allow.
+func unlockFile(f *os.File) error {
+	return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, new(windows.Overlapped))
+}
+
+// listenPrivate binds the socket; privateDir's inherited DACL and ownerOnly
+// limit who can open it.
+func listenPrivate(path string) (*net.UnixListener, error) {
+	return net.ListenUnix("unix", &net.UnixAddr{Net: "unix", Name: path})
 }
 
 // ownerOnly replaces the socket's inherited DACL with a protected one that
