@@ -17,8 +17,9 @@ hold them to it.
   all. (A tolerant decoder gives one key several spellings, and a revoked
   key could then be added again under another one `[verified]`.)
 - Times are integer milliseconds since the Unix epoch, UTC.
-- Random ids are 16 random bytes, base64url (22 characters). An id is
-  compared as text and never decoded.
+- Random ids are 16 random bytes in canonical base64url: 22 characters.
+  Where a receiver reads a field that holds one, anything else is a wrong
+  type (`contracts/conventions.md` section 2).
 
 ## 2. Device
 
@@ -57,9 +58,11 @@ hold them to it.
 - A text that is not a device id by these rules is never used as a key: as
   `k` it fails `bad_sig`, as `dev` or `user` it makes a log entry refused,
   and a `pair` message that carries it is ignored.
-- Being a point of the curve is not part of being a device id: a `dev` is
-  not tested for it, and nothing verifies under a `k` that is not one
-  (section 3, check 1).
+- Being a point of the curve is not part of being a device id. Nothing
+  verifies under a `k` that is not one (section 3, check 1). A `dev` is
+  not tested for it by either implementation, and a browser does not hand
+  a `dev` to `importKey` to find out: an entry may add 32 bytes that are no
+  point, and that device can never sign.
 - **Fingerprint** (shown to people) = first 6 bytes of SHA-256 of the public
   key, as 12 upper-case hex digits in groups of four: `3F9A 0C21 77BE`.
 
@@ -102,8 +105,8 @@ failure with one error code:
    has a reason to listen to (the receiver's owner; a member of a group it
    homes; the home of a group it participates in; or a pairing peer, section
    6).
-3. `bad_request`: `p` is a JSON object in which `t` and `n` are strings and
-   `ts` is an integer, and `g` and `to`, when there, are strings. The
+3. `bad_request`: `p` is a JSON object in which `t` is a string, `n` an id
+   and `ts` an integer; `g`, when there, is an id, and `to` a string. The
    payload is parsed at this point because the two checks that follow read
    `to` and `ts`. How fields, `null` and integers are read is in
    `contracts/conventions.md` section 2.
@@ -230,15 +233,22 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
 ```
 
 - `role` is `a` for the side that created the secret, `b` for the other.
-- `mac` = HMAC-SHA256(key = secret bytes, message =
-  `"solodawn/pair/1\n"` + role + `"\n"` + device id), base64url.
+- `mac` = HMAC-SHA256(key = secret bytes, message = `"solodawn/pair/1\n"`
+  + role + `"\n"` + device id + `"\n"` + kind + `"\n"` + name),
+  base64url. Each part is the field as it stands in the message after
+  JSON decoding, encoded the way `TextEncoder` encodes text: UTF-8, with a
+  lone surrogate becoming U+FFFD. Nothing is trimmed, normalised or
+  escaped. `name` comes last and may hold line breaks: the three parts
+  before it cannot, so the message is read back in one way only.
 - A side accepts a `pair` message when its `role` is the other role (the
-  room can hand a side its own message back), its `k` is a device id, and
-  its `mac` is the one that follows from that `role` and `k`. It ignores
-  any other. After that it knows the other's device id is authentic for
-  the next 10 minutes and accepts signed signalling from it. The
-  rendezvous service sees the room id and both device ids, and cannot
-  forge a `mac` without the secret.
+  room can hand a side its own message back), its `k` is a device id, its
+  `kind` is `node` or `browser`, its `name` is a string, and its `mac` is
+  the one that follows from those four values. It ignores any other. After
+  that it knows that the other's device id, kind and name are authentic
+  for the next 10 minutes, and accepts signed signalling from it. The
+  rendezvous service sees the room id and both messages, and can change
+  nothing in them without the secret: `kind` and `name` are what the side
+  that already belongs to a person writes into the `add` entry.
 - Until the newcomer is in the log, the connection carries `hello` and
   `devlog` and nothing else.
 - Once the data channel is open, the side that already belongs to a person

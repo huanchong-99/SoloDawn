@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	crockford  = base32.NewEncoding("0123456789ABCDEFGHJKMNPQRSTVWXYZ").WithPadding(base32.NoPadding)
-	secretForm = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{16}$`)
+	crockford    = base32.NewEncoding("0123456789ABCDEFGHJKMNPQRSTVWXYZ").WithPadding(base32.NoPadding)
+	copiedSecret = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{16}$`)
 )
 
 // Secret is a pairing secret in its canonical form: 16 Crockford base32
@@ -31,14 +31,16 @@ func NewSecret() Secret {
 	return Secret(crockford.EncodeToString(b))
 }
 
-// ParseSecret reads a secret as a person copied it, in either case, with or
-// without the hyphens.
+// ParseSecret reads a secret as a person copied it: the hyphens are removed
+// and the letters a to z made upper case, and nothing more. No other character
+// is mapped to one of the alphabet, which strings.ToUpper alone would do for
+// the long s.
 func ParseSecret(text string) (Secret, error) {
-	s := strings.ToUpper(strings.ReplaceAll(text, "-", ""))
-	if !secretForm.MatchString(s) {
+	s := strings.ReplaceAll(text, "-", "")
+	if !copiedSecret.MatchString(s) {
 		return "", errors.New("not a pairing secret: want 16 characters such as 7K2M-9QXD-4F8T-WB3N")
 	}
-	return Secret(s), nil
+	return Secret(strings.ToUpper(s)), nil
 }
 
 // String returns the secret as shown to people: four groups of four.
@@ -60,9 +62,10 @@ func (s Secret) MAC(role, device string) string {
 	return b64.EncodeToString(m.Sum(nil))
 }
 
-// Verify reports whether a received pair message proves that its sender holds
-// the secret. role is the role the other side must have: a message in the
-// receiver's own role is its own message sent back, and proves nothing.
+// Verify reports whether a received pair message is to be accepted: it has
+// the role the other side must have, its k is a device id, and its mac proves
+// that its sender holds the secret. A message in the receiver's own role is
+// its own message sent back, and proves nothing.
 func (s Secret) Verify(m proto.Pair, role string) bool {
-	return m.Role == role && hmac.Equal([]byte(m.MAC), []byte(s.MAC(role, m.Key)))
+	return m.Role == role && isDevice(m.Key) && hmac.Equal([]byte(m.MAC), []byte(s.MAC(role, m.Key)))
 }

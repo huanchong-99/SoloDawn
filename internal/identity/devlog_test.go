@@ -313,3 +313,113 @@ func TestAdopts(t *testing.T) {
 		}
 	}
 }
+
+// rewritten signs the payload of an entry after changing its text.
+func rewritten(signer device, p, old, new string) proto.Envelope {
+	changed := strings.Replace(p, old, new, 1)
+	if changed == p {
+		panic("the payload does not hold " + old)
+	}
+	return signer.key.Sign(changed)
+}
+
+func TestLogNeverLosesItsLastValidDevice(t *testing.T) {
+	l := started(t)
+	apply(t, l, "the only device revokes itself", revoke(browser, 2, browser), false, errLast)
+	apply(t, l, "a revoke of a key that was never added, by the only device", revoke(browser, 2, stranger), true, nil)
+	apply(t, l, "the only device revokes itself after that", revoke(browser, 3, browser), false, errLast)
+	apply(t, l, "add the node", add(browser, 3, node), true, nil)
+	apply(t, l, "add the tablet", add(browser, 4, tablet), true, nil)
+	apply(t, l, "the node revokes the browser, two remain", revoke(node, 5, browser), true, nil)
+	apply(t, l, "the node revokes itself, one remains", revoke(node, 6, node), true, nil)
+	apply(t, l, "the tablet, the last one, revokes itself", revoke(tablet, 7, tablet), false, errLast)
+	apply(t, l, "the last one revokes a device that is already revoked", revoke(tablet, 7, node), true, nil)
+	apply(t, l, "the last one adds a revoked device", add(tablet, 8, node), false, errRevoked)
+	if got := valid(l); got != "tablet browser" {
+		t.Errorf("valid %q", got)
+	}
+}
+
+// Rule 2 of section 4: what is read of an entry, and nothing else.
+func TestLogReadsOnlyTheFieldsOfAnEntry(t *testing.T) {
+	const longS = string(rune(0x17f))
+	addNode, revokeNode := change(browser, 2, "add", node), change(browser, 3, "revoke", node)
+	weak := b64.EncodeToString(weakValues()[2])
+
+	for what, c := range map[string]struct {
+		p, old, new string
+		want        error
+	}{
+		"another kind":                   {addNode, `"kind":"node"`, `"kind":"phone"`, BadRequest},
+		"kind in upper case":             {addNode, `"kind":"node"`, `"kind":"Node"`, BadRequest},
+		"an empty kind":                  {addNode, `"kind":"node"`, `"kind":""`, BadRequest},
+		"no kind":                        {addNode, `"kind":"node",`, ``, BadRequest},
+		"kind null":                      {addNode, `"kind":"node"`, `"kind":null`, BadRequest},
+		"kind only as KIND":              {addNode, `"kind":"node"`, `"KIND":"node"`, BadRequest},
+		"no name":                        {addNode, `,"name":"workstation"`, ``, BadRequest},
+		"name null":                      {addNode, `"name":"workstation"`, `"name":null`, BadRequest},
+		"name a number":                  {addNode, `"name":"workstation"`, `"name":7`, BadRequest},
+		"name only as NAME":              {addNode, `"name":"workstation"`, `"NAME":"workstation"`, BadRequest},
+		"ver null":                       {addNode, `"ver":2`, `"ver":null`, BadRequest},
+		"ver a text":                     {addNode, `"ver":2`, `"ver":"2"`, BadRequest},
+		"ver with a fraction":            {addNode, `"ver":2`, `"ver":2.5`, BadRequest},
+		"ver beyond 2^53-1":              {addNode, `"ver":2`, `"ver":9007199254740992`, BadRequest},
+		"ver only as VER":                {addNode, `"ver":2`, `"VER":2`, BadRequest},
+		"ver under a name with a long s": {addNode, `"ver":2`, `"ver` + longS + `":2`, BadRequest},
+		"no ver":                         {addNode, `"ver":2,`, ``, BadRequest},
+		"user null":                      {addNode, `"user":"` + browser.id() + `"`, `"user":null`, BadRequest},
+		"no user":                        {addNode, `"user":"` + browser.id() + `",`, ``, BadRequest},
+		"user only as USER":              {addNode, `"user"`, `"USER"`, BadRequest},
+		"another user":                   {addNode, `"user":"` + browser.id() + `"`, `"user":"` + node.id() + `"`, errPerson},
+		"op null":                        {addNode, `"op":"add"`, `"op":null`, BadRequest},
+		"op in upper case":               {addNode, `"op":"add"`, `"op":"ADD"`, BadRequest},
+		"dev null":                       {addNode, `"dev":"` + node.id() + `"`, `"dev":null`, BadRequest},
+		"dev a weak key":                 {addNode, `"dev":"` + node.id() + `"`, `"dev":"` + weak + `"`, BadRequest},
+		"dev in another spelling":        {addNode, `"dev":"` + node.id() + `"`, `"dev":"` + respelled(node.id()) + `"`, BadRequest},
+		"t null":                         {addNode, `"t":"device"`, `"t":null`, BadRequest},
+		"t in upper case":                {addNode, `"t":"device"`, `"t":"DEVICE"`, BadRequest},
+		"a list":                         {addNode, addNode, "[" + addNode + "]", BadRequest},
+		"null":                           {addNode, addNode, "null", BadRequest},
+	} {
+		l := started(t)
+		apply(t, l, what, rewritten(browser, c.p, c.old, c.new), false, c.want)
+		apply(t, l, what+": the entry itself, after it", browser.key.Sign(c.p), true, nil)
+	}
+
+	for what, c := range map[string]struct{ p, old, new string }{
+		"ver written 2.0":                       {addNode, `"ver":2`, `"ver":2.0`},
+		"ver written 2e0":                       {addNode, `"ver":2`, `"ver":2e0`},
+		"ver written with digits past a double": {addNode, `"ver":2`, `"ver":2.0000000000000001`},
+		"VER after ver":                         {addNode, `"ver":2`, `"ver":2,"VER":3`},
+		"VER before ver":                        {addNode, `"ver":2`, `"VER":3,"ver":2`},
+		"ver twice: the last counts":            {addNode, `"ver":2`, `"ver":7,"ver":2`},
+		"no n and no ts":                        {addNode, `"n":"` + testID("2addworkstation") + `","ts":` + fmt.Sprint(ts+2) + `,`, ``},
+		"n and ts null":                         {addNode, `"ts":` + fmt.Sprint(ts+2), `"ts":null,"g":null,"to":null`},
+		"ts a text":                             {addNode, `"ts":` + fmt.Sprint(ts+2), `"ts":"long ago"`},
+		"an empty name":                         {addNode, `"name":"workstation"`, `"name":""`},
+		"a name of 100000 characters":           {addNode, `"name":"workstation"`, `"name":"` + strings.Repeat("w", 100000) + `"`},
+		"a field the log does not know":         {addNode, `"name":"workstation"`, `"name":"workstation","os":null,"DEV":"x","OP":"revoke"`},
+	} {
+		l := started(t)
+		env := rewritten(browser, c.p, c.old, c.new)
+		apply(t, l, what, env, true, nil)
+		if got := valid(l); got != "phone browser, workstation" {
+			t.Errorf("%s: valid %q", what, got)
+		}
+		apply(t, l, what+": the unchanged entry for the same version", browser.key.Sign(c.p), false, errFork)
+	}
+
+	// On a revoke, kind and name are not read at all.
+	for what, c := range map[string]struct{ old, new string }{
+		"a revoke with another kind": {`"op":"revoke"`, `"op":"revoke","kind":"phone"`},
+		"a revoke with kind null":    {`"op":"revoke"`, `"op":"revoke","kind":null,"name":null`},
+		"a revoke with a name":       {`"op":"revoke"`, `"op":"revoke","kind":7,"name":["x"]`},
+	} {
+		l := started(t)
+		apply(t, l, "add the node", browser.key.Sign(addNode), true, nil)
+		apply(t, l, what, rewritten(browser, revokeNode, c.old, c.new), true, nil)
+		if got := valid(l); got != "phone browser" {
+			t.Errorf("%s: valid %q", what, got)
+		}
+	}
+}

@@ -1,7 +1,15 @@
-// The shared test vectors of contracts/envelope.md section 8, which internal/identity passes too.
+// The shared test vectors of planning/contracts/vectors.md, which internal/identity passes too.
 import { describe, expect, it } from 'vitest';
 import { DeviceLog } from './devlog';
-import { Device, decode, encode, openCommand, verifyChallenge, verifyEnvelope } from './identity';
+import {
+  Device,
+  decode,
+  encode,
+  openCommand,
+  openSignal,
+  verifyChallenge,
+  verifyEnvelope,
+} from './identity';
 import { goldens } from './mock';
 import { mac, parseSecret, room, shown, verifyPair } from './pairing';
 import type { Envelope } from './proto';
@@ -11,17 +19,35 @@ interface Side {
   mac: string;
 }
 
-/** The shape of section 8. */
+/** The shape of section 1 of the vectors contract. */
 interface Vectors {
   keys: { name: string; seed: string; device: string; fingerprint: string }[];
   envelopes: (Envelope & { name: string; ok: boolean })[];
   rendezvous: { nonce: string; k: string; s: string }[];
+  received: {
+    name: string;
+    kind: 'command' | 'signal';
+    me: string;
+    now: number;
+    known: boolean;
+    env: Envelope;
+    code: string;
+  }[];
   pairing: { shown: string; secret: string; room: string; a: Side; b: Side }[];
+  bad_secrets: { name: string; shown: string }[];
   devlogs: {
     name: string;
     user: string;
     entries: { env: Envelope; accept: boolean }[];
     valid: string[];
+  }[];
+  adopt: {
+    name: string;
+    user: string;
+    me: string;
+    peer: string;
+    entries: Envelope[];
+    ok: boolean;
   }[];
 }
 
@@ -45,26 +71,21 @@ async function device(seed: string): Promise<Device> {
 
 const devices = new Map<string, Device>();
 
-/** Whether this WebCrypto signs deterministically, as RFC 8032 does: Node's does, Safari's
- *  does not. The contract holds only Go to the bytes of s; a browser's signature must verify. */
-async function deterministic(device: Device): Promise<boolean> {
-  return (await device.sign('x')).s === (await device.sign('x')).s;
-}
-
-/** Signing p again with the seed of k: the same s where signing is deterministic, else a
- *  signature that verifies. */
-async function signsAgain(device: Device, p: string, s: string): Promise<boolean> {
-  const again = await device.sign(p);
-  return (await deterministic(device)) ? again.s === s : verifyEnvelope(crypto, again);
-}
-
 describe('the shared crypto vectors', () => {
-  it('have the cases section 8 asks for', () => {
-    expect(vectors.keys.length).toBeGreaterThanOrEqual(2);
-    expect(vectors.envelopes.length).toBeGreaterThanOrEqual(4);
-    expect(vectors.rendezvous.length).toBeGreaterThanOrEqual(1);
-    expect(vectors.pairing.length).toBeGreaterThanOrEqual(3);
-    expect(vectors.devlogs.length).toBeGreaterThanOrEqual(8);
+  it('have every part, each with cases', () => {
+    const parts = Object.entries(vectors).map(([part, cases]) => [part, cases.length > 0]);
+    expect(parts).toStrictEqual(
+      [
+        'keys',
+        'envelopes',
+        'rendezvous',
+        'received',
+        'pairing',
+        'bad_secrets',
+        'devlogs',
+        'adopt',
+      ].map((part) => [part, true]),
+    );
   });
 
   it.each(vectors.keys)('key $name: device id and fingerprint follow from the seed', async (c) => {
@@ -79,17 +100,22 @@ describe('the shared crypto vectors', () => {
     expect(await verifyEnvelope(crypto, env)).toBe(c.ok);
     const opened = await openCommand(crypto, env, '', everyone, now);
     expect('code' in opened && opened.code === 'bad_sig').toBe(!c.ok);
-    const signer = devices.get(c.k);
-    if (c.ok) expect(await signsAgain(signer!, c.p, c.s)).toBe(true);
+    // Signature bytes are never compared (section 2 of the vectors contract): Safari's are
+    // random. What the client signs itself must verify.
+    if (c.ok) expect(await verifyEnvelope(crypto, await devices.get(c.k)!.sign(c.p))).toBe(true);
   });
 
   it.each(vectors.rendezvous)('rendezvous nonce $nonce: the answer is for it alone', async (c) => {
     expect(await verifyChallenge(crypto, c.k, c.nonce, c.s)).toBe(true);
     expect(await verifyChallenge(crypto, c.k, c.nonce + 'A', c.s)).toBe(false);
-    const signer = devices.get(c.k)!;
-    const again = await signer.signChallenge(c.nonce);
-    if (await deterministic(signer)) expect(again).toBe(c.s);
+    const again = await devices.get(c.k)!.signChallenge(c.nonce);
     expect(await verifyChallenge(crypto, c.k, c.nonce, again)).toBe(true);
+  });
+
+  it.each(vectors.received)('received "$name": $code', async (c) => {
+    const open = c.kind === 'signal' ? openSignal : openCommand;
+    const opened = await open(crypto, c.env, c.me, () => c.known, c.now);
+    expect('code' in opened ? opened.code : 'ok').toBe(c.code);
   });
 
   it.each(vectors.pairing)('pairing $shown: secret, room and both macs', async (c) => {
@@ -123,6 +149,10 @@ describe('the shared crypto vectors', () => {
     expect(await verifyPair(crypto, secret, b, 'a')).toBe(false);
   });
 
+  it.each(vectors.bad_secrets)('bad secret "$name": no secret', (c) => {
+    expect(() => parseSecret(c.shown)).toThrow('not a pairing secret');
+  });
+
   it.each(vectors.devlogs)('device log "$name"', async (c) => {
     const log = new DeviceLog(crypto, c.user);
     const accepted = [];
@@ -135,6 +165,11 @@ describe('the shared crypto vectors', () => {
       );
     expect(accepted).toStrictEqual(c.entries.map((e) => e.accept));
     expect(log.validDevices()).toStrictEqual(c.valid);
+  });
+
+  it.each(vectors.adopt)('adopt "$name"', async (c) => {
+    const log = await DeviceLog.replay(crypto, c.user, c.entries);
+    expect(log.adopts(c.me, c.peer)).toBe(c.ok);
   });
 
   it('encodes a device id back to itself', () => {

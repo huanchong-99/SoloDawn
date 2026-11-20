@@ -16,7 +16,6 @@ const noEd25519 = {
 let browserCrypto: Crypto;
 let browserCss: Pick<typeof CSS, 'supports'>;
 let browserIdb: () => IDBFactory;
-let persisted = 0; // requests for persistent storage; a plain count, which no mock reset clears
 let svelte: typeof import('svelte');
 let app: Record<string, never> | undefined;
 
@@ -31,7 +30,6 @@ async function open(hash = '') {
     crypto: browserCrypto,
     css: browserCss,
     idb: browserIdb,
-    storage: { persist: () => Promise.resolve(++persisted > 0) },
   });
   svelte.flushSync();
 }
@@ -43,12 +41,10 @@ function supported() {
   browserCrypto = crypto;
   browserCss = CSS;
   browserIdb = () => idb;
-  persisted = 0;
 }
 
 /** This browser's device, as the client keeps it. */
-const thisDevice = () =>
-  loadDevice({ crypto, idb: browserIdb, storage: { persist: () => Promise.resolve(true) } });
+const thisDevice = () => loadDevice({ crypto, idb: browserIdb });
 
 const newDevice = async () =>
   Device.of(crypto, await crypto.subtle.generateKey(ed25519, false, ['sign', 'verify']));
@@ -365,9 +361,6 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     Then('the browser is the same device as the first time', async () => {
       expect(texts('nav a[aria-current="page"]')).toEqual(['群聊']);
       expect((await thisDevice()).id).toBe(firstId);
-    });
-    And('the browser asked once for persistent site storage', () => {
-      expect(persisted).toBe(1);
     });
   });
 
