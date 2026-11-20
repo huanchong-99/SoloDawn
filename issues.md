@@ -36,6 +36,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `entry` reads the payload with `encoding/json` into `proto.DeviceEntry` (`internal/identity/devlog.go:68`), and `addressed` into `proto.PayloadHeader` (`internal/identity/envelope.go:53`); `encoding/json` matches keys without regard to case and refuses a fraction for an integer, and the contract has no canonical JSON. The shared vectors (`internal/proto/testdata/crypto.json`) hold no such payload.
 - Status: open. Only the signer can write such a payload, and it gains no authority it does not already have; what it can do is make a Go receiver and a browser read its own payload differently. No software of this project writes one.
 
+### 2026-11-20 · limitation · Go verifies signatures of small-order public keys that OpenSSL refuses
+
+- Symptom: for the device id `AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA` (the identity point), the signature made of the identity point and a zero scalar verifies over any text in `crypto/ed25519`, so `VerifyChallenge` and `OpenCommand` (with a `known` that admits the id) accept it without any private key. The other small-order points verify such forgeries for part of all texts. Node 24 (OpenSSL) refuses the same signature, so a Go receiver and another Ed25519 implementation can disagree on whether an envelope or log entry verifies.
+- Cause: `ed25519.Verify` (`internal/identity/key.go:90`) follows RFC 8032 without refusing small-order or non-canonical public keys, and `contracts/envelope.md` section 2 does not say whether such a key is a device id.
+- Status: open, for the planning lead: whether a device id must not be a small-order point, so that both implementations refuse it. Such a key is trusted only after a valid device adds it or a secret holder pairs it, so nobody can use it against a device that is not theirs.
+
 ## Resolved
 
 ### 2026-11-20 · bug · Go acceptance suite ran the web feature
