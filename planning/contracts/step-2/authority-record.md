@@ -25,9 +25,9 @@ without a brief; a brief's `arg`; a role the brief does not give; labels),
 acceptance tests, with those of step 3 split off; `risks.md` K-4.
 
 P-4 freezes `allow.set`, `req`, `body.start`, `secretary_by`,
-`secretary_joined`, a brief's `arg` and the lists in `host.info`. T2-3 builds sections 2 to 5 on the
-host, T2-2 the home's side (sections 5 and 6), T2-4 section 7 and its
-vectors, T2-13 the labels.
+`secretary_joined`, a brief's `arg` and the lists in `host.info`. T2-3
+builds sections 2 to 5 on the host, T2-2 the home's side (sections 5 and 6),
+T2-4 section 7 and its vectors, T2-13 the labels.
 
 ## 2. Settled by the coordinator (2026-11-20)
 
