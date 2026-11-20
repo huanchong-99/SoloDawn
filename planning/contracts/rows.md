@@ -100,11 +100,12 @@ does not.
 ```json
 {"r":"task","id":"t12…","seq":805,"g":"Qm1…","num":12,
  "title":"Node: report connection path changes",
+ "slug":"node-report-connection-path-changes",
  "origin":"brief","brief":"<msg id>",
  "state":"active","step":"review","commit":"9f2c1ab",
  "assignee":"<member id>","reviewer":"<member id>",
  "foundation":false,"pass":90,"depends":[],
- "branch":"task/12-conn-events","pr":31,"pr_url":"https://…/pull/31",
+ "branch":"task/12-node-report-connection-path-changes","pr":31,"pr_url":"https://…/pull/31",
  "checks":{"local":{"ok":true,"at":1763598000000,"commit":"9f2c1ab"},
            "cloud":{"ok":true,"at":1763598300000,"commit":"9f2c1ab"}},
  "review":{"round":1,"score":86,"ok":false,"by":"<member id>","commit":"9f2c1ab","at":1763598900000},
@@ -118,6 +119,7 @@ does not.
 | Field | Values |
 | --- | --- |
 | `num` | per-group counter, shown as `T-12` |
+| `slug` | the task's name in its branch `task/<num>-<slug>` and its worktree: 1 to 40 characters of `a` to `z`, `0` to `9` and `-`, made from `title` by the rule of `contracts/local.md` section 7. The home writes it once, when it creates the task, and never changes it; hosts read it from here. Frozen in code by P-1 |
 | `origin` | `brief` (from a confirmed brief), `direct` (R-71), `takeover` (R-83) |
 | `state` | `queued`, `active`, `paused`, `failed`, `merged`, `cancelled` |
 | `step` | `branch`, `local_check`, `cloud_check`, `review`, `merge`. The card draws six positions; "pull request" is done when `pr` is set (`contracts/task-machine.md` section 1) |
