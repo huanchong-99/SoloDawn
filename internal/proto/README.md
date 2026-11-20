@@ -25,8 +25,13 @@ host command with `HostCommand` (`to` is always there).
 
 - A `set` command carries only what it changes, so each of its fields is a
   pointer: nil is "not sent", and a pointer to `""` or to an empty list is a value.
-- An optional text or id is a plain field with `omitempty`: left out when it is
-  empty, and an empty one that is sent is read as left out.
+- An optional text or id is a plain field with `omitempty`, left out when it is
+  empty. An empty text that is sent all the same is read as left out. An empty
+  id that is sent is refused, like any text that is no id: `"assignee":""`,
+  `"as":""`.
+- "At least one" is not judged here: a `set` that changes nothing and a
+  `task assign` with neither role decode, and the home refuses them
+  ([issues](../../issues.md)).
 - `Post[B]` holds what the author signs of the body: the row's body type,
   `EmptyBody` for a summary, `ReviewSigned` for a review. The home adds the rest.
 - `MemberStatus[E]` carries a host's fact as one of the event types, which are
@@ -89,7 +94,8 @@ alone reads four things differently from a browser. An error from `Decode` is
 - **Ids.** A field of type `ID` takes a random id, the canonical base64url spelling of 16 bytes
   (22 characters), and no other text, an empty one included. `n` and `g` of `PayloadHeader` have
   this type, and so has every id in a command payload, in an `Item`, and `g` of `inbox` and `ack`.
-  Rows, message bodies and the frames that read a group still hold ids as plain strings
+  Of the bodies a `post` carries, only a review's is checked: `task` of `ReviewSigned`. Rows, the
+  other message bodies and the frames that read a group still hold ids as plain strings
   ([issues](../../issues.md)).
 - **Slugs.** A field of type `Slug` takes 1 to 40 characters, groups of `a` to `z` and `0` to `9`
   with one `-` between two, and no other text. The `slug` of `TaskRow` has this type, so a slug

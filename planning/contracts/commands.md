@@ -41,10 +41,12 @@ result fields of its command.
 table lists for a command are all in its payload, except these optional
 ones:
 
-- where a table says "any of", only the fields being changed are sent;
+- where a table says "any of", only the fields being changed are sent, and
+  a command that sends none of them is `bad_request`;
 - `as`, there only when a host signs for one of its AIs;
 - in `act`: `arg` and `text` (which action has which: 1.4);
-- in `task assign`: `assignee` and `reviewer` (at least one of the two);
+- in `task assign`: `assignee` and `reviewer` (at least one of the two; with
+  neither it is `bad_request`);
 - in `member status`: `task` (the AI is on no task) and `event` (there is
   no fact to report);
 - in `task submitted`: `pr` and `pr_url` (the group has no remote);

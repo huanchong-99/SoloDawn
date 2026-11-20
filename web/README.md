@@ -128,7 +128,8 @@ development dependency, an IndexedDB for the tests.
   `Frame` is what a node may send on `ctl`. Code after it trusts the type. An envelope's `p` stays
   the exact string received. `Id` is a random id, the canonical base64url spelling of 16 bytes;
   `n`, `g` and `conn` of a signed payload have this type, and so has every id in a command
-  payload and in an inbox item; rows and message bodies still hold ids as strings (`issues.md`).
+  payload and in an inbox item, the `task` in the body of a review post included; rows and the
+  other message bodies still hold ids as strings (`issues.md`).
   `Slug` is a task's slug, the type of `slug` in a task row. The payload of each command has its
   schema (`GroupCreate`, `Post`, `Act`, `TaskStart`); a schema names the `op`, `kind` or `code`
   that selects it. `Ctl` is the interface of a `ctl` connection: numbered requests, their
