@@ -387,6 +387,11 @@ func TestTaskMergeWaitsForTheCloneLock(t *testing.T) {
 	})
 	workEqual(t, inspected, MergeResult{MergeCommit: head})
 	workOK(t, RemoveTaskWorkspace(f.project, 10, "merge", TaskMerged))
-	requireCloneLockWait(t, f.repo, "branch deletion", func() error { return merge.DeleteBranch(t.Context()) })
+	var deleted bool
+	requireCloneLockWait(t, f.repo, "branch deletion", func() (err error) {
+		deleted, err = merge.DeleteBranch(t.Context())
+		return err
+	})
+	workEqual(t, deleted, true)
 	workEqual(t, fixtureGit(t, f.repo, "for-each-ref", "--format=%(refname)", "refs/heads/task"), "")
 }

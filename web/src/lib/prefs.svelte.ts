@@ -1,12 +1,19 @@
 // Browser preferences (theme, language) and the lookup of interface texts.
 import { MediaQuery } from 'svelte/reactivity';
+import chatEn from '../messages/chat.en.json';
+import chatZh from '../messages/chat.zh-CN.json';
 import en from '../messages/en.json';
+import groupsEn from '../messages/groups.en.json';
+import groupsZh from '../messages/groups.zh-CN.json';
 import zh from '../messages/zh-CN.json';
 import { shift } from './motion';
 
-export type Key = keyof typeof zh;
-
-const messages = { 'zh-CN': zh, en } satisfies Record<string, Record<Key, string>>;
+// The shell's texts, then those of each area of the interface, which has its own two files.
+const messages = {
+  'zh-CN': { ...zh, ...groupsZh, ...chatZh },
+  en: { ...en, ...groupsEn, ...chatEn },
+};
+export type Key = keyof (typeof messages)['zh-CN'] & keyof (typeof messages)['en'];
 export type Lang = keyof typeof messages;
 export const langs = Object.keys(messages) as Lang[];
 

@@ -184,7 +184,7 @@ the test of the switch takes their place:
   effect on disk.
 - The switches of section 5 are tested once, with declarations made up in
   the test: no shipped CLI is needed to show a refusal. Those are the
-  capability tests among A10.x of `steps/step-2-3-acceptance.md`.
+  capability tests among A10.x of `steps/step-3-acceptance.md`.
 - A `live` part needs the owner's key for that CLI. Until it has run, the
   driver's level tables carry `[unverified]` where step 1 carries
   `[verified]`.
@@ -229,7 +229,7 @@ is in that description. `[documented]` means read there and not run.
 4. `[unverified]` The values on Windows, for the step 1 drivers too
    (spike S-5).
 5. The capability tests are A10.1 to A10.4 of
-   `steps/step-2-3-acceptance.md` (unit C2-0).
+   `steps/step-3-acceptance.md` (unit C2-0).
 6. The answers of `steps/parallel-plan-step-2-3.md` section 1 that this
    file rests on: D-16 only. The level cap of D-1 is used as R-44 states
    it.

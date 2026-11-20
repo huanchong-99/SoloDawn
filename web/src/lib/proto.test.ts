@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 import { describe, expect, it } from 'vitest';
-import { examples, goldens, schemaOf } from './mock';
+import { examples, goldens, mockCtl, schemaOf } from './mock';
 import * as p from './proto';
 
 /** What the two readers of the wire agree on: internal/proto/testdata/wire.json, which the Go
@@ -363,9 +363,53 @@ describe('rendezvous frames', () => {
 });
 
 describe('decode', () => {
-  const frames = ['welcome', 'synced', 'fetched', 'cmd-ok', 'cmd-pair-link', 'cmd-error'];
+  /** Each answer example, and the type of the request it answers. */
+  const answers: [string, p.RequestType][] = [
+    ['welcome', 'hello'],
+    ['synced', 'sync'],
+    ['fetched', 'fetch'],
+    ['cmd-ok', 'cmd'],
+    ['cmd-started', 'cmd'],
+    ['cmd-reviewed', 'cmd'],
+    ['cmd-pair-link', 'cmd'],
+    ['host-info-answer', 'host.info'],
+    ['audit-answer', 'audit'],
+  ];
+  const pushes = ['rows', 'reset', 'devlog', 'groups', 'host-info-push'];
 
-  it.each([...frames, 'rows', 'reset', 'devlog'])('reads the %s frame', (name) => {
+  it('has an answer example for every request type', () => {
+    expect([...new Set(answers.map(([, t]) => t))].toSorted()).toEqual(
+      Object.keys(p.AnswerOf).toSorted(),
+    );
+  });
+
+  it.each(answers)('reads %s as the answer to %s', (name, t) => {
+    expect(p.decodeAnswer(t, goldens[name])).toStrictEqual(JSON.parse(goldens[name]));
+    expect(schemaOf[name]).toBe(p.AnswerOf[t]);
+  });
+
+  it.each(Object.keys(p.AnswerOf) as p.RequestType[])(
+    'reads an error as the answer to %s, whatever else it holds',
+    (t) => {
+      const error = JSON.parse(goldens['cmd-error']);
+      expect(p.decodeAnswer(t, goldens['cmd-error'])).toStrictEqual(error);
+      const text = JSON.stringify({ ...error, ok: true, t: 'welcome' });
+      expect(p.decodeAnswer(t, text)).toStrictEqual(error);
+    },
+  );
+
+  // Only an object can be an error answer; any other JSON value is refused by the answer schema,
+  // a ValiError like any frame that does not match, never a TypeError of looking for `err` in it.
+  it.each(Object.keys(p.AnswerOf) as p.RequestType[])(
+    'refuses a JSON value that is no object as the answer to %s',
+    (t) => {
+      for (const text of ['null', '4', '"err"', '[]', '[{"err":{}}]', 'true']) {
+        expect(() => p.decodeAnswer(t, text), text).toThrow(v.ValiError);
+      }
+    },
+  );
+
+  it.each([...pushes, 'cmd-error'])('reads the %s frame, which needs no request', (name) => {
     expect(p.decode(p.Frame, goldens[name])).toStrictEqual(JSON.parse(goldens[name]));
   });
 
@@ -376,33 +420,62 @@ describe('decode', () => {
     },
   );
 
-  it('reads the groups push, which has no wire example yet', () => {
-    const groups = '{"t":"groups","groups":[{"g":"Qm1","name":"Website","seq":812}]}';
-    expect(p.decode(p.Frame, groups)).toStrictEqual(JSON.parse(groups));
+  it('reads the groups push with the entries of welcome', () => {
+    const groups = p.decode(p.Groups, goldens.groups);
+    expect(groups.groups).toStrictEqual(p.decode(p.Welcome, goldens.welcome).groups);
     expect(() => p.decode(p.Frame, '{"t":"groups","groups":[{"g":"Qm1"}]}')).toThrow(v.ValiError);
   });
 
-  // An answer without t is one to cmd; one with t is read by the schema its t names.
-  it.each(['welcome', 'synced', 'fetched'])(
-    'refuses a %s answer without one of its fields',
-    (name) => {
-      const keys = Object.keys(JSON.parse(goldens[name])).filter((key) => key !== 't');
-      for (const key of keys) {
-        const missing = JSON.parse(goldens[name]);
-        delete missing[key];
-        expect(() => p.decode(p.Frame, JSON.stringify(missing)), `without ${key}`).toThrow(
-          v.ValiError,
-        );
+  it('reads host.info as an answer by its request, and as a push without one', () => {
+    const answer = JSON.parse(goldens['host-info-answer']);
+    const push = JSON.parse(goldens['host-info-push']);
+    expect(p.decode(p.Frame, goldens['host-info-push'])).toStrictEqual(push);
+    expect(() => p.decodeAnswer('host.info', goldens['host-info-push'])).toThrow(v.ValiError);
+    expect(() => p.decodeAnswer('host.info', JSON.stringify({ ...answer, ok: false }))).toThrow(
+      v.ValiError,
+    );
+  });
+
+  // Read by the request they answer, the answers to cmd and audit ignore what they do not read,
+  // as Go does (contracts/conventions.md section 2).
+  it('ignores in a cmd answer the members it does not read, rows and t included', () => {
+    for (const extra of [{ rows: null }, { rows: [{ ts: 1 }] }, { t: 'audit' }, { t: null }]) {
+      const text = JSON.stringify({ re: 4, ok: true, ...extra });
+      expect(p.decodeAnswer('cmd', text), text).toStrictEqual({ re: 4, ok: true });
+    }
+  });
+
+  it('refuses an audit answer whose rows it cannot read', () => {
+    const answer = JSON.parse(goldens['audit-answer']);
+    for (const rows of [[{ ts: 1 }], 'none', null, [null]]) {
+      const text = JSON.stringify({ ...answer, rows });
+      expect(() => p.decodeAnswer('audit', text), text).toThrow(v.ValiError);
+    }
+    expect(() => p.decodeAnswer('audit', goldens['cmd-ok'])).toThrow(v.ValiError);
+  });
+
+  it.each(answers)('refuses %s, the answer to %s, without one of its fields', (name, t) => {
+    for (const key of Object.keys(JSON.parse(goldens[name]))) {
+      const missing = JSON.parse(goldens[name]);
+      delete missing[key];
+      const read = () => p.decodeAnswer(t, JSON.stringify(missing));
+      if (schemaOf[name] === p.CmdResult && !['re', 'ok'].includes(key)) {
+        expect(read, `without ${key}`).not.toThrow();
+      } else {
+        expect(read, `without ${key}`).toThrow(v.ValiError);
       }
-    },
-  );
+    }
+  });
 
   it('reads a node version as the release tag it was built from (contracts/local.md)', () => {
     expect(p.decode(p.Welcome, goldens.welcome).version).toMatch(/^v\d+\.\d+\.\d+$/);
   });
 
-  it('refuses a frame a node does not send', () => {
+  it('refuses a frame a node does not send, and an answer as a push', () => {
     expect(() => p.decode(p.Frame, goldens.hello)).toThrow(v.ValiError);
+    for (const name of ['welcome', 'synced', 'fetched', 'cmd-ok', 'audit-answer']) {
+      expect(() => p.decode(p.Frame, goldens[name]), name).toThrow(v.ValiError);
+    }
   });
 
   it('refuses text that is not JSON', () => {
@@ -531,6 +604,111 @@ describe('commands', () => {
       expect(accepts(name, { ...command, op: 'unknown' })).toBe(false);
     },
   );
+});
+
+describe('host surface', () => {
+  // A host command has `to` and a `t` with a dot; the frames of the host surface have no `to`.
+  const hostCommands = examples.filter((name) => {
+    const { t, to } = JSON.parse(goldens[name]);
+    return typeof t === 'string' && t.includes('.') && to !== undefined;
+  });
+
+  it.each(hostCommands)('%s is named by its t, and is for one node', (name) => {
+    const command = JSON.parse(goldens[name]);
+    expect(name).toBe(command.t.replace('.', '-'));
+    expect(command.to).toBe(p.decode(p.Welcome, goldens.welcome).device);
+    expect(accepts(name, { ...command, t: 'host.unknown' })).toBe(false);
+  });
+
+  it('holds the agent of host.info as settings.set and agent.set name it', () => {
+    const info = p.decode(p.HostInfo, goldens['host-info-answer']);
+    const set = p.decode(p.SettingsSet, goldens['settings-set']);
+    expect(info.agents.map((agent) => agent.agent)).toEqual(Object.keys(set.caps!));
+    expect(info.agents.map((agent) => agent.account)).toEqual(['personal', null]);
+    expect(p.decode(p.AgentSet, goldens['agent-set'])).toMatchObject({ agent: 'codex' });
+    expect(info.homes).toEqual([
+      { g: info.agents[0].groups[0].g, home: info.device, name: 'Website' },
+    ]);
+  });
+
+  it('reads caps only of the agents it knows, and refuses a cap without its max', () => {
+    const set = JSON.parse(goldens['settings-set']);
+    const read = (caps: unknown) => v.safeParse(p.SettingsSet, { ...set, caps });
+    expect(read({ Claude: { day: null } }).output).toMatchObject({ caps: {} });
+    expect(read({ codex: { day: { unit: 'turns' } } }).success).toBe(false);
+    expect(read({ codex: null }).success).toBe(false);
+    expect(read([]).success).toBe(false);
+  });
+
+  it('takes a takeover member and task, and a terminal member, only as ids', () => {
+    const start = JSON.parse(goldens['takeover-start']);
+    const resize = JSON.parse(goldens['pty-resize']);
+    expect(start.member).toBe(resize.ai);
+    expect(accepts('takeover-start', { ...start, member: 'codex' })).toBe(false);
+    expect(accepts('pty-resize', { ...resize, ai: 'codex' })).toBe(false);
+  });
+});
+
+describe('MCP tool lists', () => {
+  const lists = p.decode(p.ToolLists, goldens.tools);
+  const names = (kind: keyof p.ToolLists) => lists[kind].tools.map((tool) => tool.name);
+
+  it('reads tools.json as it is written, and nothing it does not name', () => {
+    expect(lists).toStrictEqual(JSON.parse(goldens.tools));
+    const described = JSON.parse(goldens.tools);
+    described.group.tools[0].description = 'Post a message.';
+    expect(v.is(p.ToolLists, described)).toBe(false);
+  });
+
+  it('lists the tools of section 1 to every session, and none twice', () => {
+    for (const kind of Object.keys(lists) as (keyof p.ToolLists)[]) {
+      expect(names(kind), kind).toEqual(expect.arrayContaining(['post', 'ask', 'net_status']));
+      expect(new Set(names(kind)).size, kind).toBe(names(kind).length);
+      expect(names(kind), kind).not.toContain('approve');
+    }
+    expect(names('secretary')).toEqual(expect.arrayContaining(['propose_brief', 'set_task']));
+    expect(names('task_level_1')).not.toContain('submit_task');
+    expect(names('task_level_2_3')).toContain('submit_task');
+  });
+});
+
+describe('mock connection', () => {
+  it('pushes reset and rows before it answers sync', async () => {
+    const seen: string[] = [];
+    const ctl = mockCtl((push) => seen.push(push.t));
+    const synced = await ctl.request({ t: 'sync', g: 'g', since: 0, state_only: false });
+    expect([...seen, synced]).toEqual(['reset', 'rows', { ...JSON.parse(goldens.synced), re: 1 }]);
+  });
+
+  it('answers audit with the example, typed by the request', async () => {
+    const ctl = mockCtl(() => {});
+    const answer: p.AuditAnswer | p.ErrorResponse = await ctl.request({
+      t: 'audit',
+      before: 0,
+      limit: 50,
+    });
+    expect(answer).toStrictEqual({ ...JSON.parse(goldens['audit-answer']), re: 1 });
+  });
+
+  it('answers host.info with the example, numbered', async () => {
+    const ctl = mockCtl(() => {});
+    await ctl.request({ t: 'host.info' });
+    const info = await ctl.request({ t: 'host.info' });
+    expect(info).toStrictEqual({ ...JSON.parse(goldens['host-info-answer']), re: 2 });
+  });
+
+  it('pushes groups before it answers a group create, and after no other command', async () => {
+    const seen: string[] = [];
+    const ctl = mockCtl((push) => seen.push(push.t));
+    const sign = (payload: unknown) => ({ p: JSON.stringify(payload), k: 'k', s: 's' });
+    await ctl.request({ t: 'cmd', env: p.decode(p.Cmd, goldens.cmd).env });
+    expect(seen).toEqual([]);
+    await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['group-pause'])) });
+    expect(seen).toEqual([]);
+    const created = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['group-create'])) });
+    expect(seen).toEqual(['groups']);
+    expect(created).toStrictEqual({ re: 3, ok: true });
+  });
 });
 
 describe('inbox', () => {
