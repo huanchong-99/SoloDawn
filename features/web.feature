@@ -78,7 +78,7 @@ Feature: Web client
     Given the wire examples in "internal/proto/testdata"
     When the client reads each one with the schema of its file name
     Then each one is read with every field as written
-    And each one is refused with one unknown field added
+    And each one is read without a field added that the client does not know
 
   Scenario: Screens can sync a group with no node
     Given a mock connection, with no node

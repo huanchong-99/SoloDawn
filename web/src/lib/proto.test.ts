@@ -69,10 +69,13 @@ describe('wire examples', () => {
     expect(p.decode(schemaOf[name], goldens[name])).toStrictEqual(JSON.parse(goldens[name]));
   });
 
-  it.each(examples)('%s is refused with an unknown field in any object', (name) => {
+  it.each(examples)('%s drops an unknown field in any object', (name) => {
     for (const path of objects(JSON.parse(goldens[name]))) {
       const extra = variant(name, path, (o) => (o.extra = 1));
-      expect(accepts(name, extra), `extra field at ${path.join('.')}`).toBe(false);
+      const read = p.decode(schemaOf[name], JSON.stringify(extra));
+      expect(read, `extra field at ${path.join('.')}`).toStrictEqual(JSON.parse(goldens[name]));
+      // So a golden file with a field that the schema lacks fails the exact test above.
+      expect(read, `extra field at ${path.join('.')}`).not.toStrictEqual(extra);
     }
   });
 

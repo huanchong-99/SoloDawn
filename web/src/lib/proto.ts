@@ -1,5 +1,6 @@
 // Wire types, mirroring internal/proto. Each message is declared once, as a valibot schema; its
-// TypeScript type is inferred from that schema under the same name. Objects are strict: an unknown
+// TypeScript type is inferred from that schema under the same name. An unknown field is dropped,
+// as Go's encoding/json does, so a node that adds a field does not break an older client; a missing
 // field is an error. A Go field tagged omitempty is optional here; a Go pointer without omitempty
 // is required and may be null. json.RawMessage fields are any JSON until a contract types them.
 import * as v from 'valibot';
@@ -10,13 +11,13 @@ const bool = v.boolean();
 const strs = v.array(str);
 
 // The signed payload `p` is kept as the exact string received: its bytes are what is signed.
-export const Envelope = v.strictObject({ p: str, k: str, s: str });
+export const Envelope = v.object({ p: str, k: str, s: str });
 export type Envelope = v.InferOutput<typeof Envelope>;
 
 const PayloadHeader = { n: str, ts: num, g: v.optional(str), to: v.optional(str) };
 const SignalHeader = { ...PayloadHeader, conn: str };
 
-export const Offer = v.strictObject({
+export const Offer = v.object({
   t: v.literal('offer'),
   ...SignalHeader,
   sdp: str,
@@ -24,10 +25,10 @@ export const Offer = v.strictObject({
 });
 export type Offer = v.InferOutput<typeof Offer>;
 
-export const Answer = v.strictObject({ t: v.literal('answer'), ...SignalHeader, sdp: str });
+export const Answer = v.object({ t: v.literal('answer'), ...SignalHeader, sdp: str });
 export type Answer = v.InferOutput<typeof Answer>;
 
-export const ICECandidate = v.strictObject({
+export const ICECandidate = v.object({
   t: v.literal('ice'),
   ...SignalHeader,
   cand: str,
@@ -35,7 +36,7 @@ export const ICECandidate = v.strictObject({
 });
 export type ICECandidate = v.InferOutput<typeof ICECandidate>;
 
-export const Pair = v.strictObject({
+export const Pair = v.object({
   t: v.literal('pair'),
   k: str,
   kind: str,
@@ -55,7 +56,7 @@ const DeviceChange = {
 };
 
 /** An entry of a person's device log: the payload of one of its envelopes. */
-export const DeviceEntry = v.strictObject({
+export const DeviceEntry = v.object({
   t: v.literal('device'),
   ...PayloadHeader,
   ...DeviceChange,
@@ -66,7 +67,7 @@ export type DeviceEntry = v.InferOutput<typeof DeviceEntry>;
 
 const Success = { re: num, ok: v.literal(true) };
 
-export const Hello = v.strictObject({
+export const Hello = v.object({
   t: v.literal('hello'),
   id: num,
   v: num,
@@ -76,9 +77,9 @@ export const Hello = v.strictObject({
 });
 export type Hello = v.InferOutput<typeof Hello>;
 
-const GroupSummary = v.strictObject({ g: str, name: str, seq: num });
+const GroupSummary = v.object({ g: str, name: str, seq: num });
 
-export const Welcome = v.strictObject({
+export const Welcome = v.object({
   t: v.literal('welcome'),
   ...Success,
   v: num,
@@ -92,10 +93,10 @@ export const Welcome = v.strictObject({
 export type Welcome = v.InferOutput<typeof Welcome>;
 
 /** The whole list of readable groups again, whenever it changes. No Go type or example yet (B-10). */
-export const Groups = v.strictObject({ t: v.literal('groups'), groups: v.array(GroupSummary) });
+export const Groups = v.object({ t: v.literal('groups'), groups: v.array(GroupSummary) });
 export type Groups = v.InferOutput<typeof Groups>;
 
-export const Devlog = v.strictObject({
+export const Devlog = v.object({
   t: v.literal('devlog'),
   user: str,
   entries: v.array(Envelope),
@@ -106,10 +107,10 @@ export type Devlog = v.InferOutput<typeof Devlog>;
 
 const RowHeader = { id: str, seq: num };
 
-export const GoneRow = v.strictObject({ r: str, ...RowHeader, gone: v.literal(true) });
+export const GoneRow = v.object({ r: str, ...RowHeader, gone: v.literal(true) });
 export type GoneRow = v.InferOutput<typeof GoneRow>;
 
-export const GroupRow = v.strictObject({
+export const GroupRow = v.object({
   r: v.literal('group'),
   ...RowHeader,
   name: str,
@@ -122,7 +123,7 @@ export const GroupRow = v.strictObject({
   checks: strs,
   pass: num,
   pass_foundation: num,
-  limits: v.strictObject({
+  limits: v.object({
     rounds: num,
     wakes_per_hour: num,
     turn_minutes: num,
@@ -133,7 +134,7 @@ export const GroupRow = v.strictObject({
     approval_wait_s: num,
     idle_notice_minutes: num,
   }),
-  paused: v.nullable(v.strictObject({ by: str, at: num })),
+  paused: v.nullable(v.object({ by: str, at: num })),
   created: num,
 });
 export type GroupRow = v.InferOutput<typeof GroupRow>;
@@ -147,7 +148,7 @@ const MemberRow = {
   last_seen: num,
 };
 
-export const HumanMemberRow = v.strictObject({
+export const HumanMemberRow = v.object({
   ...MemberRow,
   kind: v.literal('human'),
   role: str,
@@ -155,7 +156,7 @@ export const HumanMemberRow = v.strictObject({
 });
 export type HumanMemberRow = v.InferOutput<typeof HumanMemberRow>;
 
-export const AIMemberRow = v.strictObject({
+export const AIMemberRow = v.object({
   ...MemberRow,
   kind: v.literal('ai'),
   cli: str,
@@ -169,7 +170,7 @@ export const AIMemberRow = v.strictObject({
   task: v.optional(str),
   since: num,
   path: str,
-  usage: v.strictObject({
+  usage: v.object({
     window_pct: v.optional(num),
     window_resets: v.optional(num),
     day_cap_pct: v.optional(num),
@@ -180,7 +181,7 @@ export const AIMemberRow = v.strictObject({
 });
 export type AIMemberRow = v.InferOutput<typeof AIMemberRow>;
 
-export const DeviceRow = v.strictObject({
+export const DeviceRow = v.object({
   r: v.literal('device'),
   ...RowHeader,
   ...DeviceChange,
@@ -188,9 +189,9 @@ export const DeviceRow = v.strictObject({
 });
 export type DeviceRow = v.InferOutput<typeof DeviceRow>;
 
-const Check = v.strictObject({ ok: bool, at: num, commit: str });
+const Check = v.object({ ok: bool, at: num, commit: str });
 
-export const TaskRow = v.strictObject({
+export const TaskRow = v.object({
   r: v.literal('task'),
   ...RowHeader,
   g: str,
@@ -209,25 +210,23 @@ export const TaskRow = v.strictObject({
   branch: v.optional(str),
   pr: v.optional(num),
   pr_url: v.optional(str),
-  checks: v.strictObject({ local: v.optional(Check), cloud: v.optional(Check) }),
-  review: v.optional(
-    v.strictObject({ round: num, score: num, ok: bool, by: str, commit: str, at: num }),
-  ),
+  checks: v.object({ local: v.optional(Check), cloud: v.optional(Check) }),
+  review: v.optional(v.object({ round: num, score: num, ok: bool, by: str, commit: str, at: num })),
   wait: v.nullable(
-    v.strictObject({ kind: str, msg: v.optional(str), who: v.optional(strs), since: num }),
+    v.object({ kind: str, msg: v.optional(str), who: v.optional(strs), since: num }),
   ),
   failures: num,
-  thread: v.strictObject({
+  thread: v.object({
     count: num,
     rounds: num,
-    last: v.optional(v.strictObject({ by: str, kind: str, text: str, ts: num })),
+    last: v.optional(v.object({ by: str, kind: str, text: str, ts: num })),
   }),
-  stats: v.strictObject({ added: num, removed: num, started: num, ended: v.nullable(num) }),
+  stats: v.object({ added: num, removed: num, started: num, ended: v.nullable(num) }),
   created: num,
 });
 export type TaskRow = v.InferOutput<typeof TaskRow>;
 
-export const MsgRow = v.strictObject({
+export const MsgRow = v.object({
   r: v.literal('msg'),
   ...RowHeader,
   pos: num,
@@ -242,7 +241,7 @@ export const MsgRow = v.strictObject({
   re: v.nullable(str),
   body: v.unknown(),
   state: v.nullable(
-    v.strictObject({
+    v.object({
       status: str,
       by: v.optional(str),
       at: v.optional(num),
@@ -258,7 +257,7 @@ export const MsgRow = v.strictObject({
 });
 export type MsgRow = v.InferOutput<typeof MsgRow>;
 
-export const NoteRow = v.strictObject({
+export const NoteRow = v.object({
   r: v.literal('note'),
   ...RowHeader,
   g: str,
@@ -283,7 +282,7 @@ export type Row = v.InferOutput<typeof Row>;
 
 // Reading a group (datachannel.md section 4)
 
-export const Sync = v.strictObject({
+export const Sync = v.object({
   t: v.literal('sync'),
   id: num,
   g: str,
@@ -292,26 +291,26 @@ export const Sync = v.strictObject({
 });
 export type Sync = v.InferOutput<typeof Sync>;
 
-export const Reset = v.strictObject({ t: v.literal('reset'), g: str });
+export const Reset = v.object({ t: v.literal('reset'), g: str });
 export type Reset = v.InferOutput<typeof Reset>;
 
-export const Synced = v.strictObject({ t: v.literal('synced'), ...Success, g: str, seq: num });
+export const Synced = v.object({ t: v.literal('synced'), ...Success, g: str, seq: num });
 export type Synced = v.InferOutput<typeof Synced>;
 
-export const Rows = v.strictObject({ t: v.literal('rows'), g: str, rows: v.array(Row) });
+export const Rows = v.object({ t: v.literal('rows'), g: str, rows: v.array(Row) });
 export type Rows = v.InferOutput<typeof Rows>;
 
 const FetchPage = { t: v.literal('fetch'), id: num, g: str, before: num, limit: num };
 
 /** A page of a thread, or of the main line when `thread` is null. */
-export const FetchThread = v.strictObject({ ...FetchPage, thread: v.nullable(str) });
+export const FetchThread = v.object({ ...FetchPage, thread: v.nullable(str) });
 export type FetchThread = v.InferOutput<typeof FetchThread>;
 
 /** A page of the review messages or of the notes. */
-export const FetchKind = v.strictObject({ ...FetchPage, kind: str });
+export const FetchKind = v.object({ ...FetchPage, kind: str });
 export type FetchKind = v.InferOutput<typeof FetchKind>;
 
-export const Fetched = v.strictObject({
+export const Fetched = v.object({
   t: v.literal('fetched'),
   ...Success,
   rows: v.array(Row),
@@ -321,10 +320,10 @@ export type Fetched = v.InferOutput<typeof Fetched>;
 
 // Commands (datachannel.md section 5)
 
-export const Cmd = v.strictObject({ t: v.literal('cmd'), id: num, env: Envelope });
+export const Cmd = v.object({ t: v.literal('cmd'), id: num, env: Envelope });
 export type Cmd = v.InferOutput<typeof Cmd>;
 
-export const CmdResult = v.strictObject({
+export const CmdResult = v.object({
   ...Success,
   num: v.optional(num),
   passed: v.optional(bool),
@@ -334,9 +333,9 @@ export const CmdResult = v.strictObject({
 });
 export type CmdResult = v.InferOutput<typeof CmdResult>;
 
-export const ErrorResponse = v.strictObject({
+export const ErrorResponse = v.object({
   re: num,
-  err: v.strictObject({ code: str, msg: str }),
+  err: v.object({ code: str, msg: str }),
 });
 export type ErrorResponse = v.InferOutput<typeof ErrorResponse>;
 
