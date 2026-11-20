@@ -47,7 +47,7 @@ Node to client:
 
 ```json
 {"t":"welcome","re":1,"ok":true,"v":1,"device":"<node device id>",
- "name":"workstation","version":"0.3.1","time":1763600000000,
+ "name":"workstation","version":"v0.3.1","time":1763600000000,
  "groups":[{"g":"Qm1…","name":"Website","seq":812}],"owner":true}
 ```
 
@@ -133,7 +133,8 @@ before `synced` and rows from `fetch` never move it.
 
 - `thread` is a task id, or `null` for the main line. In its place,
   `"kind":"review"` asks for the review messages of all threads (the
-  ledger) and `"kind":"note"` for the notes (R-102).
+  ledger), `"kind":"note"` for the notes (R-102), and `"row":"<id>"` for
+  that one row of the group, with `before` 0 and `limit` 1 (unit HM-3).
 - `before` is a `pos` (`contracts/rows.md`): the answer holds rows with a
   lower `pos`, newest first. `before: 0` asks for the newest page; no `pos`
   is 0. For an older page the client sends the lowest `pos` it received.
@@ -145,8 +146,7 @@ before `synced` and rows from `fetch` never move it.
 
 The home stops filling the answer when the next row would exceed the message
 limit; `more` says whether older rows exist. `rows` is `[]` when there is
-nothing. An answer never holds a `gone` marker, with `kind: note` as with
-any other scope: a marker has no `pos` (`contracts/rows.md`).
+nothing and never a `gone` marker, which has no `pos` (`contracts/rows.md`).
 
 ## 5. Commands
 
@@ -226,7 +226,7 @@ carry the whole object:
 
 ```json
 {"t":"host.info","re":5,"ok":true,
- "device":"…","name":"workstation","os":"macOS 15.2","version":"0.3.1",
+ "device":"…","name":"workstation","os":"macOS 15.2","version":"v0.3.1",
  "open":2,"max_open":4,"offline":false,"update":null,
  "homes":[{"g":"Qm1…","name":"Website"}],
  "relay":{"used":3250000,"limit":52428800},
@@ -242,7 +242,7 @@ carry the whole object:
 
 `agents` lists every supported CLI found on the machine. `account` is `null`
 until the owner has declared it. `update` is `null`, or
-`{"version":"0.3.2","status":"pending"}` after an update check
+`{"version":"v0.3.2","status":"pending"}` after an update check
 (`contracts/local.md` section 9): `pending` when that version is installed
 and waits for a restart, `mismatch` when its file failed the checksum and
 nothing was replaced. In `groups`, `state` and `task` are the AI's derived
