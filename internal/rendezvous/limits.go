@@ -16,7 +16,7 @@ const (
 // placeTTL is how long a place taken by an Allocate waits for its
 // allocation. Pion creates it at once or fails; a failure gives the place
 // back when the client asks again from the same address, or after this.
-const placeTTL = 5 * time.Second
+const placeTTL time.Duration = 5e9 // 5 s
 
 // allocations counts the relay allocations of each device and of each source
 // IP. The quota check of an Allocate takes a place before Pion creates the

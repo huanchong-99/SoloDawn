@@ -312,7 +312,7 @@ func (a *allocation) ReadFrom(b []byte) (int, net.Addr, error) {
 	}
 	for {
 		n, src, err := a.PacketConn.ReadFrom(a.packet)
-		if err != nil {
+		if err != nil && !truncated(err) {
 			return n, src, err
 		}
 		if a.forward(n, len(b), src) {
@@ -323,10 +323,14 @@ func (a *allocation) ReadFrom(b []byte) (int, net.Addr, error) {
 }
 
 // forward admits a datagram from a peer: whole, from a permitted peer, and
-// within the quota.
+// within the quota. A datagram that filled the buffer was cut.
 func (a *allocation) forward(n, room int, src net.Addr) bool {
-	_, allowed := a.g.permissions.Load(permission{a.addr, src.(*net.UDPAddr).IP.String()})
-	return n <= room && allowed && a.g.admit(a.device, n)
+	return n <= room && a.permitted(src) && a.g.admit(a.device, n)
+}
+
+func (a *allocation) permitted(src net.Addr) bool {
+	_, ok := a.g.permissions.Load(permission{a.addr, src.(*net.UDPAddr).IP.String()})
+	return ok
 }
 
 // WriteTo relays a datagram to a peer. One to this server goes only to one of
