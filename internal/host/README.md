@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers), group sync and inbox delivery, the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
 kind: reference
 ---
 
@@ -121,3 +121,13 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `CreateTaskWorkspace(ctx, projectDir, num, slug, ai, base, remote)` and `RemoveTaskWorkspace(ctx, projectDir, num, slug, ai, why)` handle `wt/<num>-<slug>`. `PrepareReviewWorkspace(ctx, projectDir, num, ai, commit, base, remote)` and `RemoveReviewWorkspace(ctx, projectDir, num, ai)` handle `review/<num>`. `ai` is the member id of the AI that holds the folder. A create reuses only a worktree recorded for the same AI, and a removal leaves one recorded for another AI untouched.
 - A create works out from the branches whether a task is new, taken over or returning; there is no takeover flag. A slug the home cannot produce, or a `num` below 1, is refused.
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
+
+# Delivery and group state
+
+`deliver.go` implements the host's group synchronization and inbox delivery ([datachannel.md](../../planning/contracts/datachannel.md) sections 4 and 6, [flows/sync.md](../../planning/flows/sync.md), [flows/agent-turn.md](../../planning/flows/agent-turn.md)).
+
+- **Registrations.** From `init`, `deliver.go` registers `"deliver"` in `Attached`, `"inbox"`, `"rows"` and `"reset"` in `Pushes`, and provides `Deliver`.
+- **Per-host state.** All sync cursors, held session queues, early items buffered during an active `sync`, and active merge trackers live in `Part[delivery](h)`, never in package globals.
+- **Lock order and channels.** `delivery` creates no channels of its own; waiting tool calls read the single-item channel returned by `Host.Await`, whose sole writer is `Host.Hand` (`host.go`). `delivery.mu` guards only in-memory maps and slices and is never held across `Store.Write`, `Sessions` calls, `Home.Request` or `Home.Send`, `Host.Hand`, `Host.Held`, `Compose`, `Runner.Turn`, or workspace and merge commands. Per-AI turn delivery is serialized per `(group, member)` with an in-memory busy/recheck flag so concurrent pushes and re-entrant `Deliver` callbacks never overlap or drop a queued turn.
+- **Sync cursor (R3-5).** On `Attach`, each group known for that home (`delivery.groups`, `Sessions`, or `setting` `'homes'`) enters `syncing` with `live = false` and requests `sync` (`state_only: true`) from its last cursor. `reset` drops `h.Rows` for the group and resets `cursor = 0` and `live = false`. `rows` applies only rows whose `seq` exceeds the cached row's `seq` and advances `cursor` only while `live = true`. `synced` sets `cursor = seq`, `live = true` and `syncing = false`, so an interrupted reset restarts from `0` while an interrupted delta keeps its prior cursor.
+- **Boundary, open waits, still-current check (R3-3) and merges.** Each `inbox` item is checked at arrival against the group's home, the owner's device log, `to` and item shape; invalid items record `AuditRefused` and send `ack`, and already-audited `(home, item)` pairs send `ack` without a second turn. Open `ask` and `approve` waits receive `reply` and `decided` items immediately via `h.Hand`; late approval decisions verify `cause` and update or delete the `approval` record in the same transaction as `AuditDelivered`. Session items are routed, held, re-checked against `h.Rows` when taken, composed with `Compose`, audited, acknowledged, and handed to `Runner.Turn`. `merge` items record `AuditDelivered` and `AuditMerge` together, fill `ReviewedMerge` (including `GitHubRepo` from `GroupRow.Repo`), run `Apply` (or `Inspect` after a restart), and report `task merged` or `task conflict`.
