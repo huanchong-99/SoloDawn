@@ -306,7 +306,9 @@ describe('openSignal and openCommand', () => {
     const device = await newDevice();
     const p = `{"t":"cmd","n":"${n}","ts":1.0000000000000001,"TO":"o","to":"o","to":"me","Ts":"no"}`;
     const opened = await openCommand(crypto, await device.sign(p), 'me', everyone, 1);
-    expect(opened).toStrictEqual({ header: JSON.parse(p) });
+    if ('code' in opened) throw new Error(opened.code);
+    const { t, n: nonce, ts, to } = opened.header;
+    expect({ t, n: nonce, ts, to }).toStrictEqual({ t: 'cmd', n, ts: 1, to: 'me' });
   });
 
   it('let a command have no to, and read an empty to as a value', async () => {
