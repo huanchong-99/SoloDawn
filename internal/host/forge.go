@@ -117,10 +117,11 @@ func (f TaskForge) WaitHostedChecks(ctx context.Context, pr int, commit string) 
 		if result != nil || err != nil {
 			return result, err
 		}
+		nextPoll := time.After(30 * time.Second)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(30 * time.Second):
+		case <-nextPoll:
 		}
 	}
 }
