@@ -13,8 +13,8 @@ type Outcome struct {
 }
 
 func (tx *Tx) PutReceipt(signer, nonce string, ts int64, result Outcome) error {
-	data, _ := json.Marshal(result) // only booleans, integers and strings
-	_, err := tx.Exec("INSERT INTO receipt(k,n,ts,answer) VALUES(?,?,?,?)", signer, nonce, ts, string(data))
+	data, _ := encode(result) // only booleans, integers and strings
+	_, err := tx.Exec("INSERT INTO receipt(k,n,ts,answer) VALUES(?,?,?,?)", signer, nonce, ts, data)
 	return err
 }
 

@@ -1,0 +1,17 @@
+{
+  "t": "member",
+  "n": "fTuX8YoC2SHlMHGAs69RFg",
+  "ts": 1763600000000,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "op": "status",
+  "id": "1PC8WineBrUQ-apCjx7tug",
+  "state": "dormant",
+  "path": "local",
+  "usage": {},
+  "event": {
+    "code": "turn_interrupted",
+    "reason": "timeout",
+    "task": "DrtCn6htSBwmMPrFPbHJHA",
+    "detail": "Turn deadline reached."
+  }
+}

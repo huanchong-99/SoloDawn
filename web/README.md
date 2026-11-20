@@ -1,5 +1,5 @@
 ---
-description: 'The SoloDawn web client: how to build and check it, what its shell, routing, preferences and texts guarantee, and what a new screen has to follow.'
+description: 'The SoloDawn web client: how to build and check it, what its shell, routing, preferences, texts, group caches, group list and chat guarantee, and what a new screen has to follow.'
 kind: reference
 ---
 
@@ -12,8 +12,11 @@ embeds it and the rendezvous serves it as static files. It holds no group logic:
 and sends commands (`planning/steps/step-1-frontend.md`). What exists today is the frame every
 screen lives in: navigation, top bar, themes, languages, hash routing, the web manifest and the
 notices for browsers that cannot run the client or that block its storage; this browser's device
-key with signed envelopes, the device log and pairing; the wire types with their decoding; and a
-mock connection that answers from the node's wire examples.
+key with signed envelopes, the device log and pairing; the wire types with their decoding; a
+mock connection that answers from the node's wire examples; the row cache of every group with the
+lists drawn from it; the group list with its create-group dialog; and the main line of a group's
+chat with its composer. Nothing yet connects to a node: until the connection code hands a
+connection to the pages, a development server shows the one group of the wire examples.
 
 The interface mockups are in `design/`. They are the visual reference for the interface: implement
 screens to match them, and add the motion they leave out.
@@ -127,9 +130,13 @@ development dependency, an IndexedDB for the tests.
   them. `decode(schema, text)` is the only place where received text becomes a typed value;
   `Frame` is what a node may send on `ctl`. Code after it trusts the type. An envelope's `p` stays
   the exact string received. `Id` is a random id, the canonical base64url spelling of 16 bytes;
-  `n` and `g` of a signed payload have this type, the other fields that hold ids are still
-  strings (`issues.md`). `Ctl` is the interface of a `ctl` connection: numbered requests,
-  their answers, and pushes.
+  `n`, `g` and `conn` of a signed payload have this type, and so has every id in a command
+  payload and in an inbox item, the `task` in the body of a review post included; rows and the
+  other message bodies still hold ids as strings (`issues.md`).
+  `Slug` is a task's slug, the type of `slug` in a task row. The payload of each command has its
+  schema (`GroupCreate`, `Post`, `Act`, `TaskStart`); a schema names the `op`, `kind` or `code`
+  that selects it. `Ctl` is the interface of a `ctl` connection: numbered requests, their
+  answers, and pushes.
 - **Mock connection.** `mockCtl(onpush)` in `src/lib/mock.ts` is a `Ctl` that answers from the
   files of `internal/proto/testdata`: `hello` with `welcome`; `sync` with the pushes `reset` and
   `rows`, then `synced`; `fetch` with `fetched`; every `cmd` with `ok`. It knows the examples'
@@ -141,8 +148,13 @@ development dependency, an IndexedDB for the tests.
 - **Fonts.** Geist and Geist Mono 1.9.2, one variable `woff2` each, are served from
   `public/fonts/` with their licence (OFL-1.1); the page requests nothing from a third party. A
   browser downloads a face only when text uses it and shows the system fonts until it arrives.
-- **Texts.** Every interface string is a key in both `src/messages/zh-CN.json` and
-  `src/messages/en.json` and is read with `t(key)`; a test fails when the key sets differ. Chat
+- **Texts.** Every interface string is a key in both languages and is read with `t(key)`. The
+  shell's are in `src/messages/zh-CN.json` and `src/messages/en.json`. Each area of the interface
+  has two files of its own, `src/messages/<area>.zh-CN.json` and `<area>.en.json`, whose keys all
+  begin with `<area>.`; today the areas are `groups` and `chat`. `prefs.svelte.ts` merges them, and
+  a text is a `Key` only when both languages have it. A test fails when the key sets of a pair
+  differ, and `areas.test.ts` finds every pair by its name, so a new area adds its two files and
+  its two imports. A text with a number in it carries `{n}`, which its component replaces. Chat
   content is never translated. The options of the language choice are named in their own
   language in both files and carry its `lang`, so a screen reader speaks each in its language
   (WCAG 2.2 SC 3.1.2). The language button of the top bar has no `aria-label`: its name is its
@@ -151,6 +163,11 @@ development dependency, an IndexedDB for the tests.
   (`textIn`), so speech input can use the visible text (SC 2.5.3).
 - **Motion.** No animation library is bundled: CSS transitions and keyframes move the parts, the
   browser's View Transitions cross-fade the page, and `svelte/motion` reads the system setting.
+  `svelte/animate`'s `flip`, part of Svelte, moves a group to its new place in the list; it runs
+  in script, which the styles cannot still, so its duration is 0 under reduced motion. What
+  arrives rises from `--travel` below its place (`rise` in `base.css`): a message, a dialog, the
+  list of mentions, the rows of the group list one after another. A count that changes lands with
+  `--spring`.
   The tokens are in `tokens.css` beside the others: four durations (`--dur-1` 120 ms hover and
   press, `--dur-2` 200 ms switch and focus, `--dur-3` 320 ms arrival and cross-fade, `--dur-4`
   500 ms spring), `--ease` for a change of state, `--ease-out` for an arrival, `--spring` for what
@@ -172,6 +189,77 @@ development dependency, an IndexedDB for the tests.
   keyframes, no cross-fade, and a cross-fade under way ends at once (the rule for its pictures is apart
   from the rule for every part, which a browser without view transitions would otherwise drop); the logo does not turn to
   the pointer and a press does not sink a button, which shows the press by its layer alone.
+- **Group caches.** `src/lib/groups.svelte.ts` holds what `planning/flows/sync.md` asks of a
+  client. The code that owns the connections makes one `Home` per node, with the person's user id
+  and a `sign` for their commands, and puts it in `homes`. For every connection to that node it
+  calls `home.connect()` before the connection exists, gives the link's `push` to the connection
+  as its push handler, and calls the link's `online(ctl, welcome)` after `welcome` and its
+  `offline()` when the connection is gone.
+  - Only the last connection to call `online` is the home's: what an earlier one still pushes is
+    dropped, and its going leaves the home online, so a move to a better path cannot mix two
+    reads. The owner of the connections therefore calls `online` only for the connection that is
+    to become the home's: for a probe, when it takes over. `online` lists the node's groups and reads each with `sync` from its cursor; a `groups`
+    push replaces the list, keeps the rows of a group listed before and reads a new one at once.
+  - A `Group` applies a row only with a higher `seq` than the copy it holds, and keeps a `gone`
+    marker in place of its row, unseen. Its `cursor`, the `since` of its next `sync`, is 0 at the
+    start and from every `reset`, S at `synced`, then the `seq` of each live row applied; rows
+    before `synced` and pages never move it, so a reset that breaks off starts again from nothing
+    and a delta that breaks off keeps its place. The answer to a read moves the cursor only when
+    no later read of the group was started and its connection is still the home's.
+  - `older(thread)` fetches one page of a thread, or of the main line, and then the page before
+    the lowest `pos` received. No page is asked for while the group is being read: the paging
+    starts again at `synced`, from the rows the read brought. The main line starts before the oldest of the newest 50 messages
+    held, which a cold read brings without a gap; not before the oldest message held, which can be
+    a card still pending from long ago. A thread starts at its newest page, `before: 0`. An empty
+    page ends the paging; a page the home refuses stops it (`failed`) until the group is read
+    again; a page that arrives after a later read, or after its connection is gone, is dropped.
+    `paging(thread)` says whether more may exist, whether a page is on its way, and whether one
+    can be asked for (`ready`).
+  - The lists: `main` and `thread(task)` in `pos` order, `members` by name, `me`, `waiting` (the
+    pending brief the person asked for, the pending approvals and decisions put to them), `info`
+    (the group row), `latest`. `recent()` is every group, the newest main line first.
+  - `post` and `create` send signed commands, shaped as the wire examples `post-text.json` and
+    `group-create.json`, and answer what the node answered; the client draws from the rows that
+    come back, never from its own command. A request whose connection is lost is answered
+    `lost()`, a code of the client's own. While `home.ctl` is undefined the group is shown from
+    the rows held, read-only.
+- **Group pages.** `#/groups` is the group list and `#/groups/<group id>` the chat of that group;
+  `routes/Groups.svelte` reads the address itself until the route table carries the rest of a
+  fragment.
+  - Width: from 1280 px the list stays beside an open chat; below it an open chat has the page
+    and its back button leads to the list. With no group open the list has the page below 900 px,
+    with the cards that wait as a bar above it; from 900 px they are an overview beside the list.
+    On a phone an open chat also takes the place of the top bar and the bottom navigation: the
+    page's styles hide them with `:has()`, because the shell has no place yet for a page to say so.
+  - The main line is a reversed scroller with one child, so the newest message is in view when it
+    opens, and a page added above moves nothing. While the top of what is read is in view, or
+    within 600 px of it, the page before is fetched; when it cannot be, because the home refused
+    a page or cannot be reached, the top says so and never claims to be the start. Messages stand
+    under the day they were written on. A day keeps its key when messages are added before or
+    after it, so the messages already drawn stay as they are. Its name stays at the top of the
+    line on a band of the page's colour, under which the messages pass. A message within five
+    minutes of the one before it, by the same author, is drawn under it without a head; its time
+    shows under the pointer, and for all such messages while keyboard focus is on the main line
+    or on a button of the chat. That, and the focus ring of the main line, are for someone who
+    has pressed a key since they last used the pointer, not for the focus the main line is given
+    when a chat opens.
+  - "Today" and "yesterday" are read from `now()` of `when.ts`, one clock that moves once a
+    minute while something drawn reads it.
+  - A text shows its code spans and the mentions of the members its row names. The composer
+    completes a mention from the members as it is typed (arrow keys, Enter or Tab, Escape),
+    sends with Enter where the person has a keyboard and with the button on a touch screen, and
+    never on a key that an input method is composing with. What is typed while a message is on
+    its way stays in the field. It estimates the row by `contracts/rows.md` section 5 (`rowSize`
+    in `compose.ts`): the text twice, 52 bytes for each member mentioned, and 627 for the rest of
+    a row, measured on the wire example with the longest sequence numbers. It tells the writer
+    from three quarters of the 16 KiB and does not send beyond them; the size the node measures
+    decides.
+  - The create-group dialog holds the computer chosen as the home, not its place in the list, and
+    sends nothing when that computer is no longer among those that can be reached. A computer
+    that appears while there was none to choose from is chosen.
+  - Only text messages are drawn in full. A card is one line that names its kind and its subject,
+    with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
+    the units of the cards replace both.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. Shared styles are global classes in
   `src/styles/base.css`, taken from the design; a component's own layout goes in its `<style>`.
@@ -191,13 +279,24 @@ development dependency, an IndexedDB for the tests.
 | `src/lib/motion.ts`         | `spring`, the curve of `--spring`; `shift`, the page cross-fade |
 | `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface           |
 | `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`                 |
+| `src/lib/groups.svelte.ts`  | `Home`, `Group`: row caches, cursor, paging, lists, commands    |
+| `src/lib/compose.ts`        | mention being typed, mentions and parts of a text, row size     |
+| `src/lib/when.ts`           | times in the reader's language; messages by day                 |
 | `src/App.svelte`            | shell: skip link, navigation, top bar, the current route        |
 | `src/Notice.svelte`         | the upgrade notice and the storage notice                       |
-| `src/routes/`               | one component per page                                          |
-| `src/components/`           | shared parts; `Icon.svelte` holds the line icons                |
+| `src/routes/`               | one component per page; `Groups.svelte` is the list and a chat  |
+| `src/components/`           | shared parts: `Icon` (line icons), `Avatar`, `Failure`          |
+| `src/components/groups/`    | the group list, the cards that wait, the create-group dialog    |
+| `src/components/chat/`      | the chat of a group: main line, message, composer               |
 | `src/styles/`               | `tokens.css` (design tokens) and `base.css` (shared classes)    |
 | `public/`                   | manifest, icon and `fonts/`, copied as they are                 |
 | `features/web.spec.ts`      | steps of `../features/web.feature`                              |
+| `features/groups.spec.ts`   | steps of `../features/web_groups.feature`                       |
+| `features/chat.spec.ts`     | steps of `../features/web_chat.feature`                         |
+| `features/home.ts`          | a home in memory for those steps; `page.ts` drives the page     |
+| `features/demo.ts`          | groups with a morning of talk, for a development page           |
+| `features/watch.svelte.ts`  | an effect outside a component, for tests of what is reactive    |
+| `features/shots.ts`         | screenshots of the group pages from that demo, four widths      |
 | `e2e/config.ts`             | end-to-end projects per engine, `launch`, the build of a run    |
 | `e2e/nodes.ts`              | `startNet`: rendezvous and nodes per test, stop, teardown sweep |
 | `features/e2e.ts`           | steps of `../features/web_e2e.feature`, run by `e2e/config.ts`  |
@@ -221,6 +320,11 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 - Nothing yet stores a device log or uses the device key beyond `boot`; the connection code
   (F-03) and onboarding (F-04) will.
 - The manifest has an SVG icon only and there is no service worker yet.
+- No page has a connection to a node yet, so the built client lists no group. A development
+  server (`pnpm dev`) shows the one group of the wire examples, unless the address has `?nomock`;
+  the mock accepts a post and pushes no row, so a message sent there does not appear.
+- Cards and the rows a home writes are one line each in the main line, and Safari moves the main
+  line when a message arrives while the reader is scrolled back (`issues.md`).
 - The end-to-end harness runs on macOS and Linux only. Until the node runtime is wired (N-4),
   `solodawn node` exits right after making its data directory, so a test cannot await a running
   node yet, and a node has no address but its local socket (`issues.md`).
@@ -238,10 +342,13 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   holds `--spring` to `spring()`. Frame rate was not measured, and the fallback without view
   transitions was exercised only in the tests.
 - `src/lib/proto.test.ts` reads every wire example with the schema of its file name and fails on a
-  file that has none (`crypto.json`, which holds test vectors, excepted); it adds an unknown field
-  to every object, which is dropped (so a golden file with a field the schema lacks fails the exact
-  comparison), and removes every field in turn. Fields that appear in no example are not
-  covered by those variants.
+  file that has none (`crypto.json` and `wire.json`, which hold test vectors, excepted); it adds
+  an unknown field to every object, which is dropped (so a golden file with a field the schema
+  lacks fails the exact comparison). It then holds the schemas to `internal/proto/testdata/wire.json`,
+  which the Go tests write from the Go types and judge `proto.Decode` by: every value of every
+  example is changed in turn (left out, `null`, another type, a fraction, 2^53, a text that is no
+  id) and must be read or refused as that file says, and so must its cases, the slugs among them.
+  Fields that appear in no example are not covered by those variants.
 - `src/lib/vectors.test.ts` holds the client to every part of
   `internal/proto/testdata/crypto.json` (`planning/contracts/vectors.md`). It never compares
   signature bytes, since Safari's signatures are random: it verifies the vectors' signatures and
@@ -250,4 +357,17 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   browsers is task F-01c.
 - Importing `decode` and `Frame` adds about 7.6 KiB to the bundle, 2.6 KiB gzipped (measured
   with `valibot` 1.5.0 on 2026-11-20). Nothing in the application imports them yet.
+- The group list and the chat have unit tests beside `groups.svelte.ts`, `compose.ts` and
+  `when.ts`, and two acceptance features, `../features/web_groups.feature` (A2.1, A2.2, A2.6 and
+  the reset of round 3, R3-5) and `../features/web_chat.feature`. Their steps mount
+  `routes/Groups.svelte` in the test DOM against `features/home.ts`, which answers `sync`,
+  `fetch` and `cmd` as `planning/flows/sync.md` says; no node ran. The test DOM lays nothing out:
+  whether the top of the main line is in view, and whether the person has a keyboard, are stood
+  in for (`features/page.ts`); it does not report the chosen option of a select either, so the
+  steps choose one by disabling the others for that moment. `compose.test.ts` holds `rowSize` to
+  rows built from the wire example, with up to 20 members mentioned: never under, at most 2 bytes
+  over.
+- Both pages were looked at in headless Chromium at 375, 820, 1100 and 1440 px in both themes,
+  with `features/demo.ts` loaded into a development page, on 2026-11-20. They have not been opened
+  in Safari or Firefox, nor on a real phone, and nobody walked through them with a screen reader.
 - Rules: `planning/architecture.md` section 8, `planning/product-rules.md` R-160 to R-164.

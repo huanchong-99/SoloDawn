@@ -134,19 +134,19 @@ remote.
 | task session created for a task taken over from another AI | with a remote: fetch, then `git -C repo worktree add ../<wt> -b <br> origin/<br>` if that branch exists there, else as for a new task. Without a remote: `git -C repo worktree add ../<wt> <br>` |
 | task session created for a task that returns to a node which still has the local branch `<br>` | with a remote: fetch, `git -C repo worktree add ../<wt> <br>` (the branch is reused, not created), then `git -C <wt> merge --ff-only origin/<br>`. If the branch has diverged, the worktree is removed again and the session fails with the output of Git. Without a remote: as the row above |
 | `push_branch` | `git -C <wt> push origin refs/heads/<br>:refs/heads/<br>`: the full ref on both sides, never a short name; never with a force option |
-| `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Then each entry of `group.checks`, in order, through the system shell, in the worktree. The time left in the current turn (`limits.turn_minutes`) limits the whole run of these entries together, not each command. The commit recorded is `git -C <wt> rev-parse HEAD` |
-| hard check: secrets | the patterns of section 8 over the added lines of `git diff <base-ref>...HEAD` |
+| `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Before the status, the assume-unchanged bit, a speed hint that `core.ignoreStat` sets on every path, is cleared in the worktree's index for each path that has it (`git -C <wt> ls-files -v` tags it in lower case; `git -C <wt> update-index --no-assume-unchanged -z --stdin`), so a change shows. Refused when a tracked path has the skip-worktree bit (tag `S` or `s`), as in a sparse checkout, whose content the status never shows; the error names up to 10 such paths. Then each entry of `group.checks`, in order, through the system shell, in the worktree. The time left in the current turn (`limits.turn_minutes`) limits the whole run of these entries together, not each command. The commit recorded is `git -C <wt> rev-parse HEAD` |
+| hard check: secrets | the patterns of section 8 over the added lines of `git diff --text <base-ref>...HEAD`, files Git takes as binary included. More than 64 MiB of added lines fail the check with "too large to check" and their size |
 | hard check: tests | fails when the diff changes source files and no test file; what counts as each is below the table |
-| `submit_task` | refused unless the tree is clean, by the status command of `run_checks`, and both HEAD and `<br>` are the commit of the last `run_checks`, which passed. With a remote: the push above, then `gh pr list --head <br> --base <base> --state open --json number,headRefOid,url,state,baseRefName`. A pull request that is closed (merged included) or whose base is not `<base>` is never reused. If the list is empty: `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
+| `submit_task` | refused unless the tree is clean, by the status command of `run_checks`, and both HEAD and `<br>` are the commit of the last `run_checks`, which passed. With a remote: the push above, then `gh pr list --head <br> --base <base> --state open --json number,headRefOid,url,state,baseRefName,isCrossRepository`. A pull request that is closed (merged included), whose base is not `<base>`, or that comes from another repository (`isCrossRepository`; `--head` matches the branch name only, so a fork's branch of the same name is listed too) is never reused. If the list is empty: `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
 | hosted checks | every 30 s, one request: `gh pr view <pr> --json headRefOid,statusCheckRollup`; what each read counts as is below the table. A result is reported only from an answer whose `headRefOid` is the submitted commit `[unverified]` that both fields come back in one answer; else `gh api` for the check runs of that commit |
 | review session created or reused | with a remote `git -C repo fetch origin`; first round `git -C repo worktree add --detach ../review/<num> <commit>`, later `git -C review/<num> checkout --force --detach <commit>` (the checkout holds no one's work); then `git diff --no-ext-diff --no-textconv --no-color <base-ref>...<commit>` written to `review/<num>/.solodawn-review.diff`, a reserved name in a review checkout. The same rule as for a task's worktree decides whether `review/<num>` is reused (below the table) |
-| merge, with a remote | `gh pr merge <pr> --repo <owner>/<repo> --squash --delete-branch --match-head-commit <commit>` `[documented, round 1]`, run from `projects/<group>`, outside the clone; `<owner>/<repo>` is the group's GitHub repository. With `--repo`, gh merges and deletes the remote branch only, whatever its version, and never touches the worktree or the local branch. After the merge the node removes the worktree (row "task merged") and then deletes the local branch with `git -C repo branch -D <br>`, under the clone's lock |
-| merge, no remote | only if `git -C repo rev-parse <br>` is `<commit>`: `git -C repo merge --squash <commit>` and a commit on `<base>` whose message names the task and the commit; on failure `git -C repo reset --merge` |
-| node restarts with a merge it took and did not report | no second attempt. It knows it took one from the audit row `merge` (task, commit) written in the same transaction as the item's `delivered` row. It looks: `gh pr view <pr> --json state,mergeCommit,headRefOid`, or without a remote the last commit message on `<base>`. Merged, and with a remote `headRefOid` is the reviewed commit: `task merged`. Merged with another head, or not merged: `task conflict` |
+| merge, with a remote | `gh pr merge <pr> --repo <owner>/<repo> --squash --delete-branch --match-head-commit <commit>` `[documented, round 1]`, run from `projects/<group>`, outside the clone; `<owner>/<repo>` is the group's GitHub repository. With `--repo`, gh merges and deletes the remote branch only, whatever its version, and never touches the worktree or the local branch. After the merge the node removes the worktree and deletes the local branch (row "task merged"). After the merge command the node reads `gh api graphql` for the pull request's `state`, `headRefOid`, `mergeCommit`, `autoMergeRequest` and `mergeQueueEntry`, one call, run like the merge from `projects/<group>`. The merge is pending only while the pull request is `OPEN` and `autoMergeRequest` or `mergeQueueEntry` is set (a merge queue or auto-merge merges it later); the node then reads again every 30 s, and a read that fails counts as unfinished. `MERGED`: `task merged` when `headRefOid` is the reviewed commit, else `task conflict`. `CLOSED`, or `OPEN` with neither set: `task conflict` at once, with the state in the detail; right after a merge command that succeeded, `OPEN` with neither set counts only from the second read, 30 s later, since the forge's read can lag its own write. 60 minutes after the merge command a merge still pending is `task conflict` with the detail "merge still pending after 60 minutes (merge queue or auto-merge)", but only when the last read succeeded; when it failed, the outcome stays unknown and the node reads again later |
+| merge, no remote | only if `git -C repo rev-parse <br>` is `<commit>`: `git -C repo merge --squash <commit>` and a commit on `<base>` whose message names the task and the commit; on failure `git -C repo reset --merge`. These three run with `-c core.hooksPath=<an empty folder>`, so no hook of the project runs in them, and the commit with `--no-verify --no-gpg-sign`, so no signing prompt waits for a person; pushes and fetches keep the project's hooks |
+| node restarts with a merge it took and did not report | no second attempt. It knows it took one from the audit row `merge` (task, commit) written in the same transaction as the item's `delivered` row. It looks: with a remote the read of the row "merge, with a remote", or without a remote for a commit on the first-parent history of `<base>` whose message is exactly the merge message. Merged, and with a remote `headRefOid` is the reviewed commit: `task merged`. Merged with another head, or not merged: `task conflict`. A merge still pending (as in the row "merge, with a remote") is waited for the same way, and the 60 minutes count from the time of the audit row `merge`, or from the restart when the caller does not have it |
 | merge failed, or the head is not the reviewed commit | `task conflict` with the command's output |
 | task given to another AI | with a remote, first the push of `push_branch`; then `git -C repo worktree remove --force ../<wt>`. Only commits carry over: uncommitted changes in the worktree are discarded. The reviewer's checkout stays. When both AIs are on one node, the order of the new AI's create and the old AI's removal does not matter: the create adds the worktree again for the new AI, and the removal leaves a worktree that another AI holds untouched (below the table) |
 | reviewer changed | the old reviewer's node removes `review/<num>`; on one node, as for a task given to another AI |
-| task merged | `git -C repo worktree remove ../<wt>`; the reviewer's node removes `review/<num>` |
+| task merged | `git -C repo worktree remove ../<wt>`, then, under the clone's lock and only while `git -C repo rev-parse --verify refs/heads/<br>` is the merged commit, `git -C repo branch -D <br>`: a branch that has moved since is kept, with its commits, and `branch -D` refuses a branch that a worktree whose removal failed still has checked out. The reviewer's node removes `review/<num>` |
 | task cancelled | `git -C repo worktree remove --force ../<wt>`: uncommitted changes in the worktree are discarded; the branch `<br>` keeps its commits. The reviewer's node removes `review/<num>` |
 | hand-back facts | in the session's folder: `git rev-parse HEAD`, `git status --porcelain --untracked-files=all`, `git log <start>..HEAD --format='%h %s'`, `git diff --shortstat <start>`, `git diff --name-only <start>`. The `files` of the hand-back are that list plus the untracked files of the status |
 | statistics | `git diff --shortstat <base-ref>...<commit>` |
@@ -159,10 +159,14 @@ remote.
   leading and trailing `-` are trimmed; the result is cut to 40 characters
   and trimmed of `-` again; if nothing is left, it is `task`. Example:
   "Node: report connection path changes" gives
-  `node-report-connection-path-changes`. A host refuses a slug this rule
-  cannot produce (one that does not match `^[a-z0-9]+(-[a-z0-9]+)*$`, or
-  is longer than 40 characters) and a `num` below 1, before it builds a
-  path or a branch from them.
+  `node-report-connection-path-changes`. A slug is therefore 1 to 40
+  characters, groups of `a` to `z` and `0` to `9` with one `-` between two
+  groups (`^[a-z0-9]+(-[a-z0-9]+)*$`), and a host takes no other text for
+  one: the decoder refuses the task row (`contracts/rows.md` section 4).
+  "Lower-case ASCII" is exact: a letter outside ASCII is never kept, also
+  one that a general lower-casing turns into `a` to `z` (the Kelvin sign).
+  The host's workspace code also refuses any other slug, and a `num`
+  below 1, before it builds a path or a branch from them.
 - **An interrupted squash merge** (no remote), which a restart leaves
   staged in `repo` while `<base>` does not yet record the merge, counts as
   a failed merge. On restart, before anything else touches the clone, the
@@ -217,7 +221,11 @@ remote.
 - **Text the host writes.** Before the host sends them, the output tails of
   check items, the Git output in `task conflict`, and the `detail` of
   `task fail`, `login_invalid` and `turn_interrupted` go through the
-  patterns of section 8; each match is replaced by `[redacted]`.
+  patterns of section 8; each match is replaced by `[redacted]`. A
+  private key goes through its footer, or to the end of the text without
+  one; a private-key footer without its header, as in a tail cut inside a
+  key, from the start of the text through that footer. A check's last
+  64 KiB of output are redacted before the tail is cut from them.
 - Checks are about a commit, so they need a clean tree: the commit that is
   checked is the commit that is submitted, reviewed and merged
   (`contracts/task-machine.md` section 4).
@@ -253,6 +261,10 @@ remote.
   those languages.
 - "Fake tests" has no command; it is a veto item in review.
 - Both hard checks always run (R-103). There is no setting to turn one off.
+  They outlive the turn's deadline and have their own limit of 2 minutes; a
+  check that reaches it fails with `timed out`. An explicit stop of the run
+  (a pause, an interrupt, a shutdown) stops them too, and then nothing is
+  reported.
 
 ## 8. Outbound secret check (R-137)
 
@@ -262,7 +274,7 @@ diffs (section 7), the text arguments of tools and the texts of approvals
 
 Patterns:
 
-- a PEM private-key header;
+- a PEM or OpenPGP private-key header;
 - well-known credential formats, recognised by prefix and length (the list
   is short and is part of the code review). The vendors document the
   prefixes, not a fixed length (GitHub warns that a token's length can

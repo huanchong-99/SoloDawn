@@ -3,6 +3,7 @@ package host
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"time"
@@ -21,6 +22,11 @@ var noPrompt = []string{"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "SSH_AS
 // environment plus noPrompt, and with no controlling terminal, so it never
 // waits for a person. Project check commands have their own runner.
 func runIn(ctx context.Context, dir, name string, args ...string) (stdout, stderr string, err error) {
+	return runInput(ctx, dir, nil, name, args...)
+}
+
+// runInput is runIn with stdin as the command's standard input.
+func runInput(ctx context.Context, dir string, stdin io.Reader, name string, args ...string) (stdout, stderr string, err error) {
 	ctx, cancel := context.WithTimeout(ctx, limitOf(name, args))
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -34,7 +40,7 @@ func runIn(ctx context.Context, dir, name string, args ...string) (stdout, stder
 	// A child that outlives a stopped command cannot hold its output open.
 	cmd.WaitDelay = 10 * time.Second
 	var out, errOut bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errOut
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, &out, &errOut
 	err = cmd.Run()
 	return out.String(), errOut.String(), err
 }

@@ -81,17 +81,27 @@ func (f TaskForge) checkSubmission(ctx context.Context, commit string) error {
 
 // openPR returns the URL of the open pull request from the task branch into
 // base, or "" if there is none. Closed and other-base pull requests are not
-// listed, so they are never reused.
+// listed, and one from another repository (a fork with a branch of the same
+// name, which --head also matches) is skipped, so none of them is reused.
 func (f TaskForge) openPR(ctx context.Context, base string) (string, error) {
-	out, err := f.command(ctx, "gh", "pr", "list", "--head", f.Branch, "--base", base, "--state", "open", "--json", "number,headRefOid,url,state,baseRefName")
+	out, err := f.command(ctx, "gh", "pr", "list", "--head", f.Branch, "--base", base, "--state", "open",
+		"--json", "number,headRefOid,url,state,baseRefName,isCrossRepository")
 	if err != nil {
 		return "", err
 	}
-	var prs []struct{ URL string }
-	if err := json.Unmarshal([]byte(out), &prs); err != nil || len(prs) == 0 {
+	var prs []struct {
+		URL               string
+		IsCrossRepository bool
+	}
+	if err := json.Unmarshal([]byte(out), &prs); err != nil {
 		return "", err
 	}
-	return prs[0].URL, nil
+	for _, pr := range prs {
+		if !pr.IsCrossRepository {
+			return pr.URL, nil
+		}
+	}
+	return "", nil
 }
 
 // pullRequest takes the number from the last path element of the URL.
@@ -199,15 +209,27 @@ type HostedCheck struct {
 }
 
 // HostedChecksToResume selects, from the task rows, the tasks a restarted
-// node polls again: active, at step cloud_check, assigned to one of ais.
+// node polls again: at step cloud_check, assigned to one of ais, and active
+// or paused, the states in which task-machine row 6 takes task cloud. A row
+// without checks.local has its 60 minutes spent: it ends with the timed-out
+// result unless the first read has finished.
 func HostedChecksToResume(tasks []proto.TaskRow, ais []string) []HostedCheck {
 	var resume []HostedCheck
 	for _, t := range tasks {
-		if t.State == "active" && t.Step == "cloud_check" && slices.Contains(ais, t.Assignee) {
-			resume = append(resume, HostedCheck{Task: t.ID, Branch: t.Branch, Commit: t.Commit, PR: t.PR, Since: time.UnixMilli(t.Checks.Local.At)})
+		if t.Step == "cloud_check" && slices.Contains(ais, t.Assignee) && slices.Contains(cloudStates, t.State) {
+			resume = append(resume, HostedCheck{Task: t.ID, Branch: t.Branch, Commit: t.Commit, PR: t.PR, Since: localCheckTime(t.Checks.Local)})
 		}
 	}
 	return resume
+}
+
+var cloudStates = []string{"active", "paused"}
+
+func localCheckTime(local *proto.Check) time.Time {
+	if local == nil {
+		return time.Time{}
+	}
+	return time.UnixMilli(local.At)
 }
 
 // forgeCheck is one entry of the rollup: a CheckRun (name, status,

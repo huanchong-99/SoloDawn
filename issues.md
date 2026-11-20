@@ -6,11 +6,29 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-20 · deviation · P-1's task row decoder must refuse a slug the home cannot produce
+### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
 
-- Symptom: none yet. The host now refuses a `slug` that does not match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 40 characters, and a `num` below 1 (`internal/host/workspace.go:113`, `taskName`), because both go into paths and branch names. A task row that carries such a slug is accepted on the wire today.
-- Cause: the decoder of the task row (P-1, `internal/proto`) checks no form of `slug`; `planning/contracts/local.md` section 7, "Slug", gives the only form the home produces.
-- Status: open. P-1 refuses such a row when it decodes it, so the refusal comes before any host sees the row.
+- Symptom: after the sixth failed review a task is `failed` at step `review`. When an admin resumes or reassigns it, the reviewer is asked to review the same commit again, although that commit has just failed.
+- Cause: row 7 of `contracts/task-machine.md` above the limit is row 14 alone, which leaves the step (`internal/home/machine.go:560`); section 2 then gives a task that becomes active at step `review` its `review` item (`internal/home/machine.go:428`). Row 6 is different: failed hosted checks set step `local_check` before they stop the task.
+- Status: open. No change, by the coordinator's decision of 2026-11-20: the contract says so explicitly, and it lets a person resume the task with another reviewer for the same commit.
+
+### 2026-11-20 · limitation · A child of a Windows check can start before the job holds the shell
+
+- Symptom: on Windows a check's `cmd.exe` joins its job object only after it has started, so a process it starts in that moment is outside the job and survives the check.
+- Cause: Go starts the process before `killCheckTree` assigns it (`internal/host/checks_tree_windows.go`, `newCheckJob`).
+- Status: open. The fix is to start the shell with `CREATE_SUSPENDED`, assign it to the job, then resume it.
+
+### 2026-11-20 · limitation · A key in a UTF-16 file passes the secrets check
+
+- Symptom: a UTF-16LE file holding a private key or a token passes the secrets hard check: with `--text`, Git shows its bytes, and every second byte is NUL, so no pattern matches.
+- Cause: the patterns of `local.md` §8 match ASCII text (`internal/host/secret.go`); `checkAddedLines` reads the diff as it comes.
+- Status: open.
+
+### 2026-11-20 · limitation · Files hidden by ignore rules can change what a check runs
+
+- Symptom: a file ignored through `.git/info/exclude` or `core.excludesFile`, not through the project's `.gitignore`, is shown by neither `git status` nor `git ls-files`; it can change what a project check does, so a passing check may not describe the commit alone (L5).
+- Cause: `run_checks` runs in the task's worktree (`internal/host/checks.go`, `cleanCheckHead`), where such files can exist.
+- Status: open. Step 2 closes it by running the checks on a clean export of the commit.
 
 ### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
 
@@ -163,11 +181,29 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: neither frame has a Go type or a wire example yet, and the mock answers from wire examples only (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:94-96`, `web/src/lib/proto.ts:372-377`). Both are frozen by unit P-2 (`planning/contracts/conventions.md` section 5; `planning/steps/parallel-plan-units.md` section 1), which also adds the mock answers for `host.info` and `groups`; B-10 named them before the parallel plan.
 - Status: open. `host.info` was left out by the coordinator's decision of 2026-11-20, until it has an example; the `groups` push was found in the review of PR #61 and not changed there.
 
-### 2026-11-20 · limitation · Random ids are checked in `n`, `g` and a signal's `conn` only
+### 2026-11-20 · limitation · Random ids are not checked in rows, most message bodies and the frames that read a group
 
-- Symptom: `contracts/conventions.md` section 2 makes any text that is no random id a wrong type in every field that holds one. `proto.Decode` and `decode` check it for `n` and `g` of a signed payload, which is what the envelope check reads (`contracts/envelope.md` section 3, check 3), and for `conn` of a signalling payload, which a node drops otherwise (`internal/peer/signal.go:104-109`) and so does the browser (`web/src/lib/rendezvous.ts:175-180`). A row, a frame or a command field that holds an id (`g` of `sync` or of a row, `thread`, `re`, `task`, `mentions`, a row's own `id`) still takes any text.
-- Cause: only those fields have the type (`internal/proto/envelope.go:12-23`, `web/src/lib/proto.ts:33-36`). The contracts type `n` and `g` as ids in a field table; for the other fields `contracts/rows.md` says "random ids unless stated" without saying per field which values stand beside the id (the `by` of a message row may be `"system"`, a device row's `id` is `<user id>:<ver>`).
-- Status: open. A field gets the type (`proto.ID` in Go, `Id` in `proto.ts`) in the task that first reads it from the wire.
+- Symptom: `contracts/conventions.md` section 2 makes any text that is no random id a wrong type in every field that holds one. `proto.Decode` and `decode` check it for `n` and `g` of a signed payload, which is what the envelope check reads (`contracts/envelope.md` section 3, check 3); for `conn` of a signalling payload, which a node drops otherwise (`internal/peer/signal.go:104-109`) and so does the browser (`web/src/lib/rendezvous.ts:175-180`); and, since unit P-1, for every id in the payload of a home or host command, in the payload of an inbox item, and for `g` of `inbox` and `ack`. Of the bodies a `post` carries, a review's is checked too: its `task` is refused when it is no id, because `ReviewSigned` is a type of P-1. The other bodies are not yet: `brief`, `approval`, `decision` and `call` take any text for the ids they hold (`requester`, `assignee`, `reviewer`, `replaces`, `task`, `ai`, `to`), although the `thread`, `re` and `mentions` around them are checked. Nor is a row (`g` of a row, `thread`, `re`, `task`, `mentions`, `assignee`, a row's own `id`), nor `g` of `sync`, `reset`, `rows` and `fetch`.
+- Cause: only those fields have the type (`ID` in `internal/proto/envelope.go`, `command.go` and `inbox.go`; `Id` in `web/src/lib/proto.ts`). The row types and the body types a row shares with its `post` were frozen before the type existed, and code outside `internal/proto` builds them from plain strings (`internal/store`, `internal/host`), so a change of their field types is a change in those packages too. For rows, `contracts/rows.md` says "random ids unless stated" without saying per field which values stand beside the id (the `by` of a message row may be `"system"`, a device row's `id` is `<user id>:<ver>`).
+- Status: open, by the coordinator's decision of 2026-11-20: they stay as they are in P-1. A home looks up every id that a body names (`contracts/commands.md` 1.3), so a text that is no id names nothing there. The rows and bodies get the type in one change with `internal/store` and `internal/host`.
+
+### 2026-11-20 · limitation · A task's `branch` is text that no reader checks
+
+- Symptom: `proto.Decode` and the web client refuse a task row whose `slug` the home's rule cannot make (unit P-1), but take any text as its `branch`, and as the `branch` of `task branch`. `contracts/local.md` section 7 derives the branch from `num` and `slug` (`task/<num>-<slug>`); `HostedChecksToResume` instead copies `branch` from the row (`internal/host/forge.go:219`), from where it would reach `git` and `gh` arguments.
+- Cause: `TaskRow.Branch` and `TaskBranch.Branch` are plain strings (`internal/proto/task.go`, `internal/proto/command.go`). Giving the field a type of its own changes `internal/host`, which unit P-1 does not own; and whether the home must refuse a `task branch` whose `branch` is not `task/<num>-<slug>` is not in `contracts/commands.md` 1.5.
+- Status: open. Decided by the coordinator on 2026-11-20: hosts build the branch from `num` and `slug` only, and the home refuses any other `branch`. The host side (`internal/host/forge.go`, `HostedChecksToResume`) goes to the owner of the host forge after P-1 and pull request 156 merge; the home side is unit HM-9.
+
+### 2026-11-20 · deviation · A `set` that changes nothing and a `task assign` without a role are not refused yet
+
+- Symptom: `contracts/commands.md` gives `group set` and `member set` "any of" their fields, and `task assign` at least one of `assignee` and `reviewer`. A `group set` with no field, a `member set` with nothing but `id`, and a `task assign` with neither role are read by `proto.Decode` and by the web client's schemas, and nothing refuses them yet.
+- Cause: each of those fields is optional by itself (`GroupSet`, `MemberSet`, `TaskAssign` in `internal/proto/command.go`; the schemas of the same names in `web/src/lib/proto.ts`), and "at least one" is a rule across fields, which the wire types do not state. The command functions of the home are not written yet.
+- Status: open. Decided by the coordinator on 2026-11-20, and now in `contracts/commands.md` (the list of optional fields): the home answers `bad_request`. Unit HM-9 does it for `task assign`, unit HM-5 for `group set`; `member set` is the same case in HM-5's file.
+
+### 2026-11-20 · limitation · The shared wire test does not show where one reader is stricter about a text
+
+- Symptom: `internal/proto/testdata/wire.json` lists, per example, the texts that are random ids, and both test suites check that such a text refuses a value that is no id. The reverse is not checked: that a text which is not listed takes any text on both sides. So a value rule that only one reader has passes unnoticed. Two are known, both in the web client alone: `conn` of a signalling payload is an `Id` (`web/src/lib/proto.ts:41`) where Go has a plain string (`internal/proto/envelope.go:27`), and a pairing room is 32 lower-case hex digits (`web/src/lib/proto.ts:130`) where Go has a plain string (`internal/proto/rendezvous.go:67`). The independent review of P-1 probed for more and found none.
+- Cause: the shared changes are those the Go tags can state (left out, `null`, the type of a value, a fraction, an id, a slug); a rule a schema adds to a text (a pattern, a literal) is in no tag. The names a schema gives `t`, `op`, a post's `kind` and an event's `code` are outside the agreement on purpose (`contracts/conventions.md` section 5).
+- Status: open, accepted by the coordinator on 2026-11-20 with no code change. Both known cases behave alike in the end, because the Go code that uses the field checks it itself: `internal/peer` refuses a `conn` that is no id (`internal/peer/signal.go:104-109`), and the rendezvous a room that is not 32 lower-case hex digits (`internal/rendezvous/room.go:10-19`).
 
 ### 2026-11-20 · limitation · A message cut short by a closing transport is forwarded as if it were complete
 
@@ -236,6 +272,54 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:41-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
 
+### 2026-11-20 · deviation · The audit record has no `what` for a CLI killed on an idle close
+
+- Symptom: `planning/flows/agent-turn.md` section G has the node write an audit row, and nothing else, when it kills a CLI that did not answer a close within 10 s outside a turn. `planning/contracts/storage.md` section 3 lists eight values of `what` (`delivered`, `refused`, `requested`, `approval`, `takeover`, `handback`, `merge`, `setting`), and none of them says that.
+- Cause: the list of `what` was written before that rule. The audit write takes any text as `what` and has a constant for each of the eight only (`internal/host/audit.go:6-15`); nothing kills a CLI yet.
+- Status: open. HS-15 adds the value to `storage.md` section 3 and a constant beside the others when it builds the idle close (coordinator, 2026-11-20).
+
+### 2026-11-20 · limitation · The host gives no notice when something `host.info` shows has changed
+
+- Symptom: `planning/contracts/datachannel.md` section 7 pushes `host.info` whenever one of its fields changes. `open`, and `state`, `task` and `queued` of each AI in a group, come from the host's sessions, and the host tells nobody when one of them changes: whoever builds `host.info` can only read the session table again (`Sessions.All`, `internal/host/session.go:341`).
+- Cause: the seam of the host (HS-0, #159) has no hook on a change of the session table (`internal/host/session.go:115`); which changes matter depends on what `host.info` is built from, which is N-3's.
+- Status: open. N-3 decides whether it needs a notice or reads the table again, and asks the owner of `internal/host/session.go` for the hook if it does (coordinator, 2026-11-20).
+
+### 2026-11-20 · limitation · A commit that fails leaves the session table ahead of the store
+
+- Symptom: not observed. If the store fails to commit a transaction whose function succeeded (an I/O error at `COMMIT`), the session table in memory keeps the changes the store lost, until the node restarts and reads the table again.
+- Cause: `Sessions.Write` puts a change into memory inside the transaction and takes it out again only when the transaction's function returns an error (`internal/host/session.go:180`, `Write`). The store reports a failed commit only after the next transaction may have started (`internal/store/store.go:76-86`, `:88-92`), and has no hook that runs before it.
+- Status: open, accepted for step 1. A store hook that runs on the writer after a failed commit would close it.
+
+### 2026-11-20 · limitation · Cards and home-written rows are one line each in the chat main line
+
+- Symptom: in the main line of the web client a brief, an approval, a decision, a summary and a call are one outlined line that names the kind and the card's subject, with the dawn edge and "Waiting on you" when the card waits for the reader. It has no buttons: the reader cannot confirm, approve or choose there. A row the home wrote (`task`, `system`) is a quiet centred line; a `system` row shows its `code` as it is on the wire, not a sentence.
+- Cause: F-07 is the row layout and text messages (`planning/steps/step-1-frontend.md`). The line is drawn in `web/src/components/chat/Message.svelte`; `subject` in `web/src/lib/groups.svelte.ts` gives the subject.
+- Status: open. The card units replace the line (U-4 approvals, U-7 brief, decision and summary, U-8 task, U-9 the wording of `system` rows, U-10 calls).
+
+### 2026-11-20 · deviation · An open chat hides the shell's top bar on a phone from its own styles
+
+- Symptom: below 768 px an open chat shows no top bar and no bottom navigation; its own head, with a back button and the group's name, stands where the bar was, as the design asks (`web/design/README.md` 3.4). At every other width the top bar stays "Chats" and the group's name is in the chat's head below it, where the design has one bar with the group's name.
+- Cause: the shell has no place yet where a page says what the top bar shows or that the navigation is hidden. `web/src/routes/Groups.svelte` hides both with `.app:has(.groups.open)` in its own styles, and reads the group id from the address itself, because `route` carries only the page (`web/src/lib/route.svelte.ts`).
+- Status: open, for U-0 (mounting points of the shell, the route table).
+
+### 2026-11-20 · limitation · In Safari the main line moves when a message arrives while the reader is scrolled back
+
+- Symptom: not observed, expected from the engine. The main line is a reversed scroller, whose offset is counted from its bottom. A message that arrives at the bottom while the reader is scrolled back pushes what they read up by its height, unless the browser anchors the scroll position. Chrome and Firefox do; Safari has no scroll anchoring.
+- Cause: `web/src/components/chat/Chat.svelte`, `.scroller` (`flex-direction: column-reverse`). The reversed scroller is what keeps a page added above from moving anything, in every browser.
+- Status: open. No correction in script was added, because it could not be tried in Safari here.
+
+### 2026-11-20 · limitation · A device in the logs of two people is read as the device of the lower user id
+
+- Symptom: nothing stops a person from adding to their own log a device that another person's log already holds. A home then reads that device's commands as coming from whichever of the two people has the lower user id (`planning/contracts/commands.md`, "Who"). A member could so turn the commands of another member's device into their own, which that device's person did not ask for.
+- Cause: `(*State).user` walks the logs in the order of their user ids and returns the first that holds the device as valid (`internal/home/check.go:92`). `planning/contracts/envelope.md` section 4 says nothing about one device in two logs.
+- Status: open, without effect in step 1, where a group has one person. Step 2, which adds people, has to settle it.
+
+### 2026-11-20 · limitation · A member of another group on the same home is answered `unknown_device`, not `forbidden`
+
+- Symptom: check 2 of `planning/contracts/envelope.md` section 3 knows a device of "a member of a group it homes". A command for group A from a device whose person is a member only of group B, homed on the same node, is answered `unknown_device`, where `forbidden` is the code for a known signer that may not do this.
+- Cause: `(*State).known` asks the logs of one group's `State` (`internal/home/check.go:88`), which hold the node owner's log and those of that group's people.
+- Status: open, without effect in step 1, where every group on a node has the same one person. For step 2, by the coordinator's decision of 2026-11-20 after the review of #160.
+
 ## Resolved
 
 ### 2026-11-20 · bug · Crash recovery of the host's worktrees decided on the folder alone
@@ -279,6 +363,125 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a clone reached through a symbolic link and through its real path had two locks.
 - Cause: `cloneLock` keyed by `filepath.Clean` only; `internal/host/merge.go:36`, `:62` and `:114` lock `m.Repo` and `internal/host/workspace.go:29` locked `filepath.Join(projectDir, "repo")`.
 - Status: resolved in branch `fix/host-workspace-review`: `cloneLock`, the one helper both use, keys by the real path of the longest existing prefix (`internal/host/workspace.go:21-33`), so a clone has one key before and after it exists. A relative and an absolute spelling still differ; the node passes absolute paths. Test: `TestCloneLockFollowsSymbolicLinks`.
+
+### 2026-11-20 · deviation · P-1's task row decoder must refuse a slug the home cannot produce
+
+- Symptom: the host refuses a `slug` that does not match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 40 characters, and a `num` below 1 (`internal/host/workspace.go:113`, `taskName`), because both go into paths and branch names; a task row with such a slug was accepted on the wire.
+- Cause: the decoder of the task row (P-1, `internal/proto`) checked no form of `slug`; `planning/contracts/local.md` section 7, "Slug", gives the only form the home produces.
+- Status: resolved by P-1 on `rebuild`: `proto.Slug` (`internal/proto/slug.go`) and `proto.Decode` refuse such a row (`internal/proto/decode.go:163`). The host keeps its own refusal before it builds a path.
+
+### 2026-11-20 · bug · The local merge ran the project's Git hooks (review M5)
+
+- Symptom: once a check's `npm install` had let Husky set `core.hooksPath` in the clone's config, a `prepare-commit-msg` hook that adds a trailer made `Apply` return a conflict ("last commit on base does not record …") although the base held the change, and the next round added a second squash commit; a commitlint-style `commit-msg` hook made every local merge a conflict. A configured signing key could make the commit wait for a person.
+- Cause: `git merge --squash`, `git commit` and `git reset --merge` in `squashLocal` (`internal/host/merge.go`) ran with the clone's own hooks and signing settings, and the inspection compared the exact message.
+- Status: resolved on branch `fix/host-merge-review`: the three commands, and the reset of an interrupted squash after a restart, run with `-c core.hooksPath=<repo>/.git/solodawn-no-hooks`, an empty folder the host makes; the commit with `--no-verify --no-gpg-sign` (`noHooks`, `squashLocal`, `resetLocal`). Pushes and fetches keep the project's hooks (Git LFS needs `pre-push`). `local.md` section 7, row "merge, no remote". Tests `TestLocalMergeRunsNoProjectHooks`, `TestLocalMergeWithoutHooksFolder`.
+
+### 2026-11-20 · bug · `Submit` could reuse a pull request from a fork (review M6)
+
+- Symptom: an open pull request from a fork whose branch has the task branch's name, into the same base, was taken as the task's pull request.
+- Cause: in gh 2.102.0 `gh pr list --head` matches the branch name only; `openPR` (`internal/host/forge.go`) took the first entry.
+- Status: resolved on branch `fix/host-merge-review`: `--json` asks for `isCrossRepository` and such entries are skipped; `local.md` section 7, row `submit_task`. Test `TestSubmitForgeSkipsForkPullRequests`, with a fake `gh`; not verified against GitHub.
+
+### 2026-11-20 · bug · A merge queue or auto-merge was reported as a conflict (review M7)
+
+- Symptom: when `gh pr merge` exits 0 and the pull request stays `OPEN` (a merge queue or auto-merge merges it later), `Apply` reported `task conflict` "pull request N is OPEN", and so did `Inspect` after a restart.
+- Cause: `Apply` and `Inspect` (`internal/host/merge.go`) read the pull request once.
+- Status: resolved on branch `fix/host-merge-review`: the pull request is read with one `gh api graphql` call (`state`, `headRefOid`, `mergeCommit`, `autoMergeRequest`, `mergeQueueEntry`). The merge is pending only while it is `OPEN` with a merge queue entry or auto-merge; `awaitPR` then reads every 30 s until an outcome, or 60 minutes after the merge command (after a restart, after `ReviewedMerge.Taken`, the audit row's time, or the restart), then `task conflict` "merge still pending after 60 minutes (merge queue or auto-merge)". An `OPEN` pull request with neither (the merge never ran, failed, or left the queue) is `task conflict` at once (re-check N2; `TestOpenPRWithNothingPending`). Right after a merge command that succeeded, that holds only from the second read, as GitHub's read can lag its write; at the limit, a last read that failed returns its error, so a merged PR out of reach is not reported as a conflict (focused review D1, D2; `TestReadFailureAtTheLimitAfterARestart`, `TestReadFailureAtTheLimitAfterAnOutage`, `TestFirstReadAfterTheMergeMayLag`). `local.md` section 7, rows "merge, with a remote" and "node restarts with a merge". Tests `TestMergeWaitsWhilePending`, `TestPendingMergeEnds`, `TestInspectResumesPendingMerge`, `TestPendingMergeStops`, with a fake `gh`; not verified against GitHub. A read that fails during the wait counts as unfinished and is repeated 30 s later, as for hosted checks (`TestPendingMergeOutlastsFailedReads`).
+
+### 2026-11-20 · bug · `HostedChecksToResume` panicked on a row without `checks.local` (review M8)
+
+- Symptom: a task row at `cloud_check` with no `checks.local` made the selection dereference a nil pointer.
+- Cause: `time.UnixMilli(t.Checks.Local.At)` in `HostedChecksToResume` (`internal/host/forge.go`).
+- Status: resolved on branch `fix/host-merge-review`: such a task resumes with its 60 minutes spent (`Since` is the zero time), so it ends with the timed-out result unless its first read has finished. Tests `TestHostedChecksToResumePausedAndWithoutLocalCheck`, `TestHostedChecksWithoutLocalCheckTimeOut`.
+
+### 2026-11-20 · bug · Restart inspection without a remote looked at the last commit only (review L6)
+
+- Symptom: after merging task t1 and then t2, `Inspect` of t1 reported a conflict.
+- Cause: `inspectLocal` (`internal/host/merge.go`) compared the message of `git log -1` on the base only.
+- Status: resolved on branch `fix/host-merge-review`: merged means a commit on the first-parent history of the base whose message is exactly the merge message; `local.md` section 7, row "node restarts with a merge". Test `TestInspectFindsAnEarlierLocalMerge`.
+
+### 2026-11-20 · deviation · Paused tasks were not resumed at `cloud_check` (review L8)
+
+- Symptom: after a restart, a paused task at `cloud_check` was not polled again, though task-machine row 6 takes `task cloud` while paused and `local.md` section 7 says every task at that step.
+- Cause: `HostedChecksToResume` (`internal/host/forge.go`) kept `active` tasks only, and its test asserted the exclusion.
+- Status: resolved on branch `fix/host-merge-review`: tasks at `cloud_check` that are active or paused resume, the two states row 6 accepts; the test now expects the paused task.
+
+### 2026-11-20 · bug · `DeleteBranch` could drop unreviewed commits (review L9)
+
+- Symptom: a local task branch that had moved past the merged commit was deleted with `git branch -D`, and its later commits with it.
+- Cause: `DeleteBranch` (`internal/host/merge.go`) deleted the branch whatever it pointed at.
+- Status: resolved on branch `fix/host-merge-review`: the branch is deleted with `git branch -D` only while `rev-parse` shows it is the merged commit; a moved branch is kept and `DeleteBranch` returns `deleted` false. `branch -D` refuses a branch that a worktree still has checked out, the only place it could move from; an earlier version used `update-ref -d`, which deleted it under a worktree whose removal had failed (re-check N1). `local.md` section 7, row "task merged". Tests `TestDeleteBranchOnlyAtTheMergedCommit`, `TestDeleteBranchRefusedWhileCheckedOut`, `TestDeleteBranchFailures`.
+
+### 2026-11-20 · limitation · The task machine held `review.failed` and `wait.kept` beside the task row
+
+- Symptom: on the branch of HM-M, `home.Step` took and returned `home.Task`, a `proto.TaskRow` with two more fields, `ReviewFailed` and `Kept`. A caller that kept only the `proto.TaskRow` would have lost the count of failed reviews and the wait a pause replaced.
+- Cause: `contracts/rows.md` section 4 has `review.failed` and `wait.kept`; `proto.TaskRow` did not have them until P-1 froze them, and HM-M was built in the same wave.
+- Status: resolved in PR #161, before it was merged: after P-1 (PR #162) `home.Step` takes and returns `proto.TaskRow`, and the two fields are `review.failed` and `wait.kept` of the row.
+
+### 2026-11-20 · limitation · `group create` was sent as the contract describes it, before its wire example
+
+- Symptom: the create-group dialog of the web client was written before P-1 froze the payload of `group`, with `g` equal to `n` as `planning/contracts/commands.md` 1.1 reads.
+- Cause: the order of the units; `Home.create` in `web/src/lib/groups.svelte.ts`.
+- Status: resolved in #164. P-1 (#162) froze `group-create.json` with `g` equal to `n`; `create` sends the fields of that example in its order, and its test reads the payload with the `GroupCreate` schema. The dialog still asks for the repository address with `forge: none`, since `repo` is absent only for a group without a repository (`planning/contracts/rows.md` section 1).
+
+### 2026-11-20 · deviation · No unit measured a row against its size limit
+
+- Symptom: `planning/contracts/conventions.md` section 4 has the home answer `bad_request`, naming the limit and the size, to a command that would write a row above 16 KiB, or a card above 12 KiB when it is created. No row of `planning/steps/parallel-plan-units.md` names the rule, and the first version of the seam handed the rows of a command's function to its caller unmeasured.
+- Status: resolved in #160 by the coordinator's decision of 2026-11-20: `Table.Apply` measures every row of a result after numbering it and refuses the command for one above its limit (`State.Seal`, `internal/home/home.go:344`; `rowFits` at `:143`).
+
+### 2026-11-20 · bug · The tests check counted deleted files
+
+- Symptom: changing `a.go` and deleting `a_test.go` passed; only deleting `old.go` failed; renaming `x_test.go` to `y.go` passed. `local.md` §7 says a deleted file counts as neither a test file nor a source file. Found in the independent review of `internal/host` (M1).
+- Cause: the names diff of the hard checks listed deleted paths (`internal/host/checks.go:163` before the fix); with `--no-renames` a rename is a deletion and an addition.
+- Status: resolved on branch `fix/host-checks-review`: `--diff-filter=d` on the names diff. Test `TestTestsCheckIgnoresDeletedFiles`.
+
+### 2026-11-20 · bug · The secrets check did not read files Git takes as binary
+
+- Symptom: a `server.pem` holding a PKCS #8 key passed the secrets hard check when `.gitattributes` marked `*.pem binary` or the file held a NUL byte; Git printed "Binary files differ" instead of the added lines (M2).
+- Cause: the patch diff ran without `--text` (`internal/host/checks.go:159` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: `--text` on the patch diff. A large binary then put tens of MiB through the scan: the check now matches in place with a literal prefilter and no copies, fails above 64 MiB of added lines with "too large to check", and the hard checks stop at their own 2-minute limit with "timed out". Tests `TestSecretsCheckReadsFilesGitTakesAsBinary`, `TestAddedLinesOverTheLimit`, `TestHardChecksTimeOutOnTheirOwnLimit`.
+
+### 2026-11-20 · bug · A check's output tail could hold the end of a private key
+
+- Symptom: a check that printed a 4.4 KiB key left a tail that began inside the key and ended with its END line, which redaction did not match (L1).
+- Cause: the output was cut to 4 KiB before redaction, and redaction needed the header (`internal/host/checks.go:118-125` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: the last 64 KiB of output are redacted, then cut to the 4 KiB tail (`checkDetail`); redaction, and not the check, also replaces a private-key footer without its header from the start of the text. Tests `TestCheckOutputRedactsKeyLongerThanTail`, `TestCheckDetailIsErrorThenRedactedTail`, `TestRedactSecrets`.
+
+### 2026-11-20 · bug · A turn that ran out took the hard checks with it
+
+- Symptom: with a context of 300 ms and the check `sleep 2`, `Run` returned "context deadline exceeded" and no items, so neither hard check ran (L3; R-103 says both always run).
+- Cause: the hard checks used the caller's context after the group's checks had used up its deadline (`internal/host/checks.go:38` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: the turn's deadline does not stop the hard checks, which have their own limit; an explicit cancel (pause, interrupt, shutdown) stops the run, which then reports nothing and returns the error. The group's checks share the turn's deadline, with `turn_minutes` bounding a context without one. Tests `TestTurnDeadlineKeepsHardChecks`, `TestCancelStopsRun`.
+
+### 2026-11-20 · bug · A background child of a check outlived it and hid the error
+
+- Symptom: `sleep 3 & echo done` gave `ok=false` with the detail "done\n": the `WaitDelay` error was dropped, and `sleep` kept running (L4).
+- Cause: the detail was replaced by the output tail, and nothing killed the process group after `Wait` (`internal/host/checks.go:115-125` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: after `Wait` the process group is killed (Unix, `checks_tree_unix.go`); on Windows the shell runs in a job object closed after `Wait` (`checks_tree_windows.go`); without a job nothing is killed after `Wait`, as Go has released the process. The detail is the error, then the redacted tail. Test `TestBackgroundChildDiesWithCheck`.
+
+### 2026-11-20 · bug · A clean status did not prove the checked commit
+
+- Symptom: a tracked file with the skip-worktree or assume-unchanged bit could differ from the commit while `git status --porcelain` stayed empty, so `run_checks` checked content that was not the commit (L5).
+- Cause: the clean-tree test read the status only (`internal/host/checks.go:70-80` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: a skip-worktree path (`S` or `s` in `git ls-files -v`) is refused with its own error naming up to 10 paths; the assume-unchanged bit, a speed hint that `core.ignoreStat` sets on every path, is cleared before the status, so a change shows and a clean tree runs. `local.md` §7 `run_checks` says so. Tests `TestSkipWorktreeIsRefusedByName`, `TestAssumeUnchangedDoesNotHideChanges`.
+
+### 2026-11-20 · deviation · Redaction was not available to the node
+
+- Symptom: the node must apply the one pattern list to the details of `task fail`, `login_invalid` and `turn_interrupted` (`local.md` §7), but the helper was unexported (L10).
+- Cause: `redactSecrets` in `internal/host/secret.go:53` before the fix.
+- Status: resolved on branch `fix/host-checks-review`: exported as `RedactSecrets`. Test `TestRedactSecretsFromOutsideHost`.
+
+### 2026-11-20 · bug · OpenPGP private keys passed the secret check
+
+- Symptom: `-----BEGIN PGP PRIVATE KEY BLOCK-----` matched no pattern (L11).
+- Cause: the PEM pattern required `PRIVATE KEY-----` (`internal/host/secret.go:19` before the fix).
+- Status: resolved on branch `fix/host-checks-review`: the pattern takes an OpenPGP block through its END line; `local.md` §8 reads "a PEM or OpenPGP private-key header". Tests in `TestRedactSecrets` and `TestCheckOutboundSecretRejects`.
+
+### 2026-11-20 · bug · The signalling client could set off the rendezvous's own limits
+
+- Symptom: a node's rendezvous connection could be closed by the server for two things the node did itself. A backlog of signalling left in bursts of 90 frames exactly 10 seconds apart, so ordinary latency between two bursts could bring 121 frames within the server's 10 seconds. A `to` frame of 16,383 or 16,384 bytes passed the node's own check, but the `from` the server forwards is 2 bytes longer than the 16 KiB limit, and the server closes the sender.
+- Cause: the pacer allowed 90 frames in any 10 seconds (`internal/peer/path.go`, `pacer.turn`), with no margin in time against the server's count (`internal/rendezvous/server.go`, `client.admit`). `Path.Write` held every frame to 16,384 bytes, the `to` frames of `Path.send` included, while the server refuses a `to` whose `from` would exceed that (`internal/rendezvous/server.go`, `client.sendFrom`).
+- Status: resolved on branch `fix/peer-pacer-margin`. The pacer allows 90 frames in any 11 seconds, and a `to` frame is refused locally over 16,382 bytes; `planning/contracts/rendezvous.md` section 2 states both. The browser's signalling client gets the same rules in #155.
 
 ### 2026-11-20 · bug · The independent review of `web/src/lib` found ten faults in signalling, the tab lock, the device log and the wire types, and its re-check five more
 
@@ -332,6 +535,7 @@ Found in the audit of the harness; each was reproduced before the fix (lines are
 - Actions were referenced by movable tags (`pnpm/action-setup` is third party); `release.yml` restored pnpm and Go caches into the build of released files; `sudo ./netsim.test` had no time limit; CI never vetted code behind the `acceptance` tag nor compiled the macOS and Windows tests. Resolved in PR #142: pins to the full commit, no cache in the release job, `-test.timeout=10m`, `go vet` with the tag and for every cross-compile target.
 - Every job built with Go 1.26.0, eleven patch releases behind 1.26.11 (Backend run 44697108086), because setup-go v5.6.0 reads `go 1.26.0` in `go.mod:3` as an exact version. Resolved on branch `ci/go127-windows-macos` by the coordinator's decision of 2026-11-20: every setup-go takes `go-version: '1.27.x'` with `check-latest: true`, the newest patch of the line development uses (1.27.4); `go.mod` keeps `go 1.26.0` as the minimum.
 - No job had a time limit, so a hung step could hold a runner for six hours (a `pnpm install` held a macOS runner for 30 minutes on 2026-11-20); and no Go code ran on Windows or macOS. Resolved on branch `ci/go127-windows-macos`: `timeout-minutes` on every job, and a Backend job on `windows-latest` and `macos-latest` (vet, `go test -race`, the acceptance suite, coverage of the files built only there).
+
 ### 2026-11-20 · deviation · Two host check tests skipped themselves on Windows
 
 - Symptom: `TestChecksRequireBothGitDiffReads` and `TestCheckCancellationStopsForegroundPipeline` in `internal/host/checks_test.go` called `t.Skip` on Windows. `t.Skip(` is a listed directive under `[tamper]` in `.project-standard/gates.toml` with no exception, yet both merged with HS-5 (#94).
@@ -464,3 +668,9 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: `go test -tags acceptance -count=1 ./features/...` failed with `step is undefined` for seven scenarios of `features/web.feature` (for example `the current page is "群聊"`), so the merge gate failed.
 - Cause: `features/acceptance_test.go:44` sets `Paths: []string{"."}`, so godog runs every `.feature` in `features/`, including `web.feature`, whose steps are implemented in `web/features/web.spec.ts` (vitest-cucumber) and not in Go; `Strict: true` fails the undefined steps. Each branch passed on its own (the F-00 branch had no `go.mod`, so Go acceptance was skipped; the B-00 and B-01 branches had no `web.feature`); the conflict appeared only after both were merged.
 - Status: resolved in PR #59: `web.feature` is tagged `@web` and the godog run uses `Tags: "~@web"`.
+
+### 2026-11-20 · bug · The store wrote rows with HTML escapes
+
+- Symptom: a note with 16,000 `<` characters was stored as 96,124 bytes, though `planning/contracts/conventions.md` section 4 counts a row's size on its JSON without HTML escaping and the home accepts rows up to 16 KiB on that count. A row the home accepts could be stored above the 60 KiB limit of a `ctl` message, so a `rows` or `fetched` frame built from it could not be sent. No node wrote rows yet, so nothing was broken.
+- Cause: `Put` encoded the row with `json.Marshal` (`internal/store/put.go:17` before the fix), which escapes `<`, `>` and `&` as six-byte `<`, `>`, `&`. `internal/peer` encodes frames without escaping and leaves stored escapes as they are.
+- Status: resolved in PR #163. `Put` and `PutReceipt` encode through `encode` (`internal/store/put.go:29`, a `json.Encoder` with `SetEscapeHTML(false)`, newline trimmed); `internal/store/put.go:18` and `internal/store/receipt.go:16` call it. Raw JSON the store returns (read paths, signed envelopes in the inbox) is never re-encoded. Test: `TestPutStoresWithoutHTMLEscapes` in `internal/store/read_test.go`. `internal/proto/decode.go:64` has the same `json.Marshal` pattern but is an intermediate that is decoded again at once; not changed (owned by P-1).

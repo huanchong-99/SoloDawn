@@ -624,7 +624,7 @@ func TestCloneLockFollowsSymbolicLinks(t *testing.T) {
 		result, err = merge.Inspect(t.Context())
 		return err
 	})
-	workEqual(t, result.Conflict, "last commit on trunk does not record Merge task t1 at absent")
+	workEqual(t, result.Conflict, "no commit on trunk records Merge task t1 at absent")
 	// A clone that does not exist yet keys the same as it will once it does.
 	workEqual(t, cloneLock(filepath.Join(link, "new", "repo")), cloneLock(filepath.Join(filepath.Dir(f.project), "new", "repo")))
 }
@@ -659,6 +659,11 @@ func TestTaskMergeWaitsForTheCloneLock(t *testing.T) {
 	})
 	workEqual(t, inspected, MergeResult{MergeCommit: head})
 	workOK(t, RemoveTaskWorkspace(t.Context(), f.project, 10, "merge", aiOne, TaskMerged))
-	requireCloneLockWait(t, f.repo, "branch deletion", func() error { return merge.DeleteBranch(t.Context()) })
+	var deleted bool
+	requireCloneLockWait(t, f.repo, "branch deletion", func() (err error) {
+		deleted, err = merge.DeleteBranch(t.Context())
+		return err
+	})
+	workEqual(t, deleted, true)
 	workEqual(t, fixtureGit(t, f.repo, "for-each-ref", "--format=%(refname)", "refs/heads/task"), "")
 }

@@ -11,9 +11,7 @@ import (
 // what the caller's own code just encoded; anything else is a panic.
 func UnexpectedNulls(encoded []byte, allowed ...string) []string {
 	var value any
-	if err := json.Unmarshal(encoded, &value); err != nil {
-		panic(err)
-	}
+	sure(json.Unmarshal(encoded, &value))
 	paths := []string{}
 	collectNulls(value, "", &paths)
 	paths = slices.DeleteFunc(paths, func(p string) bool { return slices.Contains(allowed, p) })

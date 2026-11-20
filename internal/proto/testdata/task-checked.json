@@ -1,0 +1,17 @@
+{
+  "t": "task",
+  "n": "d4TLcnuZrA6sIZd6rB7JiA",
+  "ts": 1763600000000,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "op": "checked",
+  "id": "DrtCn6htSBwmMPrFPbHJHA",
+  "ok": true,
+  "items": [
+    {
+      "name": "go test ./...",
+      "ok": true,
+      "detail": "42 tests"
+    }
+  ],
+  "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
+}
