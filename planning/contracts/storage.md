@@ -125,6 +125,13 @@ CREATE TABLE receipt (          -- one per accepted command (commands.md, "Once 
   PRIMARY KEY (k, n)
 ) STRICT;
 
+CREATE TABLE processed_offer (
+  signer TEXT NOT NULL,
+  conn TEXT NOT NULL,
+  expires_ms INTEGER NOT NULL,
+  PRIMARY KEY (signer, conn)
+) STRICT;
+
 CREATE TABLE setting (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL           -- JSON
@@ -139,6 +146,9 @@ CREATE TABLE setting (
   home commands and host commands alike. For `pair.browser` and
   `takeover.start` it records only that the command succeeded
   (`contracts/commands.md`, "Once only").
+- `processed_offer` remembers a signer's first applied offer across restarts
+  ([rendezvous §2.3](rendezvous.md#23-signalling-payloads-inside-env)). Its expiry
+  is the offer's `ts + 120000`; delete it only when the node's clock is strictly later.
 - `setting` keys: `name`, `owner` (user id), `rendezvous` (list of URLs),
   `retention_days` (90), `idle_minutes` (15), `max_open` (4),
   `default_level` (2), `all_level3` (false), `approvers` (list of user ids),

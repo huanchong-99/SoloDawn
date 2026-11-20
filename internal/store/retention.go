@@ -22,8 +22,10 @@ DELETE FROM inbox WHERE created<:cut;
 DELETE FROM audit WHERE ts<:cut;
 DELETE FROM usage WHERE day<:day;
 DELETE FROM peer WHERE ok_at<:cut;
+DELETE FROM processed_offer WHERE expires_ms<:now;
 DELETE FROM receipt WHERE ts<:receiptCut;`,
 		sql.Named("cut", cut.UnixMilli()), sql.Named("day", cut.Format(time.DateOnly)),
+		sql.Named("now", now.UnixMilli()),
 		sql.Named("receiptCut", now.Add(-24*time.Hour).UnixMilli()))
 	return err
 }
