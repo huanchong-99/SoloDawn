@@ -106,6 +106,9 @@ func forgeGit(t *testing.T, dir string, args ...string) string {
 
 func forgeRepo(t *testing.T) (TaskForge, string, string) {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("LC_ALL", "C")
 	worktree, remote := t.TempDir(), t.TempDir()
 	forgeGit(t, remote, "init", "--bare", "-b", "base")
 	forgeGit(t, worktree, "init", "-b", "base")
@@ -118,39 +121,34 @@ func forgeRepo(t *testing.T) (TaskForge, string, string) {
 	return f, remote, forgeGit(t, worktree, "rev-parse", "HEAD")
 }
 
-func forgeView(branch string) []string {
-	return []string{"pr", "view", branch, "--json", "number,headRefOid,url,state,baseRefName"}
+func forgeList(branch string) []string {
+	return []string{"pr", "list", "--head", branch, "--base", "base", "--state", "open", "--json", "number,headRefOid,url,state,baseRefName"}
 }
 
-func noForgePR(branch string) forgeAnswer {
-	return forgeAnswer{Stderr: fmt.Sprintf("no pull requests found for branch %q\n", branch), Code: 1}
+func forgeCreate(branch, title, body string) []string {
+	return []string{"pr", "create", "--head", branch, "--base", "base", "--title", title, "--body", body}
 }
 
 func TestSubmitForge(t *testing.T) {
 	f, remote, head := forgeRepo(t)
-	url := "https://example.invalid/test/repo/pull/1"
-	view := forgeAnswer{Stdout: fmt.Sprintf(`{"number":1,"headRefOid":%q,"url":%q,"state":"OPEN","baseRefName":"base"}`, head, url)}
-	calls := fakeForgeGH(t, noForgePR(f.Branch), forgeAnswer{Stdout: url + "\n"}, view)
+	url := "https://example.invalid/test/repo/pull/12"
+	open := forgeAnswer{Stdout: fmt.Sprintf(`[{"url":%q,"state":"OPEN","baseRefName":"base"}]`, url)}
+	calls := fakeForgeGH(t, forgeAnswer{Stdout: "[]\n"}, forgeAnswer{Stdout: url + "\n"}, open)
 	title, summary := "Task title", "summary with \"quotes\"\nand a second line"
 	for range 2 {
 		pr, err := f.Submit(t.Context(), head, "base", title, summary)
 		assertForge(t, err, nil)
-		assertForge(t, pr, &ForgePullRequest{Number: 1, URL: url})
-		assertForge(t, forgeGit(t, remote, "rev-parse", f.Branch), head)
+		assertForge(t, pr, &ForgePullRequest{Number: 12, URL: url})
+		assertForge(t, forgeGit(t, remote, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/task"), "refs/heads/"+f.Branch+" "+head)
 	}
-	calls(forgeView(f.Branch), []string{"pr", "create", "--head", f.Branch, "--base", "base", "--title", title, "--body", summary}, forgeView(f.Branch))
+	calls(forgeList(f.Branch), forgeCreate(f.Branch, title, summary), forgeList(f.Branch))
 }
 
-func TestSubmitForgeCreatesForIntendedBase(t *testing.T) {
-	f, _, head := forgeRepo(t)
-	for _, prior := range []string{`{"state":"CLOSED"}`, `{"state":"MERGED"}`, `{"state":"OPEN","baseRefName":"another"}`} {
-		url := "https://example.invalid/test/repo/pull/2"
-		calls := fakeForgeGH(t, forgeAnswer{Stdout: prior}, forgeAnswer{Stdout: url})
-		pr, err := f.Submit(t.Context(), head, "base", "t", "s")
-		assertForge(t, err, nil)
-		assertForge(t, pr, &ForgePullRequest{Number: 2, URL: url})
-		calls(forgeView(f.Branch), []string{"pr", "create", "--head", f.Branch, "--base", "base", "--title", "t", "--body", "s"})
-	}
+func TestPushIgnoresPushConfig(t *testing.T) {
+	f, remote, head := forgeRepo(t)
+	forgeGit(t, f.Worktree, "config", "remote.origin.push", "refs/heads/*:refs/heads/elsewhere/*")
+	assertForge(t, f.PushBranch(t.Context()), nil)
+	assertForge(t, forgeGit(t, remote, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/task", "refs/heads/elsewhere"), "refs/heads/"+f.Branch+" "+head)
 }
 
 func TestSubmitForgePreconditions(t *testing.T) {
@@ -163,11 +161,13 @@ func TestSubmitForgePreconditions(t *testing.T) {
 		assertForge(t, err.Error(), want)
 	}
 	submitError("old", "task head differs from the checked commit")
+	forgeGit(t, f.Worktree, "config", "status.showUntrackedFiles", "no")
+	forgeOK(os.WriteFile(filepath.Join(f.Worktree, "untracked"), nil, 0600))
+	submitError(head, "task worktree has uncommitted changes")
+	forgeOK(os.Remove(filepath.Join(f.Worktree, "untracked")))
 	forgeGit(t, f.Worktree, "switch", "base")
 	submitError(forgeGit(t, f.Worktree, "rev-parse", "HEAD"), "task head differs from the checked commit")
-	forgeOK(os.WriteFile(filepath.Join(f.Worktree, "dirty"), nil, 0600))
-	submitError(head, "task worktree has uncommitted changes")
-	assertForge(t, forgeGit(t, remote, "for-each-ref", "--format=%(refname:short)"), "base")
+	assertForge(t, forgeGit(t, remote, "for-each-ref", "--format=%(refname)"), "refs/heads/base")
 	calls()
 }
 
@@ -179,16 +179,23 @@ func TestForgeSubmitCommandFailures(t *testing.T) {
 		assertForge(t, pr, (*ForgePullRequest)(nil))
 		return err.Error()
 	}
-	calls := fakeForgeGH(t, forgeAnswer{Stderr: "login required\n", Code: 1}, noForgePR(f.Branch), forgeAnswer{Stderr: "create denied\n", Code: 1})
+	calls := fakeForgeGH(t, forgeAnswer{Stderr: "login required\n", Code: 1}, forgeAnswer{Stdout: "["},
+		forgeAnswer{Stdout: "[]"}, forgeAnswer{Stderr: "create denied\n", Code: 1},
+		forgeAnswer{Stdout: "[]"}, forgeAnswer{Stdout: "https://example.invalid/test/repo/pull/\n"})
 	assertForge(t, prError(), "login required: exit status 1")
+	assertForge(t, prError(), "unexpected end of JSON input")
 	assertForge(t, prError(), "create denied: exit status 1")
-	calls(forgeView(f.Branch), forgeView(f.Branch), []string{"pr", "create", "--head", f.Branch, "--base", "base", "--title", "title", "--body", "body"})
+	assertForge(t, prError(), `strconv.Atoi: parsing "": invalid syntax`)
+	create := forgeCreate(f.Branch, "title", "body")
+	calls(forgeList(f.Branch), forgeList(f.Branch), forgeList(f.Branch), create, forgeList(f.Branch), create)
 	forgeGit(t, f.Worktree, "remote", "remove", "origin")
-	assertForge(t, strings.Contains(prError(), "'origin' does not appear to be a git repository"), true)
+	assertForge(t, prError(), "fatal: 'origin' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\n"+
+		"Please make sure you have the correct access rights\nand the repository exists.: exit status 128")
 	f.Branch = "task/missing"
-	assertForge(t, strings.Contains(prError(), "unknown revision"), true)
+	assertForge(t, prError(), "fatal: ambiguous argument 'refs/heads/task/missing': unknown revision or path not in the working tree.\n"+
+		"Use '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]': exit status 128")
 	f.Worktree = t.TempDir()
-	assertForge(t, strings.Contains(prError(), "not a git repository"), true)
+	assertForge(t, prError(), "fatal: not a git repository (or any of the parent directories): .git: exit status 128")
 }
 
 func TestForgeGHCannotStart(t *testing.T) {
@@ -198,30 +205,15 @@ func TestForgeGHCannotStart(t *testing.T) {
 	forgeOK(os.WriteFile(gh, []byte("invalid executable"), 0700))
 	pr, err := f.Submit(t.Context(), head, "base", "t", "s")
 	assertForge(t, pr, (*ForgePullRequest)(nil))
-	assertForge(t, err != nil, true)
+	assertForge(t, err.Error(), "fork/exec "+gh+": exec format error")
 	calls()
-}
-
-func TestForgePRReplies(t *testing.T) {
-	for _, view := range []string{"not JSON", `{}`, `{"state":"OPEN"}`, `{"state":"OPEN","baseRefName":"base"}`,
-		`{"state":"OPEN","baseRefName":"base","url":"https://example.invalid/r/pull/1","number":2,"headRefOid":"new"}`,
-		`{"state":"OPEN","baseRefName":"base","url":"https://example.invalid/r/pull/1","number":1,"headRefOid":"old"}`} {
-		pr, err := existingPR(view, "base", "new")
-		assertForge(t, pr, (*ForgePullRequest)(nil))
-		assertForge(t, err != nil, true)
-	}
-	for _, out := range []string{"invalid", "/org/repo/pull/1", "https://example.invalid/issues/1", "https://example.invalid/pull/no", "https://example.invalid/pull/0"} {
-		pr, err := forgePRFromURL(out)
-		assertForge(t, pr, (*ForgePullRequest)(nil))
-		assertForge(t, err != nil, true)
-	}
 }
 
 func TestForgeHostedPoll(t *testing.T) {
 	f := TaskForge{Worktree: t.TempDir()}
 	calls := fakeForgeGH(t,
 		forgeAnswer{Stdout: `{"headRefOid":"stale","statusCheckRollup":[]}`},
-		forgeAnswer{Stdout: `{"headRefOid":"new","statusCheckRollup":[{"__typename":"CheckRun","status":"QUEUED"}]}`},
+		forgeAnswer{Stdout: `{"headRefOid":"new","statusCheckRollup":[{"__typename":"CheckRun","name":"build","status":"QUEUED"}]}`},
 		forgeAnswer{Stdout: `{"headRefOid":"new","statusCheckRollup":[]}`},
 	)
 	synctest.Test(t, func(t *testing.T) {
@@ -237,7 +229,8 @@ func TestForgeHostedPoll(t *testing.T) {
 
 func TestForgePollStops(t *testing.T) {
 	f := TaskForge{Worktree: t.TempDir()}
-	calls := fakeForgeGH(t, forgeAnswer{Stdout: `{"headRefOid":"stale","statusCheckRollup":[]}`}, forgeAnswer{Stderr: "login required", Code: 1})
+	calls := fakeForgeGH(t, forgeAnswer{Stdout: `{"headRefOid":"stale","statusCheckRollup":[]}`},
+		forgeAnswer{Stderr: "login required", Code: 1}, forgeAnswer{Stdout: "{"})
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
@@ -245,37 +238,33 @@ func TestForgePollStops(t *testing.T) {
 		assertForge(t, result, (*proto.ChecksBody)(nil))
 		assertForge(t, err, context.DeadlineExceeded)
 	})
-	result, err := f.WaitHostedChecks(t.Context(), 4, "new")
-	assertForge(t, result, (*proto.ChecksBody)(nil))
-	assertForge(t, err.Error(), "login required: exit status 1")
+	for _, want := range []string{"login required: exit status 1", "unexpected end of JSON input"} {
+		result, err := f.WaitHostedChecks(t.Context(), 4, "new")
+		assertForge(t, result, (*proto.ChecksBody)(nil))
+		assertForge(t, err.Error(), want)
+	}
 	view := []string{"pr", "view", "4", "--json", "headRefOid,statusCheckRollup"}
-	calls(view, view)
+	calls(view, view, view)
 }
 
 func TestForgeCheckRollup(t *testing.T) {
-	checks := []forgeCheck{{TypeName: "CheckRun", Name: "build", Status: "COMPLETED", Conclusion: "FAILURE"},
-		{TypeName: "StatusContext", Context: "lint", State: "SUCCESS"}, {TypeName: "CheckRun", Name: "optional", Status: "COMPLETED", Conclusion: "SKIPPED"}}
-	want := &proto.ChecksBody{Stage: "cloud", Commit: "new", OK: false, Items: []proto.CheckItem{
-		{Name: "build", OK: false, Detail: new("FAILURE")}, {Name: "lint", OK: true, Detail: new("SUCCESS")}, {Name: "optional", OK: true, Detail: new("SKIPPED")},
-	}}
-	result, err := completedChecks("new", checks)
-	assertForge(t, err, nil)
-	assertForge(t, result, want)
-	for _, state := range []string{"EXPECTED", "PENDING"} {
-		checks[1].State = state
-		result, err = completedChecks("new", checks)
-		assertForge(t, err, nil)
-		assertForge(t, result, (*proto.ChecksBody)(nil))
+	checks := []forgeCheck{
+		{TypeName: "CheckRun", Name: "build", Status: "COMPLETED", Conclusion: "FAILURE"},
+		{TypeName: "StatusContext", Context: "lint", State: "SUCCESS"},
+		{TypeName: "StatusContext", Context: "legacy", State: "ERROR"},
+		{TypeName: "CheckRun", Name: "unit", Status: "COMPLETED", Conclusion: "SUCCESS"},
+		{TypeName: "CheckRun", Name: "neutral", Status: "COMPLETED", Conclusion: "NEUTRAL"},
+		{TypeName: "CheckRun", Name: "optional", Status: "COMPLETED", Conclusion: "SKIPPED"},
 	}
-}
-
-func TestForgeMalformedChecks(t *testing.T) {
-	for _, out := range []string{"bad", `{"statusCheckRollup":[]}`, `{"headRefOid":"new"}`,
-		`{"headRefOid":"new","statusCheckRollup":[{}]}`, `{"headRefOid":"new","statusCheckRollup":[{"__typename":"CheckRun"}]}`,
-		`{"headRefOid":"new","statusCheckRollup":[{"__typename":"StatusContext","state":"SUCCESS"}]}`,
-		`{"headRefOid":"new","statusCheckRollup":[{"__typename":"StatusContext","state":"invalid"}]}`} {
-		result, err := hostedResult(out, "new")
-		assertForge(t, result, (*proto.ChecksBody)(nil))
-		assertForge(t, err != nil, true)
+	items := []proto.CheckItem{
+		{Name: "build", OK: false, Detail: new("FAILURE")}, {Name: "lint", OK: true, Detail: new("SUCCESS")},
+		{Name: "legacy", OK: false, Detail: new("ERROR")}, {Name: "unit", OK: true, Detail: new("SUCCESS")},
+		{Name: "neutral", OK: true, Detail: new("NEUTRAL")}, {Name: "optional", OK: true, Detail: new("SKIPPED")},
+	}
+	assertForge(t, completedChecks("new", checks), &proto.ChecksBody{Stage: "cloud", Commit: "new", OK: false, Items: items})
+	assertForge(t, completedChecks("new", checks[1:2]), &proto.ChecksBody{Stage: "cloud", Commit: "new", OK: true, Items: items[1:2]})
+	for _, pending := range []forgeCheck{{TypeName: "StatusContext", Context: "lint", State: "EXPECTED"},
+		{TypeName: "StatusContext", Context: "lint", State: "PENDING"}, {TypeName: "CheckRun", Name: "build", Status: "IN_PROGRESS"}} {
+		assertForge(t, completedChecks("new", append(checks[3:4:4], pending)), (*proto.ChecksBody)(nil))
 	}
 }

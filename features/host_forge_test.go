@@ -3,6 +3,7 @@
 package features
 
 import (
+	"bytes"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -68,12 +69,28 @@ func hostForgeSteps(sc *godog.ScenarioContext, f fixtures) {
 		return nil
 	})
 	sc.Step(`^Git rejects the push and origin keeps the newer commit$`, func() error {
-		if pushErr == nil || !strings.Contains(pushErr.Error(), "[rejected]") {
-			return fmt.Errorf("expected Git to reject the push, got %v", pushErr)
+		if err := hostForgeRejected(task, pushErr); err != nil {
+			return err
 		}
 		if got := remoteBranch(); got != "refs/heads/"+task.Branch+" "+newer {
 			return fmt.Errorf("unexpected remote refs after rejection: %s", got)
 		}
 		return nil
 	})
+}
+
+// hostForgeRejected compares the host's push error with Git's own refusal,
+// whose text differs between Git versions, by repeating the push without force.
+func hostForgeRejected(task host.TaskForge, pushErr error) error {
+	ref := "refs/heads/" + task.Branch
+	push := exec.Command("git", "push", "origin", ref+":"+ref)
+	push.Dir = task.Worktree
+	var stderr bytes.Buffer
+	push.Stderr = &stderr
+	err := push.Run()
+	want := fmt.Sprintf("%s: %v", strings.TrimSpace(stderr.String()), err)
+	if err == nil || pushErr == nil || pushErr.Error() != want {
+		return fmt.Errorf("got push error %v, want %s", pushErr, want)
+	}
+	return nil
 }
