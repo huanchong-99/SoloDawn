@@ -1,7 +1,10 @@
 package proto
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -21,7 +24,7 @@ type messageExample struct {
 	signedBody         any // when the home adds fields to the posted body
 }
 
-func exampleRow[B, S any](t *testing.T, m messageExample, body B, state *S, seq int64) MessageRow[B, S] {
+func exampleRow[B, S any](t *testing.T, m messageExample, body B, state S, seq int64) MessageRow[B, S] {
 	t.Helper()
 	r := MessageRow[B, S]{
 		RowHeader: RowHeader{"msg", id(m.kind), seq}, Pos: 790, Group: group,
@@ -58,12 +61,12 @@ func decisionExample() (messageExample, DecisionBody) {
 func decidedExample(t *testing.T) MessageRow[DecisionBody, DecisionDecidedState] {
 	m, body := decisionExample()
 	state := DecisionDecidedState{"decided", person, ts, new("A"), new("Header works."), actExample("decision", "choose", "A", "Header works.")}
-	return exampleRow(t, m, body, &state, 814)
+	return exampleRow(t, m, body, state, 814)
 }
 
 func TestDecisionGoldens(t *testing.T) {
 	m, body := decisionExample()
-	golden(t, "row-msg-decision-pending", exampleRow(t, m, body, &StatusOnly{"pending"}, 790))
+	golden(t, "row-msg-decision-pending", exampleRow(t, m, body, StatusOnly{"pending"}, 790))
 	golden(t, "row-msg-decision-decided", decidedExample(t))
 }
 
@@ -75,39 +78,40 @@ func TestBriefGoldens(t *testing.T) {
 		[]BriefTask{{"Report path changes", agent, reviewer, true, []int{}}, {"Show the path", reviewer, agent, false, []int{0}}},
 		90, person, nil,
 	}
-	golden(t, "row-msg-brief-pending", exampleRow(t, m, body, &StatusOnly{"pending"}, 790))
+	golden(t, "row-msg-brief-pending", exampleRow(t, m, body, StatusOnly{"pending"}, 790))
 	confirmed := ActedState{"confirmed", person, ts, actExample("brief", "confirm", "", "")}
-	golden(t, "row-msg-brief-confirmed", exampleRow(t, m, body, &confirmed, 814))
+	golden(t, "row-msg-brief-confirmed", exampleRow(t, m, body, confirmed, 814))
 	note := "Include the relay path."
 	revise := BriefReviseState{"revise", person, ts, actExample("brief", "revise", "", note), &note}
-	golden(t, "row-msg-brief-revise", exampleRow(t, m, body, &revise, 814))
+	golden(t, "row-msg-brief-revise", exampleRow(t, m, body, revise, 814))
 	superseded := CardState{Status: "superseded", By: &revise.By, At: &revise.At, Act: &revise.Act, Note: &note}
-	golden(t, "row-msg-brief-superseded", exampleRow(t, m, body, &superseded, 815))
+	golden(t, "row-msg-brief-superseded", exampleRow(t, m, body, superseded, 815))
 }
 
 func TestApprovalGoldens(t *testing.T) {
 	m := messageExample{kind: "approval", author: agent, thread: &taskID, main: true}
-	body := ApprovalBody{taskID, agent, "Bash", "pnpm exec playwright install chromium", new("Time the path change in a browser."), "command", []string{user}}
-	golden(t, "row-msg-approval-pending", exampleRow(t, m, body, &StatusOnly{"pending"}, 790))
+	// The request was longer than what the card shows (contracts/messages.md 2.3).
+	body := ApprovalBody{taskID, agent, "Bash", "pnpm exec playwright install chromium", new(4096), new("Time the path change in a browser."), "command", []string{user}}
+	golden(t, "row-msg-approval-pending", exampleRow(t, m, body, StatusOnly{"pending"}, 790))
 	for _, a := range []struct{ status, action string }{{"approved", "approve"}, {"denied", "deny"}} {
 		state := ActedState{a.status, person, ts, actExample("approval", a.action, "", "")}
-		golden(t, "row-msg-approval-"+a.status, exampleRow(t, m, body, &state, 814))
+		golden(t, "row-msg-approval-"+a.status, exampleRow(t, m, body, state, 814))
 	}
 	for _, status := range []string{"expired", "reassigned"} {
-		golden(t, "row-msg-approval-"+status, exampleRow(t, m, body, &TimedState{status, ts}, 814))
+		golden(t, "row-msg-approval-"+status, exampleRow(t, m, body, TimedState{status, ts}, 814))
 	}
 }
 
 func TestCallGoldens(t *testing.T) {
 	m := messageExample{kind: "call", author: agent, thread: &taskID, text: "Which event reports a path change?"}
 	body := CallBody{reviewer, 1, true}
-	golden(t, "row-msg-call-waiting", exampleRow(t, m, body, &StatusOnly{"waiting"}, 790))
-	golden(t, "row-msg-call-answered", exampleRow(t, m, body, &CallAnsweredState{"answered", id("reply"), 500}, 814))
+	golden(t, "row-msg-call-waiting", exampleRow(t, m, body, StatusOnly{"waiting"}, 790))
+	golden(t, "row-msg-call-answered", exampleRow(t, m, body, CallAnsweredState{"answered", id("reply"), 500}, 814))
 }
 
 func nonCard[B any](t *testing.T, m messageExample, body B) {
 	t.Helper()
-	golden(t, "row-msg-"+m.kind, exampleRow[B, StatusOnly](t, m, body, nil, 790))
+	golden(t, "row-msg-"+m.kind, exampleRow[B, NoCard](t, m, body, nil, 790))
 }
 
 // CardState reads every state, a superseded brief's included, and keeps what is there.
@@ -144,4 +148,38 @@ func TestNonCardGoldens(t *testing.T) {
 		"task": review.Task, "commit": review.Commit, "score": review.Score, "items": review.Items}}, review)
 	nonCard(t, messageExample{kind: "handback", author: agent, thread: &taskID}, HandbackBody{[]string{"path.go"}, []CommitSubject{{"9f2c1ab", "Emit path changes"}}, 40, 3})
 	nonCard(t, messageExample{kind: "system", author: "system", thread: &taskID}, TurnInterruptedBody{SystemCode{"turn_interrupted"}, agent, "timeout", &taskID, new("Turn deadline reached.")})
+}
+
+// withState is a message example with its state replaced.
+func withState(t *testing.T, name string, state any) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", name+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row map[string]any
+	if err := json.Unmarshal(data, &row); err != nil {
+		t.Fatal(err)
+	}
+	row["state"] = state
+	return wireJSON(t, row)
+}
+
+// A card's state is never null; it is null for every other kind (contracts/rows.md section 5).
+func TestOnlyACardHasAState(t *testing.T) {
+	var card MessageRow[ApprovalBody, StatusOnly]
+	if err := Decode(withState(t, "row-msg-approval-pending", nil), &card); err != errNull {
+		t.Errorf("a pending approval without a state: %v, want %v", err, errNull)
+	}
+	var text MessageRow[EmptyBody, NoCard]
+	if err := Decode(withState(t, "row-msg-text", map[string]any{"status": "pending"}), &text); err != errCard {
+		t.Errorf("a text message with a state: %v, want %v", err, errCard)
+	}
+	// Before its kind is known, a message may hold either.
+	for name, state := range map[string]any{"row-msg-approval-pending": nil, "row-msg-text": map[string]any{"status": "pending"}} {
+		var row MsgRow
+		if err := Decode(withState(t, name, state), &row); err != nil || (row.State == nil) != (state == nil) {
+			t.Errorf("%s with state %v: %+v, %v", name, state, row.State, err)
+		}
+	}
 }

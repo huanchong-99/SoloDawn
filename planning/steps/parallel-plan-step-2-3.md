@@ -71,7 +71,7 @@ are complete only when S-10 and T3-0 have reported.
 
 | Id | W | Does | Tests | Owns | Needs | M | Sz |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P-4 | 4 | Wire shapes of step 2: `invite`, `join`, role and removal, `confirm` body and states, group kind `team`, `checks.accept`, templates, the snapshot, `watch` | golden round trip | lane PROTO | P-3, C2-1 to C2-6 | F | L |
+| P-4 | 4 | Wire shapes of step 2: `invite`, `join`, role and removal, `confirm` body and states, group kind `team`, `checks.accept`, templates, the snapshot, `watch`, and the rest that each step 2 contract assigns to P-4; protocol `v` 2 (`contracts/step-3/knowledge.md` section 8) | golden round trip | lane PROTO | P-3, C2-1 to C2-6 | F | L |
 | T2-1 | 5 | Home: invitations, joining, roles, removing a member; admission of a joiner by the node and the browser | A9 people | `home/cmd_people.go`, `node/admit.go`, `lib/join.ts` | P-4, HM-5 | A | M |
 | T2-2 | 5 | Home: the `confirm` card and `act confirm`; who must be asked | A9 confirm | `home/cmd_confirm.go` | P-4, HM-10 | F | M |
 | T2-3 | 5 | Host: the owner-signature rule, the signed list, the level cap, delegates | A9 authority | `host/authority.go` | P-4, HS-13, HS-16a | F | M |
@@ -97,7 +97,7 @@ are complete only when S-10 and T3-0 have reported.
 | Id | W | Does | Tests | Owns | Needs | M | Sz |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | T3-0 | 1 | Desk research: terms and capabilities of each candidate CLI, each claim with its source (no code; the answer goes into C3-1) | — | pull request description | — | A | S |
-| P-5 | 5 | Wire shapes: note types `preset` and `kb`, the brief's preset field, `kb_put`, `kb_search` | golden round trip | lane PROTO | P-4, C3-2 | F | S |
+| P-5 | 5 | Wire shapes: note types `preset` and `kb`, the brief's preset field, `kb_put`, `kb_search`; the `driver` object of `host.info` (`contracts/step-3/drivers.md` section 6) | golden round trip | lane PROTO | P-4, C3-1, C3-2 | F | S |
 | T3-1 | 4 | The capability table and the switches it drives | A10 capabilities | `host/caps.go` | C3-1, HS-1, HS-2 | A | S |
 | T3-2, T3-3 | 5+ | One driver and one fake CLI each for OpenCode and Qwen Code, the CLIs that passed T3-0, one at a time | M3, M4, M7 tests for that CLI | `host/<cli>.go`, `host/fakecli/<cli>/` | T3-1, captures | A | 2 × M |
 | T3-4 | — | Amp: not scheduled. T3-0 found no approval channel for R-43 | — | — | — | — | — |
@@ -116,4 +116,6 @@ does.
 - None of the proposed answers was checked against the vendors' terms or
   against code; they follow from the contracts as written.
 - D-4 was not checked against every case of `risks.md` K-4.
-- Which candidate CLIs still have headless mode, resume and MCP.
+- The capabilities of OpenCode and Qwen Code: T3-0 read them in the
+  vendors' documentation and ran nothing (`contracts/step-3/drivers.md`
+  section 8).

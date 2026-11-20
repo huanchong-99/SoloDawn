@@ -93,10 +93,12 @@ type DeviceRow struct {
 	Env Envelope `json:"env"`
 }
 
-// MsgRow holds a message before its kind and status are known.
-type MsgRow = MessageRow[json.RawMessage, CardState]
+// MsgRow holds a message before its kind and status are known: its state may
+// be null or any card's.
+type MsgRow = MessageRow[json.RawMessage, *CardState]
 
-// MessageRow binds a body and card state for a known kind. Non-cards have nil State.
+// MessageRow binds a body and card state for a known kind. The state of a card
+// is a struct, never null; a message that is not a card has NoCard.
 type MessageRow[B, S any] struct {
 	RowHeader
 	Pos       int64     `json:"pos"`
@@ -110,7 +112,7 @@ type MessageRow[B, S any] struct {
 	Mentions  []string  `json:"mentions"`
 	Re        *string   `json:"re"`
 	Body      B         `json:"body"`
-	State     *S        `json:"state"`
+	State     S         `json:"state"`
 	Env       *Envelope `json:"env,omitempty"`
 }
 

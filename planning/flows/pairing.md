@@ -15,28 +15,37 @@ rendezvous.
 2. The browser creates a pairing secret, authenticates to the rendezvous
    service, and joins the room derived from the secret.
 3. The onboarding page shows a prompt that contains the address of
-   `install.md` and the pairing secret, with a 10-minute countdown.
+   `install.md` and the pairing secret, with a 10-minute countdown. When the
+   page's origin is not the official rendezvous, the prompt also gives
+   `--rendezvous <url>` with the page's own signalling URL, `wss://<host>/rv`.
 4. The owner copies the prompt to the AI on the computer to be added.
 5. The AI follows `install.md`: download the release for this system, check
-   its SHA-256, run `solodawn pair <secret> --name <label>`.
+   its SHA-256, run `solodawn pair <secret> --name <label>`, with
+   `--rendezvous <url>` when the prompt gives one.
 6. `solodawn pair` starts the node process if it is not running and hands it
    the secret over the local socket. The node generates its device key on
-   first start.
-7. The node authenticates to the rendezvous service and joins the room. The
-   service sends `joined` to both sides.
+   first start. A node that already belongs to a person refuses: the command
+   says so and points to `solodawn pair-browser` (section C).
+7. The node authenticates to the rendezvous service, the one the prompt
+   names if it names one, and joins the room. The service sends `joined` to
+   both sides.
 8. Both sides send their `pair` message and verify the other's `mac`. The
-   page shows the node's label, system, version and fingerprint.
+   page shows the node's label and fingerprint, which its `pair` message
+   carries; the node's version arrives with `welcome` and its system with
+   `host.info` (steps 10 and 11).
 9. The browser sends a signed `offer` to the node; the node answers; ICE
    runs (`flows/connect.md`); the `ctl` channel opens.
-10. Until the next step is done the connection carries only `hello` and
-    `devlog`. The browser writes log entry 1 (genesis, itself) and entry 2
-    (`add` the node) and sends both in a `devlog` frame. The node, which
-    belongs to nobody yet, adopts that person because the log is valid and
-    the entry that adds the node is signed by the browser at the other end
-    of this pairing connection (`contracts/envelope.md` section 6). The
-    browser sends `hello` again and the new `welcome` says `owner: true`.
-11. The node registers itself to start at login, then reports over `ctl` the
-    AI CLIs it found on the machine.
+10. Until the node has adopted the person, the connection carries only
+    `hello` and `devlog`. The browser writes log entry 1 (genesis, itself)
+    and entry 2 (`add` the node) and sends both in a `devlog` frame. The
+    node, which belongs to nobody yet, adopts that person because the log
+    is valid and the entry that adds the node is signed by the browser at
+    the other end of this pairing connection (`contracts/envelope.md`
+    section 6). The browser sends `hello` again and the new `welcome` says
+    `owner: true`.
+11. The node registers itself to start at login, then reports the AI CLIs
+    it found on the machine in `host.info` (`contracts/datachannel.md`
+    section 7).
 12. For each CLI the owner picks an account type (R-50); the browser sends
     `agent.set`. The page moves on to "create your first group".
 13. `solodawn pair` prints the result (label, fingerprint, path in use) and
@@ -74,21 +83,28 @@ Used for a phone, a second browser, or after site data was cleared.
    which belongs to nobody yet, adopts that person because the entry that
    adds it is signed by the node it paired with. It sends `hello` again,
    reads `owner: true`, and now knows the owner's other nodes.
-5. The node sends the new entry, the same way, to the homes it is connected
-   to.
+5. The node sends the new entry, the same way, to the homes and the owner's
+   browsers it is connected to. Those browsers pass it on to the owner's
+   other nodes (`contracts/envelope.md` section 4); until one has, those
+   nodes refuse the new browser (`risks.md` K-24).
 
 `solodawn open` on a node does the same for the local browser in one step: it
-creates a secret and opens `http://localhost:47800/#pair=<secret>`.
+creates a secret and opens `http://localhost:47800/#pair=<secret>`. The page
+uses the node's own handler, where the node joins the room
+(`contracts/rendezvous.md` section 1, "Local delivery").
 
 A browser that has lost its key comes back this way too (`risks.md` K-20
 says how a key is lost and what the client does against it). It has no
 identity left: it shows the onboarding page and is paired as a new device,
-and the owner revokes its old entry (section D).
+and the owner revokes its old entry (section D). Its onboarding prompt,
+given to the AI on a computer that is already set up, ends at step A.6:
+`solodawn pair` refuses there and points to `solodawn pair-browser`.
 
 ## D. Revoking a device
 
-1. From any device, the owner chooses a device and confirms.
-2. That device appends a `revoke` entry and sends it in a `devlog` frame to
+1. From any of the owner's browsers, the owner chooses a device and
+   confirms.
+2. That browser appends a `revoke` entry and sends it in a `devlog` frame to
    every node of the owner and every home it is connected to.
 3. Each receiver that accepts the entry closes any connection from the
    revoked device and refuses new ones (`unknown_device`).

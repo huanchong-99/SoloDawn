@@ -41,7 +41,7 @@ func initialize(db *sql.DB) error {
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		return err
 	}
-	return migrate(db, []string{schema})
+	return migrate(db, []string{schema, processedOffers})
 }
 
 func migrate(db *sql.DB, migrations []string) error {

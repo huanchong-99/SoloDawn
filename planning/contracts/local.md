@@ -15,7 +15,7 @@ Markers: `[verified]` observed in the driver experiments or in a spike;
 | --- | --- |
 | `solodawn node` | runs the node in the foreground |
 | `solodawn rendezvous …` | runs the rendezvous service (`contracts/rendezvous.md`) |
-| `solodawn pair <secret> [--name <label>]` | starts the node if needed, pairs it, prints the result (`flows/pairing.md` A) |
+| `solodawn pair <secret> [--name <label>] [--rendezvous <url>]` | starts the node if needed, pairs it, prints the result (`flows/pairing.md` A). Without `--name` the label is the computer's host name; without `--rendezvous` the node uses its configured rendezvous, or the official one. A node that already has an owner refuses, and its one line points to `solodawn pair-browser` |
 | `solodawn pair-browser` | prints a pairing link for a new browser |
 | `solodawn open` | pairs and opens the local browser on the node's own web client |
 | `solodawn status` | prints version, device fingerprint, connections and their paths, open sessions |
@@ -23,8 +23,12 @@ Markers: `[verified]` observed in the driver experiments or in a spike;
 | `solodawn mcp --token <t>` | the MCP shim; started by a CLI, not by people |
 | `solodawn version` | prints the version |
 
-Every command except `node`, `rendezvous` and `mcp` talks to the running node
-through the local socket and exits non-zero with one line of text on failure.
+`version` prints the version of its own binary, and `service install` and
+`service remove` write or delete the start-at-login entry themselves; these
+need no running node (`install.md` runs `version` before pairing). Every
+other command except `node`, `rendezvous` and `mcp` talks to the running
+node through the local socket and exits non-zero with one line of text on
+failure.
 
 ## 2. Data directory
 
@@ -69,10 +73,14 @@ One JSON line opens a connection:
 - `{"mcp":"<session token>"}`: the rest of the connection is the MCP
   JSON-RPC stream of that session. The shim copies its stdin to the socket
   and the socket to its stdout and does nothing else.
-- `{"cmd":"pair","secret":"…","name":"…"}` and the other commands of section
-  1: the node answers with JSON lines. Each line that the command prints
+- `{"cmd":"pair","secret":"…","name":"…"}`, with `"rendezvous":"<url>"`
+  when the option was given, and the other commands of section 1: the
+  node answers with JSON lines. Each line that the command prints
   is one line `{"text":"…"}`; the last line is `{"done":true,"ok":true}` or
   `{"done":true,"error":"…"}`.
+
+A first line that is neither gets one line `{"done":true,"error":"…"}`, and
+the node closes the connection.
 
 A session token is 16 random bytes created when the node starts a CLI
 process and forgotten when that process exits.
@@ -97,8 +105,11 @@ Names used below: `<wt>` is `wt/<num>-<slug>`; `<br>` is
 `task/<num>-<slug>`, where `<slug>` is the task row's `slug`;
 `<base>` is the **name** of the base branch (for
 example `main`); `<base-ref>` is what to branch from and diff against:
-`origin/<base>` with a remote, `<base>` without one. Nothing fetches when the
-group has no remote.
+`origin/<base>` with a remote, `<base>` without one; `<start>` is the commit
+noted when a takeover started (`flows/takeover.md` step 5). A group has a
+remote when its `forge` is `github`, and none when it is `none`
+(`contracts/rows.md` section 1). Nothing fetches when the group has no
+remote.
 
 | When | Command |
 | --- | --- |
@@ -108,20 +119,21 @@ group has no remote.
 | task session created for a task taken over from another AI | with a remote: fetch, then `git -C repo worktree add ../<wt> -b <br> origin/<br>` if that branch exists there, else as for a new task. Without a remote: `git -C repo worktree add ../<wt> <br>` |
 | task session created for a task that returns to a node which still has the local branch `<br>` | with a remote: fetch, `git -C repo worktree add ../<wt> <br>` (the branch is reused, not created), then `git -C <wt> merge --ff-only origin/<br>`. If the branch has diverged, the worktree is removed again and the session fails with the output of Git. Without a remote: as the row above |
 | `push_branch` | `git -C <wt> push origin refs/heads/<br>:refs/heads/<br>`: the full ref on both sides, never a short name; never with a force option |
-| `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Then each entry of `group.checks`, in order, through the system shell, in the worktree. `limits.turn_minutes` limits the whole run of these entries together, not each command. The commit recorded is `git -C <wt> rev-parse HEAD` |
+| `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Then each entry of `group.checks`, in order, through the system shell, in the worktree. The time left in the current turn (`limits.turn_minutes`) limits the whole run of these entries together, not each command. The commit recorded is `git -C <wt> rev-parse HEAD` |
 | hard check: secrets | the patterns of section 8 over the added lines of `git diff <base-ref>...HEAD` |
 | hard check: tests | fails when the diff changes source files and no test file; what counts as each is below the table |
-| `submit_task` | refused unless the tree is clean, by the status command of `run_checks`, and HEAD is the checked commit. With a remote: the push above, then `gh pr list --head <br> --base <base> --state open --json number,headRefOid,url,state,baseRefName`. A pull request that is closed (merged included) or whose base is not `<base>` is never reused. If the list is empty: `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
-| hosted checks | every 30 s, one request: `gh pr view <pr> --json headRefOid,statusCheckRollup`. A result is reported only from an answer whose `headRefOid` is the submitted commit `[unverified]` that both fields come back in one answer; else `gh api` for the check runs of that commit |
+| `submit_task` | refused unless the tree is clean, by the status command of `run_checks`, and both HEAD and `<br>` are the commit of the last `run_checks`, which passed. With a remote: the push above, then `gh pr list --head <br> --base <base> --state open --json number,headRefOid,url,state,baseRefName`. A pull request that is closed (merged included) or whose base is not `<base>` is never reused. If the list is empty: `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
+| hosted checks | every 30 s, one request: `gh pr view <pr> --json headRefOid,statusCheckRollup`; what each read counts as is below the table. A result is reported only from an answer whose `headRefOid` is the submitted commit `[unverified]` that both fields come back in one answer; else `gh api` for the check runs of that commit |
 | review session created or reused | with a remote `git -C repo fetch origin`; first round `git -C repo worktree add --detach ../review/<num> <commit>`, later `git -C review/<num> checkout --detach <commit>`; then `git diff <base-ref>...<commit>` written to `review/<num>/.solodawn-review.diff` |
 | merge, with a remote | `gh pr merge <pr> --squash --delete-branch --match-head-commit <commit>` `[documented, round 1]` |
 | merge, no remote | only if `git -C repo rev-parse <br>` is `<commit>`: `git -C repo merge --squash <commit>` and a commit on `<base>` whose message names the task and the commit; on failure `git -C repo reset --merge` |
-| node restarts with a merge it took and did not report | no second attempt. It looks: `gh pr view <pr> --json state,mergeCommit,headRefOid`, or without a remote the last commit message on `<base>`. Merged, and with a remote `headRefOid` is the reviewed commit: `task merged`. Merged with another head, or not merged: `task conflict` |
+| node restarts with a merge it took and did not report | no second attempt. It knows it took one from the audit row `merge` (task, commit) written in the same transaction as the item's `delivered` row. It looks: `gh pr view <pr> --json state,mergeCommit,headRefOid`, or without a remote the last commit message on `<base>`. Merged, and with a remote `headRefOid` is the reviewed commit: `task merged`. Merged with another head, or not merged: `task conflict` |
 | merge failed, or the head is not the reviewed commit | `task conflict` with the command's output |
-| task given to another AI | with a remote, first the push of `push_branch`; then as the next row |
-| task merged, or given away | `git -C repo worktree remove ../<wt>`; the reviewer's node removes `review/<num>` |
+| task given to another AI | with a remote, first the push of `push_branch`; then `git -C repo worktree remove --force ../<wt>`. Only commits carry over: uncommitted changes in the worktree are discarded. The reviewer's checkout stays |
+| reviewer changed | the old reviewer's node removes `review/<num>` |
+| task merged | `git -C repo worktree remove ../<wt>`; the reviewer's node removes `review/<num>` |
 | task cancelled | `git -C repo worktree remove --force ../<wt>`: uncommitted changes in the worktree are discarded; the branch `<br>` keeps its commits. The reviewer's node removes `review/<num>` |
-| hand-back facts | in the session's folder: `git rev-parse HEAD`, `git status --porcelain --untracked-files=all`, `git log <start>..HEAD --format='%h %s'`, `git diff --shortstat <start>` |
+| hand-back facts | in the session's folder: `git rev-parse HEAD`, `git status --porcelain --untracked-files=all`, `git log <start>..HEAD --format='%h %s'`, `git diff --shortstat <start>`, `git diff --name-only <start>`. The `files` of the hand-back are that list plus the untracked files of the status |
 | statistics | `git diff --shortstat <base-ref>...<commit>` |
 
 - **Slug.** The home writes `slug` into the task row once, when it creates
@@ -136,9 +148,32 @@ group has no remote.
 - **An interrupted squash merge** (no remote), which a restart leaves
   staged in `repo` while `<base>` does not yet record the merge, counts as
   a failed merge. On restart, before anything else touches the clone, the
-  host runs `git -C repo reset --merge` under the same lock as merges; the
-  row on the restart above then reports `task conflict`. HS-7b implements
-  it.
+  host runs `git -C repo reset --merge` under the clone's lock; the row on
+  the restart above then reports `task conflict`. HS-7b implements it.
+- **One lock per clone.** Every Git command that changes the clone or one
+  of its worktrees runs under one lock per clone: `clone`, `fetch`, `merge`
+  (fast-forwards, and the local squash merge with its commit or reset),
+  `worktree add` and `worktree remove`.
+- **A worktree left by a crash.** When the node stopped after
+  `worktree add` and before it recorded the session, the item comes again;
+  a `wt/<num>-<slug>` that is already a worktree on `<br>` is reused as it
+  is, not added again.
+- **Hosted checks.** A read is finished when its `headRefOid` is the
+  submitted commit and every check in it has completed; a read that fails,
+  or that shows another head or a check still running, counts as
+  unfinished, and the next read follows 30 s later. An empty rollup (no
+  checks) counts as passed only after two consecutive empty reads at least
+  30 s apart. 60 minutes after `checks.local.at` of the submitted commit
+  the checks count as failed: `task cloud` not passed, whose items are
+  those of the last read as they were, followed by
+  `{"name":"hosted checks","ok":false,"detail":"hosted checks timed out"}`.
+  After a restart the host reads again for every task at step
+  `cloud_check` whose assignee runs on it; the 60 minutes still count from
+  `checks.local.at`, so the limit left may be slightly short.
+- **Text the host writes.** Before the host sends them, the output tails of
+  check items, the Git output in `task conflict`, and the `detail` of
+  `task fail`, `login_invalid` and `turn_interrupted` go through the
+  patterns of section 8; each match is replaced by `[redacted]`.
 - Checks are about a commit, so they need a clean tree: the commit that is
   checked is the commit that is submitted, reviewed and merged
   (`contracts/task-machine.md` section 4).
@@ -167,7 +202,8 @@ group has no remote.
   ```
 
   A change to a file of any other type does not trigger the check: the
-  check neither fails nor passes because of it. Support for projects with
+  check neither fails nor passes because of it. A deleted file counts as
+  neither a test file nor a source file. Support for projects with
   other conventions is a later option. This is the list of the code's
   `checkCodeExtensions` (`internal/host/checks.go`): the HS-5 list cut to
   those languages.
@@ -176,8 +212,9 @@ group has no remote.
 
 ## 8. Outbound secret check (R-137)
 
-One fixed list of patterns, in one source file, used in two places: the hard
-check on diffs (section 7) and everything an AI sends to the group.
+One fixed list of patterns, in one source file, used for the hard check on
+diffs (section 7), the text arguments of tools and the texts of approvals
+(below), and the text the host writes (section 7).
 
 Patterns:
 
@@ -192,7 +229,7 @@ Patterns:
   | --- | --- | --- | --- |
   | Anthropic API key | `sk-ant-` | 32 of `A-Za-z0-9_-` | [Claude docs][ak] |
   | OpenAI API keys, project keys included | `sk-` (`sk-proj-` for a project key) | 32 of `A-Za-z0-9_-` | [OpenAPI spec][oa], [Cookbook][op] |
-  | GitHub personal access token (classic) | `ghp_` | 36 of `A-Za-z0-9` | [GitHub docs][gh]; the length as HS-6 has it |
+  | GitHub personal access token (classic) | `ghp_` | 36 of `A-Za-z0-9_` | [GitHub docs][gh], [changelog][ghc]: `A-Za-z0-9_`, and lengths will grow |
   | GitHub fine-grained personal access token | `github_pat_` | 30 of `A-Za-z0-9_` | [GitHub docs][gh] |
   | GitHub OAuth, user, installation and refresh tokens | `gho_`, `ghu_`, `ghs_`, `ghr_` | 30 of `A-Za-z0-9_.-` | [GitHub docs][gh] |
   | AWS access key id | `AKIA`, `ASIA` | 16 of `A-Z0-9` | as HS-6 has it |
@@ -201,7 +238,8 @@ Patterns:
   HS-6b. `ghs_` includes the stateless `ghs_<app id>_<JWT>` format that
   GitHub began on 2026-04-27, hence `.` and `-`;
 - environment-file content: three or more lines of `NAME=value` in a row
-  where a name contains `KEY`, `SECRET`, `TOKEN` or `PASSWORD`.
+  where a name contains `KEY`, `SECRET`, `TOKEN` or `PASSWORD`, matched
+  without regard to case (`api_key` matches).
 
 Applied on the AI's own node, before signing, to:
 
@@ -228,7 +266,9 @@ is not applied to what people type.
   `solodawn_v1.4.0_linux_amd64`. A release is newer when its three numbers,
   compared as numbers from left to right, are higher than those of the
   running binary. Pre-release tags, such as `v1.5.0-rc.1`, are ignored. The
-  release build stamps its tag into the binary as the version.
+  release build stamps its tag into the binary as the version. A
+  development build, whose version is no release tag, never updates
+  itself.
 - Once a day the node reads the latest release. If it is newer, the node
   downloads the file for its system, compares its SHA-256 with the line in
   `SHA256SUMS`, and replaces its own binary.
@@ -238,11 +278,15 @@ is not applied to what people type.
 
 ## 10. Local web client
 
-`http://localhost:47800/` serves the embedded web client. Requests whose
-`Host` header is not `localhost` or `127.0.0.1` are refused. The page gets
-no special trust: it pairs like any browser (`solodawn open`).
+`http://localhost:47800/` serves the embedded web client. For the static
+files, requests whose `Host` header is not `localhost` or `127.0.0.1` are
+refused. `/rv` on the same port is served on the node's network addresses
+too and is authenticated by its challenge (`contracts/rendezvous.md`
+section 1). The page gets no special trust: it pairs like any browser
+(`solodawn open`).
 
 [ak]: https://platform.claude.com/docs/en/get-api-key
 [oa]: https://github.com/openai/openai-openapi/blob/manual_spec/openapi.yaml
 [op]: https://developers.openai.com/cookbook/examples/agents_sdk/context_personalization
 [gh]: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github
+[ghc]: https://github.blog/changelog/2021-03-04-authentication-token-format-updates/

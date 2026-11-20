@@ -32,29 +32,46 @@ function store(key: string, value: string) {
   }
 }
 
+// Until the person changes a setting nothing is stored, so the client follows the browser's
+// language and scheme: a default is not a choice.
 export const prefs = $state({
   theme: stored('sd-theme', themes, themes[0]),
   lang: stored('sd-lang', langs, navigator.language.startsWith('zh') ? 'zh-CN' : 'en'),
 });
 
-// <html> and this browser's storage follow the preferences. tokens.css reads data-theme.
-$effect.root(() => {
-  $effect(() => {
-    document.documentElement.dataset.theme = prefs.theme;
-    document.documentElement.lang = prefs.lang;
-    store('sd-theme', prefs.theme);
-    store('sd-lang', prefs.lang);
-  });
-});
+/** Sets a preference as the person chose it, and remembers it in this browser. */
+function set<K extends keyof typeof prefs>(key: K, value: (typeof prefs)[K]) {
+  prefs[key] = value;
+  store(`sd-${key}`, value);
+}
 
 const systemDark = new MediaQuery('prefers-color-scheme: dark');
 
 export const isDark = () => (prefs.theme === 'auto' ? systemDark.current : prefs.theme === 'dark');
 
+// The browser's own bar: index.html gives a colour for each system scheme, which applies before
+// the script runs. From then on both tags take the colour of the theme shown, chosen or not.
+const bars = () => document.querySelectorAll<HTMLMetaElement>('meta[name=theme-color]');
+const barColour = new Map(
+  [...bars()].map((meta) => [meta.matches('[media*=dark]'), meta.getAttribute('content')]),
+);
+
+// <html> follows the preferences; tokens.css reads data-theme.
+$effect.root(() => {
+  $effect(() => {
+    document.documentElement.dataset.theme = prefs.theme;
+    document.documentElement.lang = prefs.lang;
+  });
+  $effect(() => {
+    const colour = barColour.get(isDark())!;
+    for (const meta of bars()) meta.setAttribute('content', colour);
+  });
+});
+
 /** Changes a preference; the page cross-fades to its new look. */
 export function choose<K extends keyof typeof prefs>(key: K, value: (typeof prefs)[K]) {
   shift(() => {
-    prefs[key] = value;
+    set(key, value);
     announcement.text = '';
   });
 }
@@ -62,16 +79,22 @@ export function choose<K extends keyof typeof prefs>(key: K, value: (typeof pref
 // Radios expose their checked state natively. The two action buttons announce their result.
 export const announcement = $state({ text: '' });
 
+/** The language the interface does not show, which the language button offers. */
+export const otherLang = () => langs.find((lang) => lang !== prefs.lang)!;
+
 export const toggleTheme = () =>
   shift(() => {
-    prefs.theme = isDark() ? 'light' : 'dark';
+    set('theme', isDark() ? 'light' : 'dark');
     announcement.text = `${t('settings.theme')}: ${t(`settings.theme.${prefs.theme}`)}`;
   });
 
 export const toggleLang = () =>
   shift(() => {
-    prefs.lang = prefs.lang === 'en' ? 'zh-CN' : 'en';
+    set('lang', otherLang());
     announcement.text = `${t('settings.lang')}: ${t(`settings.lang.${prefs.lang}`)}`;
   });
 
-export const t = (key: Key) => messages[prefs.lang][key];
+/** An interface text in a given language, for a text that names both languages. */
+export const textIn = (lang: Lang, key: Key) => messages[lang][key];
+
+export const t = (key: Key) => textIn(prefs.lang, key);

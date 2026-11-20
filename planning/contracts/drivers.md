@@ -8,7 +8,7 @@ told. Session kinds are in `sessions.md`; folders and Git commands in
 Markers: `[verified]` observed in the driver experiments and in spikes S-2,
 S-3 and S-4 (Claude Code 2.1.311, Codex CLI 0.164.0, macOS);
 `[documented]` in the vendor's documentation or generated schema but not
-run by us; `[unverified]` not shown yet. Windows waits for spike S-5.
+run by us; `[unverified]` not shown yet. Windows: `risks.md` Q-4 and T-4.
 
 ## 1. Starting the CLIs
 
@@ -20,8 +20,9 @@ One process per open session. Folder and level come from the session kind:
 | task session | `wt/<num>-<slug>/` | what the owner set for this AI in this project (R-40) |
 | review session | `review/<num>/` | 1 |
 
-The node always passes model, permission and sandbox settings explicitly
-instead of inheriting the user's defaults.
+The node always passes permission and sandbox settings explicitly instead
+of inheriting the user's defaults. Step 1 passes no model: each CLI uses its
+own default model.
 
 ### 1.1 Claude Code, structured
 
@@ -37,7 +38,6 @@ claude -p --verbose
   --setting-sources user                          [verified]
   --append-system-prompt <instructions>           [verified]
   --permission-mode <mode>                        [verified]
-  --model <model>                                 (if the owner set one)
 ```
 
 - `<file>` is a temporary MCP configuration with one server: command
@@ -49,7 +49,8 @@ claude -p --verbose
   the project's `CLAUDE.md` with them. What the owner configured for
   themselves still loads: their own `CLAUDE.md`, skills, plugins, agents
   and memory. When the owner enabled repository configuration for the
-  project it becomes `user,project` (`risks.md` Q-24).
+  project it becomes `user,project` for task and review sessions; group
+  sessions never load it (`risks.md` Q-24).
 - Instructions are fixed per session: the system prompt is recorded at the
   first request of a session id, and another text given on `--resume` is
   ignored.
@@ -61,12 +62,14 @@ claude -p --verbose
   sent. The CLI answers with a `control_response` and ends the turn with a
   `result` of subtype `error_during_execution`; the next turn works in the
   same process.
-- Close: close stdin and wait for exit (observed 0.6 to 1.2 s).
+- Close: close stdin and wait for exit (observed 0.6 to 1.2 s). A CLI that
+  does not answer an interrupt or a close within 10 s is killed
+  (`flows/agent-turn.md` G).
 
 | Level | Flags | What was measured |
 | --- | --- | --- |
 | 1 | `--permission-mode default --tools Read,Glob,Grep`; `approve` answers deny. (`default` is accepted and reported by `system/init`, though `--help` of 2.1.311 no longer lists it.) | `[verified]` the tool set is those three and the node's tools: no Write, no Bash. Reading inside the folder needs no request; reading outside it reaches `approve` and is denied |
-| 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true; everything else reaches `approve`. Native Windows, where the CLI has no sandbox: open until spike S-5 (`risks.md` Q-4) | `[verified]` file tools: inside the folder without asking, outside it through `approve`. Sandboxed Bash: a write inside the folder works, and so does one in the sandbox's own temp folder, which cannot be closed; a write to a folder named in `sandbox.filesystem.denyWrite` is refused; **reads work anywhere**; the network is blocked with no request and no event, and the command waits for its own timeout. `[unverified]` that a Bash write anywhere else outside the folder is refused: the spike's folder lay inside that temp folder, and the only evidence is the sandbox's debug line `write: denyAllExcept` |
+| 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true; everything else reaches `approve`. On native Windows, where the CLI has no sandbox, the node refuses level 2 for Claude Code with a clear reason and offers only the levels it can enforce (`risks.md` Q-4): `perm.set` asking for it answers `conflict`, and a `default_level` of 2 falls back to 1 for it | `[verified]` file tools: inside the folder without asking, outside it through `approve`. Sandboxed Bash: a write inside the folder works, and so does one in the sandbox's own temp folder, which cannot be closed; a write to a folder named in `sandbox.filesystem.denyWrite` is refused; **reads work anywhere**; the network is blocked with no request and no event, and the command waits for its own timeout. `[unverified]` that a Bash write anywhere else outside the folder is refused: the spike's folder lay inside that temp folder, and the only evidence is the sandbox's debug line `write: denyAllExcept` |
 | 3 | `--permission-mode bypassPermissions`; in the terminal also `--settings '{"skipDangerousModePermissionPrompt":true}'`, without which the terminal asks the owner to accept the mode and stores the answer in the owner's configuration | `[verified]` no requests |
 
 `[unverified]` That a command the model asks to run outside the sandbox
@@ -101,9 +104,9 @@ JSON-RPC over stdio, one JSON object per line `[verified]`:
 
 1. `initialize`, then `initialized`.
 2. `thread/start` (first time) or `thread/resume` with the stored thread
-   id. Thread parameters, not launch flags: `cwd`, `model` (if the owner
-   set one), `sandbox`, `approvalPolicy`, `developerInstructions` (the
-   instructions of section 4) and `config`. Codex creates the thread id.
+   id. Thread parameters, not launch flags: `cwd`, `sandbox`,
+   `approvalPolicy`, `developerInstructions` (the instructions of section
+   4) and `config`; no `model` (section 1). Codex creates the thread id.
 3. `turn/start` with the turn text. The turn ends with `turn/completed`;
    usage arrives in `thread/tokenUsage/updated` and the rate-limit windows
    in `account/rateLimits/updated`.
@@ -113,14 +116,19 @@ JSON-RPC over stdio, one JSON object per line `[verified]`:
    ids only: the change is in the `fileChange` item sent just before it
    (`changes[]` with `path`, `kind`, `diff`). The schema has more request
    types (permissions, MCP elicitation, user input, dynamic tools)
-   `[documented]`; none was seen, and the node declines them.
+   `[documented]`; none was seen, and the node declines them. A `decline`
+   carries no text, so a deny sentence of `flows/approval.md` reaches only
+   Claude Code; on Codex the instruction of section 4 says what to do.
 5. `turn/interrupt` interrupts: `turn/completed` with status `interrupted`
    follows at once and the process stays usable.
 6. A silent turn is interrupted. In the spike 2 turns of about 25 stopped
    sending anything for more than 170 seconds, for no known reason. When a
    turn has sent no notification for 5 minutes while no approval request
    and no call of one of the node's tools is open, the node interrupts it
-   and reports `turn_interrupted` with reason `timeout`.
+   and reports `turn_interrupted` with reason `timeout`, and in a task
+   session also `task fail`, as for the turn time limit
+   (`flows/agent-turn.md` E).
+7. Close: close stdin and wait for exit, as in 1.1, killed after 10 s.
 
 | Level | `sandbox` | `approvalPolicy` | What it gives `[verified]` |
 | --- | --- | --- | --- |
@@ -136,7 +144,8 @@ JSON-RPC over stdio, one JSON object per line `[verified]`:
   declines `[unverified]`.
 - A project's `AGENTS.md` is loaded by default;
   `config.project_doc_max_bytes = 0` keeps it out. The node passes that
-  unless the owner enabled repository configuration (`risks.md` Q-24).
+  unless the owner enabled repository configuration, which applies to task
+  and review sessions, never to group sessions (`risks.md` Q-24).
 - One `app-server` with one thread took about 340 MB with its child
   processes.
 
@@ -178,7 +187,8 @@ codex resume <thread id> --no-alt-screen --no-daemon -C <folder>
 ### 1.4 Detecting CLIs and sign-in
 
 - A CLI is "found" when `claude --version` or `codex --version` succeeds on
-  the node's PATH. The version is shown and stored.
+  the node's PATH. The version is shown and stored. The node looks at node
+  start and on each `host.info` request, and keeps the answer for 60 s.
 - The node never reads a credential file. It learns that sign-in is not
   usable from the CLI's own error when a session starts, and reports
   `login_invalid` (R-56, R-137).
@@ -231,8 +241,8 @@ A later turn:
 Which fields do you need in the path event?
 ```
 
-- Header per item: position, `why`, authority, author, place, and the call
-  id when the message is a `call`.
+- Header per item, in the order of the examples: position, `why`, author,
+  place, authority, and the call id when the message is a `call`.
 - Authority comes from signatures, never from the text. It is `instruction`
   when the message that caused the item is signed by the AI's owner as a
   person (a device in the owner's log, with no `as`; a message an AI wrote
@@ -240,6 +250,9 @@ Which fields do you need in the path event?
   (`assign`, `review`, `reviewed`, `decided`, `checks`, `resume`, the
   hand-back and continue turns). It is `information` for everything else
   (R-52).
+- A `confirmed` item keeps the writer of the brief as its author and also
+  names the person who confirmed it or sent it back; its authority comes
+  from that person, by the rule above.
 - Text from other members is included verbatim below the header and never
   above it. A label is context for the model; it enforces nothing.
 - Notes are included newest first up to 8 KiB; `note_list` returns all.

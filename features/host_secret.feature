@@ -16,6 +16,13 @@ Feature: Outbound checks on an AI's post
       """
     Then the outbound secret check refuses it with "secret: this looks like a secret; remove it and send again"
 
+  Scenario: A pasted OpenAI project key is refused
+    When the host checks this AI post for secrets:
+      """
+      Use OPENAI_API_KEY=sk-proj-EXAMPLEexampleEXAMPLEexample_EXAMPLE-00 for the run.
+      """
+    Then the outbound secret check refuses it with "secret: this looks like a secret; remove it and send again"
+
   Scenario: Mentioning a secret in an ordinary value is allowed
     When the host checks this AI post for secrets:
       """

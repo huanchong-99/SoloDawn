@@ -249,3 +249,54 @@ export async function reducedThemeChange() {
     };
   });
 }
+
+export function forceColors() {
+  return page.emulateMedia({ forcedColors: 'active' });
+}
+
+// The accessible name of the language button, as Chromium computes it, and the language of each
+// part of its content.
+export async function languageButton() {
+  const button = page.getByRole('button', { name: /Switch language/ });
+  return {
+    snapshot: await button.ariaSnapshot(),
+    parts: await button.evaluate((b) =>
+      [...b.querySelectorAll<HTMLElement>('[lang]')].map((part) => [part.textContent, part.lang]),
+    ),
+  };
+}
+
+// For each group of options, which ones are marked in the system highlight colours and keep them:
+// the system puts no backplate of its page colour behind the text, which would hide it.
+export function highlighted() {
+  return page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement('i'));
+    probe.style.background = 'Highlight';
+    probe.style.color = 'HighlightText';
+    const system = getComputedStyle(probe);
+    const [highlight, text] = [system.backgroundColor, system.color];
+    probe.remove();
+    return ['fieldset:has([name=theme]) label', 'fieldset:has([name=lang]) label', '.tabs a'].map(
+      (selector) =>
+        [...document.querySelectorAll(selector)].map((part) => {
+          const style = getComputedStyle(part);
+          return (
+            style.backgroundColor === highlight &&
+            style.color === text &&
+            style.forcedColorAdjust === 'none'
+          );
+        }),
+    );
+  });
+}
+
+// Whether the hover layer of the current page's entry covers it while the pointer is on it.
+export async function coveredUnderPointer() {
+  const current = page.locator('.tabs a[aria-current]');
+  await current.hover();
+  return current.evaluate(async (entry) => {
+    await Promise.all(entry.getAnimations({ subtree: true }).map((a) => a.finished));
+    const layer = getComputedStyle(entry, '::before');
+    return layer.display !== 'none' && layer.opacity !== '0';
+  });
+}

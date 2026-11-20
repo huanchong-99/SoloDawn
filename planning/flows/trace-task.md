@@ -24,11 +24,11 @@ GitHub remote and base branch `main`. Payloads are shown without `n` and
 | 1 | browser → home, `cmd` | `OB` | `{"t":"post","g":"G","kind":"text","text":"Show the connection path…"}` (id `M1`) | stores `M1`; item 1 for `mS` |
 | 2 | secretary → home, `cmd` | `HA`, `as: mS` | `{"t":"post","kind":"brief","body":{"title":"…","criteria":[…],"tasks":[{"title":"Node: report path changes","assignee":"mX","reviewer":"mY"}],"pass":90,"requester":"<owner>"}}` (id `M2`) | stores the card, pending |
 | 3 | browser → home, `cmd` | `OB` | `{"t":"act","g":"G","msg":"M2","action":"confirm"}` (nonce `C1`) | card confirmed; task `t1` (T-12) `active`/`branch`; `task` message `M3`; receipt for (`OB`, `C1`); item 2 for `mX`; item 3 for `mS` |
-| 4 | host A → home, `cmd` | `HA` | `{"t":"task","op":"branch","id":"t1","branch":"task/12-path-events"}` | step `local_check` |
+| 4 | host A → home, `cmd` | `HA` | `{"t":"task","op":"branch","id":"t1","branch":"task/12-node-report-path-changes"}` | step `local_check` |
 | 5 | AI `mX` → home, `cmd` | `HA`, `as: mX` | `{"t":"post","kind":"progress","thread":"t1","text":"Branch created…"}` | stores it |
 | 6 | host A → home, `cmd` | `HA` | `{"t":"task","op":"checked","id":"t1","ok":true,"commit":"c1","items":[…]}` | `checks.local`; a `checks` message |
 | 7 | AI `mX`, then host A → home | `HA` | `{"t":"post","kind":"report","thread":"t1",…}` (`as: mX`), then `{"t":"task","op":"submitted","id":"t1","commit":"c1","pr":31,"pr_url":"…","stats":{…}}` | `commit` = `c1`; step `cloud_check` |
-| 8 | host A → home, `cmd` | `HA` | `{"t":"task","op":"cloud","id":"t1","commit":"c1","ok":true,"items":[…]}` | step `review`; `failures` = 0; item 4 for `mY` |
+| 8 | host A → home, `cmd` | `HA` | `{"t":"task","op":"cloud","id":"t1","commit":"c1","ok":true,"items":[…]}` | `checks.cloud`; step `review`; `failures` = 0; item 4 for `mY` |
 | 9 | AI `mY` → home, `cmd` | `HB`, `as: mY` | `{"t":"post","kind":"review","thread":"t1","body":{"task":"t1","commit":"c1","score":93,"items":[…]}}`; answered `{"ok":true,"passed":true,"round":1}` | step `merge`; item 5 for host A |
 | 10 | host A → home, `cmd` | `HA` | `{"t":"task","op":"merged","id":"t1","commit":"c1","merge_commit":"m1","stats":{…}}` | task `merged`; `system` `task_merged`; item 6 for `mS` |
 | 11 | secretary → home, `cmd` | `HA`, `as: mS` | `{"t":"post","kind":"summary","thread":"t1","text":"Path changes are reported…"}` | fills the figures; summary card |
