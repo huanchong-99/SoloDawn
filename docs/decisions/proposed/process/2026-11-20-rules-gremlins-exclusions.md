@@ -4,7 +4,7 @@ Status: proposed
 
 ## Problem
 
-The Go part of the mutation gate (`[mutation] command` for the harden stage, the first `[stages] nightly` command) runs `gremlins unleash` from the module root, as set by `2026-11-20-rules-go-mutation.md` in `docs/decisions/implemented/process/`. Its web part runs Stryker. Four defects make the gate wrong: two kinds of file reach gremlins that the gate cannot judge on the machine it runs on, the harden run's `--diff` silently skips changed lines, and the Stryker call can fetch and run an unrelated npm package.
+The Go part of the mutation gate (`[mutation] command` for the harden stage, the first `[stages] nightly` command) runs `gremlins unleash` from the module root, as set by `2026-11-20-rules-go-mutation.md` in `docs/decisions/implemented/process/`. Its web part runs Stryker. Four defects make the gate wrong: two kinds of file reach gremlins that the gate cannot judge on the machine it runs on, the harden run's `--diff` silently skips changed lines, and the Stryker call can fetch and run an unpinned, legacy Stryker release.
 
 **Files built for another platform.** gremlins v0.6.0 does not read build constraints. Its engine walks every `.go` file under the module root that is not a `_test.go` file (`internal/engine/engine.go:104-108` at tag `v0.6.0` of github.com/go-gremlins/gremlins) and gives a mutant the status NOT COVERED when the coverage profile has no block for its position (`engine.go:188-197`, `internal/coverage/profile.go:27-31`). The profile comes from `go test -cover` on the host (`internal/coverage/coverage.go:145-153`), which compiles only the files built for the host's GOOS and GOARCH. Every mutant in a Windows-only file is therefore NOT COVERED on macOS or Linux, whatever its tests do, and the gate fails. The first case is pull request #107 (branch `devin/N-0-local-cli`), which adds `internal/node/socket_windows.go`: the harden command reports `NOT COVERED CONDITIONALS_NEGATION at internal/node/socket_windows.go:24:9` and exits 1 (line 22 in an earlier revision of the branch). HS-19's `pty_windows.go` will be the next. The same applies to any file whose file-name suffix or `//go:build` line excludes the host, for example a `_linux.go` file on the Mac.
 
@@ -12,7 +12,7 @@ The Go part of the mutation gate (`[mutation] command` for the harden stage, the
 
 **`--diff` skips changed lines.** gremlins v0.6.0 builds the changed-line set from `git diff --merge-base <ref>` (`internal/diff/parse.go:33`), which compares the merge-base with the working tree. It turns each hunk into one range: start `NewPosition + LeadingContext`, end start plus `LinesAdded` minus 1 (`internal/diff/diff.go:34-51`). Git puts changes that lie within six lines of each other into one hunk with unchanged lines between them; those interior lines are not counted, so the range ends early and the later added lines of the hunk are outside it. A hunk that starts with a deletion and adds lines further down is shifted the same way. A mutant outside every range is SKIPPED (`engine.go:188-197`), and SKIPPED passes. Pull request #117 (head `af7af0e11`) changed `internal/proto/session.go` lines 14 to 27 in one hunk `@@ -1,13 +1,30 @@`; gremlins took lines 3 to 20, skipped the only mutant, `!=` at line 23, and ran no mutant at all, while a whole-package run killed it. The harden gate passed without testing the change. New files (one hunk from line 1) and pure deletions are handled correctly; an empty diff makes gremlins treat every line as changed (`diff.go:55-58`), which the pre-check prevents.
 
-**Stryker can fetch an unrelated package.** Both Stryker calls are `npx stryker run`. When `web/node_modules` is not installed, npx does not fail: it downloads the npm package named `stryker` (version `^1`, an old, unrelated package; the project's Stryker is `@stryker-mutator/core` 10.1.1, pinned in `web/package.json`) into `~/.npm/_npx/` and runs it. This happened on 2026-11-20 while the subagent checked pull request #117 in a fresh worktree: npx installed `stryker@^1` into `~/.npm/_npx/49301fa88e4fa3d5` (50 MB) and ran it, and it crashed on a missing module. The gate failed by accident, after running third-party code.
+**Stryker can fetch a legacy release.** Both Stryker calls are `npx stryker run`. When `web/node_modules` is not installed, npx does not fail: it downloads the npm package named `stryker` into `~/.npm/_npx/` and runs it. That package is Stryker's legacy 1.x release (`stryker` 1.0.1, published before the project moved to `@stryker-mutator/core`), not the Stryker this project pins, `@stryker-mutator/core` 10.1.1 with `@stryker-mutator/vitest-runner` in `web/package.json`. This happened on 2026-11-20 while the subagent checked pull request #117 in a fresh worktree: npx installed `stryker` 1.0.1 into `~/.npm/_npx/49301fa88e4fa3d5` (50 MB) and ran it, and it crashed with `Cannot find module 'rx'` before testing anything. The gate failed by accident, after silently fetching and running an unpinned package.
 
 ## Proposal
 
@@ -85,7 +85,7 @@ The full diff, for the coordinator to apply to `.project-standard/gates.toml` af
 +# test roots (features/, internal/host/fakecli/, testdata/); those files are not mutated in this run. The harden run sets
 +# git's diff.context to 0 for gremlins' own git diff: gremlins 0.6.0 reads each hunk as one block of added lines, so with
 +# context lines inside a hunk it skips the later changed lines. Stryker runs through pnpm exec and fails when the web
-+# dependencies are not installed, instead of letting npx fetch the unrelated npm package "stryker" (see
++# dependencies are not installed, instead of letting npx fetch the legacy npm package "stryker" 1.x (see
 +# docs/decisions/implemented/process/2026-11-20-rules-gremlins-exclusions.md).
  engine = "command"
  test_command = ""
@@ -125,7 +125,7 @@ On approval, the `Rules approved on` row gains, after the go-mutation entry: `; 
 
 **A wrapper for `git` on `PATH`, or a newer gremlins.** A wrapper adding `-U0` is a script outside the protected file. Whether a later gremlins release fixes the hunk arithmetic was not checked; changing the installed tool needs the owner.
 
-**`npx --no-install stryker run`.** It blocks new downloads but still runs a package already in the npx cache: with `web/node_modules` missing, it ran the cached `stryker@^1` from `~/.npm/_npx/49301fa88e4fa3d5` (observed on 2026-11-20). Not safe on a machine where the wrong package was ever fetched.
+**`npx --no-install stryker run`.** It blocks new downloads but still runs a package already in the npx cache: with `web/node_modules` missing, it ran the cached `stryker@^1` from `~/.npm/_npx/49301fa88e4fa3d5` (observed on 2026-11-20). Not safe on a machine where the legacy package was ever fetched.
 
 **Plain `pnpm exec stryker run`.** Runs the pinned Stryker, but pnpm 11 then installs the dependencies itself when they are missing (observed: it created `web/node_modules` in a fresh worktree). The coordinator asked for a failure instead, so that a gate run never installs anything.
 
@@ -154,7 +154,7 @@ After the coordinator applies the diff:
 - **`GIT_CONFIG_COUNT` is replaced.** If the environment that runs the gate already sets `GIT_CONFIG_COUNT`, the gremlins call overrides it; none of this project's tooling sets it.
 - **Code merged before the fix.** Pull requests merged while `--diff` skipped lines may hold untested mutants; a whole-module run measures them, and fixes are assigned separately.
 - **pnpm is required.** The gate needs `pnpm` on `PATH` and an installed `web/node_modules`. The fast stage's `npx prettier`, `npx svelte-check` and `npx vitest` still fetch the real, but unpinned, packages when `node_modules` is missing; they are outside this proposal.
-- **The bad npx cache entry stays.** `~/.npm/_npx/49301fa88e4fa3d5` holds `stryker@^1` on this machine; any other `npx stryker` would run it. Removing it is a cache clean-up for the owner or the coordinator.
+- **Other machines.** The cache entry `~/.npm/_npx/49301fa88e4fa3d5` with `stryker` 1.0.1 was removed from this machine on 2026-11-20 at the coordinator's request. A machine that ever ran `npx stryker` without `web/node_modules` may hold the same entry, and `npx stryker` there would still run it; the proposed commands do not call npx.
 
 ## Verification
 
