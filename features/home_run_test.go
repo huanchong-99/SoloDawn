@@ -35,9 +35,10 @@ type homeRunWorld struct {
 // homeRunPeer is a connection as the loop sees it: a home.Client that keeps
 // the frames it is sent.
 type homeRunPeer struct {
-	conn   *home.Conn
-	frames chan any
-	re     int64
+	conn    *home.Conn
+	frames  chan any
+	re      int64
+	welcome string // the answer to its hello
 }
 
 func (p *homeRunPeer) Send(frame any) error  { p.frames <- frame; return nil }
@@ -113,6 +114,12 @@ func (w *homeRunWorld) start(cleanup func(func())) error {
 	for name, key := range w.keys {
 		p := &homeRunPeer{frames: make(chan any, 64)}
 		p.conn = loop.Attach(key.ID(), p)
+		loop.Welcome(p.conn, func(groups []proto.GroupSummary) any {
+			return proto.Welcome{Type: "welcome", Success: proto.Success{Re: 1, OK: true}, V: 1, Device: node.ID(), Time: w.now.UnixMilli(), Addrs: []string{}, Groups: groups}
+		})
+		if p.welcome, err = p.next(); err != nil {
+			return err
+		}
 		w.peers[name] = p
 	}
 	return nil
@@ -242,12 +249,14 @@ func (w *homeRunWorld) pushed(text string, seq int64) error {
 }
 
 // again checks what the connections of a home that started again are told
-// of its groups, and lets both read the group from where it is.
+// of its groups in their welcome, and lets both read the group from where
+// it is.
 func (w *homeRunWorld) again(name string) error {
 	for who, p := range w.peers {
+		var welcome proto.Welcome
 		want := []proto.GroupSummary{{Group: w.group, Name: name, Seq: 3}}
-		if got := w.loop.Groups(p.conn); !reflect.DeepEqual(got, want) {
-			return fmt.Errorf("%s is listed %v; want %v", who, got, want)
+		if err := json.Unmarshal([]byte(p.welcome), &welcome); err != nil || !reflect.DeepEqual(welcome.Groups, want) {
+			return fmt.Errorf("%s was welcomed with %s (%v); want the groups %v", who, p.welcome, err, want)
 		}
 	}
 	return w.read(3)

@@ -55,7 +55,10 @@ func NodeTables() Tables {
 	return Tables{Commands: Commands, Timers: Timers, Events: Events, After: After}
 }
 
-// LoopConfig is what a loop is started with.
+// LoopConfig is what a loop is started with. The loop calls Logs, Now and
+// Report on the goroutines of its groups, and Logs and Now also on the
+// caller of Cmd. So none of the three may wait for a lock that is held
+// around a call of Attach, Watch, Close or Cmd, and none may call those.
 type LoopConfig struct {
 	Store *store.Store
 	Home  string // this node's device id
@@ -271,12 +274,31 @@ func (l *Loop) Attach(device string, client Client) *Conn {
 
 // Detach ends a connection: nothing more is sent to it, and every group
 // forgets it. It does not close the client. Detaching twice is harmless.
+// Every group has the job of forgetting the connection before Gone is
+// closed, so what is handed in after Gone finds the device gone.
 func (l *Loop) Detach(c *Conn) {
-	c.leave()
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	delete(l.conns, c)
 	l.each(func(g *runGroup) { g.detach(c) })
+	l.mu.Unlock()
+	c.leave()
+}
+
+// Welcome sends c the answer to its hello: the frame that build makes from
+// the groups homed here that the device of c may read, as welcome lists them
+// (planning/contracts/datachannel.md section 3). The list is read and the
+// frame is queued in one step, and c is pushed its groups only from then on:
+// so no groups push comes before the welcome, and none that is older than
+// the welcome comes after it. A node calls it for every hello. build runs
+// under the lock of the loop and must not call the loop.
+func (l *Loop) Welcome(c *Conn, build func(groups []proto.GroupSummary) any) {
+	l.mu.Lock()
+	c.welcomed = true
+	fits := c.frames.push(build(l.listed(c.device)))
+	l.mu.Unlock()
+	if !fits {
+		c.fail()
+	}
 }
 
 // Cmd hands in the cmd request re that arrived on c with the envelope env
@@ -312,8 +334,11 @@ func runGroupOf(env proto.Envelope) string {
 // group runs it and it leaves no receipt. Only the owner's devices are known
 // to it.
 func (l *Loop) stray(c *Conn, re int64, env proto.Envelope) {
-	_, refusal := l.fresh(runNowhere).open(c.device, env, l.cfg.Now())
-	c.send(refused(refusal).Frame(re))
+	res := refused(&Refusal{"bad_request", "the command names no group in g"})
+	if _, refusal := l.fresh(runNowhere).open(c.device, env, l.cfg.Now()); refusal != nil {
+		res = refused(refusal)
+	}
+	c.send(res.Frame(re))
 }
 
 // Watch subscribes c to every change of a group after the sequence number it
@@ -338,7 +363,9 @@ func (l *Loop) Inbox(c *Conn) {
 }
 
 // Groups returns the groups homed here that the device of c may read, as
-// welcome and groups list them (planning/contracts/datachannel.md section 3).
+// they are now. It is a read for tests and tools: a frame built from it can
+// be older than a groups push that is already on its way, which is why a
+// node answers a hello through Welcome.
 func (l *Loop) Groups(c *Conn) []proto.GroupSummary {
 	l.mu.Lock()
 	defer l.mu.Unlock()

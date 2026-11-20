@@ -57,9 +57,23 @@ loop".
    not given out again after retention has removed the task that had it.
 10. **The owner's log comes from the node, every other log from the group's device rows.** A
     state starts with the log that `LoopConfig.Logs` returns for the owner, and loading replays
-    the group's device rows on top, as `Commit` applied them.
+    the group's device rows on top, in the order of their versions. That is the order in which
+    `Commit` applied their entries; the order of their sequence numbers is not, once a row has
+    been written again. An independent review found that, with a device that was revoked and
+    valid again after a restart.
 11. **The tables are part of the configuration.** `NodeTables()` returns those of a node; a test
     and an acceptance step pass their own.
+12. **A group pushes only to the devices it serves.** `Serves` is asked again for every result,
+    on the state that holds it: a connection whose device is revoked, or whose person left, stops
+    watching with that result and is sent no item. The same review found rows going to a revoked
+    device on its open connection.
+13. **The loop queues the welcome.** `Welcome(conn, build)` reads the list of groups and queues
+    the frame that `build` makes from it under the lock that orders the `groups` pushes, and a
+    connection is pushed `groups` only after its welcome. The review found that a node which
+    read the list and sent the welcome itself could send it after a newer `groups` push.
+14. **An item that cannot be made into a frame is left out, not waited for.** It is reported once
+    for a connection, and the other items of the group are delivered. A queue that cannot be
+    read at all is read again on the next tick.
 
 ## Alternatives considered
 
@@ -103,7 +117,10 @@ exception because `group create` needs the owner's devices before the group has 
 ## Consequences
 
 - A hook, a timer, a handler and the function of a command must not call `Attach`, `Watch` or
-  `Close`; everything else of the loop may be called from anywhere.
+  `Close`; everything else of the loop may be called from anywhere. `LoopConfig.Logs`, `Now` and
+  `Report` run on the goroutines of the groups and must not wait for a lock held around those
+  calls or around `Cmd`.
+- A node must answer a `hello` through `Welcome`, not with a `Send` of its own.
 - The list of jobs of a group can grow without bound while a client sends faster than the group
   applies. A `peer.Connection` buffers by itself, so the limit of 1,024 frames applies to clients
   whose `Send` waits, such as a local link.

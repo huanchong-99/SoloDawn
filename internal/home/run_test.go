@@ -186,9 +186,22 @@ type runPeer struct {
 	re     int64
 }
 
+// attach connects a device and takes its welcome.
 func (w *runWorld) attach(key identity.Key) *runPeer {
 	client := runNewClient()
-	return w.attachClient(key, client, client)
+	p := w.attachClient(key, client, client)
+	w.loop.Welcome(p.conn, runWelcome)
+	p.next()
+	return p
+}
+
+// runWelcome is the welcome of the tests: its groups and nothing else.
+func runWelcome(groups []proto.GroupSummary) any {
+	return proto.Groups{Type: "welcome", Groups: groups}
+}
+
+func runWelcomeFrame(entries ...proto.GroupSummary) string {
+	return runFrame(runWelcome(append([]proto.GroupSummary{}, entries...)))
 }
 
 func (w *runWorld) attachClient(key identity.Key, client home.Client, inner *runClient) *runPeer {
@@ -430,6 +443,62 @@ func TestRunTellsEveryClientOfAGroup(t *testing.T) {
 	equal(t, runQuery[string](t, w.db, "SELECT data FROM row WHERE g=? AND seq=4", groupID), runFrame(runMsg(runID(w.nonce.Load()-1), 4, "hello")))
 	equal(t, runQuery[int64](t, w.db, "SELECT mt FROM row WHERE g=? AND seq=4", groupID), int64(clock))
 	equal(t, runQuery[int64](t, w.db, "SELECT seq FROM grp WHERE g=?", groupID), int64(5))
+}
+
+// A welcome holds the groups as they are when it is queued, and the pushes
+// of the list start with it: a group created before the welcome is in it and
+// is not pushed before it, and one created after it follows it.
+func TestRunWelcomesAConnectionBeforeItsGroupsPushes(t *testing.T) {
+	w := runStart(t, runOpen(t), runTables())
+	p := w.attach(browser)
+	client := runNewClient()
+	late := w.attachClient(laptop, client, client)
+	p.does(groupID, "group", runCreateWebsite)
+	website := proto.GroupSummary{Group: groupID, Name: "Website", Seq: 3}
+	p.gets(runGroupsFrame(website))
+	w.loop.Welcome(late.conn, runWelcome)
+	p.does(runOther, "group", `,"op":"create","name":"Other"`)
+	both := runGroupsFrame(website, proto.GroupSummary{Group: runOther, Name: "Other", Seq: 3})
+	p.gets(both)
+	late.gets(runWelcomeFrame(website), both)
+	// A second hello is answered with the list as it is then.
+	w.loop.Welcome(late.conn, runWelcome)
+	late.gets(runWelcomeFrame(website, proto.GroupSummary{Group: runOther, Name: "Other", Seq: 3}))
+	// A device that may read no group here is welcomed with none.
+	stranger := w.attachClient(guest, client, client)
+	w.loop.Welcome(stranger.conn, runWelcome)
+	stranger.gets(runWelcomeFrame())
+}
+
+// A device row that is written again has a later sequence number than the
+// entry after it. A loop that starts holds the device rows in the order of
+// their versions, so a device that was revoked stays revoked.
+func TestRunLoadsTheDeviceRowsInTheOrderOfTheirVersions(t *testing.T) {
+	tablet := device(8)
+	tables := runTables()
+	tables.Commands["member/device"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
+		var p struct {
+			Version int    `json:"ver"`
+			Change  string `json:"change"`
+		}
+		c.Decode(&p)
+		return home.Result{Rows: []home.Row{home.RowOf(deviceRow(browser, browser, p.Version, p.Change, tablet))}}, nil
+	}
+	db := runOpen(t)
+	w := runStart(t, db, tables)
+	p := w.attach(browser)
+	p.does(groupID, "group", runCreateWebsite)
+	p.next()
+	p.does(groupID, "member", `,"op":"device","ver":4,"change":"add"`)
+	p.does(groupID, "member", `,"op":"device","ver":5,"change":"revoke"`)
+	p.does(groupID, "member", `,"op":"device","ver":4,"change":"add"`)
+	equal(t, runQuery[string](t, db, "SELECT group_concat(data->>'ver', ' ' ORDER BY seq) FROM row WHERE r='device'"), "5 4")
+	w.attach(tablet).fails(groupID, "note", `,"text":"x"`, "unknown_device")
+	w.loop.Close()
+
+	w = runStart(t, db, tables)
+	w.attach(tablet).fails(groupID, "note", `,"text":"x"`, "unknown_device")
+	w.attach(laptop).does(groupID, "note", `,"text":"x"`)
 }
 
 // A loop that starts on a store reads its groups from it: the rows, the two
@@ -775,6 +844,8 @@ func TestRunDefaults(t *testing.T) {
 	defer loop.Close()
 	client := runNewClient()
 	conn := loop.Attach(browser.ID(), client)
+	loop.Welcome(conn, runWelcome)
+	<-client.got
 	before := time.Now().UnixMilli()
 	loop.Cmd(conn, 1, browser.Sign(fmt.Sprintf(`{"t":"group","n":%q,"ts":%d,"g":%q%s}`, runID(1), before, groupID, runCreateWebsite)))
 	loop.Cmd(conn, 2, browser.Sign(fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q}`, runID(2), before, groupID)))

@@ -29,6 +29,9 @@ type Conn struct {
 	gone   chan struct{}
 	once   sync.Once
 	broken atomic.Bool // the loop gave the connection up
+	// welcomed says that the connection has had its welcome and is pushed
+	// its groups from then on. The lock of the loop guards it.
+	welcomed bool
 }
 
 // Gone is closed when the loop sends nothing more to the connection: after

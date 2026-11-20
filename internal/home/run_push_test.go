@@ -70,6 +70,69 @@ func TestRunPushesTheRowsEachClientAskedFor(t *testing.T) {
 	guestPeer.gets(runGroupsFrame())
 }
 
+// A connection is pushed rows and sent items only while its group serves
+// its device (datachannel section 8). The result that ends that is not
+// pushed to it either, and it does not watch again by itself when the group
+// serves the device once more.
+func TestRunStopsPushingToADeviceTheGroupNoLongerServes(t *testing.T) {
+	tables := runTables()
+	visitor := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "visitor"}, Kind: "human", User: guest.ID()}, Role: "member"}
+	results := map[string]home.Result{
+		"joins":   {Rows: []home.Row{home.RowOf(visitor), home.RowOf(deviceRow(guest, guest, 1, "add", guest))}},
+		"leaves":  {Rows: []home.Row{home.RowOf(runGone("member", "visitor", 0))}},
+		"returns": {Rows: []home.Row{home.RowOf(visitor)}},
+		"revokes": {Rows: []home.Row{home.RowOf(deviceRow(browser, browser, 4, "revoke", laptop))}},
+		"wakes":   {Items: []home.Item{{AI: aiID, Why: "notice"}}},
+	}
+	tables.Commands["jump"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
+		var p struct {
+			What string `json:"what"`
+		}
+		c.Decode(&p)
+		return results[p.What], nil
+	}
+	w, p := runFounded(t, tables)
+	host, visit := w.attach(laptop), w.attach(guest)
+	w.loop.Watch(host.conn, groupID, false)
+	w.loop.Inbox(host.conn)
+	p.does(groupID, "jump", `,"what":"joins"`)
+	host.next()
+	seq, ok := w.loop.Watch(visit.conn, groupID, false)
+	equal(t, []any{seq, ok}, []any{int64(5), true})
+	p.does(groupID, "note", `,"text":"for everyone"`)
+	note := runRows(groupID, runNote(runID(w.nonce.Load()), 6, "for everyone"))
+	host.gets(note)
+	visit.gets(note)
+
+	// The visitor leaves the group: its connection is not pushed the row
+	// that says so, nor anything after it, also not as a member again.
+	p.does(groupID, "jump", `,"what":"leaves"`)
+	host.gets(runRows(groupID, runGone("member", "visitor", 7)))
+	visit.quiet()
+	p.does(groupID, "jump", `,"what":"returns"`)
+	host.next()
+	p.does(groupID, "note", `,"text":"not for a connection that did not ask again"`)
+	host.next()
+	visit.quiet()
+	seq, ok = w.loop.Watch(visit.conn, groupID, false)
+	equal(t, []any{seq, ok}, []any{int64(9), true})
+
+	// The laptop is revoked: its open connection gets no row and no item.
+	p.does(groupID, "jump", `,"what":"wakes"`)
+	equal(t, strings.HasPrefix(host.next(), `{"Group":"`+groupID+`","Items":[{"ID":1,`), true)
+	p.does(groupID, "jump", `,"what":"revokes"`)
+	visit.next()
+	p.does(groupID, "note", `,"text":"not for a revoked device"`)
+	visit.next()
+	p.does(groupID, "jump", `,"what":"wakes"`)
+	w.loop.Inbox(host.conn)
+	host.quiet()
+	if _, ok := w.loop.Watch(host.conn, groupID, false); ok {
+		t.Fatal("a revoked device watches the group")
+	}
+	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM inbox"), 2)
+}
+
 // A rows frame is filled only as far as a ctl message goes; the rest of a
 // result follows in the next frame.
 func TestRunSplitsTheRowsOfALargeResult(t *testing.T) {
@@ -196,21 +259,31 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 	again.gets(sent[3])
 	host.quiet()
 
-	// An item in the store that cannot be read is reported, and nothing is
-	// sent; the next tick tries again.
-	env := runQuery[string](t, w.db, "SELECT env FROM inbox")
-	runExec(t, w.db, "UPDATE inbox SET env='x'")
+	// An item in the store that cannot be read is reported and left out, once
+	// for a connection; the others are sent.
+	last := wake(0)
+	host.gets(runRows(groupID, runTask("t1", 7)), last)
+	again.gets(last)
+	env := runQuery[string](t, w.db, "SELECT env FROM inbox WHERE id=3")
+	runExec(t, w.db, "UPDATE inbox SET env='x' WHERE id=3")
 	w.loop.Inbox(host.conn)
-	equal(t, strings.HasPrefix(w.reported(), "group "+groupID+", its inbox: invalid character 'x'"), true)
-	host.quiet()
-	runExec(t, w.db, "UPDATE inbox SET env=?", env)
-	w.loop.Tick(time.UnixMilli(clock + 999))
-	host.quiet()
+	equal(t, strings.HasPrefix(w.reported(), "group "+groupID+", its inbox: item 3: invalid character 'x'"), true)
+	host.gets(last)
 	w.loop.Tick(time.UnixMilli(clock + 1000))
-	host.gets(sent[3])
+	host.quiet()
+	again.quiet()
+	equal(t, len(w.reports), 0)
+	runExec(t, w.db, "UPDATE inbox SET env=? WHERE id=3", env)
+	w.loop.Inbox(host.conn)
+	host.gets(sent[3], last)
+
+	// A queue that cannot be read is reported, and read again on the next tick.
 	runExec(t, w.db, "DROP TABLE inbox")
 	w.loop.Inbox(host.conn)
 	equal(t, strings.Contains(w.reported(), "group "+groupID+", its inbox: "), true)
+	w.loop.Tick(time.UnixMilli(clock + 999))
+	host.quiet()
+	equal(t, len(w.reports), 0)
 	w.loop.Tick(time.UnixMilli(clock + 1000))
 	equal(t, strings.Contains(w.reported(), "group "+groupID+", its inbox: "), true)
 }
@@ -291,9 +364,16 @@ func TestRunCountsTheItemsOfTheLastHour(t *testing.T) {
 // it, up to 1024 of them, and then the connection is given up and closed,
 // whichever frame finds no room.
 func TestRunGivesUpAClientThatStopsReading(t *testing.T) {
-	for name, last := range map[string][2]string{
-		"a rows frame":   {"note", `,"text":"x"`},
-		"a groups frame": {"jump", ``},
+	for name, last := range map[string]func(w *runWorld, p, slow *runPeer){
+		"a rows frame": func(w *runWorld, p, slow *runPeer) {
+			p.does(groupID, "note", `,"text":"x"`)
+			p.next()
+		},
+		"a groups frame": func(w *runWorld, p, slow *runPeer) {
+			p.does(groupID, "jump", ``)
+			p.next()
+		},
+		"a welcome": func(w *runWorld, p, slow *runPeer) { w.loop.Welcome(slow.conn, runWelcome) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			tables := runTables()
@@ -313,23 +393,23 @@ func TestRunGivesUpAClientThatStopsReading(t *testing.T) {
 					p.next()
 				}
 			}
-			note(1)
-			runWait(t, inner.started) // the first frame is with the client, which does not return
+			w.loop.Welcome(slow.conn, runWelcome)
+			runWait(t, inner.started) // the welcome is with the client, which does not return
 			note(1024)
 			select {
 			case <-slow.conn.Gone():
 				t.Fatal("the connection was given up while its frames still had room")
 			default:
 			}
-			p.does(groupID, last[0], last[1])
-			p.next()
+			last(w, p, slow)
 			runWait(t, slow.conn.Gone())
 			runWait(t, client.closed)
 			note(1)
-			equal(t, online.all()[1025:], []string{"true", "true", "false"})
+			seen := online.all()
+			equal(t, []string{seen[1024], seen[len(seen)-1]}, []string{"true", "false"})
 			// The frames that waited are dropped.
 			close(inner.hold)
-			slow.next()
+			slow.gets(runWelcomeFrame(proto.GroupSummary{Group: groupID, Name: "Website", Seq: 3}))
 			time.Sleep(20 * time.Millisecond)
 			equal(t, len(inner.got), 0)
 			if _, ok := w.loop.Watch(slow.conn, groupID, false); ok {
@@ -625,8 +705,10 @@ func TestRunACloseEndsEverything(t *testing.T) {
 	// The group finished what it was given.
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM row WHERE r='note'"), 1)
 
-	late := w.attach(browser)
+	client := runNewClient()
+	late := w.attachClient(browser, client, client)
 	runWait(t, late.conn.Gone())
+	w.loop.Welcome(late.conn, runWelcome)
 	late.send(groupID, "note", `,"text":"after the close"`)
 	late.send(runOther, "group", runCreateWebsite)
 	w.loop.Tick(time.UnixMilli(clock))

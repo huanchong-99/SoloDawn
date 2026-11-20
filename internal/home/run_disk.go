@@ -1,10 +1,12 @@
 package home
 
 import (
+	"cmp"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
@@ -21,8 +23,10 @@ type runStored struct {
 }
 
 // load reads every group that has a group row and makes its state: the
-// owner's log, the state rows in their order, device rows included, so that
-// the logs are what they were, and the two counters.
+// owner's log, the state rows, and the two counters. The device rows are
+// held in the order of their versions, the order in which their entries were
+// accepted, so that the logs are what they were: a row that was written
+// again has a later sequence number than the entry after it.
 func (l *Loop) load() (states []*State, err error) {
 	var stored []runStored
 	err = l.cfg.Store.Write(func(tx *store.Tx) error {
@@ -32,6 +36,7 @@ func (l *Loop) load() (states []*State, err error) {
 	})
 	for _, held := range stored {
 		s := l.fresh(held.group)
+		slices.SortStableFunc(held.rows, func(a, b json.RawMessage) int { return cmp.Compare(runVersion(a), runVersion(b)) })
 		for _, data := range held.rows {
 			err = errors.Join(err, runHold(s, data))
 		}
@@ -39,6 +44,17 @@ func (l *Loop) load() (states []*State, err error) {
 		states = append(states, s)
 	}
 	return states, err
+}
+
+// runVersion is the version of the entry of a device row, and 0 for every
+// other state row, none of which has a ver: those stay first, in the order
+// of their sequence numbers.
+func runVersion(data json.RawMessage) int {
+	var row struct {
+		Version int `json:"ver"`
+	}
+	json.Unmarshal(data, &row) // what does not decode is refused when it is held
+	return row.Version
 }
 
 func runRead(tx *store.Tx) (stored []runStored, err error) {

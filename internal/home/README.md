@@ -44,7 +44,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | run the home of a node | `StartLoop(LoopConfig{…})` with `NodeTables()`; `Close` before the store is closed |
 | connect a client | `loop.Attach(device, client)` returns its `*Conn`; `loop.Detach(conn)`; `conn.Gone()` |
 | hand in a `cmd` frame | `loop.Cmd(conn, re, env)`; the answer is sent to the connection |
-| list the groups of a peer, for `welcome` | `loop.Groups(conn)` |
+| answer a `hello` | `loop.Welcome(conn, build)`: `build` makes the `welcome` frame from the groups of the peer |
 | subscribe a connection to a group | `loop.Watch(conn, group, stateOnly)` |
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
@@ -165,7 +165,8 @@ are in package `home_test` and use only what is exported. The task machine takes
 start with `task`, `step`, `wait`, `item` and `states`, and `workItems`, `byAssignee` and
 `byReviewer`; its tests take the names that start with `mc` and `machine`. The run loop takes the
 names that start with `run`, and its tests those that start with `run` and `Run`; it exports
-`Loop`, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and `ItemsPush`.
+`Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
+`ItemsPush`.
 
 ## The run loop
 
@@ -175,8 +176,10 @@ order it was handed in; two groups run side by side.
 
 **Loading.** A group is one that has a `group` row. Its state is the owner's device log as
 `LoopConfig.Logs` gives it, then the group's state rows in the order of their sequence numbers,
-device rows included, so the logs are what `Commit` had made them, then the two counters of
-`grp`. `Seq` is the stored counter, `Num` the higher of the stored counter and the task rows. A
+then its device rows in the order of their versions, then the two counters of `grp`. The device
+rows go by version because that is the order in which `Commit` applied their entries: a row that
+was written again has a later sequence number than the entry after it, and by sequence number a
+revoked device would be valid again after a restart. `Seq` is the stored counter, `Num` the higher of the stored counter and the task rows. A
 store that cannot be read, or a state row that does not decode, starts no loop.
 
 **One result, one transaction.** A command, a timer and an event go the same way:
@@ -211,12 +214,23 @@ the answer, in this order:
 1. `rows`, to each connection that watches the group (`Watch`): all rows of the result, or with
    `state_only` the `group`, `member`, `device` and `task` rows, markers of those types included.
    A frame takes rows up to 61,376 bytes; the rest follows in further frames. A connection that
-   would get no row gets no frame.
-2. `groups`, to every connection of the node, when the result has `GroupsChanged`: the groups
-   that exist and whose `State.Serves` holds for the connection's device, in the order of their
-   ids, `[]` when there are none.
-3. The inbox items the result queued, to the connections that take them. So a row change reaches
-   a host before the items it caused.
+   would get no row gets no frame. A connection whose device the group no longer serves
+   (`State.Serves`, on the state that holds the result) stops watching with that result and is
+   not pushed its rows: a revoked device and a member who left read nothing more on a connection
+   that is still open ([datachannel](../../planning/contracts/datachannel.md), section 8). It
+   watches again only through `Watch`.
+2. `groups`, to every connection that has had its welcome, when the result has `GroupsChanged`:
+   the groups that exist and whose `State.Serves` holds for the connection's device, in the
+   order of their ids, `[]` when there are none.
+3. The inbox items the result queued, to the connections that take them and whose device the
+   group serves. So a row change reaches a host before the items it caused.
+
+**Welcome.** `Welcome(conn, build)` reads the list of groups for the connection's device, has
+`build` make the `welcome` frame from it and queues that frame, in one step under the lock that
+also orders the `groups` pushes; and a connection is pushed `groups` only once it has had a
+welcome. So no `groups` push comes before the welcome, and none that is older than the welcome
+comes after it. A node calls it for every `hello`. `Groups(conn)` reads the same list without
+queuing anything; a frame built from it can be older than a push that is already queued.
 
 `Watch` is the subscription of `sync` without the rows before it: it returns the group's sequence
 number, and the connection is pushed every change after it. It refuses a group that does not
@@ -227,8 +241,10 @@ that result leaves the member rows; an item for a member that is no AI fails the
 `Inbox(conn)` makes a connection the taker of the items of its device: it is sent every item
 that is due now, also those it was sent before, and from then on each item when it is queued or
 when its `NotBefore` has passed, which the loop looks at on a tick. Each delivery reads the queue
-from the store, so an item that was acknowledged or retired is not sent again. A delivery that
-fails is reported and tried again on the next tick. Until the inbox unit signs items, an item is
+from the store, so an item that was acknowledged or retired is not sent again. A queue that
+cannot be read is reported and read again on the next tick. An item that cannot be made into a
+frame is reported and left out, once for each connection until its next `Inbox`, and the other
+items are sent. Until the inbox unit signs items, an item is
 kept and sent in the seam's form: the store's `env` holds the `Item` as JSON, and the frame is an
 `ItemsPush` with one `QueuedItem`. That unit replaces `runSeal` and `runItemFrame` in
 `run_push.go` and nothing else.
@@ -244,7 +260,9 @@ held item's time being in the future. The count is in memory and starts again wi
 the contract says; items sent again after a restart count nothing.
 
 **Online.** `State.Online[device]` is true from `Attach` until the last connection of that device
-is gone, in every group, also for a device that the group does not serve.
+is gone, in every group, also for a device that the group does not serve. `Gone()` is closed
+after every group has been given the job of forgetting the connection, so a command handed in
+after it finds the device offline.
 
 **Connections.** `Attach(device, client)` gives a `Client` a queue of its own and one goroutine
 that sends from it, so the goroutine of a group never waits for a client. No frame is ever left
@@ -262,11 +280,12 @@ keeps), or nil. `Now`, `Report` and `Every` may be left out: the machine's clock
 logger, and no ticks but `Tick`. A connection goes through four entries, the same for a
 `peer.Connection` and for the local link of a host on the same node:
 
-1. `conn := loop.Attach(device, client)`, once the device is authenticated. `loop.Groups(conn)`
-   is then the `groups` of `welcome`.
-2. For each frame the client sends, the entry of its type: `loop.Cmd(conn, re, env)` for `cmd`,
-   with the `id` of the request as `re`; `loop.Inbox(conn)` on each `hello` of a host; `sync`,
-   `fetch` and `ack` come with their units.
+1. `conn := loop.Attach(device, client)`, once the device is authenticated.
+2. For each frame the client sends, the entry of its type: for `hello`,
+   `loop.Welcome(conn, build)`, where `build` gets the `groups` of the welcome and returns the
+   whole frame, and never a `Send` of the node's own, and after it `loop.Inbox(conn)` for a host;
+   `loop.Cmd(conn, re, env)` for `cmd`, with the `id` of the request as `re`; `sync`, `fetch` and
+   `ack` come with their units.
 3. The loop calls `client.Send(frame)` for every answer and push, one at a time, in order. The
    answer to a command is a frame like the others and comes after the frames queued before it.
    So a `Send` must not wait for something that the sender of a command holds while it waits for
@@ -274,8 +293,12 @@ logger, and no ticks but `Tick`. A connection goes through four entries, the sam
 4. `loop.Detach(conn)`, or the client's `Done()`. `conn.Gone()` tells the node that the loop
    gave a connection up; the node need not detach it then.
 
-**Who may call what.** `Cmd`, `Detach`, `Inbox`, `Tick`, `Event` and `Groups` never wait for a
-group and may be called from anywhere. `Attach`, `Watch` and `Close` wait for the groups: they
+**Who may call what.** `Cmd`, `Detach`, `Welcome`, `Inbox`, `Tick`, `Event` and `Groups` never
+wait for a group and may be called from anywhere, except that the `build` of a `Welcome` runs
+under the lock of the loop and must not call the loop. The loop calls `LoopConfig.Logs`, `Now`
+and `Report` on the goroutines of its groups, and `Logs` and `Now` also on the caller of `Cmd`:
+none of the three may wait for a lock that is held around a call of `Attach`, `Watch`, `Close`
+or `Cmd`, and none may call those. `Attach`, `Watch` and `Close` wait for the groups: they
 must not be called on the goroutine of a group, which is where a hook runs, or on the store's
 writer, which is where the function of a command, a timer, a handler, a `Disk` and a `Write.Put`
 run. A client's `Send` runs on the goroutine of its connection and may call every entry. A hook

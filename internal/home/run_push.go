@@ -30,21 +30,30 @@ var runStateRows = map[string]bool{"group": true, "member": true, "device": true
 
 // tell pushes a committed result.
 func (g *runGroup) tell(res Result, now time.Time) {
-	rows := map[bool][]any{false: g.rowFrames(res.Rows, false), true: g.rowFrames(res.Rows, true)}
-	for c, seat := range g.seats {
-		if !seat.watching {
-			continue
-		}
-		for _, frame := range rows[seat.stateOnly] {
-			c.send(frame)
-		}
-	}
+	g.pushRows(res.Rows)
 	g.publish()
 	if res.GroupsChanged {
 		g.loop.announce()
 	}
 	if len(res.Items) > 0 {
 		g.deliver(now)
+	}
+}
+
+// pushRows sends the rows of a result to the connections that watch the
+// group. A connection whose device the group no longer serves, as the state
+// is after this result, stops watching and is not sent these rows either
+// (planning/contracts/datachannel.md section 8): it has to ask again.
+func (g *runGroup) pushRows(rows []Row) {
+	frames := map[bool][]any{false: g.rowFrames(rows, false), true: g.rowFrames(rows, true)}
+	for c, seat := range g.seats {
+		seat.watching = seat.watching && g.state.Serves(c.device)
+		if !seat.watching {
+			continue
+		}
+		for _, frame := range frames[seat.stateOnly] {
+			c.send(frame)
+		}
 	}
 }
 
@@ -120,14 +129,14 @@ func (g *runGroup) publish() {
 	g.loop.views[g.state.ID] = v
 }
 
-// announce pushes every connection its list of groups again. The lists are
-// queued under the registry lock, so that of two announcements the later
-// list is also the later frame.
+// announce pushes every connection that has had its welcome its list of
+// groups again. The lists are queued under the registry lock, as a welcome
+// is, so that of two lists the later one is also the later frame.
 func (l *Loop) announce() {
 	var full []*Conn
 	l.mu.Lock()
 	for c := range l.conns {
-		if !c.frames.push(proto.Groups{Type: "groups", Groups: l.listed(c.device)}) {
+		if c.welcomed && !c.frames.push(proto.Groups{Type: "groups", Groups: l.listed(c.device)}) {
 			full = append(full, c)
 		}
 	}
@@ -192,26 +201,30 @@ type runLot struct {
 // due. It reads the queue from the store every time, so an item that was
 // acknowledged or retired is not sent, and is forgotten here. Without a
 // taker nothing is read: the connection that becomes one asks again. A
-// delivery that fails is reported and tried again on the next tick.
+// queue that cannot be read is reported and read again on the next tick. An
+// item that cannot be made into a frame is reported and left out, once for
+// each connection, and the others are sent.
 func (g *runGroup) deliver(now time.Time) {
 	g.next = runNever
 	if !g.taken() {
 		return
 	}
 	lots, next := map[*Conn]runLot{}, int64(runNever)
+	var skipped error
 	err := g.loop.cfg.Store.Write(func(tx *store.Tx) error {
 		d := &runDisk{tx: tx, group: g.state.ID}
 		var due []store.Item
 		due, next = runDue(d.Queued(), now.UnixMilli())
 		for c, seat := range g.seats {
-			lot, err := runLotOf(d, seat, c.device, due)
-			lots[c], d.err = lot, errors.Join(d.err, err)
+			lot, err := runLotOf(d, seat.inbox && g.state.Serves(c.device), seat.sent, c.device, due)
+			lots[c], skipped = lot, errors.Join(skipped, err)
 		}
 		return d.err
 	})
+	g.failed(skipped)
 	if err != nil {
 		g.next = now.UnixMilli()
-		g.loop.cfg.Report(fmt.Errorf("group %s, its inbox: %w", g.state.ID, err))
+		g.failed(err)
 		return
 	}
 	g.next = next
@@ -220,6 +233,13 @@ func (g *runGroup) deliver(now time.Time) {
 		for _, frame := range lot.frames {
 			c.send(frame)
 		}
+	}
+}
+
+// failed reports what went wrong with the inbox of the group, if anything.
+func (g *runGroup) failed(err error) {
+	if err != nil {
+		g.loop.cfg.Report(fmt.Errorf("group %s, its inbox: %w", g.state.ID, err))
 	}
 }
 
@@ -247,20 +267,26 @@ func runDue(queued []store.Item, now int64) (due []store.Item, next int64) {
 	return due, next
 }
 
-// runLotOf picks from the due items those of one connection's device, and
-// makes the frames of the ones it was not sent yet.
-func runLotOf(d Disk, seat *runSeat, device string, due []store.Item) (lot runLot, err error) {
+// runLotOf picks from the due items those of one connection's device, when
+// the connection takes items and its group serves the device, and makes the
+// frames of the ones it was not sent yet. An item whose frame cannot be made
+// counts as sent and is in the error.
+func runLotOf(d Disk, takes bool, sent map[int64]bool, device string, due []store.Item) (lot runLot, err error) {
 	lot.sent = map[int64]bool{}
 	for _, it := range due {
-		if !seat.inbox || it.Host != device {
+		if !takes || it.Host != device {
 			continue
 		}
 		lot.sent[it.ID] = true
-		if seat.sent[it.ID] {
+		if sent[it.ID] {
 			continue
 		}
-		frame, ferr := runItemFrame(d, it)
-		lot.frames, err = append(lot.frames, frame), errors.Join(err, ferr)
+		frame, failed := runItemFrame(d, it)
+		if failed != nil {
+			err = errors.Join(err, fmt.Errorf("item %d: %w", it.ID, failed))
+			continue
+		}
+		lot.frames = append(lot.frames, frame)
 	}
 	return lot, err
 }
