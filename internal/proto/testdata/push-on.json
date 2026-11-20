@@ -1,0 +1,22 @@
+{
+  "t": "push",
+  "n": "_5irzCjqvIZ9m-fXBt6VDA",
+  "ts": 1763600000000,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "sub": {
+    "endpoint": "https://push.example/send/qPp_1giTQRpJkHtVRcz5xA",
+    "p256dh": "KW3o1JwNpBJcRr1kq2RmwZQblxZwk1Lw8jSofM-0EMYpbejUnA2kElxGvWSrZGbBlBuXFnCTUvDyNKh8z7QQxik",
+    "auth": "d9QvDpEWQ6apHlml1-uvwA"
+  },
+  "vapid": {
+    "pub": "w9YxYcObUAh_aS8TI7r4yHgEtPEAKSFXJ0C-5EPa_43D1jFhw5tQCH9pLxMjuvjIeAS08QApIVcnQL7kQ9r_jcM",
+    "priv": "1Qugy-pM4GShyu0FYGZ0n6N_mjJBBtgF2sDTr8k-E2M"
+  },
+  "on": [
+    "mention",
+    "approval",
+    "decision",
+    "brief",
+    "done"
+  ]
+}

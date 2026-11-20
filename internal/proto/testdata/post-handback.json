@@ -1,0 +1,26 @@
+{
+  "t": "post",
+  "n": "qiMu2CuTcXhg2GyH0haRfA",
+  "ts": 1763599999500,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "as": "1PC8WineBrUQ-apCjx7tug",
+  "kind": "handback",
+  "thread": "DrtCn6htSBwmMPrFPbHJHA",
+  "main": false,
+  "text": "",
+  "mentions": [],
+  "re": null,
+  "body": {
+    "files": [
+      "path.go"
+    ],
+    "commits": [
+      {
+        "sha": "9f2c1ab",
+        "subject": "Emit path changes"
+      }
+    ],
+    "added": 40,
+    "removed": 3
+  }
+}

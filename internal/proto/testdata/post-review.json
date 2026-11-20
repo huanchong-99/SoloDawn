@@ -1,0 +1,26 @@
+{
+  "t": "post",
+  "n": "yXrOTI_vLO6PoPPJ9SqrGA",
+  "ts": 1763599999500,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "as": "LXCZmuGAXkvO-bSrOkuCfw",
+  "kind": "review",
+  "thread": "DrtCn6htSBwmMPrFPbHJHA",
+  "main": false,
+  "text": "",
+  "mentions": [],
+  "re": null,
+  "body": {
+    "commit": "9f2c1ab",
+    "items": [
+      {
+        "text": "Missing relay path",
+        "veto": false,
+        "file": "path.go",
+        "line": 88
+      }
+    ],
+    "score": 86,
+    "task": "DrtCn6htSBwmMPrFPbHJHA"
+  }
+}

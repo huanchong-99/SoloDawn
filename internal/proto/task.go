@@ -5,8 +5,10 @@ type TaskRow struct {
 	Group      string        `json:"g"`
 	Num        int           `json:"num"`
 	Title      string        `json:"title"`
+	Slug       Slug          `json:"slug"`
 	Origin     string        `json:"origin"`
 	Brief      string        `json:"brief,omitempty"`
+	Plan       string        `json:"plan,omitempty"`
 	State      string        `json:"state"`
 	Step       string        `json:"step"`
 	Commit     string        `json:"commit,omitempty"`
@@ -38,8 +40,11 @@ type Check struct {
 	Commit string `json:"commit"`
 }
 
+// Review is the latest review. Failed counts the failed reviews since the task
+// was created or a person last resumed or reassigned it from failed.
 type Review struct {
 	Round  int    `json:"round"`
+	Failed int    `json:"failed"`
 	Score  int    `json:"score"`
 	OK     bool   `json:"ok"`
 	By     string `json:"by"`
@@ -47,11 +52,14 @@ type Review struct {
 	At     int64  `json:"at"`
 }
 
+// TaskWait is the latest reason a task is not moving. Kept is on the wait of a
+// paused task that replaced a reviewer or conflict wait: that kind.
 type TaskWait struct {
 	Kind  string   `json:"kind"`
 	Msg   string   `json:"msg,omitempty"`
 	Who   []string `json:"who,omitempty"`
 	Since int64    `json:"since"`
+	Kept  string   `json:"kept,omitempty"`
 }
 
 type ThreadSummary struct {

@@ -169,6 +169,21 @@ to them below before the code that uses them (`steps/parallel-plan-units.md`
 section 1). Until a golden file exists, the example and field table in the
 contract are the reference, and the web client types the shape from them.
 
+**One answer for the same bytes.** Each side has a file map that names what
+reads each golden file: `shapes` in `internal/proto/shapes_test.go`, and
+`schemaOf` in `web/src/lib/mock.ts`. `internal/proto/testdata/wire.json`
+holds what the two readers must agree on, and both test suites judge
+every golden file by it: which of its members may be left out, which may be
+`null`, which numbers may be a fraction, which texts are random ids; and
+cases with one value replaced, such as a slug that the home's rule cannot
+make. The Go tests write that file from the tags of the Go types, so a
+changed tag is a changed line there, and the web client's tests then hold
+its schema to the same line. Two things are outside it: a member that the
+Go type of a frame keeps as JSON (a row in `rows`, the `msg` of an inbox
+item) is judged through its own golden file; and `t`, `op`, a post's `kind`
+and an event's `code` are read before a shape is chosen, so the Go types
+hold them as text and only the schemas name them.
+
 | Shapes | Frozen in |
 | --- | --- |
 | envelope; `offer`, `answer`, `ice`; `pair`; device-log entries; `hello`, `welcome`, `devlog` | B-01 slice (a), done |

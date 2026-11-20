@@ -154,6 +154,17 @@ never a `gone` marker, which has no `pos` (`contracts/rows.md`).
   again, under the `re` of the new request, and has no second effect
   (`contracts/commands.md`, "Once only").
 - A home command has `g`; a host command has `to`, the node's device id.
+- A home answers with the first of these that fails, in this order: the
+  signer is the connection's device; the envelope checks
+  (`contracts/envelope.md` section 3); `g` is there, else `bad_request`.
+  These leave no receipt. Then the receipt answers a command that was
+  answered before. Then, with the outcome kept as the receipt: the type
+  and, for `group`, `member`, `task`, `post` and `act`, the `op`, `kind`
+  or `action` name a command, else `bad_request`, which is also the answer
+  when that field is missing or when `t` or that field holds a `/`; the
+  node is home to the group, else `not_found`, for every command but
+  `group create`; `as` and the signer (`contracts/commands.md`, "Who");
+  and what the command's own table says.
 
 ## 6. Inbox (home to host)
 
@@ -172,10 +183,16 @@ item is an instruction to a host, so every item is signed by the home.
 queues it, and stored: what is sent later is what was decided then,
 whatever the task has become. Its payload always has `t` (`item`), `n`,
 `ts`, `g`, `to`, `item`, `ai` and `why`, and the fields the table gives its
-`why`, each there exactly when the table says. Beside `env`, `msg` and
+`why`, each there exactly when the table says. `item` is the number that
+`ack` names. In the payload, `task` and `msg` are the ids of those rows,
+and the optional fields are `task`, `msg`, `commit`, `pr`, `jump`, `code`
+and `detail`. Beside `env`, `msg` and
 `task` are copies of the rows `env` names, taken when the item is sent, to
 build the turn from (`msg.env` is the author's own envelope), and `cause`
-is the signed `act` that led to the item, unchanged.
+is the signed `act` that led to the item, unchanged. `cause` is beside
+`env` only, never in the payload: its own signature is its authority.
+Beside `env`, all three are optional, and `items` is `[]` when a frame has
+none.
 
 | `why` | `task` | `msg` | Other |
 | --- | --- | --- | --- |
