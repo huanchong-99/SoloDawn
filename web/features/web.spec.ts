@@ -274,6 +274,22 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     },
   );
 
+  Scenario('A press during the cross-fade reaches the page', ({ Given, When, Then, And }) => {
+    let result: Awaited<ReturnType<typeof motion.pressDuringCrossFade>>;
+    Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+    And('the browser has view transitions', motion.viewTransitions);
+    And('the person opens the client', () => motion.open());
+    When('the person presses "切换深色 / 浅色" and again while the page cross-fades', async () => {
+      result = await motion.pressDuringCrossFade();
+    });
+    Then('the second press came while the picture of the old page was up', () => {
+      expect(result.pictures).toEqual(['::view-transition-old(root)']);
+    });
+    And('the page uses the "light" theme', () => {
+      expect(result.theme).toBe('light');
+    });
+  });
+
   Scenario(
     'The theme changes at once when the system asks for reduced motion',
     ({ Given, When, Then, And }) => {

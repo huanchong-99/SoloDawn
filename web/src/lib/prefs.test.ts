@@ -117,7 +117,12 @@ describe('language', () => {
 it('applies successive toggles in the order their transition callbacks run', async () => {
   const changes: (() => void)[] = [];
   const { prefs, toggleTheme, toggleLang } = await load();
-  Object.assign(document, { startViewTransition: (change: () => void) => changes.push(change) });
+  Object.assign(document, {
+    startViewTransition(change: () => void) {
+      changes.push(change);
+      return { finished: Promise.resolve() };
+    },
+  });
   try {
     toggleTheme();
     toggleTheme();

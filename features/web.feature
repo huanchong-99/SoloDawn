@@ -88,6 +88,14 @@ Feature: Web client
     Then the page uses the "auto" theme until the cross-fade has its first picture
     And the page uses the "dark" theme in the cross-fade
 
+  Scenario: A press during the cross-fade reaches the page
+    Given the browser supports Ed25519 in WebCrypto
+    And the browser has view transitions
+    And the person opens the client
+    When the person presses "切换深色 / 浅色" and again while the page cross-fades
+    Then the second press came while the picture of the old page was up
+    And the page uses the "light" theme
+
   Scenario: The theme changes at once when the system asks for reduced motion
     Given the browser supports Ed25519 in WebCrypto
     And the browser has view transitions

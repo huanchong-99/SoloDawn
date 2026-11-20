@@ -22,6 +22,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   Reflect.deleteProperty(document, 'startViewTransition');
+  delete document.documentElement.dataset.live;
 });
 
 describe('spring', () => {
@@ -42,20 +43,41 @@ describe('spring', () => {
 });
 
 describe('shift', () => {
+  /** View transitions that run their update, and end, when the test says so. */
   const viewTransitions = () => {
-    const start = vi.fn();
+    const ends: (() => void)[] = [];
+    const start = vi.fn((_update: () => void) => ({
+      finished: new Promise<void>((end) => ends.push(end)),
+    }));
     Object.assign(document, { startViewTransition: start });
-    return start;
+    return { start, end: () => ends.shift()!() };
   };
+  const live = () => document.documentElement.dataset.live;
 
   it('hands the change to a view transition of the document', async () => {
     const { shift } = await load();
-    const start = viewTransitions();
+    const { start } = viewTransitions();
     const change = vi.fn();
     shift(change);
-    expect(start.mock.calls).toEqual([[change]]);
+    expect(start).toHaveBeenCalledOnce();
     expect(start.mock.contexts).toEqual([document]);
     expect(change).not.toHaveBeenCalled();
+    start.mock.calls[0][0]();
+    expect(change.mock.calls).toEqual([[]]);
+  });
+
+  it('marks the new page live from the change to the end of the fade', async () => {
+    const { shift } = await load();
+    const { start, end } = viewTransitions();
+    shift(() => expect(live()).toBeUndefined());
+    expect(live()).toBeUndefined();
+    start.mock.calls[0][0]();
+    expect(live()).toBe('');
+    await Promise.resolve();
+    expect(live()).toBe('');
+    end();
+    await Promise.resolve();
+    expect(live()).toBeUndefined();
   });
 
   it('makes the change at once in a browser without view transitions', async () => {
@@ -67,15 +89,16 @@ describe('shift', () => {
 
   it('makes the change at once when the system asks for reduced motion', async () => {
     const { shift } = await load();
-    const start = viewTransitions();
+    const { start } = viewTransitions();
     const change = vi.fn();
     reducedMotion = true;
     shift(change);
     expect(change.mock.calls).toEqual([[]]);
     expect(start.mock.calls).toEqual([]);
+    expect(live()).toBeUndefined();
     reducedMotion = false;
     shift(change);
-    expect(start.mock.calls).toEqual([[change]]);
+    expect(start).toHaveBeenCalledOnce();
     expect(change.mock.calls).toEqual([[]]);
   });
 });

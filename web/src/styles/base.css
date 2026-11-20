@@ -712,13 +712,20 @@ kbd,
     transform: rotate(-90deg) scale(0.6);
   }
 }
-/* Theme and language change the whole page: shift() in motion.ts cross-fades the old page into
-   the new one. The page keeps its place and size, so its group has nothing to animate. */
+/* Theme and language change the whole page: shift() in motion.ts fades the picture of the old
+   page out over the new page. The new page has no picture of its own: a page in a picture takes
+   no pointer input, and neither would the pictures above it, so they let it through. The page
+   keeps its place and size, so its group has nothing to animate. */
+[data-live] {
+  view-transition-name: none;
+}
+::view-transition {
+  pointer-events: none;
+}
 ::view-transition-group(root) {
   animation: none;
 }
-::view-transition-old(root),
-::view-transition-new(root) {
+::view-transition-old(root) {
   animation-duration: var(--dur-3);
   animation-timing-function: var(--ease);
 }

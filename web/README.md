@@ -119,8 +119,11 @@ development dependency, an IndexedDB for the tests.
   the styles turn them into the side a page arrives from and the place of the sliding mark.
   `choose(key, value)` changes a preference through `shift` of `src/lib/motion.ts`, which
   cross-fades the page where the browser has view transitions (Chrome and Edge, Safari 18,
-  Firefox 144) and changes it at once elsewhere. When the system asks for reduced motion, nothing
-  moves: no transition, no keyframes, no cross-fade.
+  Firefox 144) and changes it at once elsewhere. The fade takes a picture of the old page only
+  and fades it out over the new page: a page in a picture takes no pointer input, so `shift`
+  marks the new page `data-live`, which keeps it out of the pictures, and a press during the fade
+  reaches it. When the system asks for reduced motion, nothing moves: no transition, no
+  keyframes, no cross-fade.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. Shared styles are global classes in
   `src/styles/base.css`, taken from the design; a component's own layout goes in its `<style>`.
