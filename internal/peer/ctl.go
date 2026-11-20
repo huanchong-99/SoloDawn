@@ -12,7 +12,7 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-const ctlLimit = 60 * 1024
+const ctlLimit = 61_440 // 60 KiB
 
 type Connection struct {
 	Device     string
@@ -124,13 +124,17 @@ func validResult(kind *string, data []byte) error {
 		return err
 	}
 	if fields.Err != nil {
-		if fields.OK != nil || kind != nil {
-			return errors.New("invalid ctl error response")
-		}
-		return nil
+		return checkErrorResult(fields.OK, kind)
 	}
 	if fields.OK == nil || !*fields.OK {
 		return errors.New("ctl response without a result")
+	}
+	return nil
+}
+
+func checkErrorResult(ok *bool, kind *string) error {
+	if ok != nil || kind != nil {
+		return errors.New("invalid ctl error response")
 	}
 	return nil
 }

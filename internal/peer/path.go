@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -15,7 +16,7 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
-const signalLimit = 16 * 1024
+const signalLimit = 16_384 // 16 KiB
 
 func encode(v any) []byte {
 	var b bytes.Buffer
@@ -167,7 +168,7 @@ func (p *Path) refresh(data []byte) error {
 	return nil
 }
 func validateTTL(ttl int) error {
-	if ttl < 1 || int64(ttl) > int64((1<<63-1)/time.Second) {
+	if ttl < 1 || int64(ttl) > int64(math.MaxInt64/time.Second) {
 		return errors.New("invalid ICE credential lifetime")
 	}
 	return nil

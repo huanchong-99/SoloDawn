@@ -142,12 +142,16 @@ func (p *Peer) firstOffer(k link, o proto.Offer, now int64) (*proto.Envelope, er
 	if err != nil || !first {
 		return nil, err
 	}
-	if old := p.slot[k.device]; old != nil {
-		if err := old.Close(); err != nil {
-			return nil, err
-		}
+	if err := p.closeInbound(k.device); err != nil {
+		return nil, err
 	}
 	return p.answer(k, desc)
+}
+func (p *Peer) closeInbound(device string) error {
+	if old := p.slot[device]; old != nil {
+		return old.Close()
+	}
+	return nil
 }
 func (p *Peer) answer(k link, desc webrtc.SessionDescription) (*proto.Envelope, error) {
 	c, err := p.create(k, p.sockets.answer)

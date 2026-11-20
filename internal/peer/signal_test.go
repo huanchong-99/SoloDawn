@@ -295,3 +295,37 @@ func TestCandidateAddOrder(t *testing.T) {
 		})
 	}
 }
+
+func TestEarlyAndRetiredCutoffs(t *testing.T) {
+	f := newPair(t)
+	p := f.b
+	k := link{f.a.key.ID(), randomID()}
+	v := candidate{"0", "local fixture"}
+	check(t, p.hold(k, v, 110000, 100000))
+	check(t, p.hold(k, v, 100000, 100000))
+	eq(t, p.early[k].expires, int64(230000))
+	p.prune(230000)
+	eq(t, p.early[k].pending, []candidate{v})
+	p.prune(230001)
+	eq(t, len(p.early), 0)
+	f.now.Store(800000)
+	old := &Connection{ctx: context.Background(), close: func() error { return nil }}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	old.ctx = ctx
+	current := &Connection{}
+	p.live[k] = old
+	p.slot[k.device] = current
+	p.forget(k, old)
+	eq(t, p.slot[k.device], current)
+	eq(t, len(p.live), 0)
+	eq(t, p.retired[k], int64(920000))
+	p.prune(920000)
+	check(t, p.hold(k, v, 920000, 920000))
+	eq(t, len(p.early), 0)
+	p.prune(920001)
+	eq(t, len(p.retired), 0)
+	p.slot[k.device] = old
+	p.forget(k, old)
+	eq(t, len(p.slot), 0)
+}
