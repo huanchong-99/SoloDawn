@@ -2,7 +2,7 @@
 Feature: Web client
   The web client is one responsive page that a node and the rendezvous serve as static files.
   It opens in the person's language and theme, moves between its pages by the address fragment,
-  and tells a browser that cannot run it to update instead of failing later.
+  and tells a browser below the supported versions to update instead of failing later.
 
   Background:
     Given a browser set to Chinese and a light system theme
@@ -49,6 +49,18 @@ Feature: Web client
 
   Scenario: A browser without Ed25519 gets the upgrade notice
     Given the browser lacks Ed25519 in WebCrypto
+    When the person opens the client
+    Then the upgrade notice "这个浏览器需要升级" is shown
+    And the application is not shown
+
+  Scenario: A browser that cannot keep its Ed25519 key gets the upgrade notice
+    Given the browser makes Ed25519 keys but cannot clone them for storage
+    When the person opens the client
+    Then the upgrade notice "这个浏览器需要升级" is shown
+    And the application is not shown
+
+  Scenario: A browser without light-dark() colours gets the upgrade notice
+    Given the browser supports Ed25519 in WebCrypto but not light-dark() in CSS
     When the person opens the client
     Then the upgrade notice "这个浏览器需要升级" is shown
     And the application is not shown
