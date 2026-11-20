@@ -133,7 +133,8 @@ before `synced` and rows from `fetch` never move it.
 
 - `thread` is a task id, or `null` for the main line. In its place,
   `"kind":"review"` asks for the review messages of all threads (the
-  ledger) and `"kind":"note"` for the notes (R-102).
+  ledger), `"kind":"note"` for the notes (R-102), and `"row":"<id>"` for
+  that one row of the group, with `before` 0 and `limit` 1 (unit HM-3).
 - `before` is a `pos` (`contracts/rows.md`): the answer holds rows with a
   lower `pos`, newest first. `before: 0` asks for the newest page; no `pos`
   is 0. For an older page the client sends the lowest `pos` it received.
@@ -145,8 +146,7 @@ before `synced` and rows from `fetch` never move it.
 
 The home stops filling the answer when the next row would exceed the message
 limit; `more` says whether older rows exist. `rows` is `[]` when there is
-nothing. An answer never holds a `gone` marker, with `kind: note` as with
-any other scope: a marker has no `pos` (`contracts/rows.md`).
+nothing and never a `gone` marker, which has no `pos` (`contracts/rows.md`).
 
 ## 5. Commands
 
