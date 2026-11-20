@@ -268,7 +268,7 @@ func TestAcceptBackoff(t *testing.T) {
 			t.Fatal(got)
 		}
 		synctest.Wait()
-		if p.conns[host(a.RemoteAddr())] != 1 {
+		if p.conns[source(a.RemoteAddr())] != 1 {
 			t.Fatal("the connection after the errors was not served", p.conns)
 		}
 	})
@@ -281,7 +281,7 @@ func TestConnectionsPerIP(t *testing.T) {
 		p := &sharedPort{config: &tls.Config{}, conns: map[string]int{}}
 		var clients []net.Conn
 		connect := func() net.Conn {
-			a, b := net.Pipe() // every pipe has the address "pipe", without a host
+			a, b := net.Pipe() // every pipe has the address "pipe", one source
 			p.admit(a)
 			clients = append(clients, b)
 			return b
@@ -297,7 +297,7 @@ func TestConnectionsPerIP(t *testing.T) {
 		synctest.Wait()
 		connect()
 		synctest.Wait()
-		if p.conns[""] != maxConnsPerIP {
+		if p.conns[source(clients[0].RemoteAddr())] != maxConnsPerIP {
 			t.Fatal(p.conns)
 		}
 		for _, c := range clients {
@@ -327,6 +327,40 @@ func TestTURNWriteDeadline(t *testing.T) {
 		a.Close()
 		if n, err := stream.Write([]byte("z")); n != 0 || !errors.Is(err, io.ErrClosedPipe) {
 			t.Fatal(n, err)
+		}
+	})
+}
+
+// remoteConn is a pipe end that reports a remote address of its own.
+type remoteConn struct {
+	net.Conn
+	remote net.Addr
+}
+
+func (c remoteConn) RemoteAddr() net.Addr { return c.remote }
+
+// The connection cap counts an IPv6 /64 as one source.
+func TestConnectionsPerSlash64(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := &sharedPort{config: &tls.Config{}, conns: map[string]int{}}
+		var clients []net.Conn
+		for i := range maxConnsPerIP + 1 {
+			a, b := net.Pipe()
+			p.admit(remoteConn{a, &net.TCPAddr{IP: net.ParseIP(fmt.Sprintf("2001:db8:0:1::%x", i+1)), Port: 443}})
+			clients = append(clients, b)
+		}
+		if n, err := clients[maxConnsPerIP].Read(make([]byte, 1)); n != 0 || err != io.EOF {
+			t.Fatalf("connection %d from one /64: %d, %v", maxConnsPerIP+1, n, err)
+		}
+		if p.conns["2001:db8:0:1::/64"] != maxConnsPerIP {
+			t.Fatal(p.conns)
+		}
+		for _, c := range clients {
+			c.Close()
+		}
+		synctest.Wait()
+		if len(p.conns) != 0 {
+			t.Fatal(p.conns)
 		}
 	})
 }

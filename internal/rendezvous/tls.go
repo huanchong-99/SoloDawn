@@ -138,8 +138,8 @@ func httpServer(h http.Handler) *http.Server {
 }
 
 // sharedPort hands each TLS connection on the signalling port to HTTPS or
-// TURN: by ALPN stun.turn, otherwise by server name. A source IP has at most
-// maxConnsPerIP connections open on it.
+// TURN: by ALPN stun.turn, otherwise by server name. A source, an IPv4
+// address or an IPv6 /64, has at most maxConnsPerIP connections open on it.
 type sharedPort struct {
 	config *tls.Config
 	names  map[string]*endpoint
@@ -189,9 +189,9 @@ func (p *sharedPort) serve(listener net.Listener) error {
 	}
 }
 
-// admit routes a connection unless its source IP already has maxConnsPerIP.
+// admit routes a connection unless its source already has maxConnsPerIP.
 func (p *sharedPort) admit(c net.Conn) {
-	ip := host(c.RemoteAddr())
+	ip := source(c.RemoteAddr())
 	p.mu.Lock()
 	full := p.conns[ip] == maxConnsPerIP
 	if !full {

@@ -2,14 +2,15 @@ package rendezvous
 
 import (
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 )
 
 // The relay's resource limits (contracts/rendezvous.md section 3).
 const (
-	maxDeviceAllocations = 8
-	maxSourceAllocations = 32
+	maxDeviceAllocations = 32
+	maxSourceAllocations = 128
 	maxPeers             = 64
 )
 
@@ -18,8 +19,8 @@ const (
 // back when the client asks again from the same address, or after this.
 const placeTTL time.Duration = 5e9 // 5 s
 
-// allocations counts the relay allocations of each device and of each source
-// IP. The quota check of an Allocate takes a place before Pion creates the
+// allocations counts the relay allocations of each device and of each
+// source. The quota check of an Allocate takes a place before Pion creates the
 // allocation, so concurrent Allocates cannot pass a limit together.
 type allocations struct {
 	mu      sync.Mutex
@@ -37,9 +38,15 @@ func newAllocations() *allocations {
 	return &allocations{devices: map[string]int{}, sources: map[string]int{}, pending: map[string]place{}}
 }
 
-func host(addr net.Addr) string {
-	h, _, _ := net.SplitHostPort(addr.String()) // a transport address is host:port
-	return h
+// source is what the per-source limits count by: an IPv4 address, or the /64
+// of an IPv6 address, which one host usually holds whole.
+func source(addr net.Addr) string {
+	ap, _ := netip.ParseAddrPort(addr.String()) // a transport address is ip:port
+	ip := ap.Addr().Unmap()
+	if ip.Is6() {
+		return netip.PrefixFrom(ip, 64).Masked().String()
+	}
+	return ip.String()
 }
 
 // take is Pion's quota check of an Allocate from src.
@@ -48,7 +55,7 @@ func (a *allocations) take(device string, src net.Addr) bool {
 	defer a.mu.Unlock()
 	now := time.Now()
 	a.expire(src.String(), now)
-	p := place{device, host(src), now}
+	p := place{device, source(src), now}
 	if a.devices[p.device] >= maxDeviceAllocations || a.sources[p.source] >= maxSourceAllocations {
 		return false
 	}
@@ -74,10 +81,13 @@ func (a *allocations) release(device, source string) {
 	decrement(a.sources, source)
 }
 
-func decrement(counts map[string]int, key string) {
-	if counts[key]--; counts[key] == 0 {
-		delete(counts, key)
+// decrement counts one less of a key, and never below zero.
+func decrement[K comparable](counts map[K]int, key K) {
+	if counts[key] > 1 {
+		counts[key]--
+		return
 	}
+	delete(counts, key)
 }
 
 // created keeps the place of a new allocation. One that took longer than
@@ -90,13 +100,13 @@ func (a *allocations) created(device string, src net.Addr) {
 		return
 	}
 	a.devices[device]++
-	a.sources[host(src)]++
+	a.sources[source(src)]++
 }
 
 func (a *allocations) deleted(device string, src net.Addr) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.release(device, host(src))
+	a.release(device, source(src))
 }
 
 // peers holds the peer IPs that each client transport address has a

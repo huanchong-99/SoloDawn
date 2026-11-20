@@ -26,7 +26,8 @@ import (
 const ttl = time.Hour
 
 // quiet is Pion's logger: a line for every refused request would let anyone
-// flood the log. Refused Allocates are counted in relay.refused instead.
+// flood the log. Refused Allocates are counted in relay.refused instead, which
+// report logs at most once a minute.
 var quiet = &logging.DefaultLoggerFactory{Writer: io.Discard, DefaultLogLevel: logging.LogLevelDisabled}
 
 type relay struct {
@@ -51,6 +52,30 @@ func (r *relay) ice(kind, id string) proto.ICEConfig {
 	return frame
 }
 
+// report logs the count of refused Allocates once a minute when it changed,
+// until stop is closed.
+func (r *relay) report(stop <-chan struct{}, logf func(string, ...any)) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	var logged int64
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+			logged = r.logRefused(logged, logf)
+		}
+	}
+}
+
+func (r *relay) logRefused(logged int64, logf func(string, ...any)) int64 {
+	n := r.refused.Load()
+	if n != logged {
+		logf("relay: %d allocations refused since start", n)
+	}
+	return n
+}
+
 // alias stands for a device in TURN usernames and in the quota: the first 16
 // bytes of an HMAC-SHA256 of its id under the process's secret, base64url, so
 // that a username does not carry the device id.
@@ -67,7 +92,7 @@ func (o Options) start(udp net.PacketConn, tlsListener net.Listener, tlsPort int
 	cfg := turn.ServerConfig{Realm: o.Domain, LoggerFactory: quiet, PacketConnConfigs: []turn.PacketConnConfig{{PacketConn: udp}}}
 	if tlsListener != nil {
 		r.limit, r.secret = o.QuotaMB<<20, rand.Text()
-		g, err := r.generator(o.Domain, local.IP)
+		g, err := r.generator(o.Domain, local.IP, o.relayPorts())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -87,7 +112,7 @@ func (o Options) start(udp net.PacketConn, tlsListener net.Listener, tlsPort int
 }
 
 // generator resolves the relay's public addresses and its own.
-func (r *relay) generator(domain string, bind net.IP) (*generator, error) {
+func (r *relay) generator(domain string, bind net.IP, ports PortRange) (*generator, error) {
 	ips, err := net.LookupIP(domain)
 	if err != nil {
 		return nil, err
@@ -96,11 +121,42 @@ func (r *relay) generator(domain string, bind net.IP) (*generator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newGenerator(ips, bind, own, &r.ledger, &r.refused), nil
+	return newGenerator(ips, bind, own, ports, &r.ledger, &r.refused), nil
 }
 
-func newGenerator(public []net.IP, bind net.IP, own map[netip.Addr]bool, l *ledger, refused *atomic.Int64) *generator {
-	return &generator{public: public, bind: bind, own: own, ledger: l, refused: refused, allocations: newAllocations(), peers: peers{by: map[string]map[string]bool{}}}
+func newGenerator(public []net.IP, bind net.IP, own map[netip.Addr]bool, ports PortRange, l *ledger, refused *atomic.Int64) *generator {
+	g := &generator{public: public, bind: bind, portRange: ports, ports: map[portKey]int{}, ledger: l, refused: refused, allocations: newAllocations(), peers: peers{by: map[string]map[string]bool{}}}
+	g.own.Store(&ownSet{own, time.Now()})
+	return g
+}
+
+// ownTTL is how long the server's own addresses are used before they are
+// read again: an interface can gain an address while the service runs.
+const ownTTL = time.Minute
+
+type ownSet struct {
+	addrs map[netip.Addr]bool
+	at    time.Time
+}
+
+func (g *generator) ownAddr(ip netip.Addr) bool {
+	set := g.own.Load()
+	if time.Since(set.at) >= ownTTL {
+		set = g.refreshOwn(set)
+	}
+	return set.addrs[ip]
+}
+
+// refreshOwn reads the server's addresses again. If that fails, it keeps the
+// ones it has for another ownTTL.
+func (g *generator) refreshOwn(old *ownSet) *ownSet {
+	addrs, err := ownAddrs(g.bind, g.public)
+	if err != nil {
+		addrs = old.addrs
+	}
+	set := &ownSet{addrs, time.Now()}
+	g.own.Store(set)
+	return set
 }
 
 // interfaceAddrs lists this host's interface addresses.
@@ -150,15 +206,42 @@ func restAuth(secret string, refused *atomic.Int64) turn.AuthHandler {
 }
 
 type generator struct {
-	public []net.IP
-	bind   net.IP
-	own    map[netip.Addr]bool
+	public    []net.IP
+	bind      net.IP
+	own       atomic.Pointer[ownSet]
+	portRange PortRange
+	portsMu   sync.Mutex
+	ports     map[portKey]int // the sockets of this server's relay allocations
 	*ledger
 	refused     *atomic.Int64
 	allocations *allocations
 	peers       peers
-	ports       sync.Map // the ports of this server's relay allocations
 	permissions sync.Map // (relay endpoint, peer IP) installed by Pion
+}
+
+// portKey names a relay socket's port. IPv4 and IPv6 sockets have ports of
+// their own: an IPv6 one can briefly hold the number of a live IPv4 one.
+type portKey struct {
+	ipv6 bool
+	port int
+}
+
+func (g *generator) holdPort(k portKey) {
+	g.portsMu.Lock()
+	defer g.portsMu.Unlock()
+	g.ports[k]++
+}
+
+func (g *generator) freePort(k portKey) {
+	g.portsMu.Lock()
+	defer g.portsMu.Unlock()
+	decrement(g.ports, k)
+}
+
+func (g *generator) relayPort(k portKey) bool {
+	g.portsMu.Lock()
+	defer g.portsMu.Unlock()
+	return g.ports[k] > 0
 }
 
 type permission struct {
@@ -186,7 +269,7 @@ func (g *generator) events() turn.EventHandler {
 }
 
 // quota is Pion's check of a new allocation: at most maxDeviceAllocations
-// per device and maxSourceAllocations per source IP.
+// per device and maxSourceAllocations per source (see source).
 func (g *generator) quota(device, _ string, src net.Addr) bool {
 	ok := g.allocations.take(device, src)
 	if !ok {
@@ -200,13 +283,37 @@ func (g *generator) AllocatePacketConn(c turn.AllocateListenerConfig) (net.Packe
 	if ip == nil {
 		return nil, nil, errors.New("no unambiguous relay address for requested address family")
 	}
-	conn, err := net.ListenPacket(c.Network, net.JoinHostPort(g.bind.String(), strconv.Itoa(c.RequestedPort)))
+	conn, err := g.listen(c.Network)
 	if err != nil {
 		return nil, nil, err
 	}
 	addr := &net.UDPAddr{IP: ip, Port: conn.LocalAddr().(*net.UDPAddr).Port}
-	g.ports.Store(addr.Port, true)
-	return &allocation{PacketConn: conn, g: g, addr: addr, device: c.UserID}, addr, nil
+	key := portKey{c.Network == "udp6", addr.Port}
+	g.holdPort(key)
+	return &allocation{PacketConn: conn, g: g, addr: addr, key: key, device: c.UserID}, addr, nil
+}
+
+var errNoPort = errors.New("no free port in the relay port range")
+
+// listen binds a relay socket on the first free port of the relay range, which
+// lies outside the system's ephemeral ports and caps the number of sockets.
+// A requested port (Pion's port reservations) is not offered. A bind address
+// of the other family fails at once, not once per port.
+func (g *generator) listen(network string) (net.PacketConn, error) {
+	local, err := net.ResolveUDPAddr(network, net.JoinHostPort(g.bind.String(), "0"))
+	if err != nil {
+		return nil, err
+	}
+	for port := g.portRange.First; port <= g.portRange.Last; port++ {
+		if g.relayPort(portKey{network == "udp6", port}) {
+			continue
+		}
+		local.Port = port
+		if conn, err := net.ListenUDP(network, local); err == nil {
+			return conn, nil
+		}
+	}
+	return nil, errNoPort
 }
 
 func (*generator) Validate() error { return nil } // Addresses were resolved at startup.
@@ -270,6 +377,7 @@ var deniedPeers = prefixes(
 	"64:ff9b::/96",    // NAT64
 	"64:ff9b:1::/48",  // local NAT64
 	"::/96",           // IPv4-compatible
+	"::ffff:0:0:0/96", // IPv4-translated
 	"2002::/16",       // 6to4
 	"2001::/32",       // Teredo
 	"fec0::/10",       // site-local
@@ -297,12 +405,13 @@ type allocation struct {
 	net.PacketConn
 	g      *generator
 	addr   *net.UDPAddr
+	key    portKey
 	device string
 	packet []byte // one byte more than Pion reads, to see a datagram it would cut
 }
 
 func (a *allocation) Close() error {
-	a.g.ports.Delete(a.addr.Port)
+	a.g.freePort(a.key)
 	return a.PacketConn.Close()
 }
 
@@ -311,8 +420,8 @@ func (a *allocation) ReadFrom(b []byte) (int, net.Addr, error) {
 		a.packet = make([]byte, len(b)+1)
 	}
 	for {
-		n, src, err := a.PacketConn.ReadFrom(a.packet)
-		if err != nil && !truncated(err) {
+		n, src, err := readDatagram(a.PacketConn, a.packet)
+		if err != nil {
 			return n, src, err
 		}
 		if a.forward(n, len(b), src) {
@@ -356,6 +465,6 @@ func (a *allocation) WriteTo(b []byte, dst net.Addr) (int, error) {
 func (g *generator) toSelf(dst net.Addr) bool {
 	u := dst.(*net.UDPAddr)
 	ip, _ := netip.AddrFromSlice(u.IP)
-	_, relay := g.ports.Load(u.Port)
-	return g.own[ip.Unmap()] && !relay
+	ip = ip.Unmap()
+	return g.ownAddr(ip) && !g.relayPort(portKey{ip.Is6(), u.Port})
 }

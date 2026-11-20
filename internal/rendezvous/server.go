@@ -53,26 +53,34 @@ var anyOrigin = &websocket.AcceptOptions{InsecureSkipVerify: true}
 const maxBytes = 16_384 // 16 KiB
 
 type client struct {
-	conn   *websocket.Conn
-	out    chan frame
-	id     string
-	watch  []string
-	rooms  map[string]*room // the rooms this connection is in
-	window [120]time.Time
-	next   int
-	mu     sync.Mutex     // guards queued, which the writer also changes
-	queued map[string]int // frames in out by the device they are from
+	conn      *websocket.Conn
+	out       chan frame
+	id        string
+	watch     []string
+	rooms     map[string]*room // the rooms this connection is in
+	window    [120]time.Time
+	next      int
+	mu        sync.Mutex     // guards queued and strangers, which the writer also changes
+	queued    map[string]int // frames in out by the device they are from
+	strangers int            // frames in out from devices not on the watch list
 }
 
-// frame is a frame waiting to be written, and the device it is from when the
-// server forwards it.
+// frame is a frame waiting to be written, the device it is from when the
+// server forwards it, and whether that device was off the receiver's watch
+// list.
 type frame struct {
-	data []byte
-	from string
+	data     []byte
+	from     string
+	stranger bool
 }
 
-// maxQueued is how many frames one sender may have in a receiver's queue.
-const maxQueued = 16
+// A receiver's queue holds at most maxQueued frames of one sender, and at
+// most maxStrangers in all from senders off its watch list, which keeps room
+// for the devices it watches.
+const (
+	maxQueued    = 16
+	maxStrangers = 32
+)
 
 func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, anyOrigin)
@@ -102,7 +110,7 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 func (c *client) write() {
 	defer c.conn.CloseNow()
 	for f := range c.out {
-		c.dequeued(f.from)
+		c.dequeued(f)
 		if c.conn.Write(context.Background(), websocket.MessageText, f.data) != nil {
 			return
 		}
@@ -112,11 +120,12 @@ func (c *client) write() {
 func (c *client) send(v any) bool { return c.sendFrom("", v) }
 
 // While routing, a stalled socket must not hold up other devices: a frame for
-// a receiver whose queue is full, or that already holds maxQueued frames of
-// the same sender, is dropped, and both connections stay open. The sender's
-// offer timeout and back-off cover the loss. sendFrom returns false when the
-// frame would exceed the wire limit. In particular, the authenticated "from"
-// wrapper is longer than "to".
+// a receiver whose queue is full, or that already holds the sender's share
+// (maxQueued, maxStrangers), is dropped, and both connections stay open. The
+// sender's offer timeout and back-off cover the loss. The receiver's watch
+// list is read for a frame with a sender only, whose callers hold the
+// server's lock. sendFrom returns false when the frame would exceed the wire
+// limit. In particular, the authenticated "from" wrapper is longer than "to".
 func (c *client) sendFrom(from string, v any) bool {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -128,11 +137,12 @@ func (c *client) sendFrom(from string, v any) bool {
 	if len(data) > maxBytes {
 		return false
 	}
-	if c.enqueued(from) {
+	f := frame{data, from, from != "" && !slices.Contains(c.watch, from)}
+	if c.enqueued(f) {
 		select {
-		case c.out <- frame{data, from}:
+		case c.out <- f:
 		default:
-			c.dequeued(from)
+			c.dequeued(f)
 		}
 	}
 	return true
@@ -140,26 +150,32 @@ func (c *client) sendFrom(from string, v any) bool {
 
 // enqueued counts a frame of a sender in the queue, if the sender has room.
 // The server's own frames are from nobody and have no share.
-func (c *client) enqueued(from string) bool {
-	if from == "" {
+func (c *client) enqueued(f frame) bool {
+	if f.from == "" {
 		return true
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.queued[from] == maxQueued {
+	if c.queued[f.from] == maxQueued || f.stranger && c.strangers == maxStrangers {
 		return false
 	}
-	c.queued[from]++
+	c.queued[f.from]++
+	if f.stranger {
+		c.strangers++
+	}
 	return true
 }
 
-func (c *client) dequeued(from string) {
-	if from == "" {
+func (c *client) dequeued(f frame) {
+	if f.from == "" {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	decrement(c.queued, from)
+	decrement(c.queued, f.from)
+	if f.stranger {
+		c.strangers--
+	}
 }
 
 func (c *client) admit(now time.Time) bool {

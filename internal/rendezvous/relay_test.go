@@ -116,7 +116,7 @@ func udpLocal(t *testing.T) net.PacketConn {
 }
 
 func testGenerator(l *ledger, bind net.IP, public ...net.IP) *generator {
-	return newGenerator(public, bind, map[netip.Addr]bool{}, l, new(atomic.Int64))
+	return newGenerator(public, bind, map[netip.Addr]bool{}, DefaultRelayPorts, l, new(atomic.Int64))
 }
 
 func TestMeteredSocket(t *testing.T) {
@@ -201,8 +201,9 @@ func TestGenerator(t *testing.T) {
 		t.Fatal(got)
 	}
 	g.public = []net.IP{v4}
-	if c, a, err := g.AllocatePacketConn(turn.AllocateListenerConfig{Network: "udp4", RequestedPort: -1}); c != nil || a != nil || err == nil || err.Error() != "listen udp4: address -1: invalid port" {
-		t.Fatalf("invalid port: %v, %v, %v", c, a, err)
+	g.portRange = PortRange{0, -1}
+	if c, a, err := g.AllocatePacketConn(turn.AllocateListenerConfig{Network: "udp4"}); c != nil || a != nil || err != errNoPort {
+		t.Fatalf("no relay ports: %v, %v, %v", c, a, err)
 	}
 	if c, a, err := g.AllocateListener(turn.AllocateListenerConfig{}); c != nil || a != nil || !errors.Is(err, errTransport) {
 		t.Fatal(c, a, err)
@@ -242,7 +243,7 @@ func TestPeerFilter(t *testing.T) {
 		{"::", "240.0.0.1", false}, {"::", "255.255.255.254", false}, {"::", "192.0.2.1", false}, {"::", "198.51.100.1", false}, {"::", "203.0.113.1", false},
 		{"::", "64:ff9b::808:808", false}, {"::", "64:ff9b:1::1", false}, {"::", "::808:808", false}, {"::", "2002:808:808::1", false},
 		{"::", "2001:0:4136:e378::1", false}, {"::", "2001:1::1", true}, {"::", "fec0::1", false}, {"::", "2001:db8::1", false}, {"::", "2606:4700::1111", true},
-		{"::", "::ffff:8.8.8.8", true}, {"::", "::ffff:10.0.0.1", false},
+		{"::", "::ffff:8.8.8.8", true}, {"::", "::ffff:10.0.0.1", false}, {"::", "::ffff:0:808:808", false},
 	} {
 		g.bind = net.ParseIP(tc.bind)
 		if got := g.permitPeer(src, net.ParseIP(tc.peer)); got != tc.want {

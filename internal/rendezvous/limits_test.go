@@ -2,6 +2,7 @@ package rendezvous
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http/httptest"
@@ -63,13 +64,13 @@ func waitAllocations(t *testing.T, s *turn.Server, n int) {
 	}
 }
 
-// A device has at most 8 allocations and a source IP at most 32. A closed
+// A device has at most 32 allocations and a source at most 128. A closed
 // allocation gives its place back.
 func TestAllocationLimits(t *testing.T) {
 	r, s, udp := loopbackRelay(t)
 	const refusal = "Allocate error response (error 486: )"
 	var first net.PacketConn
-	for i := range 8 {
+	for i := range maxDeviceAllocations {
 		a, err := allocate(t, r, udp, "a")
 		if err != nil {
 			t.Fatalf("allocation %d: %v", i, err)
@@ -77,17 +78,51 @@ func TestAllocationLimits(t *testing.T) {
 		first = a
 	}
 	if _, err := allocate(t, r, udp, "a"); err == nil || err.Error() != refusal || r.refused.Load() != 1 {
-		t.Fatalf("a ninth allocation: %v, %d refused", err, r.refused.Load())
+		t.Fatalf("a 33rd allocation of one device: %v, %d refused", err, r.refused.Load())
 	}
 	first.Close()
-	waitAllocations(t, s, 7)
-	for _, device := range []string{"a", "b", "b", "b", "b", "b", "b", "b", "b", "c", "c", "c", "c", "c", "c", "c", "c", "d", "d", "d", "d", "d", "d", "d", "d"} {
+	waitAllocations(t, s, maxDeviceAllocations-1)
+	devices := []string{"a"}
+	for _, d := range []string{"b", "c", "d"} {
+		for range maxDeviceAllocations {
+			devices = append(devices, d)
+		}
+	}
+	for _, device := range devices {
 		if _, err := allocate(t, r, udp, device); err != nil {
 			t.Fatalf("%s: %v", device, err)
 		}
 	}
-	if _, err := allocate(t, r, udp, "e"); err == nil || err.Error() != refusal || r.refused.Load() != 2 || s.AllocationCount() != 32 {
-		t.Fatalf("a 33rd allocation from one IP: %v, %d refused, %d allocations", err, r.refused.Load(), s.AllocationCount())
+	if _, err := allocate(t, r, udp, "e"); err == nil || err.Error() != refusal || r.refused.Load() != 2 || s.AllocationCount() != maxSourceAllocations {
+		t.Fatalf("a 129th allocation from one IP: %v, %d refused, %d allocations", err, r.refused.Load(), s.AllocationCount())
+	}
+}
+
+// The per-source limits count an IPv4 address, or an IPv6 /64.
+func TestSources(t *testing.T) {
+	for _, tc := range []struct{ addr, source string }{
+		{"192.0.2.1:9", "192.0.2.1"}, {"[::ffff:192.0.2.1]:9", "192.0.2.1"},
+		{"[2001:db8:1:2:3:4:5:6]:9", "2001:db8:1:2::/64"}, {"[2001:db8:1:2::ffff]:9", "2001:db8:1:2::/64"}, {"[2001:db8:1:3::1]:9", "2001:db8:1:3::/64"},
+	} {
+		addr, _ := net.ResolveUDPAddr("udp", tc.addr)
+		if got := source(addr); got != tc.source {
+			t.Errorf("%s: %s", tc.addr, got)
+		}
+	}
+	a := newAllocations()
+	for i := range maxSourceAllocations {
+		src := &net.UDPAddr{IP: net.ParseIP(fmt.Sprintf("2001:db8:0:1::%x", i+1)), Port: 9}
+		if !a.take(fmt.Sprint(i%5), src) {
+			t.Fatalf("place %d", i)
+		}
+	}
+	if a.take("other", &net.UDPAddr{IP: net.ParseIP("2001:db8:0:1:ffff::1"), Port: 9}) || !a.take("other", &net.UDPAddr{IP: net.ParseIP("2001:db8:0:2::1"), Port: 9}) {
+		t.Fatal("the /64 is not one source")
+	}
+	counts := map[string]int{}
+	decrement(counts, "never counted")
+	if len(counts) != 0 {
+		t.Fatal(counts)
 	}
 }
 
@@ -194,13 +229,13 @@ func TestOwnAddresses(t *testing.T) {
 	if own, err := ownAddrs(net.IPv4zero, nil); own != nil || err != failure {
 		t.Fatal(own, err)
 	}
-	if g, err := (&relay{}).generator("localhost", net.IPv4zero); g != nil || err != failure {
+	if g, err := (&relay{}).generator("localhost", net.IPv4zero, DefaultRelayPorts); g != nil || err != failure {
 		t.Fatal(g, err)
 	}
 	// An allocation on 127.0.0.1 of a relay that counts 127.0.0.1 as its own.
 	l := ledger{limit: 1000}
 	g := testGenerator(&l, net.IPv4(127, 0, 0, 1), net.IPv4(127, 0, 0, 1))
-	g.own = want
+	g.own.Store(&ownSet{want, time.Now()})
 	relayed, _, err := g.AllocatePacketConn(turn.AllocateListenerConfig{Network: "udp4", UserID: "d"})
 	if err != nil {
 		t.Fatal(err)
@@ -310,4 +345,172 @@ func fixtureWith(t *testing.T, r *relay) string {
 	s := httptest.NewServer(handler(fstest.MapFS{}, time.Second, r))
 	t.Cleanup(s.Close)
 	return s.URL
+}
+
+// freeRange finds two free consecutive UDP ports on 127.0.0.1.
+func freeRange(t *testing.T) PortRange {
+	t.Helper()
+	for range 100 {
+		c, err := net.ListenPacket("udp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := c.LocalAddr().(*net.UDPAddr).Port
+		next, err := net.ListenPacket("udp4", fmt.Sprintf("127.0.0.1:%d", port+1))
+		c.Close()
+		if err == nil {
+			next.Close()
+			return PortRange{port, port + 1}
+		}
+	}
+	t.Fatal("no two free ports")
+	return PortRange{}
+}
+
+// Relay sockets bind ports of the relay range only, which caps them; a
+// closed one frees its port.
+func TestRelayPortRange(t *testing.T) {
+	ports := freeRange(t)
+	g := testGenerator(&ledger{}, net.IPv4(127, 0, 0, 1), net.IPv4(127, 0, 0, 1))
+	g.portRange = ports
+	cfg := turn.AllocateListenerConfig{Network: "udp4", UserID: "d"}
+	first, _, err := g.AllocatePacketConn(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := g.AllocatePacketConn(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if a, b := first.LocalAddr().(*net.UDPAddr).Port, second.LocalAddr().(*net.UDPAddr).Port; a != ports.First || b != ports.Last {
+		t.Fatal(a, b)
+	}
+	if c, _, err := g.AllocatePacketConn(cfg); c != nil || err != errNoPort {
+		t.Fatal(c, err)
+	}
+	first.Close()
+	again, _, err := g.AllocatePacketConn(cfg)
+	if err != nil || again.LocalAddr().(*net.UDPAddr).Port != ports.First {
+		t.Fatal(again, err)
+	}
+	again.Close()
+}
+
+// A relay socket of the other family than the bind address fails at once,
+// with the reason, instead of trying every port of the range.
+func TestRelayPortFamily(t *testing.T) {
+	g := testGenerator(&ledger{}, net.IPv4(127, 0, 0, 1))
+	g.portRange = DefaultRelayPorts
+	c, err := g.listen("udp6")
+	var addrErr *net.AddrError
+	if c != nil || !errors.As(err, &addrErr) {
+		t.Fatal(c, err)
+	}
+}
+
+// A relay port is named by family and port, and counted: an IPv6 socket on
+// the number of a live IPv4 allocation does not end that allocation's role.
+func TestRelayPortsByFamily(t *testing.T) {
+	g := testGenerator(&ledger{}, net.IPv6unspecified)
+	g.own.Store(&ownSet{map[netip.Addr]bool{netip.MustParseAddr("192.0.2.10"): true, netip.MustParseAddr("2001:db8::10"): true}, time.Now()})
+	v4 := &net.UDPAddr{IP: net.ParseIP("192.0.2.10"), Port: 20000}
+	v6 := &net.UDPAddr{IP: net.ParseIP("2001:db8::10"), Port: 20000}
+	g.holdPort(portKey{false, 20000})
+	g.holdPort(portKey{true, 20000})
+	g.freePort(portKey{true, 20000})
+	if g.toSelf(v4) || !g.toSelf(v6) {
+		t.Fatal("the IPv6 socket's close ended the IPv4 allocation's port")
+	}
+	g.holdPort(portKey{false, 20000})
+	g.freePort(portKey{false, 20000})
+	if g.toSelf(v4) {
+		t.Fatal("a port held twice was freed by one close")
+	}
+	g.freePort(portKey{false, 20000})
+	if !g.toSelf(v4) || len(g.ports) != 0 {
+		t.Fatal(g.ports)
+	}
+}
+
+// The server reads its own addresses again after a minute; a failed read
+// keeps those it has.
+func TestOwnAddressRefresh(t *testing.T) {
+	defer func(f func() ([]net.Addr, error)) { interfaceAddrs = f }(interfaceAddrs)
+	synctest.Test(t, func(t *testing.T) {
+		old, fresh := netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")
+		g := testGenerator(&ledger{}, net.IPv4zero)
+		g.own.Store(&ownSet{map[netip.Addr]bool{old: true}, time.Now()})
+		addrs := []net.Addr{&net.IPNet{IP: fresh.AsSlice(), Mask: net.CIDRMask(24, 32)}}
+		var failure error
+		interfaceAddrs = func() ([]net.Addr, error) { return addrs, failure }
+		time.Sleep(ownTTL - time.Nanosecond)
+		if !g.ownAddr(old) || g.ownAddr(fresh) {
+			t.Fatal("read again before a minute")
+		}
+		time.Sleep(time.Nanosecond)
+		if g.ownAddr(old) || !g.ownAddr(fresh) {
+			t.Fatal("not read again after a minute")
+		}
+		failure = errors.New("no interfaces")
+		time.Sleep(ownTTL)
+		if !g.ownAddr(fresh) {
+			t.Fatal("a failed read lost the addresses")
+		}
+	})
+}
+
+// The count of refused Allocates is logged once a minute when it changed.
+func TestRefusedReport(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var r relay
+		lines := make(chan string, 4)
+		logf := func(format string, args ...any) { lines <- fmt.Sprintf(format, args...) }
+		stop := make(chan struct{})
+		done := make(chan struct{})
+		go func() { r.report(stop, logf); close(done) }()
+		r.refused.Add(2)
+		time.Sleep(time.Minute - time.Nanosecond)
+		synctest.Wait()
+		if len(lines) != 0 {
+			t.Fatal(<-lines)
+		}
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		time.Sleep(time.Minute) // unchanged
+		synctest.Wait()
+		r.refused.Add(1)
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		close(stop)
+		<-done
+		close(lines)
+		var got []string
+		for line := range lines {
+			got = append(got, line)
+		}
+		if !reflect.DeepEqual(got, []string{"relay: 2 allocations refused since start", "relay: 3 allocations refused since start"}) {
+			t.Fatal(got)
+		}
+	})
+}
+
+// --relay-ports takes first-last, two ports in order; an invalid range in
+// Options means the default one.
+func TestPortRange(t *testing.T) {
+	var r PortRange
+	for _, bad := range []string{"", "20000", "20000-", "-29999", "0-10", "30000-20000", "20000-65536", "a-b"} {
+		if err := r.Set(bad); err != errPortRange || r != (PortRange{}) {
+			t.Fatalf("%q: %v, %v", bad, err, r)
+		}
+	}
+	if err := r.Set("1-65535"); err != nil || r.String() != "1-65535" {
+		t.Fatal(err, r)
+	}
+	if got := (Options{}).relayPorts(); got != DefaultRelayPorts || DefaultRelayPorts.String() != "20000-29999" {
+		t.Fatal(got)
+	}
+	if got := (Options{RelayPorts: PortRange{5, 5}}).relayPorts(); got != (PortRange{5, 5}) {
+		t.Fatal(got)
+	}
 }

@@ -358,14 +358,14 @@ func TestSenderShareOfAQueue(t *testing.T) {
 		t.Fatal(len(c.out), c.queued)
 	}
 	f := <-c.out
-	c.dequeued(f.from)
-	c.dequeued("")
+	c.dequeued(f)
+	c.dequeued(frame{})
 	c.sendFrom("a", "x")
 	if c.queued["a"] != maxQueued || len(c.out) != 19 {
 		t.Fatal(c.queued, len(c.out))
 	}
 	for len(c.out) != 0 {
-		c.dequeued((<-c.out).from)
+		c.dequeued(<-c.out)
 	}
 	if len(c.queued) != 0 {
 		t.Fatal(c.queued)
@@ -401,5 +401,35 @@ func TestWatcherIndex(t *testing.T) {
 	s.disconnect(replacement)
 	if len(s.watchers) != 0 {
 		t.Fatal("a closed connection still watches", s.watchers)
+	}
+}
+
+// Senders off the receiver's watch list share at most 32 places of its queue,
+// so devices it watches still find room.
+func TestQueueRoomForWatchedDevices(t *testing.T) {
+	c := client{out: make(chan frame, 128), queued: map[string]int{}, watch: []string{"w"}}
+	for _, from := range []string{"x", "y", "z"} {
+		for range maxQueued {
+			c.sendFrom(from, "f")
+		}
+	}
+	for range maxQueued {
+		c.sendFrom("w", "f")
+	}
+	c.send("presence")
+	if len(c.out) != maxStrangers+maxQueued+1 || c.strangers != maxStrangers || !reflect.DeepEqual(c.queued, map[string]int{"x": 16, "y": 16, "w": 16}) {
+		t.Fatal(len(c.out), c.strangers, c.queued)
+	}
+	// A stranger's frame written out frees a place for strangers.
+	c.dequeued(<-c.out)
+	c.sendFrom("z", "f")
+	if c.strangers != maxStrangers || c.queued["z"] != 1 {
+		t.Fatal(c.strangers, c.queued)
+	}
+	for len(c.out) != 0 {
+		c.dequeued(<-c.out)
+	}
+	if c.strangers != 0 || len(c.queued) != 0 {
+		t.Fatal(c.strangers, c.queued)
 	}
 }
