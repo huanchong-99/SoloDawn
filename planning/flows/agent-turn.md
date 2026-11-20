@@ -19,7 +19,7 @@ H addresses items to an AI. N chooses the session.
 | `mention` or `reply` whose message is in the thread of a task for which the AI has a task or review session | that session |
 | any other `mention`, `reply` or `decided` | the AI's group session |
 | everything addressed to the secretary | the secretary's group session |
-| `merge` | no session: N runs the merge itself (`flows/task.md` E) |
+| `merge` | no session: N runs the merge itself (`flows/task.md` E). Held only while the group is paused or N is offline by the owner's command |
 
 **An answer that a tool call is waiting for is not a turn.** A `reply` to a
 call whose `ask` is still open, and a `decided` for an approval the CLI is
@@ -38,18 +38,22 @@ that is waiting for them.
    refuses the item: audit row `refused`, then `ack`. Rows inside the item
    that carry no signature are content for the turn, not authority.
 3. N holds the item, unacknowledged, while any of these is true: the group
-   is paused; the task of the target session is `paused`; N is offline by
-   the owner's command; the AI is `limited`; the target session is in
-   `takeover`; the AI is already running a turn in this group, in any of
-   its sessions.
+   is paused; the item's task is `paused` or `failed`; N is offline by the
+   owner's command; the AI is `limited` by a cap or a rate limit; the
+   target session is in `takeover`; the AI is already running a turn in
+   this group, in any of its sessions. The home queues `decided` and
+   `mention` items for a paused or failed task too; N holds every item of
+   such a task and delivers them when the task is `active` again. N starts
+   no turn in the session of a `failed` task.
 4. If the target session does not exist yet, N creates it: prepares the
    folder (worktree for a task session, read-only checkout for a review
    session, `flows/task.md`), and records a new session row with a fresh
    session id.
 5. If S is `dormant`, N wakes it:
-   1. if the number of open sessions on this node equals `max_open`, N
-      closes the open session that has been `waiting` longest. If every
-      open session is `working`, the item waits until one is free;
+   1. if the number of open sessions on this node, those in `takeover`
+      included, equals `max_open`, N closes the open session that has been
+      `waiting` longest. If every open session is `working` or in
+      `takeover`, the item waits until one is free;
    2. N starts the CLI in the session's folder with the session id and the
       level of the session kind (`contracts/drivers.md`);
    3. state becomes `working`; N reports `member status`.
@@ -86,12 +90,15 @@ that is waiting for them.
     - The jump item is for the **same** session: nothing is reported; the
       item simply goes first, and the task is not paused.
     - It is for another session, and the interrupted one is a task session:
-      N reports `task preempted`.
+      N reports `task preempted`. If the home refuses it (a task at step
+      `merge`), nothing more is reported for that task.
 13. N delivers the jump item as in steps 4 to 9.
-14. If a task was pre-empted: when the jump turn has ended, N reports
-    `task resume` for it and gives the interrupted session one turn of its
-    own: "You were interrupted by a direct request from your owner.
-    Continue the task." No inbox item is involved.
+14. When the jump turn has ended, N gives the interrupted session, whatever
+    its kind, one turn of its own: "You were interrupted by a direct request
+    from your owner. Continue the task." for a task session, and the same
+    first sentence followed by "Continue." for the others. If its task was
+    pre-empted, N first reports `task resume` for it. No inbox item is
+    involved.
 
 ## D. Going dormant, and ending
 
@@ -99,10 +106,12 @@ that is waiting for them.
     needs a slot (step 5.1).
 16. N closes the CLI's stdin and waits for the process to exit. Only the
     session id remains. State `dormant`.
-17. A task session and a review session end when their task is merged,
-    cancelled, or given to another AI: N closes the process if open, removes
-    the session row and the folder. A group session ends when the AI leaves
-    the group.
+17. A task session ends when its task is merged or cancelled, or another AI
+    becomes its assignee; a review session when its task is merged or
+    cancelled, or another AI becomes its reviewer. N closes the process if
+    open, removes the session row and the folder of that role
+    (`contracts/local.md` section 7). A group session ends when the AI
+    leaves the group.
 
 ## E. When things go wrong
 
@@ -113,12 +122,15 @@ an `event` in `member status`, which H turns into a `system` row
 | Event | What N does |
 | --- | --- |
 | the CLI exits or closes its output during a turn | reports `turn_interrupted` (`crash`); in a task session also sends `task fail`; state `dormant`; the next item starts the CLI again with the same session id |
-| a turn lasts longer than `limits.turn_minutes` | interrupts it; reports `turn_interrupted` (`timeout`); in a task session also sends `task fail` |
+| a turn lasts longer than `limits.turn_minutes`, or a Codex turn is silent (`contracts/drivers.md` 1.2 step 6) | interrupts it; reports `turn_interrupted` (`timeout`); in a task session also sends `task fail` |
 | the CLI cannot resume the session id | starts a fresh session in the same folder; its first turn carries what the first turn of that session kind carries, plus the last 20 messages of the thread (R-123); reports `session_replaced` |
 | the CLI reports a vendor rate limit | state `limited`; reports `rate_limited` with the reset time; items are held until then |
 | the owner's cap is reached (R-61) | state `limited`; reports `cap_reached`; items are held until the cap is released (`contracts/commands.md` section 2) |
-| the CLI reports that sign-in is not valid in this mode | state `limited`; reports `login_invalid`; N never changes how the CLI authenticates (R-56) |
-| group paused, or owner's "all offline" | interrupts running turns of the affected sessions (`turn_interrupted`, `stop`) and closes them; items are held |
+| the CLI reports that sign-in is not valid in this mode | state `limited`; reports `login_invalid` only when the AI enters `limited`, at the first failed start after a success; later failed tries are not reported again. N never changes how the CLI authenticates (R-56). The state ends when the owner sends `agent.set` for that CLI again, or when the session start for the next item succeeds: that start is still tried |
+| group paused | interrupts running turns of the group's sessions (`turn_interrupted`, `stop`); the sessions stay open; items are held |
+| task paused (`contracts/task-machine.md` row 12) | interrupts a running turn of that task's sessions (`turn_interrupted`, `stop`); the sessions stay open; items are held |
+| owner's "all offline" | interrupts running turns (`turn_interrupted`, `stop`) and closes every session; items are held |
+| the node starts and finds session rows saved as `working` or `waiting` | they become `dormant`; one that was `working` is reported as a crash: `turn_interrupted` (`crash`), and `task fail` in a task session. A row saved as `takeover` is handed back (`flows/takeover.md` E) |
 
 ## F. Who the AI is talking to
 
@@ -139,6 +151,12 @@ an `event` in `member status`, which H turns into a `system` row
 - Exactly one process is attached to a session id while the state is
   `working`, `waiting` or `takeover`. Every switch (dormant, takeover,
   hand-back, restart) closes the current process and waits for its exit
-  before anything else starts (C-6).
+  before anything else starts (C-6). A structured CLI, Claude Code or
+  Codex, is closed by closing its stdin; an interactive CLI by closing its
+  pseudo-terminal.
+- A CLI that does not answer an interrupt or a close within 10 s gets its
+  process tree killed. During a turn that is a crash (section E, first
+  row). Outside a turn (an idle close) N writes an audit row and nothing
+  else: no `turn_interrupted` and no `task fail`.
 - N cannot stop a person from resuming the same session id in their own
   terminal outside SoloDawn. The owner is told not to; see `risks.md` K-6.
