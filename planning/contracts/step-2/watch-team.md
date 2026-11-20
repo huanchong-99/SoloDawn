@@ -149,6 +149,7 @@ A host command, by O as every host command (`contracts/commands.md` 2):
 | --- | --- |
 | hand-back, for any of the reasons of `flows/takeover.md` D and E | before step 13 there, N closes every `watch` channel of the AI and drops every grant for it |
 | `watch.end` | that person's channels close, the grant is dropped |
+| the watcher's `member` row in the group becomes a `gone` marker (`contracts/step-2/people.md` 2.4) | N drops that person's grants in the group and closes their `watch` channels |
 | WB closes the channel, N closes it for a full buffer, or the connection is lost | the grant stays; WB may send `watch.start` again while the takeover lasts |
 | the path of WB or of N to the other becomes `relay` | that end closes the `watch` channel; the grant stays |
 | N restarts | grants are in memory only and are gone; the session is treated as handed back (`flows/takeover.md` E) |
@@ -202,10 +203,10 @@ by the step 1 rules. No inbox item is ever queued in a team group.
 
 ## 10. A secretary's notice (R-14)
 
-**Needs the coordinator's word** (section 12, point 1). D-15 says that a
-secretary posts there "with the `post` tool and a group id". It does not
-say how the node knows that group's home, nor as whom the home accepts the
-message, since no AI is a member. This section is the proposed answer.
+Accepted by the coordinator (section 12, point 1). D-15 says that a
+secretary posts there "with the `post` tool and a group id"; this section
+says how the node knows that group's home and as whom the home accepts the
+message, since no AI is a member.
 
 **As whom.** The secretary's node signs the `post` as a device of its
 owner, with no `as`: the person principal of `contracts/commands.md`. The
@@ -229,6 +230,11 @@ signer's owner, which is all that any message "from an AI" is
 (`architecture.md` section 4). A client shows a bulletin as written by
 `ai` of `group`, on a computer of the person in `by`. In the signed `post`,
 `thread` and `re` are `null` and `main` is `false`.
+
+**A person-level post path.** This gives a node a way to post as its
+owner, a person, with no `as`. The home cannot tell such a post from one
+the person sent from a browser; only its kind, `bulletin`, says a node
+wrote it.
 
 **Which home.** The owner names the team groups to their node, in a new key
 of `settings.set` (`contracts/commands.md` section 2) that `host.info`
@@ -267,23 +273,19 @@ Unit P-4 freezes the new shapes (`contracts/conventions.md` section 5).
 | `contracts/storage.md` | audit `what` gains `watch`; `setting` key `teams` |
 | `flows/takeover.md`, `architecture.md` | section G becomes sections 1 to 6 here; section 3: a watcher's browser to the AI's host (`ctl`, `watch:*`), a node to the home of a team group |
 
-## 12. Open points for the coordinator
+## 12. Settled by the coordinator (2026-11-20)
 
-1. **How a secretary reaches the team group** (section 10). The other way,
-   the AI joining as a member without a clone, needs a refusal on every
-   path that wakes an AI and contradicts "`host.join` is refused".
-2. **The `act` does not bind the card's signer.** Its `arg` digest
-   (`contracts/step-2/confirm.md` section 6) covers `env.p` and not `env.k`.
-   A home that is not O's could put O's `act confirm` beside the same `p`
-   signed by another person, and checks 1 to 3 of section 2 would pass.
-   Recommended, in `confirm.md` and not here: the digest also covers the
-   request's `k`.
-3. **The item `why: watch`** (section 2): `confirm.md` section 5 names
-   this item for a confirmed `watch` card; no other item is defined.
-4. **Consent lasts one takeover and can be withdrawn** (sections 2, 5):
-   D-14 is silent on both. The cost is one list (`watchers`) and one
-   command (`watch.end`); without them the owner could neither see who may
-   watch nor stop one person without handing back.
+1. **How a secretary reaches the team group**: the `bulletin` of section
+   10, with the person-level post path it states. Joining the AI as a
+   member without a clone would need a refusal on every path that wakes
+   an AI.
+2. **The confirmation binds the card's signer**: the digest of
+   `contracts/step-2/confirm.md` section 6 covers the request's `k`, so
+   check 1 of section 2 fails for the same `p` signed by another person.
+3. **The item `why: watch`** is the one `confirm.md` section 5 names.
+4. **Consent lasts one takeover and can be withdrawn** (sections 2, 5),
+   with the list `watchers` and the command `watch.end`. A grant also ends
+   when the watcher is removed from the group (section 6).
 
 ## 13. Not verified
 
@@ -295,5 +297,4 @@ Unit P-4 freezes the new shapes (`contracts/conventions.md` section 5).
   N to replay.
 - `[unverified]` That every engine of the baseline sees promptly that a
   channel with a full send buffer was closed.
-- `confirm.md`, `authority.md` and `move.md` are written at the same time
-  and were not read; the card field that holds the AI is named there.
+- `contracts/step-2/authority.md` and `move.md` did not exist yet.
