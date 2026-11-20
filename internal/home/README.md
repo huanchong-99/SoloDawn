@@ -168,6 +168,8 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
 `ItemsPush`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+The checks and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too, and
+their test functions start with `TestReviewCmd`.
 
 ## The run loop
 
@@ -392,9 +394,52 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Checks and reviews
+
+`cmd_review.go` holds `task` `checked`, `submitted` and `cloud`, and `post` of kind `review`
+([commands](../../planning/contracts/commands.md) 1.3, 1.5 and 1.8;
+[messages](../../planning/contracts/messages.md) 2.8, 2.9 and 2.11;
+[task-machine](../../planning/contracts/task-machine.md) rows 4 to 7 and 14), under the keys
+`task/checked`, `task/submitted`, `task/cloud` and `post/review`. Where the contracts are silent,
+it does this:
+
+- **Checks (`task/checked`, `task/cloud`).** Both require a non-empty `commit` and check items
+  whose `name` and optional `detail` are non-empty, else `bad_request`; a missing task is
+  `not_found`, and any signer other than the host of the task's assignee is `forbidden`. Each
+  writes a `checks` message (`by` `"system"`, `stage` `"local"` or `"cloud"`, `ts` `c.Now`) under id
+  `n` in the task's thread, advancing `task.thread.count` and `task.thread.last`, on both passed
+  and failed runs ([issues](../../issues.md)). When failed hosted checks reach `limits.failures`
+  (row 6 into row 14), the home also writes `system` `task_failed` (`reason` `"failures"`) in the
+  thread after the `checks` message and queues `notice` (`code` `"task_failed"`) naming it for the
+  secretary when the group has one.
+- **Submissions (`task/submitted`).** Requires a non-empty `commit` and `stats.added` and
+  `stats.removed` at least 0; when `group.forge` is not `"none"`, `pr` must be at least 1 and
+  `pr_url` non-empty, and when `group.forge` is `"none"`, neither `pr` nor `pr_url` may appear in
+  the payload, else `bad_request`. `Step` receives the task's pending `approval` and `decision`
+  cards from `c.Disk.Pending()`, retires queued `review` items of the task from `c.Disk.Queued()`,
+  and copies `pr`, `pr_url`, `stats.added` and `stats.removed` onto the task row.
+- **Reviews (`post/review`).** Only a working AI may post a review, else `forbidden`; `Step`
+  checks that `as` is the task's reviewer before checking state or commit. `main` must be `false`,
+  `thread` must equal `body.task`, `commit` must be non-empty, `score` must be 0 to 100, each
+  remark's `text` and optional `file` must be non-empty, optional `line` must be at least 1, and
+  `mentions` must hold no duplicate id, else `bad_request`; a mentioned id that is no member of the
+  group, or an id collision on disk, is `conflict`. Any item with `veto` sets `score` to 0 and `ok`
+  to `false`; otherwise `ok` is `score >= task.pass`. The row has `ts` as signed, `body` completed
+  with `num`, `title`, `round`, `score`, `pass` and `ok`, and `task.thread.last.text` cut to at
+  most 200 UTF-8 characters; the answer carries `passed` and `round`. Passing queues `merge` for
+  the assignee's host with `commit`, plus `pr` when `group.forge` is not `"none"`. The sixth failed
+  review (`review.failed > limits.review_rounds`, row 14) writes `system` `task_failed` (`reason`
+  `"review_rounds"`) after the `review` row instead of queuing `reviewed`.
+- **Derived `task_failed` id.** When `task/cloud` or `post/review` triggers row 14, `n` already
+  names the `checks` or `review` row, so the `task_failed` row gets the first 16 bytes of the
+  SHA-256 of `SoloDawn task failed <n>` in base64url (`conflict` if already held on disk;
+  [issues](../../issues.md)), and mentions the brief's requester when still a member and the
+  assignee's owner without duplicates.
+
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
+- The table of commands holds only the briefs and the checks, submissions and reviews, and no node
+  starts a loop yet: the other command
   files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
@@ -435,3 +480,8 @@ while a task is paused and a reviewer named while it is paused.
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`cmd_review_test.go` sends `task/checked`, `task/submitted`, `task/cloud` and `post/review` through
+`Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every refusal, boundary, retirement,
+card-wait recomputation, veto and row-14 stop, and checking `proto.UnexpectedNulls` on the rows
+written. `features/home_review.feature` holds the home half of acceptance tests A5.3 and A5.4.
