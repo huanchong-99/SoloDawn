@@ -154,11 +154,12 @@ The home writes the `direct` and `ask` cards and signs nothing in them, and
 from step 2 a home may belong to someone else. So the owner's `act` does not
 rest on the card: it names the request.
 
-- **Digest of a request**: the SHA-256 of the UTF-8 bytes of `body.ai`, one
-  line feed and the request's `env.p`, in base64url (`contracts/envelope.md`
-  section 1): 43 characters. The request is the message `re` names; for
-  `watch` it is the card's own `env`. With the AI in it, a confirmation for
-  one AI of an owner cannot be used for another AI of the same owner.
+- **Digest of a request**: the SHA-256 of the UTF-8 bytes of `body.ai`, a
+  line feed, the request's `env.k`, a line feed and its `env.p`, in
+  base64url (`contracts/envelope.md` section 1): 43 characters. The request
+  is the message `re` names; for `watch` it is the card's own `env`. With
+  the AI in it, a confirmation for one AI of an owner cannot be used for
+  another; with `k`, not for the same `p` signed by another person.
 - The owner's browser computes the digest from the request it shows, and
   never takes it from the home. The home computes it too and refuses an
   `act confirm` that carries another value, so that no card is marked
@@ -221,24 +222,26 @@ The turn format of `contracts/drivers.md` section 3 does not change: the
 header of every item already carries `instruction` or `information`. What
 step 2 settles is which of the two an item from another owner's side gets.
 
-- **As if from the owner's side.** A request whose word is enough for the
-  AI, by the allow list or by a confirmed `direct` or `ask` card, is
-  labelled exactly as step 1 labels the same message from the owner's own
-  side: a person's message as the owner's own message, an AI's message as
-  one from another AI of the owner (R-51: "as if the owner had sent that
-  message").
+- **Only a message a person signed** can be `instruction`. Every message
+  an AI wrote is `information`, also one of the owner's own AIs and a
+  confirmed call (section 10, point 3).
+- **A person's message** is `instruction` when that person's word is enough
+  for the AI (section 2) or a confirmed `direct` card covers it (R-51: "as
+  if the owner had sent that message"). In the thread of a task the AI
+  takes part in, only the owner's own message is (R-52; section 10, point 4).
 - **Workflow items** (`assign`, `review`, `reviewed`, `decided`, `checks`,
   `resume`, the hand-back and continue turns) are `instruction` for a task
   the AI takes part in. "A task the owner confirmed" of step 1 reads so in
   step 2.
-- **Everything else is `information`**: above all a message from another
-  owner's person or AI in the thread of a task the AI takes part in. It is
-  delivered at once, to that task's session, with no card (R-52).
+- **Everything else is `information`**: above all a message from anyone
+  but the owner, listed persons included, in the thread of a task the AI
+  takes part in. It goes at once to that task's session, with no card.
 - The node never reads a message to tell a remark from an order (R-2,
   D-9): the label follows from signatures the host has verified.
 - So after a task has started, direction changes in three ways only: the
   owner writes in the thread; a new brief replaces the old one; or, for
-  added work, a mention outside the thread, which is a new `direct` card.
+  added work, a mention outside the thread (a new `direct` card unless the
+  person's word is enough).
 - The label is context for the model and enforces nothing, as in step 1.
 
 The sentence for every session (`contracts/drivers.md` section 4, "All")
@@ -262,37 +265,26 @@ Folded in when step 1 is built; until then this file is the reference.
 Unit P-4 of the parallel plan freezes the shapes: one golden message row
 per status, `row-msg-confirm-<status>.json`, and the `act` with `arg`.
 
-## 10. Needs the coordinator
+## 10. Settled by the coordinator (2026-11-20)
 
-The text above follows the recommendation in each case.
-
-1. **D-8 names personal subscriptions only.** A person who is not on the
-   allow list of a team or API-key AI is in the same position (R-53).
-   Recommended, section 2: the same card. Alternative: refuse the message
-   with `forbidden`.
-2. **D-9 speaks of "a new `confirm` card"** for a change of direction and
-   does not say what produces it once a task has started. Recommended,
-   section 8: no card for a message in the thread, a card for a mention
-   outside it.
-3. **`contracts/drivers.md` section 3** labels `instruction` a message
-   "signed by a device of the AI's owner"; its example labels a call from
-   the owner's other AI `information`, though that AI's host is such a
-   device. Section 8 avoids the question ("as step 1 labels the same
-   message"). Recommended for step 1: `instruction` only for a message a
-   person signed; every message an AI wrote is `information`.
-4. **A listed person writing in a task's thread.** Section 8 labels it
-   `instruction`, because R-53 lets that person direct the AI. R-52 read
-   strictly makes it `information`. Recommended: as written.
-5. **A task with no request** cannot go to an AI whose owner would have to
-   confirm (section 7). Recommended: accept the limit. Alternative: a
-   second digest, over the AI and the task id, which binds no content.
+1. A person not on the allow list of a team or API-key AI gets the same
+   card as for a personal AI (section 2), not a refusal.
+2. A change of direction after a task started: no card for a message in
+   the thread; a mention outside it is a new card (section 8).
+3. Only a message a person signed is `instruction` (section 8). Follow-up
+   for the coordinator, not made here: `contracts/drivers.md` section 3
+   says "signed by a device of the AI's owner", which its own example
+   contradicts for a call from the owner's other AI; it is to say "signed
+   by the owner as a person".
+4. A listed person's message in the thread of a running task is
+   `information`: R-52 governs there, R-53 outside it (section 8).
+5. A task with no request cannot go to an AI whose owner would have to
+   confirm (section 7): a stated limit.
 
 ## 11. Not verified
 
-- The sibling files of `contracts/step-2/` are written at the same time and
-  were not read. This file leans on `authority.md` (the host's rule, the
-  allow list, the level) and `watch-team.md` (how a confirmed `watch` card
-  opens the channel); they may disagree with it.
+- `contracts/step-2/authority.md` (the host's rule, the allow list, the
+  level) did not exist yet; this file leans on it.
 - That the host can be given the request: an `assign` or `review` item
   carries one message row, which after a reassignment is not the brief.
   Section 6 assumes the host then reads the brief from the home.
