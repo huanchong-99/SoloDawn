@@ -1,18 +1,19 @@
 name: Release
 
+# For a pushed vMAJOR.MINOR.PATCH tag, builds the six binaries stamped with the
+# tag and their SHA256SUMS, and keeps them as a workflow artifact. It creates
+# no release and no tag.
+
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
-      - '!v0[0-9]*.*.*'
-      - '!v*.0[0-9]*.*'
-      - '!v*.*.0[0-9]*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     if: ${{ !github.event.deleted }}
     runs-on: ubuntu-latest
     steps:
@@ -38,12 +39,7 @@ jobs:
           pnpm build
           cp ../install.md ../internal/node/webdist/
 
-      - name: Stamp the version for release builds
-        run: |
-          sed "s/^const Version = .*/const Version = \"$GITHUB_REF_NAME\"/" internal/node/node.go > "$RUNNER_TEMP/node.go"
-          jq -n --arg file "$RUNNER_TEMP/node.go" '{Replace: {"internal/node/node.go": $file}}' > "$RUNNER_TEMP/version.json"
-
-      - name: Build release binaries
+      - name: Build six binaries stamped with the tag
         env:
           CGO_ENABLED: '0'
         run: |
@@ -52,9 +48,9 @@ jobs:
             suffix=
             if [[ "$os" == windows ]]; then suffix=.exe; fi
             for arch in amd64 arm64; do
-              asset="solodawn_${GITHUB_REF_NAME}_${os}_${arch}${suffix}"
-              GOOS="$os" GOARCH="$arch" go build -overlay "$RUNNER_TEMP/version.json" \
-                -trimpath -ldflags='-s -w' -o "dist/$asset" ./cmd/solodawn
+              GOOS="$os" GOARCH="$arch" go build -trimpath \
+                -ldflags="-s -w -X github.com/huanchong-99/SoloDawn/internal/node.Version=$GITHUB_REF_NAME" \
+                -o "dist/solodawn_${GITHUB_REF_NAME}_${os}_${arch}${suffix}" ./cmd/solodawn
             done
           done
           test "$("dist/solodawn_${GITHUB_REF_NAME}_linux_amd64" version)" = "$GITHUB_REF_NAME"
@@ -63,7 +59,8 @@ jobs:
         working-directory: dist
         run: sha256sum solodawn_* > SHA256SUMS
 
-      - name: Publish the tagged release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create --verify-tag --generate-notes -- "$GITHUB_REF_NAME" dist/* install.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: solodawn_${{ github.ref_name }}
+          path: dist/
+          if-no-files-found: error
