@@ -135,5 +135,5 @@ func TestPairingAndSessionGoldens(t *testing.T) {
 		signed(browser, " "+string(wireJSON(t, addNode))),
 	}})
 	golden(t, "hello", Hello{Request{"hello", 1}, 1, "browser", "phone browser", []string{}})
-	golden(t, "welcome", Welcome{"welcome", Success{1, true}, 1, host, "workstation", "0.3.1", ts, []GroupSummary{{group, "Website", 812}}, true})
+	golden(t, "welcome", Welcome{"welcome", Success{1, true}, 1, host, "workstation", "v0.3.1", ts, []GroupSummary{{group, "Website", 812}}, true})
 }
