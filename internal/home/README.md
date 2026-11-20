@@ -153,7 +153,8 @@ name is taken for all of them. The seam takes `wireRow`, `typedRow`, `rowLimit`,
 `rowFits`, `sizeLimit`, `refused`, `repeated`, `addOnce`, `keyCreate` and `keySelector`. Its tests
 are in package `home_test` and use only what is exported. The task machine takes the names that
 start with `task`, `step`, `wait`, `item` and `states`, and `workItems`, `byAssignee` and
-`byReviewer`; its tests take the names that start with `mc` and `machine`.
+`byReviewer`; its tests take the names that start with `mc` and `machine`. The briefs take the
+names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
 
 ## The task machine
 
@@ -187,10 +188,54 @@ function that moves a task calls it and adds nothing to its rules.
   `thread.count`, `thread.last`); the bodies of the messages; for row 23, the timer and telling the
   secretary once per quiet period. The machine sets `stats.ended`.
 
+## Briefs
+
+`cmd_brief.go` holds `post` of kind `brief` and `act` `confirm` and `revise` on it
+([commands](../../planning/contracts/commands.md) 1.3 and 1.4;
+[messages](../../planning/contracts/messages.md) 2.1 and 3.1), under the keys `post/brief`,
+`act/confirm` and `act/revise`. Where the contracts are silent, it does this:
+
+- **Post.** Only the secretary posts a brief, else `forbidden`; a group without one has nobody who
+  can. What the payload says by itself is `bad_request`: a `thread` that is not `null`, no
+  criterion, no task, a dependency that is not an earlier entry or that is named twice, an entry
+  whose assignee is its reviewer. What the group says is `conflict`: a requester who is no member,
+  an assignee or reviewer who is no working AI (an AI member other than the secretary), a message
+  that already has the id `n`, and a `replaces` that names no brief that is `pending` or `revise`.
+  The row is a main-line card with `main` false, `ts` as signed, `state` `pending`, and a body
+  encoded again from the checked fields. A post creates no task and queues no item (A5.2). The
+  replaced brief keeps its state with `status` `superseded`.
+- **Act.** `confirm` has neither `arg` nor `text`, `revise` no `arg` and at most a `text` that is
+  not empty and is at most 1,024 bytes as a JSON string, its quotes included; else `bad_request`.
+  Then an act names no message: `not_found`; a message that is no brief: `bad_request`; a signer
+  that is not a person who is the requester or an admin, which an `as` never is: `forbidden`; a
+  brief that is not `pending`: `conflict`. The brief's `state` gets `by` (the person's member id),
+  `at` (the home's time) and the signed `act`; a `revise` with a `text` also gets `note`.
+- **Confirm.** The checks of the post are made again against the group as it is now, and a brief
+  that fails one is answered `conflict`. Two are left: the brief it replaces has been superseded
+  since the post, and the task machine refuses an entry whose assignee is its reviewer
+  ([issues](../../issues.md)). Then each entry becomes a task through `Step` with `OnConfirm`,
+  `By` `ByAdmin` or `ByPerson`, and `Blocked` when the entry has a dependency: a dependency is an
+  earlier entry, created by the same confirm, so it is not merged. The row has `num` from
+  `State.Num + 1` in the order of the entries, `origin` `brief`, `brief` the card's id, `slug`
+  from `proto.MakeSlug`, `pass` the brief's or, for a foundation task, the group's
+  `pass_foundation`, `depends` as task ids, and `created` and `stats.started` the home's time.
+  Each task has a `task` message in the main line, with the task's own id.
+- **Ids.** The id of the task of entry `i` is the first 16 bytes of the SHA-256 of
+  `SoloDawn brief task <n of the act> <i>`, in base64url: a function has no randomness, and
+  nobody can know the id before the act arrives. An id that a task or a message already has is
+  answered `conflict`.
+- **Items.** Each item of row 1 (`assign` for a task that starts) names the task and its task
+  message, with the act as `cause`. Then the secretary gets `confirmed`, naming the brief, with
+  the act as `cause`, after a `confirm` and after a `revise`; a group without a secretary gets
+  none. A queued task gets its `assign` when the merge of its last dependency releases it (unit
+  HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
+  `c.Disk.Msg` reads.
+
 ## Known limitations
 
-- The tables are empty and nothing in a node calls `Apply`, `Seal` or a hook yet: the command
-  files and the run loop are separate units ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- The table of commands holds only the briefs, and nothing in a node calls `Apply`, `Seal` or a
+  hook yet: the other command files and the run loop are separate units
+  ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - A device of a member of another group on the same home is answered `unknown_device`, not
   `forbidden` ([issues](../../issues.md)).
 - A device held by the logs of two people is read as the device of the one with the lower user id
@@ -211,3 +256,9 @@ to a store in memory, because no command file exists yet. The choices behind the
 and for the refusals, and covers every statement of `machine.go`. `features/home_machine.feature`
 holds acceptance test A5.18 at step `merge` and the two points of the third review, a card decided
 while a task is paused and a reviewer named while it is paused.
+
+`cmd_brief_test.go` sends every command of the briefs through `Commands.Apply` with fakes of
+`Receipts` and `Disk`, with a case for every refusal and branch. `features/home_brief.feature`
+holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
+`Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
+commands of `task assign` and `task merged` are other units' (HM-9, HM-12).

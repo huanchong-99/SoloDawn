@@ -6,6 +6,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · deviation · `act confirm` does not make the `replaces` check of the post again
+
+- Symptom: `planning/contracts/commands.md` 1.4 says that a `confirm` makes "the checks of a `brief` post (1.3)" again. One of them is that `body.replaces`, when not `null`, names a brief that is `pending` or `revise`. The post itself made that brief `superseded`, so the check, made again, would refuse every confirm of a brief that replaces another.
+- Cause: the contract lists the post's checks without saying which of them are about the group when the brief is confirmed. `(*State).briefStill` (`internal/home/cmd_brief.go:247`) makes the others again: the shape of the body, the requester a member, every assignee and reviewer a working AI. That an entry's assignee is not its reviewer is made again by the task machine's role rule, which `Step` answers `conflict` (`internal/home/machine.go:253`).
+- Status: open, decided by unit HM-8 on 2026-11-21. The contract should say that the `replaces` check is the post's only.
+
+### 2026-11-21 · deviation · The tasks of a confirmed brief have ids that follow from the act, not random ones
+
+- Symptom: `planning/contracts/rows.md` says that the ids of tasks and messages are random ids. The home gives the task of entry `i` of a confirmed brief, and its `task` message, the id made of the first 16 bytes of the SHA-256 of `SoloDawn brief task <n of the act> <i>`.
+- Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `briefTaskID` (`internal/home/cmd_brief.go:290`). The id has the form of a random id, and nobody knows it before the act arrives, because the act's `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:276`).
+- Status: open, decided by unit HM-8 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivation can go.
+
+### 2026-11-21 · limitation · A queued task's `stats.started` is the time its brief was confirmed
+
+- Symptom: a task created queued by a confirm has `stats.started` set when it is created, and it keeps that time when the merge of its dependency makes it active. The minutes a summary counts for it include the time it waited.
+- Cause: `briefCreate` sets `created` and `stats.started` to the home's time (`internal/home/cmd_brief.go:311`); row 8 of `planning/contracts/task-machine.md` does not name `stats.started`, and `Step` does not set it on a release (`internal/home/machine.go:577`). The contracts do not say when a task starts.
+- Status: open. Unit HM-12, which releases queued tasks and writes the summary, or the coordinator, decides whether a release sets it.
+
 ### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
 
 - Symptom: after the sixth failed review a task is `failed` at step `review`. When an admin resumes or reassigns it, the reviewer is asked to review the same commit again, although that commit has just failed.
