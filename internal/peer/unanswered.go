@@ -2,25 +2,22 @@ package peer
 
 import "time"
 
-// answerWait is set only on an offered connection, under the peer lock, until
-// its answer is applied (flows/connect.md step 15).
-type answerWait struct {
-	timer *time.Timer
-	paths map[string]bool // the paths that have not reported the target offline
-}
-
+// waitForAnswer marks an offered connection as unanswered, under the peer
+// lock, until its answer is applied (flows/connect.md step 15): pending holds
+// the paths that have not reported the target offline. Its deadline is made
+// stopped; Offer starts it, for 10 seconds, once a copy of the offer is out.
 func (p *Peer) waitForAnswer(c *Connection, paths []Route) {
-	w := &answerWait{paths: make(map[string]bool)}
+	c.pending = make(map[string]bool)
 	for _, path := range paths {
-		w.paths[path.ID] = true
+		c.pending[path.ID] = true
 	}
-	w.timer = time.AfterFunc(10*time.Second, func() { p.retirePending(c) })
-	c.pending = w
+	c.deadline = time.AfterFunc(time.Hour, func() { p.retirePending(c) })
+	c.deadline.Stop()
 }
 
 func (c *Connection) endWait() {
 	if c.pending != nil {
-		c.pending.timer.Stop()
+		c.deadline.Stop()
 		c.pending = nil
 	}
 }
@@ -40,8 +37,8 @@ func (p *Peer) Offline(pathID, target string) {
 	defer p.mu.Unlock()
 	for _, c := range p.live {
 		if c.Device == target && c.pending != nil {
-			delete(c.pending.paths, pathID)
-			if len(c.pending.paths) == 0 {
+			delete(c.pending, pathID)
+			if len(c.pending) == 0 {
 				c.Close()
 			}
 		}

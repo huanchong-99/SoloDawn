@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"maps"
 	"sync"
 	"time"
 
@@ -16,23 +17,35 @@ import (
 
 type link struct{ device, conn string }
 
+// A Peer answers and offers the connections of one device.
+//
+// Lock order, for the node that wires it: the Peer holds its own lock only
+// around its own decisions, and never while it calls known, paths, inbound or
+// a channel handler, or sends on a Route. known and paths run on the caller's
+// goroutine during Receive and Offer, and paths and Route.Send also on pion's
+// goroutines; inbound and the handlers run on pion's. A callback may call back
+// into the Peer, but a caller of Receive, Offer or Connect must not hold a
+// lock that known or paths takes.
 type Peer struct {
-	key     identity.Key
-	sockets *Sockets
-	db      *store.Store
-	known   func(string) bool
-	paths   func(string) []Route
-	inbound func(*Connection)
-	now     func() time.Time
-	mu      sync.Mutex // decisions and description/candidate application, never network writes
-	live    map[link]*Connection
-	slot    map[string]*Connection
-	early   map[link]*batch
-	retired map[link]int64
+	key      identity.Key
+	sockets  *Sockets
+	db       *store.Store
+	known    func(string) bool
+	paths    func(string) []Route
+	inbound  func(*Connection)
+	channels Channels
+	now      func() time.Time
+	mu       sync.Mutex // decisions and description/candidate application, never network writes
+	live     map[link]*Connection
+	slot     map[string]*Connection
+	early    map[link]*batch
+	retired  map[link]int64
 }
 
-func New(key identity.Key, sockets *Sockets, db *store.Store, known func(string) bool, paths func(string) []Route, inbound func(*Connection)) *Peer {
-	return &Peer{key: key, sockets: sockets, db: db, known: known, paths: paths, inbound: inbound, now: time.Now, live: make(map[link]*Connection), slot: make(map[string]*Connection), early: make(map[link]*batch), retired: make(map[link]int64)}
+// New keeps its own copy of channels: what the caller changes later does not
+// reach it.
+func New(key identity.Key, sockets *Sockets, db *store.Store, known func(string) bool, paths func(string) []Route, inbound func(*Connection), channels Channels) *Peer {
+	return &Peer{key: key, sockets: sockets, db: db, known: known, paths: paths, inbound: inbound, channels: maps.Clone(channels), now: time.Now, live: make(map[link]*Connection), slot: make(map[string]*Connection), early: make(map[link]*batch), retired: make(map[link]int64)}
 }
 func randomID() string {
 	var b [16]byte
@@ -63,17 +76,22 @@ func broadcast(ctx context.Context, paths []Route, to string, env proto.Envelope
 
 // Receive is shared by every transport, including node-local delivery. The
 // outer sender must match the signer, and every copy is independently checked.
+// An answer is sent on path from a goroutine of its own, after Receive returns.
 func (p *Peer) Receive(ctx context.Context, path Route, frame proto.Route) error {
 	now := p.now()
 	env, hdr, err := p.open(frame, now)
 	if err != nil {
 		return err
 	}
-	answer, err := p.apply(link{env.Key, hdr.Conn}, hdr.Type, []byte(env.Payload), now.UnixMilli())
+	paths := p.paths(env.Key) // before the lock: the callback may take locks of its own
+	answer, err := p.apply(link{env.Key, hdr.Conn}, hdr.Type, []byte(env.Payload), now.UnixMilli(), paths)
 	if err != nil || answer == nil {
 		return err
 	}
-	return path.Send(ctx, env.Key, *answer)
+	// The answer waits for its turn on the path, as candidates do, while
+	// the path's reader goes on.
+	go path.Send(ctx, env.Key, *answer)
+	return nil
 }
 func (p *Peer) open(frame proto.Route, now time.Time) (env proto.Envelope, hdr proto.SignalHeader, err error) {
 	if proto.Decode(frame.Env, &env) != nil || frame.Key != env.Key {
@@ -92,13 +110,13 @@ func (p *Peer) open(frame proto.Route, now time.Time) (env proto.Envelope, hdr p
 	hdr.Conn = string(id.Conn)
 	return env, hdr, nil
 }
-func (p *Peer) apply(k link, kind string, data []byte, now int64) (*proto.Envelope, error) {
+func (p *Peer) apply(k link, kind string, data []byte, now int64, paths []Route) (*proto.Envelope, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.prune(now)
 	switch kind {
 	case "offer":
-		return p.receiveOffer(k, data, now)
+		return p.receiveOffer(k, data, now, paths)
 	case "answer":
 		return nil, p.receiveAnswer(k, data)
 	case "ice":
@@ -120,9 +138,13 @@ func (p *Peer) prune(now int64) {
 	}
 }
 
-func (p *Peer) receiveOffer(k link, data []byte, now int64) (*proto.Envelope, error) {
+func (p *Peer) receiveOffer(k link, data []byte, now int64, paths []Route) (*proto.Envelope, error) {
 	var o proto.Offer
-	if proto.Decode(data, &o) != nil || o.Probe {
+	if proto.Decode(data, &o) != nil {
+		return nil, identity.BadRequest
+	}
+	kind := offerKinds[kindOf(o)]
+	if kind == nil {
 		return nil, identity.BadRequest
 	}
 	if c := p.live[k]; c != nil {
@@ -131,9 +153,9 @@ func (p *Peer) receiveOffer(k link, data []byte, now int64) (*proto.Envelope, er
 		}
 		return c.answer, nil
 	}
-	return p.firstOffer(k, o, now)
+	return p.firstOffer(k, o, now, kind, paths)
 }
-func (p *Peer) firstOffer(k link, o proto.Offer, now int64) (*proto.Envelope, error) {
+func (p *Peer) firstOffer(k link, o proto.Offer, now int64, kind offerKind, paths []Route) (*proto.Envelope, error) {
 	desc := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: o.SDP}
 	if _, err := desc.Unmarshal(); err != nil {
 		return nil, identity.BadRequest
@@ -142,20 +164,28 @@ func (p *Peer) firstOffer(k link, o proto.Offer, now int64) (*proto.Envelope, er
 	if err != nil || !first {
 		return nil, err
 	}
+	return kind(p, k, desc, paths)
+}
+
+func init() { offerKinds["ordinary"] = (*Peer).ordinaryOffer }
+
+// ordinaryOffer closes the signer's earlier inbound connection before the new
+// checks start (contracts/rendezvous.md section 2.3).
+func (p *Peer) ordinaryOffer(k link, desc webrtc.SessionDescription, paths []Route) (*proto.Envelope, error) {
 	if old := p.slot[k.device]; old != nil {
 		// Close returns once pion has released the old mux registration; its
 		// error concerns only the old connection.
 		old.Close()
 	}
-	return p.answer(k, desc)
+	return p.answer(k, desc, paths)
 }
-func (p *Peer) answer(k link, desc webrtc.SessionDescription) (*proto.Envelope, error) {
-	c, err := p.create(k, p.sockets.answer)
+func (p *Peer) answer(k link, desc webrtc.SessionDescription, paths []Route) (*proto.Envelope, error) {
+	c, err := p.create(k, p.sockets.answer, paths)
 	if err != nil {
 		return nil, err
 	}
 	p.slot[k.device] = c
-	c.pc.OnDataChannel(func(dc *webrtc.DataChannel) { c.acceptCtl(dc, p.inbound) })
+	c.pc.OnDataChannel(func(dc *webrtc.DataChannel) { p.dispatch(c, dc) })
 	answer, err := c.makeAnswer(desc)
 	if err != nil {
 		c.Close()
@@ -219,12 +249,13 @@ func (p *Peer) Offer(ctx context.Context, device string) (*Connection, error) {
 		c.Close()
 		return nil, err
 	}
+	c.deadline.Reset(10 * time.Second)
 	return c, nil
 }
 func (p *Peer) makeOffer(k link, paths []Route) (*Connection, proto.Envelope, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	c, err := p.create(k, p.sockets.offer)
+	c, err := p.create(k, p.sockets.offer, paths)
 	if err != nil {
 		return nil, proto.Envelope{}, err
 	}
@@ -240,8 +271,10 @@ func (p *Peer) makeOffer(k link, paths []Route) (*Connection, proto.Envelope, er
 	return c, env, nil
 }
 
-func (p *Peer) create(k link, api *webrtc.API) (*Connection, error) {
-	pc, err := api.NewPeerConnection(iceConfig(p.paths(k.device)))
+// create makes a connection with the ICE servers of paths, a snapshot taken
+// before the peer lock.
+func (p *Peer) create(k link, api *webrtc.API, paths []Route) (*Connection, error) {
+	pc, err := api.NewPeerConnection(iceConfig(paths))
 	if err != nil {
 		return nil, err
 	}

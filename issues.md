@@ -6,6 +6,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
+
+- Symptom: `crap.py` gives `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reports `internal/peer` at 100% of statements.
+- Cause: the empty `case <-c.Done():` of the `select` in `deliver` (`internal/peer/ctl.go:91`) is a cover block with no statements and count 0. Go leaves it out of its percentage; the gate's conversion of the cover profile into lines (the last command of `stages.fast` in `.project-standard/gates.toml`) counts its line as an uncovered line. That gives `deliver` 13 of 14 lines, 92.9%, at complexity 6. The same before PR-0 (9c09938f6).
+- Effect: none on a change that leaves `deliver` alone, because the gate measures changed functions only. A change to `deliver`, or a CRAP run over the whole repository, reports it.
+- Status: open. No code change, by the coordinator's decision of 2026-11-20.
+
 ### 2026-11-20 · bug · go-nat v0.2.0 gets four things wrong in port mapping
 
 - Symptom: against NET-1's gateway (miniupnpd 2.3.9) in spike S-8 ([#134](https://github.com/huanchong-99/SoloDawn/pull/134)), go-nat failed four ways. (1) NAT-PMP returns the external port it asked for, not the one the router granted: it reported 55459 where the router mapped 30000, so a node would publish an unreachable port. (2) NAT-PMP `DeletePortMapping` leaves the mapping in place. (3) NAT-PMP calls ignore the context: with the router silent, a call with a 2 s context had not returned after 10 s. (4) UPnP asks only for random external ports and fails with 606 where the router restricts ports. Discovery also always takes 5 s.
@@ -130,7 +137,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · limitation · A frame dropped for a slow receiver can leave it with stale state
 
 - Symptom: when a receiver's queue of 128 frames is full, the rendezvous drops the next frame for it and closes neither connection (`planning/contracts/rendezvous.md` section 2). A dropped `from` or `room` is covered by its sender's offer timeout and back-off. A frame the server itself generates has no sender to send it again: after a dropped `presence` a watcher shows the wrong online state until that device's next change or the next `watch`; after a dropped `joined` a pairing member waits until it joins again; a dropped `offline`, `ice` or `quota` leaves that request unanswered.
-- Cause: `client.sendFrom` drops a frame when the queue is full, holds 16 frames of its sender, or holds 32 from senders off the receiver's watch list (`internal/rendezvous/server.go:129-165`, limits at `:81-82`, queue size at `:92`).
+- Cause: `client.sendFrom` drops a frame when the queue is full, holds 16 frames of its sender, or holds 32 from senders off the receiver's watch list (`internal/rendezvous/server.go:129-167`, limits at `:81-82`, queue size at `:92`).
 - Status: open. Coalescing the server's own frames is not built, by the coordinator's decision of 2026-11-20.
 
 ### 2026-11-20 · limitation · The rendezvous challenge is not bound to a server
@@ -184,7 +191,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · limitation · Limits by address let one NAT crowd its users and a spoofer fill a victim's places
 
 - Symptom: the relay's 128 allocations and the shared TLS port's 256 connections are counted per IPv4 address or IPv6 /64 (`planning/contracts/rendezvous.md` sections 3 and 6). Devices behind one NAT or carrier-grade NAT share one count, so busy neighbours can leave a device without relay. A sender that can forge UDP source addresses can, with TURN credentials of its own (any device key it makes gets them), create allocations from a victim's address without seeing the answers; each holds one of the victim's places for its lifetime, up to an hour, and blind refreshes can keep it.
-- Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:40-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
+- Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:41-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
 
 ## Resolved
@@ -194,6 +201,16 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: the relay sends a datagram to one of the server's own addresses only when it is for one of its relay allocations (`planning/contracts/rendezvous.md` section 3). The server reads its interface addresses once, when it starts; an address that an interface gets later (a new DHCP lease, an added IPv6 address) is not one of its own addresses for this rule until the service restarts, so a client can relay to a service on the server through that address.
 - Cause: `ownAddrs` read `net.InterfaceAddrs` once, from `relay.generator` at startup (`internal/rendezvous/relay.go:111-129` before the fix), with the addresses its name resolves to.
 - Status: resolved in PR #151: `generator.ownAddr` reads them again once they are a minute old and keeps the previous set if the read fails (`internal/rendezvous/relay.go:133-160`); a new address counts as the server's own within a minute.
+
+### 2026-11-20 · deviation · The plan had host files register their subcommands and channels
+
+- Symptom: `planning/steps/parallel-plan-units.md` had HS-19 register the terminal channel in the table of PR-0 from `host/pty.go`, and every host unit register its subcommands and channels in the tables of N-0 and PR-0 from its own file. `host` may import neither `peer` nor `node` (`planning/architecture.md` 8.2, `imports_test.go`).
+- Status: resolved in #135 by the coordinator's decision of 2026-11-20: `node` registers the subcommands of host features in the table of N-0 and gives each `Peer` the handlers of their channels when it creates it (`peer.New`, `peer.Channels`); a handler gets a `peer.Stream`. The entries of HS-19, N-4, PR-0 and PR-1 and the note of lane HOST say so.
+
+### 2026-11-20 · deviation · The probe needs `peer/signal.go`, which PR-1 did not own
+
+- Symptom: PR-1 owned `peer/probe.go` only. PR-0 hands a probe offer to its handler, but a probe also needs an answer without TURN (`create` takes its ICE servers from `paths`), an ordinary offer that closes a pending probe (`ordinaryOffer`), and a probe that does not take the device's slot before its first `hello` (`answer`), all in `internal/peer/signal.go`.
+- Status: resolved in #135 by the coordinator's decision of 2026-11-20: PR-1 also owns those three changes in `peer/signal.go`.
 
 ### 2026-11-20 · bug · Go acceptance steps acted beyond their own scenario
 

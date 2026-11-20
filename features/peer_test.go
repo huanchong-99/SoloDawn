@@ -43,8 +43,8 @@ type peersWorld struct {
 	dated    map[string]proto.Envelope // the node's offers as they left it, by conn
 	offers   []proto.Envelope          // the same, in order
 	local    [2]chan proto.Envelope
-	replies  [][]proto.Envelope // what each replay path was sent
-	first    [2]proto.Envelope  // the candidate of each side delivered before its description
+	replies  []chan proto.Envelope // what each replay path is sent
+	first    [2]proto.Envelope     // the candidate of each side delivered before its description
 	cleanup  []func()
 }
 
@@ -100,7 +100,7 @@ func (w *peersWorld) start(routes func(i int) []peer.Route) error {
 		}
 		w.cleanup = append(w.cleanup, func() { socks.Close(); db.Close() })
 		other := exampleKey([]string{"tablet", "node"}[i]).ID()
-		w.nodes[i] = peer.New(w.keys[i], socks, db, func(id string) bool { return id == other }, func(string) []peer.Route { return routes(i) }, func(c *peer.Connection) { w.accepted[i] <- c; w.serve(c, i) })
+		w.nodes[i] = peer.New(w.keys[i], socks, db, func(id string) bool { return id == other }, func(string) []peer.Route { return routes(i) }, func(c *peer.Connection) { w.accepted[i] <- c; w.serve(c, i) }, nil)
 	}
 	return nil
 }
@@ -352,15 +352,15 @@ func (w *peersWorld) newerOffer() error {
 }
 
 // replay gives the tablet the node's offer number n again on copies paths of
-// node-local delivery, and keeps what each path was sent.
+// node-local delivery; each path keeps what it is sent.
 func (w *peersWorld) replay(n, copies int) error {
 	w.mu.Lock()
 	offer := w.offers[n]
 	w.mu.Unlock()
 	w.replies = nil
 	for range copies {
-		var got []proto.Envelope
-		path := peer.Route{ID: "replay", Send: func(_ context.Context, _ string, env proto.Envelope) error { got = append(got, env); return nil }}
+		got := make(chan proto.Envelope, 2)
+		path := peer.Route{ID: "replay", Send: func(_ context.Context, _ string, env proto.Envelope) error { got <- env; return nil }}
 		if err := w.nodes[1].Receive(w.ctx, path, signal(offer)); err != nil {
 			return err
 		}
@@ -369,11 +369,35 @@ func (w *peersWorld) replay(n, copies int) error {
 	return nil
 }
 
+// answers is what each replay path was sent. The node sends an answer from a
+// goroutine of its own after Receive returns, so a path that has nothing is
+// given a second.
+func (w *peersWorld) answers() [][]proto.Envelope {
+	var all [][]proto.Envelope
+	for _, got := range w.replies {
+		var envs []proto.Envelope
+		select {
+		case env := <-got:
+			envs = append(envs, env)
+		case <-time.After(time.Second):
+		}
+		all = append(all, append(envs, drain(got)...))
+	}
+	return all
+}
+func drain(got chan proto.Envelope) []proto.Envelope {
+	var envs []proto.Envelope
+	for len(got) > 0 {
+		envs = append(envs, <-got)
+	}
+	return envs
+}
+
 // replied checks what the replay paths were sent, that the tablet made no
 // connection for them, and that the newer connection still works.
 func (w *peersWorld) replied(want func([][]proto.Envelope) bool) error {
-	if !want(w.replies) {
-		return fmt.Errorf("the replay paths were sent %v", w.replies)
+	if sent := w.answers(); !want(sent) {
+		return fmt.Errorf("the replay paths were sent %v", sent)
 	}
 	if n := len(w.accepted[1]); n != 0 {
 		return fmt.Errorf("%d more connections", n)

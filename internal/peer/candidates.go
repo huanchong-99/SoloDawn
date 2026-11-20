@@ -8,8 +8,10 @@ import (
 
 // A batch holds the candidates of one (sender, conn) until the remote
 // description is set, and applies each distinct candidate exactly once
-// (contracts/rendezvous.md section 2.3, "Trickle"). It holds at most
-// earlyCount, for at most earlyMillis from the first, and drops the rest.
+// (contracts/rendezvous.md section 2.3, "Trickle"). A connection takes at
+// most maxCandidates, held or applied; candidates that arrive before their
+// description are held for at most earlyMillis from the first, for at most
+// earlyAttempts connection attempts of one signer. The rest are dropped.
 type candidate struct{ mid, text string }
 type batch struct {
 	seen    map[candidate]bool
@@ -19,8 +21,9 @@ type batch struct {
 }
 
 const (
-	earlyCount  = 64
-	earlyMillis = 30000
+	maxCandidates = 64
+	earlyMillis   = 30000
+	earlyAttempts = 8
 )
 
 func (p *Peer) take(k link) *batch {
@@ -52,17 +55,34 @@ func (p *Peer) hold(k link, v candidate, now int64) error {
 	if seen || err != nil {
 		return err
 	}
-	b := p.early[k]
-	if b == nil {
-		b = newBatch()
-		b.expires = now + earlyMillis
-		p.early[k] = b
+	if b := p.batchFor(k, now); b != nil {
+		b.receive(v, nil)
 	}
-	b.receive(v, nil)
 	return nil
 }
+
+// batchFor is the batch that holds k's early candidates; a new one is made
+// unless k's signer already has earlyAttempts.
+func (p *Peer) batchFor(k link, now int64) *batch {
+	if b := p.early[k]; b != nil {
+		return b
+	}
+	n := 0
+	for held := range p.early {
+		if held.device == k.device {
+			n++
+		}
+	}
+	if n == earlyAttempts {
+		return nil
+	}
+	b := newBatch()
+	b.expires = now + earlyMillis
+	p.early[k] = b
+	return b
+}
 func (b *batch) receive(v candidate, add func(webrtc.ICECandidateInit)) {
-	if b.seen[v] || !b.ready && len(b.pending) == earlyCount {
+	if b.seen[v] || len(b.seen) == maxCandidates {
 		return
 	}
 	b.seen[v] = true
