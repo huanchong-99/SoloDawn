@@ -36,11 +36,13 @@ case "$mode" in
 esac
 
 if [ "$mode" = symmetric ]; then
-    # Allocate a new public port for each new remote tuple. Conntrack
-    # preserves it for that flow and reverses it only for matching replies.
+    # Allocate a new public port, 40000 to 40999 in turn, for each new remote
+    # tuple. Conntrack preserves it for that flow and reverses it only for
+    # matching replies. nft 1.0 cannot use numgen as a port, so map it to one.
+    ports=$(awk 'BEGIN { for (i = 0; i < 1000; i++) printf "%s%d : %d", (i ? ", " : ""), i, 40000 + i }')
     learn=''
     incoming=''
-    snat="meta l4proto udp snat to $public:numgen inc mod 20000 offset 40000"
+    snat="meta l4proto udp snat to $public : numgen inc mod 1000 map { $ports }"
 else
     learn="iifname \"lan\" oifname \"wan\" meta l4proto udp update @allowed { $out }"
     incoming="iifname \"wan\" ip daddr $public $in @allowed dnat to 10.0.0.2"

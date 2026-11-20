@@ -97,12 +97,12 @@ func removed(t *testing.T, name string, test func(t *testing.T) Network) {
 }
 
 // mapped checks the public endpoint of a client socket: cones keep the client
-// port, symmetric NAT draws one from 40000 to 59999.
+// port, symmetric NAT draws one from 40000 to 40999.
 func mapped(t *testing.T, mode NAT, got netip.AddrPort, public string, port uint16) {
 	t.Helper()
 	ok := got.Addr().String() == public && got.Port() == port
 	if mode == Symmetric {
-		ok = got.Addr().String() == public && got.Port() >= 40000 && got.Port() < 60000
+		ok = got.Addr().String() == public && got.Port() >= 40000 && got.Port() < 41000
 	}
 	if !ok {
 		t.Fatalf("%s: client port %d mapped to %s, public IP %s", mode, port, got, public)
