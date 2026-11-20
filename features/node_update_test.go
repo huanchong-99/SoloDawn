@@ -58,9 +58,9 @@ func nodeUpdateSteps(sc *godog.ScenarioContext, f fixtures) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/SHA256SUMS", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprintf(w, "%x  %s\n", sum, name) })
 		mux.HandleFunc("/"+name, func(w http.ResponseWriter, _ *http.Request) { w.Write(image) })
-		server := httptest.NewServer(mux)
+		server := httptest.NewTLSServer(mux) // the node downloads over https only
 		cleanup(server.Close)
-		u.ReleaseURL = server.URL
+		u.ReleaseURL, u.Transport = server.URL, server.Client().Transport
 		return nil
 	})
 	sc.Step(`^a session is (working|takeover)$`, func(s string) { state = s })

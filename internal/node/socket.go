@@ -2,52 +2,86 @@ package node
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
-// errRunning means another node answers on the socket.
+// errRunning means another node holds the data directory's lock.
 var errRunning = errors.New("a node is already running")
 
-// ListenLocal creates the node's private directory and listens on its socket,
-// which only the current user can open (local.md 3). A socket file left by a
-// node that stopped is removed first.
-func ListenLocal(dir string) (*net.UnixListener, error) {
+// Local is the node's local socket and the lock that makes it the only node
+// of its data directory. Both are held until Close.
+type Local struct {
+	*net.UnixListener
+	lock *os.File
+}
+
+// Close closes the listener, which removes the socket, then releases the
+// lock before it closes the lock file: a node restarted at once finds it free.
+func (l *Local) Close() error {
+	return errors.Join(l.UnixListener.Close(), unlockFile(l.lock), l.lock.Close())
+}
+
+// ListenLocal creates the node's private directory, takes its lock and
+// listens on its socket, which only the current user can open (local.md 3).
+// Without the lock another node is running. With it, a socket file that is
+// there was left by a node that stopped, and is removed.
+func ListenLocal(dir string) (*Local, error) {
 	if err := privateDir(dir); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, "sock")
-	if err := clearStale(path); err != nil {
+	lock, err := lockData(dir)
+	if err != nil {
 		return nil, err
 	}
-	l, err := net.ListenUnix("unix", &net.UnixAddr{Net: "unix", Name: path})
+	l, err := bindLocal(filepath.Join(dir, "sock"))
+	if err != nil {
+		lock.Close()
+		return nil, err
+	}
+	return &Local{l, lock}, nil
+}
+
+// lockFile takes the lock without waiting; a test replaces it.
+var lockFile = lockExclusive
+
+// lockData takes an exclusive lock on the lock file of the data directory;
+// the system releases it when the process ends. Only a lock held by another
+// process means a node is running; a file system that cannot lock is an
+// error of its own.
+func lockData(dir string) (*os.File, error) {
+	f, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := lockFile(f); err != nil {
+		f.Close()
+		if errors.Is(err, lockHeld) {
+			return nil, errRunning
+		}
+		return nil, fmt.Errorf("lock %s: %w", f.Name(), err)
+	}
+	return f, nil
+}
+
+func bindLocal(path string) (*net.UnixListener, error) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	l, err := listenPrivate(path)
 	if err != nil {
 		return nil, err
 	}
 	return secureSocket(l)
-}
-
-// clearStale removes the socket file when a dial to it is refused. A dial
-// that connects means a node is running; any other failure, such as no file,
-// leaves the bind to report. Windows refuses a dial to a path where no file
-// is, as it refuses one to a stale socket, so a file must be there too.
-func clearStale(path string) error {
-	conn, err := net.Dial("unix", path)
-	if err == nil {
-		conn.Close()
-		return errRunning
-	}
-	if _, missing := os.Lstat(path); errors.Is(err, connRefused) && !errors.Is(missing, fs.ErrNotExist) {
-		return os.Remove(path)
-	}
-	return nil
 }
 
 func secureSocket(l *net.UnixListener) (*net.UnixListener, error) {
@@ -65,11 +99,20 @@ type Opening struct {
 	MCP string `json:"mcp,omitempty"`
 }
 
+// maxOpening limits the first line of a local connection.
+const maxOpening = 64 << 10
+
+// openingTimeout limits the wait for the first line, and for the error line
+// that answers a bad one.
+var openingTimeout time.Duration = 10e9 // 10 s
+
+// ReadOpening reads the first line, which must fit in r's buffer.
 func ReadOpening(r *bufio.Reader) (Opening, []byte, error) {
-	line, err := r.ReadBytes('\n')
+	line, err := r.ReadSlice('\n')
 	if err != nil {
 		return Opening{}, nil, err
 	}
+	line = bytes.Clone(line)
 	var open Opening
 	if err := proto.Decode(line, &open); err != nil {
 		return Opening{}, nil, err
@@ -81,17 +124,23 @@ func ReadOpening(r *bufio.Reader) (Opening, []byte, error) {
 	return open, line, nil
 }
 
-// AcceptOpening reads the first line of a local connection. A line that is
-// neither a command nor an MCP token gets one error line, and the connection
-// is closed (local.md 3). The caller continues from the returned reader.
-func AcceptOpening(conn io.ReadWriteCloser) (Opening, []byte, *bufio.Reader, error) {
-	r := bufio.NewReader(conn)
+// AcceptOpening reads the first line of a local connection, at most
+// maxOpening bytes within openingTimeout. A line that is neither a command
+// nor an MCP token gets one error line, and the connection is closed
+// (local.md 3). The caller continues from the returned reader, without a
+// deadline.
+func AcceptOpening(conn net.Conn) (Opening, []byte, *bufio.Reader, error) {
+	conn.SetReadDeadline(time.Now().Add(openingTimeout))
+	r := bufio.NewReaderSize(conn, maxOpening)
 	open, line, err := ReadOpening(r)
 	if err != nil {
+		conn.SetWriteDeadline(time.Now().Add(openingTimeout))
 		json.NewEncoder(conn).Encode(localReply{Done: true, Error: err.Error()}) // the client may be gone already
 		conn.Close()
+		return open, line, r, err
 	}
-	return open, line, r, err
+	conn.SetReadDeadline(time.Time{})
+	return open, line, r, nil
 }
 
 // ErrOwned refuses pair on a node that already has an owner (local.md 1).
@@ -129,7 +178,7 @@ func ReadPair(line []byte, owner string, configured []string) (PairRequest, erro
 
 // startNode runs the node on its data directory and local listener. The
 // runtime assembly in node.go replaces it.
-var startNode = func(string, *net.UnixListener) error {
+var startNode = func(string, *Local) error {
 	return errors.New("node runtime is unavailable")
 }
 

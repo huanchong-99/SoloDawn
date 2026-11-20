@@ -30,11 +30,16 @@ else
   sha256sum "$asset"
 fi | grep -Fxf SHA256SUMS &&
   mkdir -p "$HOME/.local/bin" &&
-  install -m 755 "$asset" "$HOME/.local/bin/solodawn"
+  install -m 755 "$asset" "$HOME/.local/bin/solodawn" &&
+  if [ "$(uname -s)" = Darwin ]; then
+    xattr -d com.apple.quarantine "$HOME/.local/bin/solodawn" 2>/dev/null || true
+  fi
 ```
 
-On success the matching line appears. Add `$HOME/.local/bin` to your
-`PATH` if needed.
+On success the matching line appears. On macOS the last step clears the
+quarantine mark that a browser download carries, which would otherwise
+stop the unsigned binary from running; it runs only after the checksum
+matched. Add `$HOME/.local/bin` to your `PATH` if needed.
 
 **Windows** (PowerShell)
 

@@ -28,6 +28,120 @@ func TestListenLocal(t *testing.T) {
 	}
 }
 
+// A node that holds the lock and has not bound yet is running: a second
+// node neither removes nor binds the socket.
+func TestLockedDataDirIsRunning(t *testing.T) {
+	dir := socketRoot(t)
+	lock, err := lockData(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l, err := ListenLocal(dir); l != nil || err != errRunning {
+		t.Fatalf("listener beside a held lock = %v, %v; want %v", l, err, errRunning)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "sock")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("socket beside a held lock: %v", err)
+	}
+	lock.Close()
+	openSocket(t, dir)
+}
+
+// Nodes that start together: exactly one listens, and its socket stays.
+func TestNodesStartingTogether(t *testing.T) {
+	for round := range 20 {
+		dir := socketRoot(t)
+		winners := startTogether(t, dir, 8)
+		if len(winners) != 1 {
+			t.Fatalf("round %d: %d listeners", round, len(winners))
+		}
+		conn, err := net.Dial("unix", filepath.Join(dir, "sock"))
+		if err != nil {
+			t.Fatalf("round %d: dial the winner: %v", round, err)
+		}
+		conn.Close()
+		winners[0].Close()
+	}
+}
+
+// startTogether starts n listeners on dir at once and returns those that listen.
+func startTogether(t *testing.T, dir string, n int) []*Local {
+	results := make(chan *Local, n)
+	for range n {
+		go func() {
+			l, err := ListenLocal(dir)
+			if err != nil && err != errRunning {
+				t.Error(err)
+			}
+			results <- l
+		}()
+	}
+	var winners []*Local
+	for range n {
+		if l := <-results; l != nil {
+			winners = append(winners, l)
+		}
+	}
+	return winners
+}
+
+// A file system that cannot lock is an error of its own, not a running node.
+func TestLockUnsupported(t *testing.T) {
+	saved := lockFile
+	t.Cleanup(func() { lockFile = saved })
+	lockFile = func(*os.File) error { return syscall.ENOTSUP }
+	dir := socketRoot(t)
+	want := "lock " + filepath.Join(dir, "lock") + ": " + syscall.ENOTSUP.Error()
+	if l, err := ListenLocal(dir); l != nil || !errors.Is(err, syscall.ENOTSUP) || err.Error() != want {
+		t.Fatalf("listener where locks are not supported = %v, %v; want %q", l, err, want)
+	}
+}
+
+// Close releases the lock: the next node starts at once.
+func TestRestartAfterClose(t *testing.T) {
+	dir := socketRoot(t)
+	for range 3 {
+		l, err := ListenLocal(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestLockPathError(t *testing.T) {
+	dir := socketRoot(t)
+	if err := os.Mkdir(filepath.Join(dir, "lock"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var open *os.PathError
+	if l, err := ListenLocal(dir); l != nil || !errors.As(err, &open) || open.Op != "open" {
+		t.Fatalf("listener with a folder as its lock = %v, %v", l, err)
+	}
+}
+
+func TestSocketPathError(t *testing.T) {
+	dir := socketRoot(t)
+	if err := os.MkdirAll(filepath.Join(dir, "sock", "file"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var remove *os.PathError
+	if l, err := ListenLocal(dir); l != nil || !errors.As(err, &remove) || remove.Op != "remove" {
+		t.Fatalf("listener with a folder as its socket = %v, %v", l, err)
+	}
+	openLock(t, dir) // the failed listener released the lock
+}
+
+func openLock(t *testing.T, dir string) {
+	t.Helper()
+	lock, err := lockData(dir)
+	if err != nil {
+		t.Fatalf("lock after a failed listener: %v", err)
+	}
+	lock.Close()
+}
+
 func TestStaleSocketIsReplaced(t *testing.T) {
 	dir := socketRoot(t)
 	path := filepath.Join(dir, "sock")
@@ -55,6 +169,7 @@ func TestBindFailure(t *testing.T) {
 	if l, err := ListenLocal(dir); l != nil || !errors.As(err, &bind) || bind.Op != "listen" {
 		t.Fatalf("listener on a path beyond the socket limit = %v, %v; want a listen error", l, err)
 	}
+	openLock(t, dir)
 }
 
 func TestSocketPermissionFailureClosesListener(t *testing.T) {
@@ -120,7 +235,7 @@ func TestForegroundRuntime(t *testing.T) {
 	}
 	saved := startNode
 	t.Cleanup(func() { startNode = saved })
-	startNode = func(path string, l *net.UnixListener) error {
+	startNode = func(path string, l *Local) error {
 		if path != dir || l.Addr().String() != filepath.Join(dir, "sock") {
 			t.Errorf("runtime got %q and %q, want %q", path, l.Addr(), dir)
 		}
@@ -198,7 +313,7 @@ func nodeTestDir(t *testing.T) string {
 	return dir
 }
 
-func openSocket(t *testing.T, dir string) *net.UnixListener {
+func openSocket(t *testing.T, dir string) *Local {
 	t.Helper()
 	l, err := ListenLocal(dir)
 	if l == nil || err != nil {
@@ -258,5 +373,47 @@ func TestReadPair(t *testing.T) {
 		if !reflect.DeepEqual(got, tc.want) || errText(err) != tc.err {
 			t.Errorf("%s with owner %q: got %+v, %v; want %+v, %q", tc.line, tc.owner, got, err, tc.want, tc.err)
 		}
+	}
+}
+
+func TestLongOpeningIsRefused(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	go func() {
+		client.Write([]byte(strings.Repeat("x", maxOpening)))
+	}()
+	server.SetDeadline(time.Now().Add(2 * time.Second))
+	go io.Copy(io.Discard, client)
+	if _, _, _, err := AcceptOpening(server); err != bufio.ErrBufferFull {
+		t.Fatalf("AcceptOpening on %d bytes without a line end = %v", maxOpening, err)
+	}
+}
+
+func TestOpeningLimits(t *testing.T) {
+	saved := openingTimeout
+	t.Cleanup(func() { openingTimeout = saved })
+	openingTimeout = 50 * time.Millisecond
+	// A silent client gets the error line once the wait is over.
+	client, server := net.Pipe()
+	go AcceptOpening(server)
+	client.SetDeadline(time.Now().Add(2 * time.Second))
+	reply, err := io.ReadAll(client)
+	client.Close()
+	if string(reply) != "{\"done\":true,\"error\":\"read pipe: i/o timeout\"}\n" || err != nil {
+		t.Fatalf("reply to a silent client %q, %v", reply, err)
+	}
+	// After a good opening the stream has no deadline.
+	client, server = net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	go io.WriteString(client, "{\"cmd\":\"status\"}\n")
+	_, _, r, err := AcceptOpening(server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * openingTimeout)
+	go io.WriteString(client, "later\n")
+	if rest, err := r.ReadString('\n'); rest != "later\n" || err != nil {
+		t.Fatalf("stream after the opening = %q, %v", rest, err)
 	}
 }

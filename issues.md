@@ -24,6 +24,42 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `run_checks` runs in the task's worktree (`internal/host/checks.go`, `cleanCheckHead`), where such files can exist.
 - Status: open. Step 2 closes it by running the checks on a clean export of the commit.
 
+### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
+
+- Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
+- Cause: `pair` (`cmd/solodawn/main.go:61`) only sends the command through `Command.send` (`internal/node/cmd.go:40`). No unit owned starting the node.
+- Status: open. Added to N-4's row in `planning/steps/parallel-plan-units.md` by the coordinator's decision of 2026-11-20 (independent review of `internal/node`).
+
+### 2026-11-20 · bug · Two nodes starting together could each remove the other's socket
+
+- Symptom: two nodes that started together on one data directory both ran over a stale `sock`: one removed the other's live socket, and the first one's close then removed the second's (89 of 3000 rounds in the independent review of `internal/node`).
+- Cause: the dial of `sock` and its removal were not one step (`internal/node/socket.go`, before this fix).
+- Status: resolved. `local.md` section 3, "One node per data directory", now holds the rule: an exclusive lock on `lock` in the data directory, taken by `ListenLocal` (`internal/node/socket.go:38`, `lockData` at `:61`) before the socket is touched.
+
+### 2026-11-20 · limitation · The start-at-login entries are not run by a real service manager
+
+- Symptom: the tests check the files and the task definition that `solodawn service install` writes, not a service manager starting the node from them. Not verified:
+  1. a systemd user unit started by a real user manager, with the escaping of `ExecStart` (`$$`, `%%`) and the `Environment="PATH=…"` line (`internal/node/service_linux.go`);
+  2. launchd loading the agent with its `EnvironmentVariables` (`internal/node/service_darwin.go`);
+  3. the scheduled task running the node headless through `conhost.exe --headless` (`internal/node/service_windows.go`); Windows CI only builds the action.
+- Cause: nothing is installed on the development machine, by the coordinator's decision of 2026-11-20.
+- Status: open. Candidate for a CI smoke job on GitHub's throwaway runners (Linux, macOS, Windows) after the quota reset: install, log in or start the manager, check that the node runs with the expected PATH, remove.
+
+### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
+
+- Symptom, from the independent review of `internal/node`:
+  1. `Apply` checks `Busy` and then calls `Restart` (`internal/node/update.go:98`). A turn or a takeover admitted between the two is restarted.
+  2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
+  3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
+- Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
+- Status: open, for N-4.
+
+### 2026-11-20 · limitation · `SHA256SUMS` proves the download intact, not where it came from
+
+- Symptom: the node checks the binary against `SHA256SUMS` from the same release (`local.md` section 9). Whoever can replace the binary there can replace `SHA256SUMS` too, so the check catches a damaged or cut download, not a forged release.
+- Cause: the contract has no signature over releases; binaries are not signed (decided). The download itself is https only, follows at most five redirects, each to https, is limited in size, and is given up after 60 s without data, whatever its total time (`internal/node/update.go`, `get`).
+- Status: accepted trade-off of the contract.
+
 ### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
 
 - Symptom: `crap.py` gives `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reports `internal/peer` at 100% of statements.
@@ -72,13 +108,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
 
 - Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
-- Cause: `startNode` is a stub that returns that error until N-4 assembles the runtime (`internal/node/socket.go:80-84`); `cmd/solodawn/main.go:26-28` registers `node` without arguments.
+- Cause: `startNode` is a stub that returns that error until N-4 assembles the runtime (`internal/node/socket.go:181-183`); `cmd/solodawn/main.go:26-28` registers `node` without arguments.
 - Status: open until N-4. What I-8 needs from N-4 is listed in [#132](https://github.com/huanchong-99/SoloDawn/pull/132).
 
 ### 2026-11-20 · limitation · A node's socket does not fit under a long HOME on macOS
 
 - Symptom: with a HOME of more than about 60 bytes, `solodawn node` exits with `listen unix <HOME>/Library/Application Support/solodawn/sock: bind: invalid argument`. Seen on macOS with HOME under a session's temporary directory of over 100 bytes.
-- Cause: a Unix socket path holds at most 103 bytes on macOS (107 on Linux), and on macOS the socket is 41 bytes below HOME (`internal/node/dir.go:23-24`, `internal/node/socket.go:23-27`). The system's temporary directory there (`/var/folders/…/T/`, 49 bytes) leaves room for a short name only, so `t.TempDir()` as HOME fails. `internal/node/socket_test.go:175-179`, `features/cmd_local_test.go:29-34` and `web/e2e/nodes.ts` create their directories under `/tmp` on macOS for this reason.
+- Cause: a Unix socket path holds at most 103 bytes on macOS (107 on Linux), and on macOS the socket is 41 bytes below HOME (`internal/node/dir.go:23-24`, `internal/node/socket.go:46`). The system's temporary directory there (`/var/folders/…/T/`, 49 bytes) leaves room for a short name only, so `t.TempDir()` as HOME fails. `internal/node/socket_test.go:289-298`, `features/cmd_local_test.go:29-34` and `web/e2e/nodes.ts` create their directories under `/tmp` on macOS for this reason.
 - Effect: none for an ordinary home directory such as `/Users/<name>`.
 - Status: open, accepted for tests; a test that sets HOME for a node on macOS keeps it under `/tmp`.
 

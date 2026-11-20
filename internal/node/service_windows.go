@@ -11,10 +11,17 @@ $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $name = "SoloDawn-$user"
 `
 
-// InstallService registers the absolute executable path for the next user login.
-func InstallService(executable string) error {
-	return scheduledTask(`$action = New-ScheduledTaskAction -Execute $env:SOLODAWN_TASK_EXECUTABLE -Argument 'node'
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+// taskAction runs the node through a console host without a window: a
+// console program started by the task would open one, and closing it would
+// stop the node.
+const taskAction = `$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument ('--headless "' + $env:SOLODAWN_TASK_EXECUTABLE + '" node')
+`
+
+// InstallService registers the absolute executable path for the next user
+// login. The task starts with the user's own environment, PATH included, so
+// path is not needed here.
+func InstallService(executable, _ string) error {
+	return scheduledTask(taskAction+`$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskPath '\' -TaskName $name -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null`, executable)

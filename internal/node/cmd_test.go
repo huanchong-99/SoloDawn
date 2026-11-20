@@ -5,8 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"os"
-	"runtime"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -14,12 +13,9 @@ import (
 
 func TestCannotSendCommand(t *testing.T) {
 	c := Command{Cmd: "status"}
-	// Windows refuses a dial to a path where no file is.
-	missing := error(os.ErrNotExist)
-	if runtime.GOOS == "windows" {
-		missing = connRefused
-	}
-	if err := c.send(t.TempDir(), io.Discard); !errors.Is(err, missing) {
+	// No socket: the dial fails (not found; Windows says refused).
+	var dial *net.OpError
+	if err := c.send(t.TempDir(), io.Discard); !errors.As(err, &dial) || dial.Op != "dial" {
 		t.Fatalf("send to a missing socket = %v", err)
 	}
 	conn := struct {
@@ -38,6 +34,8 @@ func (failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 func TestReplies(t *testing.T) {
 	for _, tc := range []struct{ lines, stdout, wantErr string }{
 		{"{\"done\":true,\"ok\":true}\n", "", ""},
+		{"{\"done\":true}\n", "", "the node ended its answer without ok"},
+		{"{\"text\":\"one\"}\n{\"done\":true,\"ok\":false}\n", "one\n", "the node ended its answer without ok"},
 		{"{\"done\":true,\"error\":\"denied\"}\n", "", "denied"},
 		{"{\"text\":\"one\"}\n{\"text\":\"\"}\n{\"done\":true,\"ok\":true}\n", "one\n\n", ""},
 		{"{\"text\":\"partial\"}\n{\"done\":true,\"error\":\"denied\"}\n", "partial\n", "denied"},

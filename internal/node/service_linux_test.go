@@ -11,10 +11,11 @@ func TestServiceLoginUnit(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", config)
 	unit := filepath.Join(config, "systemd", "user", "solodawn.service")
 	link := filepath.Join(filepath.Dir(unit), "default.target.wants", "solodawn.service")
-	serviceOK(t, InstallService("/opt/an old installation"))
-	serviceOK(t, InstallService(`/opt/%n/$HOME/a "node"`))
+	serviceOK(t, InstallService("/opt/an old installation", "/usr/bin"))
+	serviceOK(t, InstallService(`/opt/%n/$HOME/a "node"`, `/opt/100%/bin:/usr/bin`))
 	want := "[Unit]\nDescription=SoloDawn node\n\n[Service]\n" +
-		"ExecStart=:/bin/sh -c 'exec \"$0\" node' \"/opt/%%n/$HOME/a \\\"node\\\"\"\n\n[Install]\nWantedBy=default.target\n"
+		"Environment=\"PATH=/opt/100%%/bin:/usr/bin\"\n" +
+		"ExecStart=/bin/sh -c 'exec \"$$0\" node' \"/opt/%%n/$$HOME/a \\\"node\\\"\"\n\n[Install]\nWantedBy=default.target\n"
 	serviceFile(t, unit, want)
 	target, err := filepath.EvalSymlinks(link)
 	serviceOK(t, err)
@@ -30,7 +31,7 @@ func TestServiceMissingConfig(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "")
 	const missing = "neither $XDG_CONFIG_HOME nor $HOME are defined"
-	serviceError(t, InstallService("/opt/node"), missing)
+	serviceError(t, InstallService("/opt/node", "/usr/bin"), missing)
 	serviceError(t, RemoveService(), missing)
 }
 
@@ -39,11 +40,11 @@ func TestServiceUnitWriteErrors(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", config)
 	file := filepath.Join(config, "systemd")
 	serviceOK(t, os.WriteFile(file, nil, 0600))
-	serviceError(t, InstallService("/opt/node"), "mkdir "+file+": not a directory")
+	serviceError(t, InstallService("/opt/node", "/usr/bin"), "mkdir "+file+": not a directory")
 	serviceOK(t, os.Remove(file))
 	unit := filepath.Join(file, "user", "solodawn.service")
 	serviceOK(t, os.MkdirAll(unit, 0700))
-	serviceError(t, InstallService("/opt/node"), "open "+unit+": is a directory")
+	serviceError(t, InstallService("/opt/node", "/usr/bin"), "open "+unit+": is a directory")
 }
 
 func TestServiceManagerFailure(t *testing.T) {
@@ -51,6 +52,6 @@ func TestServiceManagerFailure(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("PATH", dir)
 	serviceOK(t, os.WriteFile(filepath.Join(dir, "systemctl"), []byte("#!/bin/sh\necho 'unit manager' >&2\necho failed >&2\nexit 7\n"), 0700))
-	serviceError(t, InstallService("/opt/node"), "systemctl enable: exit status 7 (unit manager failed)")
+	serviceError(t, InstallService("/opt/node", "/usr/bin"), "systemctl enable: exit status 7 (unit manager failed)")
 	serviceError(t, RemoveService(), "systemctl disable: exit status 7 (unit manager failed)")
 }
