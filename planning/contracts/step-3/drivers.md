@@ -162,8 +162,8 @@ The name is not `caps`: that field holds the owner's usage caps.
   one pull request (`contracts/conventions.md` section 5): unit P-5, as
   the coordinator decided on 2026-11-20. The Fable interface unit U3-3
   shows it: the account choice, the level control, the cap units and the
-  terminal button. The P-5 row of the parallel plan lists `driver`; U3-3
-  is not in its tables yet.
+  terminal button. The parallel plan lists both; T3-1 puts nothing on the
+  wire, and T3-2 puts `driver` into `host.info` after P-5.
 
 ## 7. Acceptance
 

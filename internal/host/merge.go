@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // ReviewedMerge identifies a merge item taken by the host after checking
@@ -25,16 +24,15 @@ type MergeResult struct {
 	Conflict    string
 }
 
-// Local tasks share the clone's base checkout and index. A squash and its
-// commit (or reset) must finish before another local squash starts.
-var localMergeMu sync.Mutex
-
 // Apply makes one merge attempt. For an item already taken before restart,
 // the caller must use Inspect instead.
 func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 	if m.PR == 0 {
-		localMergeMu.Lock()
-		defer localMergeMu.Unlock()
+		// Local tasks share the clone's base checkout and index: the squash
+		// and its commit (or reset) run under the clone's lock.
+		lock := cloneLock(m.Repo)
+		lock.Lock()
+		defer lock.Unlock()
 		if err := m.squashLocal(ctx); err != nil {
 			return MergeResult{Conflict: err.Error()}, nil
 		}
@@ -99,8 +97,9 @@ func (m ReviewedMerge) Inspect(ctx context.Context) (MergeResult, error) {
 	if m.PR != 0 {
 		return m.inspectPR(ctx)
 	}
-	localMergeMu.Lock()
-	defer localMergeMu.Unlock()
+	lock := cloneLock(m.Repo)
+	lock.Lock()
+	defer lock.Unlock()
 	result, err := m.inspectLocal(ctx)
 	if result.Conflict == "" {
 		return result, err

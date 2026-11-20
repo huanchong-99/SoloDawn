@@ -151,12 +151,11 @@ Notes of this group:
 - Path events use fields path, rtt_ms, since, limited.
 ```
 
-- When it composes the turn, the host reads the brief row, named by the
-  task row's `brief`, with `fetch` `row` (`contracts/datachannel.md`
-  section 4), for the goal, the criteria and the preset's name, and the
-  text with `fetch` `kind: preset`. So the text is the one of that moment,
-  not of the confirmation: a task that starts weeks later gets the current
-  preset.
+- When it composes the turn, the host reads the brief row, named by the task
+  row's `brief`, with `fetch` `row` (`contracts/datachannel.md` section 4),
+  for the goal, the criteria and the preset's name, and the text with `fetch`
+  `kind: preset`. So the text is the one of that moment, not of the
+  confirmation: a task that starts weeks later gets the current preset.
 - The text is included whole, outside the 8 KiB of the notes.
 - If the preset was forgotten since, the turn has one line in its place
   and the task goes on:
@@ -269,7 +268,9 @@ a client offers presets and the knowledge base, and a host lists `kb_put`,
 step 3: a home that answers `welcome` with `v` 2. Decided: one protocol
 step, `v` 2, covers every addition of steps 2 and 3. A client or host
 sends `hello` with `v` 2 and, answered `version`, again with `v` 1, and
-then offers nothing of steps 2 and 3. P-4 freezes it.
+then offers nothing of steps 2 and 3. A `v` 2 home takes `hello` with `v` 1
+only from a device of its owner and answers `version` to any other
+(coordinator, 2026-11-20). P-4 freezes it; T2-1 builds it.
 
 ## 9. Verified, not verified, decided
 

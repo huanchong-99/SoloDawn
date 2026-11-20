@@ -71,9 +71,8 @@ itself claims no author and is not checked (section 5).
   `contracts/messages.md` section 2, and for the `confirm` card in
   `contracts/step-2/confirm.md`. A field the home adds is not compared
   (section 5).
-- One exception, from `contracts/messages.md` 2.9: the `score` of a
-  `review` row equals the signed `score`, or is 0 when a signed item has
-  `veto: true`.
+- One exception, from `contracts/messages.md` 2.9: the `score` of a `review`
+  row equals the signed `score`, or is 0 when a signed item has `veto: true`.
 - Equal means the same JSON value: the same type, number or text, lists in
   the same order, objects with the same members in any order. An optional
   field is absent on both sides or equal.
@@ -87,13 +86,12 @@ Let M be the `member` row whose `id` is the row's `by`.
 | a person | the payload has no `as`; M has `kind: human`; `env.k` is valid in the log of `M.user` |
 | an AI | the payload's `as` equals `by`; M has `kind: ai`; `env.k` equals `M.host`; `env.k` is valid in the log of `M.user`, the AI's owner |
 
-An AI has no key: its host signs for it (`contracts/envelope.md`
-section 5). The last condition of the AI row ties the host to a person;
-without it a home could name any device as a host. This establishes that
-a device of the person with user id `M.user` signed the message as this
-member; for an AI, which person's computer sent it, not what the model
-wrote. That the user id goes with the name on the screen is not
-established (section 10, limit 1).
+An AI has no key: its host signs for it (`contracts/envelope.md` section 5).
+The last condition of the AI row ties the host to a person; without it a home
+could name any device as a host. This establishes that a device of the person
+with user id `M.user` signed the message as this member; for an AI, which
+person's computer sent it, not what the model wrote. That the user id goes
+with the name on the screen is not established (section 10, limit 1).
 
 ## 4. Who decided a card
 
@@ -154,18 +152,20 @@ The check ends at the first line that applies:
 | 5 | none of these | verified |
 
 - **When.** A row is drawn when its check has ended; the check needs no
-  traffic. It is judged again when the row, the member row or the person's
+  traffic, except for a `direct` or `ask` card whose request this browser
+  does not hold: it reads the request with `fetch` `row`
+  (`contracts/datachannel.md` section 4), and until it has it the card has no
+  actions. A row is judged again when the row, the member row or the person's
   log changes: an outcome follows the log and is never stored. Rows of a
-  first read are judged after its `synced`, because the state rows the
-  check needs are part of that read.
+  first read are judged after its `synced`, because the state rows the check
+  needs are part of that read.
 - **Verified** rows are shown as in step 1, with nothing added. There is
   no "verified" badge, and no mark anywhere in a group on an own home.
-- **The unverified mark** is shown for the three other outcomes, beside
-  the name it is about: the author of a message, wherever that row is
-  drawn with its author (main line, thread, the ledger, the last message
-  in the group list, an in-page notification), and the person named as
-  having decided a card. The text and the card are still shown, as the
-  home sent them.
+- **The unverified mark** is shown for the three other outcomes, beside the
+  name it is about: the author of a message, wherever that row is drawn with
+  its author (main line, thread, the ledger, the last message in the group
+  list, an in-page notification), and the person named as having decided a
+  card. The text and the card are still shown, as the home sent them.
 - **On request** (the interface units choose how) the mark names the
   home's computer and its person and gives the sentence of its outcome:
 
@@ -176,9 +176,10 @@ The check ends at the first line that applies:
 | cannot be checked | this browser does not have what it needs to check it |
 
 - **A card can be acted on from this browser only when its author is
-  verified**; a `direct` or `ask` card, when its request is. Otherwise its actions are replaced by the sentence of the
-  mark: an `act` names only the id of a card, so acting on content that
-  did not pass would sign for something not seen (section 11, point 3).
+  verified**; a `direct` or `ask` card, when its request is. Otherwise its
+  actions are replaced by the sentence of the mark: an `act` names only the
+  id of a card, so acting on content that did not pass would sign for
+  something not seen (section 11, point 3).
 
 ## 7. The secretary warning (D-6)
 
@@ -237,13 +238,12 @@ The group info shows, for every group: the name and fingerprint
 connected to as the home, and the person in whose log that device is
 valid, or that this person is not known.
 
-For a home of another it also says, once: that computer stores and orders
-the group and must stay on (R-134); this browser checks who wrote each
-message and who decided each card; everything else is as that computer
-reports it (section 5). The project memory section says the same above the
-notes, whose authors are not checked. A person's member card shows the
-fingerprint of their user id, so that two people can compare it outside
-SoloDawn (section 10, limit 1).
+For a home of another it also says, once: that computer stores and orders the
+group and must stay on (R-134); this browser checks who wrote each message and
+who decided each card; everything else is as that computer reports it (section
+5). The project memory section says the same above the notes, whose authors
+are not checked. A person's member card shows the fingerprint of their user
+id, so that two people can compare it outside SoloDawn (section 10, limit 1).
 
 ### 8.3 What the other step 2 contracts show
 

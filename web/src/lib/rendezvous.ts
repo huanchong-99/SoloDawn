@@ -55,11 +55,13 @@ function path(url: string, device: Device, known: Known, receive: Receive) {
     const result = v.safeParse(incoming, read(data));
     if (!result.success) return;
     const frame = result.output;
-    if (frame.t === 'from' && 'code' in (await opened(frame))) return;
+    if (frame.t === 'from' && !(await accepts(frame))) return;
     receive(url, frame);
   }
 
-  const opened = ({ env }: RVFrom) => openSignal(crypto, env, device.id, known, Date.now());
+  // The relay's sender must be the signer, as on a node (internal/peer/signal.go).
+  const accepts = async ({ k, env }: RVFrom) =>
+    k === env.k && 'header' in (await openSignal(crypto, env, device.id, known, Date.now()));
 
   socket.onclose = () => receive(url, { t: 'closed' });
 
@@ -74,8 +76,8 @@ function path(url: string, device: Device, known: Known, receive: Receive) {
 
 /** Signs in on each signalling URL (rendezvous and local node; contracts/rendezvous.md 2) and
  *  sends every frame on each of them. receive gets each path's frames with its URL, and
- *  `closed` when the path closes. A `from` reaches it only when its envelope passes the
- *  receiver's checks for a signal; its sender is the envelope's `k`. Room data still needs the
+ *  `closed` when the path closes. A `from` reaches it only when its `k` is the envelope's
+ *  signer and the envelope passes the receiver's checks for a signal. Room data still needs the
  *  pairing mac check. */
 export function rendezvous(
   urls: readonly string[],
