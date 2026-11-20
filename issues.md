@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
+
+- Symptom: after the sixth failed review a task is `failed` at step `review`. When an admin resumes or reassigns it, the reviewer is asked to review the same commit again, although that commit has just failed.
+- Cause: row 7 of `contracts/task-machine.md` above the limit is row 14 alone, which leaves the step (`internal/home/machine.go:560`); section 2 then gives a task that becomes active at step `review` its `review` item (`internal/home/machine.go:428`). Row 6 is different: failed hosted checks set step `local_check` before they stop the task.
+- Status: open. No change, by the coordinator's decision of 2026-11-20: the contract says so explicitly, and it lets a person resume the task with another reviewer for the same commit.
+
 ### 2026-11-20 · limitation · A child of a Windows check can start before the job holds the shell
 
 - Symptom: on Windows a check's `cmd.exe` joins its job object only after it has started, so a process it starts in that moment is outside the job and survives the check.
@@ -340,11 +346,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `DeleteBranch` (`internal/host/merge.go`) deleted the branch whatever it pointed at.
 - Status: resolved on branch `fix/host-merge-review`: the branch is deleted with `git branch -D` only while `rev-parse` shows it is the merged commit; a moved branch is kept and `DeleteBranch` returns `deleted` false. `branch -D` refuses a branch that a worktree still has checked out, the only place it could move from; an earlier version used `update-ref -d`, which deleted it under a worktree whose removal had failed (re-check N1). `local.md` section 7, row "task merged". Tests `TestDeleteBranchOnlyAtTheMergedCommit`, `TestDeleteBranchRefusedWhileCheckedOut`, `TestDeleteBranchFailures`.
 
+### 2026-11-20 · limitation · The task machine held `review.failed` and `wait.kept` beside the task row
+
+- Symptom: on the branch of HM-M, `home.Step` took and returned `home.Task`, a `proto.TaskRow` with two more fields, `ReviewFailed` and `Kept`. A caller that kept only the `proto.TaskRow` would have lost the count of failed reviews and the wait a pause replaced.
+- Cause: `contracts/rows.md` section 4 has `review.failed` and `wait.kept`; `proto.TaskRow` did not have them until P-1 froze them, and HM-M was built in the same wave.
+- Status: resolved in PR #161, before it was merged: after P-1 (PR #162) `home.Step` takes and returns `proto.TaskRow`, and the two fields are `review.failed` and `wait.kept` of the row.
+
 ### 2026-11-20 · limitation · `group create` was sent as the contract describes it, before its wire example
 
 - Symptom: the create-group dialog of the web client was written before P-1 froze the payload of `group`, with `g` equal to `n` as `planning/contracts/commands.md` 1.1 reads.
 - Cause: the order of the units; `Home.create` in `web/src/lib/groups.svelte.ts`.
 - Status: resolved in #164. P-1 (#162) froze `group-create.json` with `g` equal to `n`; `create` sends the fields of that example in its order, and its test reads the payload with the `GroupCreate` schema. The dialog still asks for the repository address with `forge: none`, since `repo` is absent only for a group without a repository (`planning/contracts/rows.md` section 1).
+
 ### 2026-11-20 · deviation · No unit measured a row against its size limit
 
 - Symptom: `planning/contracts/conventions.md` section 4 has the home answer `bad_request`, naming the limit and the size, to a command that would write a row above 16 KiB, or a card above 12 KiB when it is created. No row of `planning/steps/parallel-plan-units.md` names the rule, and the first version of the seam handed the rows of a command's function to its caller unmeasured.
@@ -456,6 +469,7 @@ Found in the audit of the harness; each was reproduced before the fix (lines are
 - Actions were referenced by movable tags (`pnpm/action-setup` is third party); `release.yml` restored pnpm and Go caches into the build of released files; `sudo ./netsim.test` had no time limit; CI never vetted code behind the `acceptance` tag nor compiled the macOS and Windows tests. Resolved in PR #142: pins to the full commit, no cache in the release job, `-test.timeout=10m`, `go vet` with the tag and for every cross-compile target.
 - Every job built with Go 1.26.0, eleven patch releases behind 1.26.11 (Backend run 44697108086), because setup-go v5.6.0 reads `go 1.26.0` in `go.mod:3` as an exact version. Resolved on branch `ci/go127-windows-macos` by the coordinator's decision of 2026-11-20: every setup-go takes `go-version: '1.27.x'` with `check-latest: true`, the newest patch of the line development uses (1.27.4); `go.mod` keeps `go 1.26.0` as the minimum.
 - No job had a time limit, so a hung step could hold a runner for six hours (a `pnpm install` held a macOS runner for 30 minutes on 2026-11-20); and no Go code ran on Windows or macOS. Resolved on branch `ci/go127-windows-macos`: `timeout-minutes` on every job, and a Backend job on `windows-latest` and `macos-latest` (vet, `go test -race`, the acceptance suite, coverage of the files built only there).
+
 ### 2026-11-20 · deviation · Two host check tests skipped themselves on Windows
 
 - Symptom: `TestChecksRequireBothGitDiffReads` and `TestCheckCancellationStopsForegroundPipeline` in `internal/host/checks_test.go` called `t.Skip` on Windows. `t.Skip(` is a listed directive under `[tamper]` in `.project-standard/gates.toml` with no exception, yet both merged with HS-5 (#94).
