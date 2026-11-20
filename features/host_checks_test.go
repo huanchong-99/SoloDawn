@@ -27,15 +27,21 @@ func hostCheckSteps(sc *godog.ScenarioContext, f fixtures) {
 	probe, line := hostCheckEnvProbe()
 	var result proto.ChecksBody
 	var runErr error
-	git := func(args ...string) string {
-		f.t.Helper()
-		cmd := exec.Command("git", append([]string{"-c", "user.name=Test", "-c", "user.email=fixture"}, args...)...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			f.t.Fatalf("git %v: %s (%v)", args, out, err)
+	// git runs each command in dir, stops at the first that fails and returns
+	// the output of the last. A step returns the error: Fatal on the suite's
+	// test would end the whole suite.
+	git := func(commands ...[]string) (string, error) {
+		var out string
+		for _, args := range commands {
+			cmd := exec.Command("git", append([]string{"-c", "user.name=Test", "-c", "user.email=fixture"}, args...)...)
+			cmd.Dir = dir
+			b, err := cmd.CombinedOutput()
+			if err != nil {
+				return "", fmt.Errorf("git %v: %s (%v)", args, b, err)
+			}
+			out = strings.TrimSpace(string(b))
 		}
-		return strings.TrimSpace(string(out))
+		return out, nil
 	}
 	const marker = "-----BEGIN " + "PRIVATE KEY-----"
 	var runner host.CheckRunner
@@ -43,12 +49,11 @@ func hostCheckSteps(sc *godog.ScenarioContext, f fixtures) {
 		group := proto.GroupRow{Checks: commands, Limits: proto.Limits{TurnMinutes: 1}}
 		result, runErr = runner.Run(f.t.Context(), dir, "base", group)
 	}
-	sc.Step(`^a clean task branch for the host check runner$`, func() {
+	sc.Step(`^a clean task branch for the host check runner$`, func() (err error) {
 		dir = f.t.TempDir()
-		git("init", "-b", "base")
-		git("commit", "--allow-empty", "-m", "base")
-		git("switch", "-c", "task")
-		head = git("rev-parse", "HEAD")
+		head, err = git([]string{"init", "-b", "base"}, []string{"commit", "--allow-empty", "-m", "base"},
+			[]string{"switch", "-c", "task"}, []string{"rev-parse", "HEAD"})
+		return err
 	})
 	sc.Step(`^the task worktree contains an uncommitted file$`, func() error {
 		return os.WriteFile(filepath.Join(dir, "notes"), []byte("unfinished"), 0600)
@@ -63,14 +68,12 @@ func hostCheckSteps(sc *godog.ScenarioContext, f fixtures) {
 		}
 		return nil
 	})
-	sc.Step(`^the task commit adds a line matching the secret checker$`, func() error {
-		if err := os.WriteFile(filepath.Join(dir, "notes"), []byte(marker+"\n"), 0600); err != nil {
+	sc.Step(`^the task commit adds a line matching the secret checker$`, func() (err error) {
+		if err = os.WriteFile(filepath.Join(dir, "notes"), []byte(marker+"\n"), 0600); err != nil {
 			return err
 		}
-		git("add", "notes")
-		git("commit", "-m", "add synthetic marker")
-		head = git("rev-parse", "HEAD")
-		return nil
+		head, err = git([]string{"add", "notes"}, []string{"commit", "-m", "add synthetic marker"}, []string{"rev-parse", "HEAD"})
+		return err
 	})
 	sc.Step(`^the host runs checks with an empty project command list$`, func() { run() })
 	sc.Step(`^the secret check fails for the task commit and the tests check passes$`, func() error {
