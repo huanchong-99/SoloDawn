@@ -3,6 +3,7 @@
 package features
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -49,11 +50,20 @@ func hostMergeSteps(sc *godog.ScenarioContext, f fixtures) {
 		want := fmt.Sprintf("git rev-parse --verify refs/heads/task/7: got %q, expected %q", moved, m.Commit)
 		return hostMergeWant(result, host.MergeResult{Conflict: want})
 	})
-	sc.Step(`^the host reports the Git merge conflict$`, func() error {
-		if !strings.Contains(result.Conflict, "CONFLICT (content): Merge conflict in item") {
-			return fmt.Errorf("missing git conflict detail in %q", result.Conflict)
+	sc.Step(`^the host reports the conflict as Git words it$`, func() error {
+		// Git's text differs between versions: repeat the squash, then undo it.
+		want, err := hostMergeFailure(m.Repo, "merge", "--squash", "--", m.Commit)
+		if err != nil {
+			return err
 		}
-		return hostMergeWant(result.MergeCommit, "")
+		if _, err := hostMergeGit(m.Repo, "reset", "--merge"); err != nil {
+			return err
+		}
+		return hostMergeWant(result, host.MergeResult{Conflict: want})
+	})
+	sc.Step(`^the host squashed the reviewed commit and stopped before its commit$`, func() error {
+		_, err := hostMergeGit(m.Repo, "merge", "--squash", m.Commit)
+		return err
 	})
 	sc.Step(`^the base commit and index are unchanged$`, func() error {
 		if err := hostMergeVerify(m.Repo, "", "status", "--porcelain"); err != nil {
@@ -114,6 +124,20 @@ func hostMergeGit(dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %v: %w: %s", args, err, out)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// hostMergeFailure runs a Git command that must fail and returns its error
+// as the host words it.
+func hostMergeFailure(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err == nil {
+		return "", fmt.Errorf("git %v succeeded", args)
+	}
+	return fmt.Sprintf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)+stderr.String())), nil
 }
 
 func hostMergeEdit(dir, text string) (string, error) {

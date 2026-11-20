@@ -11,8 +11,8 @@ Feature: The host merges the reviewed task commit
   Scenario: An overlapping change on the base fails the squash
     Given the base has independently changed the same line
     When the host takes the merge item for the reviewed commit
-    Then the host reports the Git merge conflict
-    And the base commit and index are unchanged
+    Then the base commit and index are unchanged
+    And the host reports the conflict as Git words it
 
   Scenario: Restart after the squash commit and before the report
     When the host takes the merge item for the reviewed commit
@@ -21,6 +21,12 @@ Feature: The host merges the reviewed task commit
     Then the host reports the existing squash commit
 
   Scenario: Restart after taking the item and before merging
+    When the restarted host inspects the taken merge item
+    Then the host reports that the base does not record this merge
+    And the base commit and index are unchanged
+
+  Scenario: Restart after the squash and before its commit
+    Given the host squashed the reviewed commit and stopped before its commit
     When the restarted host inspects the taken merge item
     Then the host reports that the base does not record this merge
     And the base commit and index are unchanged

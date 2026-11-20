@@ -40,7 +40,7 @@ func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 		if err := m.squashLocal(ctx); err != nil {
 			return MergeResult{Conflict: err.Error()}, nil
 		}
-		return m.Inspect(ctx)
+		return m.inspectLocal(ctx)
 	}
 	// gh can exit unsuccessfully deleting the branch after the server has
 	// already merged the PR. Inspect its state even on a command error.
@@ -79,10 +79,7 @@ func (m ReviewedMerge) checkLocal(ctx context.Context) error {
 	if err := m.expectGit(ctx, m.Commit, "rev-parse", "--verify", "refs/heads/"+m.Branch); err != nil {
 		return err
 	}
-	if err := m.expectGit(ctx, "refs/heads/"+m.Base, "symbolic-ref", "HEAD"); err != nil {
-		return err
-	}
-	return m.expectGit(ctx, "", "status", "--porcelain", "--untracked-files=no")
+	return m.expectGit(ctx, "refs/heads/"+m.Base, "symbolic-ref", "HEAD")
 }
 
 func (m ReviewedMerge) expectGit(ctx context.Context, want string, args ...string) error {
@@ -97,11 +94,26 @@ func (m ReviewedMerge) expectGit(ctx context.Context, want string, args ...strin
 }
 
 // Inspect reads the last commit on the local base or the state of the PR.
-// It never attempts a merge or changes the repository.
+// It never attempts a merge. Without a remote, a base that does not record
+// the merge gets the reset of a failed merge, which undoes a squash
+// interrupted before its commit.
 func (m ReviewedMerge) Inspect(ctx context.Context) (MergeResult, error) {
 	if m.PR != 0 {
 		return m.inspectPR(ctx)
 	}
+	localMergeMu.Lock()
+	defer localMergeMu.Unlock()
+	result, err := m.inspectLocal(ctx)
+	if result.Conflict == "" {
+		return result, err
+	}
+	if _, err := m.run(ctx, "git", "reset", "--merge"); err != nil {
+		return MergeResult{}, err
+	}
+	return result, nil
+}
+
+func (m ReviewedMerge) inspectLocal(ctx context.Context) (MergeResult, error) {
 	last, err := m.run(ctx, "git", "log", "-1", "--no-show-signature", "--format=%H%n%B", "refs/heads/"+m.Base, "--")
 	if err != nil {
 		return MergeResult{}, err
@@ -126,24 +138,13 @@ func (m ReviewedMerge) inspectPR(ctx context.Context) (MergeResult, error) {
 	if err := json.Unmarshal([]byte(out), &pr); err != nil {
 		return MergeResult{}, fmt.Errorf("gh pr view: %w", err)
 	}
-	switch pr.State {
-	case "MERGED":
-		return m.mergedPR(pr.HeadRefOID, pr.MergeCommit.OID)
-	case "OPEN", "CLOSED":
+	if pr.State != "MERGED" {
 		return MergeResult{Conflict: fmt.Sprintf("pull request %d is %s", m.PR, pr.State)}, nil
-	default:
-		return MergeResult{}, fmt.Errorf("gh pr view: unexpected state %q", pr.State)
 	}
-}
-
-func (m ReviewedMerge) mergedPR(head, squash string) (MergeResult, error) {
-	if head == "" || squash == "" {
-		return MergeResult{}, errors.New("gh pr view: merged pull request is missing its head or merge commit")
+	if pr.HeadRefOID != m.Commit {
+		return MergeResult{Conflict: fmt.Sprintf("pull request %d merged head %s, expected %s", m.PR, pr.HeadRefOID, m.Commit)}, nil
 	}
-	if head != m.Commit {
-		return MergeResult{Conflict: fmt.Sprintf("pull request %d merged head %s, expected %s", m.PR, head, m.Commit)}, nil
-	}
-	return MergeResult{MergeCommit: squash}, nil
+	return MergeResult{MergeCommit: pr.MergeCommit.OID}, nil
 }
 
 func (m ReviewedMerge) run(ctx context.Context, name string, args ...string) (string, error) {

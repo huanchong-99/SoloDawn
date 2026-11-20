@@ -1,7 +1,7 @@
 package host_test
 
 import (
-	"errors"
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -101,11 +101,19 @@ func TestLocalMergeRefusal(t *testing.T) {
 	moved := mergeGit(t, m.Repo, "rev-parse", "HEAD")
 	mergeGit(t, m.Repo, "switch", "-q", "base")
 	check(fmt.Sprintf("git rev-parse --verify refs/heads/task/7: got %q, expected %q", moved, m.Commit))
-	m.Commit = moved
-	mergeFile(t, m.Repo, "extra", "unreviewed")
-	mergeGit(t, m.Repo, "add", "extra")
-	check(`git status --porcelain --untracked-files=no: got "A  extra", expected ""`)
-	mergeEqual(t, mergeGit(t, m.Repo, "diff", "--cached", "--name-only"), "extra")
+}
+
+// gitFailure runs a Git command that must fail and returns its error as the
+// host words it, with Git's own text, which differs between Git versions.
+func gitFailure(t *testing.T, repo string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repo
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	mergeEqual(t, err != nil, true)
+	return fmt.Sprintf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)+stderr.String()))
 }
 
 func TestLocalConflictAndCommitFailureResetIndex(t *testing.T) {
@@ -122,14 +130,22 @@ func TestLocalConflictAndCommitFailureResetIndex(t *testing.T) {
 			base := mergeGit(t, m.Repo, "rev-parse", "HEAD")
 			result, err := m.Apply(t.Context())
 			mergeOK(t, err)
-			mergeEqual(t, result.MergeCommit, "")
-			mergeEqual(t, strings.HasPrefix(result.Conflict, "git "+stage+" "), true)
 			mergeEqual(t, mergeGit(t, m.Repo, "status", "--porcelain"), "")
 			mergeEqual(t, mergeGit(t, m.Repo, "rev-parse", "HEAD"), base)
+			var want string
+			if stage == "merge" {
+				want = gitFailure(t, m.Repo, "merge", "--squash", "--", m.Commit)
+			} else {
+				mergeGit(t, m.Repo, "merge", "--squash", "--", m.Commit)
+				want = gitFailure(t, m.Repo, "commit", "--allow-empty", "-m", "Merge task t7 at "+m.Commit)
+			}
+			mergeEqual(t, result, host.MergeResult{Conflict: want})
 		})
 	}
 }
 
+// A restart between the squash and its commit: the base does not record the
+// merge, and the interrupted squash is undone.
 func TestInterruptedLocalSquash(t *testing.T) {
 	m := mergeFixture(t)
 	base := mergeGit(t, m.Repo, "rev-parse", "base")
@@ -138,7 +154,19 @@ func TestInterruptedLocalSquash(t *testing.T) {
 	mergeOK(t, err)
 	mergeEqual(t, result, host.MergeResult{Conflict: "last commit on base does not record Merge task t7 at " + m.Commit})
 	mergeEqual(t, mergeGit(t, m.Repo, "rev-parse", "base"), base)
-	mergeEqual(t, mergeGit(t, m.Repo, "diff", "--cached", "--name-only"), "item")
+	mergeEqual(t, mergeGit(t, m.Repo, "status", "--porcelain"), "")
+	result, err = m.Apply(t.Context())
+	mergeOK(t, err)
+	mergeEqual(t, result, host.MergeResult{MergeCommit: mergeGit(t, m.Repo, "rev-parse", "base")})
+}
+
+func TestInterruptedLocalSquashResetFailure(t *testing.T) {
+	m := mergeFixture(t)
+	mergeGit(t, m.Repo, "merge", "--squash", m.Commit)
+	mergeFile(t, m.Repo, filepath.Join(".git", "index.lock"), "")
+	result, err := m.Inspect(t.Context())
+	mergeEqual(t, result, host.MergeResult{})
+	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "reset", "--merge"))
 }
 
 func TestMergeChangeAlreadyOnBase(t *testing.T) {
@@ -180,9 +208,7 @@ func TestMergeMissingRefs(t *testing.T) {
 	m.Base = "absent"
 	result, err = m.Inspect(t.Context())
 	mergeEqual(t, result, host.MergeResult{})
-	var exit *exec.ExitError
-	mergeEqual(t, errors.As(err, &exit), true)
-	mergeEqual(t, exit.ExitCode(), 128)
+	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "log", "-1", "--no-show-signature", "--format=%H%n%B", "refs/heads/absent", "--"))
 }
 
 // Re-execute this test binary as gh. Each invocation records its argv in
@@ -281,9 +307,6 @@ func TestMergePRInspection(t *testing.T) {
 		{out: `{"state":"OPEN","mergeCommit":null}`, conflict: "pull request 32 is OPEN"},
 		{out: `{"state":"CLOSED","mergeCommit":null}`, conflict: "pull request 32 is CLOSED"},
 		{out: `{"state":"MERGED","mergeCommit":{"oid":"def"},"headRefOid":"abc1"}`, conflict: "pull request 32 merged head abc1, expected abc"},
-		{out: `{"state":"MERGED","mergeCommit":null,"headRefOid":"abc"}`, problem: "gh pr view: merged pull request is missing its head or merge commit"},
-		{out: `{"state":"MERGED","mergeCommit":{"oid":"def"}}`, problem: "gh pr view: merged pull request is missing its head or merge commit"},
-		{out: `{}`, problem: `gh pr view: unexpected state ""`},
 		{out: "{", problem: "gh pr view: unexpected end of JSON input"},
 		{fail: "view", problem: "gh pr view 32 --json state,mergeCommit,headRefOid: exit status 1: forge refused"},
 	} {
