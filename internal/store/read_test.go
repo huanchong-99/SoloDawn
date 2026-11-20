@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
@@ -183,4 +184,44 @@ func TestInvalidBodyNotWritten(t *testing.T) {
 		t.Fatalf("put bad body: %v", err)
 	}
 	equal(t, scalar[int](t, s.db, "SELECT count(*) FROM row"), 0)
+}
+
+func TestPutStoresWithoutHTMLEscapes(t *testing.T) {
+	s := openDB(t, ":memory:")
+	text := strings.Repeat("<>&", 5000)
+	note := proto.NoteRow{RowHeader: header("note", "n", 1), Pos: 1, Group: "g", Text: text}
+	body := json.RawMessage(`{"a":"<b>&"}`)
+	card := msg("card", 2, nil, false, "text")
+	card.Body = body
+	put(t, s, "g", 10, note)
+	put(t, s, "g", 10, card)
+	want, err := encode(note)
+	check(t, err)
+	if len(want) != len(text)+len(`{"r":"note","id":"n","seq":1,"pos":1,"g":"g","task":null,"text":"","by":"","ts":0}`) {
+		t.Fatalf("reference encoding is escaped: %d bytes", len(want))
+	}
+	var size int
+	var stored, storedCard string
+	check(t, s.db.QueryRow("SELECT length(data), data FROM row WHERE id='n'").Scan(&size, &stored))
+	check(t, s.db.QueryRow("SELECT data FROM row WHERE id='card'").Scan(&storedCard))
+	equal(t, stored, want)
+	equal(t, size, len(want))
+	if !strings.Contains(storedCard, `"body":{"a":"<b>&"}`) {
+		t.Fatalf("body was escaped: %s", storedCard)
+	}
+	var back proto.NoteRow
+	check(t, json.Unmarshal([]byte(stored), &back))
+	equal(t, back, note)
+}
+
+func TestPutKeepsStoredEscapesOfRawJSON(t *testing.T) {
+	s := openDB(t, ":memory:")
+	card := msg("card", 1, nil, false, "text")
+	card.Body = json.RawMessage(`{"a":"<b>"}`)
+	put(t, s, "g", 10, card)
+	var stored string
+	check(t, s.db.QueryRow("SELECT data FROM row WHERE id='card'").Scan(&stored))
+	if !strings.Contains(stored, `"body":{"a":"<b>"}`) {
+		t.Fatalf("escapes were rewritten: %s", stored)
+	}
 }
