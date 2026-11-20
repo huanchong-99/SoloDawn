@@ -265,15 +265,21 @@ func mergeForgeFixture(t *testing.T) host.ReviewedMerge {
 	return host.ReviewedMerge{Repo: repo, Task: "t7", Commit: "abc", PR: 32, GitHubRepo: "team/website"}
 }
 
-// checkMergeCalls compares the gh calls with want, a list of "merge" (run
-// with --repo from the folder that holds the clone) and "view" (in the clone).
+// prQuery is the GraphQL query the host sends to read a pull request.
+const prQuery = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { " +
+	"pullRequest(number: $number) { state headRefOid mergeCommit { oid } autoMergeRequest { enabledAt } mergeQueueEntry { id } } } }"
+
+// checkMergeCalls compares the gh calls with want, a list of "merge" (with
+// --repo) and "read" (the GraphQL read), both run from the folder that
+// holds the clone.
 func checkMergeCalls(t *testing.T, m host.ReviewedMerge, want ...string) {
 	t.Helper()
 	data, err := os.ReadFile(os.Getenv("SOLODAWN_TEST_MERGE_GH"))
 	mergeOK(t, err)
 	calls := map[string]string{
 		"merge": filepath.Dir(m.Repo) + " | pr merge 32 --repo team/website --squash --delete-branch --match-head-commit abc\n",
-		"view":  m.Repo + " | pr view 32 --json state,mergeCommit,headRefOid\n",
+		"read": filepath.Dir(m.Repo) + " | api graphql -f query=" + prQuery +
+			" -f owner=team -f name=website -F number=32 --jq .data.repository.pullRequest\n",
 	}
 	var expected string
 	for _, call := range want {
@@ -288,11 +294,11 @@ func TestMergeReviewedPR(t *testing.T) {
 	result, err := m.Apply(t.Context())
 	mergeOK(t, err)
 	mergeEqual(t, result, host.MergeResult{MergeCommit: "def"})
-	checkMergeCalls(t, m, "merge", "view")
+	checkMergeCalls(t, m, "merge", "read")
 	observed, err := m.Inspect(t.Context())
 	mergeOK(t, err)
 	mergeEqual(t, observed, result)
-	checkMergeCalls(t, m, "merge", "view", "view")
+	checkMergeCalls(t, m, "merge", "read", "read")
 }
 
 func TestMergePRCommandFailure(t *testing.T) {
@@ -302,7 +308,7 @@ func TestMergePRCommandFailure(t *testing.T) {
 	result, err := m.Apply(t.Context())
 	mergeOK(t, err)
 	mergeEqual(t, result, host.MergeResult{Conflict: "gh pr merge 32 --repo team/website --squash --delete-branch --match-head-commit abc: exit status 1: forge refused"})
-	checkMergeCalls(t, m, "merge", "view")
+	checkMergeCalls(t, m, "merge", "read")
 }
 
 func TestMergePRBranchDeletionFailure(t *testing.T) {
@@ -312,17 +318,19 @@ func TestMergePRBranchDeletionFailure(t *testing.T) {
 	result, err := m.Apply(t.Context())
 	mergeOK(t, err)
 	mergeEqual(t, result, host.MergeResult{MergeCommit: "def"})
-	checkMergeCalls(t, m, "merge", "view")
+	checkMergeCalls(t, m, "merge", "read")
 }
 
 func TestMergePRInspection(t *testing.T) {
 	for _, tc := range []struct{ out, fail, conflict, problem string }{
-		{out: `{"state":"OPEN","mergeCommit":null}`, conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"},
+		{out: `{"state":"OPEN","mergeCommit":null,"autoMergeRequest":{"enabledAt":"t"}}`, conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"},
+		// OPEN with nothing pending: the merge never ran, failed, or left the queue.
+		{out: `{"state":"OPEN","mergeCommit":null,"autoMergeRequest":null,"mergeQueueEntry":null}`, conflict: "pull request 32 is OPEN, with no merge queue entry and no auto-merge"},
 		{out: `{"state":"CLOSED","mergeCommit":null}`, conflict: "pull request 32 is CLOSED"},
 		{out: `{"state":"MERGED","mergeCommit":{"oid":"def"},"headRefOid":"abc1"}`, conflict: "pull request 32 merged head abc1, expected abc"},
 		// A read that fails counts as unfinished; the limit has passed.
 		{out: "{", conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"},
-		{fail: "view", conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"},
+		{fail: "graphql", conflict: "merge still pending after 60 minutes (merge queue or auto-merge)"},
 	} {
 		t.Run(tc.out+tc.fail, func(t *testing.T) {
 			m := mergeForgeFixture(t)
@@ -337,7 +345,7 @@ func TestMergePRInspection(t *testing.T) {
 			} else {
 				mergeEqual(t, err.Error(), tc.problem)
 			}
-			checkMergeCalls(t, m, "view")
+			checkMergeCalls(t, m, "read")
 		})
 	}
 }
@@ -363,12 +371,30 @@ func TestDeleteBranchOnlyAtTheMergedCommit(t *testing.T) {
 	mergeEqual(t, mergeGit(t, m.Repo, "for-each-ref", "--format=%(refname)", "refs/heads/task"), "")
 }
 
+// The worktree's removal failed (an untracked file was left), so the
+// worktree still has the branch checked out: the branch is not deleted under
+// it, and the worktree keeps its commit and files.
+func TestDeleteBranchRefusedWhileCheckedOut(t *testing.T) {
+	m := mergeFixture(t)
+	_, err := m.Apply(t.Context())
+	mergeOK(t, err)
+	worktree := filepath.Join(t.TempDir(), "wt")
+	mergeGit(t, m.Repo, "worktree", "add", "-q", worktree, m.Branch)
+	mergeFile(t, worktree, "left", "untracked\n")
+	mergeEqual(t, gitFailure(t, m.Repo, "worktree", "remove", worktree) != "", true)
+	deleted, err := m.DeleteBranch(t.Context())
+	mergeEqual(t, deleted, false)
+	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "branch", "-D", m.Branch))
+	mergeEqual(t, mergeGit(t, m.Repo, "rev-parse", m.Branch), m.Commit)
+	mergeEqual(t, mergeGit(t, worktree, "status", "--porcelain"), "?? left")
+}
+
 func TestDeleteBranchFailures(t *testing.T) {
 	m := mergeFixture(t)
 	mergeFile(t, m.Repo, filepath.Join(".git", "refs", "heads", "task", "7.lock"), "")
 	deleted, err := m.DeleteBranch(t.Context())
 	mergeEqual(t, deleted, false)
-	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "update-ref", "-d", "refs/heads/task/7", m.Commit))
+	mergeEqual(t, err.Error(), gitFailure(t, m.Repo, "branch", "-D", "task/7"))
 	mergeEqual(t, mergeGit(t, m.Repo, "rev-parse", m.Branch), m.Commit)
 	m.Branch = "absent"
 	deleted, err = m.DeleteBranch(t.Context())

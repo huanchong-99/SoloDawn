@@ -60,9 +60,12 @@ func (m ReviewedMerge) applyPR(ctx context.Context) (MergeResult, error) {
 	}
 	// gh can exit unsuccessfully deleting the remote branch after the server
 	// has already merged the PR. Inspect its state even on a command error.
-	_, result, err := m.readPR(ctx)
+	pending, result, err := m.readPR(ctx)
 	if err != nil {
 		return MergeResult{}, errors.Join(mergeErr, err)
+	}
+	if pending {
+		return m.awaitPR(ctx, taken)
 	}
 	if result.Conflict != "" {
 		result.Conflict = redactSecrets(mergeErr.Error())
@@ -72,9 +75,11 @@ func (m ReviewedMerge) applyPR(ctx context.Context) (MergeResult, error) {
 
 // DeleteBranch deletes the local task branch after a successful merge and
 // the removal of the task's worktree, only while the branch is still the
-// merged commit: update-ref deletes it only from that value. A branch that
-// has moved since is kept, and deleted is false, so no unreviewed commit is
-// lost. It runs under the clone's lock.
+// merged commit. A branch that has moved since is kept, and deleted is false,
+// so no unreviewed commit is lost. The branch can move only from a worktree
+// that has it checked out, and branch -D refuses exactly that case, so a
+// worktree whose removal failed is never left on a deleted branch. It runs
+// under the clone's lock.
 func (m ReviewedMerge) DeleteBranch(ctx context.Context) (deleted bool, err error) {
 	lock := cloneLock(m.Repo)
 	lock.Lock()
@@ -84,7 +89,7 @@ func (m ReviewedMerge) DeleteBranch(ctx context.Context) (deleted bool, err erro
 	if err != nil || head != m.Commit {
 		return false, err
 	}
-	_, err = m.run(ctx, "git", "update-ref", "-d", ref, m.Commit)
+	_, err = m.run(ctx, "git", "branch", "-D", m.Branch)
 	return err == nil, err
 }
 
@@ -190,15 +195,15 @@ func (m ReviewedMerge) inspectLocal(ctx context.Context) (MergeResult, error) {
 	return MergeResult{Conflict: fmt.Sprintf("no commit on %s records %s", m.Base, m.message())}, nil
 }
 
-// awaitPR reads the PR every 30 s while it is still OPEN after the merge
-// command succeeded, as a merge queue or auto-merge merges it later. A read
-// that fails counts as unfinished too: only MERGED, CLOSED or the limit, 60
-// minutes after since, end the wait.
+// awaitPR reads the PR every 30 s while its merge is pending: OPEN with a
+// merge queue entry or auto-merge, which merges it later. A read that fails
+// counts as unfinished too: only an outcome (merged, closed, or OPEN with
+// nothing pending) or the limit, 60 minutes after since, ends the wait.
 func (m ReviewedMerge) awaitPR(ctx context.Context, since time.Time) (MergeResult, error) {
 	deadline := since.Add(60 * time.Minute)
 	for {
-		state, result, err := m.readPR(ctx)
-		if err == nil && state != "OPEN" {
+		pending, result, err := m.readPR(ctx)
+		if err == nil && !pending {
 			return result, nil
 		}
 		if !time.Now().Before(deadline) {
@@ -221,27 +226,54 @@ func pollWait(ctx context.Context) error {
 	}
 }
 
-// readPR reads the PR once and returns its state with the outcome it gives.
-func (m ReviewedMerge) readPR(ctx context.Context) (string, MergeResult, error) {
-	out, err := m.run(ctx, "gh", "pr", "view", strconv.Itoa(m.PR), "--json", "state,mergeCommit,headRefOid")
+// prQuery reads, in one call, what decides a merge through the forge.
+const prQuery = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { " +
+	"pullRequest(number: $number) { state headRefOid mergeCommit { oid } autoMergeRequest { enabledAt } mergeQueueEntry { id } } } }"
+
+// readPR reads the PR once, from the folder that holds the clone, and returns
+// whether its merge is pending, else the outcome.
+func (m ReviewedMerge) readPR(ctx context.Context) (bool, MergeResult, error) {
+	owner, name, _ := strings.Cut(m.GitHubRepo, "/")
+	out, err := commandText(ctx, filepath.Dir(m.Repo), "gh", "api", "graphql", "-f", "query="+prQuery,
+		"-f", "owner="+owner, "-f", "name="+name, "-F", "number="+strconv.Itoa(m.PR), "--jq", ".data.repository.pullRequest")
 	if err != nil {
-		return "", MergeResult{}, err
+		return false, MergeResult{}, err
 	}
-	var pr struct {
-		State       string
-		HeadRefOID  string
-		MergeCommit struct{ OID string }
-	}
+	var pr forgeMergeState
 	if err := json.Unmarshal([]byte(out), &pr); err != nil {
-		return "", MergeResult{}, fmt.Errorf("gh pr view: %w", err)
+		return false, MergeResult{}, fmt.Errorf("gh api graphql: %w", err)
 	}
-	if pr.State != "MERGED" {
-		return pr.State, MergeResult{Conflict: fmt.Sprintf("pull request %d is %s", m.PR, pr.State)}, nil
+	pending, result := pr.outcome(m)
+	return pending, result, nil
+}
+
+// forgeMergeState is the PR as prQuery reads it; a null field is nil.
+type forgeMergeState struct {
+	State, HeadRefOid string
+	MergeCommit       struct{ Oid string }
+	AutoMergeRequest  *struct{}
+	MergeQueueEntry   *struct{}
+}
+
+func (pr forgeMergeState) outcome(m ReviewedMerge) (bool, MergeResult) {
+	if pr.State == "MERGED" {
+		return false, pr.merged(m)
 	}
-	if pr.HeadRefOID != m.Commit {
-		return pr.State, MergeResult{Conflict: fmt.Sprintf("pull request %d merged head %s, expected %s", m.PR, pr.HeadRefOID, m.Commit)}, nil
+	if pr.State == "OPEN" && (pr.AutoMergeRequest != nil || pr.MergeQueueEntry != nil) {
+		return true, MergeResult{}
 	}
-	return pr.State, MergeResult{MergeCommit: pr.MergeCommit.OID}, nil
+	detail := fmt.Sprintf("pull request %d is %s", m.PR, pr.State)
+	if pr.State == "OPEN" {
+		detail += ", with no merge queue entry and no auto-merge"
+	}
+	return false, MergeResult{Conflict: detail}
+}
+
+func (pr forgeMergeState) merged(m ReviewedMerge) MergeResult {
+	if pr.HeadRefOid != m.Commit {
+		return MergeResult{Conflict: fmt.Sprintf("pull request %d merged head %s, expected %s", m.PR, pr.HeadRefOid, m.Commit)}
+	}
+	return MergeResult{MergeCommit: pr.MergeCommit.Oid}
 }
 
 // mergePR runs gh with --repo from the folder that holds the clone, not
