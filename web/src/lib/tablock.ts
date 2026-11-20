@@ -1,30 +1,24 @@
 type ActiveSession = (signal: AbortSignal) => Promise<void>;
 
-// Keep a session error (including its own AbortError) distinct from a stolen Web Lock.
-async function runSession(active: ActiveSession, signal: AbortSignal) {
+// True when the session ran to its end; false when another tab held the lock or took it.
+async function trySession(name: string, options: LockOptions, active: ActiveSession) {
+  const session = new AbortController();
   try {
-    await active(signal);
+    const ended = await navigator.locks.request(
+      name,
+      options,
+      (lock) => lock && active(session.signal).then(() => true),
+    );
+    return ended === true;
   } catch (error) {
-    return { error };
+    if ((error as Error).name !== 'AbortError') throw error;
+    session.abort();
+    return false;
   }
 }
 
-// True on normal session end; false when another tab holds the lock.
-async function trySession(name: string, options: LockOptions, active: ActiveSession) {
-  const session = new AbortController();
-  const result = await navigator.locks
-    .request(name, options, (lock) => lock && runSession(active, session.signal))
-    .catch((error: unknown) => {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) throw error;
-      session.abort();
-      return null;
-    });
-  if (result) throw result.error;
-  return result !== null;
-}
-
 /** Only active may start signalling, peers, reconnects or probes. Its promise holds the lock
- *  until normal session end; on abort it must cancel that work and close its connections.
+ *  until the session ends; on abort it must cancel that work and close its connections.
  *  waitForUseHere reports the other-tab state and resolves only on the person's choice. */
 export async function runTab(
   device: string,

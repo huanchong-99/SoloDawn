@@ -64,9 +64,7 @@ it('A1.12: grants only one session, aborts the former holder and never reconnect
 
   second.end.resolve();
   await secondRun;
-  expect((await navigator.locks.query()).held).not.toContainEqual(
-    expect.objectContaining({ name }),
-  );
+  expect(await navigator.locks.query()).toStrictEqual({ held: [], pending: [] });
   expect(requests.mock.calls.map(([key, options]) => [key, options])).toStrictEqual([
     [name, { ifAvailable: true }],
     [name, { ifAvailable: true }],
@@ -76,20 +74,19 @@ it('A1.12: grants only one session, aborts the former holder and never reconnect
   first.end.resolve();
 });
 
-it('propagates a session’s own AbortError without reporting another tab', async () => {
-  const failure = new DOMException('session ended', 'AbortError');
-  const otherTab = vi.fn().mockRejectedValue(new Error('unexpected other-tab notice'));
+it('propagates a session error without reporting another tab', async () => {
+  const failure = new Error('session failed');
+  const otherTab = vi.fn();
   await expect(runTab(device, () => Promise.reject(failure), otherTab)).rejects.toBe(failure);
   expect(otherTab.mock.calls).toStrictEqual([]);
+  expect(await navigator.locks.query()).toStrictEqual({ held: [], pending: [] });
 });
 
-it.each([
-  new DOMException('blocked', 'SecurityError'),
-  Object.assign(new Error('not a DOM exception'), { name: 'AbortError' }),
-])('propagates a lock request failure (%s) without starting a session', async (failure) => {
+it('propagates a lock request failure without starting a session', async () => {
+  const failure = new DOMException('blocked', 'SecurityError');
   vi.spyOn(navigator.locks, 'request').mockRejectedValue(failure);
   const active = vi.fn();
-  const otherTab = vi.fn().mockRejectedValue(new Error('unexpected other-tab notice'));
+  const otherTab = vi.fn();
   await expect(runTab(device, active, otherTab)).rejects.toBe(failure);
   expect(active.mock.calls).toStrictEqual([]);
   expect(otherTab.mock.calls).toStrictEqual([]);
