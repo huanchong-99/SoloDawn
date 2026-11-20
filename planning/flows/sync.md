@@ -49,6 +49,8 @@ cold start.
 ## B. Opening a thread or scrolling back
 
 8. C sends `fetch {g, thread: <task id or null>, before: <pos>, limit}`.
+   Which `before` asks for which page is in `contracts/datachannel.md`
+   section 4.
 9. H answers with messages of that scope whose `pos` is lower, newest first,
    as many as fit one message up to `limit`, and `more: true|false`.
 

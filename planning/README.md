@@ -16,6 +16,10 @@ to start". The coordinator has settled Q-1 to Q-22 (`risks.md`). Next:
    lead changes the contract. Code does not silently depart from it.
 4. The answers of the spikes (M0) are recorded here by the planning lead.
    Q-4 waits for spike S-5.
+5. Questions that implementation raises about a contract are settled in
+   the contract itself. The first batches, from the reviews of backend
+   tasks B-01 and B-02, are in `contracts/conventions.md`,
+   `contracts/messages.md` and `contracts/envelope.md`.
 
 SoloDawn is being rebuilt from an empty tree. This directory holds the plan
 that the implementation will follow. It is written for two readers: the
@@ -127,9 +131,12 @@ Change: <files and sections edited, or the reason for rejecting>
 | `flows/ask.md` | one AI calls another, same machine or not |
 | `flows/takeover.md` | the owner takes the terminal and hands it back |
 | `contracts/envelope.md` | identities, signed envelope, device log |
+| `contracts/vectors.md` | the shared test vectors that hold the Go node and the web client to `contracts/envelope.md` |
 | `contracts/rendezvous.md` | WebSocket signalling protocol, STUN and relay |
 | `contracts/datachannel.md` | data-channel protocol: channels, framing, session, reading, inbox, terminal |
+| `contracts/conventions.md` | rules for everything on the wire: which fields are always present, requests and answers, sizes, and which task freezes which shape |
 | `contracts/rows.md` | the rows a home pushes: group, member, device, task, message, note |
+| `contracts/messages.md` | message kinds, the body of each, and the states of cards |
 | `contracts/commands.md` | every signed command, who may send it, what it does |
 | `contracts/mcp-tools.md` | tools the node offers to AI sessions |
 | `contracts/storage.md` | SQLite schema draft |

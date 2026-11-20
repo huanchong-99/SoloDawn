@@ -4,22 +4,62 @@ One primitive authenticates everything: the signed envelope. This file
 defines it, the device log that says which devices belong to a person, and
 the pairing exchange that introduces two devices that have never met.
 
+The Go node and the web client both implement this file and must give the
+same answer for the same bytes. The test vectors of `contracts/vectors.md`
+hold them to it.
+
 ## 1. Encodings
 
-- Binary values in JSON are base64url without padding.
+- Binary values in JSON are base64url without padding, and only the
+  canonical spelling is a value: the text that encoding the bytes gives. A
+  reader decodes, encodes again and compares. Padding, `+` or `/`, a line
+  break, or other values in the unused last bits make a text no value at
+  all. (A tolerant decoder gives one key several spellings, and a revoked
+  key could then be added again under another one `[verified]`.)
 - Times are integer milliseconds since the Unix epoch, UTC.
-- Random ids are 16 random bytes, base64url (22 characters).
+- Random ids are 16 random bytes, base64url (22 characters). An id is
+  compared as text and never decoded.
 
 ## 2. Device
 
 - A device is one node installation or one browser profile on one origin.
 - It owns an Ed25519 key pair, generated on first run.
-  - Node: stored in the node's data directory, readable by the user only.
+  - Node: the file `device.key` of the data directory
+    (`contracts/local.md` section 2).
   - Browser: a non-extractable WebCrypto key stored in IndexedDB. Only
     browsers with native Ed25519 in WebCrypto are supported; no signature
-    library is bundled (R-164). `[unverified]` The exact minimum versions;
-    spike S-7 fixes them.
-- **Device id** = the 32-byte public key, base64url (43 characters).
+    library is bundled (R-164). The lowest versions are in
+    `docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md`.
+- **Device id** = the 32-byte public key, base64url: 43 characters, in the
+  canonical spelling of section 1.
+- **Weak keys.** Fourteen 32-byte values are never a device id. They are
+  the encodings of the points of small order, under which a signature can
+  be made without any private key: the values that, with the highest bit of
+  the last byte cleared, are one of these (hex):
+
+  ```
+  0000000000000000000000000000000000000000000000000000000000000000
+  0100000000000000000000000000000000000000000000000000000000000000
+  26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05
+  c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a
+  ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f
+  edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f
+  eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f
+  ```
+
+  Both implementations compare these bytes themselves, in a key and in the
+  first half of a signature (section 3), and do not leave it to their
+  Ed25519 library, because the libraries differ `[verified]`. Under the
+  identity point as key, Go and the three browser engines accept a forged
+  signature, and OpenSSL, which runs the web client's unit tests, refuses
+  it. A signature by a real key that begins with the identity point is
+  accepted by Go and refused by OpenSSL.
+- A text that is not a device id by these rules is never used as a key: as
+  `k` it fails `bad_sig`, as `dev` or `user` it makes a log entry refused,
+  and a `pair` message that carries it is ignored.
+- Being a point of the curve is not part of being a device id: a `dev` is
+  not tested for it, and nothing verifies under a `k` that is not one
+  (section 3, check 1).
 - **Fingerprint** (shown to people) = first 6 bytes of SHA-256 of the public
   key, as 12 upper-case hex digits in groups of four: `3F9A 0C21 77BE`.
 
@@ -35,8 +75,8 @@ the pairing exchange that introduces two devices that have never met.
 
 - `p` is the payload: a JSON document carried as a string, so that the signed
   bytes are exactly the bytes received. No canonical form is needed.
-- `s` = Ed25519 signature over the UTF-8 bytes of `"solodawn/1\n"` followed
-  by `p`.
+- `s` = the 64-byte Ed25519 signature over the UTF-8 bytes of
+  `"solodawn/1\n"` followed by `p`, base64url.
 - Payload fields common to all envelopes:
 
 | Field | Type | Meaning |
@@ -50,14 +90,30 @@ the pairing exchange that introduces two devices that have never met.
 A receiver checks, in this order, and drops the envelope on the first
 failure with one error code:
 
-1. `bad_sig`: `s` verifies for `k` over the prefix and `p`.
+1. `bad_sig`: `k` is a device id (section 2). `s` is 64 bytes in their
+   canonical spelling: the first 32 are not one of the fourteen values of
+   section 2, and the last 32, read as a little-endian number, are below
+   the order of the group, 2^252 + 27742317777372353535851937790883648493.
+   And `s` verifies for `k` over the prefix and `p`. A `k` whose bytes are
+   no point of the curve fails here like any signature that does not
+   verify, also where the library refuses such a key before it verifies
+   anything (WebCrypto may throw from `importKey`).
 2. `unknown_device`: `k` is a currently valid device of someone the receiver
    has a reason to listen to (the receiver's owner; a member of a group it
    homes; the home of a group it participates in; or a pairing peer, section
    6).
-3. `not_for_me`: if `to` is present, it equals the receiver's device id.
-4. `stale`: `ts` is close enough to the receiver's clock: within two
-   minutes for signalling payloads, within 24 hours for commands.
+3. `bad_request`: `p` is a JSON object in which `t` and `n` are strings and
+   `ts` is an integer, and `g` and `to`, when there, are strings. The
+   payload is parsed at this point because the two checks that follow read
+   `to` and `ts`. How fields, `null` and integers are read is in
+   `contracts/conventions.md` section 2.
+4. `not_for_me`: `to`, when there, is the receiver's device id; an empty
+   `to` is a value like any other, and is not that id. A signalling payload
+   must carry `to`. A host command without one is refused with the same
+   code by the node that receives it (`contracts/commands.md` section 2).
+5. `stale`: `ts` is at most two minutes from the receiver's clock for a
+   signalling payload, and at most 24 hours for a command, earlier or
+   later. Exactly two minutes, or exactly 24 hours, still passes.
 
 A command that passes these checks and was already accepted is not an
 error: the receiver answers what it answered the first time, from its
@@ -83,22 +139,49 @@ Each log entry is an envelope with payload:
 
 | Field | Values |
 | --- | --- |
+| `user` | the person whose log this is |
 | `ver` | 1, 2, 3 … with no gaps |
 | `op` | `add` or `revoke` |
-| `kind` | `node` or `browser` (for `add`) |
-| `name` | label chosen by the person (for `add`) |
+| `dev` | the device added or revoked |
+| `kind` | `node` or `browser`; on an `add` |
+| `name` | label chosen by the person; on an `add` |
 
-Rules:
+Every implementation must judge an entry the same way, or logs fork. An
+entry is **accepted**, and appended, when all of the following hold. Any
+other entry is **refused**: the log stays exactly as it was, and the entries
+that come after are judged against that unchanged log.
 
-- Entry 1 is the genesis: `op` is `add`, and `dev`, `k` and `user` are the
-  same key.
-- Entry `ver` = v is accepted only if the receiver's current version for
-  that user is v − 1 and the signer `k` is in the valid set at v − 1.
-- `add` puts `dev` in the valid set. `revoke` removes it for good; a revoked
-  key is never added again.
-- A second, different entry for a version already accepted is rejected.
-  First accepted wins.
-- Anyone can verify a whole log by replaying it from entry 1.
+1. `k` is a device id and `s` verifies (section 3, check 1). No other check
+   of section 3 applies: an entry is addressed to nobody and is replayed
+   long after it was signed.
+2. `p` is a JSON object in which `t` is `"device"`, `user` is this log's
+   user id, `op` is `"add"` or `"revoke"`, `dev` is a device id, and `ver`
+   is an integer. On an `add`, `kind` is `"node"` or `"browser"` and `name`
+   is a string. Nothing else is read: not `n` or `ts`, not `kind` or `name`
+   on a `revoke`, not a field under another name. How fields, `null` and
+   integers are read is in `contracts/conventions.md` section 2.
+3. `ver` is the number of entries in the log plus one.
+4. Entry 1 is the genesis: `op` is `add`, and `dev`, `k` and `user` are the
+   same key.
+5. In a later entry, `k` is in the valid set before it.
+6. An `add` does not name a device that was ever revoked, and a `revoke`
+   does not remove the last valid device: a log with no valid device could
+   never change again, and nothing its person owns could be operated.
+
+`add` puts `dev` in the valid set; `revoke` removes it for good.
+
+An entry whose `ver` the log already holds is never appended. If it is the
+entry held at that version (the same `p`, `k` and `s`) it is not refused
+either, and nothing changes: logs are passed on, so one entry arrives many
+times. Any other entry for that version is refused. First accepted wins.
+
+These rules accept, on purpose: a `revoke` of a device that was never added
+(it can then never be added); an `add` of a device that is already valid
+(the latest `add` gives its `kind` and `name`); a device revoking itself;
+and a `revoke` of the first device, after which the user id is still the
+person's id.
+
+Anyone can verify a whole log by replaying it from entry 1.
 
 Where logs live and how they spread:
 
@@ -111,12 +194,8 @@ Where logs live and how they spread:
   to; nodes and homes pass on what they accept; after every `welcome` each
   side sends the logs the other may be missing.
 
-Known limit: two entries for the same version make a fork, and receivers
-may accept different ones. It happens when a stolen device and its owner
-race to revoke each other, and also, innocently, when two devices of the
-same person each add a device at the same moment. Step 1 does not resolve
-forks: the guidance is to add one device at a time, and recovery is manual
-(`risks.md` K-4).
+Two entries for one version make a fork, and receivers may then hold
+different logs. Step 1 does not resolve forks (`risks.md` K-4).
 
 ## 5. AI members have no key
 
@@ -134,9 +213,15 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   valid for 10 minutes, used once. It travels inside the onboarding prompt
   that the person copies, or as a link that the node prints.
 - **Secret bytes**, wherever the secret is hashed or used as a key: the 16
-  characters in upper case, without the hyphens, as ASCII.
-- **Room id** = first 16 bytes of SHA-256(`"solodawn/room/1\n"` + secret
-  bytes), hex.
+  characters in upper case, without the hyphens, as ASCII. A secret that a
+  person typed is read by removing the hyphens and turning `a` to `z` into
+  `A` to `Z`, and nothing more: what remains must be 16 characters of
+  `0123456789ABCDEFGHJKMNPQRSTVWXYZ`. No other character is changed, so a
+  space, one of `I`, `L`, `O`, `U`, or a letter outside ASCII makes it no
+  secret, also a letter that a general upper-casing would turn into valid
+  characters (`\u017f` into `S`, `\u00df` into `SS`).
+- **Room id** = the first 16 bytes of SHA-256(`"solodawn/room/1\n"` +
+  secret bytes), as 32 lower-case hex characters.
 - Each side sends through the room one message:
 
 ```json
@@ -146,11 +231,14 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
 
 - `role` is `a` for the side that created the secret, `b` for the other.
 - `mac` = HMAC-SHA256(key = secret bytes, message =
-  `"solodawn/pair/1\n"` + role + `"\n"` + device id).
-- Each side verifies the other's `mac`. After that it knows the other's
-  device id is authentic for the next 10 minutes and accepts signed
-  signalling from it. The rendezvous service sees the room id and both
-  device ids, and cannot forge a `mac` without the secret.
+  `"solodawn/pair/1\n"` + role + `"\n"` + device id), base64url.
+- A side accepts a `pair` message when its `role` is the other role (the
+  room can hand a side its own message back), its `k` is a device id, and
+  its `mac` is the one that follows from that `role` and `k`. It ignores
+  any other. After that it knows the other's device id is authentic for
+  the next 10 minutes and accepts signed signalling from it. The
+  rendezvous service sees the room id and both device ids, and cannot
+  forge a `mac` without the secret.
 - Until the newcomer is in the log, the connection carries `hello` and
   `devlog` and nothing else.
 - Once the data channel is open, the side that already belongs to a person
@@ -169,12 +257,11 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   verify a human identity.
 - When the newcomer has been enrolled, the client side sends `hello` again
   and reads `owner: true` from the new `welcome`.
-- `internal/proto/testdata/crypto.json` holds a fixed secret with its room
-  id and both `mac` values, for the Go and the browser implementation.
+- The shared test vectors pin the secret bytes, the room id and both `mac`
+  values.
 
 The code has 16 characters by decision (R-152, `risks.md` Q-2). Eight would
-need a password-authenticated key exchange, which is not added. Any text
-that still shows an 8-character sample is out of date.
+need a password-authenticated key exchange, which is not added.
 
 ## 7. What is deliberately absent
 
@@ -182,3 +269,8 @@ that still shows an 8-character sample is out of date.
   signalling carries nothing secret.
 - No certificate authority, no accounts, no server-side identity.
 - No canonical JSON, no key rotation, no multi-signature.
+
+## 8. Shared test vectors
+
+The cases that both implementations must pass, and the shape of the file
+that holds them, are in `contracts/vectors.md`.

@@ -30,7 +30,7 @@ Conventions:
 | `post` | `text`; `kind` = `text` (default), `progress`, `question`; also `handback` in a hand-back turn (the node adds the Git facts), and `summary` with `task` for the secretary after a merge; `mentions` (names); `where` = `thread` (default when the turn has a task) or `main` | `{"id":"…"}` | `post` |
 | `ask` | `to` (an AI's name); `text`; `wait` = true (default) or false | `{"answer":"…"}`, or `{"pending":true,"receipt":"…"}` | `post` kind `call`; `flows/ask.md` |
 | `reply` | `call` (the id shown in the turn); `text` | `{"ok":true}` | `post` kind `reply` |
-| `read_thread` | `task` or `"main"`; `limit` (default 30, at most 100); `before` (the `pos` of a message from an earlier result) | `{"messages":[{"id","pos","by","kind","at","text"}],"more":true}` | `fetch` |
+| `read_thread` | `task` or `"main"`; `limit` (default 30, at most 100); `before` (the `pos` of a message from an earlier result; left out for the newest messages) | `{"messages":[{"id","pos","by","kind","at","text"}],"more":true}` | `fetch` |
 | `list_members` | — | `{"members":[{"name","kind","state","host","account","task","usage"}]}` | state rows |
 | `list_tasks` | `state` (optional filter) | `{"tasks":[{"task":"T-12","title","state","step","assignee","reviewer","wait","idle_minutes"}]}` | state rows |
 | `note_put` | `text`; `task` (optional) | `{"id":"…"}` | `note` |

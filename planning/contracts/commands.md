@@ -34,7 +34,26 @@ answered `ok` with the original link while that link is still valid, or
 `conflict`. A repeat never creates a new link or a new terminal.
 
 **Results.** Effects are read from rows. A few commands also answer with
-named fields, listed in the tables as "Result".
+named fields, listed in the tables as "Result"; an answer has only the
+result fields of its command.
+
+**Presence** follows `contracts/conventions.md` section 2. The fields a
+table lists for a command are all in its payload, except these optional
+ones:
+
+- where a table says "any of", only the fields being changed are sent;
+- `as`, there only when a host signs for one of its AIs;
+- in `act`: `arg` and `text`;
+- in `task assign`: `assignee` and `reviewer` (at least one of the two);
+- in `member status`: `task` (the AI is on no task) and `event` (there is
+  no fact to report);
+- in `task submitted`: `pr` and `pr_url` (the group has no remote);
+- in `takeover.start`: `task`.
+
+A `post` always carries `kind`, `text`, `thread` (or `null`), `main`,
+`mentions`, `re` (or `null`) and `body`; what `body` must hold for each
+kind is in `contracts/messages.md`. In `task start`, `re` is the message
+that led to the task, or `null`; in `note`, `task` is a task id or `null`.
 
 ## 1. Home commands
 
@@ -73,7 +92,7 @@ The message id is `n`.
 | `progress`, `question` | an AI | `progress` only in a thread | item `mention` for each mentioned AI |
 | `report` | an AI | `thread` is a task whose assignee is `as` | — |
 | `brief` | the secretary | `body.requester` is a member; every assignee and reviewer is a working AI of the group, the two differ, and `depends` names only earlier entries of the same brief | `state.status = pending`; the brief named in `body.replaces` becomes `superseded` |
-| `summary` | the secretary | `thread` is a `merged` task | the home fills `score`, `rounds`, `minutes`, `added`, `removed`, `pr` in `body` from the task row; `main = true` |
+| `summary` | the secretary | `thread` is a `merged` task | the home adds the whole `body` from the task row; `main = true` |
 | `approval` | an AI | `as` is the task's assignee | `state.status = pending`; `main = true`; task-machine row 17 |
 | `decision` | an AI | — | `state.status = pending`; `main = true`; task-machine row 19 |
 | `call` | an AI | the callee is another AI member; `body.depth` ≤ `limits.ask_depth` | `state.status = waiting`; item `mention` for the callee |
@@ -180,17 +199,12 @@ is task-machine row 7.
 
 ### 1.9 Host events
 
-`member status` may carry `event`, a fact the host observed. The home turns
-it into a `system` row, in the thread of `task` when given, else in the main
-line. The row's `body` is the event.
-
-| `event.code` | Other fields |
-| --- | --- |
-| `turn_interrupted` | `task`, `reason` (`crash`, `timeout`, `stop`), `detail` |
-| `session_replaced` | `task` |
-| `login_invalid` | `detail` |
-| `cap_reached` | `cap` (`day`, `task`), `task` |
-| `rate_limited` | `resets` |
+`member status` carries `event` when the host has a fact to report. An
+event is the body of a `system` message without `ai`
+(`contracts/messages.md` 2.11, which lists the codes a host reports and the
+fields of each). The home adds `ai`, the `id` of that `member status`, and
+writes the row in the thread of the event's `task` when it has one, else in
+the main line.
 
 For `login_invalid`, `cap_reached` and `rate_limited` the home also gives
 the secretary a `notice`. A closed host connection sets `state = offline`

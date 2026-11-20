@@ -23,17 +23,11 @@ peer is (section 8).
 ## 2. Framing on `ctl`
 
 - One JSON object per message. Field `t` is the type.
-- A message is at most 60 KiB. The payload `p` of an envelope is at most
-  24 KiB, so a row with its envelope always fits one message. Larger results
-  are split by the sender (`rows` batches, `fetch` pages).
-- **Request**: has `id` (integer, unique per connection, chosen by the
-  sender). **Response**: has `re` equal to that `id`, and either `ok: true`
-  plus result fields or `err: {code, msg}`. `msg` is an English sentence for
-  logs; clients show their own text for `code`.
-- **Push**: has no `id` and no `re`.
-
-`[unverified]` 60 KiB assumes both stacks accept SCTP messages of that size.
-Spike S-1 measures it; the two numbers are constants.
+- The rules for every frame are in `contracts/conventions.md`: which fields
+  are always present and which may be left out (section 2); requests,
+  answers and pushes (section 3); size limits (section 4).
+- A result that does not fit one message is split by the sender (`rows`
+  batches, `fetch` pages).
 
 ## 3. Session
 
@@ -47,7 +41,7 @@ Client to node, first message:
 | --- | --- |
 | `v` | protocol version; a node answers `err.code = "version"` if it cannot speak it |
 | `kind` | `browser` or `host` |
-| `addrs` | hosts only: signalling URLs at which this node may be reachable |
+| `addrs` | signalling URLs at which this node may be reachable; `[]` from a browser |
 
 Node to client:
 
@@ -63,7 +57,9 @@ Node to client:
 | `owner` | true if the peer is a device of this node's owner; the host surface is then available |
 
 - When the list of groups for a connected peer changes, the node pushes
-  `{"t":"groups","groups":[…]}` with the whole list.
+  the whole list again, each entry shaped as in `welcome`:
+  `{"t":"groups","groups":[{"g":"Qm1…","name":"Website","seq":812}]}`.
+  The list is `[]` when the peer may read no group here.
 - A node keeps one inbound connection per client device. A `hello` on a new
   inbound connection from a device that already has one closes the older
   one. Nothing is carried over: the client reads again with `sync`
@@ -138,14 +134,18 @@ before `synced` and rows from `fetch` never move it.
   `"kind":"review"` asks for the review messages of all threads (the
   ledger) and `"kind":"note"` for the notes (R-102).
 - `before` is a `pos` (`contracts/rows.md`): the answer holds rows with a
-  lower `pos`, newest first. `limit` is at most 100.
+  lower `pos`, newest first. `before: 0` asks for the newest page; no `pos`
+  is 0. For an older page the client sends the lowest `pos` it received.
+  `limit` is at most 100.
 
 ```json
 {"t":"fetched","re":3,"ok":true,"rows":[ … ],"more":true}
 ```
 
 The home stops filling the answer when the next row would exceed the message
-limit; `more` says whether older rows exist.
+limit; `more` says whether older rows exist. `rows` is `[]` when there is
+nothing. An answer never holds a `gone` marker, with `kind: note` as with
+any other scope: a marker has no `pos` (`contracts/rows.md`).
 
 ## 5. Commands
 
@@ -185,8 +185,8 @@ item is an instruction to a host, so every item is signed by the home.
 | Part | Meaning |
 | --- | --- |
 | `env` | the item itself: which AI, why, which task and message; for `review` and `merge` which commit, and for `merge` which pull request (`pr`); `jump: true` when the owner jumped the queue. Built and signed by the home in the transaction that queued the item, and stored: what is sent later is what was decided then, whatever the task has become |
-| `msg`, `task` | copies, taken when the item is sent, of the rows the turn is built from. `msg.env`, when present, is the author's own envelope |
-| `cause` | the signed decision that led to the item, unchanged: the `act` of the person who decided an approval or a decision, or who confirmed or sent back the brief. Absent where there is none: direct work starts from the owner's own message, which is `msg` |
+| `msg`, `task` | optional: copies, taken when the item is sent, of the rows the turn is built from. `msg.env`, when present, is the author's own envelope |
+| `cause` | optional: the signed decision that led to the item, unchanged: the `act` of the person who decided an approval or a decision, or who confirmed or sent back the brief. Absent where there is none: direct work starts from the owner's own message, which is `msg` |
 
 - **What a host accepts (step 1).** The item's envelope is signed by the
   home of that group, that device is in the log of the host's owner, `to`
@@ -214,10 +214,9 @@ item is an instruction to a host, so every item is signed by the home.
 
 ## 7. Host surface
 
-Available when `welcome.owner` is true. The name describes the wire. In the
-code, node-level requests (`pair.browser`, node settings, putting
-`host.info` together) are handled by `internal/node`, and everything about
-AIs and sessions by `internal/host` (`architecture.md` section 8).
+Available when `welcome.owner` is true. The name describes the wire: in the
+code, node-level requests are handled by `internal/node` and everything
+about AIs and sessions by `internal/host` (`architecture.md` section 8).
 
 ### `host.info` (request, then pushes)
 
@@ -240,20 +239,21 @@ carry the whole object:
              "all_level3":false,"approvers":[]}}
 ```
 
-`agents` lists every supported CLI found on the machine; `account` is `null`
-until the owner has declared it. In `groups`, `state` and `task` are the
-derived state of the AI in that group (`contracts/rows.md` section 2),
-`level` is the level of its task sessions, and `queued` counts held items.
+`agents` lists every supported CLI found on the machine. `account` is `null`
+until the owner has declared it. `update` is `null`, or
+`{"version":"0.3.2","status":"pending"}` after an update check
+(`contracts/local.md` section 9): `pending` when that version is installed
+and waits for a restart, `mismatch` when its file failed the checksum and
+nothing was replaced. In `groups`, `state` and `task` are the AI's derived
+state (`contracts/rows.md` section 2; `task` is optional), `level` is the
+level of its task sessions, and `queued` counts held items.
 
 ### `audit` (request)
 
 `{"t":"audit","id":6,"before":1763600000000,"limit":50}` is answered with
-
-```json
-{"re":6,"ok":true,"rows":[
-  {"ts":1763599000000,"g":"Qm1…","ai":"claude","what":"approval",
-   "detail":"git push origin other-branch","by":"<device id>","result":"approved"}]}
-```
+`{"re":6,"ok":true,"rows":[…]}`, each row shaped as
+`{"ts":1763599000000,"g":"Qm1…","ai":"claude","what":"approval","detail":"git push origin other-branch","by":"<device id>","result":"approved"}`.
+`g`, `ai`, `by` and `result` are optional.
 
 ### Terminal
 
@@ -293,6 +293,7 @@ derived state of the AI in that group (`contracts/rows.md` section 2),
 | `cli` | the CLI program failed; `msg` carries its error text |
 | `secret` | host only: text from an AI matched the outbound secret check and was not sent (R-137) |
 | `home_unreachable` | host only: the home of that group is not connected |
+| `internal` | the node itself failed; the cause is in its log, not in `msg` |
 
-Every boundary failure maps to exactly one of these. Internal failures are
-not mapped: the node logs them and the request fails with `internal`.
+Every boundary failure maps to exactly one of the codes above `internal`;
+any other failure is logged by the node and answered with `internal`.

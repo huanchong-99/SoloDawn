@@ -32,7 +32,8 @@ The per-user application data folder of the system, subfolder `solodawn`:
 
 ```
 node.db            SQLite database (contracts/storage.md)
-device.key         the device's private key, readable by the user only
+device.key         the device's private key: the 32-byte Ed25519 seed and
+                   nothing else, readable by the user only (mode 0600)
 sock               local socket
 projects/<group>/repo/            the clone; folder of group sessions
 projects/<group>/wt/<num>-<slug>/ worktree of a task; folder of its task session
@@ -158,8 +159,8 @@ is not applied to what people type.
   downloads the file for its system, compares its SHA-256 with the line in
   `SHA256SUMS`, and replaces its own binary.
 - It restarts only when no session is `working` or in `takeover`.
-- A mismatch is logged and shown in `host.info` (`update`); nothing is
-  replaced.
+- A mismatch is logged and shown in `host.info`; nothing is replaced. The
+  shape of `update` there is in `contracts/datachannel.md` section 7.
 
 ## 10. Local web client
 
