@@ -2,10 +2,10 @@
 
 `internal/proto/testdata/crypto.json` holds the cases that keep the two
 implementations of `contracts/envelope.md` to one answer: the Go node and
-the web client. The backend produces the file (B-02, completed by B-02b).
-The Go tests read it, and so do the web client's tests, under the unit-test
-runner (F-01b) and in the three baseline browsers (F-01c). Every case must
-pass in all of them.
+the web client. Every case must pass in both; the web client runs them
+under its unit-test runner and in each baseline browser, because their
+Ed25519 libraries differ (section 2 of that file). Which task produces the
+file is in `contracts/conventions.md` section 5.
 
 Sections named below are those of `contracts/envelope.md`.
 
@@ -22,8 +22,15 @@ Sections named below are those of `contracts/envelope.md`.
               "env":{"p":"…","k":"…","s":"…"},"code":"bad_request"}],
  "pairing":[{"shown":"7K2M-9QXD-4F8T-WB3N","secret":"7K2M9QXD4F8TWB3N",
              "room":"<room id>",
-             "a":{"device":"<device id>","mac":"<mac>"},
-             "b":{"device":"<device id>","mac":"<mac>"}}],
+             "a":{"device":"<device id>","kind":"browser","name":"phone",
+                  "mac":"<mac>"},
+             "b":{"device":"<device id>","kind":"node","name":"workstation",
+                  "mac":"<mac>"}}],
+ "pair_messages":[{"name":"name changed on the way","me":"b",
+                   "secret":"7K2M9QXD4F8TWB3N",
+                   "msg":{"t":"pair","k":"<device id>","kind":"browser",
+                          "name":"laptop","role":"a","mac":"<mac>"},
+                   "ok":false}],
  "bad_secrets":[{"name":"a space","shown":"7K2M 9QXD-4F8T-WB3N"}],
  "devlogs":[{"name":"add, then revoke","user":"<user id>",
              "entries":[{"env":{"p":"…","k":"…","s":"…"},"accept":true}],
@@ -56,9 +63,10 @@ itself.
 | `envelopes` | `ok` is whether the envelope passes check 1 of section 3. Where `ok` is true, `k` is one of `keys` |
 | `rendezvous` | `s` answers `nonce` for `k` (`contracts/rendezvous.md` 2.1); `k` is one of `keys` |
 | `received` | the envelope arrives at device `me`, whose clock reads `now`, as a command or as a signalling payload (`kind` is `command` or `signal`); `known` says whether the receiver listens to its signer. `code` is `ok`, or the code of the first check of section 3 that fails |
-| `pairing` | `shown` is a secret as a person typed it, `secret` its secret bytes as text; `room` and both `mac` values follow (section 6) |
+| `pairing` | `shown` is a secret as a person typed it, `secret` its secret bytes as text; `room` follows, and so does the `mac` of each side from its role, `device`, `kind` and `name` (section 6) |
+| `pair_messages` | a side with role `me` that holds `secret` receives `msg`; `ok` says whether it accepts it (section 6) |
 | `bad_secrets` | `shown` is a text that is no secret (section 6) |
-| `devlogs` | the entries are applied in order to an empty log of `user`. `accept` true: the entry is not refused, that is, it is appended, or it is the entry already held at its version. False: it is refused. `valid` is the valid set afterwards, the device ids sorted as byte strings, ascending |
+| `devlogs` | the entries are applied in order to an empty log of `user`. `accept` true: the entry is not refused, that is, it is appended, or it is the entry already held at its version. False: it is refused. `valid` lists the devices of `keys` that are in the valid set afterwards, sorted as byte strings, ascending. A device that is not one of `keys` is never listed, valid or not |
 | `adopt` | `entries` is a valid log of `user`. `ok` says whether device `me`, which belongs to no person and has paired with `peer`, adopts it (section 6) |
 
 ## 4. Cases each part must hold
@@ -88,15 +96,22 @@ itself.
   `me`.
 - `not_for_me`: `to` is another device; `to` is `""`; a signalling payload
   without `to`.
-- `bad_request`: `to` is `null`; `ts` beyond 2^53 − 1; no `ts`; a `p` that
-  is not a JSON object.
+- `bad_request`: `to` is `null`; `ts` beyond 2^53 − 1; no `ts`; an `n` that
+  is no id, written with the escape of a lone surrogate; a `p` that is not
+  a JSON object.
 - `stale`: one millisecond beyond each of the two windows.
 - the order of the checks: a signer the receiver does not listen to, once
   with a signature that does not verify (`bad_sig`) and once with a `p`
   that is not JSON (`unknown_device`); a `to` that is another device with a
   `ts` outside the window (`not_for_me`).
 
-**`pairing`**: a secret as displayed; in lower case; without hyphens.
+**`pairing`**: a secret as displayed; in lower case; without hyphens; a
+`name` with non-ASCII text and a line break.
+
+**`pair_messages`**: a message that is accepted; the same with `name`
+changed, and with `kind` changed, each keeping its `mac`; a message in the
+receiver's own role; a `k` that is a weak key, and a `kind` that is neither
+`node` nor `browser`, each with the `mac` that follows from it.
 
 **`bad_secrets`**: with a space; with one of `I`, `L`, `O`, `U`; one
 character short, and one too long; fifteen valid characters and
@@ -112,7 +127,8 @@ characters and `\u00df`, which JavaScript's `toUpperCase` turns into `SS`.
   same entry again;
 - a first entry whose `dev`, `k` and `user` are not one key;
 - a payload that is not JSON, and one with another `t` or `op`;
-- `dev` a weak key;
+- `dev` a weak key (refused); `dev` 32 bytes in their canonical spelling
+  that are no point of the curve (accepted);
 - `ver` written `2.0000000000000001`, which is 2; `ver` that is `null`;
 - a field `VER` beside the right `ver`;
 - an `add` with another `kind`, one without `name`, and one whose `name`
