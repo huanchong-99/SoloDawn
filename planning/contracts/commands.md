@@ -18,6 +18,17 @@ member id.
 "Admin" is a person with role `owner` or `admin`. "Secretary" is the AI that
 `group.secretary` names.
 
+A signer with no `as` is the person whose log holds it and, when it is a
+node, also a host: a row of the tables is met by whichever of the two it
+names. A home takes a command only from a device of a member of the group,
+and `group create` only from a device of its own owner; any other signer
+that passed the envelope checks is answered `forbidden`. An `as` that is no
+text, or an empty one, is `bad_request`; one that does not name an AI whose
+`host` is the signer is `forbidden` (`contracts/envelope.md` section 5).
+Should the logs of two people hold one device, a home reads it as a device
+of the person with the lower user id; step 2, which brings the second
+person, settles what such a device may do.
+
 **Once only.** The receiver stores a receipt for every command it accepts,
 keyed by signer and `n`, with the outcome (ok and its result fields, or the
 error code), in the same transaction as the change. A command that arrives
@@ -25,6 +36,14 @@ again gets that outcome, under the request id of the new request, and has
 no second effect. A command whose `ts` is more than 24 hours from the
 receiver's clock is refused with `stale`; receipts are kept for that long
 (`contracts/storage.md`).
+
+A command is accepted, in this sense, once it passed the checks that
+`contracts/datachannel.md` section 5 puts before the receipt: it arrived on
+the connection of its signer, passed the envelope checks and, as a home
+command, has its `g`. Whatever the receiver answers after that, a refusal
+included, is the outcome its receipt keeps; a command that one of those
+checks refused leaves no receipt. The answer to a repeated refusal has the
+same code. Its `msg` is not kept, and need not be the same.
 
 Two results name something that lives only in memory: the link of
 `pair.browser` and the terminal of `takeover.start`. Their receipts record
@@ -41,10 +60,12 @@ result fields of its command.
 table lists for a command are all in its payload, except these optional
 ones:
 
-- where a table says "any of", only the fields being changed are sent;
+- where a table says "any of", only the fields being changed are sent, and
+  a command that sends none of them is `bad_request`;
 - `as`, there only when a host signs for one of its AIs;
 - in `act`: `arg` and `text` (which action has which: 1.4);
-- in `task assign`: `assignee` and `reviewer` (at least one of the two);
+- in `task assign`: `assignee` and `reviewer` (at least one of the two; with
+  neither it is `bad_request`);
 - in `member status`: `task` (the AI is on no task) and `event` (there is
   no fact to report);
 - in `task submitted`: `pr` and `pr_url` (the group has no remote);
@@ -62,8 +83,8 @@ that led to the task, or `null`; in `note`, `task` is a task id or `null`.
 
 | `op` | Fields | By | Effect |
 | --- | --- | --- | --- |
-| `create` | `name`, `kind`, `repo`, `base`, `forge`, `checks`, `member_name` | a person: a device of the receiving node's owner | the node becomes home of group `g` = `n`; group row with `pass` 90, `pass_foundation` 70 (R-101) and the `limits` of the example in `contracts/rows.md` section 1; a `member` row for that person with role `owner` and `member_name` as its `name`; a `groups` push to that person's connected devices |
-| `set` | any of `name`, `checks`, `pass`, `pass_foundation`, `limits`, `secretary` | an admin | group row updated. `secretary` must name an AI member that is not assignee or reviewer of a task that is not final, else `conflict`; the previous secretary's member row loses the flag |
+| `create` | `name`, `kind`, `repo`, `base`, `forge`, `checks`, `member_name` | a person: a device of the receiving node's owner | the node becomes home of group `g` = `n`: the payload carries `g` like every home command, and a `create` whose `g` is not its `n` is `bad_request`; group row with `pass` 90, `pass_foundation` 70 (R-101) and the `limits` of the example in `contracts/rows.md` section 1; a `member` row for that person with role `owner` and `member_name` as its `name`; a `groups` push to that person's connected devices |
+| `set` | any of `name`, `checks`, `pass`, `pass_foundation`, `limits`, `secretary` | an admin | group row updated. `limits`, when sent, is the whole object of `contracts/rows.md` section 1. `secretary` must name an AI member that is not assignee or reviewer of a task that is not final, else `conflict`; the previous secretary's member row loses the flag |
 | `pause` | — | an admin | `group.paused` set; `system` `group_paused`; hosts interrupt running turns of the group and hold items. A `pause` of a paused group is accepted and changes nothing |
 | `resume` | — | an admin | `group.paused` cleared; `system` `group_resumed`; task-machine row 24. A `resume` of a group that is not paused is accepted and changes nothing |
 
@@ -179,7 +200,9 @@ names only the project memory; every other message leaves by retention.
 
 By a browser, for itself: `{"sub":{"endpoint":"…","p256dh":"…","auth":"…"},
 "vapid":{"pub":"…","priv":"…"},"on":["mention","approval","decision",
-"brief","done"]}`, or `{"off":true}`. The browser creates the VAPID key pair
+"brief","done"]}`, or `{"off":true}`. A `push` whose `off` is `true` is the
+second form, whatever else it holds; any other `push` is read as the first,
+and its `off` is not read. The browser creates the VAPID key pair
 and hands it to each home it wants reminders from. `g` routes the command,
 as in every home command; the subscription covers all of that browser's
 groups on that home.
@@ -202,6 +225,8 @@ Its content is a short summary:
 | `kind` | `approval`, `decision`, `brief`, `mention`, `done` |
 | `who` | display name of the member it is about: the AI asking, the secretary, the author of the mention |
 | `title` | one line, at most 80 characters. `approval`: the first line of the justification the CLI attached (`body.why`), absent if there is none. `decision`: the question. `brief`, `done`: the brief or task title. `mention`: absent |
+
+`title` is optional; every other field is always present.
 
 Never included: message text, the command of an approval, code, file
 names. The browser shows `group · kind · who: title` in the user's language

@@ -35,11 +35,21 @@ func jsonValue(t *testing.T, b []byte) any {
 	return v
 }
 
+// golden holds a typed example to the file of that name, and the file to the
+// type the file map gives it.
 func golden[T any](t *testing.T, name string, want T) {
+	t.Helper()
+	if shapes[name] != reflect.TypeFor[T]() {
+		t.Fatalf("%s is read as %v in the file map, and written here as %v", name, shapes[name], reflect.TypeFor[T]())
+	}
+	goldenJSON(t, name, wireJSON(t, want))
+}
+
+// goldenJSON is golden for an example that was encoded already.
+func goldenJSON(t *testing.T, name string, encoded []byte) {
 	t.Helper()
 	t.Run(name, func(t *testing.T) {
 		path := filepath.Join("testdata", name+".json")
-		encoded := wireJSON(t, want)
 		if *update {
 			var pretty bytes.Buffer
 			if err := json.Indent(&pretty, encoded, "", "  "); err != nil {
@@ -61,18 +71,18 @@ func golden[T any](t *testing.T, name string, want T) {
 			t.Fatalf("encoded %s\ngolden  %s", encoded, data)
 		}
 
-		var got T
-		if err := json.Unmarshal(data, &got); err != nil {
+		got := reflect.New(shapes[name])
+		if err := json.Unmarshal(data, got.Interface()); err != nil {
 			t.Fatal(err)
 		}
 		// Every example is read by the function that reads the wire: none lacks
 		// a field its type says is always there, or holds a null it has no place
 		// for. Compared as JSON values, because a row kept as JSON is spaced anew.
-		var read T
-		if err := Decode(data, &read); err != nil || !reflect.DeepEqual(jsonValue(t, wireJSON(t, read)), jsonValue(t, encoded)) {
-			t.Fatalf("Decode read %+v, %v\nwant        %s", read, err, encoded)
+		read := reflect.New(shapes[name])
+		if err := Decode(data, read.Interface()); err != nil || !reflect.DeepEqual(jsonValue(t, wireJSON(t, read.Interface())), jsonValue(t, encoded)) {
+			t.Fatalf("Decode read %+v, %v\nwant        %s", read.Elem(), err, encoded)
 		}
-		if roundTrip := wireJSON(t, got); !reflect.DeepEqual(jsonValue(t, roundTrip), jsonValue(t, encoded)) {
+		if roundTrip := wireJSON(t, got.Interface()); !reflect.DeepEqual(jsonValue(t, roundTrip), jsonValue(t, encoded)) {
 			t.Fatalf("round trip %s\nwant       %s", roundTrip, encoded)
 		}
 	})
@@ -135,5 +145,7 @@ func TestPairingAndSessionGoldens(t *testing.T) {
 		signed(browser, " "+string(wireJSON(t, addNode))),
 	}})
 	golden(t, "hello", Hello{Request{"hello", 1}, 1, "browser", "phone browser", []string{}})
-	golden(t, "welcome", Welcome{"welcome", Success{1, true}, 1, host, "workstation", "v0.3.1", ts, []GroupSummary{{group, "Website", 812}}, true})
+	// What reaches the node without the rendezvous comes first, then its rendezvous (datachannel.md section 3).
+	addrs := []string{"ws://192.0.2.10:47800/rv", "wss://rv.example/rv"}
+	golden(t, "welcome", Welcome{"welcome", Success{1, true}, 1, host, "workstation", "v0.3.1", ts, addrs, []GroupSummary{{group, "Website", 812}}, true})
 }
