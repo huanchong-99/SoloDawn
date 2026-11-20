@@ -52,3 +52,25 @@ func TestCheckOutputIsRedacted(t *testing.T) {
 		t.Fatalf("check item %q %v %q, want detail %q", got.Name, got.OK, *got.Detail, line)
 	}
 }
+
+// The check scans by hand what redaction finds with regular expressions;
+// both must agree, and a diff's '>' lines must count as plain lines.
+func TestCheckAndRedactionAgree(t *testing.T) {
+	for _, text := range []string{
+		"", "A=1\nB=2\nC=3", "A=1\nB=2\nmy_key=3", "KEY=1\nB=2", "A=1\n\nTOKEN=2\nC=3",
+		"A=1\r\nTop_Secret=2\r\nC=3\r\n", "2A=1\nKEY=2\nC=3", "a-b=1\nKEY=2\nC=3", "=1\nKEY=2\nC=3",
+		"x\nA=1\nB=2\nC=3\nDB_PASSWORD=4\ny", "A=KEY\nB=SECRET=v\nC=TOKEN", "Ä=1\nKEY=2\nC=3",
+		"a sk-" + strings.Repeat("x", 32), "ask-" + strings.Repeat("x", 32), "sk-sk-" + strings.Repeat("y", 32),
+		"xsk-sk-" + strings.Repeat("y", 32), "AKIA" + strings.Repeat("Q", 15), "_ASIA" + strings.Repeat("Q", 16),
+		keyBegin + "PRIVATE KEY-----", "ghr_" + strings.Repeat("z", 29) + ".",
+	} {
+		redacted := RedactSecrets(text) != text
+		if found := containsSecret(text, ""); found != redacted {
+			t.Errorf("%q: check %v, redaction %v", text, found, redacted)
+		}
+		diff := ">" + strings.ReplaceAll(text, "\n", "\n>")
+		if found := containsSecret(diff, ">"); found != redacted {
+			t.Errorf("%q as added lines: check %v, redaction %v", text, found, redacted)
+		}
+	}
+}

@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path"
 	"reflect"
-	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -303,14 +302,10 @@ func hardItem(ctx context.Context, name string, readErr error, verdict func() er
 	return proto.CheckItem{}, readErr
 }
 
-// '>' marks added lines only. Headers, context and deletions separate runs
-// so the multiline secret matcher never combines unrelated additions.
-var addedCheckLines = regexp.MustCompile(`(?m)^(?:>[^\n]*\n?)+`)
-
 // checkAddedLines looks for a secret in each run of added lines, in place:
 // every line of a run keeps its '>'. It reads at most addedLineLimit bytes.
 func checkAddedLines(ctx context.Context, patch string) error {
-	runs := addedCheckLines.FindAllStringIndex(patch, -1)
+	runs := addedRuns(patch)
 	if size := addedSize(runs); size > addedLineLimit {
 		return fmt.Errorf("too large to check: %d bytes of added lines, over the limit of %d", size, addedLineLimit)
 	}
@@ -318,14 +313,37 @@ func checkAddedLines(ctx context.Context, patch string) error {
 		if ctx.Err() != nil {
 			return errHardTimeout
 		}
-		if containsSecret(patch[run[0]:run[1]], diffEnv) {
+		if containsSecret(patch[run[0]:run[1]], ">") {
 			return errSecret
 		}
 	}
 	return nil
 }
 
-func addedSize(runs [][]int) int {
+// addedRuns are the runs of consecutive added lines of patch, the lines
+// that start with '>'. Headers, context and deletions separate runs, so the
+// multiline matcher never combines unrelated additions.
+func addedRuns(patch string) [][2]int {
+	var runs [][2]int
+	off := 0
+	for line := range strings.SplitAfterSeq(patch, "\n") {
+		if strings.HasPrefix(line, ">") {
+			runs = extendRun(runs, off, off+len(line))
+		}
+		off += len(line)
+	}
+	return runs
+}
+
+func extendRun(runs [][2]int, start, end int) [][2]int {
+	if n := len(runs); n > 0 && runs[n-1][1] == start {
+		runs[n-1][1] = end
+		return runs
+	}
+	return append(runs, [2]int{start, end})
+}
+
+func addedSize(runs [][2]int) int {
 	size := 0
 	for _, run := range runs {
 		size += run[1] - run[0]
