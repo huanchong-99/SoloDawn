@@ -53,14 +53,14 @@ func TestPagesAndDelta(t *testing.T) {
 	put(t, s, "g", 10, card)
 	put(t, s, "g", 10, msg("thread", 3, &thread, false, "text"))
 	put(t, s, "g", 10, msg("review", 4, &other, false, "review"))
-	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "note", 5), Group: "g"})
+	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "note", 5), Pos: 5, Group: "g"})
 	put(t, s, "g", 10, msg("erased", 6, &thread, true, "text"))
 	put(t, s, "g", 20, proto.GoneRow{RowHeader: header("msg", "erased", 7), Gone: true})
 	card.Seq = 8
 	card.State = &proto.CardState{Status: "decided"}
 	put(t, s, "g", 20, card)
 	put(t, s, "other", 10, msg("elsewhere", 1, nil, true, "review"))
-	put(t, s, "other", 10, proto.NoteRow{RowHeader: header("note", "elsewhere-note", 2), Group: "other"})
+	put(t, s, "other", 10, proto.NoteRow{RowHeader: header("note", "elsewhere-note", 2), Pos: 2, Group: "other"})
 
 	v := snapshot(t, s, "g")
 	rows, err := v.AfterSeqUpTo(3, 7)
@@ -169,7 +169,7 @@ func TestStoredWireRows(t *testing.T) {
 	roundTripGolden[proto.AIMemberRow](t, "member-ai")
 	roundTripGolden[proto.DeviceRow](t, "device")
 	roundTripGolden[proto.TaskRow](t, "task-waiting")
-	roundTripGolden[proto.MsgRow](t, "msg")
+	roundTripGolden[proto.MsgRow](t, "msg-decision-decided")
 	roundTripGolden[proto.NoteRow](t, "note")
 	roundTripGolden[proto.GoneRow](t, "gone")
 }

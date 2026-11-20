@@ -1,0 +1,30 @@
+{
+  "r": "msg",
+  "id": "dht62K1DmyhV_LthEzHGRg",
+  "seq": 790,
+  "pos": 790,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "thread": "DrtCn6htSBwmMPrFPbHJHA",
+  "main": true,
+  "by": "qBSFMsr2hHYKOMblEA_kdA",
+  "kind": "summary",
+  "ts": 1763599999500,
+  "text": "",
+  "mentions": [],
+  "re": null,
+  "body": {
+    "task": "DrtCn6htSBwmMPrFPbHJHA",
+    "score": 94,
+    "rounds": 2,
+    "minutes": 72,
+    "added": 318,
+    "removed": 42,
+    "pr": 28
+  },
+  "state": null,
+  "env": {
+    "p": "{\"t\":\"post\",\"n\":\"dht62K1DmyhV_LthEzHGRg\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"qBSFMsr2hHYKOMblEA_kdA\",\"kind\":\"summary\",\"thread\":\"DrtCn6htSBwmMPrFPbHJHA\",\"main\":true,\"text\":\"\",\"mentions\":[],\"re\":null,\"body\":{}}",
+    "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+    "s": "Sm6gXMtzvW-49F5eJTbpyIsBqeoAw8nG8oLTpfkDOklRIDLC4fQj04_a3LfHY_fzEfdoClk5hxuIxURXUhFfCg"
+  }
+}

@@ -226,40 +226,201 @@ export const TaskRow = v.object({
 });
 export type TaskRow = v.InferOutput<typeof TaskRow>;
 
-export const MsgRow = v.object({
+const int = v.pipe(num, v.safeInteger());
+const optionalText = v.optional(str);
+const optionalInt = v.optional(int);
+// valibot's object({}) also accepts arrays; the body on the wire must be an object.
+const EmptyBody = v.pipe(
+  v.unknown(),
+  v.check((x) => !Array.isArray(x)),
+  v.object({}),
+);
+
+const BriefTask = v.object({
+  title: str,
+  assignee: str,
+  reviewer: str,
+  foundation: bool,
+  depends: v.array(int),
+});
+
+const BriefBody = v.object({
+  title: str,
+  goal: str,
+  criteria: strs,
+  scope: v.object({ in: strs, out: strs }),
+  tasks: v.array(BriefTask),
+  pass: int,
+  requester: str,
+  replaces: v.nullable(str),
+});
+
+const ApprovalBody = v.object({
+  task: str,
+  ai: str,
+  tool: str,
+  command: str,
+  why: optionalText,
+  category: str,
+  approvers: strs,
+});
+
+const DecisionBody = v.object({
+  task: optionalText,
+  question: str,
+  context: optionalText,
+  options: v.array(v.object({ id: str, label: str, effect: str })),
+  recommended: optionalText,
+  to: strs,
+});
+
+const SystemBody = v.variant('code', [
+  v.object({ code: v.literal('rounds_limit'), task: str, n: int }),
+  v.object({
+    code: v.literal('turn_interrupted'),
+    ai: str,
+    reason: str,
+    task: optionalText,
+    detail: optionalText,
+  }),
+  v.object({ code: v.picklist(['group_paused', 'group_resumed']), by: str }),
+  v.object({ code: v.literal('preempted'), task: str, by: str }),
+  v.object({
+    code: v.literal('cap_reached'),
+    ai: str,
+    cap: str,
+    task: optionalText,
+  }),
+  v.object({ code: v.literal('rate_limited'), ai: str, resets: int }),
+  v.object({ code: v.literal('login_invalid'), ai: str, detail: optionalText }),
+  v.object({ code: v.literal('task_failed'), task: str, reason: str }),
+  v.object({ code: v.literal('task_merged'), task: str, commit: str, merge_commit: str }),
+  v.object({ code: v.literal('no_secretary') }),
+  v.object({ code: v.literal('session_replaced'), ai: str, task: optionalText }),
+]);
+
+const Pending = v.object({ status: v.literal('pending') });
+const acted = { by: str, at: int, act: Envelope };
+const BriefAction = v.object({ ...acted, note: optionalText });
+const BriefState = v.variant('status', [
+  Pending,
+  v.object({ status: v.literal('confirmed'), ...acted }),
+  v.object({ status: v.literal('revise'), ...BriefAction.entries }),
+  v.object({ status: v.literal('superseded'), ...v.partial(BriefAction).entries }),
+]);
+const ApprovalState = v.variant('status', [
+  Pending,
+  v.object({ status: v.picklist(['approved', 'denied']), ...acted }),
+  v.object({ status: v.picklist(['expired', 'reassigned']), at: int }),
+]);
+const DecisionState = v.variant('status', [
+  Pending,
+  v.object({ status: v.literal('decided'), ...acted, choice: optionalText, text: optionalText }),
+]);
+
+const MsgFields = {
   r: v.literal('msg'),
-  ...RowHeader,
-  pos: num,
+  id: str,
+  seq: int,
+  pos: int,
   g: str,
   thread: v.nullable(str),
   main: bool,
   by: str,
-  kind: str,
-  ts: num,
+  ts: int,
   text: str,
   mentions: strs,
   re: v.nullable(str),
-  body: v.unknown(),
-  state: v.nullable(
-    v.object({
-      status: str,
-      by: v.optional(str),
-      at: v.optional(num),
-      note: v.optional(str),
-      choice: v.optional(str),
-      text: v.optional(str),
-      reply: v.optional(str),
-      ms: v.optional(num),
-      act: v.optional(Envelope),
-    }),
-  ),
   env: v.optional(Envelope),
-});
+};
+
+function message<K extends string, B extends v.GenericSchema, S extends v.GenericSchema>(
+  kind: K,
+  body: B,
+  state: S,
+) {
+  return v.object({ ...MsgFields, kind: v.literal(kind), body, state });
+}
+
+const noCard = v.null();
+export const MsgRow = v.variant('kind', [
+  message('text', EmptyBody, noCard),
+  message('progress', EmptyBody, noCard),
+  message('question', EmptyBody, noCard),
+  message('reply', EmptyBody, noCard),
+  message('brief', BriefBody, BriefState),
+  message('task', v.object({ task: str }), noCard),
+  message('approval', ApprovalBody, ApprovalState),
+  message('decision', DecisionBody, DecisionState),
+  message(
+    'summary',
+    v.object({
+      task: str,
+      score: int,
+      rounds: int,
+      minutes: int,
+      added: int,
+      removed: int,
+      pr: optionalInt,
+    }),
+    noCard,
+  ),
+  message(
+    'call',
+    v.object({ to: str, depth: int, wait: bool }),
+    v.variant('status', [
+      v.object({ status: v.literal('waiting') }),
+      v.object({ status: v.literal('answered'), reply: str, ms: int }),
+    ]),
+  ),
+  message(
+    'report',
+    v.object({ commit: str, files: int, added: int, removed: int, pr: optionalInt }),
+    noCard,
+  ),
+  message(
+    'checks',
+    v.object({
+      stage: str,
+      ok: bool,
+      commit: str,
+      items: v.array(v.object({ name: str, ok: bool, detail: optionalText })),
+    }),
+    noCard,
+  ),
+  message(
+    'review',
+    v.object({
+      task: str,
+      num: int,
+      title: str,
+      commit: str,
+      round: int,
+      score: int,
+      pass: int,
+      ok: bool,
+      items: v.array(v.object({ text: str, veto: bool, file: optionalText, line: optionalInt })),
+    }),
+    noCard,
+  ),
+  message(
+    'handback',
+    v.object({
+      files: strs,
+      commits: v.array(v.object({ sha: str, subject: str })),
+      added: int,
+      removed: int,
+    }),
+    noCard,
+  ),
+  message('system', SystemBody, noCard),
+]);
 export type MsgRow = v.InferOutput<typeof MsgRow>;
 
 export const NoteRow = v.object({
   r: v.literal('note'),
   ...RowHeader,
+  pos: int,
   g: str,
   task: v.nullable(str),
   text: str,
