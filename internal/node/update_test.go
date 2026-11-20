@@ -25,7 +25,7 @@ const newImage = "new release binary\x00"
 
 func writeImage(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -34,53 +34,7 @@ func checkImage(t *testing.T, path, content string) {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil || string(b) != content {
-		t.Fatalf("binary = %q, %v; want %q", b, err, content)
-	}
-}
-
-type updateFixture struct {
-	u              Updater
-	name, manifest string
-	requests       map[string]int
-	restarts       int
-	busy           bool
-}
-
-func setupUpdate(t *testing.T, mux *http.ServeMux) *updateFixture {
-	t.Helper()
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	f := &updateFixture{
-		name:     "solodawn_v1.10.1_" + updateTarget(runtime.GOOS, runtime.GOARCH),
-		requests: make(map[string]int),
-	}
-	f.manifest = fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte(newImage)), f.name)
-	f.u = Updater{
-		ReleaseURL: server.URL + "/latest/download/",
-		Binary:     filepath.Join(t.TempDir(), "solodawn"),
-		Version:    "v1.9.1",
-		Busy:       func() bool { return f.busy },
-		Restart:    func() error { f.restarts++; return nil },
-	}
-	writeImage(t, f.u.Binary, "old binary")
-	return f
-}
-
-func (f *updateFixture) serve(mux *http.ServeMux, image string) {
-	mux.HandleFunc("/latest/download/SHA256SUMS", func(w http.ResponseWriter, r *http.Request) {
-		f.requests["manifest"]++
-		fmt.Fprint(w, f.manifest)
-	})
-	mux.HandleFunc("/latest/download/"+f.name, func(w http.ResponseWriter, r *http.Request) {
-		f.requests["binary"]++
-		fmt.Fprint(w, image)
-	})
-}
-
-func noErr(t *testing.T, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%s = %q, %v; want %q", path, b, err, content)
 	}
 }
 
@@ -91,152 +45,183 @@ func checkUpdateValue(t *testing.T, got, want any) {
 	}
 }
 
-func TestUpdateWhenIdle(t *testing.T) {
+func checkFolder(t *testing.T, dir string, want ...string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	noErr(t, err)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	checkUpdateValue(t, names, want)
+}
+
+func noErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+type updateFixture struct {
+	u        Updater
+	name     string
+	manifest string
+	image    string
+	requests map[string]int
+	restarts int
+	busy     bool
+}
+
+// newUpdate serves release v1.10.1 to a node running v1.9.1 whose binary is
+// the only file in its folder.
+func newUpdate(t *testing.T) (*updateFixture, *http.ServeMux) {
+	t.Helper()
 	mux := http.NewServeMux()
-	f := setupUpdate(t, mux)
-	f.serve(mux, newImage)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	f := &updateFixture{
+		name:     "solodawn_v1.10.1_" + updateTarget(runtime.GOOS, runtime.GOARCH),
+		image:    newImage,
+		requests: map[string]int{},
+	}
+	f.manifest = fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte(newImage)), f.name)
+	f.u = Updater{
+		ReleaseURL: server.URL + "/download",
+		Binary:     filepath.Join(t.TempDir(), "solodawn"),
+		Version:    "v1.9.1",
+		Busy:       func() bool { return f.busy },
+		Restart:    func() error { f.restarts++; return nil },
+	}
+	writeImage(t, f.u.Binary, "old binary")
+	return f, mux
+}
+
+func (f *updateFixture) serve(mux *http.ServeMux) {
+	mux.HandleFunc("/download/SHA256SUMS", func(w http.ResponseWriter, _ *http.Request) {
+		f.requests["SHA256SUMS"]++
+		fmt.Fprint(w, f.manifest)
+	})
+	mux.HandleFunc("/download/"+f.name, func(w http.ResponseWriter, _ *http.Request) {
+		f.requests["binary"]++
+		fmt.Fprint(w, f.image)
+	})
+}
+
+func TestUpdateInstallsThenRestartsWhenIdle(t *testing.T) {
+	f, mux := newUpdate(t)
+	f.serve(mux)
 	now := time.Now()
 	noErr(t, f.u.Apply())
+	f.busy = true
 	noErr(t, f.u.Check(t.Context(), now))
-	f.busy = true // a session started during download
-	noErr(t, f.u.Apply())
-	noErr(t, f.u.Check(t.Context(), now.Add(48*time.Hour)))
-	checkImage(t, f.u.Binary, "old binary")
-	checkUpdateValue(t, f.u.Status, (*UpdateStatus)(nil))
-	checkUpdateValue(t, f.restarts, 0)
+	checkImage(t, f.u.Binary, newImage)
 	info, err := os.Stat(f.u.Binary)
 	noErr(t, err)
+	checkUpdateValue(t, info.Mode(), fs.FileMode(0o755))
+	checkFolder(t, filepath.Dir(f.u.Binary), "solodawn")
+	checkUpdateValue(t, f.u.Status, &UpdateStatus{Version: "v1.10.1", Status: "pending"})
+	noErr(t, f.u.Apply())
+	checkUpdateValue(t, f.restarts, 0)
 	f.busy = false
 	noErr(t, f.u.Apply())
-	noErr(t, f.u.Apply())
-	checkImage(t, f.u.Binary, newImage)
-	installed, err := os.Stat(f.u.Binary)
-	noErr(t, err)
-	checkUpdateValue(t, installed.Mode(), info.Mode())
-	checkUpdateValue(t, f.u.Status, &UpdateStatus{Version: "1.10.1", Status: "pending"})
 	checkUpdateValue(t, f.restarts, 1)
-	checkUpdateValue(t, f.requests, map[string]int{"manifest": 1, "binary": 1})
+	// An installed release waits for its restart; no further check runs.
+	noErr(t, f.u.Check(t.Context(), now.Add(48*time.Hour)))
+	checkUpdateValue(t, f.requests, map[string]int{"SHA256SUMS": 1, "binary": 1})
+}
+
+func TestUpdateRestartError(t *testing.T) {
+	f, mux := newUpdate(t)
+	f.serve(mux)
+	noErr(t, f.u.Check(t.Context(), time.Now()))
+	f.u.Restart = func() error { return io.ErrClosedPipe }
+	checkUpdateValue(t, f.u.Apply(), io.ErrClosedPipe)
 }
 
 func TestUpdateMismatchAndDailyCheck(t *testing.T) {
-	mux := http.NewServeMux()
-	f := setupUpdate(t, mux)
-	f.serve(mux, "different bytes")
+	f, mux := newUpdate(t)
+	f.image = "different bytes"
+	f.serve(mux)
 	var logged bytes.Buffer
-	oldWriter := log.Writer()
+	writer, flags := log.Writer(), log.Flags()
 	log.SetOutput(&logged)
-	t.Cleanup(func() { log.SetOutput(oldWriter) })
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(writer); log.SetFlags(flags) })
 	now := time.Now()
-	checkUpdateValue(t, f.u.Check(t.Context(), now), errUpdateMismatch)
-	if !strings.HasSuffix(logged.String(), errUpdateMismatch.Error()+" for "+f.name+"\n") {
-		t.Fatalf("log = %q", logged.String())
-	}
-	noErr(t, f.u.Apply())
+	noErr(t, f.u.Check(t.Context(), now))
+	checkUpdateValue(t, logged.String(), "self-update: SHA-256 mismatch for "+f.name+"\n")
 	checkImage(t, f.u.Binary, "old binary")
-	assertOnlyInstalled(t, f.u.Binary)
-	checkUpdateValue(t, f.u.Status, &UpdateStatus{Version: "1.10.1", Status: "mismatch"})
+	checkFolder(t, filepath.Dir(f.u.Binary), "solodawn")
+	checkUpdateValue(t, f.u.Status, &UpdateStatus{Version: "v1.10.1", Status: "mismatch"})
+	noErr(t, f.u.Apply())
 	checkUpdateValue(t, f.restarts, 0)
 	f.u.Version = "v1.10.1"
 	noErr(t, f.u.Check(t.Context(), now.Add(24*time.Hour-time.Nanosecond)))
-	checkUpdateValue(t, f.requests, map[string]int{"manifest": 1, "binary": 1})
+	checkUpdateValue(t, f.requests, map[string]int{"SHA256SUMS": 1, "binary": 1})
 	noErr(t, f.u.Check(t.Context(), now.Add(24*time.Hour)))
 	checkUpdateValue(t, f.u.Status, (*UpdateStatus)(nil))
-	checkUpdateValue(t, f.requests, map[string]int{"manifest": 2, "binary": 1})
+	checkUpdateValue(t, f.requests, map[string]int{"SHA256SUMS": 2, "binary": 1})
 }
 
-func assertOnlyInstalled(t *testing.T, path string) {
-	t.Helper()
-	entries, err := os.ReadDir(filepath.Dir(path))
-	noErr(t, err)
-	if len(entries) != 1 || entries[0].Name() != filepath.Base(path) {
-		t.Fatalf("unexpected entries: %v", entries)
-	}
+func TestUpdateFailures(t *testing.T) {
+	f, mux := newUpdate(t)
+	now := time.Now()
+	checkUpdateValue(t, fmt.Sprint(f.u.Check(t.Context(), now)), "self-update: SHA256SUMS: 404 Not Found")
+	mux.HandleFunc("/download/SHA256SUMS", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, f.manifest) })
+	checkUpdateValue(t, fmt.Sprint(f.u.Check(t.Context(), now.Add(24*time.Hour))), "self-update: "+f.name+": 404 Not Found")
+	f.manifest = "xyz  " + f.name
+	checkUpdateValue(t, fmt.Sprint(f.u.Check(t.Context(), now.Add(48*time.Hour))), "self-update: no SHA256SUMS entry for "+updateTarget(runtime.GOOS, runtime.GOARCH))
+	checkImage(t, f.u.Binary, "old binary")
+	checkFolder(t, filepath.Dir(f.u.Binary), "solodawn")
+	checkUpdateValue(t, f.u.Status, (*UpdateStatus)(nil))
 }
 
-func TestApplyFailures(t *testing.T) {
-	mux := http.NewServeMux()
-	f := setupUpdate(t, mux)
-	f.serve(mux, newImage)
-	noErr(t, f.u.Check(t.Context(), time.Now()))
+func TestUpdateInstallFailure(t *testing.T) {
+	f, mux := newUpdate(t)
+	f.serve(mux)
 	noErr(t, os.Remove(f.u.Binary))
-	if err := f.u.Apply(); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("install: got %v, want ErrNotExist", err)
+	noErr(t, os.MkdirAll(filepath.Join(f.u.Binary, "in use"), 0o700))
+	var rename *os.LinkError
+	if err := f.u.Check(t.Context(), time.Now()); !errors.As(err, &rename) || rename.Op != "rename" || rename.New != f.u.Binary {
+		t.Fatalf("install over a folder: %v", err)
 	}
-	writeImage(t, f.u.Binary, "old binary")
-	f.u.Restart = func() error { return io.ErrClosedPipe }
-	if err := f.u.Apply(); err != io.ErrClosedPipe {
-		t.Fatalf("restart: got %v", err)
-	}
-	checkImage(t, f.u.Binary, newImage)
-	f.u.Restart = func() error { f.restarts++; return nil }
-	f.busy = true
-	noErr(t, f.u.Apply())
-	if f.restarts != 0 {
-		t.Fatal("retried restart while busy")
-	}
-	f.busy = false
-	noErr(t, f.u.Apply())
-	if f.restarts != 1 {
-		t.Fatalf("restart requests = %d", f.restarts)
+	checkUpdateValue(t, f.u.Status, (*UpdateStatus)(nil))
+}
+
+func TestUpdateRequestErrors(t *testing.T) {
+	u := Updater{ReleaseURL: "https://%zz"}
+	_, err := u.get(t.Context(), "file")
+	checkUpdateValue(t, fmt.Sprint(err), `parse "https://%zz/file": invalid URL escape "%zz"`)
+	u.ReleaseURL = "https://example.invalid"
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := u.get(ctx, "file"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled request: %v", err)
 	}
 }
 
 func TestReleaseSelection(t *testing.T) {
 	for _, tc := range []struct {
-		version, current string
-		newer            bool
+		tag, current string
+		newer        bool
 	}{
 		{"v2.0.0", "v1.9.9", true}, {"v1.3.0", "v1.2.9", true}, {"v1.0.10", "v1.0.9", true},
-		{"v1.2.3", "v1.2.3", false}, {"v1.1.9", "v1.2.0", false}, {"v1.0.1", "dev", false},
-		{"1.2.3", "v1.2.0", false}, {"v1.2.3", "1.2.0", false}, {"v1.2.3-rc.1", "v1.2.0", false},
+		{"v1.2.3", "v1.2.3", false}, {"v1.1.9", "v1.2.0", false}, {"v1.0.9", "v1.0.10", false},
+		{"v1.0.1", "dev", false}, {"1.2.3", "v1.2.0", false}, {"v1.2.3-rc.1", "v1.2.0", false},
+		{"v01.2.3", "v1.2.0", false},
 	} {
-		t.Run(tc.version+"_vs_"+tc.current, func(t *testing.T) {
-			checkUpdateValue(t, newerRelease(tc.version, tc.current), tc.newer)
-		})
+		checkUpdateValue(t, []any{tc.tag, tc.current, newerRelease(tc.tag, tc.current)}, []any{tc.tag, tc.current, tc.newer})
 	}
-	sum := strings.Repeat("A", 64)
-	name := "solodawn_v1.2.3_windows_arm64.exe"
-	line := sum + " *" + name + "\r\n"
+}
+
+func TestFindRelease(t *testing.T) {
+	sum := strings.Repeat("a", 64)
 	target := updateTarget("windows", "arm64")
-	file, err := findRelease(strings.NewReader(sum+"  solodawn_v1.2.3_linux_arm64\n"+line), target)
-	noErr(t, err)
-	checkUpdateValue(t, *file, releaseFile{name: name, tag: "v1.2.3", sum: sum})
-	if _, err := findRelease(strings.NewReader(line+line), target); err == nil || err.Error() != "self-update: multiple SHA256SUMS entries for windows_arm64.exe" {
-		t.Fatalf("duplicate entry: %v", err)
-	}
-	_, err = findRelease(iotest.ErrReader(io.ErrUnexpectedEOF), target)
-	if err != io.ErrUnexpectedEOF {
-		t.Fatalf("manifest read: %v", err)
-	}
-}
-
-func TestUpdateHTTPFailures(t *testing.T) {
-	mux := http.NewServeMux()
-	f := setupUpdate(t, mux)
-	now := time.Now()
-	checkUpdateValue(t, fmt.Sprint(f.u.Check(t.Context(), now)), "self-update: SHA256SUMS: 404 Not Found")
-	mux.HandleFunc("/latest/download/SHA256SUMS", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, f.manifest) })
-	checkUpdateValue(t, fmt.Sprint(f.u.Check(t.Context(), now.Add(24*time.Hour))), "self-update: "+f.name+": 404 Not Found")
-	f.manifest = "xyz  " + f.name
-	want := "self-update: no valid SHA256SUMS entry for " + updateTarget(runtime.GOOS, runtime.GOARCH)
-	if err := f.u.Check(t.Context(), now.Add(48*time.Hour)); err == nil || err.Error() != want {
-		t.Fatalf("invalid manifest: %v", err)
-	}
-	checkImage(t, f.u.Binary, "old binary")
-	assertOnlyInstalled(t, f.u.Binary)
-}
-
-func TestUpdateRequestErrors(t *testing.T) {
-	u := Updater{ReleaseURL: "https://%zz"}
-	if _, err := u.open(t.Context(), "file"); err == nil || err.Error() != `parse "https://%zz/file": invalid URL escape "%zz"` {
-		t.Fatalf("invalid URL: %v", err)
-	}
-	u.ReleaseURL = "https://example.invalid"
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := u.open(ctx, "file"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("canceled request: %v", err)
-	}
+	name, tag, got, err := findRelease(strings.NewReader(sum+"  solodawn_v1.2.3_linux_arm64\n"+sum+"  solodawn_v1.2.3_windows_arm64.exe\r\n"), target)
+	checkUpdateValue(t, []any{name, tag, got, err}, []any{"solodawn_v1.2.3_windows_arm64.exe", "v1.2.3", sum, nil})
+	_, _, _, err = findRelease(iotest.ErrReader(io.ErrUnexpectedEOF), target)
+	checkUpdateValue(t, err, io.ErrUnexpectedEOF)
 }
 
 func TestStageErrors(t *testing.T) {
@@ -244,35 +229,30 @@ func TestStageErrors(t *testing.T) {
 	if _, err := stageRelease(filepath.Join(dir, "missing"), strings.NewReader(""), ""); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("create stage: %v", err)
 	}
-	if _, err := stageRelease(dir, iotest.ErrReader(io.ErrUnexpectedEOF), ""); !errors.Is(err, io.ErrUnexpectedEOF) {
+	if _, err := stageRelease(dir, iotest.ErrReader(io.ErrUnexpectedEOF), ""); !errors.Is(err, io.ErrUnexpectedEOF) || err.Error() != "unexpected EOF" {
 		t.Fatalf("download: %v", err)
 	}
-	entries, err := os.ReadDir(dir)
-	noErr(t, err)
-	if len(entries) != 0 {
-		t.Fatalf("partial downloads: %v", entries)
-	}
+	checkFolder(t, dir)
 }
 
-func TestWindowsInstall(t *testing.T) {
+func TestInstallRelease(t *testing.T) {
 	dir := t.TempDir()
 	binary, staged := filepath.Join(dir, "solodawn.exe"), filepath.Join(dir, "stage")
-	writeImage(t, binary, "old")
 	if err := installRelease(staged, binary, "windows"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("missing staged file: %v", err)
 	}
 	writeImage(t, staged, "new")
-	noErr(t, os.Mkdir(binary+".old", 0700))
-	if err := installRelease(staged, binary, "windows"); err == nil {
-		t.Fatal("replaced a directory with the backup")
+	if err := installRelease(staged, binary, "windows"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing binary: %v", err)
 	}
-	checkImage(t, binary, "old")
-	noErr(t, os.Remove(binary+".old"))
-	if err := installRelease(binary, binary, "windows"); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("failed second rename: %v", err)
-	}
-	checkImage(t, binary, "old") // rollback restored the running version
+	writeImage(t, binary, "old")
+	writeImage(t, binary+".old", "older")
 	noErr(t, installRelease(staged, binary, "windows"))
 	checkImage(t, binary, "new")
 	checkImage(t, binary+".old", "old")
+	writeImage(t, staged, "newer")
+	noErr(t, installRelease(staged, binary, "linux"))
+	checkImage(t, binary, "newer")
+	checkImage(t, binary+".old", "old")
+	checkFolder(t, dir, "solodawn.exe", "solodawn.exe.old")
 }

@@ -20,17 +20,16 @@ import (
 	"time"
 )
 
-// UpdateStatus is the update field of host.info. It is nil before installation
-// unless a downloaded binary failed verification.
+// UpdateStatus is the update field of host.info (contracts/datachannel.md 7).
 type UpdateStatus struct {
 	Version string `json:"version"`
 	Status  string `json:"status"`
 }
 
-// Updater is owned by the node. ReleaseURL is the latest release's download
-// directory (releases/latest/download on GitHub). Binary is the installed path.
-// The owner serializes Check and Apply, and serializes Apply with admission
-// of turns and takeovers. Only Check uses the network.
+// Updater is owned by the node, which calls Check and Apply from one goroutine.
+// ReleaseURL is the latest release's download directory (releases/latest/download
+// on GitHub), Binary the installed executable, Version the running release tag.
+// Busy reports whether a session is working or in takeover.
 type Updater struct {
 	ReleaseURL string
 	Binary     string
@@ -40,41 +39,71 @@ type Updater struct {
 	Status     *UpdateStatus
 
 	nextCheck time.Time
-	ready     *releaseFile
 }
 
-type releaseFile struct {
-	name, tag, sum string
-	staged         string
-}
-
-var errUpdateMismatch = errors.New("self-update: SHA-256 mismatch")
-
-// Check reads the latest manifest once a day. A verified download waits in
-// the installation directory until Apply can install it.
+// Check reads the latest release once a day. A newer binary whose SHA-256
+// matches SHA256SUMS replaces Binary and waits for Apply to restart; a
+// mismatch is logged and kept in Status, and nothing is replaced.
 func (u *Updater) Check(ctx context.Context, now time.Time) error {
-	if u.ready != nil || now.Before(u.nextCheck) {
+	if u.pending() || now.Before(u.nextCheck) {
 		return nil
 	}
 	u.nextCheck = now.Add(24 * time.Hour)
-	body, err := u.open(ctx, "SHA256SUMS")
+	name, tag, sum, err := u.latest(ctx)
 	if err != nil {
 		return err
 	}
-	defer body.Close()
-	file, err := findRelease(body, updateTarget(runtime.GOOS, runtime.GOARCH))
-	if err != nil {
-		return err
+	u.Status = nil
+	if newerRelease(tag, u.Version) {
+		u.Status, err = u.update(ctx, name, tag, sum)
 	}
-	if !newerRelease(file.tag, u.Version) {
-		u.Status = nil
-		return nil
-	}
-	return u.prepare(ctx, file)
+	return err
 }
 
-func (u *Updater) open(ctx context.Context, name string) (io.ReadCloser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(u.ReleaseURL, "/")+"/"+name, nil)
+func (u *Updater) latest(ctx context.Context) (name, tag, sum string, err error) {
+	sums, err := u.get(ctx, "SHA256SUMS")
+	if err != nil {
+		return "", "", "", err
+	}
+	defer sums.Close()
+	return findRelease(sums, updateTarget(runtime.GOOS, runtime.GOARCH))
+}
+
+func (u *Updater) update(ctx context.Context, name, tag, sum string) (*UpdateStatus, error) {
+	body, err := u.get(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	staged, err := stageRelease(filepath.Dir(u.Binary), body, sum)
+	if errors.Is(err, errUpdateMismatch) {
+		log.Printf("%v for %s", err, name)
+		return &UpdateStatus{Version: tag, Status: "mismatch"}, nil
+	}
+	if err == nil {
+		err = installRelease(staged, u.Binary, runtime.GOOS)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &UpdateStatus{Version: tag, Status: "pending"}, nil
+}
+
+// Apply restarts into the installed release when no session is busy. The node
+// calls it after Check and whenever a session leaves working or takeover.
+func (u *Updater) Apply() error {
+	if !u.pending() || u.Busy() {
+		return nil
+	}
+	return u.Restart()
+}
+
+func (u *Updater) pending() bool {
+	return u.Status != nil && u.Status.Status == "pending"
+}
+
+func (u *Updater) get(ctx context.Context, name string) (io.ReadCloser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.ReleaseURL+"/"+name, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -97,121 +126,63 @@ func updateTarget(goos, arch string) string {
 	return target
 }
 
-var stableTag = regexp.MustCompile(`^v(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){2}$`)
-
-func findRelease(body io.Reader, target string) (*releaseFile, error) {
-	line := regexp.MustCompile(`^([[:xdigit:]]{64}) [ *](solodawn_(v[0-9A-Za-z.+-]+)_` + regexp.QuoteMeta(target) + `)$`)
-	var file *releaseFile
-	scanner := bufio.NewScanner(body)
+// findRelease returns the file, tag and SHA-256 of this target's line in SHA256SUMS.
+func findRelease(sums io.Reader, target string) (name, tag, sum string, err error) {
+	line := regexp.MustCompile(`^([0-9a-f]{64})  (solodawn_(v[^_]+)_` + regexp.QuoteMeta(target) + `)$`)
+	scanner := bufio.NewScanner(sums)
 	for scanner.Scan() {
-		m := line.FindStringSubmatch(scanner.Text())
-		if m == nil {
-			continue
+		if m := line.FindStringSubmatch(scanner.Text()); m != nil {
+			return m[2], m[3], m[1], nil
 		}
-		if file != nil {
-			return nil, fmt.Errorf("self-update: multiple SHA256SUMS entries for %s", target)
-		}
-		file = &releaseFile{name: m[2], tag: m[3], sum: m[1]}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return "", "", "", err
 	}
-	if file == nil {
-		return nil, fmt.Errorf("self-update: no valid SHA256SUMS entry for %s", target)
-	}
-	return file, nil
+	return "", "", "", fmt.Errorf("self-update: no SHA256SUMS entry for %s", target)
 }
 
-// Compare the three decimal components of stable releases without integer
-// overflow. A development build has no release version to advance.
+var stableTag = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
+// newerRelease compares two vMAJOR.MINOR.PATCH tags by their three numbers. A
+// pre-release tag is never newer, and a development build is never updated.
 func newerRelease(tag, current string) bool {
 	if !stableTag.MatchString(tag) || !stableTag.MatchString(current) {
 		return false
 	}
-	parts := strings.Split(strings.TrimPrefix(current, "v"), ".")
-	order := slices.CompareFunc(strings.Split(strings.TrimPrefix(tag, "v"), "."), parts, func(a, b string) int {
-		return cmp.Or(cmp.Compare(len(a), len(b)), strings.Compare(a, b))
-	})
-	return order > 0
+	byNumber := func(a, b string) int { return cmp.Or(cmp.Compare(len(a), len(b)), strings.Compare(a, b)) }
+	return slices.CompareFunc(stableTag.FindStringSubmatch(tag)[1:], stableTag.FindStringSubmatch(current)[1:], byNumber) > 0
 }
 
-func (u *Updater) prepare(ctx context.Context, file *releaseFile) error {
-	body, err := u.open(ctx, file.name)
-	if err != nil {
-		return err
-	}
-	defer body.Close()
-	file.staged, err = stageRelease(filepath.Dir(u.Binary), body, file.sum)
-	if errors.Is(err, errUpdateMismatch) {
-		u.Status = &UpdateStatus{Version: strings.TrimPrefix(file.tag, "v"), Status: "mismatch"}
-		log.Printf("%v for %s", err, file.name)
-	}
-	if err != nil {
-		return err
-	}
-	u.Status = nil
-	u.ready = file
-	return nil
-}
+var errUpdateMismatch = errors.New("self-update: SHA-256 mismatch")
 
+// stageRelease downloads into the binary's folder, so that installing is a rename.
 func stageRelease(dir string, body io.Reader, sum string) (string, error) {
 	f, err := os.CreateTemp(dir, ".solodawn-update-*")
 	if err != nil {
 		return "", err
 	}
 	hash := sha256.New()
-	_, copyErr := io.Copy(io.MultiWriter(f, hash), body)
-	if err := errors.Join(copyErr, f.Close()); err != nil {
+	_, err = io.Copy(io.MultiWriter(f, hash), body)
+	if err = errors.Join(err, f.Close()); err == nil && hex.EncodeToString(hash.Sum(nil)) != sum {
+		err = errUpdateMismatch
+	}
+	if err != nil {
 		os.Remove(f.Name())
 		return "", err
-	}
-	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), sum) {
-		os.Remove(f.Name())
-		return "", errUpdateMismatch
 	}
 	return f.Name(), nil
 }
 
-// Apply is called after Check and when session activity changes. Busy must
-// include every working or takeover session. Restart requests the handoff to
-// the newly installed binary. A failed restart can be tried again when idle.
-func (u *Updater) Apply() error {
-	if u.ready == nil || u.Busy() {
-		return nil
+func installRelease(staged, binary, goos string) error {
+	if err := os.Chmod(staged, 0o755); err != nil {
+		return err
 	}
-	if u.ready.staged != "" {
-		if err := installRelease(u.ready.staged, u.Binary, runtime.GOOS); err != nil {
+	if goos == "windows" {
+		// Windows lets a running executable be renamed, not replaced. The
+		// previous image is overwritten by the next update.
+		if err := os.Rename(binary, binary+".old"); err != nil {
 			return err
 		}
-		u.ready.staged = ""
-		u.Status = &UpdateStatus{Version: strings.TrimPrefix(u.ready.tag, "v"), Status: "pending"}
 	}
-	if err := u.Restart(); err != nil {
-		return err
-	}
-	u.ready = nil
-	return nil
-}
-
-func installRelease(staged, binary, goos string) error {
-	info, err := os.Stat(binary)
-	if err != nil {
-		return err
-	}
-	if err := os.Chmod(staged, info.Mode().Perm()); err != nil {
-		return err
-	}
-	if goos != "windows" {
-		return os.Rename(staged, binary)
-	}
-	// Windows permits moving the running executable aside, but not
-	// overwriting it. The previous image can be overwritten after restart.
-	old := binary + ".old"
-	if err := os.Rename(binary, old); err != nil {
-		return err
-	}
-	if err := os.Rename(staged, binary); err != nil {
-		return errors.Join(err, os.Rename(old, binary))
-	}
-	return nil
+	return os.Rename(staged, binary)
 }
