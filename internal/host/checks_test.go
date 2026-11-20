@@ -53,9 +53,6 @@ func checkTestRunner() CheckRunner {
 			}
 			return nil
 		},
-		ClassifyPath: func(path string) (bool, bool) {
-			return path == "source.go", path == "source_test.go"
-		},
 	}
 }
 
@@ -222,15 +219,35 @@ func TestChecksOnlyConsecutiveAddedLinesReachSecretMatcher(t *testing.T) {
 	}
 }
 
-func TestChecksNULDelimitedNames(t *testing.T) {
-	var got []string
-	runner := CheckRunner{ClassifyPath: func(name string) (bool, bool) {
-		got = append(got, name)
-		return false, false
-	}}
-	err := runner.checkTestFiles("one file\x00line\nbreak\x00")
-	if err != nil || !slices.Equal(got, []string{"one file", "line\nbreak"}) {
-		t.Fatalf("names %q, err %v", got, err)
+func TestChecksRecognizeTestFilenamesAndDirectories(t *testing.T) {
+	for _, name := range []string{
+		"dir/foo_test.go", "ui/view.test.ts", "view.spec.jsx", "scripts/test_words.py",
+		"tests/fixture", "dir/tests/deep/case.txt", "__tests__/case", "ui/__tests__/a b\nc",
+	} {
+		if err := checkTestFiles("src/a.go\x00" + name + "\x00"); err != nil {
+			t.Errorf("test file %q: %v", name, err)
+		}
+	}
+	for _, name := range []string{
+		"mytests/view.ts", "testsuffix/foo_tested.go", "test_dir/source.rs", "view.test.ts/entry.js",
+		"tests", "foo.spec", "test.py", "Tests/a.py", "test-fixture.py", "before.go\nafter.txt",
+	} {
+		err := checkTestFiles("ui/a.SVELTE\x00" + name + "\x00")
+		if err == nil || err.Error() != "source changed without a test file" {
+			t.Errorf("non-test %q: got %v", name, err)
+		}
+	}
+}
+
+func TestChecksOnlyCountCodeExtensionsAsSource(t *testing.T) {
+	if err := checkTestFiles("docs/a.md\x00icon.png\x00package.json\x00Makefile\x00before.go\nafter.txt\x00"); err != nil {
+		t.Errorf("non-code files: %v", err)
+	}
+	for _, name := range []string{"native/one.CPP", "src/a b\nc.py", "web/a.tsx", "src/thing.go"} {
+		err := checkTestFiles(name + "\x00notes.md\x00")
+		if err == nil || err.Error() != "source changed without a test file" {
+			t.Errorf("source %q: got %v", name, err)
+		}
 	}
 }
 

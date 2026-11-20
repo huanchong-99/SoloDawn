@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"reflect"
 	"regexp"
 	"runtime"
@@ -18,11 +19,9 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
-// CheckRunner uses the host's shared secret checker and source/test path
-// conventions. Neither hard check is configurable by the group.
+// CheckRunner uses the host's shared outbound secret checker on added lines.
 type CheckRunner struct {
-	CheckSecret  func(text string) error
-	ClassifyPath func(path string) (source, test bool)
+	CheckSecret func(text string) error
 }
 
 var ErrDirtyCheckTree = errors.New("conflict: the worktree has uncommitted changes")
@@ -175,7 +174,7 @@ func (r CheckRunner) hardChecks(ctx context.Context, dir, revisions string) ([]p
 	}
 	return []proto.CheckItem{
 		checkedItem("secrets", r.checkAddedLines(patch)),
-		checkedItem("tests", r.checkTestFiles(names)),
+		checkedItem("tests", checkTestFiles(names)),
 	}, nil
 }
 
@@ -192,17 +191,30 @@ func (r CheckRunner) checkAddedLines(patch string) error {
 	return nil
 }
 
-func (r CheckRunner) checkTestFiles(names string) error {
+var checkCodeExtensions = strings.Fields(`
+	.asm .bash .bat .c .cc .cjs .clj .cljc .cljs .cmd .cpp .cs .css .cts .cxx
+	.dart .erl .ex .exs .fs .fsi .fsx .go .h .hh .hpp .hrl .htm .html .hxx
+	.java .js .jsx .kt .kts .less .lua .m .mjs .mm .mts .php .pl .pm .ps1
+	.py .pyi .r .rb .rs .s .sass .scala .scss .sh .sql .svelte .swift
+	.ts .tsx .vb .vue .zsh`)
+
+func isCheckTestFile(name string) bool {
+	dir, file := path.Split(name)
+	return strings.Contains("/"+dir, "/tests/") || strings.Contains("/"+dir, "/__tests__/") ||
+		strings.HasPrefix(file, "test_") || strings.Contains(file, "_test.") ||
+		strings.Contains(file, ".test.") || strings.Contains(file, ".spec.")
+}
+
+func checkTestFiles(names string) error {
 	sourceChanged := false
 	for name := range strings.SplitSeq(names, "\x00") {
 		if name == "" {
 			break
 		}
-		source, test := r.ClassifyPath(name)
-		if test {
+		if isCheckTestFile(name) {
 			return nil
 		}
-		sourceChanged = sourceChanged || source
+		sourceChanged = sourceChanged || slices.Contains(checkCodeExtensions, strings.ToLower(path.Ext(name)))
 	}
 	if sourceChanged {
 		return errors.New("source changed without a test file")

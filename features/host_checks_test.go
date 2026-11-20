@@ -44,7 +44,6 @@ func hostCheckSteps(sc *godog.ScenarioContext, f fixtures) {
 			}
 			return nil
 		},
-		ClassifyPath: func(string) (bool, bool) { return false, false }, // Fixtures change only a note.
 	}
 	run := func(commands ...string) {
 		group := proto.GroupRow{Checks: commands, Limits: proto.Limits{TurnMinutes: 1}}
