@@ -247,9 +247,11 @@ Run once with a scratch GitHub repository and once with `forge: none`.
   Across ten switches no start comes before the previous exit.
 - **A7.5** On a relayed path the button is disabled and `takeover.start`
   returns `relay`.
-- **A7.9** With a terminal open on a direct path, UDP and the ICE-TCP port
-  are blocked as in A1.3: when the path becomes `relay` the `pty` channel
-  closes and the node hands back (`flows/connect.md` step 9).
+- **A7.9** With `pty` open on a direct path, keep TURN reachable and make the
+  same peer connection select a relayed pair. Verify the transition from its
+  selected-pair statistics. The end that observes `relay` closes `pty`, the
+  node hands back, and `host.info` still succeeds on the original `ctl`
+  without a new offer.
 - **A7.6** Closing the terminal in order (the button, or a tab close that
   the browser signals) hands back within 2 seconds. A connection that is
   simply lost hands back when the node's stack reports it. `takeover.start`
