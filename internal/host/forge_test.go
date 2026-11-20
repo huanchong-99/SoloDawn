@@ -210,62 +210,116 @@ func TestForgeGHCannotStart(t *testing.T) {
 	calls()
 }
 
-func TestForgeHostedPoll(t *testing.T) {
-	f := TaskForge{Worktree: t.TempDir()}
-	calls := fakeForgeGH(t,
-		forgeAnswer{Stdout: `{"headRefOid":"stale","statusCheckRollup":[]}`},
-		forgeAnswer{Stdout: `{"headRefOid":"new","statusCheckRollup":[{"__typename":"CheckRun","name":"build","status":"QUEUED"}]}`},
-		forgeAnswer{Stdout: `{"headRefOid":"new","statusCheckRollup":[]}`},
-	)
-	synctest.Test(t, func(t *testing.T) {
-		start := time.Now()
-		result, err := f.WaitHostedChecks(t.Context(), 4, "new")
-		assertForge(t, err, nil)
-		assertForge(t, result, &proto.ChecksBody{Stage: "cloud", Commit: "new", OK: true, Items: []proto.CheckItem{}})
-		assertForge(t, time.Since(start), 60*time.Second)
-	})
-	view := []string{"pr", "view", "4", "--json", "headRefOid,statusCheckRollup"}
-	calls(view, view, view)
+func hostedView(head, rollup string) forgeAnswer {
+	return forgeAnswer{Stdout: fmt.Sprintf(`{"headRefOid":%q,"statusCheckRollup":[%s]}`, head, rollup)}
 }
 
-func TestForgePollStops(t *testing.T) {
+// waitHosted runs WaitHostedChecks on a virtual clock and checks the result,
+// the time it took and that every read asked for the head and the rollup.
+func waitHosted(t *testing.T, since time.Duration, answers []forgeAnswer, want *proto.ChecksBody, took time.Duration) {
+	t.Helper()
 	f := TaskForge{Worktree: t.TempDir()}
-	calls := fakeForgeGH(t, forgeAnswer{Stdout: `{"headRefOid":"stale","statusCheckRollup":[]}`},
-		forgeAnswer{Stderr: "login required", Code: 1}, forgeAnswer{Stdout: "{"})
+	calls := fakeForgeGH(t, answers...)
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		result, err := f.WaitHostedChecks(t.Context(), 4, "new", start.Add(-since))
+		assertForge(t, err, nil)
+		assertForge(t, result, want)
+		assertForge(t, time.Since(start), took)
+	})
+	views := make([][]string, len(answers))
+	for i := range views {
+		views[i] = []string{"pr", "view", "4", "--json", "headRefOid,statusCheckRollup"}
+	}
+	calls(views...)
+}
+
+const (
+	queuedRun  = `{"__typename":"CheckRun","name":"build","status":"QUEUED"}`
+	passedRun  = `{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS"}`
+	failedRun  = `{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"FAILURE"}`
+	lintStatus = `{"__typename":"StatusContext","context":"lint","state":"%s"}`
+)
+
+func TestHostedChecksReportFinishedChecks(t *testing.T) {
+	waitHosted(t, 0, []forgeAnswer{hostedView("new", queuedRun), hostedView("new", failedRun+","+fmt.Sprintf(lintStatus, "SUCCESS"))},
+		&proto.ChecksBody{Stage: "cloud", Commit: "new", OK: false, Items: []proto.CheckItem{
+			{Name: "build", Detail: new("FAILURE")}, {Name: "lint", OK: true, Detail: new("SUCCESS")}}}, 30*time.Second)
+}
+
+// Checks the forge registers a few seconds late are not skipped.
+func TestHostedChecksLateRegistration(t *testing.T) {
+	waitHosted(t, 0, []forgeAnswer{hostedView("new", ""), hostedView("new", passedRun)},
+		&proto.ChecksBody{Stage: "cloud", Commit: "new", OK: true, Items: []proto.CheckItem{{Name: "build", OK: true, Detail: new("SUCCESS")}}},
+		30*time.Second)
+}
+
+// No checks pass on the second consecutive empty read at the submitted head;
+// a failed read, another head or an unfinished check in between start again.
+func TestHostedChecksNoChecks(t *testing.T) {
+	waitHosted(t, 0, []forgeAnswer{hostedView("new", ""), {Stderr: "login required", Code: 1}, hostedView("new", ""),
+		hostedView("stale", ""), hostedView("new", ""), {Stdout: "{"}, hostedView("new", ""), hostedView("new", queuedRun),
+		hostedView("new", ""), hostedView("new", "")},
+		&proto.ChecksBody{Stage: "cloud", Commit: "new", OK: true, Items: []proto.CheckItem{}}, 270*time.Second)
+}
+
+// After sixty minutes the last read's items stay as they were and the reason
+// is added; a read that fails does not replace them.
+func TestHostedChecksTimeOut(t *testing.T) {
+	timedOut := proto.CheckItem{Name: "hosted checks", Detail: new("hosted checks timed out")}
+	waitHosted(t, 59*time.Minute, []forgeAnswer{hostedView("new", queuedRun+","+fmt.Sprintf(lintStatus, "PENDING")),
+		hostedView("new", passedRun+","+fmt.Sprintf(lintStatus, "EXPECTED")), {Stderr: "login required", Code: 1}},
+		&proto.ChecksBody{Stage: "cloud", Commit: "new", OK: false, Items: []proto.CheckItem{
+			{Name: "build", OK: true, Detail: new("SUCCESS")}, {Name: "lint", Detail: new("EXPECTED")}, timedOut}}, time.Minute)
+	waitHosted(t, time.Hour, []forgeAnswer{hostedView("stale", passedRun)},
+		&proto.ChecksBody{Stage: "cloud", Commit: "new", OK: false, Items: []proto.CheckItem{timedOut}}, 0)
+}
+
+func TestHostedChecksStopOnCancel(t *testing.T) {
+	f := TaskForge{Worktree: t.TempDir()}
+	calls := fakeForgeGH(t, hostedView("new", queuedRun))
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
-		result, err := f.WaitHostedChecks(ctx, 4, "new")
+		result, err := f.WaitHostedChecks(ctx, 4, "new", time.Now())
 		assertForge(t, result, (*proto.ChecksBody)(nil))
 		assertForge(t, err, context.DeadlineExceeded)
 	})
-	for _, want := range []string{"login required: exit status 1", "unexpected end of JSON input"} {
-		result, err := f.WaitHostedChecks(t.Context(), 4, "new")
-		assertForge(t, result, (*proto.ChecksBody)(nil))
-		assertForge(t, err.Error(), want)
-	}
-	view := []string{"pr", "view", "4", "--json", "headRefOid,statusCheckRollup"}
-	calls(view, view, view)
+	calls([]string{"pr", "view", "4", "--json", "headRefOid,statusCheckRollup"})
 }
 
-func TestForgeCheckRollup(t *testing.T) {
-	checks := []forgeCheck{
-		{TypeName: "CheckRun", Name: "build", Status: "COMPLETED", Conclusion: "FAILURE"},
-		{TypeName: "StatusContext", Context: "lint", State: "SUCCESS"},
-		{TypeName: "StatusContext", Context: "legacy", State: "ERROR"},
-		{TypeName: "CheckRun", Name: "unit", Status: "COMPLETED", Conclusion: "SUCCESS"},
-		{TypeName: "CheckRun", Name: "neutral", Status: "COMPLETED", Conclusion: "NEUTRAL"},
-		{TypeName: "CheckRun", Name: "optional", Status: "COMPLETED", Conclusion: "SKIPPED"},
+func TestForgeCheckItems(t *testing.T) {
+	for _, tc := range []struct {
+		check forgeCheck
+		item  proto.CheckItem
+		done  bool
+	}{
+		{forgeCheck{TypeName: "CheckRun", Name: "a", Status: "COMPLETED", Conclusion: "FAILURE"}, proto.CheckItem{Name: "a", Detail: new("FAILURE")}, true},
+		{forgeCheck{TypeName: "CheckRun", Name: "a", Status: "COMPLETED", Conclusion: "SUCCESS"}, proto.CheckItem{Name: "a", OK: true, Detail: new("SUCCESS")}, true},
+		{forgeCheck{TypeName: "CheckRun", Name: "a", Status: "COMPLETED", Conclusion: "NEUTRAL"}, proto.CheckItem{Name: "a", OK: true, Detail: new("NEUTRAL")}, true},
+		{forgeCheck{TypeName: "CheckRun", Name: "a", Status: "COMPLETED", Conclusion: "SKIPPED"}, proto.CheckItem{Name: "a", OK: true, Detail: new("SKIPPED")}, true},
+		{forgeCheck{TypeName: "CheckRun", Name: "a", Status: "IN_PROGRESS"}, proto.CheckItem{Name: "a", Detail: new("IN_PROGRESS")}, false},
+		{forgeCheck{TypeName: "StatusContext", Context: "b", State: "SUCCESS"}, proto.CheckItem{Name: "b", OK: true, Detail: new("SUCCESS")}, true},
+		{forgeCheck{TypeName: "StatusContext", Context: "b", State: "ERROR"}, proto.CheckItem{Name: "b", Detail: new("ERROR")}, true},
+		{forgeCheck{TypeName: "StatusContext", Context: "b", State: "PENDING"}, proto.CheckItem{Name: "b", Detail: new("PENDING")}, false},
+		{forgeCheck{TypeName: "StatusContext", Context: "b", State: "EXPECTED"}, proto.CheckItem{Name: "b", Detail: new("EXPECTED")}, false},
+	} {
+		item, done := tc.check.item()
+		assertForge(t, item, tc.item)
+		assertForge(t, done, tc.done)
 	}
-	items := []proto.CheckItem{
-		{Name: "build", OK: false, Detail: new("FAILURE")}, {Name: "lint", OK: true, Detail: new("SUCCESS")},
-		{Name: "legacy", OK: false, Detail: new("ERROR")}, {Name: "unit", OK: true, Detail: new("SUCCESS")},
-		{Name: "neutral", OK: true, Detail: new("NEUTRAL")}, {Name: "optional", OK: true, Detail: new("SKIPPED")},
+}
+
+func TestHostedChecksToResume(t *testing.T) {
+	task := func(id, state, step, assignee string) proto.TaskRow {
+		return proto.TaskRow{RowHeader: proto.RowHeader{ID: id}, State: state, Step: step, Assignee: assignee, Branch: "task/4-fix",
+			Commit: "new", PR: 12, Checks: proto.TaskChecks{Local: &proto.Check{OK: true, At: 1_700_000_000_123, Commit: "new"}}}
 	}
-	assertForge(t, completedChecks("new", checks), &proto.ChecksBody{Stage: "cloud", Commit: "new", OK: false, Items: items})
-	assertForge(t, completedChecks("new", checks[1:2]), &proto.ChecksBody{Stage: "cloud", Commit: "new", OK: true, Items: items[1:2]})
-	for _, pending := range []forgeCheck{{TypeName: "StatusContext", Context: "lint", State: "EXPECTED"},
-		{TypeName: "StatusContext", Context: "lint", State: "PENDING"}, {TypeName: "CheckRun", Name: "build", Status: "IN_PROGRESS"}} {
-		assertForge(t, completedChecks("new", append(checks[3:4:4], pending)), (*proto.ChecksBody)(nil))
-	}
+	tasks := []proto.TaskRow{task("t1", "active", "cloud_check", "a1"), task("t2", "active", "cloud_check", "a9"),
+		task("t3", "active", "review", "a1"), task("t4", "paused", "cloud_check", "a2"), task("t5", "active", "cloud_check", "a2")}
+	assertForge(t, HostedChecksToResume(tasks, []string{"a1", "a2"}), []HostedCheck{
+		{Task: "t1", Branch: "task/4-fix", Commit: "new", PR: 12, Since: time.UnixMilli(1_700_000_000_123)},
+		{Task: "t5", Branch: "task/4-fix", Commit: "new", PR: 12, Since: time.UnixMilli(1_700_000_000_123)},
+	})
+	assertForge(t, HostedChecksToResume(tasks, nil), []HostedCheck(nil))
 }

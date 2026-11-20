@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/cucumber/godog"
-	"github.com/huanchong-99/SoloDawn/internal/node"
 )
 
 func init() {
@@ -23,38 +22,29 @@ func init() {
 func nodeServiceSteps(sc *godog.ScenarioContext, f fixtures) {
 	var profile string
 	var installed bool
-	// HOME and XDG_CONFIG_HOME name the profile during each operation only. A
-	// subtest with its own Setenv would skip the operation whenever go test
-	// -run names a scenario, since the subtest's name does not match.
-	inProfile := func(operation func() error) error {
-		for _, key := range []string{"HOME", "XDG_CONFIG_HOME"} {
-			value, set := os.LookupEnv(key)
-			defer restoreVar(key, value, set)
-			os.Setenv(key, profile)
+	// The built binary runs with HOME and XDG_CONFIG_HOME in a temporary
+	// profile, and with no node running for it.
+	service := func(op string) error {
+		cmd := exec.Command(f.bin, "service", op)
+		cmd.Env = append(os.Environ(), "HOME="+profile, "XDG_CONFIG_HOME="+profile)
+		out, err := cmd.CombinedOutput()
+		installed = (op == "install") == (err == nil)
+		if err != nil || len(out) != 0 {
+			return fmt.Errorf("solodawn service %s: %v, output %q", op, err, out)
 		}
-		return operation()
+		return nil
 	}
 	sc.Step(`^a clean login registration for the current user$`, func() error {
 		profile = f.t.TempDir()
 		return checkLoginRegistration(profile, false)
 	})
-	sc.Step(`^the node installs its login service$`, func() error {
-		err := inProfile(func() error { return node.InstallService(f.bin) })
-		installed = err == nil
-		return err
-	})
-	remove := func() error {
-		err := inProfile(node.RemoveService)
-		installed = err != nil
-		return err
-	}
-	sc.Step(`^the node removes its login service$`, remove)
+	sc.Step(`^the owner runs "solodawn service (install|remove)" with no node running$`, service)
 	sc.Step(`^the current user has (a|no) SoloDawn login registration$`, func(article string) error {
 		return checkLoginRegistration(profile, article == "a")
 	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if installed {
-			return ctx, remove()
+			return ctx, service("remove")
 		}
 		return ctx, nil
 	})
