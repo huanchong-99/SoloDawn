@@ -90,6 +90,8 @@ func rendezvous(args []string, stderr io.Writer, serve func(node.RendezvousOptio
 	flags.StringVar(&o.TurnDomain, "turn-domain", "", "TURN-over-TLS hostname")
 	flags.StringVar(&o.Cert, "cert", "", "PEM certificate chain for both hostnames")
 	flags.StringVar(&o.Key, "key", "", "PEM certificate private key")
+	flags.StringVar(&o.ACMEDirectory, "acme-directory", "", "ACME server directory URL (empty: Let's Encrypt)")
+	flags.StringVar(&o.ACMECA, "acme-ca", "", "PEM roots for the ACME server's HTTPS only")
 	flags.IntVar(&o.UDPPort, "udp-port", 3478, "STUN and TURN UDP port")
 	flags.Int64Var(&o.QuotaMB, "relay-quota-mb", 50, "per-device UTC daily limit in MiB")
 	flags.BoolVar(&o.NoRelay, "no-relay", false, "offer STUN but no relay")

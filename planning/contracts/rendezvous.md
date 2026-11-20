@@ -284,10 +284,13 @@ solodawn rendezvous --domain rv.example --turn-domain turn.rv.example
 ```
 
 - Obtains certificates automatically for both names, or takes `--cert` and
-  `--key`, one certificate that covers both names.
+  `--key`, one certificate that covers both names. `--acme-directory <url>`
+  (default Let's Encrypt) chooses the ACME server, such as a private step-ca;
+  `--acme-ca <pem file>` holds the roots that server's HTTPS is checked
+  against, in place of the system's and for nothing else.
 - `--relay-quota-mb 50`; `--no-relay`: TLS signalling and STUN only.
   `--listen <address>`: where signalling and the static files are served;
-  alone, over plain HTTP without STUN or TURN.
+  alone, over plain HTTP without STUN or TURN, with the HTTP limits below.
 - Shared TLS port: the handshake within 10 seconds; ALPN `stun.turn` (RFC 7443)
   to TURN, anything else by server name; HTTPS headers within 10 seconds, a
   keep-alive connection closed after 120 idle seconds, never an upgraded
