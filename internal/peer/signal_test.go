@@ -274,6 +274,36 @@ func TestEveryPathChecksEnvelope(t *testing.T) {
 	}
 	eq(t, len(f.b.early), 0)
 }
+
+func TestCertificateMismatchEndsPendingConnection(t *testing.T) {
+	f := newPair(t)
+	c, err := f.a.Offer(t.Context(), f.b.key.ID())
+	check(t, err)
+	t.Cleanup(func() { c.Close() })
+	offer := recv(t, f.aMail["offer"])
+	deliver(t, f.b, f.bMail.route(), offer)
+	var a proto.Answer
+	check(t, proto.Decode([]byte(recv(t, f.bMail["answer"]).Payload), &a))
+	// A local signer advertises a certificate different from its DTLS certificate.
+	lines := strings.Split(a.SDP, "\r\n")
+	for j, line := range lines {
+		if strings.HasPrefix(line, "a=fingerprint:sha-256 ") {
+			lines[j] = "a=fingerprint:sha-256 " + strings.Repeat("00:", 31) + "00"
+		}
+	}
+	a.SDP = strings.Join(lines, "\r\n")
+	deliver(t, f.a, f.aMail.route(), f.b.sign(a))
+	li, _ := hostUDP(t, f.aMail)
+	ri, _ := hostUDP(t, f.bMail)
+	deliver(t, f.b, f.bMail.route(), li)
+	deliver(t, f.a, f.aMail.route(), ri)
+	recv(t, c.Done())
+	select {
+	case <-c.Ready():
+		t.Fatal("ctl opened with wrong certificate")
+	default:
+	}
+}
 func TestCandidateAddOrder(t *testing.T) {
 	for _, role := range []string{"offerer", "answerer"} {
 		t.Run(role, func(t *testing.T) {

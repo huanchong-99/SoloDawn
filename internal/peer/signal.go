@@ -250,8 +250,8 @@ func (p *Peer) create(k link, api *webrtc.API) (*Connection, error) {
 			_ = broadcast(c.ctx, p.paths(k.device), k.device, p.sign(msg))
 		}
 	})
-	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		if state == webrtc.ICEConnectionStateFailed || state == webrtc.ICEConnectionStateClosed {
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
 			go c.Close()
 		}
 	})
