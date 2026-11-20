@@ -394,9 +394,6 @@ func TestLocalMergeRunsNoProjectHooks(t *testing.T) {
 		"pre-commit":         "#!/bin/sh\nexit 1\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if runtime.GOOS == "windows" {
-				return
-			}
 			m := mergeFixture(t)
 			hooks := t.TempDir()
 			mergeOK(t, os.WriteFile(filepath.Join(hooks, name), []byte(hook), 0700))
@@ -419,9 +416,9 @@ func TestLocalMergeRunsNoProjectHooks(t *testing.T) {
 // error, and an inspection after a restart returns it.
 func TestLocalMergeWithoutHooksFolder(t *testing.T) {
 	m := mergeFixture(t)
-	folder := filepath.Join(m.Repo, ".git", "solodawn-no-hooks")
 	mergeFile(t, m.Repo, filepath.Join(".git", "solodawn-no-hooks"), "")
-	want := "mkdir " + folder + ": not a directory"
+	// The system's own text, which differs between systems.
+	want := os.MkdirAll(filepath.Join(m.Repo, ".git", "solodawn-no-hooks"), 0o700).Error()
 	result, err := m.Apply(t.Context())
 	mergeOK(t, err)
 	mergeEqual(t, result, host.MergeResult{Conflict: want})
