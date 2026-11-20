@@ -24,6 +24,10 @@ type Log struct {
 	changes []logEntry
 }
 
+// maxEntry is the most bytes the payload of an entry may have, so that its
+// device row stays within the size of a row (section 4, rule 2).
+const maxEntry = 2048
+
 // logEntry is what is read of an entry's payload, and nothing else: not n or
 // ts, and kind and name only on an add.
 type logEntry struct {
@@ -82,7 +86,7 @@ func entry(env proto.Envelope) (logEntry, error) {
 	if !verify(env.Key, envelopeContext+env.Payload, env.Signature) {
 		return e, BadSig
 	}
-	if proto.Decode([]byte(env.Payload), &e) != nil || !isEntry(e, env.Payload) {
+	if len(env.Payload) > maxEntry || proto.Decode([]byte(env.Payload), &e) != nil || !isEntry(e, env.Payload) {
 		return e, BadRequest
 	}
 	return e, nil

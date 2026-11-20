@@ -321,8 +321,8 @@ func (w *rvWorld) route(from, to, payload string) (err error) {
 }
 
 func (w *rvWorld) sendPair(name string) error {
-	id := exampleKey(name).ID()
-	pair := proto.Pair{Type: "pair", Key: id, Kind: "node", Name: name, Role: "a", MAC: rvSecret.MAC("a", id)}
+	pair := proto.Pair{Type: "pair", Key: exampleKey(name).ID(), Kind: "node", Name: name, Role: "a"}
+	pair.MAC = rvSecret.MAC(pair)
 	data, err := json.Marshal(pair)
 	if err != nil {
 		return err

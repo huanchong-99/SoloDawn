@@ -139,7 +139,7 @@ func approvalSteps(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		if header.Type != "act" || header.Group != after.Group || act.Msg != after.ID || act.Action != action {
+		if header.Type != "act" || string(header.Group) != after.Group || act.Msg != after.ID || act.Action != action {
 			return fmt.Errorf("unexpected approval action: %+v", env)
 		}
 		return nil

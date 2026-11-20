@@ -42,11 +42,11 @@ func OpenCommand(env proto.Envelope, me string, known func(device string) bool, 
 // to is a value, and names nobody's device: only a payload without to is for
 // any receiver.
 type common struct {
-	Type  string  `json:"t"`
-	Nonce string  `json:"n"`
-	Time  int64   `json:"ts"`
-	Group string  `json:"g,omitempty"`
-	To    *string `json:"to,omitempty"`
+	Type  string   `json:"t"`
+	Nonce proto.ID `json:"n"`
+	Time  int64    `json:"ts"`
+	Group proto.ID `json:"g,omitempty"`
+	To    *string  `json:"to,omitempty"`
 }
 
 // open makes the checks in the contract's order. window is how far ts may be

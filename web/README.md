@@ -67,16 +67,20 @@ development dependency, an IndexedDB for the tests.
   envelopes and rendezvous answers. `boot` loads it and drops it; the connection code will load it
   again.
 - **Envelopes, device log, pairing.** `src/lib/identity.ts`, `devlog.ts` and `pairing.ts`
-  implement sections 1 to 4 and 6 of `contracts/envelope.md` as settled in PR #58, where it differs
-  from `internal/identity` (`issues.md`): canonical base64url only; the fourteen weak keys are never
-  a device id and a signature whose R is one, or whose S is not below L, fails before WebCrypto is
-  asked; `openSignal` and `openCommand` answer the first failing check (`bad_sig`,
-  `unknown_device`, `bad_request`, `not_for_me`, `stale`), with both ends of the window accepted;
-  `DeviceLog.apply` accepts or refuses an entry by section 4 and leaves the log unchanged when it
-  refuses; `adopts` is the log's half of adoption; a pairing secret is read by removing hyphens and
-  upper-casing a to z only. `src/lib/payload.ts` reads the fields those checks need, with
-  `JSON.parse`: exact names, the last of a repeated name, integers as safe integers by value, and
-  no `null`. Signing is left to WebCrypto, so in Safari two signatures of one payload differ.
+  implement sections 1 to 4 and 6 of `contracts/envelope.md`, as `internal/identity` does:
+  canonical base64url only; the fourteen weak keys are never a device id and a signature whose R
+  is one, or whose S is not below L, fails before WebCrypto is asked; `openSignal` and
+  `openCommand` answer the first failing check (`bad_sig`, `unknown_device`, `bad_request`,
+  `not_for_me`, `stale`), with both ends of the window accepted; `DeviceLog.apply` accepts or
+  refuses an entry by section 4 and leaves the log unchanged when it refuses: an entry whose `p`
+  is more than 2,048 bytes as UTF-8 is refused, and a `dev` is judged by its bytes and never
+  imported as a key, so one that is no point of the curve is added; `adopts` is the log's half of
+  adoption; a pairing secret is read by removing hyphens and upper-casing a to z only; the `mac`
+  of a pair message covers its `role`, `k`, `kind` and `name` as `TextEncoder` encodes them, and
+  `verifyPair` ignores a message whose `kind` is neither `node` nor `browser`.
+  `src/lib/payload.ts` reads the fields those checks need, with `JSON.parse`: exact names, the
+  last of a repeated name, integers as safe integers by value, no `null`, and `n` and `g` as
+  random ids. Signing is left to WebCrypto, so in Safari two signatures of one payload differ.
 - **Preferences.** `prefs.theme` is `auto`, `light` or `dark`; `prefs.lang` is `zh-CN` or `en`.
   A first visit follows the system theme and the browser language (any `zh` locale opens Chinese).
   Every change is written to `<html data-theme lang>` and to `localStorage` (`sd-theme`,
@@ -91,7 +95,9 @@ development dependency, an IndexedDB for the tests.
   `omitempty` must be there and may be `null`. Message bodies are any JSON until a contract types
   them. `decode(schema, text)` is the only place where received text becomes a typed value;
   `Frame` is what a node may send on `ctl`. Code after it trusts the type. An envelope's `p` stays
-  the exact string received. `Ctl` is the interface of a `ctl` connection: numbered requests,
+  the exact string received. `Id` is a random id, the canonical base64url spelling of 16 bytes;
+  `n` and `g` of a signed payload have this type, the other fields that hold ids are still
+  strings (`issues.md`). `Ctl` is the interface of a `ctl` connection: numbered requests,
   their answers, and pushes.
 - **Mock connection.** `mockCtl(onpush)` in `src/lib/mock.ts` is a `Ctl` that answers from the
   files of `internal/proto/testdata`: `hello` with `welcome`; `sync` with the pushes `reset` and

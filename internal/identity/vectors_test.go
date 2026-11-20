@@ -31,6 +31,7 @@ type vectors struct {
 	Rendezvous []challengeVector `json:"rendezvous"`
 	Received   []receivedVector  `json:"received"`
 	Pairing    []pairingVector   `json:"pairing"`
+	Messages   []messageVector   `json:"pair_messages"`
 	BadSecrets []badSecretVector `json:"bad_secrets"`
 	Devlogs    []devlogVector    `json:"devlogs"`
 	Adopt      []adoptVector     `json:"adopt"`
@@ -65,7 +66,20 @@ type pairingVector struct {
 
 type pairSide struct {
 	Device string `json:"device"`
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
 	MAC    string `json:"mac"`
+}
+
+// messageVector is one pair message arriving at the side whose role is me and
+// which holds secret. msg is the message as it is on the wire: JSON text, so
+// that it can hold an escape that no decoded text gives back.
+type messageVector struct {
+	Name   string          `json:"name"`
+	Me     string          `json:"me"`
+	Secret string          `json:"secret"`
+	Msg    json.RawMessage `json:"msg"`
+	OK     bool            `json:"ok"`
 }
 
 // badSecretVector is a text that a person could type and that is no pairing secret.
@@ -182,7 +196,12 @@ func cryptoVectors() vectors {
 	v.Rendezvous = []challengeVector{{nonce, node.id(), node.key.SignChallenge(nonce)}}
 
 	// shown is what a person copied: the canonical bytes are its upper case
-	// without the hyphens. The first is the code as a device displays it.
+	// without the hyphens. The first is the code as a device displays it. The
+	// last name holds text outside ASCII and a line break, which the mac covers
+	// as they are.
+	side := func(secret Secret, role string, d device) pairSide {
+		return pairSide{d.id(), d.kind, d.name, pairOf(secret, role, d.id(), d.kind, d.name).MAC}
+	}
 	for _, c := range []struct {
 		shown, secret string
 		a, b          device
@@ -190,14 +209,15 @@ func cryptoVectors() vectors {
 		{"7K2M-9QXD-4F8T-WB3N", "7K2M9QXD4F8TWB3N", browser, node},
 		{"0h1j-8kmn-pqrs-tvwz", "0H1J8KMNPQRSTVWZ", node, tablet},
 		{"9ZY8XW7VT6SR5QPN", "9ZY8XW7VT6SR5QPN", node, browser},
+		{"7k2m9qxd-4f8twb3n", "7K2M9QXD4F8TWB3N", device{tablet.key, "browser", "Zoë 的平板\n第二行 🙂"}, node},
 	} {
 		secret := Secret(c.secret)
 		v.Pairing = append(v.Pairing, pairingVector{
 			Shown: c.shown, Secret: c.secret, Room: secret.Room(),
-			A: pairSide{c.a.id(), secret.MAC("a", c.a.id())},
-			B: pairSide{c.b.id(), secret.MAC("b", c.b.id())},
+			A: side(secret, "a", c.a), B: side(secret, "b", c.b),
 		})
 	}
+	v.Messages = messageVectors()
 
 	v.BadSecrets = []badSecretVector{
 		{"a space for a hyphen", "7K2M 9QXD-4F8T-WB3N"},
@@ -244,14 +264,20 @@ func cryptoVectors() vectors {
 			no(rewritten(browser, entry, node.id(), b64.EncodeToString(weakValues()[0]))),
 			no(rewritten(browser, entry, node.id(), b64.EncodeToString(make([]byte, 31)))),
 			no(rewritten(browser, entry, node.id(), "workstation"))),
-		devlogCase("ver is an integer by its value: 2.0, and 2.0000000000000001, are 2; null, a text and 2.5 are none", []device{browser, node, tablet},
+		devlogCase("dev is 32 bytes in their canonical spelling that are no point of the curve: it is added, and can never sign", []device{browser},
+			yes(genesis),
+			yes(rewritten(browser, entry, node.id(), b64.EncodeToString(offCurve()))),
+			no(proto.Envelope{Payload: change(browser, 3, "add", tablet), Key: b64.EncodeToString(offCurve()), Signature: add(browser, 3, tablet).Signature})),
+		devlogCase("p is at most 2,048 bytes as UTF-8: 2,049 are refused, 2,048 accepted", []device{browser, node},
+			yes(genesis), no(browser.key.Sign(sized(entry, 2049))), yes(browser.key.Sign(sized(entry, 2048)))),
+		devlogCase("ver is an integer by its value: 2.0000000000000001 is 2 and 3.0 is 3", []device{browser, node, tablet},
 			yes(genesis),
 			no(rewritten(browser, entry, `"ver":2`, `"ver":null`)),
 			no(rewritten(browser, entry, `"ver":2`, `"ver":"2"`)),
 			no(rewritten(browser, entry, `"ver":2`, `"ver":2.5`)),
 			no(rewritten(browser, entry, `"ver":2`, `"ver":9007199254740992`)),
-			yes(rewritten(browser, entry, `"ver":2`, `"ver":2.0`)),
-			yes(rewritten(browser, change(browser, 3, "add", tablet), `"ver":3`, `"ver":3.0000000000000001`))),
+			yes(rewritten(browser, entry, `"ver":2`, `"ver":2.0000000000000001`)),
+			yes(rewritten(browser, change(browser, 3, "add", tablet), `"ver":3`, `"ver":3.0`))),
 		devlogCase("names are exact: VER beside ver is not read, and VER alone is no ver", []device{browser, node},
 			yes(genesis),
 			no(rewritten(browser, entry, `"ver":2`, `"VER":2`)),
@@ -299,8 +325,9 @@ func cryptoVectors() vectors {
 // receivedVectors are the checks of section 3 after the first: who signed,
 // what the payload holds, whom it is for and when it was signed.
 func receivedVectors() []receivedVector {
-	me, other := node.id(), tablet.id()
-	p := func(fields string) string { return `{"t":"offer","n":"` + testID("offer") + `"` + fields + `}` }
+	me, other, id := node.id(), tablet.id(), testID("offer")
+	n := func(text string) string { return `"n":"` + text + `"` } // text as it is written in the JSON
+	p := func(fields string) string { return `{"t":"offer",` + n(id) + fields + `}` }
 	at := func(off int64) string { return `,"ts":` + fmt.Sprint(ts+off) }
 	to := func(device string) string { return `,"to":"` + device + `"` }
 	fresh := at(0)
@@ -342,9 +369,25 @@ func receivedVectors() []receivedVector {
 	both("a long s in the name is no ts", p(`,"t`+string(rune(0x17f))+`":`+fmt.Sprint(ts)+to(me)), "bad_request")
 	both("no n", `{"t":"offer"`+fresh+to(me)+`}`, "bad_request")
 	both("n null", `{"t":"offer","n":null`+fresh+to(me)+`}`, "bad_request")
-	both("no t", `{"n":"x"`+fresh+to(me)+`}`, "bad_request")
-	both("t a number", `{"t":7,"n":"x"`+fresh+to(me)+`}`, "bad_request")
-	both("an empty t and n are values", `{"t":"","n":""`+fresh+to(me)+`}`, "ok")
+	both("no t", `{`+n(id)+fresh+to(me)+`}`, "bad_request")
+	both("t a number", `{"t":7,`+n(id)+fresh+to(me)+`}`, "bad_request")
+	both("an empty t is a value", `{"t":"",`+n(id)+fresh+to(me)+`}`, "ok")
+	both("an empty t and n", `{"t":"",`+n("")+fresh+to(me)+`}`, "bad_request")
+	both("an empty n is no id", `{"t":"offer",`+n("")+fresh+to(me)+`}`, "bad_request")
+	both("n written with the escape of a lone surrogate", `{"t":"offer",`+n(`\ud800`)+fresh+to(me)+`}`, "bad_request")
+	both("n one character short of an id", `{"t":"offer",`+n(id[:21])+fresh+to(me)+`}`, "bad_request")
+	both("n one character longer than an id", `{"t":"offer",`+n(id+"A")+fresh+to(me)+`}`, "bad_request")
+	both("n in a spelling that is not canonical", `{"t":"offer",`+n(respelled(id))+fresh+to(me)+`}`, "bad_request")
+	both("n with padding", `{"t":"offer",`+n(id+"==")+fresh+to(me)+`}`, "bad_request")
+	both("n followed by a line break", `{"t":"offer",`+n(id+`\n`)+fresh+to(me)+`}`, "bad_request")
+	both("n a device id", `{"t":"offer",`+n(other)+fresh+to(me)+`}`, "bad_request")
+	both("n sixteen zero bytes", `{"t":"offer",`+n("AAAAAAAAAAAAAAAAAAAAAA")+fresh+to(me)+`}`, "ok")
+	both("n sixteen bytes of ones", `{"t":"offer",`+n("_____________________w")+fresh+to(me)+`}`, "ok")
+	both("g an id", p(fresh+to(me)+`,"g":"`+testID("group")+`"`), "ok")
+	both("an empty g is no id", p(fresh+to(me)+`,"g":""`), "bad_request")
+	both("g that is no id", p(fresh+to(me)+`,"g":"Website"`), "bad_request")
+	both("g in a spelling that is not canonical", p(fresh+to(me)+`,"g":"`+respelled(testID("group"))+`"`), "bad_request")
+	both("G alone is no g", p(fresh+to(me)+`,"G":"Website"`), "ok")
 	both("a list", `[`+p(fresh+to(me))+`]`, "bad_request")
 	both("null", `null`, "bad_request")
 	both("not JSON", `offer`, "bad_request")
@@ -361,11 +404,69 @@ func receivedVectors() []receivedVector {
 
 	// The order of the checks: each case fails a later check as well.
 	both("for another device and old: not_for_me comes first", p(at(-86_400_001)+to(other)), "not_for_me")
-	both("no t, for another device, old: bad_request comes first", `{"n":"x"`+at(-86_400_001)+to(other)+`}`, "bad_request")
+	both("no t, for another device, old: bad_request comes first", `{`+n(id)+at(-86_400_001)+to(other)+`}`, "bad_request")
+	both("n no id, for another device, old: bad_request comes first", `{"t":"offer",`+n("offer")+at(-86_400_001)+to(other)+`}`, "bad_request")
 	unknown := receivedVector{"a signer the receiver does not listen to, payload not JSON: unknown_device comes first", "command", me, ts, false, stranger.key.Sign("offer"), "unknown_device"}
 	unsigned := unknown
 	unsigned.Name, unsigned.Env.Payload, unsigned.Code = "a signature that does not hold, from that signer: bad_sig comes first", "offar", "bad_sig"
 	return append(out, unknown, unsigned)
+}
+
+// messageVectors are pair messages as one side receives them: the browser, in
+// role a, wrote them to the node, in role b, unless the case says otherwise.
+func messageVectors() []messageVector {
+	const secret = Secret("7K2M9QXD4F8TWB3N")
+	wire := func(m proto.Pair) json.RawMessage {
+		b, err := json.Marshal(m)
+		if err != nil {
+			panic(err) // a struct of strings always encodes
+		}
+		return b
+	}
+	sent := pairOf(secret, "a", browser.id(), browser.kind, browser.name)
+	with := func(change func(*proto.Pair)) json.RawMessage {
+		m := sent
+		change(&m)
+		return wire(m)
+	}
+	weakKey := b64.EncodeToString(weakValues()[2])
+	// What a browser reads as a lone surrogate and Go as U+FFFD: both encode
+	// it as the three bytes of U+FFFD, so the mac is over those.
+	lone := strings.Replace(string(wire(pairOf(secret, "a", browser.id(), "browser", "\ufffd"))), "\ufffd", "\\ud800", 1)
+	noName := strings.Replace(string(wire(pairOf(secret, "a", browser.id(), "browser", ""))), `"name":"",`, "", 1)
+	if !strings.Contains(lone, `"name":"\ud800"`) || strings.Contains(noName, "name") {
+		panic("the pair messages written by hand are not what they are meant to be")
+	}
+	return []messageVector{
+		{"the other side's message", "b", string(secret), wire(sent), true},
+		{"another message type with the same pairing fields", "b", string(secret), with(func(m *proto.Pair) { m.Type = "hello" }), false},
+		{"the answer of the other side, read by the side that created the secret", "a", string(secret), wire(pairOf(secret, "b", node.id(), node.kind, node.name)), true},
+		{"name changed on the way, with the mac it had", "b", string(secret), with(func(m *proto.Pair) { m.Name = "laptop" }), false},
+		{"kind changed on the way, with the mac it had", "b", string(secret), with(func(m *proto.Pair) { m.Kind = "node" }), false},
+		{"k changed on the way, with the mac it had", "b", string(secret), with(func(m *proto.Pair) { m.Key = tablet.id() }), false},
+		{"a message in the receiver's own role", "a", string(secret), wire(sent), false},
+		{"a mac made with another secret", "b", string(secret), wire(pairOf("7K2M9QXD4F8TWB3M", "a", browser.id(), browser.kind, browser.name)), false},
+		{"k a weak key, with the mac that follows from it", "b", string(secret), wire(pairOf(secret, "a", weakKey, browser.kind, browser.name)), false},
+		{"k in a spelling that is not canonical, with the mac that follows from it", "b", string(secret), wire(pairOf(secret, "a", respelled(browser.id()), browser.kind, browser.name)), false},
+		{"kind neither node nor browser, with the mac that follows from it", "b", string(secret), wire(pairOf(secret, "a", browser.id(), "phone", browser.name)), false},
+		{"name written as the escape of a lone surrogate, with the mac over U+FFFD", "b", string(secret), json.RawMessage(lone), true},
+		{"no name, with the mac that an empty name gives", "b", string(secret), json.RawMessage(noName), false},
+	}
+}
+
+// sized returns the payload of an add with its name made longer, so that the
+// payload is exactly size bytes of UTF-8. The filling is two bytes a
+// character, so a count of characters or of UTF-16 units is about half of it.
+func sized(entry string, size int) string {
+	room := size - len(entry)
+	if room < 2 {
+		panic("the entry is already that long")
+	}
+	p := strings.Replace(entry, `"name":"`, `"name":"`+strings.Repeat("é", room/2)+strings.Repeat("x", room%2), 1)
+	if len(p) != size {
+		panic("the entry has no name to fill")
+	}
+	return p
 }
 
 func mustDecode(s string) []byte {
@@ -419,9 +520,9 @@ func TestCryptoVectorsHold(t *testing.T) {
 	if err := dec.Decode(&v); err != nil {
 		t.Fatal(err)
 	}
-	if len(v.Keys) < 2 || len(v.Envelopes) < 26 || len(v.Rendezvous) < 1 || len(v.Pairing) < 3 || len(v.BadSecrets) < 6 || len(v.Devlogs) < 15 || len(v.Adopt) < 6 || len(v.Received) < 40 {
-		t.Fatalf("cases are missing: %d keys, %d envelopes, %d rendezvous, %d pairing, %d bad_secrets, %d devlogs, %d adopt, %d received",
-			len(v.Keys), len(v.Envelopes), len(v.Rendezvous), len(v.Pairing), len(v.BadSecrets), len(v.Devlogs), len(v.Adopt), len(v.Received))
+	if len(v.Keys) < 2 || len(v.Envelopes) < 26 || len(v.Rendezvous) < 1 || len(v.Pairing) < 4 || len(v.Messages) < 7 || len(v.BadSecrets) < 6 || len(v.Devlogs) < 17 || len(v.Adopt) < 6 || len(v.Received) < 40 {
+		t.Fatalf("cases are missing: %d keys, %d envelopes, %d rendezvous, %d pairing, %d pair_messages, %d bad_secrets, %d devlogs, %d adopt, %d received",
+			len(v.Keys), len(v.Envelopes), len(v.Rendezvous), len(v.Pairing), len(v.Messages), len(v.BadSecrets), len(v.Devlogs), len(v.Adopt), len(v.Received))
 	}
 
 	keys := map[string]Key{}
@@ -438,19 +539,22 @@ func TestCryptoVectorsHold(t *testing.T) {
 	}
 
 	for _, c := range v.Envelopes {
-		_, err := OpenCommand(c.Envelope, "", everyone, now)
-		if c.OK && err != nil || !c.OK && err != BadSig {
-			t.Errorf("envelope %q: OpenCommand gave %v, ok is %v", c.Name, err, c.OK)
+		if got := verify(c.Key, envelopeContext+c.Payload, c.Signature); got != c.OK {
+			t.Errorf("envelope %q: signature verified %v, want %v", c.Name, got, c.OK)
 		}
-		// Ed25519 signatures are deterministic: where ok is true, k is one of
-		// the keys and signing p again with its seed gives s itself; where ok
-		// is false and k is one of the keys, it gives another s.
+		if !c.OK {
+			if _, err := OpenCommand(c.Envelope, "", everyone, now); err != BadSig {
+				t.Errorf("envelope %q: OpenCommand gave %v, want bad_sig", c.Name, err)
+			}
+			continue
+		}
+		// Go signs deterministically, so signing again gives exactly s.
 		k, listed := keys[c.Key]
-		if c.OK && !listed {
+		if !listed {
 			t.Fatalf("envelope %q: k is not one of the keys", c.Name)
 		}
-		if listed && (k.Sign(c.Payload) == c.Envelope) != c.OK {
-			t.Errorf("envelope %q: signing p with the seed of k gives s %q, ok is %v", c.Name, k.Sign(c.Payload).Signature, c.OK)
+		if got := k.Sign(c.Payload).Signature; got != c.Signature {
+			t.Errorf("envelope %q: signature %q, want %q", c.Name, got, c.Signature)
 		}
 	}
 
@@ -472,13 +576,29 @@ func TestCryptoVectorsHold(t *testing.T) {
 		if c.Secret != strings.ReplaceAll(strings.ToUpper(c.Shown), "-", "") || !lowerHex32.MatchString(c.Room) {
 			t.Errorf("pairing %s: secret %q is not its upper case without hyphens, or room %q is not 32 lower-case hex digits", c.Shown, c.Secret, c.Room)
 		}
-		if s.MAC("a", c.A.Device) != c.A.MAC || s.MAC("b", c.B.Device) != c.B.MAC {
-			t.Errorf("pairing %s: mac a %q, mac b %q", c.Shown, s.MAC("a", c.A.Device), s.MAC("b", c.B.Device))
+		a := proto.Pair{Type: "pair", Key: c.A.Device, Kind: c.A.Kind, Name: c.A.Name, Role: "a", MAC: c.A.MAC}
+		b := proto.Pair{Type: "pair", Key: c.B.Device, Kind: c.B.Kind, Name: c.B.Name, Role: "b", MAC: c.B.MAC}
+		if s.MAC(a) != c.A.MAC || s.MAC(b) != c.B.MAC {
+			t.Errorf("pairing %s: mac a %q, mac b %q", c.Shown, s.MAC(a), s.MAC(b))
 		}
-		a := proto.Pair{Type: "pair", Key: c.A.Device, Role: "a", MAC: c.A.MAC}
-		b := proto.Pair{Type: "pair", Key: c.B.Device, Role: "b", MAC: c.B.MAC}
 		if !s.Verify(a, "a") || !s.Verify(b, "b") || s.Verify(a, "b") || s.Verify(b, "a") {
 			t.Errorf("pairing %s: each side must verify the other's message and not its own", c.Shown)
+		}
+	}
+
+	// A message is read as everything from the wire is, and one that cannot
+	// be read is ignored like one that is refused.
+	for _, c := range v.Messages {
+		sender, roles := "a", map[string]bool{"a": true, "b": true}
+		if !roles[c.Me] {
+			t.Fatalf("pair message %q: me %q", c.Name, c.Me)
+		}
+		if c.Me == "a" {
+			sender = "b"
+		}
+		var m proto.Pair
+		if got := proto.Decode(c.Msg, &m) == nil && Secret(c.Secret).Verify(m, sender); got != c.OK {
+			t.Errorf("pair message %q: accepted %v, ok is %v", c.Name, got, c.OK)
 		}
 	}
 
