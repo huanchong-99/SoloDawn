@@ -6,16 +6,10 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-20 · limitation · The task machine holds `review.failed` and `wait.kept` beside the task row
-
-- Symptom: `home.Step` takes and returns `home.Task`, a `proto.TaskRow` with two more fields, `ReviewFailed` and `Kept`. A caller that keeps only the `proto.TaskRow` loses the count of failed reviews and the wait a pause replaced.
-- Cause: `contracts/rows.md` section 4 has `review.failed` and `wait.kept`, and `proto.TaskRow` does not have them yet: P-1 freezes them. HM-M was built in the same wave, against the row as it was (`internal/home/machine.go:24`).
-- Status: open. When P-1 is merged, `home.Task` becomes the frozen row and the two fields move into it.
-
 ### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
 
 - Symptom: after the sixth failed review a task is `failed` at step `review`. When an admin resumes or reassigns it, the reviewer is asked to review the same commit again, although that commit has just failed.
-- Cause: row 7 of `contracts/task-machine.md` above the limit is row 14 alone, which leaves the step (`internal/home/machine.go:547`); section 2 then gives a task that becomes active at step `review` its `review` item (`internal/home/machine.go:426`). Row 6 is different: failed hosted checks set step `local_check` before they stop the task.
+- Cause: row 7 of `contracts/task-machine.md` above the limit is row 14 alone, which leaves the step (`internal/home/machine.go:560`); section 2 then gives a task that becomes active at step `review` its `review` item (`internal/home/machine.go:428`). Row 6 is different: failed hosted checks set step `local_check` before they stop the task.
 - Status: open. No change, by the coordinator's decision of 2026-11-20: the contract says so explicitly, and it lets a person resume the task with another reviewer for the same commit.
 ### 2026-11-20 · limitation · A child of a Windows check can start before the job holds the shell
 
@@ -290,6 +284,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, without effect in step 1, where every group on a node has the same one person. For step 2, by the coordinator's decision of 2026-11-20 after the review of #160.
 
 ## Resolved
+
+### 2026-11-20 · limitation · The task machine held `review.failed` and `wait.kept` beside the task row
+
+- Symptom: on the branch of HM-M, `home.Step` took and returned `home.Task`, a `proto.TaskRow` with two more fields, `ReviewFailed` and `Kept`. A caller that kept only the `proto.TaskRow` would have lost the count of failed reviews and the wait a pause replaced.
+- Cause: `contracts/rows.md` section 4 has `review.failed` and `wait.kept`; `proto.TaskRow` did not have them until P-1 froze them, and HM-M was built in the same wave.
+- Status: resolved in PR #161, before it was merged: after P-1 (PR #162) `home.Step` takes and returns `proto.TaskRow`, and the two fields are `review.failed` and `wait.kept` of the row.
 
 ### 2026-11-20 · deviation · No unit measured a row against its size limit
 

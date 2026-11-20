@@ -19,7 +19,7 @@ func init() {
 
 // homeMachine is one task row, moved through a scenario by the task machine.
 type homeMachine struct {
-	task    home.Task
+	task    proto.TaskRow
 	pending []home.PendingCard
 	fx      home.Effects
 	err     error
@@ -62,10 +62,10 @@ func homeMachineItems(items []home.TaskItem) string {
 func homeMachineSteps(sc *godog.ScenarioContext, _ fixtures) {
 	var m homeMachine
 	sc.Step(`^a task row that is "([^"]*)" at step "([^"]*)"$`, func(state, step string) {
-		m = homeMachine{task: home.Task{TaskRow: proto.TaskRow{
+		m = homeMachine{task: proto.TaskRow{
 			Origin: "brief", State: state, Step: step, Commit: "c1", Assignee: "ai-assignee", Reviewer: "ai-reviewer",
 			Checks: proto.TaskChecks{Local: &proto.Check{OK: true, At: 1763599997000, Commit: "c1"}},
-		}}}
+		}}
 	})
 	sc.Step(`^the task row has no reviewer and waits for one$`, func() {
 		m.task.Reviewer, m.task.Wait = "", &proto.TaskWait{Kind: "reviewer", Since: 1763599998000}

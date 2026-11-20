@@ -26,18 +26,25 @@ var (
 )
 
 // machineRow builds the task a case starts from.
-type machineRow struct{ home.Task }
+type machineRow struct{ proto.TaskRow }
 
 // machineTask is an active task at step local_check whose commit c1 passed
 // the local checks, with one failure, one failed review and two rounds.
 func machineTask() machineRow {
-	return machineRow{home.Task{TaskRow: proto.TaskRow{
+	return machineRow{proto.TaskRow{
 		Origin: "brief", State: "active", Step: "local_check", Commit: "c1",
 		Assignee: mcA, Reviewer: mcR, Depends: []string{},
 		Checks:   proto.TaskChecks{Local: &proto.Check{OK: true, At: 5, Commit: "c1"}},
+		Review:   mcReview(1),
 		Failures: 1,
 		Thread:   proto.ThreadSummary{Count: 4, Rounds: 2},
-	}, ReviewFailed: 1}}
+	}}
+}
+
+// mcReview is the one review machineTask has had, of an earlier commit, with
+// this many failed reviews counted.
+func mcReview(failed int) *proto.Review {
+	return &proto.Review{Round: 1, Failed: failed, Score: 60, By: mcR, Commit: "c0", At: 3}
 }
 
 func (r machineRow) at(state, step string) machineRow {
@@ -50,8 +57,11 @@ func (r machineRow) wait(kind string) machineRow {
 	return r
 }
 
+// keep makes the wait of a paused task keep the wait it replaced.
 func (r machineRow) keep(kind string) machineRow {
-	r.Kept = kind
+	wait := *r.Wait
+	wait.Kept = kind
+	r.Wait = &wait
 	return r
 }
 
@@ -60,13 +70,18 @@ func (r machineRow) reviewer(id string) machineRow {
 	return r
 }
 
-func (r machineRow) set(change func(*home.Task)) machineRow {
-	change(&r.Task)
+func (r machineRow) set(change func(*proto.TaskRow)) machineRow {
+	change(&r.TaskRow)
 	return r
 }
 
 func mcWait(kind string, since int64) *proto.TaskWait {
 	return &proto.TaskWait{Kind: kind, Since: since}
+}
+
+// mcKept is the wait of a pause at mcNow that keeps the wait it replaced.
+func mcKept(kind, kept string) *proto.TaskWait {
+	return &proto.TaskWait{Kind: kind, Since: mcNow, Kept: kept}
 }
 
 func mcCardWait(c home.PendingCard) *proto.TaskWait {
@@ -84,7 +99,7 @@ type machineCase struct {
 	name string
 	in   machineRow
 	ev   home.Event
-	out  func(*home.Task) // what the event changes in the row; it never writes through a pointer of the row
+	out  func(*proto.TaskRow) // what the event changes in the row; it never writes through a pointer of the row
 	fx   home.Effects
 	err  error
 }
@@ -114,23 +129,23 @@ func machineRun(t *testing.T, cases []machineCase) {
 
 // check runs the case, and sees that Step changed neither its task nor its event.
 func (c machineCase) check(t *testing.T) {
-	task, event := mcJSON(t, c.in.Task), mcJSON(t, c.ev)
-	want := c.in.Task
+	task, event := mcJSON(t, c.in.TaskRow), mcJSON(t, c.ev)
+	want := c.in.TaskRow
 	if c.out != nil {
 		c.out(&want)
 	}
-	got, fx, err := home.Step(c.in.Task, c.ev)
+	got, fx, err := home.Step(c.in.TaskRow, c.ev)
 	mcSame(t, "error", err, c.err)
 	mcSame(t, "task", got, want)
 	mcSame(t, "effects", fx, c.fx)
-	mcSame(t, "the task passed in", mcJSON(t, c.in.Task), task)
+	mcSame(t, "the task passed in", mcJSON(t, c.in.TaskRow), task)
 	mcSame(t, "the event passed in", mcJSON(t, c.ev), event)
 }
 
 // mcPlay applies the events in turn and returns the task and the effects after each.
-func mcPlay(t *testing.T, task home.Task, events ...home.Event) ([]home.Task, []home.Effects) {
+func mcPlay(t *testing.T, task proto.TaskRow, events ...home.Event) ([]proto.TaskRow, []home.Effects) {
 	t.Helper()
-	var tasks []home.Task
+	var tasks []proto.TaskRow
 	var effects []home.Effects
 	for i, ev := range events {
 		next, fx, err := home.Step(task, ev)
@@ -144,7 +159,7 @@ func mcPlay(t *testing.T, task home.Task, events ...home.Event) ([]home.Task, []
 }
 
 // mcState is the task's state and what it waits for.
-func mcState(task home.Task) string {
+func mcState(task proto.TaskRow) string {
 	if task.Wait == nil {
 		return task.State
 	}
@@ -163,18 +178,18 @@ func mcStopped(reason string) home.Effects {
 func TestMachineCreates(t *testing.T) {
 	on := machineEvent
 	fresh := machineTask().at("", "")
-	direct := fresh.set(func(t *home.Task) { t.Origin, t.Assignee, t.Reviewer, t.Foundation = "direct", "", "stale", true })
-	started := func(t *home.Task) {
+	direct := fresh.set(func(t *proto.TaskRow) { t.Origin, t.Assignee, t.Reviewer, t.Foundation = "direct", "", "stale", true })
+	started := func(t *proto.TaskRow) {
 		t.State, t.Step, t.Assignee, t.Reviewer, t.Foundation = "active", "branch", mcB, "", false
 	}
 	machineRun(t, []machineCase{
 		{name: "row 1: an entry without an unmerged dependency starts",
 			in: fresh, ev: on(home.OnConfirm, home.ByPerson, home.Event{}),
-			out: func(t *home.Task) { t.State, t.Step = "active", "branch" },
+			out: func(t *proto.TaskRow) { t.State, t.Step = "active", "branch" },
 			fx:  mcItems(home.TaskItem{Why: "assign", AI: mcA})},
 		{name: "row 1: an entry with an unmerged dependency is queued",
 			in: fresh, ev: on(home.OnConfirm, home.ByAdmin, home.Event{Blocked: true}),
-			out: func(t *home.Task) { t.State, t.Step, t.Wait = "queued", "branch", mcWait("depends", mcNow) }},
+			out: func(t *proto.TaskRow) { t.State, t.Step, t.Wait = "queued", "branch", mcWait("depends", mcNow) }},
 		{name: "row 1: a task that exists is not created again",
 			in: machineTask(), ev: on(home.OnConfirm, home.ByAdmin, home.Event{}), err: home.RefusedConflict},
 		{name: "row 1: an AI confirms nothing",
@@ -187,7 +202,7 @@ func TestMachineCreates(t *testing.T) {
 			out: started,
 			fx:  mcItems(home.TaskItem{Why: "assign", AI: mcB}, mcNotice("task_started"))},
 		{name: "row 2: a takeover task gets no assign item",
-			in:  direct.set(func(t *home.Task) { t.Origin = "takeover" }),
+			in:  direct.set(func(t *proto.TaskRow) { t.Origin = "takeover" }),
 			ev:  on(home.OnStart, home.ByAI, home.Event{Member: mcB}),
 			out: started,
 			fx:  mcItems(mcNotice("task_started"))},
@@ -214,10 +229,10 @@ func TestMachineHostFacts(t *testing.T) {
 	machineRun(t, []machineCase{
 		{name: "row 3: the branch exists",
 			in: base.at("active", "branch"), ev: host(home.OnBranch, home.Event{}),
-			out: func(t *home.Task) { t.Step = "local_check" }},
+			out: func(t *proto.TaskRow) { t.Step = "local_check" }},
 		{name: "row 3: accepted while paused, the wait stays",
 			in: base.at("paused", "branch").wait("manual"), ev: host(home.OnBranch, home.Event{}),
-			out: func(t *home.Task) { t.Step = "local_check" }},
+			out: func(t *proto.TaskRow) { t.Step = "local_check" }},
 		{name: "row 3: refused after step branch",
 			in: base, ev: host(home.OnBranch, home.Event{}), err: home.RefusedConflict},
 		{name: "row 3: refused for a queued task",
@@ -229,64 +244,64 @@ func TestMachineHostFacts(t *testing.T) {
 
 		{name: "row 4: a failed local check is recorded",
 			in: base, ev: host(home.OnChecked, home.Event{Commit: "c2"}),
-			out: func(t *home.Task) { t.Checks.Local = checked(false, "c2") }},
+			out: func(t *proto.TaskRow) { t.Checks.Local = checked(false, "c2") }},
 		{name: "row 4: accepted at step cloud_check",
 			in: cloud, ev: host(home.OnChecked, home.Event{Commit: "c2", OK: true}),
-			out: func(t *home.Task) { t.Checks.Local = checked(true, "c2") }},
+			out: func(t *proto.TaskRow) { t.Checks.Local = checked(true, "c2") }},
 		{name: "row 4: accepted at step review while paused",
 			in: base.at("paused", "review").wait("manual"), ev: host(home.OnChecked, home.Event{Commit: "c2", OK: true}),
-			out: func(t *home.Task) { t.Checks.Local = checked(true, "c2") }},
+			out: func(t *proto.TaskRow) { t.Checks.Local = checked(true, "c2") }},
 		{name: "row 4: refused at step branch",
 			in: base.at("active", "branch"), ev: host(home.OnChecked, home.Event{Commit: "c2"}), err: home.RefusedConflict},
 		{name: "row 4: refused at step merge",
 			in: base.at("active", "merge"), ev: host(home.OnChecked, home.Event{Commit: "c2"}), err: home.RefusedConflict},
 
 		{name: "row 5: with a remote the commit goes to hosted checks",
-			in: base.set(func(t *home.Task) { t.Commit = "c0" }), ev: host(home.OnSubmitted, home.Event{Commit: "c1", Remote: true}),
-			out: func(t *home.Task) { t.Commit, t.Step = "c1", "cloud_check" },
+			in: base.set(func(t *proto.TaskRow) { t.Commit = "c0" }), ev: host(home.OnSubmitted, home.Event{Commit: "c1", Remote: true}),
+			out: func(t *proto.TaskRow) { t.Commit, t.Step = "c1", "cloud_check" },
 			fx:  home.Effects{Retire: oldReview}},
 		{name: "row 5: a new submission at step review goes back to hosted checks",
 			in: base.at("active", "review"), ev: host(home.OnSubmitted, home.Event{Commit: "c1", Remote: true}),
-			out: func(t *home.Task) { t.Step = "cloud_check" },
+			out: func(t *proto.TaskRow) { t.Step = "cloud_check" },
 			fx:  home.Effects{Retire: oldReview}},
 		{name: "row 5: without a remote it is row 6, passed",
 			in: cloud, ev: host(home.OnSubmitted, home.Event{Commit: "c1"}),
-			out: func(t *home.Task) { t.Step, t.Failures = "review", 0 },
+			out: func(t *proto.TaskRow) { t.Step, t.Failures = "review", 0 },
 			fx:  home.Effects{Retire: oldReview, Items: []home.TaskItem{review}}},
 		{name: "row 5: without a remote and without a reviewer the task waits for one",
 			in: base.reviewer(""), ev: host(home.OnSubmitted, home.Event{Commit: "c1"}),
-			out: func(t *home.Task) { t.Step, t.Failures, t.Wait = "review", 0, mcWait("reviewer", mcNow) },
+			out: func(t *proto.TaskRow) { t.Step, t.Failures, t.Wait = "review", 0, mcWait("reviewer", mcNow) },
 			fx:  home.Effects{Retire: oldReview, Items: []home.TaskItem{mcNotice("no_reviewer")}}},
 		{name: "row 5: a conflict wait is cleared, to the pending decision",
 			in: base.wait("conflict"), ev: host(home.OnSubmitted, home.Event{Commit: "c1", Remote: true, Pending: []home.PendingCard{mcDecision}}),
-			out: func(t *home.Task) { t.Step, t.Wait = "cloud_check", mcCardWait(mcDecision) },
+			out: func(t *proto.TaskRow) { t.Step, t.Wait = "cloud_check", mcCardWait(mcDecision) },
 			fx:  home.Effects{Retire: oldReview}},
 		{name: "row 5: a reviewer wait is cleared, to the oldest approval before a decision",
 			in:  base.at("active", "review").reviewer("").wait("reviewer"),
 			ev:  host(home.OnSubmitted, home.Event{Commit: "c1", Remote: true, Pending: []home.PendingCard{mcDecision, mcApproval1, mcApproval2}}),
-			out: func(t *home.Task) { t.Step, t.Wait = "cloud_check", mcCardWait(mcApproval1) },
+			out: func(t *proto.TaskRow) { t.Step, t.Wait = "cloud_check", mcCardWait(mcApproval1) },
 			fx:  home.Effects{Retire: oldReview}},
 		{name: "row 5: a card wait is left as it is",
-			in:  base.set(func(t *home.Task) { t.Wait = mcCardWait(mcApproval2) }),
+			in:  base.set(func(t *proto.TaskRow) { t.Wait = mcCardWait(mcApproval2) }),
 			ev:  host(home.OnSubmitted, home.Event{Commit: "c1", Remote: true, Pending: []home.PendingCard{mcApproval1, mcApproval2}}),
-			out: func(t *home.Task) { t.Step = "cloud_check" },
+			out: func(t *proto.TaskRow) { t.Step = "cloud_check" },
 			fx:  home.Effects{Retire: oldReview}},
 		{name: "row 5: while paused a kept conflict wait is dropped and the wait stays",
 			in: paused.keep("conflict"), ev: host(home.OnSubmitted, home.Event{Commit: "c1", Remote: true}),
-			out: func(t *home.Task) { t.Step, t.Kept = "cloud_check", "" },
+			out: func(t *proto.TaskRow) { t.Step, t.Wait = "cloud_check", mcWait("manual", 1) },
 			fx:  home.Effects{Retire: oldReview}},
 		{name: "row 5: while paused a kept reviewer wait is dropped and no work item is queued",
 			in: paused.at("paused", "review").keep("reviewer"), ev: host(home.OnSubmitted, home.Event{Commit: "c1"}),
-			out: func(t *home.Task) { t.Failures, t.Kept = 0, "" },
+			out: func(t *proto.TaskRow) { t.Failures, t.Wait = 0, mcWait("manual", 1) },
 			fx:  home.Effects{Retire: oldReview}},
 		{name: "row 5: while paused without a reviewer the secretary is told and the wait stays",
 			in: paused.reviewer(""), ev: host(home.OnSubmitted, home.Event{Commit: "c1"}),
-			out: func(t *home.Task) { t.Step, t.Failures = "review", 0 },
+			out: func(t *proto.TaskRow) { t.Step, t.Failures = "review", 0 },
 			fx:  home.Effects{Retire: oldReview, Items: []home.TaskItem{mcNotice("no_reviewer")}}},
 		{name: "row 5: refused before the local checks ran",
-			in: base.set(func(t *home.Task) { t.Checks.Local = nil }), ev: host(home.OnSubmitted, home.Event{Commit: "c1"}), err: home.RefusedConflict},
+			in: base.set(func(t *proto.TaskRow) { t.Checks.Local = nil }), ev: host(home.OnSubmitted, home.Event{Commit: "c1"}), err: home.RefusedConflict},
 		{name: "row 5: refused after failing local checks",
-			in: base.set(func(t *home.Task) { t.Checks.Local = checked(false, "c1") }), ev: host(home.OnSubmitted, home.Event{Commit: "c1"}), err: home.RefusedConflict},
+			in: base.set(func(t *proto.TaskRow) { t.Checks.Local = checked(false, "c1") }), ev: host(home.OnSubmitted, home.Event{Commit: "c1"}), err: home.RefusedConflict},
 		{name: "row 5: refused for a commit the local checks did not see",
 			in: base, ev: host(home.OnSubmitted, home.Event{Commit: "c2"}), err: home.RefusedConflict},
 		{name: "row 5: refused at step branch",
@@ -298,39 +313,39 @@ func TestMachineHostFacts(t *testing.T) {
 
 		{name: "row 6: passed hosted checks send the commit to the reviewer",
 			in: cloud, ev: host(home.OnCloud, home.Event{Commit: "c1", OK: true}),
-			out: func(t *home.Task) { t.Checks.Cloud, t.Step, t.Failures = checked(true, "c1"), "review", 0 },
+			out: func(t *proto.TaskRow) { t.Checks.Cloud, t.Step, t.Failures = checked(true, "c1"), "review", 0 },
 			fx:  mcItems(review)},
 		{name: "row 6: passed without a reviewer, the reviewer wait replaces a card wait",
-			in: cloud.reviewer("").set(func(t *home.Task) { t.Wait = mcCardWait(mcApproval1) }), ev: host(home.OnCloud, home.Event{Commit: "c1", OK: true}),
-			out: func(t *home.Task) {
+			in: cloud.reviewer("").set(func(t *proto.TaskRow) { t.Wait = mcCardWait(mcApproval1) }), ev: host(home.OnCloud, home.Event{Commit: "c1", OK: true}),
+			out: func(t *proto.TaskRow) {
 				t.Checks.Cloud, t.Step, t.Failures, t.Wait = checked(true, "c1"), "review", 0, mcWait("reviewer", mcNow)
 			},
 			fx: mcItems(mcNotice("no_reviewer"))},
 		{name: "row 6: failed hosted checks below the limit go back to the assignee",
 			in: cloud, ev: host(home.OnCloud, home.Event{Commit: "c1"}),
-			out: func(t *home.Task) { t.Checks.Cloud, t.Step, t.Failures = checked(false, "c1"), "local_check", 2 },
+			out: func(t *proto.TaskRow) { t.Checks.Cloud, t.Step, t.Failures = checked(false, "c1"), "local_check", 2 },
 			fx:  mcItems(home.TaskItem{Why: "checks", AI: mcA})},
 		{name: "row 14: failed hosted checks at the limit stop the task",
-			in: cloud.wait("approval").set(func(t *home.Task) { t.Failures = 2 }), ev: host(home.OnCloud, home.Event{Commit: "c1"}),
-			out: func(t *home.Task) {
+			in: cloud.wait("approval").set(func(t *proto.TaskRow) { t.Failures = 2 }), ev: host(home.OnCloud, home.Event{Commit: "c1"}),
+			out: func(t *proto.TaskRow) {
 				t.Checks.Cloud, t.Step, t.Failures, t.State, t.Wait = checked(false, "c1"), "local_check", 3, "failed", nil
 			},
 			fx: mcStopped("failures")},
 		{name: "row 6: passed while paused queues no review and leaves the wait",
 			in: cloud.at("paused", "cloud_check").wait("manual"), ev: host(home.OnCloud, home.Event{Commit: "c1", OK: true}),
-			out: func(t *home.Task) { t.Checks.Cloud, t.Step, t.Failures = checked(true, "c1"), "review", 0 }},
+			out: func(t *proto.TaskRow) { t.Checks.Cloud, t.Step, t.Failures = checked(true, "c1"), "review", 0 }},
 		{name: "row 6: passed while paused without a reviewer tells the secretary and leaves the wait",
 			in: cloud.at("paused", "cloud_check").wait("preempted").reviewer(""), ev: host(home.OnCloud, home.Event{Commit: "c1", OK: true}),
-			out: func(t *home.Task) { t.Checks.Cloud, t.Step, t.Failures = checked(true, "c1"), "review", 0 },
+			out: func(t *proto.TaskRow) { t.Checks.Cloud, t.Step, t.Failures = checked(true, "c1"), "review", 0 },
 			fx:  mcItems(mcNotice("no_reviewer"))},
 		{name: "row 6: failed while paused queues no work item",
 			in: cloud.at("paused", "cloud_check").wait("manual"), ev: host(home.OnCloud, home.Event{Commit: "c1"}),
-			out: func(t *home.Task) { t.Checks.Cloud, t.Step, t.Failures = checked(false, "c1"), "local_check", 2 }},
+			out: func(t *proto.TaskRow) { t.Checks.Cloud, t.Step, t.Failures = checked(false, "c1"), "local_check", 2 }},
 		{name: "row 14: a paused task stops at the limit and keeps no wait",
-			in: cloud.at("paused", "cloud_check").wait("manual").keep("conflict").set(func(t *home.Task) { t.Failures = 2 }),
+			in: cloud.at("paused", "cloud_check").wait("manual").keep("conflict").set(func(t *proto.TaskRow) { t.Failures = 2 }),
 			ev: host(home.OnCloud, home.Event{Commit: "c1"}),
-			out: func(t *home.Task) {
-				t.Checks.Cloud, t.Step, t.Failures, t.State, t.Wait, t.Kept = checked(false, "c1"), "local_check", 3, "failed", nil, ""
+			out: func(t *proto.TaskRow) {
+				t.Checks.Cloud, t.Step, t.Failures, t.State, t.Wait = checked(false, "c1"), "local_check", 3, "failed", nil
 			},
 			fx: mcStopped("failures")},
 		{name: "row 6: refused for another commit",
@@ -350,26 +365,37 @@ func TestMachineReview(t *testing.T) {
 		return on(home.OnReview, home.ByAI, e)
 	}
 	base := machineTask().at("active", "review")
-	scored := func(round, score int, ok bool) *proto.Review {
-		return &proto.Review{Round: round, Score: score, OK: ok, By: mcR, Commit: "c1", At: mcNow}
+	scored := func(round, failed, score int, ok bool) *proto.Review {
+		return &proto.Review{Round: round, Failed: failed, Score: score, OK: ok, By: mcR, Commit: "c1", At: mcNow}
 	}
+	never := base.set(func(t *proto.TaskRow) { t.Review = nil })
+	failedBefore := func(n int) func(*proto.TaskRow) {
+		return func(t *proto.TaskRow) {
+			t.Review = &proto.Review{Round: 7, Failed: n, Score: 10, By: "old", Commit: "c0", At: 7}
+		}
+	}
+	merge := mcItems(home.TaskItem{Why: "merge", AI: mcA, Commit: "c1"})
+	reviewed := mcItems(home.TaskItem{Why: "reviewed", AI: mcA})
 	machineRun(t, []machineCase{
-		{name: "row 7: a passed review sends the merge to the host",
+		{name: "row 7: a passed first review sends the merge to the host",
+			in: never, ev: by(mcR, home.Event{Commit: "c1", OK: true, Score: 93}),
+			out: func(t *proto.TaskRow) { t.Review, t.Step = scored(1, 0, 93, true), "merge" },
+			fx:  merge},
+		{name: "row 7: a first review that fails is the first failed one",
+			in: never, ev: by(mcR, home.Event{Commit: "c1", Score: 86}),
+			out: func(t *proto.TaskRow) { t.Review, t.Step = scored(1, 1, 86, false), "local_check" },
+			fx:  reviewed},
+		{name: "row 7: the round counts on, and a passed review leaves the failed ones as they are",
 			in: base, ev: by(mcR, home.Event{Commit: "c1", OK: true, Score: 93}),
-			out: func(t *home.Task) { t.Review, t.Step = scored(1, 93, true), "merge" },
-			fx:  mcItems(home.TaskItem{Why: "merge", AI: mcA, Commit: "c1"})},
-		{name: "row 7: the round counts on from the last review",
-			in:  base.set(func(t *home.Task) { t.Review = &proto.Review{Round: 3, Score: 10, By: "old", Commit: "c0", At: 7} }),
-			ev:  by(mcR, home.Event{Commit: "c1", OK: true, Score: 93}),
-			out: func(t *home.Task) { t.Review, t.Step = scored(4, 93, true), "merge" },
-			fx:  mcItems(home.TaskItem{Why: "merge", AI: mcA, Commit: "c1"})},
+			out: func(t *proto.TaskRow) { t.Review, t.Step = scored(2, 1, 93, true), "merge" },
+			fx:  merge},
 		{name: "row 7: the fifth failed review still sends the work back",
-			in: base.set(func(t *home.Task) { t.ReviewFailed = 4 }), ev: by(mcR, home.Event{Commit: "c1", Score: 86}),
-			out: func(t *home.Task) { t.Review, t.ReviewFailed, t.Step = scored(1, 86, false), 5, "local_check" },
-			fx:  mcItems(home.TaskItem{Why: "reviewed", AI: mcA})},
+			in: base.set(failedBefore(4)), ev: by(mcR, home.Event{Commit: "c1", Score: 86}),
+			out: func(t *proto.TaskRow) { t.Review, t.Step = scored(8, 5, 86, false), "local_check" },
+			fx:  reviewed},
 		{name: "row 14: the sixth failed review stops the task",
-			in: base.wait("decision").set(func(t *home.Task) { t.ReviewFailed = 5 }), ev: by(mcR, home.Event{Commit: "c1", Score: 86}),
-			out: func(t *home.Task) { t.Review, t.ReviewFailed, t.State, t.Wait = scored(1, 86, false), 6, "failed", nil },
+			in: base.wait("decision").set(failedBefore(5)), ev: by(mcR, home.Event{Commit: "c1", Score: 86}),
+			out: func(t *proto.TaskRow) { t.Review, t.State, t.Wait = scored(8, 6, 86, false), "failed", nil },
 			fx:  mcStopped("review_rounds")},
 		{name: "row 7: refused from the task's own assignee",
 			in: base, ev: by(mcA, home.Event{Commit: "c1", OK: true}), err: home.RefusedForbidden},
@@ -405,7 +431,7 @@ func TestMachineMergeAndFailures(t *testing.T) {
 	machineRun(t, []machineCase{
 		{name: "row 8: the host merged the commit",
 			in: merging.wait("approval"), ev: host(home.OnMerged, home.Event{Commit: "c1"}),
-			out: func(t *home.Task) { t.State, t.Wait, t.Stats.Ended = "merged", nil, &ended },
+			out: func(t *proto.TaskRow) { t.State, t.Wait, t.Stats.Ended = "merged", nil, &ended },
 			fx:  home.Effects{Cards: "expired", System: "task_merged", Items: []home.TaskItem{mcNotice("task_merged")}}},
 		{name: "row 8: refused for another commit",
 			in: merging, ev: host(home.OnMerged, home.Event{Commit: "c2"}), err: home.RefusedConflict},
@@ -418,11 +444,11 @@ func TestMachineMergeAndFailures(t *testing.T) {
 
 		{name: "row 8: a task whose dependencies are all merged starts",
 			in: queued, ev: on(home.OnReleased, home.ByHome, home.Event{}),
-			out: func(t *home.Task) { t.State, t.Wait = "active", nil },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "active", nil },
 			fx:  mcItems(home.TaskItem{Why: "assign", AI: mcA})},
 		{name: "row 8: a task that starts waits for a decision asked while it was queued",
 			in: queued, ev: on(home.OnReleased, home.ByHome, home.Event{Pending: []home.PendingCard{mcDecision}}),
-			out: func(t *home.Task) { t.State, t.Wait = "active", mcCardWait(mcDecision) },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "active", mcCardWait(mcDecision) },
 			fx:  mcItems(home.TaskItem{Why: "assign", AI: mcA})},
 		{name: "row 8: a task with another unmerged dependency stays queued",
 			in: queued, ev: on(home.OnReleased, home.ByHome, home.Event{Blocked: true})},
@@ -433,7 +459,7 @@ func TestMachineMergeAndFailures(t *testing.T) {
 
 		{name: "row 9: the merge did not apply",
 			in: merging, ev: host(home.OnConflict, home.Event{Commit: "c1"}),
-			out: func(t *home.Task) { t.Step, t.Wait = "local_check", mcWait("conflict", mcNow) },
+			out: func(t *proto.TaskRow) { t.Step, t.Wait = "local_check", mcWait("conflict", mcNow) },
 			fx:  mcItems(mcNotice("conflict"))},
 		{name: "row 9: refused for another commit",
 			in: merging, ev: host(home.OnConflict, home.Event{Commit: "c2"}), err: home.RefusedConflict},
@@ -444,15 +470,15 @@ func TestMachineMergeAndFailures(t *testing.T) {
 
 		{name: "row 10: a crash below the limit is counted and the secretary told",
 			in: base, ev: host(home.OnFail, home.Event{Reason: "crash"}),
-			out: func(t *home.Task) { t.Failures = 2 },
+			out: func(t *proto.TaskRow) { t.Failures = 2 },
 			fx:  mcItems(mcNotice("crash"))},
 		{name: "row 10: a timeout is told as a timeout",
 			in: base.at("active", "review"), ev: host(home.OnFail, home.Event{Reason: "timeout"}),
-			out: func(t *home.Task) { t.Failures = 2 },
+			out: func(t *proto.TaskRow) { t.Failures = 2 },
 			fx:  mcItems(mcNotice("timeout"))},
 		{name: "row 14: the third consecutive failure stops the task",
-			in: base.wait("conflict").set(func(t *home.Task) { t.Failures = 2 }), ev: host(home.OnFail, home.Event{Reason: "crash"}),
-			out: func(t *home.Task) { t.Failures, t.State, t.Wait = 3, "failed", nil },
+			in: base.wait("conflict").set(func(t *proto.TaskRow) { t.Failures = 2 }), ev: host(home.OnFail, home.Event{Reason: "crash"}),
+			out: func(t *proto.TaskRow) { t.Failures, t.State, t.Wait = 3, "failed", nil },
 			fx:  mcStopped("failures")},
 		{name: "row 10: refused at step merge",
 			in: merging, ev: host(home.OnFail, home.Event{Reason: "crash"}), err: home.RefusedConflict},
@@ -484,97 +510,97 @@ func TestMachineAssign(t *testing.T) {
 	machineRun(t, []machineCase{
 		{name: "another assignee: its cards are reassigned, its items retired, the new one gets the task",
 			in: base, ev: sec(home.Event{Assignee: mcB}),
-			out: func(t *home.Task) { t.Assignee = mcB },
+			out: func(t *proto.TaskRow) { t.Assignee = mcB },
 			fx:  movedTo(assign(mcB))},
 		{name: "another assignee: an approval wait ends with its card, a pending decision takes its place",
-			in:  base.set(func(t *home.Task) { t.Wait = mcCardWait(mcApproval1) }),
+			in:  base.set(func(t *proto.TaskRow) { t.Wait = mcCardWait(mcApproval1) }),
 			ev:  admin(home.Event{Assignee: mcB, Pending: []home.PendingCard{mcApproval1, mcDecision, mcApproval2}}),
-			out: func(t *home.Task) { t.Assignee, t.Wait = mcB, mcCardWait(mcDecision) },
+			out: func(t *proto.TaskRow) { t.Assignee, t.Wait = mcB, mcCardWait(mcDecision) },
 			fx:  movedTo(assign(mcB))},
 		{name: "another assignee: an approval wait ends with nothing else pending",
-			in: base.set(func(t *home.Task) { t.Wait = mcCardWait(mcApproval1) }), ev: sec(home.Event{Assignee: mcB, Pending: []home.PendingCard{mcApproval1}}),
-			out: func(t *home.Task) { t.Assignee, t.Wait = mcB, nil },
+			in: base.set(func(t *proto.TaskRow) { t.Wait = mcCardWait(mcApproval1) }), ev: sec(home.Event{Assignee: mcB, Pending: []home.PendingCard{mcApproval1}}),
+			out: func(t *proto.TaskRow) { t.Assignee, t.Wait = mcB, nil },
 			fx:  movedTo(assign(mcB))},
 		{name: "another assignee: a decision wait stays",
-			in: base.set(func(t *home.Task) { t.Wait = mcCardWait(mcDecision) }), ev: sec(home.Event{Assignee: mcB, Pending: []home.PendingCard{mcDecision}}),
-			out: func(t *home.Task) { t.Assignee = mcB },
+			in: base.set(func(t *proto.TaskRow) { t.Wait = mcCardWait(mcDecision) }), ev: sec(home.Event{Assignee: mcB, Pending: []home.PendingCard{mcDecision}}),
+			out: func(t *proto.TaskRow) { t.Assignee = mcB },
 			fx:  movedTo(assign(mcB))},
 		{name: "the same assignee named again changes nothing",
 			in: base, ev: sec(home.Event{Assignee: mcA})},
 		{name: "after a conflict the same assignee gets the task again and the wait is cleared",
 			in: base.wait("conflict"), ev: sec(home.Event{Assignee: mcA}),
-			out: func(t *home.Task) { t.Wait = nil },
+			out: func(t *proto.TaskRow) { t.Wait = nil },
 			fx:  mcItems(assign(mcA))},
 		{name: "after a conflict naming only a reviewer clears the wait too",
 			in: base.wait("conflict"), ev: sec(home.Event{Reviewer: mcB, Pending: []home.PendingCard{mcDecision}}),
-			out: func(t *home.Task) { t.Reviewer, t.Wait = mcB, mcCardWait(mcDecision) },
+			out: func(t *proto.TaskRow) { t.Reviewer, t.Wait = mcB, mcCardWait(mcDecision) },
 			fx:  home.Effects{Retire: oldReviewer, Items: []home.TaskItem{assign(mcA)}}},
 		{name: "another reviewer at step review gets the commit, the old one's item is retired",
 			in: reviewing, ev: sec(home.Event{Reviewer: mcB}),
-			out: func(t *home.Task) { t.Reviewer = mcB },
+			out: func(t *proto.TaskRow) { t.Reviewer = mcB },
 			fx:  home.Effects{Retire: oldReviewer, Items: []home.TaskItem{{Why: "review", AI: mcB, Commit: "c1"}}}},
 		{name: "a first reviewer at step review ends the reviewer wait",
 			in: reviewing.reviewer("").wait("reviewer"), ev: sec(home.Event{Reviewer: mcB, Pending: []home.PendingCard{mcApproval1}}),
-			out: func(t *home.Task) { t.Reviewer, t.Wait = mcB, mcCardWait(mcApproval1) },
+			out: func(t *proto.TaskRow) { t.Reviewer, t.Wait = mcB, mcCardWait(mcApproval1) },
 			fx:  home.Effects{Retire: []home.ItemFilter{{Why: "review"}}, Items: []home.TaskItem{{Why: "review", AI: mcB, Commit: "c1"}}}},
 		{name: "another reviewer before step review gets nothing yet",
 			in: base, ev: sec(home.Event{Reviewer: mcB}),
-			out: func(t *home.Task) { t.Reviewer = mcB },
+			out: func(t *proto.TaskRow) { t.Reviewer = mcB },
 			fx:  home.Effects{Retire: oldReviewer}},
 		{name: "the same reviewer named again changes nothing",
 			in: reviewing, ev: sec(home.Event{Reviewer: mcR})},
 		{name: "another assignee at step review leaves the reviewer wait",
 			in: reviewing.reviewer("").wait("reviewer"), ev: sec(home.Event{Assignee: mcB}),
-			out: func(t *home.Task) { t.Assignee = mcB },
+			out: func(t *proto.TaskRow) { t.Assignee = mcB },
 			fx:  movedTo(assign(mcB))},
 		{name: "both named at once",
 			in: reviewing, ev: sec(home.Event{Assignee: mcB, Reviewer: "ai-third"}),
-			out: func(t *home.Task) { t.Assignee, t.Reviewer = mcB, "ai-third" },
+			out: func(t *proto.TaskRow) { t.Assignee, t.Reviewer = mcB, "ai-third" },
 			fx: home.Effects{Cards: "reassigned", Retire: []home.ItemFilter{{AI: mcA}, {AI: mcR, Why: "review"}},
 				Items: []home.TaskItem{{Why: "review", AI: "ai-third", Commit: "c1"}, assign(mcB)}}},
 		{name: "a queued task is reassigned without a work item",
 			in: base.at("queued", "branch").wait("depends"), ev: sec(home.Event{Assignee: mcB}),
-			out: func(t *home.Task) { t.Assignee = mcB },
+			out: func(t *proto.TaskRow) { t.Assignee = mcB },
 			fx:  moved},
 		{name: "a paused task is reassigned without a work item and stays paused",
 			in: base.at("paused", "local_check").wait("manual"), ev: sec(home.Event{Assignee: mcB}),
-			out: func(t *home.Task) { t.Assignee = mcB },
+			out: func(t *proto.TaskRow) { t.Assignee = mcB },
 			fx:  moved},
 		{name: "a paused task no longer keeps a conflict wait",
 			in: base.at("paused", "local_check").wait("manual").keep("conflict"), ev: sec(home.Event{Assignee: mcA}),
-			out: func(t *home.Task) { t.Kept = "" }},
+			out: func(t *proto.TaskRow) { t.Wait = mcWait("manual", 1) }},
 		{name: "a paused task no longer keeps a reviewer wait once it has a reviewer",
 			in: reviewing.at("paused", "review").reviewer("").wait("manual").keep("reviewer"), ev: sec(home.Event{Reviewer: mcB}),
-			out: func(t *home.Task) { t.Reviewer, t.Kept = mcB, "" },
+			out: func(t *proto.TaskRow) { t.Reviewer, t.Wait = mcB, mcWait("manual", 1) },
 			fx:  home.Effects{Retire: []home.ItemFilter{{Why: "review"}}}},
 		{name: "a paused task keeps its reviewer wait when only the assignee changes",
 			in: reviewing.at("paused", "review").reviewer("").wait("manual").keep("reviewer"), ev: sec(home.Event{Assignee: mcB}),
-			out: func(t *home.Task) { t.Assignee = mcB },
+			out: func(t *proto.TaskRow) { t.Assignee = mcB },
 			fx:  moved},
 
 		{name: "from failed: an admin gives it to another AI, active with the counters at zero",
 			in: failed, ev: admin(home.Event{Assignee: mcB}),
-			out: func(t *home.Task) { t.Assignee, t.State, t.Failures, t.ReviewFailed = mcB, "active", 0, 0 },
+			out: func(t *proto.TaskRow) { t.Assignee, t.State, t.Failures, t.Review = mcB, "active", 0, mcReview(0) },
 			fx:  movedTo(assign(mcB))},
 		{name: "from failed: the same assignee gets the task again",
 			in: failed, ev: admin(home.Event{Assignee: mcA}),
-			out: func(t *home.Task) { t.State, t.Failures, t.ReviewFailed = "active", 0, 0 },
+			out: func(t *proto.TaskRow) { t.State, t.Failures, t.Review = "active", 0, mcReview(0) },
 			fx:  mcItems(assign(mcA))},
 		{name: "from failed: the task waits for a decision that is still pending",
 			in: failed, ev: admin(home.Event{Assignee: mcA, Pending: []home.PendingCard{mcDecision}}),
-			out: func(t *home.Task) {
-				t.State, t.Failures, t.ReviewFailed, t.Wait = "active", 0, 0, mcCardWait(mcDecision)
+			out: func(t *proto.TaskRow) {
+				t.State, t.Failures, t.Review, t.Wait = "active", 0, mcReview(0), mcCardWait(mcDecision)
 			},
 			fx: mcItems(assign(mcA))},
 		{name: "from failed at step review: another reviewer gets the commit once",
 			in: failed.at("failed", "review"), ev: admin(home.Event{Reviewer: mcB}),
-			out: func(t *home.Task) { t.Reviewer, t.State, t.Failures, t.ReviewFailed = mcB, "active", 0, 0 },
+			out: func(t *proto.TaskRow) { t.Reviewer, t.State, t.Failures, t.Review = mcB, "active", 0, mcReview(0) },
 			fx: home.Effects{Retire: oldReviewer,
 				Items: []home.TaskItem{{Why: "review", AI: mcB, Commit: "c1", IfNone: true}, assign(mcA)}}},
 		{name: "from failed at step review without a reviewer: the task waits for one",
 			in: failed.at("failed", "review").reviewer(""), ev: admin(home.Event{Assignee: mcB}),
-			out: func(t *home.Task) {
-				t.Assignee, t.State, t.Failures, t.ReviewFailed, t.Wait = mcB, "active", 0, 0, mcWait("reviewer", mcNow)
+			out: func(t *proto.TaskRow) {
+				t.Assignee, t.State, t.Failures, t.Review, t.Wait = mcB, "active", 0, mcReview(0), mcWait("reviewer", mcNow)
 			},
 			fx: movedTo(assign(mcB))},
 
@@ -614,16 +640,16 @@ func TestMachinePauseAndResume(t *testing.T) {
 	machineRun(t, []machineCase{
 		{name: "row 12: the secretary pauses a task",
 			in: base, ev: sec(home.OnPause),
-			out: func(t *home.Task) { t.State, t.Wait = "paused", manual }},
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "paused", manual }},
 		{name: "row 12: the pause keeps a reviewer wait",
 			in: reviewing.reviewer("").wait("reviewer"), ev: admin(home.OnPause),
-			out: func(t *home.Task) { t.State, t.Wait, t.Kept = "paused", manual, "reviewer" }},
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "paused", mcKept("manual", "reviewer") }},
 		{name: "row 12: the pause keeps a conflict wait",
 			in: base.wait("conflict"), ev: sec(home.OnPause),
-			out: func(t *home.Task) { t.State, t.Wait, t.Kept = "paused", manual, "conflict" }},
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "paused", mcKept("manual", "conflict") }},
 		{name: "row 12: the pause keeps no card wait",
 			in: base.wait("approval"), ev: sec(home.OnPause),
-			out: func(t *home.Task) { t.State, t.Wait = "paused", manual }},
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "paused", manual }},
 		{name: "row 12: refused at step merge",
 			in: base.at("active", "merge"), ev: admin(home.OnPause), err: home.RefusedConflict},
 		{name: "row 12: answered paused for a paused task",
@@ -639,11 +665,11 @@ func TestMachinePauseAndResume(t *testing.T) {
 
 		{name: "row 16: the host pre-empted the task",
 			in: base, ev: host(home.OnPreempted),
-			out: func(t *home.Task) { t.State, t.Wait = "paused", pre },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "paused", pre },
 			fx:  home.Effects{System: "preempted"}},
 		{name: "row 16: the pause keeps a conflict wait",
 			in: base.wait("conflict"), ev: host(home.OnPreempted),
-			out: func(t *home.Task) { t.State, t.Wait, t.Kept = "paused", pre, "conflict" },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "paused", mcKept("preempted", "conflict") },
 			fx:  home.Effects{System: "preempted"}},
 		{name: "row 16: refused at step merge",
 			in: base.at("active", "merge"), ev: host(home.OnPreempted), err: home.RefusedConflict},
@@ -654,39 +680,43 @@ func TestMachinePauseAndResume(t *testing.T) {
 
 		{name: "row 13: the secretary resumes a paused task",
 			in: paused, ev: sec(home.OnResume),
-			out: func(t *home.Task) { t.State, t.Wait = "active", nil },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "active", nil },
 			fx:  mcItems(resume)},
 		{name: "row 13: a kept conflict wait is restored",
 			in: paused.keep("conflict"), ev: admin(home.OnResume),
-			out: func(t *home.Task) { t.State, t.Wait, t.Kept = "active", mcWait("conflict", mcNow), "" },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "active", mcWait("conflict", mcNow) },
 			fx:  mcItems(resume)},
 		{name: "row 13: a kept reviewer wait is restored and no review is queued",
 			in: paused.at("paused", "review").reviewer("").keep("reviewer"), ev: sec(home.OnResume),
-			out: func(t *home.Task) { t.State, t.Wait, t.Kept = "active", mcWait("reviewer", mcNow), "" },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "active", mcWait("reviewer", mcNow) },
 			fx:  mcItems(resume)},
 		{name: "row 13: at step review the reviewer gets the commit unless it is queued",
 			in: paused.at("paused", "review"), ev: sec(home.OnResume),
-			out: func(t *home.Task) { t.State, t.Wait = "active", nil },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "active", nil },
 			fx:  mcItems(review, resume)},
 		{name: "row 13: at step review without a reviewer the task waits for one again",
 			in: paused.at("paused", "review").reviewer(""), ev: sec(home.OnResume),
-			out: func(t *home.Task) { t.State, t.Wait = "active", mcWait("reviewer", mcNow) },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "active", mcWait("reviewer", mcNow) },
 			fx:  mcItems(resume)},
 		{name: "row 13: the wait is the oldest pending approval",
 			in: paused, ev: on(home.OnResume, home.BySecretary, home.Event{Pending: []home.PendingCard{mcApproval1, mcApproval2}}),
-			out: func(t *home.Task) { t.State, t.Wait = "active", mcCardWait(mcApproval1) },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "active", mcCardWait(mcApproval1) },
 			fx:  mcItems(resume)},
 		{name: "row 13: the secretary resumes a pre-empted task whose host never did",
 			in: paused.wait("preempted"), ev: sec(home.OnResume),
-			out: func(t *home.Task) { t.State, t.Wait = "active", nil },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "active", nil },
 			fx:  mcItems(resume)},
 		{name: "row 13: an admin ends the round limit, and the rounds start again",
 			in: paused.wait("rounds"), ev: admin(home.OnResume),
-			out: func(t *home.Task) { t.State, t.Wait, t.Thread.Rounds = "active", nil, 0 },
+			out: func(t *proto.TaskRow) { t.State, t.Wait, t.Thread.Rounds = "active", nil, 0 },
 			fx:  mcItems(resume)},
 		{name: "row 13: an admin resumes a failed task with the counters at zero",
 			in: base.at("failed", "local_check"), ev: admin(home.OnResume),
-			out: func(t *home.Task) { t.State, t.Failures, t.ReviewFailed = "active", 0, 0 },
+			out: func(t *proto.TaskRow) { t.State, t.Failures, t.Review = "active", 0, mcReview(0) },
+			fx:  mcItems(resume)},
+		{name: "row 13: a failed task that was never reviewed has only its failures to forget",
+			in: base.at("failed", "local_check").set(func(t *proto.TaskRow) { t.Review = nil }), ev: admin(home.OnResume),
+			out: func(t *proto.TaskRow) { t.State, t.Failures = "active", 0 },
 			fx:  mcItems(resume)},
 		{name: "row 13: refused: the secretary does not end the round limit",
 			in: paused.wait("rounds"), ev: sec(home.OnResume), err: home.RefusedForbidden},
@@ -703,10 +733,10 @@ func TestMachinePauseAndResume(t *testing.T) {
 
 		{name: "row 13b: the host resumes its pre-empted task and no item is queued",
 			in: paused.wait("preempted"), ev: host(home.OnResume),
-			out: func(t *home.Task) { t.State, t.Wait = "active", nil }},
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "active", nil }},
 		{name: "row 13b: at step review the reviewer gets the commit unless it is queued",
 			in: paused.at("paused", "review").wait("preempted"), ev: host(home.OnResume),
-			out: func(t *home.Task) { t.State, t.Wait = "active", nil },
+			out: func(t *proto.TaskRow) { t.State, t.Wait = "active", nil },
 			fx:  mcItems(review)},
 		{name: "row 13b: refused: the host does not end a pause by hand",
 			in: paused, ev: host(home.OnResume), err: home.RefusedForbidden},
@@ -722,9 +752,9 @@ func TestMachineCancel(t *testing.T) {
 	on := machineEvent
 	cancel := func(by home.Sender) home.Event { return on(home.OnCancel, by, home.Event{}) }
 	base := machineTask()
-	takeover := base.set(func(t *home.Task) { t.Origin = "takeover" })
+	takeover := base.set(func(t *proto.TaskRow) { t.Origin = "takeover" })
 	ended := mcNow
-	cancelled := func(t *home.Task) { t.State, t.Wait, t.Kept, t.Stats.Ended = "cancelled", nil, "", &ended }
+	cancelled := func(t *proto.TaskRow) { t.State, t.Wait, t.Stats.Ended = "cancelled", nil, &ended }
 	gone := home.Effects{Cards: "expired", Retire: []home.ItemFilter{{}}}
 	machineRun(t, []machineCase{
 		{name: "the secretary cancels an active task",
@@ -779,24 +809,24 @@ func TestMachineCards(t *testing.T) {
 	asked := func(kind string) *proto.TaskWait {
 		return &proto.TaskWait{Kind: kind, Msg: "A9", Who: []string{"u9"}, Since: 90}
 	}
-	onA1 := base.set(func(t *home.Task) { t.Wait = mcCardWait(mcApproval1) })
-	onD1 := base.set(func(t *home.Task) { t.Wait = mcCardWait(mcDecision) })
+	onA1 := base.set(func(t *proto.TaskRow) { t.Wait = mcCardWait(mcApproval1) })
+	onD1 := base.set(func(t *proto.TaskRow) { t.Wait = mcCardWait(mcDecision) })
 	decided := func(ai string) home.TaskItem { return home.TaskItem{Why: "decided", AI: ai} }
 	machineRun(t, []machineCase{
 		{name: "row 17: the task waits for the approval",
 			in: base, ev: approval(mcA),
-			out: func(t *home.Task) { t.Wait = asked("approval") }},
+			out: func(t *proto.TaskRow) { t.Wait = asked("approval") }},
 		{name: "row 17: an approval takes the wait from a pending decision",
 			in: onD1, ev: approval(mcA, mcDecision),
-			out: func(t *home.Task) { t.Wait = asked("approval") }},
+			out: func(t *proto.TaskRow) { t.Wait = asked("approval") }},
 		{name: "row 17: an older pending approval keeps the wait",
 			in: onA1, ev: approval(mcA, mcApproval1)},
 		{name: "row 17: the oldest pending approval takes the wait from a decision",
 			in: onD1, ev: approval(mcA, mcDecision, mcApproval2),
-			out: func(t *home.Task) { t.Wait = mcCardWait(mcApproval2) }},
+			out: func(t *proto.TaskRow) { t.Wait = mcCardWait(mcApproval2) }},
 		{name: "row 17: a card the caller already lists as pending is the wait once",
 			in: base, ev: approval(mcA, home.PendingCard{Kind: "approval", Msg: "A9", Who: []string{"u9"}, Since: 90}),
-			out: func(t *home.Task) { t.Wait = asked("approval") }},
+			out: func(t *proto.TaskRow) { t.Wait = asked("approval") }},
 		{name: "row 17: a reviewer wait stays",
 			in: base.at("active", "review").reviewer("").wait("reviewer"), ev: approval(mcA)},
 		{name: "row 17: a conflict wait stays",
@@ -816,15 +846,15 @@ func TestMachineCards(t *testing.T) {
 
 		{name: "row 18: the last card decided, the wait is cleared",
 			in: onA1, ev: approve("A1", mcApproval1),
-			out: func(t *home.Task) { t.Wait = nil },
+			out: func(t *proto.TaskRow) { t.Wait = nil },
 			fx:  mcItems(decided(mcA))},
 		{name: "row 18: the next approval takes the wait, before an older decision",
 			in: onA1, ev: approve("A1", mcDecision, mcApproval1, mcApproval2),
-			out: func(t *home.Task) { t.Wait = mcCardWait(mcApproval2) },
+			out: func(t *proto.TaskRow) { t.Wait = mcCardWait(mcApproval2) },
 			fx:  mcItems(decided(mcA))},
 		{name: "row 18: with no approval left the pending decision takes the wait",
 			in: onA1, ev: approve("A1", mcApproval1, mcDecision),
-			out: func(t *home.Task) { t.Wait = mcCardWait(mcDecision) },
+			out: func(t *proto.TaskRow) { t.Wait = mcCardWait(mcDecision) },
 			fx:  mcItems(decided(mcA))},
 		{name: "row 18: a card that was not the wait leaves the oldest approval waiting",
 			in: onA1, ev: approve("A2", mcApproval1, mcApproval2),
@@ -843,10 +873,10 @@ func TestMachineCards(t *testing.T) {
 
 		{name: "row 19: an active task that waits for nothing waits for the decision",
 			in: base, ev: decision(home.ByAI),
-			out: func(t *home.Task) { t.Wait = asked("decision") }},
+			out: func(t *proto.TaskRow) { t.Wait = asked("decision") }},
 		{name: "row 19: the secretary asks too",
 			in: base, ev: decision(home.BySecretary),
-			out: func(t *home.Task) { t.Wait = asked("decision") }},
+			out: func(t *proto.TaskRow) { t.Wait = asked("decision") }},
 		{name: "row 19: an approval wait stays",
 			in: onA1, ev: decision(home.ByAI)},
 		{name: "row 19: an older decision wait stays",
@@ -868,11 +898,11 @@ func TestMachineCards(t *testing.T) {
 
 		{name: "row 20: the asking AI and the assignee are told",
 			in: onD1, ev: choose(mcSec, mcDecision),
-			out: func(t *home.Task) { t.Wait = nil },
+			out: func(t *proto.TaskRow) { t.Wait = nil },
 			fx:  mcItems(decided(mcSec), decided(mcA))},
 		{name: "row 20: an assignee that asked is told once",
 			in: onD1, ev: choose(mcA, mcDecision),
-			out: func(t *home.Task) { t.Wait = nil },
+			out: func(t *proto.TaskRow) { t.Wait = nil },
 			fx:  mcItems(decided(mcA))},
 		{name: "row 20: a paused task keeps its paused wait",
 			in: paused, ev: choose(mcSec, mcDecision),
@@ -890,7 +920,7 @@ func TestMachineRoundsAndTimers(t *testing.T) {
 	quiet := on(home.OnQuiet, home.ByHome, home.Event{})
 	group := on(home.OnGroupResume, home.ByHome, home.Event{})
 	base := machineTask()
-	rounds := func(n int) func(*home.Task) { return func(t *home.Task) { t.Thread.Rounds = n } }
+	rounds := func(n int) func(*proto.TaskRow) { return func(t *proto.TaskRow) { t.Thread.Rounds = n } }
 	limit := home.Effects{System: "rounds_limit", Main: true, Items: []home.TaskItem{mcNotice("rounds_limit")}}
 	held := base.at("paused", "local_check").wait("rounds")
 	resume := home.TaskItem{Why: "resume", AI: mcA}
@@ -902,12 +932,12 @@ func TestMachineRoundsAndTimers(t *testing.T) {
 			in: base, ev: on(home.OnMention, home.BySecretary, home.Event{Member: mcSec}), out: rounds(3)},
 		{name: "row 21: the round that reaches the limit pauses the task",
 			in: base.set(rounds(9)), ev: mention,
-			out: func(t *home.Task) { t.Thread.Rounds, t.State, t.Wait = 10, "paused", mcWait("rounds", mcNow) },
+			out: func(t *proto.TaskRow) { t.Thread.Rounds, t.State, t.Wait = 10, "paused", mcWait("rounds", mcNow) },
 			fx:  limit},
 		{name: "row 21: a round above the limit pauses the task, and keeps a conflict wait",
 			in: base.wait("conflict").set(rounds(10)), ev: mention,
-			out: func(t *home.Task) {
-				t.Thread.Rounds, t.State, t.Wait, t.Kept = 11, "paused", mcWait("rounds", mcNow), "conflict"
+			out: func(t *proto.TaskRow) {
+				t.Thread.Rounds, t.State, t.Wait = 11, "paused", mcKept("rounds", "conflict")
 			},
 			fx: limit},
 		{name: "row 21: at step merge the round is counted and nothing else",
@@ -923,15 +953,15 @@ func TestMachineRoundsAndTimers(t *testing.T) {
 			in: base, ev: text, out: rounds(0)},
 		{name: "row 22: it ends the round limit",
 			in: held, ev: on(home.OnText, home.ByAdmin, home.Event{}),
-			out: func(t *home.Task) { t.Thread.Rounds, t.State, t.Wait = 0, "active", nil }},
+			out: func(t *proto.TaskRow) { t.Thread.Rounds, t.State, t.Wait = 0, "active", nil }},
 		{name: "row 22: a kept conflict wait is restored",
 			in: held.keep("conflict"), ev: text,
-			out: func(t *home.Task) {
-				t.Thread.Rounds, t.State, t.Wait, t.Kept = 0, "active", mcWait("conflict", mcNow), ""
+			out: func(t *proto.TaskRow) {
+				t.Thread.Rounds, t.State, t.Wait = 0, "active", mcWait("conflict", mcNow)
 			}},
 		{name: "row 22: at step review the reviewer gets the commit unless it is queued",
 			in: held.at("paused", "review"), ev: text,
-			out: func(t *home.Task) { t.Thread.Rounds, t.State, t.Wait = 0, "active", nil },
+			out: func(t *proto.TaskRow) { t.Thread.Rounds, t.State, t.Wait = 0, "active", nil },
 			fx:  mcItems(review)},
 		{name: "row 22: a pause by hand stays",
 			in: base.at("paused", "local_check").wait("manual"), ev: text, out: rounds(0)},
@@ -975,7 +1005,7 @@ func TestMachineRoundsAndTimers(t *testing.T) {
 // state, step, wait, commit, assignee or reviewer.
 func TestMachineStepMergeIsFrozen(t *testing.T) {
 	for _, wait := range []*proto.TaskWait{nil, mcCardWait(mcApproval1)} {
-		in := machineTask().at("active", "merge").set(func(t *home.Task) { t.Wait, t.Origin = wait, "takeover" }).Task
+		in := machineTask().at("active", "merge").set(func(t *proto.TaskRow) { t.Wait, t.Origin = wait, "takeover" }).TaskRow
 		for _, ev := range mcEveryEvent() {
 			got, _, err := home.Step(in, ev)
 			changed := !reflect.DeepEqual(mcFrozen(got), mcFrozen(in))
@@ -987,8 +1017,8 @@ func TestMachineStepMergeIsFrozen(t *testing.T) {
 }
 
 // mcFrozen is what the point of no return holds still.
-func mcFrozen(t home.Task) []any {
-	return []any{t.State, t.Step, t.Wait, t.Commit, t.Assignee, t.Reviewer, t.Kept}
+func mcFrozen(t proto.TaskRow) []any {
+	return []any{t.State, t.Step, t.Wait, t.Commit, t.Assignee, t.Reviewer}
 }
 
 // mcLeavesMerge says whether the event is one of the three that move a task at step merge with commit c1.
@@ -1032,7 +1062,7 @@ func mcEveryEvent() []home.Event {
 // R3-1: deciding the last card of a pre-empted task leaves the pause for the host to end.
 func TestMachineCardDecidedWhilePreempted(t *testing.T) {
 	on := machineEvent
-	task := machineTask().set(func(t *home.Task) { t.Wait = mcCardWait(mcApproval1) }).Task
+	task := machineTask().set(func(t *proto.TaskRow) { t.Wait = mcCardWait(mcApproval1) }).TaskRow
 	tasks, _ := mcPlay(t, task,
 		on(home.OnPreempted, home.ByHost, home.Event{}),
 		on(home.OnApprove, home.ByPerson, home.Event{Card: mcApproval1, Asker: mcA, Pending: []home.PendingCard{mcApproval1}}),
@@ -1046,7 +1076,7 @@ func TestMachineCardDecidedWhilePreempted(t *testing.T) {
 // task is resumed, with no second reassignment.
 func TestMachineReviewerNamedWhilePaused(t *testing.T) {
 	on := machineEvent
-	task := machineTask().at("active", "review").reviewer("").wait("reviewer").Task
+	task := machineTask().at("active", "review").reviewer("").wait("reviewer").TaskRow
 	tasks, fx := mcPlay(t, task,
 		on(home.OnPause, home.BySecretary, home.Event{}),
 		on(home.OnAssign, home.BySecretary, home.Event{Reviewer: mcB}),

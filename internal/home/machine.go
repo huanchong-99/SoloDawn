@@ -20,15 +20,6 @@ import (
 // OnReleased for each queued task that depends on a merged one, OnOrphaned
 // for each that depends on a cancelled one, OnGroupResume for every task.
 
-// Task is a task row as the machine reads and writes it.
-type Task struct {
-	proto.TaskRow
-	// review.failed and wait.kept of planning/contracts/rows.md section 4.
-	// They are held beside the row until P-1 freezes them in proto.TaskRow.
-	ReviewFailed int
-	Kept         string
-}
-
 // EventKind names the row of the table an event asks for.
 type EventKind string
 
@@ -242,7 +233,7 @@ var taskRules = map[EventKind][]taskRule{
 
 // taskMove is one step in the making: the row, changed in place, and its effects.
 type taskMove struct {
-	t       Task
+	t       proto.TaskRow
 	e       Event
 	x       Effects
 	by      Sender        // e.By, with the roles e.Member holds in the task
@@ -251,7 +242,7 @@ type taskMove struct {
 
 // Step applies an event to a task row. A refused event changes nothing and
 // returns a TaskRefusal.
-func Step(t Task, e Event) (Task, Effects, error) {
+func Step(t proto.TaskRow, e Event) (proto.TaskRow, Effects, error) {
 	m := taskMove{t: t, e: e, by: taskSender(t, e), pending: e.Pending}
 	rule, err := m.rule()
 	if err != nil {
@@ -266,7 +257,7 @@ func Step(t Task, e Event) (Task, Effects, error) {
 }
 
 // taskSender is who sent the event, with the roles its member holds in the task.
-func taskSender(t Task, e Event) Sender {
+func taskSender(t proto.TaskRow, e Event) Sender {
 	by := e.By
 	if e.Member == "" {
 		return by
@@ -354,6 +345,14 @@ func (m *taskMove) waitKind() string {
 	return m.t.Wait.Kind
 }
 
+// kept is the wait the task's pause replaced and keeps, or "".
+func (m *taskMove) kept() string {
+	if m.t.Wait == nil {
+		return ""
+	}
+	return m.t.Wait.Kept
+}
+
 // The building blocks.
 
 func (m *taskMove) waitFor(kind string) *proto.TaskWait {
@@ -389,8 +388,8 @@ func (m *taskMove) forget(gone func(PendingCard) bool) {
 
 // restored is the wait of a task that becomes active: the one its pause kept, else its cards.
 func (m *taskMove) restored() *proto.TaskWait {
-	if m.t.Kept != "" {
-		return m.waitFor(m.t.Kept)
+	if k := m.kept(); k != "" {
+		return m.waitFor(k)
 	}
 	return m.cardWait()
 }
@@ -398,8 +397,10 @@ func (m *taskMove) restored() *proto.TaskWait {
 // settle ends a wait of one of these kinds: an active task's wait is
 // recomputed, a paused task no longer keeps it.
 func (m *taskMove) settle(kinds ...string) {
-	if slices.Contains(kinds, m.t.Kept) {
-		m.t.Kept = ""
+	if slices.Contains(kinds, m.kept()) {
+		wait := *m.t.Wait
+		wait.Kept = ""
+		m.t.Wait = &wait
 	}
 	if slices.Contains(kinds, m.waitKind()) {
 		m.t.Wait = m.cardWait()
@@ -422,7 +423,7 @@ func (m *taskMove) retire(f ItemFilter) { m.x.Retire = append(m.x.Retire, f) }
 // activate makes the task active with the wait it has then. At step review
 // the reviewer gets the commit unless it is queued for them already.
 func (m *taskMove) activate() {
-	m.t.State, m.t.Wait, m.t.Kept = taskActive, m.restored(), ""
+	m.t.State, m.t.Wait = taskActive, m.restored()
 	if m.t.Step == stepReview {
 		m.askReview(true)
 	}
@@ -442,10 +443,11 @@ func (m *taskMove) askReview(ifNone bool) {
 
 // pause is the pause of rows 12, 16 and 21: it keeps a reviewer or conflict wait it replaces.
 func (m *taskMove) pause(kind string) {
+	wait := m.waitFor(kind)
 	if k := m.waitKind(); slices.Contains(waitsKept, k) {
-		m.t.Kept = k
+		wait.Kept = k
 	}
-	m.t.State, m.t.Wait = taskPaused, m.waitFor(kind)
+	m.t.State, m.t.Wait = taskPaused, wait
 }
 
 // strike counts a failure. At the limit the task stops (row 14) and the item is not sent.
@@ -460,7 +462,7 @@ func (m *taskMove) strike(it TaskItem) {
 
 // stop is row 14.
 func (m *taskMove) stop(reason string) {
-	m.t.State, m.t.Wait, m.t.Kept = taskFailed, nil, ""
+	m.t.State, m.t.Wait = taskFailed, nil
 	m.x.System, m.x.Reason = "task_failed", reason
 	m.notice("task_failed")
 }
@@ -474,10 +476,20 @@ func (m *taskMove) passed() {
 	m.askReview(false)
 }
 
+// forgive starts the counters of R-63 again (rows 11 and 13, from failed).
+func (m *taskMove) forgive() {
+	m.t.Failures = 0
+	if m.t.Review != nil {
+		review := *m.t.Review
+		review.Failed = 0
+		m.t.Review = &review
+	}
+}
+
 // end makes the task final (rows 8 and 15).
 func (m *taskMove) end(state string) {
 	now := m.e.Now
-	m.t.State, m.t.Wait, m.t.Kept, m.t.Stats.Ended = state, nil, "", &now
+	m.t.State, m.t.Wait, m.t.Stats.Ended = state, nil, &now
 	m.x.Cards = "expired"
 }
 
@@ -533,8 +545,8 @@ func (m *taskMove) cloud() {
 // reviewed is row 7.
 func (m *taskMove) reviewed() {
 	r := proto.Review{Score: m.e.Score, OK: m.e.OK, By: m.e.Member, Commit: m.e.Commit, At: m.e.Now}
-	if m.t.Review != nil {
-		r.Round = m.t.Review.Round
+	if last := m.t.Review; last != nil {
+		r.Round, r.Failed = last.Round, last.Failed
 	}
 	r.Round++
 	m.t.Review = &r
@@ -543,8 +555,8 @@ func (m *taskMove) reviewed() {
 		m.queue(TaskItem{Why: itemMerge, AI: m.t.Assignee, Commit: m.t.Commit})
 		return
 	}
-	m.t.ReviewFailed++
-	if m.t.ReviewFailed > m.e.Limits.ReviewRounds {
+	r.Failed++
+	if r.Failed > m.e.Limits.ReviewRounds {
 		m.stop("review_rounds")
 		return
 	}
@@ -584,7 +596,7 @@ func (m *taskMove) assign() {
 	m.setReviewer()
 	m.settle(waitConflict)
 	if was.t.State == taskFailed {
-		m.t.Failures, m.t.ReviewFailed = 0, 0
+		m.forgive()
 		m.activate()
 	}
 	if m.t.Assignee != was.t.Assignee || was.t.State == taskFailed || was.waitKind() == waitConflict {
@@ -628,7 +640,7 @@ func (m *taskMove) pauseByHand() { m.pause(waitManual) }
 // resume is row 13; row 13b is activate alone.
 func (m *taskMove) resume() {
 	if m.t.State == taskFailed {
-		m.t.Failures, m.t.ReviewFailed = 0, 0
+		m.forgive()
 	}
 	if m.waitKind() == waitRounds {
 		m.t.Thread.Rounds = 0
