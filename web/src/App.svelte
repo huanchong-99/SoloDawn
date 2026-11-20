@@ -1,7 +1,16 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import Icon, { type IconName } from './components/Icon.svelte';
-  import { announcement, isDark, prefs, t, toggleLang, toggleTheme } from './lib/prefs.svelte';
+  import {
+    announcement,
+    isDark,
+    otherLang,
+    prefs,
+    t,
+    textIn,
+    toggleLang,
+    toggleTheme,
+  } from './lib/prefs.svelte';
   import { pages, route, type Page } from './lib/route.svelte';
   import Groups from './routes/Groups.svelte';
   import Nodes from './routes/Nodes.svelte';
@@ -46,8 +55,14 @@
       <button class="icon-btn" onclick={toggleTheme} aria-label={t('bar.theme')}>
         {#key isDark()}<span class="swap"><Icon name={isDark() ? 'sun' : 'moon'} /></span>{/key}
       </button>
-      <button class="icon-btn" onclick={toggleLang} aria-label={t('bar.lang')}>
-        {#key prefs.lang}<span class="swap">{t('bar.lang.other')}</span>{/key}
+      <!-- Named by its visible text first, then in both languages, each part in its own (WCAG 2.2
+           SC 2.5.3 and 3.1.2). -->
+      <button class="icon-btn" onclick={toggleLang}>
+        {#key prefs.lang}<span class="swap" lang={otherLang()}>{t('bar.lang.other')}</span>{/key}
+        <span class="sr">
+          <span lang="en">{textIn('en', 'bar.lang')}</span> /
+          <span lang="zh-CN">{textIn('zh-CN', 'bar.lang')}</span>
+        </span>
       </button>
       <span class="sr" role="status">{announcement.text}</span>
     </div>
