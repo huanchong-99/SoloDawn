@@ -1,5 +1,9 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
+import { IDBFactory } from 'fake-indexeddb';
 import { expect, vi } from 'vitest';
+import { DeviceLog, Refused } from '../src/lib/devlog';
+import { Device, ed25519, loadDevice, openCommand, type KeyStore } from '../src/lib/identity';
+import { mac, newSecret, parseSecret, room, shown, verifyPair } from '../src/lib/pairing';
 import { examples, goldens, mockCtl, schemaOf } from '../src/lib/mock';
 import * as proto from '../src/lib/proto';
 
@@ -11,6 +15,8 @@ const noEd25519 = {
 
 let browserCrypto: Crypto;
 let browserCss: Pick<typeof CSS, 'supports'>;
+let browserIdb: () => IDBFactory;
+let persisted = 0; // requests for persistent storage; a plain count, which no mock reset clears
 let svelte: typeof import('svelte');
 let app: Record<string, never> | undefined;
 
@@ -21,15 +27,37 @@ async function open(hash = '') {
   location.hash = hash;
   svelte = await import('svelte');
   const { boot } = await import('../src/lib/boot');
-  app = await boot(document.body, browserCrypto, browserCss);
+  app = await boot(document.body, {
+    crypto: browserCrypto,
+    css: browserCss,
+    idb: browserIdb,
+    storage: { persist: () => Promise.resolve(++persisted > 0) },
+  });
   svelte.flushSync();
 }
 
-/** The test runtime's WebCrypto has Ed25519 and happy-dom's CSS.supports answers yes. */
+/** The test runtime's WebCrypto has Ed25519, happy-dom's CSS.supports answers yes, and site
+ *  storage is an empty IndexedDB that lasts the scenario. */
 function supported() {
+  const idb = new IDBFactory();
   browserCrypto = crypto;
   browserCss = CSS;
+  browserIdb = () => idb;
+  persisted = 0;
 }
+
+/** This browser's device, as the client keeps it. */
+const thisDevice = () =>
+  loadDevice({ crypto, idb: browserIdb, storage: { persist: () => Promise.resolve(true) } });
+
+const newDevice = async () =>
+  Device.of(crypto, await crypto.subtle.generateKey(ed25519, false, ['sign', 'verify']));
+
+const entry = (by: Device, user: Device, ver: number, op: string, dev: Device) =>
+  by.sign(
+    `{"t":"device","n":"n${ver}","ts":1,"user":"${user.id}","ver":${ver},"op":"${op}","dev":"${dev.id}"` +
+      (op === 'add' ? ',"kind":"browser","name":"tablet"}' : '}'),
+  );
 
 const texts = (selector: string) =>
   [...document.querySelectorAll(selector)].map((e) => e.textContent!.trim());
@@ -47,7 +75,7 @@ function press(label: string) {
   svelte.flushSync();
 }
 
-describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
+describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScenario }) => {
   AfterEachScenario(() => {
     vi.restoreAllMocks();
     localStorage.clear();
@@ -305,4 +333,147 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       expect(result).toStrictEqual({ re: 2, ok: true });
     });
   });
+
+  Scenario(
+    'A browser that blocks site storage gets the storage notice',
+    ({ Given, When, Then, And }) => {
+      Given('the browser supports Ed25519 in WebCrypto but blocks site storage', () => {
+        supported();
+        // What Firefox does when the person blocks site data: IndexedDB refuses to open.
+        browserIdb = () => {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        };
+      });
+      When('the person opens the client', () => open());
+      Then('the notice "站点存储被阻止" is shown', () => {
+        expect(texts('h1')).toEqual(['站点存储被阻止']);
+      });
+      And('the application is not shown', () => {
+        expect(document.querySelector('nav')).toBeNull();
+      });
+    },
+  );
+
+  Scenario('The browser keeps its device key between visits', ({ Given, When, Then, And }) => {
+    let firstId = '';
+    Given('the browser supports Ed25519 in WebCrypto', supported);
+    And('the person has opened the client once', async () => {
+      await open();
+      firstId = (await thisDevice()).id;
+    });
+    When('the person opens the client again', () => open());
+    Then('the browser is the same device as the first time', async () => {
+      expect(texts('nav a[aria-current="page"]')).toEqual(['群聊']);
+      expect((await thisDevice()).id).toBe(firstId);
+    });
+    And('the browser asked once for persistent site storage', () => {
+      expect(persisted).toBe(1);
+    });
+  });
+
+  ScenarioOutline(
+    'A receiver answers a signed command with one code',
+    ({ Given, When, Then }, variables) => {
+      const now = 1763600000000;
+      let browser: Device;
+      let node: Device;
+      let env: { p: string; k: string; s: string };
+      let receiver = '';
+      let at = now;
+      let valid = true;
+      Given("a command that this browser signed for the owner's node", async () => {
+        [browser, node] = [await newDevice(), await newDevice()];
+        receiver = node.id;
+        env = await browser.sign(`{"t":"cmd","n":"c1","ts":${now},"to":"${node.id}"}`);
+      });
+      When('<event>', () => {
+        const event: string = variables.event;
+        if (event.includes('is changed')) env = { ...env, p: env.p.replace('cmd', 'cme') };
+        if (event.includes('revoked')) valid = false;
+        if (event.includes('another device') || event.includes('misdirected')) receiver = 'other';
+        if (event.includes('25 hours') || event.includes('late')) at = now + 25 * 3_600_000;
+      });
+      Then('the answer is "<answer>"', async () => {
+        const opened = await openCommand(crypto, env, receiver, () => valid, at);
+        expect('code' in opened ? opened.code : 'accepted').toBe(variables.answer);
+      });
+    },
+  );
+
+  Scenario('A revoked device is out of the log for good', ({ Given, When, Then, And }) => {
+    let me: Device;
+    let tablet: Device;
+    let node: Device;
+    let log: DeviceLog;
+    let revoke: { p: string; k: string; s: string };
+    const refused = (env: Promise<{ p: string; k: string; s: string }>) =>
+      env
+        .then((e) => log.apply(e))
+        .then(
+          () => 'accepted',
+          (e: unknown) => (e instanceof Refused ? 'refused' : e),
+        );
+    Given('the device log of a person with this browser, a tablet and a node', async () => {
+      [me, tablet, node] = [await newDevice(), await newDevice(), await newDevice()];
+      log = await DeviceLog.replay(crypto, me.id, [
+        await entry(me, me, 1, 'add', me),
+        await entry(me, me, 2, 'add', tablet),
+        await entry(tablet, me, 3, 'add', node),
+      ]);
+    });
+    When('the node revokes the tablet', async () => {
+      revoke = await entry(node, me, 4, 'revoke', tablet);
+      expect(await log.apply(revoke)).toBe(true);
+    });
+    Then('the valid devices are this browser and the node', () => {
+      expect(log.validDevices()).toStrictEqual([me.id, node.id].sort());
+    });
+    And('an entry signed by the tablet is refused', async () => {
+      expect(await refused(entry(tablet, me, 5, 'add', tablet))).toBe('refused');
+    });
+    And('an entry that adds the tablet again is refused', async () => {
+      expect(await refused(entry(me, me, 5, 'add', tablet))).toBe('refused');
+    });
+    And('the same revoke arriving a second time changes nothing', async () => {
+      expect(await log.apply(revoke)).toBe(false);
+      expect(log.entries).toHaveLength(4);
+    });
+  });
+
+  Scenario(
+    'Two devices that share a pairing secret recognise each other',
+    ({ Given, When, Then, And }) => {
+      let secret = '';
+      let typed = '';
+      let browser: Device;
+      let node: Device;
+      const pair = async (side: Device, role: string, as: string) => ({
+        t: 'pair' as const,
+        k: side.id,
+        kind: role === 'a' ? 'browser' : 'node',
+        name: role,
+        role,
+        mac: await mac(crypto, as, role, side.id),
+      });
+      Given('this browser created a pairing secret', async () => {
+        secret = newSecret(crypto);
+        [browser, node] = [await newDevice(), await newDevice()];
+      });
+      When('a node is given the secret as a person typed it, in lower case', () => {
+        typed = parseSecret(shown(secret).toLowerCase());
+      });
+      Then('both sides meet in the same room', async () => {
+        expect(typed).toBe(secret);
+        expect(await room(crypto, typed)).toBe(await room(crypto, secret));
+      });
+      And("each side accepts the other's pair message", async () => {
+        expect(await verifyPair(crypto, typed, await pair(browser, 'a', secret), 'a')).toBe(true);
+        expect(await verifyPair(crypto, secret, await pair(node, 'b', typed), 'b')).toBe(true);
+      });
+      And('neither side accepts its own pair message sent back', async () => {
+        expect(await verifyPair(crypto, secret, await pair(browser, 'a', secret), 'b')).toBe(false);
+        expect(await verifyPair(crypto, typed, await pair(node, 'b', typed), 'a')).toBe(false);
+      });
+    },
+  );
 });

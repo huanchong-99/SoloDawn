@@ -1,12 +1,15 @@
 <script lang="ts">
   import { t } from './lib/prefs.svelte';
+
+  /** upgrade: the browser is below the supported versions; storage: it blocks site storage. */
+  let { kind }: { kind: 'upgrade' | 'storage' } = $props();
 </script>
 
 <main>
   <p class="brand"><img class="logo-mark" src="icon.svg" alt="" />SoloDawn</p>
   <section class="card need">
-    <h1>{t('upgrade.title')}</h1>
-    <p>{t('upgrade.body')}</p>
+    <h1>{t(`${kind}.title`)}</h1>
+    <p>{t(`${kind}.body`)}</p>
   </section>
 </main>
 

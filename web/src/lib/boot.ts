@@ -1,10 +1,10 @@
 import { mount } from 'svelte';
 import App from '../App.svelte';
-import Upgrade from '../Upgrade.svelte';
+import Notice from '../Notice.svelte';
+import { ed25519, loadDevice, StorageBlocked, type KeyStore } from './identity';
 
 type Css = Pick<typeof CSS, 'supports'>;
 
-const ed25519 = { name: 'Ed25519' } as const;
 // Not empty: Safari's verify() returns false for every signature over an empty message.
 const probe = new TextEncoder().encode('solodawn boot check');
 
@@ -27,9 +27,26 @@ export async function canKeepEd25519Key(crypto: Crypto): Promise<boolean> {
 /** Every colour in tokens.css is a light-dark() pair, and the build ships it as written. */
 export const hasLightDark = (css: Css) => css.supports('color', 'light-dark(#000, #fff)');
 
-/** Mounts the application, or the upgrade notice in its place when the browser is below the
- *  baseline (docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md). */
-export async function boot(target: HTMLElement, crypto: Crypto, css: Css) {
-  const supported = (await canKeepEd25519Key(crypto)) && hasLightDark(css);
-  return mount(supported ? App : Upgrade, { target });
+/** What boot needs from the browser: its WebCrypto, CSS and storage. */
+export interface Browser extends KeyStore {
+  css: Css;
+}
+
+/** Which notice replaces the application, if any: the browser is below the baseline
+ *  (docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md), or it blocks the
+ *  storage that keeps the device key. Loading the device creates the key on first run. */
+async function notice(browser: Browser): Promise<'upgrade' | 'storage' | undefined> {
+  if (!((await canKeepEd25519Key(browser.crypto)) && hasLightDark(browser.css))) return 'upgrade';
+  return loadDevice(browser).then(() => undefined, blocked);
+}
+
+const blocked = (error: unknown) => {
+  if (error instanceof StorageBlocked) return 'storage' as const;
+  throw error;
+};
+
+/** Mounts the application, or a notice in its place. */
+export async function boot(target: HTMLElement, browser: Browser) {
+  const kind = await notice(browser);
+  return kind ? mount(Notice, { target, props: { kind } }) : mount(App, { target });
 }
