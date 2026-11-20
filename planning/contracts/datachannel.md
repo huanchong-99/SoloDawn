@@ -60,12 +60,12 @@ Node to client:
   the whole list again, each entry shaped as in `welcome`:
   `{"t":"groups","groups":[{"g":"Qm1…","name":"Website","seq":812}]}`.
   The list is `[]` when the peer may read no group here.
-- A node keeps one inbound connection per client device. On first
-  application of a valid ordinary offer it closes that signer's previous
-  inbound connection and any pending inbound probe before it starts the
-  new checks; a copy or a replay closes nothing, and a probe's first valid
-  `hello` promotes it (`contracts/rendezvous.md` 2.3). Nothing is carried
-  over: the client reads again with `sync`.
+- A node keeps one inbound connection per client device. On first application
+  of a valid ordinary offer it closes that signer's previous inbound
+  connection and any pending inbound probe before it starts the new checks; a
+  copy or a replay closes nothing, and a probe's first valid `hello` promotes
+  it (`contracts/rendezvous.md` 2.3; hello timeout: `flows/connect.md` step
+  11). Nothing is carried over: the client reads again with `sync`.
 - A `hello` on a connection that has already had one is answered with a
   fresh `welcome`. A client sends it again when pairing has put it in the
   owner's log, and reads `owner: true` from the answer.

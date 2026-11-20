@@ -93,7 +93,9 @@ answering node; RV, any signalling path.
        close of the old connection is expected and is not a loss: C does
        not start again from step 1. With the old connection closed, C
        starts an ordinary reconnect (section C) only if `welcome` does not
-       arrive within the hello timeout, or if the probe itself fails.
+       arrive within the hello timeout, or if the probe itself fails. The
+       hello timeout is 10 seconds, counted from the moment C sends
+       `hello` on the probe: one round trip on a `ctl` that is open.
     2. N promotes the probe on its first valid `hello`: the probe becomes
        the device's inbound connection, and N closes its predecessor.
        Nothing is carried over from it. A superseded probe or a repeated
