@@ -10,7 +10,9 @@
   "kind": "approval",
   "ts": 1763599999500,
   "text": "",
-  "mentions": [],
+  "mentions": [
+    "4xq2Q8RPeg7IJLWdEZTWDQ"
+  ],
   "re": null,
   "body": {
     "task": "DrtCn6htSBwmMPrFPbHJHA",
@@ -29,14 +31,14 @@
     "by": "4xq2Q8RPeg7IJLWdEZTWDQ",
     "at": 1763600000000,
     "act": {
-      "p": "{\"t\":\"act\",\"n\":\"w9mrkYITa5xJDV0PGdzlOQ\",\"ts\":1763600000000,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"msg\":\"netluHiPQf-UoheEIBfbLw\",\"action\":\"deny\",\"arg\":\"\",\"text\":\"\"}",
+      "p": "{\"t\":\"act\",\"n\":\"w9mrkYITa5xJDV0PGdzlOQ\",\"ts\":1763600000000,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"msg\":\"netluHiPQf-UoheEIBfbLw\",\"action\":\"deny\"}",
       "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
-      "s": "kxE_5C3Kf3eHBeDZfVWEE8JZ1KO_x7mIXo8gepC-We8AisSkAC9xT17M7-u4JM_bPmOGXwQFqdgHQ2qNneivBw"
+      "s": "n97T4RE5igqdTiSuJhuaGmaBul5utZFTXnOnzYMVW0eTpO6ZL5D4QuTRZa5hoTVGXNJI7rJtJmudqHDZntAgCA"
     }
   },
   "env": {
-    "p": "{\"t\":\"post\",\"n\":\"netluHiPQf-UoheEIBfbLw\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"1PC8WineBrUQ-apCjx7tug\",\"kind\":\"approval\",\"thread\":\"DrtCn6htSBwmMPrFPbHJHA\",\"main\":true,\"text\":\"\",\"mentions\":[],\"re\":null,\"body\":{\"task\":\"DrtCn6htSBwmMPrFPbHJHA\",\"ai\":\"1PC8WineBrUQ-apCjx7tug\",\"tool\":\"Bash\",\"command\":\"pnpm exec playwright install chromium\",\"full\":4096,\"why\":\"Time the path change in a browser.\",\"category\":\"command\",\"approvers\":[\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\"]}}",
+    "p": "{\"t\":\"post\",\"n\":\"netluHiPQf-UoheEIBfbLw\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"1PC8WineBrUQ-apCjx7tug\",\"kind\":\"approval\",\"thread\":\"DrtCn6htSBwmMPrFPbHJHA\",\"main\":true,\"text\":\"\",\"mentions\":[\"4xq2Q8RPeg7IJLWdEZTWDQ\"],\"re\":null,\"body\":{\"task\":\"DrtCn6htSBwmMPrFPbHJHA\",\"ai\":\"1PC8WineBrUQ-apCjx7tug\",\"tool\":\"Bash\",\"command\":\"pnpm exec playwright install chromium\",\"full\":4096,\"why\":\"Time the path change in a browser.\",\"category\":\"command\",\"approvers\":[\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\"]}}",
     "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
-    "s": "ZMGmkSMY73gLNcO69kkAVt2IFsKX4vm0FhFS_mUqmF8zjOtV4he9iaNHRirmPDcpInUi0QZCrG0AfULJDL3CCg"
+    "s": "E6jq_zUS8eKAocwRkfy89I3yAZaR4H88KUzAIga7YkINGkIsPhilCMHMfRRfrPPqFdQ_OY6MPKRr9rcj3gSXCw"
   }
 }

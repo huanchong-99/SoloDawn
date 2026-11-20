@@ -5,6 +5,7 @@
   "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
   "num": 12,
   "title": "Show connection path",
+  "slug": "show-connection-path",
   "origin": "brief",
   "brief": "KaiCW9JC8UOG7lKNduDo8Q",
   "state": "active",
@@ -15,7 +16,7 @@
   "foundation": false,
   "pass": 90,
   "depends": [],
-  "branch": "task/12-path",
+  "branch": "task/12-show-connection-path",
   "pr": 31,
   "pr_url": "https://git.example/team/website/pull/31",
   "checks": {
@@ -32,6 +33,7 @@
   },
   "review": {
     "round": 1,
+    "failed": 1,
     "score": 86,
     "ok": false,
     "by": "LXCZmuGAXkvO-bSrOkuCfw",

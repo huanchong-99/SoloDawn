@@ -10,7 +10,9 @@
   "kind": "approval",
   "ts": 1763599999500,
   "text": "",
-  "mentions": [],
+  "mentions": [
+    "4xq2Q8RPeg7IJLWdEZTWDQ"
+  ],
   "re": null,
   "body": {
     "task": "DrtCn6htSBwmMPrFPbHJHA",
@@ -29,8 +31,8 @@
     "at": 1763600000000
   },
   "env": {
-    "p": "{\"t\":\"post\",\"n\":\"netluHiPQf-UoheEIBfbLw\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"1PC8WineBrUQ-apCjx7tug\",\"kind\":\"approval\",\"thread\":\"DrtCn6htSBwmMPrFPbHJHA\",\"main\":true,\"text\":\"\",\"mentions\":[],\"re\":null,\"body\":{\"task\":\"DrtCn6htSBwmMPrFPbHJHA\",\"ai\":\"1PC8WineBrUQ-apCjx7tug\",\"tool\":\"Bash\",\"command\":\"pnpm exec playwright install chromium\",\"full\":4096,\"why\":\"Time the path change in a browser.\",\"category\":\"command\",\"approvers\":[\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\"]}}",
+    "p": "{\"t\":\"post\",\"n\":\"netluHiPQf-UoheEIBfbLw\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"1PC8WineBrUQ-apCjx7tug\",\"kind\":\"approval\",\"thread\":\"DrtCn6htSBwmMPrFPbHJHA\",\"main\":true,\"text\":\"\",\"mentions\":[\"4xq2Q8RPeg7IJLWdEZTWDQ\"],\"re\":null,\"body\":{\"task\":\"DrtCn6htSBwmMPrFPbHJHA\",\"ai\":\"1PC8WineBrUQ-apCjx7tug\",\"tool\":\"Bash\",\"command\":\"pnpm exec playwright install chromium\",\"full\":4096,\"why\":\"Time the path change in a browser.\",\"category\":\"command\",\"approvers\":[\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\"]}}",
     "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
-    "s": "ZMGmkSMY73gLNcO69kkAVt2IFsKX4vm0FhFS_mUqmF8zjOtV4he9iaNHRirmPDcpInUi0QZCrG0AfULJDL3CCg"
+    "s": "E6jq_zUS8eKAocwRkfy89I3yAZaR4H88KUzAIga7YkINGkIsPhilCMHMfRRfrPPqFdQ_OY6MPKRr9rcj3gSXCw"
   }
 }
