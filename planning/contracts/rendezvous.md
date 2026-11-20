@@ -139,6 +139,10 @@ Rules:
   same pair of functions; the library's own are used if they accept the
   device id in the username `[unverified]`, spike S-6. The secret is random
   per process start. To the client the credential is an opaque password.
+- The expiry is checked only when a credential opens an allocation. Later
+  requests on that allocation (refresh, permission, channel binding) are
+  accepted while the HMAC matches, so a relayed connection outlives its
+  credential; the daily quota bounds its use.
 - **Quota**: bytes relayed for a device, both directions, summed over all
   its allocations, per UTC day. Default 50 MB, set by a flag. The count is
   taken where relayed data is read and written, so an allocation that is

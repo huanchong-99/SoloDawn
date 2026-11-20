@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
+	"github.com/pion/stun/v4"
 	"github.com/pion/turn/v5"
 )
 
@@ -32,18 +34,25 @@ func TestRESTLifetime(t *testing.T) {
 		check("ready", user, password)
 		time.Sleep(123 * time.Second)
 		check("ice", "946688523:device", "ay+89oSv4H/J4DZABOURaF+mr80=")
-		// The verifier is the library's: it accepts until the end of the
-		// expiry second and refuses from the next one.
-		req := &turn.RequestAttributes{Username: user, Realm: "rv"}
-		auth := turn.LongTermTURNRESTAuthHandler("secret", nil)
+		// An allocation is opened with the library's verifier: it accepts
+		// until the end of the expiry second and refuses from the next one.
+		// Every other request keeps the same device and key after expiry.
+		allocate := &turn.RequestAttributes{Username: user, Realm: "rv", Method: stun.MethodAllocate}
+		refresh := &turn.RequestAttributes{Username: user, Realm: "rv", Method: stun.MethodRefresh}
+		auth := restAuth("secret")
+		key := turn.GenerateAuthKey(user, "rv", password)
 		time.Sleep(3478*time.Second - time.Nanosecond)
-		id, k, ok := auth(req)
-		if !ok || id != "device" || !bytes.Equal(k, turn.GenerateAuthKey(user, "rv", password)) {
-			t.Fatalf("before expiry: %q %x %v", id, k, ok)
+		for _, req := range []*turn.RequestAttributes{allocate, refresh} {
+			if id, k, ok := auth(req); !ok || id != "device" || !bytes.Equal(k, key) {
+				t.Fatalf("%v before expiry: %q %x %v", req.Method, id, k, ok)
+			}
 		}
 		time.Sleep(time.Nanosecond)
-		if id, k, ok := auth(req); ok || k != nil || id != "" {
-			t.Fatalf("after expiry: %q %x %v", id, k, ok)
+		if id, k, ok := auth(allocate); ok || k != nil || id != "" {
+			t.Fatalf("allocate after expiry: %q %x %v", id, k, ok)
+		}
+		if id, k, ok := auth(refresh); !ok || id != "device" || !bytes.Equal(k, key) {
+			t.Fatalf("refresh after expiry: %q %x %v", id, k, ok)
 		}
 	})
 }
@@ -273,5 +282,63 @@ func testOmittedFamily(t *testing.T, host string) {
 	defer a.Close()
 	if got := a.LocalAddr().(*net.UDPAddr).IP; !got.Equal(net.ParseIP(host)) {
 		t.Fatal(got)
+	}
+}
+
+// A credential's expiry limits new allocations only. Once it has passed, the
+// allocation it opened still refreshes and still creates permissions; a new
+// allocation with it is refused.
+func TestRefreshAfterCredentialExpiry(t *testing.T) {
+	udp := udpLocal(t)
+	r, s, err := Options{Domain: "localhost", TurnDomain: "turn.localhost"}.start(udp, listenLocal(t), 443)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	user, pass, _ := turn.GenerateLongTermTURNRESTCredentials(r.secret, "device", time.Second)
+	expiry, _, _ := strings.Cut(user, ":")
+	client := func() *turn.Client {
+		c, err := turn.NewClient(&turn.ClientConfig{Conn: udpLocal(t), TURNServerAddr: udp.LocalAddr().String(), Username: user, Password: pass})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(c.Close)
+		if err := c.Listen(); err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	c := client()
+	if _, err := c.Allocate(); err != nil {
+		t.Fatal(err)
+	}
+	end, _ := strconv.ParseInt(expiry, 10, 64)
+	time.Sleep(time.Until(time.Unix(end+1, 0)))
+
+	if err := c.CreatePermission(udpLocal(t).LocalAddr()); err != nil {
+		t.Errorf("permission after expiry: %v", err)
+	}
+	refresh := func(attrs ...stun.Setter) *stun.Message {
+		t.Helper()
+		msg := stun.MustBuild(append([]stun.Setter{stun.TransactionID, stun.NewType(stun.MethodRefresh, stun.ClassRequest)}, attrs...)...)
+		res, err := c.PerformTransaction(msg, udp.LocalAddr(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Msg
+	}
+	var nonce stun.Nonce
+	var realm stun.Realm
+	challenge := refresh()
+	if nonce.GetFrom(challenge) != nil || realm.GetFrom(challenge) != nil || realm.String() != "localhost" {
+		t.Fatalf("unauthenticated refresh: %v", challenge)
+	}
+	var code stun.ErrorCodeAttribute
+	if res := refresh(stun.NewUsername(user), realm, nonce, stun.NewLongTermIntegrity(user, realm.String(), pass), stun.Fingerprint); res.Type.Class != stun.ClassSuccessResponse {
+		code.GetFrom(res)
+		t.Errorf("refresh after expiry: %v %v", res, code)
+	}
+	if a, err := client().Allocate(); a != nil || err == nil || err.Error() != "Allocate error response (error 401: )" {
+		t.Fatalf("new allocation after expiry: %v, %v", a, err)
 	}
 }
