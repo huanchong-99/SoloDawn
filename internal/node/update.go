@@ -108,8 +108,8 @@ func (u *Updater) pending() bool {
 
 // Downloads are limited: a longer file is cut, and so fails its checksum.
 var (
-	maxDownload   int64 = 256 << 20
-	updateTimeout       = 10 * time.Minute
+	maxDownload   int64         = 256 << 20
+	updateTimeout time.Duration = 600e9 // 10 minutes
 )
 
 // maxRedirects allows GitHub's two (latest release, then its asset store).

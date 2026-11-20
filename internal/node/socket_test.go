@@ -50,22 +50,7 @@ func TestLockedDataDirIsRunning(t *testing.T) {
 func TestNodesStartingTogether(t *testing.T) {
 	for round := range 20 {
 		dir := socketRoot(t)
-		results := make(chan *Local, 8)
-		for range 8 {
-			go func() {
-				l, err := ListenLocal(dir)
-				if err != nil && err != errRunning {
-					t.Errorf("round %d: %v", round, err)
-				}
-				results <- l
-			}()
-		}
-		var winners []*Local
-		for range 8 {
-			if l := <-results; l != nil {
-				winners = append(winners, l)
-			}
-		}
+		winners := startTogether(t, dir, 8)
 		if len(winners) != 1 {
 			t.Fatalf("round %d: %d listeners", round, len(winners))
 		}
@@ -78,7 +63,28 @@ func TestNodesStartingTogether(t *testing.T) {
 	}
 }
 
-func TestLockAndSocketPathErrors(t *testing.T) {
+// startTogether starts n listeners on dir at once and returns those that listen.
+func startTogether(t *testing.T, dir string, n int) []*Local {
+	results := make(chan *Local, n)
+	for range n {
+		go func() {
+			l, err := ListenLocal(dir)
+			if err != nil && err != errRunning {
+				t.Error(err)
+			}
+			results <- l
+		}()
+	}
+	var winners []*Local
+	for range n {
+		if l := <-results; l != nil {
+			winners = append(winners, l)
+		}
+	}
+	return winners
+}
+
+func TestLockPathError(t *testing.T) {
 	dir := socketRoot(t)
 	if err := os.Mkdir(filepath.Join(dir, "lock"), 0o700); err != nil {
 		t.Fatal(err)
@@ -87,7 +93,10 @@ func TestLockAndSocketPathErrors(t *testing.T) {
 	if l, err := ListenLocal(dir); l != nil || !errors.As(err, &open) || open.Op != "open" {
 		t.Fatalf("listener with a folder as its lock = %v, %v", l, err)
 	}
-	dir = socketRoot(t)
+}
+
+func TestSocketPathError(t *testing.T) {
+	dir := socketRoot(t)
 	if err := os.MkdirAll(filepath.Join(dir, "sock", "file"), 0o700); err != nil {
 		t.Fatal(err)
 	}

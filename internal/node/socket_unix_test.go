@@ -9,36 +9,45 @@ import (
 	"testing"
 )
 
-func TestPrivateDirChecksAnExistingOne(t *testing.T) {
-	root := t.TempDir()
-	file := filepath.Join(root, "file")
+func TestPrivateDirRefusesAFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := privateDir(file); errText(err) != file+" is not a directory" {
 		t.Fatalf("privateDir on a file = %v", err)
 	}
-	dir := filepath.Join(root, "dir")
+}
+
+func TestPrivateDirFixesTheMode(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "dir")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := privateDir(dir); err != nil {
 		t.Fatal(err)
 	}
-	if info, _ := os.Stat(dir); info.Mode().Perm() != 0o700 {
-		t.Fatalf("mode %o, want 700", info.Mode().Perm())
+	checkMode(t, dir, 0o700)
+}
+
+func TestPrivateDirRefusesAnotherUsersFolder(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "dir")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
 	}
 	saved := currentUID
 	t.Cleanup(func() { currentUID = saved })
 	currentUID = func() int { return os.Getuid() + 1 }
-	if err := os.Chmod(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := privateDir(dir); errText(err) != dir+" is not owned by the current user" {
 		t.Fatalf("privateDir on another user's folder = %v", err)
 	}
-	if info, _ := os.Stat(dir); info.Mode().Perm() != 0o755 {
-		t.Fatalf("another user's folder changed to %o", info.Mode().Perm())
+	checkMode(t, dir, 0o755)
+}
+
+func checkMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != want {
+		t.Fatalf("%s: %v, %v; want mode %o", path, info, err, want)
 	}
 }
 
@@ -53,10 +62,7 @@ func TestListenPrivateMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer l.Close()
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("socket mode %v, %v; want 600", info, err)
-	}
+	checkMode(t, path, 0o600)
 	if got := syscall.Umask(0o022); got != 0o022 {
 		t.Fatalf("umask after the bind = %o, want 022", got)
 	}

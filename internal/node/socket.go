@@ -94,7 +94,7 @@ const maxOpening = 64 << 10
 
 // openingTimeout limits the wait for the first line, and for the error line
 // that answers a bad one.
-var openingTimeout = 10 * time.Second
+var openingTimeout time.Duration = 10e9 // 10 s
 
 // ReadOpening reads the first line, which must fit in r's buffer.
 func ReadOpening(r *bufio.Reader) (Opening, []byte, error) {
