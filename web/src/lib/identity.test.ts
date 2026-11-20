@@ -247,6 +247,7 @@ describe('openSignal and openCommand', () => {
     expect(await code(tampered, 'me', nobody)).toStrictEqual({ code: 'bad_sig' });
     expect(await code(late, 'me', nobody)).toStrictEqual({ code: 'unknown_device' });
     const odd = await device.sign('{"t":"cmd","n":"c","ts":"0","to":"you"}');
+    expect(await code(odd, 'me', nobody)).toStrictEqual({ code: 'unknown_device' });
     expect(await code(odd, 'me', everyone)).toStrictEqual({ code: 'bad_request' });
     expect(await code(late, 'me', everyone)).toStrictEqual({ code: 'not_for_me' });
     expect(await code(late, 'you', everyone)).toStrictEqual({ code: 'stale' });
