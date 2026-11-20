@@ -82,10 +82,18 @@ func result(err error, stderr io.Writer) int {
 	return 0
 }
 
-func rendezvous(args []string, stderr io.Writer, serve func(string) error) int {
+func rendezvous(args []string, stderr io.Writer, serve func(node.RendezvousOptions) error) int {
 	flags := flag.NewFlagSet("rendezvous", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	addr := flags.String("listen", "127.0.0.1:8080", "HTTP signalling and static file address")
+	var o node.RendezvousOptions
+	flags.StringVar(&o.Listen, "listen", "", "signalling address (TLS :443 or local HTTP 127.0.0.1:8080)")
+	flags.StringVar(&o.Domain, "domain", "", "signalling and STUN hostname")
+	flags.StringVar(&o.TurnDomain, "turn-domain", "", "TURN-over-TLS hostname")
+	flags.StringVar(&o.Cert, "cert", "", "PEM certificate chain for both hostnames")
+	flags.StringVar(&o.Key, "key", "", "PEM certificate private key")
+	flags.IntVar(&o.UDPPort, "udp-port", 3478, "STUN and TURN UDP port")
+	flags.Int64Var(&o.QuotaMB, "relay-quota-mb", 50, "per-device UTC daily limit in MiB")
+	flags.BoolVar(&o.NoRelay, "no-relay", false, "offer STUN but no relay")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -93,6 +101,6 @@ func rendezvous(args []string, stderr io.Writer, serve func(string) error) int {
 		flags.Usage()
 		return 2
 	}
-	fmt.Fprintln(stderr, serve(*addr))
+	fmt.Fprintln(stderr, serve(o))
 	return 1
 }

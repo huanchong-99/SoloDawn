@@ -4,6 +4,7 @@ package features
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"maps"
 	"os"
@@ -63,11 +64,20 @@ func TestFeatures(t *testing.T) {
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
 	f := fixtures{t: t, bin: bin, fakeCLIs: fakes}
 	names := slices.Sorted(maps.Keys(stepSets))
+	home := os.Getenv("HOME")
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(sc *godog.ScenarioContext) {
 			for _, name := range names {
 				stepSets[name](sc, f)
 			}
+			// Runs after every step set's own After hooks: a scenario that leaves
+			// HOME changed would send later go builds to another module cache.
+			sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+				if got := os.Getenv("HOME"); got != home {
+					return ctx, fmt.Errorf("the scenario left HOME set to %q", got)
+				}
+				return ctx, nil
+			})
 		},
 		Options: &godog.Options{Format: "pretty", Paths: []string{"."}, Tags: "~@web", Strict: true, TestingT: t},
 	}

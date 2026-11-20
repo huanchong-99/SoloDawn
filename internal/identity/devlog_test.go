@@ -158,6 +158,25 @@ func TestLogFirstAcceptedEntryWins(t *testing.T) {
 	}
 }
 
+// An entry whose p the wire carries with the escape of a lone surrogate is the
+// entry held with U+FFFD in its place: that is what is signed, and what the
+// envelope reads. web/src/lib/devlog.test.ts holds the browser to this answer.
+func TestLogTakesTheSameEntryWithALoneSurrogateAgain(t *testing.T) {
+	p := strings.Replace(change(browser, 1, "add", browser), browser.name, "�", 1)
+	l := &Log{User: browser.id()}
+	held := browser.key.Sign(p)
+	apply(t, l, "the genesis with U+FFFD in its name", held, true, nil)
+	wire, err := json.Marshal(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var again proto.Envelope
+	if err := proto.Decode([]byte(strings.Replace(string(wire), "�", `\ud800`, 1)), &again); err != nil {
+		t.Fatal(err)
+	}
+	apply(t, l, "the genesis with the escape of a lone surrogate", again, false, nil)
+}
+
 func TestLogSignerMustBeValidBefore(t *testing.T) {
 	l := started(t)
 	apply(t, l, "a stranger adds the node", add(stranger, 2, node), false, UnknownDevice)

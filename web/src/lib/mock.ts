@@ -78,6 +78,8 @@ export const schemaOf: Record<string, GenericSchema> = {
   'rv-auth': p.RVAuth,
   'rv-ready': p.RVReady,
   'rv-ice-request': p.RVICERequest,
+  'rv-quota-request': p.RVQuotaRequest,
+  'rv-quota-answer': p.RVQuotaAnswer,
   'rv-ice-answer': p.RVICEAnswer,
   'rv-to': p.RVTo,
   'rv-from': p.RVFrom,

@@ -2703,6 +2703,48 @@
       ]
     },
     {
+      "name": "the same entry again with the escape of a lone surrogate in p where the entry held has U+FFFD, and the reverse: one signed text, not refused",
+      "user": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+      "entries": [
+        {
+          "env": {
+            "p": "{\"t\":\"device\",\"n\":\"mKAdRvC2pvTk-aWKoAhaTw\",\"ts\":1763600000001,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":1,\"op\":\"add\",\"dev\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"kind\":\"browser\",\"name\":\"�\"}",
+            "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+            "s": "Nzhqh6NMMZHC1HHcmjpC_Su6nvOhugbR7eYTNTJOxuAOapaTta76lNff3HlxLeps4etfy8kVPBAAFTB8xzuLCQ"
+          },
+          "accept": true
+        },
+        {
+          "env": {
+            "p": "{\"t\":\"device\",\"n\":\"mKAdRvC2pvTk-aWKoAhaTw\",\"ts\":1763600000001,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":1,\"op\":\"add\",\"dev\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"kind\":\"browser\",\"name\":\"\ud800\"}",
+            "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+            "s": "Nzhqh6NMMZHC1HHcmjpC_Su6nvOhugbR7eYTNTJOxuAOapaTta76lNff3HlxLeps4etfy8kVPBAAFTB8xzuLCQ"
+          },
+          "accept": true
+        },
+        {
+          "env": {
+            "p": "{\"t\":\"device\",\"n\":\"Sz2Uz85rLoeS2_MfpuIXPw\",\"ts\":1763600000002,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":2,\"op\":\"add\",\"dev\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\",\"kind\":\"node\",\"name\":\"\ud800\"}",
+            "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+            "s": "SwLyhdjKAh8OrNEG18Ak06ns0SOKpDSXEx_EJ4z4EObKBo_BNq3XWTyz5VHQwVyn7PZKdKTf9CyDB14aDxRvAA"
+          },
+          "accept": true
+        },
+        {
+          "env": {
+            "p": "{\"t\":\"device\",\"n\":\"Sz2Uz85rLoeS2_MfpuIXPw\",\"ts\":1763600000002,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":2,\"op\":\"add\",\"dev\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\",\"kind\":\"node\",\"name\":\"�\"}",
+            "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+            "s": "SwLyhdjKAh8OrNEG18Ak06ns0SOKpDSXEx_EJ4z4EObKBo_BNq3XWTyz5VHQwVyn7PZKdKTf9CyDB14aDxRvAA"
+          },
+          "accept": true
+        }
+      ],
+      "valid": [
+        "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+        "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
+      ]
+    },
+    {
       "name": "a revoke of the last valid device",
       "user": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
       "entries": [

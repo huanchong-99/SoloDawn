@@ -18,6 +18,8 @@ func rendezvousGoldens(t *testing.T, envelope Envelope, pair Pair) {
 	}
 	golden(t, "rv-ready", ICEConfig{"ready", ice, 3600})
 	golden(t, "rv-ice-request", RVFrame{"ice"})
+	golden(t, "rv-quota-request", RVFrame{"quota"})
+	golden(t, "rv-quota-answer", Quota{"quota", 3250000, 52428800})
 	golden(t, "rv-ice-answer", ICEConfig{"ice", ice, 3600})
 	env := wireJSON(t, envelope)
 	golden(t, "rv-to", Route{"to", host, env})

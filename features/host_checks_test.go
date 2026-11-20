@@ -3,6 +3,7 @@
 package features
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -85,9 +86,30 @@ func hostCheckSteps(sc *godog.ScenarioContext, f fixtures) {
 		}}
 		return compareHostChecks(result, runErr, want)
 	})
+	// The runner reads the process environment, so the variables are set for
+	// this scenario only and restored after it; f.t.Setenv would keep them for
+	// the rest of the suite.
+	var restore []func()
+	setenv := func(key, value string) {
+		old, had := os.LookupEnv(key)
+		restore = append(restore, func() {
+			if had {
+				os.Setenv(key, old)
+			} else {
+				os.Unsetenv(key)
+			}
+		})
+		os.Setenv(key, value)
+	}
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		for _, r := range restore {
+			r()
+		}
+		return ctx, nil
+	})
 	sc.Step(`^the host environment contains a test token$`, func() {
-		f.t.Setenv("SOLODAWN_CHECK_TEST_TOKEN", "node-only")
-		f.t.Setenv("HOME", dir)
+		setenv("SOLODAWN_CHECK_TEST_TOKEN", "node-only")
+		setenv("HOME", dir)
 	})
 	sc.Step(`^the host runs a check that inspects PATH, HOME and the test token$`, func() {
 		run(probe)
