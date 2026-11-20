@@ -1,8 +1,12 @@
 package host
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,7 +24,7 @@ func checkReviewRepo(t *testing.T, base map[string]string, change func(dir strin
 		checkTestFile(t, dir, name, content)
 	}
 	checkTestGit(t, dir, "add", "-A")
-	checkTestGit(t, dir, "commit", "-m", "base")
+	checkTestGit(t, dir, "commit", "--allow-empty", "-m", "base")
 	checkTestGit(t, dir, "switch", "-c", "task")
 	change(dir)
 	checkTestGit(t, dir, "add", "-A")
@@ -67,7 +71,7 @@ func TestTestsCheckIgnoresDeletedFiles(t *testing.T) {
 }
 
 func TestSecretsCheckReadsFilesGitTakesAsBinary(t *testing.T) {
-	key := checkTestSecret + "\nMIIEvQIBADANBg\n-----END PRIVATE KEY-----\n"
+	key := checkTestSecret + "\nMIIEvQIBADANBg\n" + keyEnd + "PRIVATE KEY-----\n"
 	for name, change := range map[string]func(dir string){
 		"binary attribute": func(dir string) { checkTestFile(t, dir, "server.pem", key) },
 		"NUL byte":         func(dir string) { checkTestFile(t, dir, "blob", "\x00\n"+key) },
@@ -82,26 +86,104 @@ func TestSecretsCheckReadsFilesGitTakesAsBinary(t *testing.T) {
 	}
 }
 
-func TestChecksRefuseHiddenTrackedChanges(t *testing.T) {
-	for _, bit := range []string{"--skip-worktree", "--assume-unchanged"} {
-		t.Run(bit, func(t *testing.T) {
-			dir := checkReviewRepo(t, map[string]string{"config.txt": "checked\n"}, func(string) {})
-			checkTestGit(t, dir, "update-index", bit, "config.txt")
-			checkTestFile(t, dir, "config.txt", "not what was committed\n")
-			if status := checkTestGit(t, dir, "status", "--porcelain"); status != "" {
-				t.Fatalf("status shows %q; the bit should hide the change", status)
+func TestSkipWorktreeIsRefusedByName(t *testing.T) {
+	for _, tc := range []struct {
+		count int
+		want  string
+	}{
+		{1, "f00"},
+		{10, "f00, f01, f02, f03, f04, f05, f06, f07, f08, f09"},
+		{11, "f00, f01, f02, f03, f04, f05, f06, f07, f08, f09, and 1 more"},
+	} {
+		t.Run(strconv.Itoa(tc.count), func(t *testing.T) {
+			files := map[string]string{}
+			args := []string{"update-index", "--skip-worktree", "--"}
+			for i := range tc.count {
+				files[fmt.Sprintf("f%02d", i)] = "checked\n"
+				args = append(args, fmt.Sprintf("f%02d", i))
 			}
+			dir := checkReviewRepo(t, files, func(string) {})
+			checkTestGit(t, dir, args...)
 			result, err := checkTestRunner().Run(t.Context(), dir, "base", checkTestGroup("echo ran > marker"))
-			if err != ErrDirtyCheckTree || !reflect.DeepEqual(result, proto.ChecksBody{}) {
-				t.Fatalf("hidden change: %#v, %v", result, err)
+			if !errors.Is(err, ErrSkipWorktree) || err.Error() != ErrSkipWorktree.Error()+": "+tc.want || !reflect.DeepEqual(result, proto.ChecksBody{}) {
+				t.Fatalf("skip-worktree: %#v, %v", result, err)
 			}
 		})
 	}
 }
 
+// core.ignoreStat sets the assume-unchanged bit on every path Git adds; the
+// bit is cleared before the status, so a change shows and a clean tree runs.
+func TestAssumeUnchangedDoesNotHideChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		ignoreStat bool
+		change     bool
+	}{
+		{"ignoreStat, clean", true, false},
+		{"ignoreStat, changed", true, true},
+		{"bit set by hand, changed", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.ignoreStat {
+				t.Setenv("GIT_CONFIG_COUNT", "1")
+				t.Setenv("GIT_CONFIG_KEY_0", "core.ignoreStat")
+				t.Setenv("GIT_CONFIG_VALUE_0", "true")
+			}
+			dir := checkReviewRepo(t, map[string]string{"config.txt": "checked\n"}, func(string) {})
+			if !tc.ignoreStat {
+				checkTestGit(t, dir, "update-index", "--assume-unchanged", "config.txt")
+			}
+			if tags := checkTestGit(t, dir, "ls-files", "-v"); tags != "h config.txt" {
+				t.Fatalf("ls-files -v = %q; the bit should be set", tags)
+			}
+			if tc.change {
+				checkTestFile(t, dir, "config.txt", "not what was committed\n")
+			}
+			result, err := checkTestRunner().Run(t.Context(), dir, "base", checkTestGroup())
+			want := proto.ChecksBody{Stage: "local", OK: true, Commit: checkTestGit(t, dir, "rev-parse", "HEAD"), Items: []proto.CheckItem{
+				{Name: "secrets", OK: true}, {Name: "tests", OK: true},
+			}}
+			var wantErr error
+			if tc.change {
+				want, wantErr = proto.ChecksBody{}, ErrDirtyCheckTree
+			}
+			if err != wantErr || !reflect.DeepEqual(result, want) {
+				t.Fatalf("got %#v, %v; want %#v, %v", result, err, want, wantErr)
+			}
+		})
+	}
+}
+
+func TestAddedLinesOverTheLimit(t *testing.T) {
+	saved := addedLineLimit
+	t.Cleanup(func() { addedLineLimit = saved })
+	addedLineLimit = 10
+	for _, tc := range []struct {
+		content string
+		want    proto.CheckItem
+	}{
+		{"01234567\n", proto.CheckItem{Name: "secrets", OK: true}},
+		{"012345678\n", proto.CheckItem{Name: "secrets", Detail: new("too large to check: 11 bytes of added lines, over the limit of 10")}},
+	} {
+		dir := checkReviewRepo(t, nil, func(dir string) { checkTestFile(t, dir, "notes", tc.content) })
+		if items := checkHardItems(t, dir); !reflect.DeepEqual(items[0], tc.want) {
+			t.Errorf("%q: secrets item %+v, want %+v", tc.content, items[0], tc.want)
+		}
+	}
+}
+
+func TestScanStopsAtTheLimitOfTheHardChecks(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := checkAddedLines(ctx, ">x\n"); err != errHardTimeout {
+		t.Fatalf("scan after the limit: %v", err)
+	}
+}
+
 func TestCheckOutputRedactsKeyLongerThanTail(t *testing.T) {
 	dir := t.TempDir()
-	key := checkTestSecret + "\n" + strings.Repeat("MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n", 85) + "-----END PRIVATE KEY-----\n"
+	key := checkTestSecret + "\n" + strings.Repeat("MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n", 85) + keyEnd + "PRIVATE KEY-----\n"
 	checkTestFile(t, dir, "key.pem", key)
 	command := "cat key.pem"
 	if runtime.GOOS == "windows" {

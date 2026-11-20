@@ -119,8 +119,8 @@ remote.
 | task session created for a task taken over from another AI | with a remote: fetch, then `git -C repo worktree add ../<wt> -b <br> origin/<br>` if that branch exists there, else as for a new task. Without a remote: `git -C repo worktree add ../<wt> <br>` |
 | task session created for a task that returns to a node which still has the local branch `<br>` | with a remote: fetch, `git -C repo worktree add ../<wt> <br>` (the branch is reused, not created), then `git -C <wt> merge --ff-only origin/<br>`. If the branch has diverged, the worktree is removed again and the session fails with the output of Git. Without a remote: as the row above |
 | `push_branch` | `git -C <wt> push origin refs/heads/<br>:refs/heads/<br>`: the full ref on both sides, never a short name; never with a force option |
-| `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Also refused when a tracked path has the skip-worktree or assume-unchanged bit (`git -C <wt> ls-files -v` tags it `S` or in lower case), whose content the status does not show. Then each entry of `group.checks`, in order, through the system shell, in the worktree. The time left in the current turn (`limits.turn_minutes`) limits the whole run of these entries together, not each command. The commit recorded is `git -C <wt> rev-parse HEAD` |
-| hard check: secrets | the patterns of section 8 over the added lines of `git diff <base-ref>...HEAD` |
+| `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Before the status, the assume-unchanged bit, a speed hint that `core.ignoreStat` sets on every path, is cleared in the worktree's index for each path that has it (`git -C <wt> ls-files -v` tags it in lower case; `git -C <wt> update-index --no-assume-unchanged -z --stdin`), so a change shows. Refused when a tracked path has the skip-worktree bit (tag `S` or `s`), as in a sparse checkout, whose content the status never shows; the error names up to 10 such paths. Then each entry of `group.checks`, in order, through the system shell, in the worktree. The time left in the current turn (`limits.turn_minutes`) limits the whole run of these entries together, not each command. The commit recorded is `git -C <wt> rev-parse HEAD` |
+| hard check: secrets | the patterns of section 8 over the added lines of `git diff --text <base-ref>...HEAD`, files Git takes as binary included. More than 64 MiB of added lines fail the check with "too large to check" and their size |
 | hard check: tests | fails when the diff changes source files and no test file; what counts as each is below the table |
 | `submit_task` | refused unless the tree is clean, by the status command of `run_checks`, and both HEAD and `<br>` are the commit of the last `run_checks`, which passed. With a remote: the push above, then `gh pr list --head <br> --base <base> --state open --json number,headRefOid,url,state,baseRefName`. A pull request that is closed (merged included) or whose base is not `<base>` is never reused. If the list is empty: `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
 | hosted checks | every 30 s, one request: `gh pr view <pr> --json headRefOid,statusCheckRollup`; what each read counts as is below the table. A result is reported only from an answer whose `headRefOid` is the submitted commit `[unverified]` that both fields come back in one answer; else `gh api` for the check runs of that commit |
@@ -173,7 +173,11 @@ remote.
 - **Text the host writes.** Before the host sends them, the output tails of
   check items, the Git output in `task conflict`, and the `detail` of
   `task fail`, `login_invalid` and `turn_interrupted` go through the
-  patterns of section 8; each match is replaced by `[redacted]`.
+  patterns of section 8; each match is replaced by `[redacted]`. A
+  private key goes through its footer, or to the end of the text without
+  one; a private-key footer without its header, as in a tail cut inside a
+  key, from the start of the text through that footer. A check's last
+  64 KiB of output are redacted before the tail is cut from them.
 - Checks are about a commit, so they need a clean tree: the commit that is
   checked is the commit that is submitted, reviewed and merged
   (`contracts/task-machine.md` section 4).
@@ -209,6 +213,10 @@ remote.
   those languages.
 - "Fake tests" has no command; it is a veto item in review.
 - Both hard checks always run (R-103). There is no setting to turn one off.
+  They outlive the turn's deadline and have their own limit of 2 minutes; a
+  check that reaches it fails with `timed out`. An explicit stop of the run
+  (a pause, an interrupt, a shutdown) stops them too, and then nothing is
+  reported.
 
 ## 8. Outbound secret check (R-137)
 
@@ -218,8 +226,7 @@ diffs (section 7), the text arguments of tools and the texts of approvals
 
 Patterns:
 
-- a PEM or OpenPGP private-key header, and such a footer without its
-  header;
+- a PEM or OpenPGP private-key header;
 - well-known credential formats, recognised by prefix and length (the list
   is short and is part of the code review). The vendors document the
   prefixes, not a fixed length (GitHub warns that a token's length can

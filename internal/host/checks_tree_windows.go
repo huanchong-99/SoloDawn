@@ -10,12 +10,13 @@ import (
 // killCheckTree returns what kills a started check with every process it
 // left behind. Once cmd.exe has exited, taskkill /t no longer finds its
 // children, so the shell goes into a job object that kills all its
-// processes when the job is closed. Without a job, Cancel (taskkill /t) is
-// the fallback.
+// processes when the job is closed. Without a job nothing is killed after
+// Wait: Go has released the process by then, and Cancel (taskkill /t)
+// still stops a running shell.
 func killCheckTree(cmd *exec.Cmd) func() {
 	job, err := newCheckJob(uint32(cmd.Process.Pid))
 	if err != nil {
-		return func() { cmd.Cancel() }
+		return func() {}
 	}
 	return func() { windows.CloseHandle(job) }
 }

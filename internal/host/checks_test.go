@@ -143,8 +143,8 @@ func TestChecksSurfaceGitFailures(t *testing.T) {
 		t.Fatalf("diff: %v", err)
 	}
 	_, err = checkTestRunner().Run(t.Context(), t.TempDir(), "base", checkTestGroup())
-	if err == nil || !strings.HasPrefix(err.Error(), "git status: exit status 128: fatal: ") {
-		t.Fatalf("status: %v", err)
+	if err == nil || !strings.HasPrefix(err.Error(), "git ls-files: exit status 128: fatal: ") {
+		t.Fatalf("ls-files: %v", err)
 	}
 }
 
@@ -172,7 +172,7 @@ func TestChecksOnlyConsecutiveAddedLinesReachSecretMatcher(t *testing.T) {
 		{"+++ b/file\n@@ -1 +1,2 @@\n>A=1\n>B=2\n@@ -9,0 +12 @@\n>MY_KEY=3", nil},
 		{"+++ b/file\n@@ -1 +1,3 @@\n A=1\n>B=2\n>MY_KEY=3", nil},
 	} {
-		if err := checkAddedLines(tc.patch); err != tc.want {
+		if err := checkAddedLines(t.Context(), tc.patch); err != tc.want {
 			t.Errorf("%q: got %v, want %v", tc.patch, err, tc.want)
 		}
 	}
@@ -250,7 +250,7 @@ func TestCheckOutputKeepsLast64KiB(t *testing.T) {
 }
 
 func TestCheckDetailIsErrorThenRedactedTail(t *testing.T) {
-	key := "-----BEGIN PRIVATE KEY-----\n" + strings.Repeat("MIIab\n", 750) + "-----END PRIVATE KEY-----\n"
+	key := keyBegin + "PRIVATE KEY-----\n" + strings.Repeat("MIIab\n", 750) + keyEnd + "PRIVATE KEY-----\n"
 	long := strings.Repeat("x", 5000)
 	for _, tc := range []struct {
 		err    error

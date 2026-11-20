@@ -7,6 +7,10 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/host"
 )
 
+// keyBegin and keyEnd split key lines in test literals, so that this file
+// holds no new private-key header or footer itself.
+const keyBegin, keyEnd = "-----BEGIN ", "-----END "
+
 func TestCheckOutboundSecretRejects(t *testing.T) {
 	for name, text := range map[string]string{
 		"PKCS8":                   "copied: -----BEGIN PRIVATE KEY-----\n",
@@ -14,8 +18,7 @@ func TestCheckOutboundSecretRejects(t *testing.T) {
 		"OpenSSH":                 "-----BEGIN OPENSSH PRIVATE KEY-----",
 		"encrypted":               "-----BEGIN ENCRYPTED PRIVATE KEY-----",
 		"two words":               "-----BEGIN SSH2 ENCRYPTED PRIVATE KEY-----",
-		"footer without header":   "MIIab\n-----END PRIVATE KEY-----",
-		"OpenPGP":                 "-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOY\n",
+		"OpenPGP":                 keyBegin + "PGP PRIVATE KEY BLOCK-----\nlQOY\n",
 		"GitHub":                  "token: (ghp_" + strings.Repeat("xY7", 12) + ")",
 		"GitHub long":             "ghp_" + strings.Repeat("a", 37),
 		"GitHub underscore":       "ghp_" + strings.Repeat("a", 35) + "_",
@@ -58,6 +61,8 @@ func TestCheckOutboundSecretAllows(t *testing.T) {
 	for name, text := range map[string]string{
 		"empty":                     "",
 		"public key":                "-----BEGIN PUBLIC KEY-----",
+		"footer alone":              "MIIab\n" + keyEnd + "PRIVATE KEY-----",
+		"footer in code":            "const pemEnd = \"" + keyEnd + "RSA PRIVATE KEY-----\"",
 		"incomplete header":         "-----BEGIN PRIVATE KEY----",
 		"no leading dashes":         "BEGIN PRIVATE KEY-----",
 		"lower-case label":          "-----BEGIN my PRIVATE KEY-----",

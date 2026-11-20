@@ -24,20 +24,41 @@ import (
 // the added lines.
 type CheckRunner struct{}
 
-var ErrDirtyCheckTree = errors.New("conflict: the worktree has uncommitted changes")
+var (
+	ErrDirtyCheckTree = errors.New("conflict: the worktree has uncommitted changes")
+	// ErrSkipWorktree is wrapped with up to 10 of the paths.
+	ErrSkipWorktree = errors.New("conflict: Git hides these paths from the status with skip-worktree, as in a sparse checkout")
+	errHardTimeout  = errors.New("timed out")
+)
+
+// The hard checks have their own limit instead of the turn's (R-103), and
+// the secrets check reads at most this much of the added lines.
+var (
+	hardCheckLimit = 2 * time.Minute
+	addedLineLimit = 64 << 20
+)
 
 // Run executes the group's checks in order, followed by both hard checks
 // against the same commit. A failed check is an item, not a runner error.
+// An explicit cancel of ctx (a pause, an interrupt, a shutdown) stops the
+// run, which then reports nothing and returns that error; the turn's
+// deadline stops only the group's checks.
 func (r CheckRunner) Run(ctx context.Context, worktree, baseRef string, group proto.GroupRow) (proto.ChecksBody, error) {
+	result, err := r.run(ctx, worktree, baseRef, group)
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return proto.ChecksBody{}, ctx.Err()
+	}
+	return result, err
+}
+
+func (r CheckRunner) run(ctx context.Context, worktree, baseRef string, group proto.GroupRow) (proto.ChecksBody, error) {
 	head, err := cleanCheckHead(ctx, worktree)
 	if err != nil {
 		return proto.ChecksBody{}, err
 	}
 	result := proto.ChecksBody{Stage: "local", Commit: head, OK: true}
 	result.Items = runGroupChecks(ctx, worktree, group)
-	// Both hard checks always run (R-103), also when the turn ran out during
-	// the group's checks.
-	hard, err := r.hardChecks(context.WithoutCancel(ctx), worktree, baseRef+"..."+head)
+	hard, err := r.hardChecks(ctx, worktree, baseRef+"..."+head)
 	if err != nil {
 		return proto.ChecksBody{}, err
 	}
@@ -71,27 +92,70 @@ func checkGit(ctx context.Context, dir string, args ...string) (string, error) {
 	return string(out), err
 }
 
-// hiddenCheckPath matches an entry of `git ls-files -v -z` whose content
-// the status does not show: tag S for skip-worktree, a lower-case tag for
-// assume-unchanged.
-var hiddenCheckPath = regexp.MustCompile(`(?:^|\x00)[Sa-z] `)
-
-// cleanCheckHead refuses a tree whose status is not empty, or in which a
-// tracked path hides its content from the status (local.md 7, run_checks).
+// cleanCheckHead refuses a tree whose status is not empty (local.md 7,
+// run_checks). A path with the skip-worktree bit is refused by name, as its
+// content never shows; the assume-unchanged bit, a speed hint that
+// core.ignoreStat sets on every path, is cleared first, so that a change
+// shows.
 func cleanCheckHead(ctx context.Context, dir string) (string, error) {
-	status, err := checkGit(ctx, dir, "status", "--porcelain", "--untracked-files=all")
-	if err != nil {
-		return "", err
-	}
 	tracked, err := checkGit(ctx, dir, "ls-files", "-v", "-z")
 	if err != nil {
 		return "", err
 	}
-	if status != "" || hiddenCheckPath.MatchString(tracked) {
+	skip, assume := hiddenCheckPaths(tracked)
+	if len(skip) != 0 {
+		return "", skipWorktreeError(skip)
+	}
+	if err := clearAssumeUnchanged(ctx, dir, assume); err != nil {
+		return "", err
+	}
+	status, err := checkGit(ctx, dir, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return "", err
+	}
+	if status != "" {
 		return "", ErrDirtyCheckTree
 	}
 	head, err := checkGit(ctx, dir, "rev-parse", "--verify", "HEAD")
 	return strings.TrimSpace(head), err
+}
+
+// hiddenCheckPaths reads `git ls-files -v -z`: tag S or s for
+// skip-worktree, any other lower-case tag for assume-unchanged.
+func hiddenCheckPaths(tracked string) (skip, assume []string) {
+	for entry := range strings.SplitSeq(strings.TrimSuffix(tracked, "\x00"), "\x00") {
+		tag, name, _ := strings.Cut(entry, " ")
+		switch {
+		case strings.EqualFold(tag, "S"):
+			skip = append(skip, name)
+		case tag != strings.ToUpper(tag):
+			assume = append(assume, name)
+		}
+	}
+	return skip, assume
+}
+
+func skipWorktreeError(paths []string) error {
+	shown := strings.Join(paths[:min(len(paths), 10)], ", ")
+	if len(paths) > 10 {
+		shown += fmt.Sprintf(", and %d more", len(paths)-10)
+	}
+	return fmt.Errorf("%w: %s", ErrSkipWorktree, shown)
+}
+
+// clearAssumeUnchanged clears the bit of paths in the worktree's index. The
+// paths go through stdin, NUL-terminated, however many there are.
+func clearAssumeUnchanged(ctx context.Context, dir string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "git", "update-index", "--no-assume-unchanged", "-z", "--stdin")
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(strings.Join(paths, "\x00") + "\x00")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git update-index: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func checkEnvironment(env []string, windows bool) []string {
@@ -195,34 +259,78 @@ func checkedItem(name string, err error) proto.CheckItem {
 }
 
 func (r CheckRunner) hardChecks(ctx context.Context, dir, revisions string) ([]proto.CheckItem, error) {
+	ctx, stop := hardCheckContext(ctx)
+	defer stop()
 	// --text: a file Git takes as binary still shows its added lines.
 	patch, err := checkGit(ctx, dir, "diff", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--find-renames", "--unified=0", "--output-indicator-new=>", "--end-of-options", revisions, "--")
+	secrets, err := hardItem(ctx, "secrets", err, func() error { return checkAddedLines(ctx, patch) })
 	if err != nil {
 		return nil, err
 	}
 	// --diff-filter=d: a deleted file counts as neither a test nor a source
 	// file; a rename is a deletion and an addition.
 	names, err := checkGit(ctx, dir, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=d", "--end-of-options", revisions, "--")
+	tests, err := hardItem(ctx, "tests", err, func() error { return checkTestFiles(names) })
 	if err != nil {
 		return nil, err
 	}
-	return []proto.CheckItem{
-		checkedItem("secrets", checkAddedLines(patch)),
-		checkedItem("tests", checkTestFiles(names)),
-	}, nil
+	return []proto.CheckItem{secrets, tests}, nil
+}
+
+// hardCheckContext bounds the hard checks by hardCheckLimit instead of the
+// turn's deadline, which they outlive (R-103). An explicit cancel of parent
+// still stops them.
+func hardCheckContext(parent context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), hardCheckLimit)
+	unwatch := context.AfterFunc(parent, func() {
+		if errors.Is(parent.Err(), context.Canceled) {
+			cancel()
+		}
+	})
+	return ctx, func() { unwatch(); cancel() }
+}
+
+// hardItem is a hard check's verdict on what Git read. A read that the
+// limit of the hard checks stopped fails the item with "timed out"; any
+// other failed read is the runner's error.
+func hardItem(ctx context.Context, name string, readErr error, verdict func() error) (proto.CheckItem, error) {
+	if readErr == nil {
+		return checkedItem(name, verdict()), nil
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return checkedItem(name, errHardTimeout), nil
+	}
+	return proto.CheckItem{}, readErr
 }
 
 // '>' marks added lines only. Headers, context and deletions separate runs
 // so the multiline secret matcher never combines unrelated additions.
 var addedCheckLines = regexp.MustCompile(`(?m)^(?:>[^\n]*\n?)+`)
 
-func checkAddedLines(patch string) error {
-	for _, run := range addedCheckLines.FindAllString(patch, -1) {
-		if err := CheckOutboundSecret(strings.ReplaceAll(run[1:], "\n>", "\n")); err != nil {
-			return err
+// checkAddedLines looks for a secret in each run of added lines, in place:
+// every line of a run keeps its '>'. It reads at most addedLineLimit bytes.
+func checkAddedLines(ctx context.Context, patch string) error {
+	runs := addedCheckLines.FindAllStringIndex(patch, -1)
+	if size := addedSize(runs); size > addedLineLimit {
+		return fmt.Errorf("too large to check: %d bytes of added lines, over the limit of %d", size, addedLineLimit)
+	}
+	for _, run := range runs {
+		if ctx.Err() != nil {
+			return errHardTimeout
+		}
+		if containsSecret(patch[run[0]:run[1]], diffEnv) {
+			return errSecret
 		}
 	}
 	return nil
+}
+
+func addedSize(runs [][]int) int {
+	size := 0
+	for _, run := range runs {
+		size += run[1] - run[0]
+	}
+	return size
 }
 
 // The source files of the "tests" hard check (local.md section 7).

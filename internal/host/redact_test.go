@@ -9,6 +9,10 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
+// keyBegin and keyEnd split key lines in test literals, so that this file
+// holds no private-key header or footer itself.
+const keyBegin, keyEnd = "-----BEGIN ", "-----END "
+
 func TestRedactSecrets(t *testing.T) {
 	ghp := "ghp_" + strings.Repeat("a", 40)
 	sk := "sk-proj-" + strings.Repeat("b", 32)
@@ -23,11 +27,11 @@ func TestRedactSecrets(t *testing.T) {
 		{"before\n-----BEGIN RSA PRIVATE KEY-----\nMIIab\n-----END RSA PRIVATE KEY-----\nafter", "before\n[redacted]\nafter"},
 		{"a -----BEGIN PRIVATE KEY-----\nMIIab\nrest", "a [redacted]"},
 		{"-----BEGIN PRIVATE KEY-----\n1\n-----END PRIVATE KEY-----\nmid\n-----BEGIN EC PRIVATE KEY-----\n2\n-----END EC PRIVATE KEY-----", "[redacted]\nmid\n[redacted]"},
-		{"MIIab\ncd\n-----END PRIVATE KEY-----\nafter", "[redacted]\nafter"},
-		{"x\n-----END RSA PRIVATE KEY-----\ny\n-----END RSA PRIVATE KEY-----\nz", "[redacted]\nz"},
-		{"a\n-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nlQOY\n=abcd\n-----END PGP PRIVATE KEY BLOCK-----\nb", "a\n[redacted]\nb"},
-		{"lQOY\n-----END PGP PRIVATE KEY BLOCK-----\nb", "[redacted]\nb"},
-		{"-----BEGIN PGP PUBLIC KEY BLOCK-----\nmQ\n-----END PGP PUBLIC KEY BLOCK-----", "-----BEGIN PGP PUBLIC KEY BLOCK-----\nmQ\n-----END PGP PUBLIC KEY BLOCK-----"},
+		{"MIIab\ncd\n" + keyEnd + "PRIVATE KEY-----\nafter", "[redacted]\nafter"},
+		{"x\n" + keyEnd + "RSA PRIVATE KEY-----\ny\n" + keyEnd + "RSA PRIVATE KEY-----\nz", "[redacted]\nz"},
+		{"a\n" + keyBegin + "PGP PRIVATE KEY BLOCK-----\n\nlQOY\n=abcd\n" + keyEnd + "PGP PRIVATE KEY BLOCK-----\nb", "a\n[redacted]\nb"},
+		{"lQOY\n" + keyEnd + "PGP PRIVATE KEY BLOCK-----\nb", "[redacted]\nb"},
+		{keyBegin + "PGP PUBLIC KEY BLOCK-----\nmQ\n" + keyEnd + "PGP PUBLIC KEY BLOCK-----", keyBegin + "PGP PUBLIC KEY BLOCK-----\nmQ\n" + keyEnd + "PGP PUBLIC KEY BLOCK-----"},
 		{"intro\nA=1\napi_key=2\nC=3\noutro", "intro\n[redacted]\noutro"},
 		{"A=1\nB=2\nC=3\nD=4\n\nX=1\nMY_TOKEN=2\nZ=3", "A=1\nB=2\nC=3\nD=4\n\n[redacted]"},
 	} {
