@@ -150,6 +150,9 @@ Change: <files and sections edited, or the reason for rejecting>
 | `steps/step-1-backend.md` | step 1 backend task list |
 | `steps/step-1-frontend.md` | step 1 frontend task list |
 | `steps/step-2-3.md` | outline of steps 2 and 3 |
+| `steps/parallel-plan.md` | the rest of version 1 as parallel units: seams, lanes, waves, critical path, what needs the owner |
+| `steps/parallel-plan-units.md` | the units of step 1, by lane |
+| `steps/parallel-plan-step-2-3.md` | steps 2 and 3: design points with proposed answers, contract units, code units |
 | `risks.md` | risks, open questions, items needing coordinator confirmation |
 | `questions-round1.md` | review questions for round 1 |
 | `questions-round2.md` | review questions for round 2 |
