@@ -25,7 +25,8 @@ type MergeResult struct {
 }
 
 // Apply makes one merge attempt. For an item already taken before restart,
-// the caller must use Inspect instead.
+// the caller must use Inspect instead. The command output in a conflict goes
+// to the group, so a secret in it is redacted (local.md 8).
 func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 	if m.PR == 0 {
 		// Local tasks share the clone's base checkout and index: the squash
@@ -34,7 +35,7 @@ func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 		lock.Lock()
 		defer lock.Unlock()
 		if err := m.squashLocal(ctx); err != nil {
-			return MergeResult{Conflict: err.Error()}, nil
+			return MergeResult{Conflict: redactSecrets(err.Error())}, nil
 		}
 		return m.inspectLocal(ctx)
 	}
@@ -47,7 +48,7 @@ func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 		return MergeResult{}, errors.Join(mergeErr, err)
 	}
 	if result.Conflict != "" && mergeErr != nil {
-		result.Conflict = mergeErr.Error()
+		result.Conflict = redactSecrets(mergeErr.Error())
 	}
 	return result, nil
 }

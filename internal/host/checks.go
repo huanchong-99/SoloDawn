@@ -119,8 +119,9 @@ func runProjectCheck(ctx context.Context, dir, command string) proto.CheckItem {
 	cmd.Stdout, cmd.Stderr = &tail, &tail
 	err := cmd.Run()
 	item := checkedItem(command, err)
+	// The tail goes to the group, so a secret in it is redacted (local.md 8).
 	if len(tail) != 0 {
-		item.Detail = new(string(tail))
+		item.Detail = new(redactSecrets(string(tail)))
 	}
 	return item
 }

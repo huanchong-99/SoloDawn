@@ -24,10 +24,12 @@ always about one commit: the one that was submitted.
 4. P taps "confirm" (`act confirm`). Nothing has started before this (R-23).
    "Change it" (`act revise`, with text) sends it back to SEC, who posts a
    new brief with `replaces`; H marks the old one `superseded`.
-5. On confirm H creates the tasks exactly as listed, refusing a task whose
-   reviewer is its assignee, writes one `task` message per task, and queues
-   `assign` for each task with no unmet dependency. The item carries P's
-   signed confirmation as its `cause`.
+5. On confirm H first makes the checks of the brief's post again
+   (`contracts/commands.md` 1.3, 1.4): members and roles may have changed
+   since. If one fails, the whole brief is answered `conflict` and nothing
+   is created. Otherwise H creates the tasks exactly as listed, writes one
+   `task` message per task, and queues `assign` for each task with no unmet
+   dependency. The item carries P's signed confirmation as its `cause`.
 
 ## B. Work
 

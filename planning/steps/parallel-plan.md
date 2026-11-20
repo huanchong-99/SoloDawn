@@ -101,7 +101,7 @@ F-01c; they are expected to merge during wave 1.
 | 3 | 1:30 | P-3, HS-3, HS-16b, HS-17, HS-18, HS-20, N-3, N-4, PR-1, PR-2, PR-3, I-1, I-3, U-2, U-5, U-6, U-11, U-12, U-13 | 19 |
 | 4 | 2:15 | P-4, N-8, I-2, I-4, I-5, I-6, I-7, I-8, U-16; step 3: T3-1 | 10 |
 | 5 | 3:00 | I-9 (E-M1 to E-M8, eight units), I-10; step 2: T2-1 to T2-13, U2-1 to U2-4; step 3: P-5, the first driver of T3-2 and T3-3 | 29 |
-| 6 | 3:45 | I-11 on three systems, I2-1, T3-5, T3-6, U3-1, U3-2, the next driver, fixes found by waves 4 and 5 | 9 + fixes |
+| 6 | 3:45 | I-11 on three systems, I2-1, T3-5, T3-6, U3-1 to U3-3, the next driver, fixes found by waves 4 and 5 | 10 + fixes |
 | 7 | 4:30 | second pass of I-11 after fixes; I2-2, I3-1; the owner's live list (section 6) | 5 + owner |
 
 HS-19 starts in wave 2 only when PR-0 is merged early in that wave;

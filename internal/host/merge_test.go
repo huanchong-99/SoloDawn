@@ -337,3 +337,18 @@ func TestDeleteBranchAfterWorktreeRemoval(t *testing.T) {
 	mergeOK(t, m.DeleteBranch(t.Context()))
 	mergeEqual(t, mergeGit(t, m.Repo, "for-each-ref", "--format=%(refname)", "refs/heads/task"), "")
 }
+
+// The detail of task conflict goes to the group, so a secret in Git's output
+// is redacted. A signing program named like a token puts one there.
+func TestConflictDetailIsRedacted(t *testing.T) {
+	m := mergeFixture(t)
+	token := "ghp_" + strings.Repeat("a", 36)
+	mergeGit(t, m.Repo, "config", "commit.gpgsign", "true")
+	mergeGit(t, m.Repo, "config", "gpg.program", token)
+	result, err := m.Apply(t.Context())
+	mergeOK(t, err)
+	mergeGit(t, m.Repo, "merge", "--squash", "--", m.Commit)
+	raw := gitFailure(t, m.Repo, "commit", "--allow-empty", "-m", "Merge task t7 at "+m.Commit)
+	mergeEqual(t, strings.Contains(raw, token), true)
+	mergeEqual(t, result, host.MergeResult{Conflict: strings.ReplaceAll(raw, token, "[redacted]")})
+}
