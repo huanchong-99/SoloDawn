@@ -160,6 +160,8 @@ it('A1.5: a changed answer never reaches the peer; the intact signed answer stil
   const from = { t: 'from', k: node.id, env };
   await rv.deliver({ ...from, env: { ...env, p: env.p.replace('original', 'altered') } });
   await rv.deliver({ ...from, k: browser.id, env: await browser.sign(env.p) });
+  // A relay that names another sender than the signer gets nothing through.
+  await rv.deliver({ ...from, k: browser.id });
   await rv.deliver({ ...from, env: await node.sign(JSON.stringify({ ...p, to: node.id })) });
   await rv.deliver({ ...from, env: await node.sign(JSON.stringify({ ...p, ts: 0 })) });
   expect(receive.mock.calls).toStrictEqual([[remote, ready]]);
