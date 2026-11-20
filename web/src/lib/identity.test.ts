@@ -173,13 +173,18 @@ describe('weak keys', () => {
     }
     expect(spy).not.toHaveBeenCalled();
   });
+});
 
-  it('do not stop a signature of another length before WebCrypto is asked', async () => {
+describe('the length of a signature', () => {
+  it('fails check 1 when it is not 64 bytes, before WebCrypto is asked', async () => {
     const device = await newDevice();
-    const spy = vi.spyOn(crypto.subtle, 'verify');
-    expect(await verify(crypto, device.id, 'x', encode(new Uint8Array(63)))).toBe(false);
-    expect(await verify(crypto, device.id, 'x', encode(new Uint8Array(65)))).toBe(false);
-    expect(spy).not.toHaveBeenCalled();
+    const real = decode(await device.signChallenge('n'))!;
+    const importing = vi.spyOn(crypto.subtle, 'importKey');
+    // Nothing but the length is wrong: R is a real one, and S stays below L either way.
+    for (const s of [real.slice(0, 63), new Uint8Array([...real, 0])]) {
+      expect(await verifyChallenge(crypto, device.id, 'n', encode(s))).toBe(false);
+    }
+    expect(importing).not.toHaveBeenCalled();
   });
 });
 
