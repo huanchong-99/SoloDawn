@@ -128,19 +128,22 @@ development dependency, an IndexedDB for the tests.
   field is refused unless Go tags it `omitempty`; a Go pointer without
   `omitempty` must be there and may be `null`. Message bodies are any JSON until a contract types
   them. `decode(schema, text)` is the only place where received text becomes a typed value;
-  `Frame` is what a node may send on `ctl`. Code after it trusts the type. An envelope's `p` stays
-  the exact string received. `Id` is a random id, the canonical base64url spelling of 16 bytes;
-  `n`, `g` and `conn` of a signed payload have this type, and so has every id in a command
-  payload and in an inbox item, the `task` in the body of a review post included; rows and the
-  other message bodies still hold ids as strings (`issues.md`).
+  `Frame` is what a node may send on `ctl` unasked, its pushes and the error answer; a frame with
+  `re` is read with `decodeAnswer(t, text)`, by the type of the request it answers (`AnswerOf`).
+  Code after it trusts the type. An envelope's `p` stays the exact string received. `Id` is a
+  random id, the canonical base64url spelling of 16 bytes; `n`, `g` and `conn` of a signed payload
+  have this type, and so has every id in a command payload and in an inbox item, the `task` in the
+  body of a review post included; rows and the other message bodies still hold ids as strings
+  (`issues.md`).
   `Slug` is a task's slug, the type of `slug` in a task row. The payload of each command has its
   schema (`GroupCreate`, `Post`, `Act`, `TaskStart`); a schema names the `op`, `kind` or `code`
   that selects it. `Ctl` is the interface of a `ctl` connection: numbered requests, their
   answers, and pushes.
 - **Mock connection.** `mockCtl(onpush)` in `src/lib/mock.ts` is a `Ctl` that answers from the
   files of `internal/proto/testdata`: `hello` with `welcome`; `sync` with the pushes `reset` and
-  `rows`, then `synced`; `fetch` with `fetched`; every `cmd` with `ok`. It knows the examples'
-  one group. It is for development and tests only: import it dynamically behind
+  `rows`, then `synced`; `fetch` with `fetched`; `host.info` and `audit` from the examples' node;
+  every `cmd` with `ok`, a `group create` after the push `groups`. It knows the examples' one
+  group. It is for development and tests only: import it dynamically behind
   `import.meta.env.DEV`, so that the build leaves it and the examples out. `vite.config.ts` names
   that directory `@testdata` and lets Vite read it (`server.fs.allow`). Stryker runs the tests in
   a copy of `web/` under `.stryker-tmp/`; there the name still points at the repository's
