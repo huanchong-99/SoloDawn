@@ -268,7 +268,7 @@ func cryptoVectors() vectors {
 			yes(rewritten(browser, entry, `"name":"workstation"`, `"name":""`))),
 		devlogCase("what is not read: n, ts and other fields of any type, and kind and name on a revoke", []device{browser},
 			yes(genesis),
-			yes(rewritten(browser, entry, `"ts":`+fmt.Sprint(ts+2), `"ts":null,"to":null,"g":7`)),
+			yes(rewritten(browser, entry, `"ts":`+fmt.Sprint(ts+2), `"ts":null,"n":null,"to":null,"g":7,"x":1e400`)),
 			yes(browser.key.Sign(`{"t":"device","user":"`+browser.id()+`","ver":3,"op":"revoke","dev":"`+node.id()+`","kind":"phone","name":null}`))),
 		devlogCase("a revoke of the last valid device", []device{node},
 			yes(genesis), no(revoke(browser, 2, browser)), yes(addNode), yes(revoke(node, 3, browser)), no(revoke(node, 4, node)), yes(revoke(node, 4, tablet))),
@@ -326,6 +326,7 @@ func receivedVectors() []receivedVector {
 	add("TO alone is no to", "signal", p(fresh+`,"TO":"`+me+`"`), "not_for_me")
 	add("TO alone is no to", "command", p(fresh+`,"TO":"`+other+`"`), "ok")
 	both("to twice: the last counts", p(fresh+to(other)+to(me)), "ok")
+	both("a member nobody reads, holding a number beyond a double", p(fresh+to(me)+`,"x":1e400`), "ok")
 
 	both("no ts", p(to(me)), "bad_request")
 	both("ts null", p(`,"ts":null`+to(me)), "bad_request")

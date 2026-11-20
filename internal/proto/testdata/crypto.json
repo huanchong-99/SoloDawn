@@ -504,6 +504,32 @@
       "code": "ok"
     },
     {
+      "name": "a member nobody reads, holding a number beyond a double",
+      "kind": "signal",
+      "me": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+      "now": 1763600000000,
+      "known": true,
+      "env": {
+        "p": "{\"t\":\"offer\",\"n\":\"mIGAvwyTKMnovQgnVcZHBA\",\"ts\":1763600000000,\"to\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\",\"x\":1e400}",
+        "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+        "s": "i2Es2oZNqKSAFEw0IRihGs9sFTg3cXJZiEwXJpmVngF-QMfio_oHddecAu53JoT7M43Xa5TrfMojzKU1XSHfBw"
+      },
+      "code": "ok"
+    },
+    {
+      "name": "a member nobody reads, holding a number beyond a double",
+      "kind": "command",
+      "me": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+      "now": 1763600000000,
+      "known": true,
+      "env": {
+        "p": "{\"t\":\"offer\",\"n\":\"mIGAvwyTKMnovQgnVcZHBA\",\"ts\":1763600000000,\"to\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\",\"x\":1e400}",
+        "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+        "s": "i2Es2oZNqKSAFEw0IRihGs9sFTg3cXJZiEwXJpmVngF-QMfio_oHddecAu53JoT7M43Xa5TrfMojzKU1XSHfBw"
+      },
+      "code": "ok"
+    },
+    {
       "name": "no ts",
       "kind": "signal",
       "me": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
@@ -1936,9 +1962,9 @@
         },
         {
           "env": {
-            "p": "{\"t\":\"device\",\"n\":\"Sz2Uz85rLoeS2_MfpuIXPw\",\"ts\":null,\"to\":null,\"g\":7,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":2,\"op\":\"add\",\"dev\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\",\"kind\":\"node\",\"name\":\"workstation\"}",
+            "p": "{\"t\":\"device\",\"n\":\"Sz2Uz85rLoeS2_MfpuIXPw\",\"ts\":null,\"n\":null,\"to\":null,\"g\":7,\"x\":1e400,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":2,\"op\":\"add\",\"dev\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\",\"kind\":\"node\",\"name\":\"workstation\"}",
             "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
-            "s": "NOxAIYPm7QvjveYZwWoTXb1TYoRs2NvH90rnyE7fEImJUbRsCkAr9DpmnNePvTfrkOssUCOygI6jc99aqECIBg"
+            "s": "VyDPojL-rBhX8mZp4z9Upm_zKhyeQ0uq506eiCUk9pwIHm6iBlO0QVdE1q5PFe1YO-TBbksGu26P_TBFGPPYBA"
           },
           "accept": true
         },
