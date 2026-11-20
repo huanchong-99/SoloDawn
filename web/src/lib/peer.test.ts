@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi, type Mock } from 'vitest';
 import { FakePC, transportStats } from '../../features/peer-fakes';
 import type { Device } from './identity';
-import { connect, type Options, type Session } from './peer';
+import type { Link } from './groups.svelte';
+import { connect, type Listener, type Options, type Session } from './peer';
 import { goldens } from './mock';
 import type { Ctl, RequestType, Welcome } from './proto';
 
@@ -725,6 +726,10 @@ describe('ctl', () => {
 });
 
 describe('hello', () => {
+  it('has in the link of a group home a listener', () => {
+    expectTypeOf<Link>().toExtend<Listener>();
+  });
+
   it('says who the browser is and hands the welcome to a new listener', async () => {
     const { peer, pc, listen, listeners } = await served();
     expect(pc.ctl.frames()).toStrictEqual([
