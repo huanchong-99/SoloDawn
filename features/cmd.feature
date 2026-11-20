@@ -8,7 +8,7 @@ Feature: Command line
 
   Scenario Outline: Arguments that are not a known command print the usage
     When I run "solodawn <arguments>"
-    Then it prints "usage: solodawn version | rendezvous [--listen address]" on stderr and exits with code 2
+    Then it prints "usage: solodawn <command> [arguments]" on stderr and exits with code 2
 
     Examples:
       | arguments     |
