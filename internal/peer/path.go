@@ -45,6 +45,32 @@ type Path struct {
 	ws     *websocket.Conn
 	mu     sync.Mutex
 	config proto.ICEConfig
+	pace   pacer
+}
+
+// pacer keeps one rendezvous connection under 100 frames in any 10 seconds,
+// below the 120 at which the server closes it (contracts/rendezvous.md
+// section 2), so that a node answering many reconnects at once stays
+// connected. A frame over the limit waits for its turn.
+type pacer struct {
+	mu   sync.Mutex // held from a frame's turn until it is written: frames queue in order
+	sent [99]time.Time
+	next int
+}
+
+// turn waits until the frame 99 places back is 10 seconds old, then counts
+// this one. A frame given up on is not counted.
+func (q *pacer) turn(ctx context.Context) error {
+	wait := time.NewTimer(time.Until(q.sent[q.next].Add(10 * time.Second)))
+	defer wait.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-wait.C:
+	}
+	q.sent[q.next] = time.Now()
+	q.next = (q.next + 1) % len(q.sent)
+	return nil
 }
 
 // Dial authenticates this device before returning any route or ICE servers.
@@ -105,6 +131,11 @@ func (p *Path) Write(ctx context.Context, frame any) error {
 	data := encode(frame)
 	if len(data) > signalLimit {
 		return errors.New("signalling frame exceeds 16 KiB")
+	}
+	p.pace.mu.Lock()
+	defer p.pace.mu.Unlock()
+	if err := p.pace.turn(ctx); err != nil {
+		return err
 	}
 	return p.ws.Write(ctx, websocket.MessageText, data)
 }
