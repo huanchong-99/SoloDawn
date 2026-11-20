@@ -94,9 +94,11 @@ func (c *client) write() {
 	}
 }
 
-// While routing, a stalled socket must not hold up other devices.
-// send returns false when the frame would exceed the wire limit. In
-// particular, the authenticated "from" wrapper is longer than "to".
+// While routing, a stalled socket must not hold up other devices: a frame for
+// a receiver whose queue is full is dropped, and both connections stay open.
+// The sender's offer timeout and back-off cover the loss. send returns false
+// when the frame would exceed the wire limit. In particular, the
+// authenticated "from" wrapper is longer than "to".
 func (c *client) send(frame any) bool {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -111,7 +113,6 @@ func (c *client) send(frame any) bool {
 	select {
 	case c.out <- data:
 	default:
-		c.conn.CloseNow()
 	}
 	return true
 }

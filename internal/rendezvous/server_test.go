@@ -292,14 +292,25 @@ func TestRollingWindow(t *testing.T) {
 	}
 }
 
-func TestFullSendQueueAndFailedWrite(t *testing.T) {
+// A receiver too slow to take a frame loses that frame and stays connected.
+func TestFullSendQueueDropsTheFrame(t *testing.T) {
 	conn, _ := dial(t, fixture(t))
 	c := client{conn: conn, out: make(chan []byte, 1)}
-	c.send("first")
-	c.send("second")
-	if got := <-c.out; string(got) != `"first"` {
-		t.Fatalf("queue = %v", got)
+	if !c.send("first") || !c.send("second") {
+		t.Fatal("send refused a frame within the wire limit")
 	}
+	if got := <-c.out; string(got) != `"first"` || len(c.out) != 0 {
+		t.Fatalf("queue = %s, then %d more", got, len(c.out))
+	}
+	if err := conn.Write(context.Background(), websocket.MessageText, []byte(`{}`)); err != nil {
+		t.Fatalf("connection closed for a full queue: %v", err)
+	}
+}
+
+func TestFailedWriteEndsTheWriter(t *testing.T) {
+	conn, _ := dial(t, fixture(t))
+	c := client{conn: conn, out: make(chan []byte, 1)}
+	conn.CloseNow()
 	// A failed write must return even when the queue remains open.
 	c.out <- []byte(`"after close"`)
 	done := make(chan struct{})

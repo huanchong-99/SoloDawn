@@ -58,6 +58,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Why it is harmless: what is forwarded is a complete, valid frame that the same authenticated sender could have sent on purpose; the sender's connection is already gone; and the receiver checks the signed envelope itself (`planning/contracts/envelope.md` section 3).
 - Status: open, accepted by the coordinator on 2026-11-20 with no code change. Revisit if the library changes, or if the server ever acts on a frame beyond forwarding it.
 
+### 2026-11-20 · limitation · A frame dropped for a slow receiver can leave it with stale state
+
+- Symptom: when a receiver's queue of 128 frames is full, the rendezvous drops the next frame for it and closes neither connection (`planning/contracts/rendezvous.md` section 2). A dropped `from` or `room` is covered by its sender's offer timeout and back-off. A frame the server itself generates has no sender to send it again: after a dropped `presence` a watcher shows the wrong online state until that device's next change or the next `watch`; after a dropped `joined` a pairing member waits until it joins again; a dropped `offline`, `ice` or `quota` leaves that request unanswered.
+- Cause: `client.send` drops a frame when the queue is full (`internal/rendezvous/server.go:113-116`, queue size at `:70`).
+- Status: open. Coalescing the server's own frames is not built, by the coordinator's decision of 2026-11-20.
+
 ## Resolved
 
 ### 2026-11-20 · bug · Web device log refused the entry it held when `p` carried a lone surrogate
