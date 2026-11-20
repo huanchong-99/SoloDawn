@@ -1,6 +1,7 @@
 {
   "groups.list": "Group list",
   "groups.projects": "Projects",
+  "groups.lead": "One group per project.",
   "groups.new": "New project group",
   "groups.none": "No messages yet",
   "groups.colon": ": ",
@@ -30,5 +31,6 @@
   "groups.create.member": "Your name in the group",
   "groups.create.home": "Home computer",
   "groups.create.submit": "Create group",
-  "groups.create.cancel": "Cancel"
+  "groups.create.cancel": "Cancel",
+  "groups.missing": "This group has not been read yet. It is read once the computer that is its home can be reached."
 }

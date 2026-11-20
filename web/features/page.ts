@@ -1,17 +1,19 @@
-// The group pages mounted in the test DOM, and what a person does on them. happy-dom lays
-// nothing out and has no input devices, so the two things the pages ask the browser are stood in
-// for: whether the top of the main line is in view, and whether the person has a keyboard.
+// The client's pages mounted in the test DOM, with the shell around them, and what a person does
+// on them. happy-dom lays nothing out and has no input devices, so the two things the pages ask
+// the browser are stood in for: whether the top of the main line is in view, and whether the
+// person has a keyboard.
 import { flushSync, mount, unmount, type Component } from 'svelte';
 import { vi } from 'vitest';
+import App from '../src/App.svelte';
 import { homes } from '../src/lib/groups.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
-import Groups from '../src/routes/Groups.svelte';
 
 let page: Record<string, never> | undefined;
 const parts: Record<string, never>[] = [];
 let inView: ((entries: { isIntersecting: boolean }[]) => void) | undefined;
 
-/** Opens the group pages at an address, in English, in a browser with a keyboard. */
+/** Opens the client at an address, in English, in a browser with a keyboard. The homes are those
+ *  the test puts in `homes`. */
 export function openPage(hash = '#/groups') {
   vi.stubGlobal(
     'IntersectionObserver',
@@ -27,8 +29,8 @@ export function openPage(hash = '#/groups') {
     (query) => ({ matches: query.includes('pointer: fine') }) as MediaQueryList,
   );
   prefs.lang = 'en';
-  location.hash = hash;
-  page = mount(Groups, { target: document.body });
+  go(hash);
+  page = mount(App, { target: document.body }) as Record<string, never>;
   flushSync();
 }
 

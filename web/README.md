@@ -1,5 +1,5 @@
 ---
-description: 'The SoloDawn web client: how to build and check it, what its shell, routing, preferences, texts, group caches, group list and chat guarantee, and what a new screen has to follow.'
+description: 'The SoloDawn web client: how to build and check it, what its shell, route table, connection, mounting points, preferences, texts, group caches, group list and chat guarantee, and how an area of the interface adds its parts.'
 kind: reference
 ---
 
@@ -10,13 +10,15 @@ kind: reference
 One responsive Svelte 5 page, built by Vite into `internal/node/webdist/`, from where the node
 embeds it and the rendezvous serves it as static files. It holds no group logic: it renders rows
 and sends commands (`planning/steps/step-1-frontend.md`). What exists today is the frame every
-screen lives in: navigation, top bar, themes, languages, hash routing, the web manifest and the
-notices for browsers that cannot run the client or that block its storage; this browser's device
+screen lives in: navigation, top bar, themes, languages, the route table of the seven pages, the
+connection the shell chooses for every page, the mounting points through which each area of the
+interface adds its parts, the web manifest and the notices for browsers that cannot run the
+client or that block its storage; this browser's device
 key with signed envelopes, the device log and pairing; the wire types with their decoding; a
 mock connection that answers from the node's wire examples; the row cache of every group with the
 lists drawn from it; the group list with its create-group dialog; and the main line of a group's
-chat with its composer. Nothing yet connects to a node: until the connection code hands a
-connection to the pages, a development server shows the one group of the wire examples.
+chat with its composer. Nothing yet connects to a node: until the browser's connections are
+wired into the shell, a development server shows the one group of the wire examples.
 
 The interface mockups are in `design/`. They are the visual reference for the interface: implement
 screens to match them, and add the motion they leave out.
@@ -64,15 +66,107 @@ removes the directory. The run's teardown kills what a test process that died le
 `e2e/` out. The tests change nothing of the test process's own environment; the scenarios of
 `../features/web_e2e.feature` check that.
 
-The one runtime dependency is `valibot`, for the wire types. Signatures, hashes and macs use the
+The runtime dependencies are `valibot`, for the wire types, and `@xterm/xterm` 6.0.0 with
+`@xterm/addon-fit` 0.11.0 (MIT) for the terminal page. Nothing imports xterm yet; it is about
+337 KiB minified (86 KiB gzipped) with a 7 KiB stylesheet, so the terminal page loads it with a
+dynamic `import()` when it opens, and the rest of the client never carries it. Signatures, hashes and macs use the
 browser's WebCrypto only; no signature library is bundled (R-164). `fake-indexeddb` is a
 development dependency, an IndexedDB for the tests.
+
+### Add an area of the interface
+
+A unit of the interface owns its folder `src/components/<area>/`, its texts and, for a page, its
+file in `src/routes/`. It edits neither the shell nor another area:
+
+1. **Texts.** `src/messages/<area>.zh-CN.json` and `<area>.en.json`, every key `<area>.…`, and
+   `src/messages/<area>.d.ts`, as `chat.d.ts` with its own name. No import to add: the loader
+   finds the files, and `t('<area>.…')` is checked by `pnpm check`.
+2. **Parts.** `src/components/<area>/mounts.ts`, default export `{ … } satisfies Mounts`, with
+   entries at the points it needs and the cards of its kinds. No import to add: `gather` finds
+   it, and `#/states` of a development server shows where each entry and card went.
+3. **A page.** `src/routes/<View>.svelte`, named as its route's `view`; it is given
+   `{ params, net }` (`PageProps<'terminal'>` types them). A page that needs another address
+   or another layout asks for a change of the route table.
+4. **A preference of this browser.** `preference('<area>-…', allowed, fallback)` of
+   `prefs.svelte.ts`.
+5. **Acceptance.** `../features/web_<slice>.feature`, tagged `@web` on its first line, and
+   `features/<slice>.spec.ts`, which loads it with `loadFeature('../features/web_<slice>.feature')`.
+   A scenario of `web_shell.feature` fails when a web feature file has no such spec or tag; the
+   end-to-end steps (`web_e2e.feature`) are the one exception, run by `e2e/config.ts` from
+   `features/e2e.ts`. The steps open the client with `openPage(address)` of `features/page.ts`,
+   which mounts the shell in the test DOM with English texts, and give it homes with `TestHome`
+   and `browser` of `features/home.ts`; `show(component, props)` mounts one part alone. The
+   development server's `net` is not used there: a test puts its homes in `homes` itself.
 
 ## Contract
 
 - **Static hosting.** Asset paths are relative (`base: './'`) and pages are address fragments, so
-  the build works from any path and needs no server rule. The fragment is `#/<page>/…`; the pages
-  are `groups`, `nodes` and `settings`; anything else opens `groups`.
+  the build works from any path and needs no server rule.
+- **Route table.** `routes` in `src/lib/route.svelte.ts` holds the seven pages of the design
+  (`design/index.html`), each with its path, the file in `src/routes/` that draws it, the entry of
+  the navigation it belongs to and whether it has the whole screen:
+
+  | Page         | Address                            | Drawn by            | Entry     | Whole screen   |
+  | ------------ | ---------------------------------- | ------------------- | --------- | -------------- |
+  | `onboarding` | `#/onboarding`                     | `Onboarding.svelte` | none      | at every width |
+  | `groups`     | `#/groups`                         | `Groups.svelte`     | chats     | no             |
+  | `chat`       | `#/groups/<g>`                     | `Groups.svelte`     | chats     | on a phone     |
+  | `terminal`   | `#/terminal/<g>/<member>[/<task>]` | `Terminal.svelte`   | chats     | on a phone     |
+  | `nodes`      | `#/nodes`                          | `Nodes.svelte`      | computers | no             |
+  | `settings`   | `#/settings`                       | `Settings.svelte`   | settings  | no             |
+  | `states`     | `#/states`                         | `dev/States.svelte` | none      | no             |
+
+  An address fits a path when it has as many segments, every word is equal and every parameter
+  is given, except an optional last one (`:task?`); no address fits two paths. Parameters are
+  read with `decodeURIComponent`; `href(page, params)` writes an address with
+  `encodeURIComponent`, and `parse` reads it back. An address that fits no path, one with a
+  malformed escape, and `#/states` in the build open `groups`. `route` is `{ page, params, dir }`;
+  `Params<'chat'>` is `{ g: string }`. The navigation has three entries (`tabs`); a page outside
+  them marks none. The shell finds a page's component by file name: until `Onboarding.svelte`
+  and `Terminal.svelte` exist, those pages say that they are coming (`src/Pending.svelte`), with
+  a link back to the chats. Focus goes to the main landmark when another page component is shown;
+  between the group list and a chat, one component, the chat moves focus itself.
+
+- **Whole screen.** A route's `full` is written to `<div class="app" data-full>`: `phone` hides
+  the top bar and the bottom navigation below 768 px (an open chat, whose head is its bar, and the
+  terminal), `always` hides them and the side navigation at every width (onboarding). The banners
+  stay in both.
+- **Connection.** The shell decides once, when it starts, where the homes come from, and hands
+  the result to every page as `net` (`src/lib/net.svelte.ts`): `sourceOf(mode, search)` is
+  `mock` in a development server (`import.meta.env.MODE === 'development'`) unless the address
+  has `?nomock`, and `live` everywhere else, the tests included. `mock` adds one home answered by
+  `mockCtl`, read by the person of the wire examples with this browser's device key, and online;
+  only a development build has this code, so the build carries neither the mock nor the examples
+  (checked in the output of `vite build`). `live` reaches no home yet: the browser's connections
+  (`peer.ts`, W-2) are wired here, one `session.peer(node, () => home.connect(), onpath)` per
+  node, and nowhere else. `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)` is how
+  this browser reaches a home now (`direct` or `relay`, the round trip, since when), and
+  undefined while it does not; the mock's path is direct. `net.source` says which it is.
+- **Mounting points.** An area of the interface mounts its components without editing the shell,
+  the chat or another area: it adds `src/components/<area>/mounts.ts`, whose default export is a
+  `Mounts` (`src/lib/mounts.svelte.ts`), and `gather` finds every such file by name. The points,
+  and what a component there is given:
+
+  | Point       | Where                                                                      | Props       |
+  | ----------- | -------------------------------------------------------------------------- | ----------- |
+  | `bar`       | the top bar, before the theme and language buttons, on every page          | `{ net }`   |
+  | `banner`    | under the top bar, across the page; a banner comes down from under the bar | `{ net }`   |
+  | `layer`     | after the page, above it: dialogs and notifications                        | `{ net }`   |
+  | `chat.head` | the head of a chat, after the group's name                                 | `{ group }` |
+  | `chat.top`  | between the head of a chat and its main line                               | `{ group }` |
+  | `chat.side` | beside the main line from 1024 px; below, a panel that slides over         | `{ group }` |
+  | `cards`     | the card of a message, by kind, in the main line and in threads            | `CardProps` |
+
+  An entry is `{ order, component }`: the lower `order` comes first, then the area's name. A
+  component with nothing to show draws nothing; an empty banner takes no room. While any area
+  mounts at `chat.side`, the chat has a side column from 1024 px and, below it, a button "People
+  and details" in its head that opens the panel, which a close button and Escape close, focus
+  returning to the button. `cards` maps a kind of message (`MsgRow['kind']`) to a component that
+  is given `{ group, msg }`, with `msg` of that kind; `card(kind)` finds it, for a thread too. In
+  a message written by a member it is drawn in the body, under the head and the text, in place of
+  the one-line stub; a row the home wrote (`by: 'system'`) it draws whole, in place of the quiet
+  line. Two areas that mount the card of one kind fail at start, naming both.
+
 - **Build output.** `vite build` empties `internal/node/webdist/` and writes its `.gitignore`
   back, so the directory stays out of Git and invisible to the gates.
 - **Browser support (C-9).** Chrome and Edge 137, Firefox 136, Safari 17.5 (macOS and iOS) and
@@ -118,7 +212,11 @@ development dependency, an IndexedDB for the tests.
   on the settings page or with a top-bar button. The preferences are always written to
   `<html data-theme lang>`. A stored value the client does not know, from another version for
   instance, is ignored. When the browser blocks site storage, the client opens with the defaults
-  and applies changes without remembering them. `tokens.css` turns `data-theme` into
+  and applies changes without remembering them. A part of the client keeps a preference of its own
+  the same way with `preference(name, allowed, fallback)`: its `value` is the default until set,
+  and setting it stores `sd-<name>`. Made again with the same values, as a module the development
+  server reloads is, it is the same preference; made with other values, or as `theme` or `lang`,
+  it throws. `tokens.css` turns `data-theme` into
   `color-scheme`; every colour is a `light-dark()` pair. The browser's own bar
   (`<meta name="theme-color">`) takes the colour `index.html` gives the theme shown, so a chosen
   theme wins over the system scheme; the manifest colours stay fixed.
@@ -149,12 +247,16 @@ development dependency, an IndexedDB for the tests.
   `public/fonts/` with their licence (OFL-1.1); the page requests nothing from a third party. A
   browser downloads a face only when text uses it and shows the system fonts until it arrives.
 - **Texts.** Every interface string is a key in both languages and is read with `t(key)`. The
-  shell's are in `src/messages/zh-CN.json` and `src/messages/en.json`. Each area of the interface
-  has two files of its own, `src/messages/<area>.zh-CN.json` and `<area>.en.json`, whose keys all
-  begin with `<area>.`; today the areas are `groups` and `chat`. `prefs.svelte.ts` merges them, and
-  a text is a `Key` only when both languages have it. A test fails when the key sets of a pair
-  differ, and `areas.test.ts` finds every pair by its name, so a new area adds its two files and
-  its two imports. A text with a number in it carries `{n}`, which its component replaces. Chat
+  shell's are in `src/messages/zh-CN.json` and `src/messages/en.json`, under the namespaces
+  `app`, `nav`, `bar`, `page` (the title of each page), `pref` (the names of the preferences),
+  `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
+  `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
+  of its English file to the type `Key`; today the areas are `chat`, `groups`, `nodes`,
+  `settings` and `states`. `src/messages/texts.ts` is the one loader: it finds every file by its
+  name and merges them, and throws, naming the file, when an area takes a namespace of the shell,
+  holds a key outside its own name, has keys that differ between its two languages, or has an
+  empty text. No key can therefore be given twice: a collision fails at start and in the tests,
+  never replacing a text. A text with a number in it carries `{n}`, which its component replaces. Chat
   content is never translated. The options of the language choice are named in their own
   language in both files and carry its `lang`, so a screen reader speaks each in its language
   (WCAG 2.2 SC 3.1.2). The language button of the top bar has no `aria-label`: its name is its
@@ -224,13 +326,13 @@ development dependency, an IndexedDB for the tests.
     `lost()`, a code of the client's own. While `home.ctl` is undefined the group is shown from
     the rows held, read-only.
 - **Group pages.** `#/groups` is the group list and `#/groups/<group id>` the chat of that group;
-  `routes/Groups.svelte` reads the address itself until the route table carries the rest of a
-  fragment.
+  `routes/Groups.svelte` draws both, from `params.g`. While the group the address names has not
+  been read, the chat's place says so, with the way back to the list.
   - Width: from 1280 px the list stays beside an open chat; below it an open chat has the page
     and its back button leads to the list. With no group open the list has the page below 900 px,
     with the cards that wait as a bar above it; from 900 px they are an overview beside the list.
-    On a phone an open chat also takes the place of the top bar and the bottom navigation: the
-    page's styles hide them with `:has()`, because the shell has no place yet for a page to say so.
+    On a phone an open chat also takes the place of the top bar and the bottom navigation: its
+    route asks the shell for the whole screen.
   - The main line is a reversed scroller with one child, so the newest message is in view when it
     opens, and a page added above moves nothing. While the top of what is read is in view, or
     within 600 px of it, the page before is fetched; when it cannot be, because the home refused
@@ -259,7 +361,7 @@ development dependency, an IndexedDB for the tests.
     that appears while there was none to choose from is chosen.
   - Only text messages are drawn in full. A card is one line that names its kind and its subject,
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
-    the units of the cards replace both.
+    the cards the areas mount replace both.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. Shared styles are global classes in
   `src/styles/base.css`, taken from the design; a component's own layout goes in its `<style>`.
@@ -274,29 +376,35 @@ development dependency, an IndexedDB for the tests.
 | `src/lib/devlog.ts`         | `DeviceLog`: apply, replay, valid devices, adoption             |
 | `src/lib/pairing.ts`        | pairing secret, room id, mac, pair message check                |
 | `src/lib/payload.ts`        | the payload fields the envelope and log checks read             |
-| `src/lib/prefs.svelte.ts`   | theme and language state, their persistence, `t`                |
-| `src/lib/route.svelte.ts`   | current page from the address fragment, and the way it changed  |
+| `src/lib/prefs.svelte.ts`   | theme, language and `preference`, their persistence, `t`        |
+| `src/messages/texts.ts`     | the one loader of the texts: finds, checks and merges the files |
+| `src/lib/route.svelte.ts`   | route table, `parse`, `href`, the page open, the way it went    |
+| `src/lib/net.svelte.ts`     | where the homes come from: `sourceOf`, `start`, the mock's home |
+| `src/lib/mounts.svelte.ts`  | mounting points, `gather` of the areas' mounts, `card(kind)`    |
 | `src/lib/motion.ts`         | `spring`, the curve of `--spring`; `shift`, the page cross-fade |
 | `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface           |
 | `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`                 |
 | `src/lib/groups.svelte.ts`  | `Home`, `Group`: row caches, cursor, paging, lists, commands    |
 | `src/lib/compose.ts`        | mention being typed, mentions and parts of a text, row size     |
 | `src/lib/when.ts`           | times in the reader's language; messages by day                 |
-| `src/App.svelte`            | shell: skip link, navigation, top bar, the current route        |
+| `src/App.svelte`            | shell: navigation, top bar, banners, the page of the route      |
 | `src/Notice.svelte`         | the upgrade notice and the storage notice                       |
+| `src/Pending.svelte`        | a page of the route table whose component is not built yet      |
 | `src/routes/`               | one component per page; `Groups.svelte` is the list and a chat  |
-| `src/components/`           | shared parts: `Icon` (line icons), `Avatar`, `Failure`          |
+| `src/routes/dev/`           | `States.svelte`: the message examples, for a development server |
+| `src/components/`           | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount` |
 | `src/components/groups/`    | the group list, the cards that wait, the create-group dialog    |
 | `src/components/chat/`      | the chat of a group: main line, message, composer               |
 | `src/styles/`               | `tokens.css` (design tokens) and `base.css` (shared classes)    |
 | `public/`                   | manifest, icon and `fonts/`, copied as they are                 |
 | `features/web.spec.ts`      | steps of `../features/web.feature`                              |
+| `features/shell.spec.ts`    | steps of `../features/web_shell.feature`; `fixtures/` stand-ins |
 | `features/groups.spec.ts`   | steps of `../features/web_groups.feature`                       |
 | `features/chat.spec.ts`     | steps of `../features/web_chat.feature`                         |
 | `features/home.ts`          | a home in memory for those steps; `page.ts` drives the page     |
 | `features/demo.ts`          | groups with a morning of talk, for a development page           |
 | `features/watch.svelte.ts`  | an effect outside a component, for tests of what is reactive    |
-| `features/shots.ts`         | screenshots of the group pages from that demo, four widths      |
+| `features/shots.ts`         | screenshots of the pages from that demo, four widths            |
 | `e2e/config.ts`             | end-to-end projects per engine, `launch`, the build of a run    |
 | `e2e/nodes.ts`              | `startNet`: rendezvous and nodes per test, stop, teardown sweep |
 | `features/e2e.ts`           | steps of `../features/web_e2e.feature`, run by `e2e/config.ts`  |
@@ -323,6 +431,11 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 - No page has a connection to a node yet, so the built client lists no group. A development
   server (`pnpm dev`) shows the one group of the wire examples, unless the address has `?nomock`;
   the mock accepts a post and pushes no row, so a message sent there does not appear.
+- The onboarding and terminal pages are in the route table without their components: they say
+  that they are coming. From 768 px the top bar of an open chat says "Chats", and the chat's own
+  head with the group's name is below it, where the design has one bar with the group's name.
+- The texts of the `states` area are in the build, although only a development server shows
+  their page.
 - Cards and the rows a home writes are one line each in the main line, and Safari moves the main
   line when a message arrives while the reader is scrolled back (`issues.md`).
 - The end-to-end harness runs on macOS and Linux only. Until the node runtime is wired (N-4),
@@ -336,6 +449,15 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 - The shell was checked in headless Chrome at 375, 820, 1100 and 1440 px in both themes and both
   languages on every page (no element wider than the viewport) on 2026-11-20. It has not been
   opened on a real phone, in Safari or in Firefox.
+- The seams of the shell have unit tests beside `route.svelte.ts`, `net.svelte.ts`,
+  `mounts.svelte.ts`, `prefs.svelte.ts` and `texts.ts`, and the acceptance feature
+  `../features/web_shell.feature`, whose steps mount stand-in areas (`features/fixtures/`) into
+  the points. The test DOM lays nothing out, so the whole-screen modes are checked by the
+  attribute the styles read. On 2026-11-21 the settings page, a coming page and the states sheet
+  were looked at in headless Chromium at 375, 820, 1100 and 1440 px in both themes, and an open
+  chat with a stand-in area at the top bar, the banner, above the main line and beside it, with
+  the side panel open below 1024 px; no element but the visually hidden half of the language
+  button's name reached past the viewport.
 - The motion was checked there too: while pages changed, the theme and language switched and
   parts were hovered, pressed and focused, the page's animations (`document.getAnimations()`)
   changed `opacity` and `transform` only, and with reduced motion emulated there were none. A test
