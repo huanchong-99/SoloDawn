@@ -85,8 +85,16 @@ function viewTransitions() {
 }
 
 function press(label: string) {
-  document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)!.click();
+  const button = document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)!;
+  button.focus();
+  button.click();
   svelte.flushSync();
+}
+
+function expectMainFocus(title: string) {
+  const main = document.querySelector('main')!;
+  expect(document.activeElement).toBe(main);
+  expect(document.getElementById(main.getAttribute('aria-labelledby')!)!.textContent).toBe(title);
 }
 
 describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScenario }) => {
@@ -127,6 +135,18 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       expect(texts('h1')).toEqual(['我的电脑和 AI']);
       expect(texts('nav a[aria-current="page"]')).toEqual(['电脑和 AI']);
     });
+    And('focus is on the main landmark named "我的电脑和 AI"', () =>
+      expectMainFocus('我的电脑和 AI'),
+    );
+  });
+
+  Scenario('The skip button moves focus into the current page', ({ Given, When, Then, And }) => {
+    Given('the browser supports Ed25519 in WebCrypto', supported);
+    And('the person opens the client', () => open());
+    When('the person activates the skip button', () => {
+      document.querySelector<HTMLButtonElement>('button.skip')!.click();
+    });
+    Then('focus is on the main landmark named "群聊"', () => expectMainFocus('群聊'));
   });
 
   Scenario('An unknown address opens the chats page', ({ Given, When, Then }) => {
@@ -177,7 +197,11 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client', () => open());
     When('the person presses "切换深色 / 浅色"', () => press('切换深色 / 浅色'));
-    And('the person presses "Switch language / 切换语言"', () =>
+    Then('the focused theme button announces "主题: 深色"', () => {
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('切换深色 / 浅色');
+      expect(texts('[role=status]')).toEqual(['主题: 深色']);
+    });
+    When('the person presses "Switch language / 切换语言"', () =>
       press('Switch language / 切换语言'),
     );
     Then('the page uses the "dark" theme', () => {
@@ -185,6 +209,10 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     });
     And('the page is marked as "en"', () => {
       expect(document.documentElement.lang).toBe('en');
+    });
+    And('the focused language button announces "Language: English"', () => {
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('Switch language / 切换语言');
+      expect(texts('[role=status]')).toEqual(['Language: English']);
     });
   });
 

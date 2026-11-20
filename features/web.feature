@@ -20,6 +20,13 @@ Feature: Web client
     And the person opens the client
     When the address fragment becomes "#/nodes"
     Then the current page is "我的电脑和 AI"
+    And focus is on the main landmark named "我的电脑和 AI"
+
+  Scenario: The skip button moves focus into the current page
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client
+    When the person activates the skip button
+    Then focus is on the main landmark named "群聊"
 
   Scenario: An unknown address opens the chats page
     Given the browser supports Ed25519 in WebCrypto
@@ -45,9 +52,11 @@ Feature: Web client
     Given the browser supports Ed25519 in WebCrypto
     And the person opens the client
     When the person presses "切换深色 / 浅色"
-    And the person presses "Switch language / 切换语言"
+    Then the focused theme button announces "主题: 深色"
+    When the person presses "Switch language / 切换语言"
     Then the page uses the "dark" theme
     And the page is marked as "en"
+    And the focused language button announces "Language: English"
 
   Scenario: The mark of the current page moves to the entry that is opened
     Given the browser supports Ed25519 in WebCrypto

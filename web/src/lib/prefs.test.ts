@@ -139,6 +139,21 @@ it('applies successive toggles in the order their transition callbacks run', asy
   }
 });
 
+it('announces top bar actions in the chosen language and clears the status on a radio choice', async () => {
+  const { announcement, choose, toggleLang, toggleTheme } = await load();
+  expect(announcement.text).toBe('');
+  toggleTheme();
+  expect(announcement.text).toBe('Theme: Dark');
+  toggleTheme();
+  expect(announcement.text).toBe('Theme: Light');
+  toggleLang();
+  expect(announcement.text).toBe('语言: 简体中文');
+  toggleLang();
+  expect(announcement.text).toBe('Language: English');
+  choose('theme', 'auto');
+  expect(announcement.text).toBe('');
+});
+
 describe('a browser that blocks site storage', () => {
   beforeEach(() => {
     vi.spyOn(globalThis, 'localStorage', 'get').mockImplementation(() => {

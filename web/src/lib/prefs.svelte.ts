@@ -55,17 +55,23 @@ export const isDark = () => (prefs.theme === 'auto' ? systemDark.current : prefs
 export function choose<K extends keyof typeof prefs>(key: K, value: (typeof prefs)[K]) {
   shift(() => {
     prefs[key] = value;
+    announcement.text = '';
   });
 }
+
+// Radios expose their checked state natively. The two action buttons announce their result.
+export const announcement = $state({ text: '' });
 
 export const toggleTheme = () =>
   shift(() => {
     prefs.theme = isDark() ? 'light' : 'dark';
+    announcement.text = `${t('settings.theme')}: ${t(`settings.theme.${prefs.theme}`)}`;
   });
 
 export const toggleLang = () =>
   shift(() => {
     prefs.lang = prefs.lang === 'en' ? 'zh-CN' : 'en';
+    announcement.text = `${t('settings.lang')}: ${t(`settings.lang.${prefs.lang}`)}`;
   });
 
 export const t = (key: Key) => messages[prefs.lang][key];

@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Icon, { type IconName } from './components/Icon.svelte';
-  import { isDark, prefs, t, toggleLang, toggleTheme } from './lib/prefs.svelte';
+  import { announcement, isDark, prefs, t, toggleLang, toggleTheme } from './lib/prefs.svelte';
   import { pages, route, type Page } from './lib/route.svelte';
   import Groups from './routes/Groups.svelte';
   import Nodes from './routes/Nodes.svelte';
@@ -10,6 +11,14 @@
   const icons: Record<Page, IconName> = { groups: 'chat', nodes: 'pc', settings: 'sliders' };
   const View = $derived(views[route.page]);
   let main: HTMLElement;
+  let previousPage = untrack(() => route.page);
+
+  $effect(() => {
+    if (route.page !== previousPage) {
+      previousPage = route.page;
+      main.focus();
+    }
+  });
 </script>
 
 <svelte:head><title>{t(`${route.page}.title`)} · SoloDawn</title></svelte:head>
@@ -30,7 +39,7 @@
   </nav>
   <header class="bar">
     <div class="bar-title">
-      {#key route.page}<h1>{t(`${route.page}.title`)}</h1>{/key}
+      {#key route.page}<h1 id="page-title">{t(`${route.page}.title`)}</h1>{/key}
     </div>
     <div class="global only-wide">
       <button class="icon-btn" onclick={toggleTheme} aria-label={t('bar.theme')}>
@@ -39,7 +48,8 @@
       <button class="icon-btn" onclick={toggleLang} aria-label={t('bar.lang')}>
         {#key prefs.lang}<span class="swap">{t('bar.lang.other')}</span>{/key}
       </button>
+      <span class="sr" role="status">{announcement.text}</span>
     </div>
   </header>
-  <main bind:this={main} tabindex="-1"><View /></main>
+  <main bind:this={main} tabindex="-1" aria-labelledby="page-title"><View /></main>
 </div>
