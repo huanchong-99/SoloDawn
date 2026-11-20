@@ -363,8 +363,10 @@ func (m *taskMove) waitFor(kind string) *proto.TaskWait {
 // pending approval card, else its oldest pending decision card, else none.
 func (m *taskMove) cardWait() *proto.TaskWait {
 	for _, kind := range []string{waitApproval, waitDecision} {
-		if i := slices.IndexFunc(m.pending, func(c PendingCard) bool { return c.Kind == kind }); i >= 0 {
-			return taskCardWait(m.pending[i])
+		for _, c := range m.pending {
+			if c.Kind == kind {
+				return taskCardWait(c)
+			}
 		}
 	}
 	return nil
