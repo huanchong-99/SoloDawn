@@ -9,6 +9,8 @@ on:
 permissions:
   contents: read
 
+# Every job builds with the newest Go 1.27 release (check-latest), as development does;
+# go.mod keeps go 1.26.0 as the minimum.
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -18,7 +20,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.x'
+          check-latest: true
       - run: go vet ./...
       - run: go vet -tags acceptance ./features/...
       - run: go test ./...
@@ -34,7 +37,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.x'
+          check-latest: true
       - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nftables miniupnpd-nftables miniupnpc
       - run: go vet -tags netsim ./features/netsim
       - run: go test -c -tags netsim -o netsim.test ./features/netsim
@@ -76,7 +80,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.x'
+          check-latest: true
       - run: go build ./cmd/solodawn ./internal/host/fakecli/claude ./internal/host/fakecli/codex
         env:
           CGO_ENABLED: "0"
@@ -88,3 +93,42 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
+
+  # The Go checks on Windows and macOS, so the files built only there run somewhere. gofmt runs on
+  # macOS only: Git for Windows checks files out with CRLF unless told not to, as below.
+  other-os:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+      - if: runner.os == 'macOS'
+        run: out=$(gofmt -l cmd internal features); echo "$out"; test -z "$out"
+      - run: go vet ./...
+      - run: go vet -tags acceptance ./features/...
+      - run: go test -race -covermode=atomic -coverprofile=cover.out ./...
+      - run: go test -tags acceptance -count=1 ./features/...
+      # Statement coverage of the files that only this system builds, from the unit tests above.
+      - name: Coverage of the files built only here
+        run: |
+          awk -F'[:, ]' 'NR > 1 && $1 ~ /_(windows|darwin|unix)\.go$/ { n[$1] += $4; if ($5 > 0) c[$1] += $4 }
+            END { for (f in n) printf "%s: %.1f%% of %d statements\n", f, 100 * c[f] / n[f], n[f] }' cover.out |
+            sort | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-${{ matrix.os }}
+          path: cover.out
+          if-no-files-found: error

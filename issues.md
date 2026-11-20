@@ -6,18 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-20 · deviation · CI and release builds use Go 1.26.0, eleven patch releases behind
-
-- Symptom: every CI job, and the six binaries of `.github/workflows/release.yml`, build with Go 1.26.0 (Backend run 44697108086: "Setup go version spec 1.26.0"). The newest 1.26 release is 1.26.11, so released binaries would lack the standard-library security fixes of 1.26.1 to 1.26.11.
-- Cause: `go.mod:3` says `go 1.26.0`, and `actions/setup-go` v5.6.0 takes the `go` line as an exact version; it does not read a `toolchain` line (v6 does).
-- Status: open; needs a decision: a `toolchain go1.26.11` line in `go.mod` with setup-go v6, or `go-version: 1.26.x` with `check-latest: true` in the workflows.
-
-### 2026-11-20 · bug · The Git helper of the host-check steps can still end the whole suite
-
-- Symptom: when its Git command fails, the remaining scenarios do not run and go test reports "subtest may have called FailNow on a parent test" (reproduced with commit signing in the global Git configuration: 8 of 70 scenarios ran).
-- Cause: `features/host_checks_test.go:36` calls `f.t.Fatalf` on the suite's test from a scenario; see the resolved entry "Go acceptance steps acted beyond their own scenario". The file was left out of the audit fixes because it belonged to another fix at the time.
-- Status: open. Return the error from the step, as `features/host_forge_test.go` does.
-
 ### 2026-11-20 · limitation · Three peer scenarios time out on a Mac with its firewall on
 
 - Symptom: "Both nodes can offer over the same two signalling paths", "A replayed offer is not processed" and "Early and repeated candidates" fail with `context deadline exceeded` after 20 s on macOS with the application firewall enabled, on `rebuild` as merged (815c52aa6) and with the audit fixes; the other 77 scenarios pass. CI runs them on Linux only.
@@ -132,6 +120,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open. PR-2 adds a beacon case to `received` in `vectors.md` and `crypto.json`, and a third envelope kind in both identity implementations, before it reads beacons.
 
 ## Resolved
+
+### 2026-11-20 · deviation · CI and release builds use Go 1.26.0, eleven patch releases behind
+
+- Symptom: every CI job, and the six binaries of `.github/workflows/release.yml`, build with Go 1.26.0 (Backend run 44697108086: "Setup go version spec 1.26.0"). The newest 1.26 release is 1.26.11, so released binaries would lack the standard-library security fixes of 1.26.1 to 1.26.11.
+- Cause: `go.mod:3` says `go 1.26.0`, and `actions/setup-go` v5.6.0 takes the `go` line as an exact version; it does not read a `toolchain` line (v6 does).
+- Status: resolved on branch `ci/go127-windows-macos`, by the coordinator's decision of 2026-11-20: every workflow sets up `go-version: '1.27.x'` with `check-latest: true`, so CI and the release take the newest patch of the stable line by themselves and match development (1.27.4); `go.mod` keeps `go 1.26.0` as the minimum.
+
+### 2026-11-20 · bug · The Git helper of the host-check steps can still end the whole suite
+
+- Symptom: when its Git command fails, the remaining scenarios do not run and go test reports "subtest may have called FailNow on a parent test" (reproduced with commit signing in the global Git configuration: 8 of 70 scenarios ran).
+- Cause: `features/host_checks_test.go:36` calls `f.t.Fatalf` on the suite's test from a scenario; see the resolved entry "Go acceptance steps acted beyond their own scenario". The file was left out of the audit fixes (PR #142) because it belonged to another fix at the time.
+- Status: resolved on branch `ci/go127-windows-macos`: the helper returns the error and the steps return it. With commit signing forced on, each host-check scenario now fails on its own and the run goes on.
 
 ### 2026-11-20 · bug · Go acceptance steps acted beyond their own scenario
 
