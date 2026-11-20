@@ -56,22 +56,21 @@ func noArgs(invoke func(io.Writer) error) node.Subcommand {
 	}
 }
 
+// pair reads "pair <secret> [--name <label>] [--rendezvous <url>]". The
+// label defaults to the computer's host name (local.md 1).
 func pair(args []string, stdout, stderr io.Writer) int {
-	var name string
-	switch len(args) {
-	case 3:
-		if args[1] != "--name" {
-			return usage(stderr)
-		}
-		name = args[2]
-	case 1:
-	default:
+	if len(args) == 0 || args[0] == "" || strings.HasPrefix(args[0], "-") {
 		return usage(stderr)
 	}
-	if args[0] == "" || strings.HasPrefix(args[0], "-") {
+	host, _ := os.Hostname() // the supported systems always report one
+	flags := flag.NewFlagSet("pair", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	name := flags.String("name", host, "")
+	rendezvous := flags.String("rendezvous", "", "")
+	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 {
 		return usage(stderr)
 	}
-	return result(node.Command{Cmd: "pair", Secret: args[0], Name: &name}.Run(stdout), stderr)
+	return result(node.Command{Cmd: "pair", Secret: args[0], Name: name, Rendezvous: *rendezvous}.Run(stdout), stderr)
 }
 
 func result(err error, stderr io.Writer) int {
