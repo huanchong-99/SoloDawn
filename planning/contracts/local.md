@@ -137,18 +137,16 @@ group has no remote.
   starts with `test_`, or lies in a folder named `tests` or `__tests__` at
   any depth; these are matched with exact case, whatever the extension. A
   *source file* is any other file whose last extension, in lower case, is
-  one of:
+  one of the list below: the languages whose test files these names cover
+  (Go, JavaScript and TypeScript, Python, PHP, Dart, Elixir).
 
   ```
-  .asm .bash .bat .c .cc .cjs .clj .cljc .cljs .cmd .cpp .cs .css .cts
-  .cxx .dart .erl .ex .exs .fs .fsi .fsx .go .h .hh .hpp .hrl .htm .html
-  .hxx .java .js .jsx .kt .kts .less .lua .m .mjs .mm .mts .php .pl .pm
-  .ps1 .py .pyi .r .rb .rs .s .sass .scala .scss .sh .sql .svelte .swift
-  .ts .tsx .vb .vue .zsh
+  .cjs .cts .dart .ex .go .js .jsx .mjs .mts .php .py .ts .tsx
   ```
 
-  A file that is neither does not count. Support for projects with other
-  conventions is a later option.
+  A change to a file of any other type does not trigger the check: the
+  check neither fails nor passes because of it. Support for projects with
+  other conventions is a later option.
 - "Fake tests" has no command; it is a veto item in review.
 - Both hard checks always run (R-103). There is no setting to turn one off.
 
