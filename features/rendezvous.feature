@@ -70,7 +70,8 @@ Feature: Rendezvous signalling
     Then the browser is told that the room is joined
     And the node is told that the room is joined
     When the tablet joins the room
-    And the browser sends its pair message through the room
+    Then the tablet is told that the room is full
+    When the browser sends its pair message through the room
     Then the node receives that room message
     When the tablet sends its pair message through the room
     Then the browser has received nothing else

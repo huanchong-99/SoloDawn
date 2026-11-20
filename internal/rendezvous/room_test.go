@@ -19,6 +19,7 @@ func TestRoomMembership(t *testing.T) {
 	id := identity.NewSecret().Room()
 	join := proto.RoomID{Type: "join", Room: id}
 	joined := proto.RoomID{Type: "joined", Room: id}
+	full := proto.RoomID{Type: "full", Room: id}
 	msg := proto.RoomData{RoomID: proto.RoomID{Type: "room", Room: id}, Data: json.RawMessage(`{"UnKnown":null,"x":9007199254740993}`)}
 	// An ice answer is an ordered barrier for requests on that socket.
 	barrier := func(cn *websocket.Conn) {
@@ -32,7 +33,11 @@ func TestRoomMembership(t *testing.T) {
 	send(t, b, join)
 	expect(t, b, joined)
 	expect(t, a, joined)
+	// A member that joins its full room again is told nothing; a third is.
+	send(t, b, join)
+	barrier(b)
 	send(t, c, join)
+	expect(t, c, full)
 	send(t, c, msg)
 	barrier(c)
 	send(t, a, msg)

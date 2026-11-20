@@ -43,15 +43,26 @@ func (r *room) forward(sender *client, msg proto.RoomData) {
 const maxRooms = 16
 
 // join reports false for a join of a room beyond maxRooms, which is bad input.
-// A room the connection is already in does not count again.
+// Joining a room the connection is already in changes nothing; a third device
+// is told that the room is full.
 func (s *server) join(c *client, id string) bool {
-	if len(c.rooms) == maxRooms && c.rooms[id] == nil {
+	if c.rooms[id] != nil {
+		return true
+	}
+	if len(c.rooms) == maxRooms {
 		return false
 	}
 	r := s.open(id)
 	if len(r.members) == 2 {
+		c.send(proto.RoomID{Type: "full", Room: id})
 		return true
 	}
+	r.enter(c, id)
+	return true
+}
+
+// enter adds a connection to a room with space; the second tells both.
+func (r *room) enter(c *client, id string) {
 	r.members[c] = true
 	c.rooms[id] = r
 	if len(r.members) == 2 {
@@ -59,7 +70,6 @@ func (s *server) join(c *client, id string) bool {
 			member.send(proto.RoomID{Type: "joined", Room: id})
 		}
 	}
-	return true
 }
 
 // open returns the room of an id, creating it with its 15 minutes.
