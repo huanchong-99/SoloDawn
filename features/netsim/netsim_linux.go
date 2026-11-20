@@ -108,7 +108,9 @@ func (n Network) SetBlocked(t testing.TB, udp bool, iceTCP uint16) {
 
 // StartUPnP starts miniupnpd (nftables backend) on this gateway, with UPnP
 // IGD and NAT-PMP available to its LAN. Its process belongs to the test.
-func (p Peer) StartUPnP(t testing.TB) {
+// Each config line is added to miniupnpd's configuration, for example a
+// permission rule that makes the gateway grant another external port.
+func (p Peer) StartUPnP(t testing.TB, config ...string) {
 	t.Helper()
 	// miniupnpd adds its rules to these chains of the gateway's table.
 	run(t, `add chain ip netsim miniupnpd
@@ -122,7 +124,8 @@ insert rule ip netsim post jump postrouting_miniupnpd
 		"miniupnpd", "-d", "-4", "-f", "/dev/stdin", "-i", "wan", "-a", "lan",
 		"-N", "-S", "-p", "5000", "-P", filepath.Join(dir, "miniupnpd.pid"))
 	cmd.Stdin = strings.NewReader("lease_file=" + filepath.Join(dir, "leases") + "\n" +
-		"upnp_nftables_family_split=yes\nupnp_table_name=netsim\nupnp_nat_table_name=netsim\n")
+		"upnp_nftables_family_split=yes\nupnp_table_name=netsim\nupnp_nat_table_name=netsim\n" +
+		strings.Join(append(config, ""), "\n"))
 	cmd.Stdout, cmd.Stderr = t.Output(), t.Output()
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("netsim %v: %v", cmd.Args, err)
