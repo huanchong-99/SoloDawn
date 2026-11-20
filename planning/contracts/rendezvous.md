@@ -18,10 +18,15 @@ node's address needs no server at all.
 | `https://<host>/` | rendezvous | static web client and `install.md` |
 | `http://localhost:47800/` | every node | static web client for the local browser |
 
-Port numbers are defaults and can be changed by flags.
+A node's ports are fixed in step 1: 47800 (TCP signalling, UDP ICE), 47801
+(ICE-TCP), 47802 (beacon). HTTPS and TURN over TLS share port 443, chosen
+by the TLS server name `[verified, S-6]`, local CA only (`risks.md` T-11).
 
-`[verified, S-6]`, local certificate authority only (`risks.md` T-11):
-HTTPS and TURN-over-TLS share port 443, chosen by the TLS server name.
+**Local delivery.** On its own handler a node counts as connected under its
+device id, without a WebSocket: a `to` for it reaches it as `from`, its
+`presence` is always `on`, and it sends `to` and joins rooms there like a
+client. A pairing node joins the room there and on each rendezvous it uses,
+so `solodawn open` pairs on `localhost`. Nothing is forwarded to other nodes.
 
 ## 2. Signalling protocol
 
@@ -168,11 +173,12 @@ A node keeps, per known device, a short list of signalling addresses:
    default; a self-hoster replaces or adds to the list.
 
 Browsers cannot use 1, and can use 2 only for `localhost`: a page served over
-HTTPS may not open `ws://` to another machine. A browser with no reachable
-rendezvous can therefore start only through a node on the same machine,
-which then signals on its behalf. A self-hoster who puts a node's port
-behind a `wss://` address with a trusted certificate has, by that, a
-rendezvous a browser can use: it is the same handler. See `risks.md` K-2.
+HTTPS may not open `ws://` to another machine, and whether it may open
+`ws://localhost` is `[unverified]` (`risks.md` T-18). A browser with no
+reachable rendezvous reaches only the node on its own machine, through that
+node's handler: step 1 forwards no signalling to other nodes (`risks.md`
+K-2). A self-hoster who puts a node's port behind a `wss://` address with a
+trusted certificate has, by that, a rendezvous a browser can use.
 
 ## 5. ICE configuration
 
@@ -186,8 +192,7 @@ the review of section 5.1 measured. "Evidence n" is entry n of
   address `[verified, S-1 and A.1]`.
 - **TCP.** An ICE-TCP passive listener on 47801 (`SetICETCPMux`), for the
   connections a node answers and for those it offers `[verified, S-1]`.
-- IPv4 and IPv6 host candidates, server-reflexive through STUN, relay
-  through TURN.
+- Host candidates on IPv4 and IPv6, server-reflexive by STUN, relay by TURN.
 - The node requests mappings (UPnP, NAT-PMP) for the answering UDP socket, the
   TCP signalling listener and the passive ICE-TCP listener. It publishes the
   external TCP signalling port in the signalling URL and each mapped ICE
@@ -232,60 +237,51 @@ the review of section 5.1 measured. "Evidence n" is entry n of
      inbound slot under this policy; one connects (`flows/connect.md` F).
 5. **Not chosen: one connection per pair of nodes, used both ways.** Each
    direction has its own `conn` and one offering client that owns `hello`,
-   commands, reconnect and probing. A node can answer as a home while it
-   offers as a host. Offers made at the same moment address different
-   peer connections, so neither meets SDP glare. Sharing one `ctl` would
-   require agreement on which connection survives simultaneous offers and
-   on how both client sessions resume on it.
+   commands, reconnect and probing; a node can answer as a home while it
+   offers as a host. Simultaneous offers address different peer
+   connections, so neither meets SDP glare. Sharing one `ctl` would need
+   agreement on which connection survives and how both sessions resume.
 6. **Not chosen: a second fixed port for offering.** One configured UDP
-   port is kept. A second, shared offering port separates the opposite
-   directions and nothing more: it can give an ordinary connection and
-   its probe the same mux registration. A mapped port for ordinary
-   offers, with private probe sockets, is reconsidered if S-8 shows a
-   material gain in reachability.
+   port is kept. A second, shared offering port only separates the opposite
+   directions, and can give an ordinary connection and its probe the same
+   mux registration. A mapped port for ordinary offers, with private probe
+   sockets, is reconsidered if S-8 shows a material gain in reachability.
 7. **Hole punching** remains available; its success rate is not measured.
    ICE checks compatible host, reflexive and relay candidates. A live NAT
    mapping and a live local socket are two things, and either can outlive
-   the other (points 4 and 10). Two peers behind the same NAT can use
-   reachable LAN host candidates; using each other's public mappings from
-   inside that NAT requires hairpinning. If LAN routing or client
-   isolation prevents the host path and hairpinning fails, another
-   working pair is required. S-8 measures these cases, and hole punching
-   across different NATs with ephemeral offering sockets (evidence 7).
+   the other (points 4 and 10). Two peers behind one NAT can use reachable
+   LAN host candidates; using each other's public mappings from inside it
+   requires hairpinning, and if LAN routing or client isolation also blocks
+   the host path, another working pair is needed. S-8 measures these, and
+   hole punching across different NATs on ephemeral offer sockets (evidence 7).
 8. **Port mapping.** A forward or mapping to 47800/UDP benefits answered
-   connections. If the other direct UDP and IPv6 paths fail, a pion
-   answerer can dial the passive TCP endpoint the offerer advertises:
-   verified on Linux with only the offerer's listener reachable
+   connections (`risks.md` K-19). If the other direct UDP and IPv6 paths
+   fail, a pion answerer can dial the passive TCP endpoint the offerer
+   advertises: verified on Linux with only the offerer's listener reachable
    `[verified, A.1]` (evidence 8). S-8 verifies the router mapping,
-   reachability from outside and publication of the actual external port,
-   also when a router grants another port than the one asked for. A
-   mapped-address rule applies only to the candidates that mapping
-   serves. TURN is used when no direct pair works. TCP simultaneous open
-   remains S-9 (`risks.md` K-19).
-9. **Remembered addresses** are unaffected. A node remembers reachable
-   signalling URLs, a mapped signalling URL included when there is one.
-   ICE candidates are gathered anew for each connection, and an ephemeral
-   ICE endpoint is never a remembered signalling address.
+   reachability from outside and publication of the external port the
+   router actually grants. A mapped-address rule applies only to the
+   candidates that mapping serves. TURN is used when no direct pair works.
+9. **Remembered addresses** are unaffected: signalling URLs, a mapped one
+   included. ICE candidates are gathered anew for each connection, and an
+   ephemeral ICE endpoint is never a remembered signalling address.
 10. **The relay-free probe** stays make-before-break. Both ends omit TURN
     on a probe, and a node keeps one pending probe beside the current
-    inbound connection. A probe can still fail where a direct path
-    exists: failed direct checks of the old connection may still own an
-    endpoint that is later assigned to the probe `[verified, A.1]`
-    (evidence 10). The old connection therefore keeps serving until the
-    node has accepted `hello` on the probe; the order is in
-    `flows/connect.md` B.
+    inbound connection. A probe can fail where a direct path exists: failed
+    direct checks of the old connection may still own an endpoint later
+    assigned to the probe `[verified, A.1]` (evidence 10). So the old
+    connection serves until the node has accepted `hello` on the probe
+    (`flows/connect.md` B).
 
 Browser: `RTCPeerConnection` with the `ice` list from `ready`; a `probe`
 connection drops the TURN entry.
 
-What ICE gives without more code: it checks compatible pairs as they
-become available and nominates a working pair. A higher-priority path
-discovered later may require a probe to take effect (R-131).
-
-Which direct paths step 1 tries together, with the relay on port 443 as
-the last resort, is R-131. TCP simultaneous open is not among them: pion
-does not perform it `[unverified]`, and spike S-9 measures what it would
-gain (`risks.md` Q-1).
+What ICE gives without more code: it checks compatible pairs as they become
+available and nominates a working pair; a higher-priority path found later
+may need a probe to take effect. Which direct paths step 1 tries together,
+with the relay on port 443 last, is R-131. TCP simultaneous open is not
+among them: pion does not perform it `[unverified]`, and spike S-9 measures
+what it would gain (`risks.md` Q-1).
 
 ## 6. Self-hosting
 

@@ -112,11 +112,13 @@ failure with one error code:
    `contracts/conventions.md` section 2.
 4. `not_for_me`: `to`, when there, is the receiver's device id; an empty
    `to` is a value like any other, and is not that id. A signalling payload
-   must carry `to`. A host command without one is refused with the same
-   code by the node that receives it (`contracts/commands.md` section 2).
+   must carry `to`; a beacon (`contracts/rendezvous.md` section 4) carries
+   none and is not checked for one. A host command without one is refused
+   with the same code by the node that receives it (`contracts/commands.md`
+   section 2).
 5. `stale`: `ts` is at most two minutes from the receiver's clock for a
-   signalling payload, and at most 24 hours for a command, earlier or
-   later. Exactly two minutes, or exactly 24 hours, still passes.
+   signalling payload or a beacon, and at most 24 hours for a command,
+   earlier or later. Exactly two minutes, or exactly 24 hours, still passes.
 
 A command that passes these checks and was already accepted is not an
 error: the receiver answers what it answered the first time, from its
@@ -177,9 +179,11 @@ that come after are judged against that unchanged log.
 `add` puts `dev` in the valid set; `revoke` removes it for good.
 
 An entry whose `ver` the log already holds is never appended. If it is the
-entry held at that version (the same `p`, `k` and `s`) it is not refused
-either, and nothing changes: logs are passed on, so one entry arrives many
-times. Any other entry for that version is refused. First accepted wins.
+entry held at that version (the same `k` and `s`, and the same `p` as
+`TextEncoder` encodes it, so that a lone surrogate and U+FFFD agree) it is
+not refused either, and nothing changes: logs are passed on, so one entry
+arrives many times. Any other entry for that version is refused. First
+accepted wins.
 
 These rules accept, on purpose: a `revoke` of a device that was never added
 (it can then never be added); an `add` of a device that is already valid
@@ -191,14 +195,17 @@ Anyone can verify a whole log by replaying it from entry 1.
 
 Where logs live and how they spread:
 
-- Every node stores the log of its owner.
+- Every node, and every browser, stores the log of its owner.
 - Every home stores the log of each person in its groups and shows entries
   to clients as `device` rows.
 - Entries travel in one frame, `devlog` (`contracts/datachannel.md` 3.1),
-  always as the original signed entries. A device that creates an entry
-  sends it to every one of the owner's nodes and every home it is connected
-  to; nodes and homes pass on what they accept; after every `welcome` each
-  side sends the logs the other may be missing.
+  always as the original signed entries. A device that creates or accepts
+  an entry sends it to every connected peer that keeps that log, browsers
+  included: an entry a node writes reaches the owner's other nodes through
+  a browser connected to them (`risks.md` K-24). After every `welcome`
+  each side sends every log the peer has a reason to know (section 3,
+  check 2), in full from version 1, in several frames, in order, if one
+  frame cannot hold it.
 
 Two entries for one version make a fork, and receivers may then hold
 different logs. Step 1 does not resolve forks (`risks.md` K-4).
@@ -255,8 +262,8 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
 - Until the newcomer is in the log, the connection carries `hello` and
   `devlog` and nothing else.
 - Once the data channel is open, the side that already belongs to a person
-  appends an `add` entry for the newcomer and sends the whole log in a
-  `devlog` frame. If neither side belongs to a person (first run), the
+  appends an `add` entry for the newcomer and sends the whole log in
+  `devlog` (section 4). If neither side belongs to a person (first run), the
   browser writes the genesis entry for itself and then the `add` for the
   node.
 - **Adoption.** A device that belongs to no person adopts the person of a
@@ -264,9 +271,12 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   the log is valid; it contains an `add` for this device that is signed by
   the device at the other end of that connection; and at the end of the
   log both that device and this one are valid. It then stores the owner
-  and the log in one step. A device that already belongs to a person never
-  adopts another, and a pairing between devices of two different people
-  changes neither log. Pairing trusts whoever holds the secret; it does not
+  and the log in one step. A log split over several `devlog` frames is
+  judged once complete: when the frame that holds the `add` for this device
+  has arrived, since the peer writes that entry last, just before it sends
+  the log. A device that already belongs to a person never adopts another,
+  and a pairing between devices of two different people changes neither
+  log. Pairing trusts whoever holds the secret; it does not
   verify a human identity.
 - When the newcomer has been enrolled, the client side sends `hello` again
   and reads `owner: true` from the new `welcome`.
