@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -71,6 +72,29 @@ func TestCheckAndRedactionAgree(t *testing.T) {
 		diff := ">" + strings.ReplaceAll(text, "\n", "\n>")
 		if found := containsSecret(diff, ">"); found != redacted {
 			t.Errorf("%q as added lines: check %v, redaction %v", text, found, redacted)
+		}
+	}
+}
+
+// Dense candidates, each preceded by a letter, are checked in linear time:
+// four times the text may take about four times as long, not sixteen.
+func TestSecretCheckIsLinear(t *testing.T) {
+	fastest := func(text string) time.Duration {
+		best := time.Hour
+		for range 3 {
+			start := time.Now()
+			if err := CheckOutboundSecret(text); err != nil {
+				t.Fatalf("%.10q…: %v", text, err)
+			}
+			best = min(best, time.Since(start))
+		}
+		return best
+	}
+	for _, unit := range []string{"task-", "xsk-"} {
+		small := fastest(strings.Repeat(unit, 256<<10/len(unit)))
+		large := fastest(strings.Repeat(unit, 1<<20/len(unit)))
+		if large > 10*small+100*time.Millisecond {
+			t.Errorf("%q: 256 KiB in %v, 1 MiB in %v", unit, small, large)
 		}
 	}
 }

@@ -9,30 +9,13 @@ import (
 var errSecret = errors.New("secret: this looks like a secret; remove it and send again")
 
 // secretPattern is one entry of the list in local.md §8. find is what the
-// check looks for; it starts with a literal, which the search skips to.
-// With lead, a match counts only when no letter or digit precedes it.
+// check looks for, with MatchString: linear, and no copy of the text.
 // redact has two groups, what precedes the secret, which stays, and the
 // secret, which redaction replaces. One of literals occurs in every match:
 // a cheap test before a regular expression runs.
 type secretPattern struct {
 	literals     []string
-	lead         bool
 	find, redact *regexp.Regexp
-}
-
-// in reports a match of p in text, trying each place find matches.
-func (p secretPattern) in(text string) bool {
-	for off := 0; ; {
-		loc := p.find.FindStringIndex(text[off:])
-		if loc == nil {
-			return false
-		}
-		at := off + loc[0]
-		if !p.lead || at == 0 || !isAlnum(text[at-1]) {
-			return true
-		}
-		off = at + 1
-	}
 }
 
 func isAlnum(c byte) bool {
@@ -50,14 +33,11 @@ func (p secretPattern) mayMatch(text string) bool {
 
 // credential is a vendor credential: a prefix not preceded by a letter or
 // digit, then at least the run of key characters the contract gives; the
-// whole longer run is the secret.
+// whole longer run is the secret. The check and redaction use the same
+// expression, so they agree.
 func credential(expr string, literals ...string) secretPattern {
-	return secretPattern{
-		literals: literals,
-		lead:     true,
-		find:     regexp.MustCompile(expr),
-		redact:   regexp.MustCompile(`(^|[^A-Za-z0-9])(` + expr + `)`),
-	}
+	re := regexp.MustCompile(`(^|[^A-Za-z0-9])(` + expr + `)`)
+	return secretPattern{literals: literals, find: re, redact: re}
 }
 
 const (
@@ -168,7 +148,7 @@ func CheckOutboundSecret(text string) error {
 // whose lines start with linePrefix. It builds no copy of the text.
 func containsSecret(text, linePrefix string) bool {
 	for _, p := range secretPatterns {
-		if p.mayMatch(text) && p.in(text) {
+		if p.mayMatch(text) && p.find.MatchString(text) {
 			return true
 		}
 	}
