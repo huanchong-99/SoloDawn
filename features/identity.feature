@@ -27,9 +27,19 @@ Feature: Identity
       | it is misdirected and late                      | not_for_me     |
 
   Scenario: Signalling goes stale sooner than a command
-    Given a payload that the owner's browser signed 3 minutes ago
+    Given a payload for the node that the owner's browser signed 3 minutes ago
     Then read as signalling the answer is "stale"
     And read as a command the answer is "accepted"
+
+  Scenario: Signalling must name its receiver
+    Given a payload for nobody that the owner's browser signed 0 minutes ago
+    Then read as signalling the answer is "not_for_me"
+    And read as a command the answer is "accepted"
+
+  Scenario: Nobody can sign for a device without its key
+    Given a signature that the Ed25519 library accepts under a key that has no private key
+    Then a receiver that would listen to that key answers "bad_sig"
+    And a device log refuses to add that key
 
   Scenario: A revoked device is out of the log for good
     Given the device log of a person with a browser, a tablet and a node
@@ -40,6 +50,12 @@ Feature: Identity
     And the same revoke arriving a second time changes nothing
     And replaying the log from its first entry gives the same valid devices
 
+  Scenario: The last valid device of a person cannot be revoked
+    Given the device log of a person with a browser and a node
+    When the node revokes the browser
+    Then an entry in which the node revokes itself is refused
+    And the node is still a valid device
+
   Scenario: Two devices that share a pairing secret recognise each other
     Given a browser that created a pairing secret
     When a node is given the secret as a person typed it, in lower case
@@ -47,6 +63,7 @@ Feature: Identity
     And each side accepts the other's pair message
     And neither side accepts its own pair message sent back
     And a pair message made with another secret is refused
+    And a secret typed with a letter that only looks like one of its characters is refused
 
   Scenario: A new device adopts only the person its pairing peer enrolled it in
     Given a node that belongs to nobody and has paired with a browser

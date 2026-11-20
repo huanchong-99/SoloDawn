@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -26,8 +29,11 @@ type vectors struct {
 	Keys       []keyVector       `json:"keys"`
 	Envelopes  []envelopeVector  `json:"envelopes"`
 	Rendezvous []challengeVector `json:"rendezvous"`
+	Received   []receivedVector  `json:"received"`
 	Pairing    []pairingVector   `json:"pairing"`
+	BadSecrets []badSecretVector `json:"bad_secrets"`
 	Devlogs    []devlogVector    `json:"devlogs"`
+	Adopt      []adoptVector     `json:"adopt"`
 }
 
 type keyVector struct {
@@ -60,6 +66,36 @@ type pairingVector struct {
 type pairSide struct {
 	Device string `json:"device"`
 	MAC    string `json:"mac"`
+}
+
+// badSecretVector is a text that a person could type and that is no pairing secret.
+type badSecretVector struct {
+	Name  string `json:"name"`
+	Shown string `json:"shown"`
+}
+
+// adoptVector asks whether device me, which belongs to no person and has
+// paired with peer, adopts the person of a valid log.
+type adoptVector struct {
+	Name    string           `json:"name"`
+	User    string           `json:"user"`
+	Me      string           `json:"me"`
+	Peer    string           `json:"peer"`
+	Entries []proto.Envelope `json:"entries"`
+	OK      bool             `json:"ok"`
+}
+
+// receivedVector is one envelope arriving at device me, whose clock reads now,
+// as a command or as a signalling payload. known says whether the receiver
+// listens to the signer. code is "ok" or the code of the first check that fails.
+type receivedVector struct {
+	Name  string         `json:"name"`
+	Kind  string         `json:"kind"`
+	Me    string         `json:"me"`
+	Now   int64          `json:"now"`
+	Known bool           `json:"known"`
+	Env   proto.Envelope `json:"env"`
+	Code  string         `json:"code"`
 }
 
 type devlogVector struct {
@@ -127,6 +163,19 @@ func cryptoVectors() vectors {
 		{"non-ASCII text and escaped characters, signed as written", browser.key.Sign(exact), true},
 		{"the same JSON value encoded again: other bytes", reencoded, false},
 		{"signed with the rendezvous prefix", proto.Envelope{Payload: plain, Key: browser.id(), Signature: browser.key.SignChallenge(plain)}, false},
+		{"k in a spelling that is not canonical", proto.Envelope{Payload: plain, Key: respelled(browser.id()), Signature: valid.Signature}, false},
+		{"s in a spelling that is not canonical", proto.Envelope{Payload: plain, Key: browser.id(), Signature: respelled(valid.Signature)}, false},
+		{"k with padding", proto.Envelope{Payload: plain, Key: browser.id() + "=", Signature: valid.Signature}, false},
+		{"s signed by k, beginning with the identity point", proto.Envelope{Payload: plain, Key: browser.id(), Signature: b64.EncodeToString(identitySignature(browser.key, envelopeContext+plain))}, false},
+		{"s with the group order added to its second half", proto.Envelope{Payload: plain, Key: browser.id(), Signature: b64.EncodeToString(plusOrder(mustDecode(valid.Signature)))}, false},
+		{"k that is 32 bytes and no point of the curve", proto.Envelope{Payload: plain, Key: b64.EncodeToString(offCurve()), Signature: valid.Signature}, false},
+	}
+	// Under each weak key, a signature made without any private key that an
+	// Ed25519 library following RFC 8032 to the letter verifies.
+	for _, key := range weakValues() {
+		p, sig := forgery(key)
+		v.Envelopes = append(v.Envelopes, envelopeVector{"forged under the weak key " + hex.EncodeToString(key),
+			proto.Envelope{Payload: p, Key: b64.EncodeToString(key), Signature: b64.EncodeToString(sig)}, false})
 	}
 
 	nonce := testID("challenge")
@@ -150,6 +199,19 @@ func cryptoVectors() vectors {
 		})
 	}
 
+	v.BadSecrets = []badSecretVector{
+		{"a space for a hyphen", "7K2M 9QXD-4F8T-WB3N"},
+		{"the letter I", "7K2M-9QXD-4F8T-WB3I"},
+		{"the letter L, in lower case", "7k2m-9qxd-4f8t-wb3l"},
+		{"the letter O", "7K2M-9QXD-4F8T-WB3O"},
+		{"the letter U", "7K2M-9QXD-4F8T-WB3U"},
+		{"one character short", "7K2M-9QXD-4F8T-WB3"},
+		{"one character too long", "7K2M-9QXD-4F8T-WB3NN"},
+		{"fifteen valid characters and a long s, which a general upper-casing turns into S", "7K2M-9QXD-4F8T-WB3" + string(rune(0x17f))},
+		{"fourteen valid characters and a sharp s, which JavaScript's toUpperCase turns into SS", "7K2M-9QXD-4F8T-WB" + string(rune(0xdf))},
+		{"a Kelvin sign for a K", "7" + string(rune(0x212a)) + "2M-9QXD-4F8T-WB3N"},
+	}
+
 	genesis, addNode := add(browser, 1, browser), add(browser, 2, node)
 	tampered := add(browser, 2, node)
 	tampered.Payload = strings.Replace(tampered.Payload, "workstation", "workstatiom", 1)
@@ -159,8 +221,9 @@ func cryptoVectors() vectors {
 			yes(genesis), yes(add(browser, 2, tablet)), yes(add(tablet, 3, node)), yes(revoke(node, 4, tablet))),
 		devlogCase("an add by a device that is not in the log", []device{browser},
 			yes(genesis), no(add(stranger, 2, node)), no(add(stranger, 2, stranger))),
-		devlogCase("an add signed by a revoked device, and a second add of a revoked key", []device{browser},
-			yes(genesis), yes(add(browser, 2, tablet)), yes(revoke(browser, 3, tablet)), no(add(tablet, 4, node)), no(add(browser, 4, tablet))),
+		devlogCase("an add signed by a revoked device, and a second add of a revoked key, in its own spelling and in another one", []device{browser},
+			yes(genesis), yes(add(browser, 2, tablet)), yes(revoke(browser, 3, tablet)), no(add(tablet, 4, node)), no(add(browser, 4, tablet)),
+			no(rewritten(browser, change(browser, 4, "add", tablet), tablet.id(), respelled(tablet.id())))),
 		devlogCase("a gap in ver", []device{browser, node},
 			yes(genesis), no(add(browser, 3, node)), no(add(browser, 0, node)), yes(addNode)),
 		devlogCase("a second, different entry for a version already accepted; the same entry again is not refused and changes nothing", []device{browser, node},
@@ -174,12 +237,142 @@ func cryptoVectors() vectors {
 			yes(genesis),
 			no(browser.key.Sign(strings.Replace(entry, `"t":"device"`, `"t":"post"`, 1))),
 			no(browser.key.Sign(strings.Replace(entry, `"op":"add"`, `"op":"rename"`, 1))),
-			no(browser.key.Sign("device"))),
+			no(browser.key.Sign("device")), no(browser.key.Sign("["+entry+"]")), no(browser.key.Sign("null"))),
+		devlogCase("dev is not a device id: a weak key, 31 bytes, a label", []device{browser},
+			yes(genesis),
+			no(rewritten(browser, entry, node.id(), b64.EncodeToString(weakValues()[2]))),
+			no(rewritten(browser, entry, node.id(), b64.EncodeToString(weakValues()[0]))),
+			no(rewritten(browser, entry, node.id(), b64.EncodeToString(make([]byte, 31)))),
+			no(rewritten(browser, entry, node.id(), "workstation"))),
+		devlogCase("ver is an integer by its value: 2.0, and 2.0000000000000001, are 2; null, a text and 2.5 are none", []device{browser, node, tablet},
+			yes(genesis),
+			no(rewritten(browser, entry, `"ver":2`, `"ver":null`)),
+			no(rewritten(browser, entry, `"ver":2`, `"ver":"2"`)),
+			no(rewritten(browser, entry, `"ver":2`, `"ver":2.5`)),
+			no(rewritten(browser, entry, `"ver":2`, `"ver":9007199254740992`)),
+			yes(rewritten(browser, entry, `"ver":2`, `"ver":2.0`)),
+			yes(rewritten(browser, change(browser, 3, "add", tablet), `"ver":3`, `"ver":3.0000000000000001`))),
+		devlogCase("names are exact: VER beside ver is not read, and VER alone is no ver", []device{browser, node},
+			yes(genesis),
+			no(rewritten(browser, entry, `"ver":2`, `"VER":2`)),
+			no(rewritten(browser, entry, `"op":"add"`, `"OP":"add"`)),
+			yes(rewritten(browser, entry, `"ver":2`, `"ver":2,"VER":3,"OP":"revoke","DEV":"`+tablet.id()+`"`))),
+		devlogCase("an add has a kind that is node or browser and a name that is a string", []device{browser, node},
+			yes(genesis),
+			no(rewritten(browser, entry, `"kind":"node"`, `"kind":"phone"`)),
+			no(rewritten(browser, entry, `"kind":"node",`, ``)),
+			no(rewritten(browser, entry, `"kind":"node"`, `"kind":null`)),
+			no(rewritten(browser, entry, `,"name":"workstation"`, ``)),
+			no(rewritten(browser, entry, `"name":"workstation"`, `"name":null`)),
+			no(rewritten(browser, entry, `"name":"workstation"`, `"name":7`)),
+			yes(rewritten(browser, entry, `"name":"workstation"`, `"name":""`))),
+		devlogCase("what is not read: n, ts and other fields of any type, and kind and name on a revoke", []device{browser},
+			yes(genesis),
+			yes(rewritten(browser, entry, `"ts":`+fmt.Sprint(ts+2), `"ts":null,"to":null,"g":7`)),
+			yes(browser.key.Sign(`{"t":"device","user":"`+browser.id()+`","ver":3,"op":"revoke","dev":"`+node.id()+`","kind":"phone","name":null}`))),
+		devlogCase("a revoke of the last valid device", []device{node},
+			yes(genesis), no(revoke(browser, 2, browser)), yes(addNode), yes(revoke(node, 3, browser)), no(revoke(node, 4, node)), yes(revoke(node, 4, tablet))),
 		devlogCase("what the rules allow: a revoke of a key never added, a second add, a device revoking itself, the first device revoked", []device{node},
 			yes(genesis), yes(revoke(browser, 2, stranger)), no(add(browser, 3, stranger)), yes(add(browser, 3, node)), yes(add(browser, 4, node)),
 			yes(add(node, 5, tablet)), yes(revoke(tablet, 6, tablet)), no(add(tablet, 7, stranger)), yes(revoke(node, 7, browser)), no(add(browser, 8, tablet))),
 	}
+	first := []proto.Envelope{genesis, addNode}
+	v.Adopt = []adoptVector{
+		{"first run: the browser's genesis and its add of the node", browser.id(), node.id(), browser.id(), first, true},
+		{"a node added to an existing person by the browser it paired with", browser.id(), stranger.id(), browser.id(),
+			append(slices.Clone(first), add(browser, 3, stranger)), true},
+		{"a browser added by the node it paired with", browser.id(), tablet.id(), node.id(),
+			append(slices.Clone(first), add(node, 3, tablet)), true},
+		{"an add of me signed by a device other than peer", browser.id(), tablet.id(), browser.id(),
+			append(slices.Clone(first), add(node, 3, tablet)), false},
+		{"me revoked later in the log", browser.id(), node.id(), browser.id(),
+			append(slices.Clone(first), revoke(browser, 3, node)), false},
+		{"peer revoked later in the log", browser.id(), node.id(), browser.id(),
+			append(slices.Clone(first), revoke(node, 3, browser)), false},
+		{"a log that never adds me", browser.id(), tablet.id(), browser.id(), first, false},
+	}
+
+	v.Received = receivedVectors()
 	return v
+}
+
+// receivedVectors are the checks of section 3 after the first: who signed,
+// what the payload holds, whom it is for and when it was signed.
+func receivedVectors() []receivedVector {
+	me, other := node.id(), tablet.id()
+	p := func(fields string) string { return `{"t":"offer","n":"` + testID("offer") + `"` + fields + `}` }
+	at := func(off int64) string { return `,"ts":` + fmt.Sprint(ts+off) }
+	to := func(device string) string { return `,"to":"` + device + `"` }
+	fresh := at(0)
+	var out []receivedVector
+	add := func(name, kind, payload, code string) {
+		out = append(out, receivedVector{name, kind, me, ts, true, browser.key.Sign(payload), code})
+	}
+	both := func(name, payload, code string) {
+		add(name, "signal", payload, code)
+		add(name, "command", payload, code)
+	}
+
+	both("to the receiver", p(fresh+to(me)), "ok")
+	both("to another device", p(fresh+to(other)), "not_for_me")
+	both("an empty to is a value, and nobody's device id", p(fresh+`,"to":""`), "not_for_me")
+	add("no to: signalling must carry one", "signal", p(fresh), "not_for_me")
+	add("no to: a command may have none", "command", p(fresh), "ok")
+	both("to null", p(fresh+`,"to":null`), "bad_request")
+	both("to a number", p(fresh+`,"to":7`), "bad_request")
+	both("g null", p(fresh+to(me)+`,"g":null`), "bad_request")
+	both("TO beside to is not read", p(fresh+to(me)+`,"TO":"`+other+`"`), "ok")
+	both("to another device, TO the receiver", p(fresh+to(other)+`,"TO":"`+me+`"`), "not_for_me")
+	add("TO alone is no to", "signal", p(fresh+`,"TO":"`+me+`"`), "not_for_me")
+	add("TO alone is no to", "command", p(fresh+`,"TO":"`+other+`"`), "ok")
+	both("to twice: the last counts", p(fresh+to(other)+to(me)), "ok")
+
+	both("no ts", p(to(me)), "bad_request")
+	both("ts null", p(`,"ts":null`+to(me)), "bad_request")
+	both("ts a text", p(`,"ts":"`+fmt.Sprint(ts)+`"`+to(me)), "bad_request")
+	both("ts with a fraction", p(`,"ts":`+fmt.Sprint(ts)+`.5`+to(me)), "bad_request")
+	both("ts written with .0", p(`,"ts":`+fmt.Sprint(ts)+`.0`+to(me)), "ok")
+	both("ts written with an exponent", p(`,"ts":1.7636e12`+to(me)), "ok")
+	both("ts written with digits past a double", p(`,"ts":`+fmt.Sprint(ts)+`.00000000000001`+to(me)), "ok")
+	both("ts 2^53, one more than the largest integer", p(`,"ts":9007199254740992`+to(me)), "bad_request")
+	both("ts 2^53-1, the largest integer", p(`,"ts":9007199254740991`+to(me)), "stale")
+	both("ts written 1e20", p(`,"ts":1e20`+to(me)), "bad_request")
+	both("TS alone is no ts", p(`,"TS":`+fmt.Sprint(ts)+to(me)), "bad_request")
+	both("a long s in the name is no ts", p(`,"t`+string(rune(0x17f))+`":`+fmt.Sprint(ts)+to(me)), "bad_request")
+	both("no n", `{"t":"offer"`+fresh+to(me)+`}`, "bad_request")
+	both("n null", `{"t":"offer","n":null`+fresh+to(me)+`}`, "bad_request")
+	both("no t", `{"n":"x"`+fresh+to(me)+`}`, "bad_request")
+	both("t a number", `{"t":7,"n":"x"`+fresh+to(me)+`}`, "bad_request")
+	both("an empty t and n are values", `{"t":"","n":""`+fresh+to(me)+`}`, "ok")
+	both("a list", `[`+p(fresh+to(me))+`]`, "bad_request")
+	both("null", `null`, "bad_request")
+	both("not JSON", `offer`, "bad_request")
+
+	add("exactly two minutes early", "signal", p(at(-120_000)+to(me)), "ok")
+	add("exactly two minutes late", "signal", p(at(120_000)+to(me)), "ok")
+	add("two minutes and a millisecond early", "signal", p(at(-120_001)+to(me)), "stale")
+	add("two minutes and a millisecond late", "signal", p(at(120_001)+to(me)), "stale")
+	add("two minutes and a millisecond early", "command", p(at(-120_001)+to(me)), "ok")
+	add("exactly 24 hours early", "command", p(at(-86_400_000)+to(me)), "ok")
+	add("exactly 24 hours late", "command", p(at(86_400_000)+to(me)), "ok")
+	add("24 hours and a millisecond early", "command", p(at(-86_400_001)+to(me)), "stale")
+	add("24 hours and a millisecond late", "command", p(at(86_400_001)+to(me)), "stale")
+
+	// The order of the checks: each case fails a later check as well.
+	both("for another device and old: not_for_me comes first", p(at(-86_400_001)+to(other)), "not_for_me")
+	both("no t, for another device, old: bad_request comes first", `{"n":"x"`+at(-86_400_001)+to(other)+`}`, "bad_request")
+	unknown := receivedVector{"a signer the receiver does not listen to, payload not JSON: unknown_device comes first", "command", me, ts, false, stranger.key.Sign("offer"), "unknown_device"}
+	unsigned := unknown
+	unsigned.Name, unsigned.Env.Payload, unsigned.Code = "a signature that does not hold, from that signer: bad_sig comes first", "offar", "bad_sig"
+	return append(out, unknown, unsigned)
+}
+
+func mustDecode(s string) []byte {
+	b, err := b64.DecodeString(s)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 
 func encodeVectors(t *testing.T, v vectors) []byte {
@@ -225,9 +418,9 @@ func TestCryptoVectorsHold(t *testing.T) {
 	if err := dec.Decode(&v); err != nil {
 		t.Fatal(err)
 	}
-	if len(v.Keys) < 2 || len(v.Envelopes) < 4 || len(v.Rendezvous) < 1 || len(v.Pairing) < 3 || len(v.Devlogs) < 8 {
-		t.Fatalf("section 8 asks for more cases: %d keys, %d envelopes, %d rendezvous, %d pairing, %d devlogs",
-			len(v.Keys), len(v.Envelopes), len(v.Rendezvous), len(v.Pairing), len(v.Devlogs))
+	if len(v.Keys) < 2 || len(v.Envelopes) < 26 || len(v.Rendezvous) < 1 || len(v.Pairing) < 3 || len(v.BadSecrets) < 6 || len(v.Devlogs) < 15 || len(v.Adopt) < 6 || len(v.Received) < 40 {
+		t.Fatalf("cases are missing: %d keys, %d envelopes, %d rendezvous, %d pairing, %d bad_secrets, %d devlogs, %d adopt, %d received",
+			len(v.Keys), len(v.Envelopes), len(v.Rendezvous), len(v.Pairing), len(v.BadSecrets), len(v.Devlogs), len(v.Adopt), len(v.Received))
 	}
 
 	keys := map[string]Key{}
@@ -248,13 +441,15 @@ func TestCryptoVectorsHold(t *testing.T) {
 		if c.OK && err != nil || !c.OK && err != BadSig {
 			t.Errorf("envelope %q: OpenCommand gave %v, ok is %v", c.Name, err, c.OK)
 		}
-		// Ed25519 signatures are deterministic: signing p again with the seed of k gives s itself.
+		// Ed25519 signatures are deterministic: where ok is true, k is one of
+		// the keys and signing p again with its seed gives s itself; where ok
+		// is false and k is one of the keys, it gives another s.
 		k, listed := keys[c.Key]
-		if !listed {
+		if c.OK && !listed {
 			t.Fatalf("envelope %q: k is not one of the keys", c.Name)
 		}
-		if again := k.Sign(c.Payload); (again == c.Envelope) != c.OK {
-			t.Errorf("envelope %q: signing p with the seed of k gives s %q, ok is %v", c.Name, again.Signature, c.OK)
+		if listed && (k.Sign(c.Payload) == c.Envelope) != c.OK {
+			t.Errorf("envelope %q: signing p with the seed of k gives s %q, ok is %v", c.Name, k.Sign(c.Payload).Signature, c.OK)
 		}
 	}
 
@@ -283,6 +478,39 @@ func TestCryptoVectorsHold(t *testing.T) {
 		b := proto.Pair{Type: "pair", Key: c.B.Device, Role: "b", MAC: c.B.MAC}
 		if !s.Verify(a, "a") || !s.Verify(b, "b") || s.Verify(a, "b") || s.Verify(b, "a") {
 			t.Errorf("pairing %s: each side must verify the other's message and not its own", c.Shown)
+		}
+	}
+
+	for _, c := range v.BadSecrets {
+		if s, err := ParseSecret(c.Shown); err == nil {
+			t.Errorf("bad secret, %s: %q was read as %q", c.Name, c.Shown, s)
+		}
+	}
+
+	for _, c := range v.Adopt {
+		l, err := Replay(c.User, c.Entries)
+		if err != nil {
+			t.Fatalf("adopt %q: the log is not valid: %v", c.Name, err)
+		}
+		if got := l.Adopts(c.Me, c.Peer); got != c.OK {
+			t.Errorf("adopt %q: Adopts gave %v, ok is %v", c.Name, got, c.OK)
+		}
+	}
+
+	for _, c := range v.Received {
+		open, kinds := OpenCommand, map[string]bool{"signal": true, "command": true}
+		if !kinds[c.Kind] {
+			t.Fatalf("received %q: kind %q", c.Name, c.Kind)
+		}
+		if c.Kind == "signal" {
+			open = OpenSignal
+		}
+		code := "ok"
+		if _, err := open(c.Env, c.Me, func(string) bool { return c.Known }, time.UnixMilli(c.Now)); err != nil {
+			code = err.Error()
+		}
+		if code != c.Code {
+			t.Errorf("received %q as a %s: %s, want %s", c.Name, c.Kind, code, c.Code)
 		}
 	}
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -27,10 +28,18 @@ func exampleKey(name string) identity.Key {
 }
 
 func logEntry(signer, user identity.Key, ver int, op string, dev identity.Key) (proto.Envelope, error) {
-	b, err := json.Marshal(proto.DeviceEntry{
+	return logEntryFor(signer, user, ver, op, dev.ID())
+}
+
+func logEntryFor(signer, user identity.Key, ver int, op, dev string) (proto.Envelope, error) {
+	e := proto.DeviceEntry{
 		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: fmt.Sprint("entry-", ver, op), Timestamp: 1763600000000},
-		DeviceChange:  proto.DeviceChange{User: user.ID(), Version: ver, Op: op, Device: dev.ID()},
-	})
+		DeviceChange:  proto.DeviceChange{User: user.ID(), Version: ver, Op: op, Device: dev},
+	}
+	if op == "add" {
+		e.Kind, e.Name = "node", "a device"
+	}
+	b, err := json.Marshal(e)
 	return signer.Sign(string(b)), err
 }
 
@@ -148,10 +157,63 @@ func identitySteps(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^a payload that the owner's browser signed (\d+) minutes ago$`, func(minutes int) error {
-		env = browser.Sign(fmt.Sprintf(`{"t":"post","n":"post-1","ts":%d,"g":"group-1","text":"hello"}`, now.Add(-time.Duration(minutes)*time.Minute).UnixMilli()))
+	sc.Step(`^a payload for (the node|nobody) that the owner's browser signed (\d+) minutes ago$`, func(whom string, minutes int) error {
+		to := ""
+		if whom == "the node" {
+			to = `,"to":"` + node.ID() + `"`
+		}
+		env = browser.Sign(fmt.Sprintf(`{"t":"offer","n":"offer-1","ts":%d%s}`, now.Add(-time.Duration(minutes)*time.Minute).UnixMilli(), to))
 		receiver, arrival = node.ID(), now
 		return owned()
+	})
+
+	// The identity point as a public key: under it the signature made of the
+	// identity point and a zero scalar verifies over any text.
+	weakKey := append([]byte{1}, make([]byte, 31)...)
+	weakID := base64.RawURLEncoding.EncodeToString(weakKey)
+	sc.Step(`^a signature that the Ed25519 library accepts under a key that has no private key$`, func() error {
+		p := fmt.Sprintf(`{"t":"settings.set","n":"forged-1","ts":%d,"to":"%s","offline":true}`, now.UnixMilli(), node.ID())
+		sig := append(append([]byte{}, weakKey...), make([]byte, 32)...)
+		if !ed25519.Verify(weakKey, []byte("solodawn/1\n"+p), sig) {
+			return fmt.Errorf("crypto/ed25519 no longer verifies the forged signature")
+		}
+		env = proto.Envelope{Payload: p, Key: weakID, Signature: base64.RawURLEncoding.EncodeToString(sig)}
+		return owned()
+	})
+	sc.Step(`^a receiver that would listen to that key answers "([^"]*)"$`, func(want string) error {
+		_, err := identity.OpenCommand(env, node.ID(), func(string) bool { return true }, now)
+		if err == nil || err.Error() != want {
+			return fmt.Errorf("the answer is %v", err)
+		}
+		return nil
+	})
+	sc.Step(`^a device log refuses to add that key$`, func() error {
+		entry, err := logEntryFor(browser, browser, 3, "add", weakID)
+		if err != nil {
+			return err
+		}
+		if added, err := log.Apply(entry); err == nil || added || len(log.Entries) != 2 {
+			return fmt.Errorf("the entry was not refused: added %v, %d entries", added, len(log.Entries))
+		}
+		return nil
+	})
+	sc.Step(`^the device log of a person with a browser and a node$`, owned)
+	sc.Step(`^the node revokes the browser$`, func() error { return revokeBrowser() })
+	sc.Step(`^an entry in which the node revokes itself is refused$`, func() error {
+		entry, err := logEntry(node, browser, 4, "revoke", node)
+		if err != nil {
+			return err
+		}
+		if added, err := log.Apply(entry); err == nil || added || len(log.Entries) != 3 {
+			return fmt.Errorf("the entry was not refused: added %v, %d entries", added, len(log.Entries))
+		}
+		return nil
+	})
+	sc.Step(`^the node is still a valid device$`, func() error {
+		if !log.Valid(node.ID()) || log.Valid(browser.ID()) {
+			return fmt.Errorf("node valid: %v, browser valid: %v", log.Valid(node.ID()), log.Valid(browser.ID()))
+		}
+		return nil
 	})
 	sc.Step(`^read as (signalling|a command) the answer is "([^"]*)"$`, func(kind, want string) error {
 		if kind == "signalling" {
@@ -273,6 +335,15 @@ func identitySteps(sc *godog.ScenarioContext) {
 		other := identity.NewSecret()
 		if other == created || created.Verify(pairMessage(other, "b", tablet, "node"), "b") {
 			return fmt.Errorf("a pair message made with %s was accepted for %s", other, created)
+		}
+		return nil
+	})
+
+	sc.Step(`^a secret typed with a letter that only looks like one of its characters is refused$`, func() error {
+		// A long s, which a general upper-casing turns into S.
+		typed := created.String()[:18] + string(rune(0x17f))
+		if s, err := identity.ParseSecret(typed); err == nil {
+			return fmt.Errorf("%q was read as the secret %s", typed, s)
 		}
 		return nil
 	})
