@@ -21,6 +21,7 @@ connection, clock or database: every function works on the values it is given.
 | send a payload | `Key.Sign(p)`, with `p` the payload's JSON text |
 | receive an envelope | `OpenSignal(env, me, known, now)` for signalling, `OpenCommand` for a command; then `proto.Decode` for the payload |
 | rendezvous handshake | `Key.SignChallenge(nonce)`, `VerifyChallenge(device, nonce, s)` |
+| whether a text is a device id | `IsDevice(id)` |
 | a person's devices | `Log{User: id}`, `Log.Apply(entry)`, `Replay(user, entries)`, `Log.Valid(device)` |
 | first-run enrolment | `Log.Adopts(me, peer)` |
 | pairing | `NewSecret`, `ParseSecret(text)`, `Secret.String`, `Secret.Room`, `Secret.MAC`, `Secret.Verify` |

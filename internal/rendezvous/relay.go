@@ -1,15 +1,20 @@
 package rendezvous
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha1"
+	"encoding/base64"
 	"errors"
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
+	"github.com/pion/stun/v4"
 	"github.com/pion/turn/v5"
 )
 
@@ -55,11 +60,28 @@ func (o Options) start(udp net.PacketConn, tlsListener net.Listener, tlsPort int
 		cfg.PacketConnConfigs[0].RelayAddressGenerator = g
 		cfg.PacketConnConfigs[0].PermissionHandler = g.permitPeer
 		cfg.ListenerConfigs = []turn.ListenerConfig{{Listener: tlsListener, RelayAddressGenerator: g, PermissionHandler: g.permitPeer}}
-		cfg.AuthHandler = turn.LongTermTURNRESTAuthHandler(r.secret, nil)
+		cfg.AuthHandler = restAuth(r.secret)
 		cfg.EventHandler = g.events()
 	}
 	s, err := turn.NewServer(cfg)
 	return r, s, err
+}
+
+// restAuth checks a credential's expiry only when it opens an allocation.
+// Later requests on that allocation (refresh, permission, channel binding)
+// are accepted while the HMAC matches, so a relayed connection outlives its
+// credential; the daily quota bounds what it relays.
+func restAuth(secret string) turn.AuthHandler {
+	allocate := turn.LongTermTURNRESTAuthHandler(secret, nil)
+	return func(a *turn.RequestAttributes) (string, []byte, bool) {
+		if a.Method == stun.MethodAllocate {
+			return allocate(a)
+		}
+		mac := hmac.New(sha1.New, []byte(secret))
+		mac.Write([]byte(a.Username))
+		_, device, _ := strings.Cut(a.Username, ":")
+		return device, turn.GenerateAuthKey(a.Username, a.Realm, base64.StdEncoding.EncodeToString(mac.Sum(nil))), true
+	}
 }
 
 type generator struct {

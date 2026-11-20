@@ -113,6 +113,8 @@ Entries 1 to 10 belong to the points of section 5.1 with the same number.
     relayed connection, Chromium and WPE WebKit moved to it by themselves
     within 5 seconds and Firefox was still relayed after 30, with pion's
     opt-in renomination on or off.
+14. **Frame size.** S-1: the largest signed offer or answer made a frame of
+    2.5 KB, well under the 16 KiB limit of section 2 of the contract.
 
 ## 3. Not verified
 
