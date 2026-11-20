@@ -9,20 +9,32 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-21 · deviation · `act confirm` does not make the `replaces` check of the post again
 
 - Symptom: `planning/contracts/commands.md` 1.4 says that a `confirm` makes "the checks of a `brief` post (1.3)" again. One of them is that `body.replaces`, when not `null`, names a brief that is `pending` or `revise`. The post itself made that brief `superseded`, so the check, made again, would refuse every confirm of a brief that replaces another.
-- Cause: the contract lists the post's checks without saying which of them are about the group when the brief is confirmed. `(*State).briefStill` (`internal/home/cmd_brief.go:247`) makes the others again: the shape of the body, the requester a member, every assignee and reviewer a working AI. That an entry's assignee is not its reviewer is made again by the task machine's role rule, which `Step` answers `conflict` (`internal/home/machine.go:253`).
+- Cause: the contract lists the post's checks without saying which of them are about the group when the brief is confirmed. `(*State).briefStill` (`internal/home/cmd_brief.go:243`) makes the others again: the shape of the body, the requester a member, every assignee and reviewer a working AI. That an entry's assignee is not its reviewer is made again by the task machine's role rule, which `Step` answers `conflict` (`internal/home/machine.go:253`).
 - Status: open, decided by unit HM-8 on 2026-11-21. The contract should say that the `replaces` check is the post's only.
 
 ### 2026-11-21 · deviation · The tasks of a confirmed brief have ids that follow from the act, not random ones
 
 - Symptom: `planning/contracts/rows.md` says that the ids of tasks and messages are random ids. The home gives the task of entry `i` of a confirmed brief, and its `task` message, the id made of the first 16 bytes of the SHA-256 of `SoloDawn brief task <n of the act> <i>`.
-- Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `briefTaskID` (`internal/home/cmd_brief.go:290`). The id has the form of a random id, and nobody knows it before the act arrives, because the act's `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:276`).
+- Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `briefTaskID` (`internal/home/cmd_brief.go:286`). The id has the form of a random id, and nobody knows it before the act arrives, because the act's `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:272`).
 - Status: open, decided by unit HM-8 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivation can go.
 
 ### 2026-11-21 · limitation · A queued task's `stats.started` is the time its brief was confirmed
 
 - Symptom: a task created queued by a confirm has `stats.started` set when it is created, and it keeps that time when the merge of its dependency makes it active. The minutes a summary counts for it include the time it waited.
-- Cause: `briefCreate` sets `created` and `stats.started` to the home's time (`internal/home/cmd_brief.go:311`); row 8 of `planning/contracts/task-machine.md` does not name `stats.started`, and `Step` does not set it on a release (`internal/home/machine.go:577`). The contracts do not say when a task starts.
+- Cause: `briefCreate` sets `created` and `stats.started` to the home's time (`internal/home/cmd_brief.go:307`); row 8 of `planning/contracts/task-machine.md` does not name `stats.started`, and `Step` does not set it on a release (`internal/home/machine.go:577`). The contracts do not say when a task starts.
 - Status: open. Unit HM-12, which releases queued tasks and writes the summary, or the coordinator, decides whether a release sets it.
+
+### 2026-11-20 · limitation · `tools.json` freezes JSON Schema keywords that the MCP SDK may write otherwise
+
+- Symptom: `internal/proto/testdata/tools.json` (#165, P-2) freezes each tool's `inputSchema` with a fixed set of keywords: `properties` always there, `{}` for a tool without arguments, `required` only when an argument must be given, and `"additionalProperties": false` (`planning/contracts/mcp-tools.md` section 5). The node's MCP server builds its tools with `github.com/modelcontextprotocol/go-sdk` v1.8.0 and `github.com/google/jsonschema-go`, and it is not shown that they write exactly these keywords: for example `properties: {}` for a struct without fields, or a `$schema` or `title` of their own.
+- Cause: the file was written from the contract, before any server code (`internal/proto/tools_test.go`, `toolLists`).
+- Status: open. HS-8 (the tool list test of the MCP server) and I-1 (the full list against `tools.json`) must check it, and normalise what the SDK writes or raise a change of the file.
+
+### 2026-11-20 · limitation · The `post` tool lists `handback` for a whole session, not for a hand-back turn
+
+- Symptom: `tools.json` lists `handback` among the kinds of `post` in every session a takeover can reach (the secretary's, review and task sessions), because a tool list is fixed per session, not per turn. `planning/contracts/mcp-tools.md` section 1 allows it only in a hand-back turn, so a model can call it in any turn of those sessions.
+- Cause: `tools/list` is read once per session (`internal/proto/tools_test.go`, `toolLists`; `planning/contracts/mcp-tools.md` section 5).
+- Status: open. The node refuses `post` with kind `handback` outside a hand-back turn, with `bad_request`: unit HS-9, through `Caller.Turn.Kind`.
 
 ### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
 
@@ -193,12 +205,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Effect: none on the protocol; envelopes and challenges have non-empty context prefixes. F-01c asserts WebKit's false result on RFC 8032 test 1 explicitly, separately from the protocol vectors.
 - Status: open, external.
 
-### 2026-11-20 · deviation · Web mock does not answer `host.info` or push `groups`
-
-- Symptom: F-02 in `planning/steps/step-1-frontend.md` asks for a mock that answers `hello`, `sync`, `fetch` and `host.info`; the settled plan (PR #58) adds that it pushes `groups`. `mockCtl` answers `hello`, `sync`, `fetch` and `cmd`, and pushes only `reset` and `rows`. `proto.ts` has no `host.info` type; it has a `Groups` type, written from the contract.
-- Cause: neither frame has a Go type or a wire example yet, and the mock answers from wire examples only (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:94-96`, `web/src/lib/proto.ts:372-377`). Both are frozen by unit P-2 (`planning/contracts/conventions.md` section 5; `planning/steps/parallel-plan-units.md` section 1), which also adds the mock answers for `host.info` and `groups`; B-10 named them before the parallel plan.
-- Status: open. `host.info` was left out by the coordinator's decision of 2026-11-20, until it has an example; the `groups` push was found in the review of PR #61 and not changed there.
-
 ### 2026-11-20 · limitation · Random ids are not checked in rows, most message bodies and the frames that read a group
 
 - Symptom: `contracts/conventions.md` section 2 makes any text that is no random id a wrong type in every field that holds one. `proto.Decode` and `decode` check it for `n` and `g` of a signed payload, which is what the envelope check reads (`contracts/envelope.md` section 3, check 3); for `conn` of a signalling payload, which a node drops otherwise (`internal/peer/signal.go:104-109`) and so does the browser (`web/src/lib/rendezvous.ts:175-180`); and, since unit P-1, for every id in the payload of a home or host command, in the payload of an inbox item, and for `g` of `inbox` and `ack`. Of the bodies a `post` carries, a review's is checked too: its `task` is refused when it is no id, because `ReviewSigned` is a type of P-1. The other bodies are not yet: `brief`, `approval`, `decision` and `call` take any text for the ids they hold (`requester`, `assignee`, `reviewer`, `replaces`, `task`, `ai`, `to`), although the `thread`, `re` and `mentions` around them are checked. Nor is a row (`g` of a row, `thread`, `re`, `task`, `mentions`, `assignee`, a row's own `id`), nor `g` of `sync`, `reset`, `rows` and `fetch`.
@@ -339,6 +345,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, without effect in step 1, where every group on a node has the same one person. For step 2, by the coordinator's decision of 2026-11-20 after the review of #160.
 
 ## Resolved
+
+### 2026-11-20 · deviation · Web mock does not answer `host.info` or push `groups`
+
+- Symptom: F-02 in `planning/steps/step-1-frontend.md` asks for a mock that answers `hello`, `sync`, `fetch` and `host.info`; the settled plan (PR #58) adds that it pushes `groups`. `mockCtl` answers `hello`, `sync`, `fetch` and `cmd`, and pushes only `reset` and `rows`. `proto.ts` has no `host.info` type; it has a `Groups` type, written from the contract.
+- Cause: neither frame has a Go type or a wire example yet, and the mock answers from wire examples only (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:94-96`, `web/src/lib/proto.ts:372-377`). Both are frozen by unit P-2 (`planning/contracts/conventions.md` section 5; `planning/steps/parallel-plan-units.md` section 1), which also adds the mock answers for `host.info` and `groups`; B-10 named them before the parallel plan.
+- Status: resolved in #165 (P-2): `host-info-answer.json` and `groups.json` exist with their Go types and schemas; `mockCtl` answers `host.info` and pushes `groups` before it answers a `group create` (`web/src/lib/mock.ts`, `mockCtl`).
 
 ### 2026-11-20 · bug · The local merge ran the project's Git hooks (review M5)
 

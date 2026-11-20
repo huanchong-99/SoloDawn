@@ -297,4 +297,4 @@ Unit P-4 freezes the new shapes (`contracts/conventions.md` section 5).
   on a resize. If not, the remedy is for O to resize, not for N to replay.
 - `[unverified]` That every engine of the baseline sees promptly that a
   channel with a full send buffer was closed.
-- `contracts/step-2/authority.md` and `move.md` did not exist yet.
+- `contracts/step-2/move.md` did not exist yet.

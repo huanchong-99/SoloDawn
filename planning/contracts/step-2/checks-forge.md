@@ -16,8 +16,8 @@ commands, which each assignee's node runs as its owner (`risks.md` K-8). So:
 
 - A host runs no check command and no forge command of a group unless its
   owner has accepted exactly the list the host holds now.
-- "The list" is the group's `forge`, `checks` and `templates`, as one
-  hash (section 2). A change of any of them is another hash and asks again.
+- "The list" is the group's `repo`, `base`, `forge`, `checks` and
+  `templates`, as one hash (section 2). Any change of them asks again.
 - Acceptance is per machine and per group: one host command,
   `checks.accept` (section 3), signed by a device of the machine's owner.
 - There is no exception: not for an empty list, not for `forge: github`
@@ -39,7 +39,7 @@ digits, a colon, and those bytes. Text is encoded the way `TextEncoder`
 encodes it (`contracts/envelope.md` section 6). A count is the text of
 its decimal digits. The items, in this order:
 
-1. `forge`;
+1. `repo` (the empty text when the row has none), then `base` and `forge`;
 2. the number of entries of `checks`, then each entry in the row's order;
 3. only when `forge` is `custom`, for each of `push`, `open`, `checks`,
    `merge` in this order: the number of arguments of that template, then
@@ -51,7 +51,8 @@ sequence readable in one way only, whatever a command contains.
 Example `[verified]` (computed for this file). For a row with
 
 ```json
-{"forge":"custom","checks":["go vet ./...","go test ./..."],
+{"repo":"https://git.example/team/website.git","base":"main",
+ "forge":"custom","checks":["go vet ./...","go test ./..."],
  "templates":{"push":["git","push","origin","{branch}"],
   "open":["gh","pr","create","--head={branch}","--base={base}",
           "--title={title}","--body={summary}"],
@@ -61,15 +62,13 @@ Example `[verified]` (computed for this file). For a row with
 ```
 
 the hashed text begins
-`solodawn/accept/1\n6:custom1:212:go vet ./...13:go test ./...1:43:git4:push`
-and the hash is `j-xacoOxVZG8QPCjzKHL7LDYQTGGT8dK_1fSY5Vf4as`. For
-`{"forge":"github","checks":[]}` the hashed text is
-`solodawn/accept/1\n6:github1:0` and the hash is
-`f7DsroUQUZ7FI-VmMKS7gZLsn7kZu1H3dU_JQwDK9s8`.
+`solodawn/accept/1\n36:https://git.example/team/website.git4:main6:custom1:2`
+and the hash is `2ZrFqCgtSSjfYdBCyXChtQV-349eaTkAdUi6GYwbBKM`. With `github`
+and no checks (`…6:github1:0`): `CYbKw6kSdvHoN2hfyyQQTyzKoED3jy4bwHNJviPtiUc`.
 
 The shared vectors (`contracts/vectors.md`) get a part `accept`: cases of
-`{"name","forge","checks","templates","hash"}`, with `templates` written
-`{}` when `forge` is not `custom`.
+`{"name","repo","base","forge","checks","templates","hash"}`, with `repo`
+`""` for a row without one and `templates` `{}` unless `forge` is `custom`.
 
 ## 3. `checks.accept`
 
@@ -87,9 +86,9 @@ id. An approver delegate cannot send it.
   with the hash as `detail`. Not equal: `conflict`, and nothing is stored.
   A `g` in which this node has no AI is `not_found`.
 - **What the client shows before it sends.** Everything the hash covers:
-  `forge`, every entry of `checks` in full, and for `custom` each of the
-  four templates argument by argument. `hash` is computed by the browser
-  from the group row it showed, never copied from `host.info`.
+  `repo` and `base`, as where this computer merges; `forge`; each check in
+  full; each template argument by argument. `hash` is computed by the browser
+  from the row it showed, never copied from `host.info`.
 - Storage: one more host table, `accept`, with `g TEXT PRIMARY KEY` and
   `hash TEXT NOT NULL`; the row goes when the node's last AI leaves the group.
 - `host.info` (`contracts/datachannel.md` section 7) gets one list,
@@ -288,6 +287,7 @@ gate, home wait), T2-8 (templates) and T2-12 (sandbox).
    token, no forge API called by the node; unaccepted programs forbidden.
 2. Every group asks once per machine, also a one-person group: an
    exception would need a signed group row.
+3. The hash also covers `repo` and `base`: where the owner's sign-in merges.
 
 ## 9. Not verified
 

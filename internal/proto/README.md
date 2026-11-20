@@ -1,7 +1,10 @@
 # Protocol wire types
 
 These structs describe the JSON exchanged during signalling, pairing, device-log
-transfer, session setup, group reads, commands and the inbox of a host. They do
+transfer, session setup, group reads, commands, the inbox of a host and the host
+surface of a node ([`host.go`](host.go): `host.info`, `audit`, `pty.resize`, the
+`groups` push and the host commands of `settings.set`, `agent.set`, `perm.set` and
+the takeover). They do
 not authenticate peers, apply rows or execute commands. The source of truth is
 [the wire contracts](../../planning/contracts/).
 
@@ -111,4 +114,17 @@ only by the error text, which is for logs.
 
 `testdata/crypto.json` is not a wire example: it holds the key, signature, pairing
 and device-log test vectors of [`internal/identity`](../identity/README.md), which
-writes and checks it. Nor is `testdata/wire.json`, described above.
+writes and checks it. Nor is `testdata/wire.json`, described above. Nor is
+`testdata/tools.json`: it is the MCP `tools/list` result of each kind of session
+([mcp-tools.md, section 5](../../planning/contracts/mcp-tools.md)), between a CLI
+and the node, where names follow MCP (`inputSchema`). Its type is `ToolLists`
+([`tools.go`](tools.go)); the tests read it with `encoding/json`, refusing a member
+the type does not name, not with `Decode`.
+
+- `host.info` is answered with `HostInfo` and pushed as `HostInfoPush`, the same
+  `HostState` without `re` and `ok`. `relay` and an agent's `account` may be `null`.
+- In `SettingsSet`, `caps` is `AgentCaps`: a member per agent being changed, its
+  caps whole. A field per agent, not a map, so that every name on the wire is fixed.
+- `pair.browser`, `host.offline` and `host.online` are a `HostCommand` alone;
+  `takeover.end` is a `Takeover`, `takeover.start` a `TakeoverStart`.
+- `Beacon` is the payload of the signed local-network beacon; it has no `g` or `to`.

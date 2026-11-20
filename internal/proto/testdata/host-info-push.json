@@ -1,0 +1,68 @@
+{
+  "t": "host.info",
+  "device": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "name": "workstation",
+  "os": "macOS 15.2",
+  "version": "v0.3.1",
+  "open": 0,
+  "max_open": 4,
+  "offline": true,
+  "update": {
+    "version": "v0.3.2",
+    "status": "pending"
+  },
+  "homes": [
+    {
+      "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+      "home": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+      "name": "Website"
+    }
+  ],
+  "relay": null,
+  "agents": [
+    {
+      "agent": "claude",
+      "cli_version": "2.1.311",
+      "account": "personal",
+      "login_ok": true,
+      "caps": {
+        "day": {
+          "unit": "turns",
+          "max": 200
+        },
+        "task": {
+          "unit": "usd",
+          "max": 12.5
+        }
+      },
+      "groups": [
+        {
+          "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+          "member": "1PC8WineBrUQ-apCjx7tug",
+          "level": 2,
+          "repo_config": false,
+          "state": "offline",
+          "task": "DrtCn6htSBwmMPrFPbHJHA",
+          "queued": 3
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "cli_version": "0.164.0",
+      "account": null,
+      "login_ok": false,
+      "caps": {},
+      "groups": []
+    }
+  ],
+  "settings": {
+    "retention_days": 90,
+    "idle_minutes": 15,
+    "default_level": 2,
+    "all_level3": false,
+    "approvers": [
+      "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
+    ]
+  }
+}
