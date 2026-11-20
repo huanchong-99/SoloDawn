@@ -20,35 +20,35 @@ type packet struct {
 	text string
 }
 
-func testPath(t *testing.T, challenge packet, ready string) (*Path, *websocket.Conn, error) {
-	t.Helper()
-	key := testKey(t)
-	accepted := make(chan *websocket.Conn, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// challenger is a signalling server that sends challenge and, if key signs
+// it, ready.
+func challenger(t *testing.T, key identity.Key, challenge packet, ready string, accepted chan<- *websocket.Conn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		ws, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}
 		accepted <- ws
 		ctx := t.Context()
-		if err := ws.Write(ctx, challenge.typ, []byte(challenge.text)); err != nil {
-			return
-		}
+		ws.Write(ctx, challenge.typ, []byte(challenge.text))
 		_, raw, err := ws.Read(ctx)
 		if err != nil {
 			return
 		}
 		var auth proto.Auth
-		if err := proto.Decode(raw, &auth); err != nil {
-			t.Error(err)
-			return
-		}
+		check(t, proto.Decode(raw, &auth))
 		if !identity.VerifyChallenge(auth.Key, "test-nonce", auth.Signature) || auth.Key != key.ID() || auth.Type != "auth" {
 			t.Error("wrong challenge response")
 			return
 		}
-		_ = ws.Write(ctx, websocket.MessageText, []byte(ready))
-	}))
+		ws.Write(ctx, websocket.MessageText, []byte(ready))
+	}
+}
+func testPath(t *testing.T, challenge packet, ready string) (*Path, *websocket.Conn, error) {
+	t.Helper()
+	key := testKey(t)
+	accepted := make(chan *websocket.Conn, 1)
+	srv := httptest.NewServer(challenger(t, key, challenge, ready, accepted))
 	t.Cleanup(srv.Close)
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
