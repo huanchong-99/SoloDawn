@@ -5,9 +5,8 @@ how a person leaves or is removed. It settles design point D-7 of
 `steps/parallel-plan-step-2-3.md` and refines the row "People" of
 `steps/step-2-3.md`. Rules: R-134, R-136, R-138, R-140.
 
-This file adds to the step 1 contracts and changes nothing in them
-(section 8). Whose signature a host requires is
-`contracts/step-2/authority.md`.
+This file adds to the step 1 contracts and changes nothing in them (section
+8). Whose signature a host requires is `contracts/step-2/authority.md`.
 
 ## 1. Roles
 
@@ -19,9 +18,9 @@ A person's `member` row has `role` (`contracts/rows.md` section 2).
 | `admin` | named by the owner | everything `contracts/commands.md` gives "an admin"; `invite`; remove a person whose role is `member` |
 | `owner` | the owner of the home node; the person of `group create` | set roles; remove an admin |
 
-- A group has exactly one owner. The role is never given, taken or left:
-  it follows the home and changes only when the group moves
-  (`contracts/step-2/move.md`).
+- A group has exactly one owner, the owner of the home, and the role never
+  changes: it is never given, taken or left, and a move takes the group to
+  another node of the same owner (`contracts/step-2/move.md`).
 - "Admin" in every contract means role `owner` or `admin`, as in step 1.
 - A role is read from the row when a command is handled. Nothing is
   cached and no command is judged again after a role changed.
@@ -173,10 +172,12 @@ joining peer, and the joiner to the `home` of its link, like a pairing
 peer: for 10 minutes from the creation of the secret, for signalling and,
 at the home, for the one command of section 5.
 
-The shared vectors gain (`contracts/vectors.md`): in `pairing`, the `mac`
-of a side with role `join`; in `pair_messages`, a field `for` (`pair` or
-`invite`) beside `me`, and the cases of the table above, each refused
-case with the `mac` that follows from its role.
+The shared vectors gain (`contracts/vectors.md`): in `pairing`, a field
+`role` in `b`, which is `b` or `join`, and cases of a joiner, whose `mac`
+follows from role `join`; in `pair_messages`, the fields `for` (`pair` or
+`invite`) and `home` beside `me`, where `home` is the device id of the link
+when `me` is `join` and `""` otherwise, and the cases of the table above,
+each refused case with the `mac` that follows from its role.
 
 ## 4. Flow: joining
 
@@ -194,9 +195,8 @@ RV, the rendezvous service.
    asks P to confirm. P can compare it with what A's dialog shows.
 5. B authenticates to RV and joins the room. RV sends `joined` to both. H
    and B exchange `pair` messages and accept them by section 3.
-6. B sends a signed `offer` to H; ICE runs (`flows/connect.md`); `ctl`
-   opens. B sends `hello`; the `welcome` has `groups: []` and
-   `owner: false`.
+6. B sends a signed `offer` to H; ICE runs (`flows/connect.md`); `ctl` opens.
+   B sends `hello`; the `welcome` has `groups: []` and `owner: false`.
 7. B sends its person's whole log in `devlog` frames. H judges the
    entries by the rules of the log and keeps the result in memory for
    this connection. H sends no log.
@@ -218,10 +218,9 @@ What each side does to admit the other:
 | P's node, for `host.join` | the command is signed by a device of its owner and names `home`; the node accepts signalling only from that device id |
 | H, for P's node | the node is a valid device in the log of a member |
 
-So the nodes of two people verify each other by keys their own owners
-signed for (R-140). Failure at any step is shown with the step and the
-reason. B closes the connection; the invitation stays open until its
-time is reached.
+So the nodes of two people verify each other by keys their own owners signed
+for (R-140). Failure at any step is shown with the step and the reason. B
+closes the connection; the invitation stays open until its time is reached.
 
 ## 5. What a node accepts from a joining peer and from a member
 
@@ -263,14 +262,15 @@ change writes no message: the row shows it.
 
 1. **Lifetime of an invitation**: 10 minutes, as a pairing secret, in a
    room that lives 15 (`contracts/rendezvous.md` 2.2). Nothing is stored.
-2. **The person's other devices** learn the group from P's nodes before
-   any AI of P joins. Host command `home.add` (`contracts/commands.md`
-   section 2), fields `g`, `home` (device id), `name`, `addrs` (the
-   signalling URLs B reached H on): the node adds the entry to
-   `host.info.homes` (`contracts/datachannel.md` section 7), each entry of
-   which carries `home`, and keeps `addrs` as addresses of `home`. It
-   connects to nothing and clones nothing. A node B did not reach learns
-   the group at `host.join`. Frozen in P-4, built in T2-1.
+2. **The person's other devices** learn the group from P's nodes before any
+   AI of P joins. Host command `home.add` (`contracts/commands.md` section
+   2), fields `g`, `home` (device id), `name`, `addrs` (the signalling URLs B
+   reached H on): the node adds the entry to `host.info.homes`
+   (`contracts/datachannel.md` section 7), the groups whose home this node
+   knows, each entry with `home`; it keeps such entries across restarts in
+   the `setting` key `homes`, and `addrs` as addresses of `home`. It connects
+   to nothing and clones nothing. A node B did not reach learns the group at
+   `host.join`. Frozen in P-4, built in T2-1.
 3. **One web client origin.** A stated limit: a browser is a device per
    origin, and the link opens the web client of the home's rendezvous. A
    person on another origin first adds a browser there
@@ -285,10 +285,10 @@ change writes no message: the row shows it.
 
 | Part | Folded into |
 | --- | --- |
-| sections 1 and 2 | `contracts/commands.md` 1.2, and a section for `invite` and `join` |
-| section 3 | `contracts/envelope.md` section 6; `contracts/vectors.md` |
+| sections 1 and 2; section 7, point 2 | `contracts/commands.md` 1.2, a section for `invite` and `join`, and section 2 (`home.add`); the link of `invite` among the results that live only in memory ("Once only"; `contracts/storage.md` section 2, `receipt`); `contracts/storage.md` section 2, `setting` key `homes` |
+| section 3 | `contracts/envelope.md` section 3 (check 2: a joining peer) and section 6; `contracts/vectors.md` |
 | section 4 | a new `flows/joining.md` |
-| section 5 | `contracts/datachannel.md` sections 3.1 and 8 |
+| section 5; section 7, point 2 | `contracts/datachannel.md` sections 3.1, 7 (`homes`: the groups whose home the node knows, each entry with `home`) and 8 |
 | section 6 | `contracts/messages.md` 2.11 |
 
 Unit P-4 freezes the wire shapes: the payloads of `invite` (with its

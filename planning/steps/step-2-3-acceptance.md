@@ -83,7 +83,7 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   for Q-personal with no `cause` signed by Q and one whose `cause` confirms
   another message. `Q1` refuses both, with audit `refused`.
 - **A9.11** P confirms a brief that makes Q-personal assignee of one task and
-  reviewer of another. The task rows show that they wait for Q; until Q
+  reviewer of another. Both wait for Q, the second from step `review`; until Q
   confirms, no `assign` or `review` item reaches `Q1` and no worktree exists
   there. In the browser: the card, its actions for Q only, each end state.
 
@@ -121,10 +121,10 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 
 ### Calls across owners (D-2, D-8; `contracts/step-2/confirm.md`)
 
-- **A9.18** P's working AI calls Q-personal with `ask`. A `confirm` card for Q
-  appears and the caller gets a receipt after the wait; after Q confirms, the
-  answer reaches the caller as a turn. A call to Q-team, which lists P, is
-  answered in the open tool call with no card. So is one between Q's AIs.
+- **A9.18** P's working AI calls Q-personal with `ask`: a `confirm` card for Q
+  appears, a receipt comes after the wait, and the answer as a turn once Q
+  confirms; denied, a turn says so. A call to Q-team, which lists P, is
+  answered in the open tool call with no card, as is one between Q's AIs.
 
 ### Approver delegates (D-13; `contracts/step-2/authority.md`)
 
@@ -150,8 +150,8 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 ### Team-wide group (D-15; `contracts/step-2/watch-team.md`)
 
 - **A9.22** `group create` with kind `team` makes a group without `repo`. In
-  it `task start`, `post` of kind `brief`, `host.join` and `member add_ai` are
-  refused, and no node holds a clone for it.
+  it `task start`, `post` of kind `brief`, `host.join`, `member add_ai` and
+  `group set` with `checks` are refused, and no node holds a clone for it.
 - **A9.23** The secretary of a project group posts a notice with the `post`
   tool and the team group's id; it appears in that group's main line under the
   secretary's name. The same call by a working AI is refused. A person's
@@ -166,7 +166,7 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   with their named places filled, and `gh` was never started.
 - **A9.25** A task title with a space, a quote, `;` and `$(touch marker)`
   arrives in its place as one unchanged argument, and no marker exists: no
-  shell reads a template. A template with an unknown place name is refused.
+  shell reads a template. `{title}` in `push` is refused; `{tag}` is literal.
 - **A9.26** The M5 run against one real forge other than GitHub, with its own
   signed-in command-line program. (`live`)
 
@@ -228,9 +228,9 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   "unverified" mark on a row the test hook changed: text that differs from the
   signed payload, an envelope by a device outside the author's log, an AI's
   message not signed by its `host`, and a signed kind with no envelope.
-- **A9.38** The home's own rows (`task`, `checks`, `system`) are shown as the
-  system's, under no member's name and with no mark. P's browser, for which
-  `P1` is its own device, shows the rows of A9.37 unmarked, as in step 1.
+- **A9.38** The home's own rows (`task`, `checks`, `system`) have no mark and,
+  but for `task_merged` (R-24), no member's name. P's browser, for which `P1`
+  is its own device, shows the rows of A9.37 unmarked, as in step 1.
 - **A9.39** With two people in the group and the secretary's `account`
   `personal`, the group information shows the warning that recommends a team
   plan or key. With one person, or another account type, it does not.
@@ -238,7 +238,7 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 ### The whole step
 
 - **A9.40** With step 2 built, A1.1 to A7.9 without their `live` parts pass
-  unchanged for a group of one person, and no `confirm` card appears.
+  for a one-person group after its `checks.accept`; no `confirm` card appears.
 - **A9.41** The above pass on the pairs under "Scope" in `steps/step-1.md`.
 
 ## Step 3: extensions (A10)
@@ -297,4 +297,4 @@ The answers are silent on these; the contract of each group decides.
 | A9.23 | a secretary's node may post in a team group although no AI is a member of it | D-15 refuses `host.join` there |
 | A9.27 to A9.32 | decided: the new home is another node of the group's owner | D-7: the owner is the home's owner. For C2-6 |
 | A9.28 | receipts travel in the snapshot | `contracts/commands.md`, "Once only" |
-| A9.40 | decided: an owner need not accept a check list they signed themselves | D-3; otherwise the A5 tests gain one step. For C2-5 |
+| A9.24, A9.40 | decided: every group asks once per machine, a one-person group too, so the A5 tests gain one step, the owner's `checks.accept` | `contracts/step-2/checks-forge.md` sections 1 and 8, point 2, which replaced the first answer (no acceptance of a list one set oneself) |

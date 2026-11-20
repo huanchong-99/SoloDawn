@@ -32,3 +32,30 @@ func TestSocketDACLIsOwnerOnly(t *testing.T) {
 		t.Errorf("socket DACL = %s, want %s", got, want)
 	}
 }
+
+func TestDataDirectoryDACL(t *testing.T) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := filepath.Join(socketRoot(t), "new", "solodawn")
+	openSocket(t, fresh)
+	if got, want := dirDACL(t, fresh), fmt.Sprintf("D:P(A;OICI;FA;;;%s)", user.User.Sid); got != want {
+		t.Errorf("new data directory DACL = %s, want %s", got, want)
+	}
+	existing := socketRoot(t)
+	before := dirDACL(t, existing)
+	openSocket(t, existing)
+	if got := dirDACL(t, existing); got != before {
+		t.Errorf("existing data directory DACL = %s, want it kept as %s", got, before)
+	}
+}
+
+func dirDACL(t *testing.T, dir string) string {
+	t.Helper()
+	sd, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sd.String()
+}

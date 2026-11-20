@@ -152,7 +152,8 @@ CREATE TABLE setting (
 - `setting` keys: `name`, `owner` (user id), `rendezvous` (list of URLs),
   `retention_days` (90), `idle_minutes` (15), `max_open` (4),
   `default_level` (2), `all_level3` (false), `approvers` (list of user ids),
-  `offline` (false).
+  `offline` (false), `homes` (the list `host.info` shows,
+  `contracts/datachannel.md` section 7).
 
 ## 3. Host tables
 
@@ -161,7 +162,6 @@ CREATE TABLE agent (              -- AI CLIs registered on this machine
   agent       TEXT PRIMARY KEY,   -- claude | codex
   cli_version TEXT NOT NULL,
   account     TEXT,               -- personal | team | api_key; NULL until declared
-  model       TEXT,
   caps        TEXT NOT NULL DEFAULT '{}'   -- JSON, as in commands.md section 2
 ) STRICT;
 
@@ -208,7 +208,7 @@ CREATE TABLE audit (              -- R-139
   what   TEXT NOT NULL,           -- delivered | refused | requested | approval | takeover | handback | merge | setting
   item   INTEGER,                 -- delivered, refused: the inbox item id
   home   TEXT,                    -- delivered, refused: device id of the home
-  detail TEXT NOT NULL,
+  detail TEXT NOT NULL,           -- merge: the task and the commit (contracts/local.md section 7)
   by     TEXT,                    -- device id that caused it
   result TEXT
 ) STRICT;

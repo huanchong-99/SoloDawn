@@ -1,19 +1,18 @@
 # Contract (step 2): accepting check lists, forge templates
 
-What a machine owner accepts before their node runs a group's commands
-(design point D-3), and how a group names the commands of a forge other
-than GitHub (D-10). Rules: R-40, R-44, R-92, R-103, R-136, R-137. It adds
-to `contracts/local.md` section 7, `contracts/commands.md`,
-`contracts/rows.md` section 1 and `contracts/task-machine.md`, and changes
-the meaning of no step 1 shape. It is folded into those files when step 1
-is built; until then this file is the statement of record for its subject.
-Markers `[verified]`, `[documented]`, `[unverified]` as in that file.
+What a machine owner accepts before their node runs a group's commands (D-3),
+and how a group names the commands of a forge other than GitHub (D-10). Rules:
+R-40, R-44, R-92, R-103, R-136, R-137. It adds to these files of `contracts/`:
+`local.md` sections 2 and 7 (`forge: custom` has a remote), `commands.md`,
+`rows.md` sections 1 and 4, `task-machine.md`, `datachannel.md` sections 7 and
+9, `storage.md` section 3, `mcp-tools.md` section 1 and `vectors.md`, and
+changes the meaning of no step 1 shape. It is folded into them when step 1 is
+built, and is the record until then. Markers as in `local.md`.
 
 ## 1. The rule
 
-In a team, a group admin who is not the machine's owner sets the checks
-and the forge commands, and every assignee's node runs them as its owner
-(`risks.md` K-8). So:
+In a team, an admin who is not the machine's owner sets the checks and forge
+commands, which each assignee's node runs as its owner (`risks.md` K-8). So:
 
 - A host runs no check command and no forge command of a group unless its
   owner has accepted exactly the list the host holds now.
@@ -32,9 +31,8 @@ and the forge commands, and every assignee's node runs them as its owner
 ## 2. The hash
 
 The node and the web client each compute it from the group row they hold.
-`hash` = SHA-256 over the bytes of `"solodawn/accept/1\n"` followed by a
-sequence of items, written as base64url (`contracts/envelope.md` section
-1): 43 characters.
+`hash` = SHA-256 over the bytes of `"solodawn/accept/1\n"` and a sequence of
+items, in base64url (`contracts/envelope.md` section 1): 43 characters.
 
 Each item is a text, written as the number of its UTF-8 bytes in decimal
 digits, a colon, and those bytes. Text is encoded the way `TextEncoder`
@@ -93,8 +91,7 @@ id. An approver delegate cannot send it.
   four templates argument by argument. `hash` is computed by the browser
   from the group row it showed, never copied from `host.info`.
 - Storage: one more host table, `accept`, with `g TEXT PRIMARY KEY` and
-  `hash TEXT NOT NULL`. The row is removed when the node's last AI leaves
-  the group.
+  `hash TEXT NOT NULL`; the row goes when the node's last AI leaves the group.
 - `host.info` (`contracts/datachannel.md` section 7) gets one list,
   always present, with one entry per group in which this node has an AI:
   `"accept":[{"g":"Qm1…","want":"<hash>","have":null}]`. `want` is the
@@ -260,7 +257,10 @@ tests and blocked private files, host paths, host ports and the network.
 macOS `sandbox-exec` (deprecated by Apple) works in part; see below.
 
 - **Where.** Linux: `bwrap --unshare-all`. macOS: `sandbox-exec`, whose
-  profile grants write to `/dev/null`. Only the worktree is writable.
+  profile grants write to `/dev/null`. Writable: the worktree and the task's
+  scratch folder `projects/<group>/scratch/<num>/`, outside the tree so that
+  it stays clean, removed with it; `HOME`, `TMPDIR` and `XDG_CACHE_HOME` point
+  into it, so toolchain caches land there.
 - **Loopback.** Linux: the private network namespace, so a check may
   listen on `localhost`. macOS has none, and allowing `localhost` would
   expose the host's services: blocked, and a check that needs a port fails.
@@ -278,8 +278,8 @@ macOS `sandbox-exec` (deprecated by Apple) works in part; see below.
 
 ## 8. Settled points (2026-11-20)
 
-Unit P-4 freezes the shapes of sections 2 to 5; code is T2-9 (acceptance
-and the gate), T2-8 (templates) and T2-12 (sandbox).
+Unit P-4 freezes the shapes of sections 2 to 5; code is T2-9 (acceptance,
+gate, home wait), T2-8 (templates) and T2-12 (sandbox).
 
 1. **Other forge programs.** R-137 (`product-rules.md`) and C-11
    (`architecture.md` section 1) were widened, as D-10 cannot be built

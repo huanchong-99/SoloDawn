@@ -1,15 +1,13 @@
 package host
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // ReviewedMerge identifies a merge item taken by the host after checking
@@ -17,7 +15,8 @@ import (
 type ReviewedMerge struct {
 	Repo, Base, Branch string
 	Task, Commit       string
-	PR                 int // zero for a local-only group
+	PR                 int    // zero for a local-only group
+	GitHubRepo         string // <owner>/<repo> of the group's GitHub repository
 }
 
 // MergeResult supplies the squash commit for task merged, or the detail for
@@ -27,33 +26,44 @@ type MergeResult struct {
 	Conflict    string
 }
 
-// Local tasks share the clone's base checkout and index. A squash and its
-// commit (or reset) must finish before another local squash starts.
-var localMergeMu sync.Mutex
-
 // Apply makes one merge attempt. For an item already taken before restart,
-// the caller must use Inspect instead.
+// the caller must use Inspect instead. The command output in a conflict goes
+// to the group, so a secret in it is redacted (local.md 8).
 func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 	if m.PR == 0 {
-		localMergeMu.Lock()
-		defer localMergeMu.Unlock()
+		// Local tasks share the clone's base checkout and index: the squash
+		// and its commit (or reset) run under the clone's lock.
+		lock := cloneLock(m.Repo)
+		lock.Lock()
+		defer lock.Unlock()
 		if err := m.squashLocal(ctx); err != nil {
-			return MergeResult{Conflict: err.Error()}, nil
+			return MergeResult{Conflict: redactSecrets(err.Error())}, nil
 		}
 		return m.inspectLocal(ctx)
 	}
-	// gh can exit unsuccessfully deleting the branch after the server has
-	// already merged the PR. Inspect its state even on a command error.
-	_, mergeErr := m.run(ctx, "gh", "pr", "merge", strconv.Itoa(m.PR),
-		"--squash", "--delete-branch", "--match-head-commit", m.Commit)
+	// gh can exit unsuccessfully deleting the remote branch after the server
+	// has already merged the PR. Inspect its state even on a command error.
+	_, mergeErr := m.mergePR(ctx)
 	result, err := m.inspectPR(ctx)
 	if err != nil {
 		return MergeResult{}, errors.Join(mergeErr, err)
 	}
 	if result.Conflict != "" && mergeErr != nil {
-		result.Conflict = mergeErr.Error()
+		result.Conflict = redactSecrets(mergeErr.Error())
 	}
 	return result, nil
+}
+
+// DeleteBranch deletes the local task branch after a successful merge and
+// the removal of the task's worktree; Git refuses while a worktree still has
+// the branch checked out. A squash leaves the branch unmerged into the base,
+// hence -D. It runs under the clone's lock.
+func (m ReviewedMerge) DeleteBranch(ctx context.Context) error {
+	lock := cloneLock(m.Repo)
+	lock.Lock()
+	defer lock.Unlock()
+	_, err := m.run(ctx, "git", "branch", "-D", m.Branch)
+	return err
 }
 
 func (m ReviewedMerge) message() string {
@@ -101,8 +111,9 @@ func (m ReviewedMerge) Inspect(ctx context.Context) (MergeResult, error) {
 	if m.PR != 0 {
 		return m.inspectPR(ctx)
 	}
-	localMergeMu.Lock()
-	defer localMergeMu.Unlock()
+	lock := cloneLock(m.Repo)
+	lock.Lock()
+	defer lock.Unlock()
 	result, err := m.inspectLocal(ctx)
 	if result.Conflict == "" {
 		return result, err
@@ -147,15 +158,26 @@ func (m ReviewedMerge) inspectPR(ctx context.Context) (MergeResult, error) {
 	return MergeResult{MergeCommit: pr.MergeCommit.OID}, nil
 }
 
+// mergePR runs gh with --repo from the folder that holds the clone, not
+// inside it: gh then merges and deletes the remote branch only, whatever its
+// version, and leaves the worktree and the local branch to the node, which
+// removes them itself (RemoveTaskWorkspace, DeleteBranch).
+func (m ReviewedMerge) mergePR(ctx context.Context) (string, error) {
+	return commandText(ctx, filepath.Dir(m.Repo), "gh", "pr", "merge", strconv.Itoa(m.PR), "--repo", m.GitHubRepo,
+		"--squash", "--delete-branch", "--match-head-commit", m.Commit)
+}
+
 func (m ReviewedMerge) run(ctx context.Context, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = m.Repo
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	return commandText(ctx, m.Repo, name, args...)
+}
+
+// commandText runs name in dir and returns its output without the final
+// line break; an error names the command and carries its whole output.
+func commandText(ctx context.Context, dir, name string, args ...string) (string, error) {
+	out, stderr, err := runIn(ctx, dir, name, args...)
 	if err != nil {
-		detail := strings.TrimSpace(string(out) + stderr.String())
+		detail := strings.TrimSpace(out + stderr)
 		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, detail)
 	}
-	return strings.TrimRight(string(out), "\r\n"), nil
+	return strings.TrimRight(out, "\r\n"), nil
 }

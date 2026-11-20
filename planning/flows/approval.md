@@ -28,7 +28,8 @@ which fields of the card is in `contracts/messages.md` 2.3.
 ## B. The request
 
 1. N receives the request.
-2. Level 1 (read only): N answers "deny" at once. No card.
+2. Level 1 (read only): N answers "deny" at once with the text "Denied:
+   this session is read only." No card.
 3. N looks in its approval records for one of this AI and task with the same
    tool and the same input digest, in state `granted`. If there is one, N
    deletes it, answers "allow", writes an audit row, done.
@@ -47,7 +48,9 @@ which fields of the card is in `contracts/messages.md` 2.3.
    for a card is not refused: the card carries its beginning and says how
    long the whole is (`contracts/messages.md` 2.3). The record, and so the
    owner's decision, is about the whole request, of which N keeps the
-   digest and not the text (`risks.md` K-21).
+   digest and not the text (`risks.md` K-21). If H refuses the `post`, N
+   deletes the record and answers "deny" with the text "The approval
+   request was refused: <code>: <reason>", the error H answered.
 6. H stores the card with `state.status = pending`, sets the task's wait to
    `approval`, and pushes the rows. The card appears in the main line under
    the secretary's name and mentions the approvers; the thread shows the
@@ -96,7 +99,8 @@ or ends.
 16. The secretary may give the task to another AI while the card is pending
     (R-42). H sets the card's `state.status = reassigned`; the first AI's
     task session ends (`flows/task.md`, "Reassignment").
-17. If the task is cancelled, H sets the card to `expired`.
+17. If the task is cancelled or merged while the card is pending, H sets
+    the card to `expired` (`contracts/task-machine.md` rows 8 and 15).
 
 ## F. What is recorded on the owner's node (R-139)
 
@@ -142,6 +146,6 @@ place for it.
 - `[unverified]` That a blocked action at level 2 becomes a request when
   the AI asks to run it outside the sandbox (`contracts/drivers.md` 1.1;
   `risks.md` Q-25).
-- `[unverified]` Whether level 2 can be expressed on Claude Code for native
-  Windows, where its sandbox is not available. The coordinator decides after
-  spike S-5 (`risks.md` Q-4).
+- Decided after spike S-5 (`risks.md` Q-4): on native Windows, where
+  Claude Code has no sandbox, the node refuses level 2 for Claude Code and
+  offers only the levels it can enforce.

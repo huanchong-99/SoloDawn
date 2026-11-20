@@ -18,9 +18,15 @@ import (
 )
 
 type fixtures struct {
+	// t is the test of the whole suite, not of one scenario. What a step
+	// registers on it (Cleanup, Setenv, TempDir, Context) lasts until the last
+	// scenario has run, and FailNow on it from a step ends the suite there,
+	// without the After hooks. A step returns its error instead, and undoes
+	// what it changed with afterScenario.
 	t        *testing.T
 	bin      string
 	fakeCLIs string
+	stamped  map[string]string // solodawn built with a release tag, by tag, for this run of the suite
 }
 
 // Each step file registers its scenario initializer under its own name in init.
@@ -62,19 +68,33 @@ func TestFeatures(t *testing.T) {
 		t.Fatalf("build fake CLIs: %v\n%s", err, out)
 	}
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
-	f := fixtures{t: t, bin: bin, fakeCLIs: fakes}
+	// Git reads no user or system configuration, so a developer's settings
+	// (commit signing, hooks) cannot change what the scenarios see.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	f := fixtures{t: t, bin: bin, fakeCLIs: fakes, stamped: map[string]string{}}
 	names := slices.Sorted(maps.Keys(stepSets))
-	home := os.Getenv("HOME")
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var env map[string]string
 	suite := godog.TestSuite{
+		// godog sets its own variables (GODOG_SEED) before the suite starts.
+		TestSuiteInitializer: func(ts *godog.TestSuiteContext) {
+			ts.BeforeSuite(func() { env = environ() })
+		},
 		ScenarioInitializer: func(sc *godog.ScenarioContext) {
 			for _, name := range names {
 				stepSets[name](sc, f)
 			}
-			// Runs after every step set's own After hooks: a scenario that leaves
-			// HOME changed would send later go builds to another module cache.
+			// Runs after every step set's own After hooks. Every scenario and the
+			// go builds of the suite share the environment and the working
+			// directory (Go keeps its module cache under HOME), so a scenario
+			// that leaves either changed fails, and the next starts as the first.
 			sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
-				if got := os.Getenv("HOME"); got != home {
-					return ctx, fmt.Errorf("the scenario left HOME set to %q", got)
+				if changed := restoreProcess(env, dir); len(changed) != 0 {
+					return ctx, fmt.Errorf("the scenario left %s changed", strings.Join(changed, ", "))
 				}
 				return ctx, nil
 			})
@@ -83,5 +103,58 @@ func TestFeatures(t *testing.T) {
 	}
 	if suite.Run() != 0 {
 		t.Fatal("acceptance scenarios failed")
+	}
+}
+
+// afterScenario returns a function that defers undo to the end of the current
+// scenario, after its last step, whether the steps passed or not. The undos
+// run in reverse order.
+func afterScenario(sc *godog.ScenarioContext) func(undo func()) {
+	var undos []func()
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		for _, undo := range slices.Backward(undos) {
+			undo()
+		}
+		return ctx, nil
+	})
+	return func(undo func()) { undos = append(undos, undo) }
+}
+
+func environ() map[string]string {
+	env := map[string]string{}
+	for _, entry := range os.Environ() {
+		key, value, _ := strings.Cut(entry, "=")
+		env[key] = value
+	}
+	return env
+}
+
+// restoreProcess puts back the environment and the working directory the
+// suite started with, and names what was changed. It names no value: a
+// variable may hold a secret.
+func restoreProcess(env map[string]string, dir string) []string {
+	now := environ()
+	keys := maps.Clone(env)
+	maps.Copy(keys, now)
+	var changed []string
+	for _, key := range slices.Sorted(maps.Keys(keys)) {
+		value, set := env[key]
+		if current, ok := now[key]; current != value || ok != set {
+			changed = append(changed, "$"+key)
+			restoreVar(key, value, set)
+		}
+	}
+	if current, _ := os.Getwd(); current != dir {
+		changed = append(changed, "the working directory")
+		os.Chdir(dir)
+	}
+	return changed
+}
+
+func restoreVar(key, value string, set bool) {
+	if set {
+		os.Setenv(key, value)
+	} else {
+		os.Unsetenv(key)
 	}
 }

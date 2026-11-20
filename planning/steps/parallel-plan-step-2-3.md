@@ -46,12 +46,12 @@ folded into the main contract files after step 1 is built.
 | Id | Writes | Settles | Owns |
 | --- | --- | --- | --- |
 | C2-0 | Acceptance tests of steps 2 and 3, numbered A9.x (step 2) and A10.x (step 3) | what "done" means | `planning/steps/step-2-3-acceptance.md` |
-| C2-1 | Authority across owners: the host's rule, the signed list with `allow` and delegates, the level cap, the fork rule of the device log with its vectors | D-1, D-2, D-4, D-13 | `planning/contracts/step-2/authority.md` |
+| C2-1 | Authority across owners: the host's rule, the signed list with `allow` and delegates, the level cap, the fork rule of the device log with its vectors. Inputs from the audit (coordinator, 2026-11-20): A9.19 has the home answer `forbidden` to `act approve` by a delegate removed after the card was posted, which the step 1 rule (a person in the card's `body.approvers`, `contracts/commands.md` 1.4) does not give; how a host gets the request to check the digest of a role after a reassignment (`contracts/step-2/confirm.md` section 11); the `devlogs` case "for a version already held, a different entry" of `contracts/vectors.md` changes its outcome under D-4 | D-1, D-2, D-4, D-13 | `planning/contracts/step-2/authority.md` |
 | C2-2 | People: `invite`, `join`, roles, `member remove`; the joining flow | D-7 | `planning/contracts/step-2/people.md` |
 | C2-3 | The `confirm` card: body, states, `act confirm`; the `information` label | D-8, D-9 | `planning/contracts/step-2/confirm.md` |
 | C2-4 | The `watch:*` channel; group kind `team` | D-14, D-15 | `planning/contracts/step-2/watch-team.md` |
 | C2-5 | Acceptance of check lists by machine owners; forge templates | D-3, D-10 | `planning/contracts/step-2/checks-forge.md` |
-| C2-6 | Moving and copying a group: snapshot shape, commands, what clients do | D-11 | `planning/contracts/step-2/move.md` |
+| C2-6 | Moving and copying a group: snapshot shape, commands, what clients do. Input (coordinator, 2026-11-20): the new home is another node of the group's owner, so the role `owner` never changes (`contracts/step-2/people.md` section 1) | D-11 | `planning/contracts/step-2/move.md` |
 | C2-7 | What the browser verifies and shows | D-5, D-6 | `planning/contracts/step-2/browser-trust.md` |
 | C3-1 | The capability table a driver declares, and what is switched off without each | D-16 | `planning/contracts/step-3/drivers.md` |
 | C3-2 | Note types `preset` and `kb`; `kb_put`, `kb_search`; the brief's preset field | D-17, D-18 | `planning/contracts/step-3/knowledge.md` |
@@ -71,16 +71,16 @@ are complete only when S-10 and T3-0 have reported.
 
 | Id | W | Does | Tests | Owns | Needs | M | Sz |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P-4 | 4 | Wire shapes of step 2: `invite`, `join`, role and removal, `confirm` body and states, group kind `team`, `checks.accept`, templates, the snapshot, `watch` | golden round trip | lane PROTO | P-3, C2-1 to C2-6 | F | L |
-| T2-1 | 5 | Home: invitations, joining, roles, removing a member; admission of a joiner by the node and the browser | A9 people | `home/cmd_people.go`, `node/admit.go`, `lib/join.ts` | P-4, HM-5 | A | M |
+| P-4 | 4 | Wire shapes of step 2: `invite`, `join`, role and removal, `confirm` body and states, group kind `team`, `checks.accept`, templates, the snapshot, `watch`, and the rest that each step 2 contract assigns to P-4; protocol `v` 2, with the rule that a `v` 2 home lets only its owner's own devices connect with `v` 1 (`contracts/step-3/knowledge.md` section 8) | golden round trip | lane PROTO | P-3, C2-1 to C2-6 | F | L |
+| T2-1 | 5 | Home: invitations, joining, roles, removing a member; admission of a joiner by the node and the browser; the `v` 2 negotiation of `hello` in node and browser, and the home's refusal of `v` 1 from devices of others | A9 people | `home/cmd_people.go`, `node/admit.go`, `node/version.go`, `lib/join.ts`, `lib/version.ts` | P-4, HM-5, N-2, W-2 | A | M |
 | T2-2 | 5 | Home: the `confirm` card and `act confirm`; who must be asked | A9 confirm | `home/cmd_confirm.go` | P-4, HM-10 | F | M |
 | T2-3 | 5 | Host: the owner-signature rule, the signed list, the level cap, delegates | A9 authority | `host/authority.go` | P-4, HS-13, HS-16a | F | M |
 | T2-4 | 5 | Device log fork rule in Go and in the web client, with the vector generator and the fork vectors in the same pull request | the new vectors | `internal/identity/devlog.go`, `lib/devlog.ts`, the fork vectors of `crypto.json` and their generator | P-4 | F | S |
 | T2-5 | 5 | Browser: verify row envelopes for homes of others | A9 trust | `lib/verify.ts` | P-4, C2-7 | A | S |
 | T2-6 | 5 | Host: the receive-only terminal channel | A9 watch | `host/watch.go` | P-4, HS-19, HS-20 | A | S |
-| T2-7 | 5 | Home: group kind `team` | A9 team | `home/team.go` | P-4, HM-5 | A | S |
-| T2-8 | 5 | Host: forge templates | A9 forge | `host/forge_tmpl.go` | P-4, HS-7a, HS-7b | A | M |
-| T2-9 | 5 | Host: acceptance of the check list and templates | A9 checks | `host/accept.go` | P-4, HS-5 | A | S |
+| T2-7 | 5 | Group kind `team`: the home's refusals; the node and host side of the bulletin: `settings.teams`, the connection to each team home, the `group` argument of the `post` tool | A9 team | `home/team.go`, `node/teams.go`, `host/tools_bulletin.go` | P-4, HM-5, N-3, HS-9, HS-21 | A | M |
+| T2-8 | 5 | Forge templates: running them on the host, and the home's checks of a template on `group create` and `group set` | A9 forge | `host/forge_tmpl.go`, `home/templates.go` | P-4, HS-7a, HS-7b, HM-5 | A | M |
+| T2-9 | 5 | Acceptance of the check list and templates: the host's gate and `checks.accept`; the home's `task accept`, rows CF-1 and CF-2 and the wait `accept` | A9 checks | `host/accept.go`, `home/cmd_accept.go` | P-4, HS-5, HM-M, HM-9 | A | M |
 | T2-10 | 5 | Moving a group to another home | A9 move | `home/move.go`, `node/move.go` | P-4, HM-1, N-4 | F | M |
 | T2-11 | 5 | A copy of a group on a second node | A9 copy | `home/copy.go` | P-4, HM-1 | A | M |
 | T2-12 | 5 | Checks inside the system's sandbox on Linux and macOS, only where S-10 showed both compatibility and isolation | A9 sandbox | `host/sandbox_linux.go`, `host/sandbox_darwin.go` | S-10, HS-5 | A | M |
@@ -97,15 +97,16 @@ are complete only when S-10 and T3-0 have reported.
 | Id | W | Does | Tests | Owns | Needs | M | Sz |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | T3-0 | 1 | Desk research: terms and capabilities of each candidate CLI, each claim with its source (no code; the answer goes into C3-1) | — | pull request description | — | A | S |
-| P-5 | 5 | Wire shapes: note types `preset` and `kb`, the brief's preset field, `kb_put`, `kb_search` | golden round trip | lane PROTO | P-4, C3-2 | F | S |
-| T3-1 | 4 | The capability table and the switches it drives | A10 capabilities | `host/caps.go` | C3-1, HS-1, HS-2 | A | S |
-| T3-2, T3-3 | 5+ | One driver and one fake CLI each for OpenCode and Qwen Code, the CLIs that passed T3-0, one at a time | M3, M4, M7 tests for that CLI | `host/<cli>.go`, `host/fakecli/<cli>/` | T3-1, captures | A | 2 × M |
+| P-5 | 5 | Wire shapes: note types `preset` and `kb`, the brief's preset field, `kb_put`, `kb_search`; the `driver` object of `host.info` (`contracts/step-3/drivers.md` section 6) | golden round trip | lane PROTO | P-4, C3-1, C3-2 | F | S |
+| T3-1 | 4 | The capability table and the switches it drives, and nothing on the wire: `driver` in `host.info` comes with T3-2, after P-5 | A10 capabilities | `host/caps.go` | C3-1, HS-1, HS-2 | A | S |
+| T3-2, T3-3 | 5+ | One driver and one fake CLI each for OpenCode and Qwen Code, the CLIs that passed T3-0, one at a time. T3-2 also puts the declaration into `host.info` as `driver`, in the shape P-5 froze | M3, M4, M7 tests for that CLI | `host/<cli>.go`, `host/fakecli/<cli>/` | T3-1, captures; T3-2 also P-5 | A | 2 × M |
 | T3-4 | — | Amp: not scheduled. T3-0 found no approval channel for R-43 | — | — | — | — | — |
 | T3-5 | 6 | Presets: the note type, the brief field, the turn text | A10 presets | `home/preset.go`, `host/turn_preset.go` | P-5 | A | S |
 | T3-6 | 6 | Knowledge base: index, `kb_put`, `kb_search`, exempt from retention | A10 knowledge | `internal/store/kb.go`, `home/kb.go`, `host/tools_kb.go` | P-5 | A | M |
 | U3-1 | 6 | Preset choice in the brief card; the preset editor | A10 as seen | `cmp/preset/` | U-7, P-5 | F | S |
 | U3-2 | 6 | Knowledge base panel in the group info | A10 as seen | `cmp/kb/` | U-14, P-5 | F | S |
-| I3-1 | 7 | Step 3 acceptance, for the CLIs that passed T3-0 only | A10.x | `features/s3*` | T3-1 to T3-3, T3-5, T3-6, U3-1, U3-2 | A | M |
+| U3-3 | 6 | What `driver` offers: the account choice, the level control, the cap units, the terminal button (`contracts/step-3/drivers.md` section 6) | A10.1, A10.2 as seen | `cmp/driver/` | U-3, U-5, U-11, U-12, P-5 | F | S |
+| I3-1 | 7 | Step 3 acceptance, for the CLIs that passed T3-0 only | A10.x | `features/s3*` | T3-1 to T3-3, T3-5, T3-6, U3-1 to U3-3 | A | M |
 
 Fable ends on Nov 23. If step 2 or 3 interface units slip past that date,
 the coordinator decides who makes their visual decisions; no GPT session
@@ -116,4 +117,6 @@ does.
 - None of the proposed answers was checked against the vendors' terms or
   against code; they follow from the contracts as written.
 - D-4 was not checked against every case of `risks.md` K-4.
-- Which candidate CLIs still have headless mode, resume and MCP.
+- The capabilities of OpenCode and Qwen Code: T3-0 read them in the
+  vendors' documentation and ran nothing (`contracts/step-3/drivers.md`
+  section 8).

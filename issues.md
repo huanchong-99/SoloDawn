@@ -6,6 +6,87 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · bug · go-nat v0.2.0 gets four things wrong in port mapping
+
+- Symptom: against NET-1's gateway (miniupnpd 2.3.9) in spike S-8 ([#134](https://github.com/huanchong-99/SoloDawn/pull/134)), go-nat failed four ways. (1) NAT-PMP returns the external port it asked for, not the one the router granted: it reported 55459 where the router mapped 30000, so a node would publish an unreachable port. (2) NAT-PMP `DeletePortMapping` leaves the mapping in place. (3) NAT-PMP calls ignore the context: with the router silent, a call with a 2 s context had not returned after 10 s. (4) UPnP asks only for random external ports and fails with 606 where the router restricts ports. Discovery also always takes 5 s.
+- Cause: in go-nat v0.2.0, `natpmp.go:106` and `:115` discard the mapping result; `natpmp.go:125-127` only forgets the port; `natpmp.go:43` uses `natpmp.NewClient`, which retries for about 128 s (go-nat-pmp v1.0.2 `natpmp.go:34-35`); `nat.go:123-125` draws random ports and `upnp.go:250-275` never tries `AddAnyPortMapping`; `upnp.go:152` waits 5 s. Details in [`spikes/S-8/results.md`](https://github.com/huanchong-99/SoloDawn/blob/spike/S-8-portmap/spikes/S-8/results.md), section 1.
+- Status: open, external. Avoided by the coordinator's decision of 2026-11-20: PR-3 uses go-nat-pmp (`NewClientWithTimeout`) and goupnp's `internetgateway2` (IGDv2 first, then IGDv1) directly, not go-nat, and replaces the go-nat pin in `deps_test.go` with these two.
+
+### 2026-11-20 · limitation · pion drops `tcptype` from server-reflexive candidates
+
+- Symptom: in spike S-8 ([#134](https://github.com/huanchong-99/SoloDawn/pull/134)), a node's mapped ICE-TCP listener published as `typ srflx ... tcptype passive` was never dialled: two symmetric NATs with UDP between them blocked and no TURN did not connect. The same endpoint published as `typ host ... tcptype passive` connected in 206 ms.
+- Cause: pion ice v4.4.8 `UnmarshalCandidate` gives `tcptype` to host candidates only (`candidate_base.go:962-993`), so a srflx candidate has no TCP type and the agent creates no active candidate for it (`agent.go:1313-1323`).
+- Workaround: publish a mapped TCP endpoint as `typ host ... tcptype passive` with the external address and the granted port (PR-3).
+- Status: open, external; not reported upstream for now.
+
+### 2026-11-20 · limitation · pion can select the relay while a direct pair is valid
+
+- Symptom: in spike S-8 ([#134](https://github.com/huanchong-99/SoloDawn/pull/134)), 5 of 63 runs with TURN, a port-mapped answerer and a restricted-cone offerer selected the relay after 2.0 s, although direct pairs were valid from about 630 ms. None of 160 runs without a mapping, none of 160 with a mapped offerer, and none with another offerer NAT type did so.
+- Cause, from the ICE trace of [run 44704969215](https://github.com/huanchong-99/SoloDawn/actions/runs/44704969215): a check relayed through the answerer's TURN allocation reaches the offerer before that relay candidate is trickled, so the offerer files it as peer-reflexive and validates the pair. When the relay candidate arrives, pion ice v4.4.8 replaces the peer-reflexive candidate but keeps the pair's old priority (`agent.go:1247-1262`, `setPriorityOverride`). That pair stays the best valid one, and the controlling agent nominates only the best valid pair once its type's wait has passed, 2 s for relay (`selection.go:74-84`). Details in [`spikes/S-8/results.md`](https://github.com/huanchong-99/SoloDawn/blob/spike/S-8-portmap/spikes/S-8/results.md), section 2.
+- Workaround: the connection works over the relay, and the probe of `planning/flows/connect.md` section B moves it to a direct path.
+- Status: open, external; not reported upstream for now.
+
+### 2026-11-20 · deviation · CI and release builds use Go 1.26.0, eleven patch releases behind
+
+- Symptom: every CI job, and the six binaries of `.github/workflows/release.yml`, build with Go 1.26.0 (Backend run 44697108086: "Setup go version spec 1.26.0"). The newest 1.26 release is 1.26.11, so released binaries would lack the standard-library security fixes of 1.26.1 to 1.26.11.
+- Cause: `go.mod:3` says `go 1.26.0`, and `actions/setup-go` v5.6.0 takes the `go` line as an exact version; it does not read a `toolchain` line (v6 does).
+- Status: open; needs a decision: a `toolchain go1.26.11` line in `go.mod` with setup-go v6, or `go-version: 1.26.x` with `check-latest: true` in the workflows.
+
+### 2026-11-20 · bug · The Git helper of the host-check steps can still end the whole suite
+
+- Symptom: when its Git command fails, the remaining scenarios do not run and go test reports "subtest may have called FailNow on a parent test" (reproduced with commit signing in the global Git configuration: 8 of 70 scenarios ran).
+- Cause: `features/host_checks_test.go:36` calls `f.t.Fatalf` on the suite's test from a scenario; see the resolved entry "Go acceptance steps acted beyond their own scenario". The file was left out of the audit fixes because it belonged to another fix at the time.
+- Status: open. Return the error from the step, as `features/host_forge_test.go` does.
+
+### 2026-11-20 · limitation · Three peer scenarios time out on a Mac with its firewall on
+
+- Symptom: "Both nodes can offer over the same two signalling paths", "A replayed offer is not processed" and "Early and repeated candidates" fail with `context deadline exceeded` after 20 s on macOS with the application firewall enabled, on `rebuild` as merged (815c52aa6) and with the audit fixes; the other 77 scenarios pass. CI runs them on Linux only.
+- Cause, not verified: `features/peer_test.go` makes each node's sockets with `peer.Listen(0, 0)`, which listens on every interface (`internal/peer/sockets.go:22-23`), and the firewall holds incoming traffic to the unsigned test binary on addresses other than loopback. The package's own tests keep the sockets on loopback (`internal/peer/sockets.go:26-27`).
+- Status: open. Bind the acceptance nodes to loopback as the unit tests do, or exclude the scenarios on macOS by tag.
+
+### 2026-11-20 · limitation · Rendezvous steps reserve a port by closing it
+
+- Symptom: not observed. The steps listen on 127.0.0.1:0, close the listener and give its port to `solodawn rendezvous`; another process can bind the port in between, and `rvListening` would take that process for the rendezvous.
+- Cause: `features/rendezvous_test.go:162-169` and `features/relay_test.go:89-94`; the command cannot take a listener or report the port it chose.
+- Status: open, until the command can listen on port 0 and print its address.
+
+### 2026-11-20 · limitation · Three web unit tests time out on a fully busy machine
+
+- Symptom: with 14 busy loops on 12 cores, `web/src/main.test.ts:4`, `web/src/lib/motion.test.ts:29` and `web/src/lib/prefs.test.ts:26` exceeded Vitest's 5 s test limit; one idle run right after `pnpm install` also failed two tests in two files (output not kept). CI passed.
+- Cause: each is the first test of its file to import the client's modules afresh inside the test, so their transformation counts against the test's limit.
+- Status: open; the gate can fail spuriously while other work loads the machine.
+
+### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
+
+- Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
+- Cause: `startNode` is a stub that returns that error until N-4 assembles the runtime (`internal/node/socket.go:80-84`); `cmd/solodawn/main.go:26-28` registers `node` without arguments.
+- Status: open until N-4. What I-8 needs from N-4 is listed in [#132](https://github.com/huanchong-99/SoloDawn/pull/132).
+
+### 2026-11-20 · limitation · A node's socket does not fit under a long HOME on macOS
+
+- Symptom: with a HOME of more than about 60 bytes, `solodawn node` exits with `listen unix <HOME>/Library/Application Support/solodawn/sock: bind: invalid argument`. Seen on macOS with HOME under a session's temporary directory of over 100 bytes.
+- Cause: a Unix socket path holds at most 103 bytes on macOS (107 on Linux), and on macOS the socket is 41 bytes below HOME (`internal/node/dir.go:23-24`, `internal/node/socket.go:23-27`). The system's temporary directory there (`/var/folders/…/T/`, 49 bytes) leaves room for a short name only, so `t.TempDir()` as HOME fails. `internal/node/socket_test.go:175-179`, `features/cmd_local_test.go:29-34` and `web/e2e/nodes.ts` create their directories under `/tmp` on macOS for this reason.
+- Effect: none for an ordinary home directory such as `/Users/<name>`.
+- Status: open, accepted for tests; a test that sets HOME for a node on macOS keeps it under `/tmp`.
+
+### 2026-11-20 · deviation · End-to-end steps are not in a `.spec.ts` file
+
+- Symptom: the feature-file convention (`planning/steps/parallel-plan.md` section 2, `planning/contracts/conventions.md` section 5) puts a web slice's steps in `web/features/<slice>.spec.ts`. The steps of `features/web_e2e.feature` are in `web/features/e2e.ts`, and the acceptance gate's `vitest run features` does not run them; the `Browser end-to-end` workflow does.
+- Cause: `pnpm test` and the gates use `web/vite.config.ts`, whose Vitest default pattern would run a `web/features/*.spec.ts` without the global setup, Go and the browsers that end-to-end tests need. F-01c keeps `web/features/browser-crypto.ts` out of that run the same way.
+- Status: open, accepted by the coordinator on 2026-11-20. `web/vite.config.ts` excludes `e2e/**` ([#132](https://github.com/huanchong-99/SoloDawn/pull/132)), so `web/e2e/*.spec.ts`, I-8's `connect.spec.ts` included, run only under `web/e2e/config.ts`.
+
+### 2026-11-20 · limitation · Two workflows download the same pinned browsers
+
+- Symptom: `.github/workflows/e2e.yml` repeats the download steps of `.github/workflows/browser-vectors.yml`: Chrome for Testing 137, Edge 137 and Firefox 136 with their URLs and SHA-256 sums. A change of version has to be made in both files.
+- Cause: E-0 added the end-to-end workflow beside F-01c's without changing it.
+- Status: open. A composite action that both workflows use can replace the steps later (coordinator, 2026-11-20).
+
+### 2026-11-20 · limitation · The end-to-end harness runs on macOS and Linux only
+
+- Symptom: the global setup of `web/e2e/config.ts` throws on Windows.
+- Cause: `web/e2e/nodes.ts` starts every process as the leader of its own process group, stops it with `process.kill(-pgid)`, and finds what a dead test process left with `ps`; Windows has neither.
+- Status: open. The browser workflows run on Linux and macOS; I-11 decides whether end-to-end tests run on Windows.
+
 ### 2026-11-20 · limitation · Fake CLIs lack invalid-login and exhausted-limit captures
 
 - Symptom: neither scripted CLI covers an invalid-login startup error or an exhausted rate limit.
@@ -42,7 +123,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · deviation · Web mock does not answer `host.info` or push `groups`
 
 - Symptom: F-02 in `planning/steps/step-1-frontend.md` asks for a mock that answers `hello`, `sync`, `fetch` and `host.info`; the settled plan (PR #58) adds that it pushes `groups`. `mockCtl` answers `hello`, `sync`, `fetch` and `cmd`, and pushes only `reset` and `rows`. `proto.ts` has no `host.info` type; it has a `Groups` type, written from the contract.
-- Cause: neither frame has a Go type or a wire example yet, and the mock answers from wire examples only (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:94-96`, `web/src/lib/proto.ts:372-377`). Both are frozen by backend task B-10 (`planning/steps/step-1-backend.md`; PR #58, `contracts/conventions.md` section 5), not by a slice of B-01.
+- Cause: neither frame has a Go type or a wire example yet, and the mock answers from wire examples only (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:94-96`, `web/src/lib/proto.ts:372-377`). Both are frozen by unit P-2 (`planning/contracts/conventions.md` section 5; `planning/steps/parallel-plan-units.md` section 1), which also adds the mock answers for `host.info` and `groups`; B-10 named them before the parallel plan.
 - Status: open. `host.info` was left out by the coordinator's decision of 2026-11-20, until it has an example; the `groups` push was found in the review of PR #61 and not changed there.
 
 ### 2026-11-20 · limitation · Random ids are checked in `n` and `g` of a signed payload only
@@ -64,7 +145,54 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the rendezvous answers each `to` it cannot deliver with `{"t":"offline","k":…}`, which names the target but not the `conn` (`planning/contracts/rendezvous.md` section 2.2). `internal/peer/path.go:140-145` passes every such report to `Peer.Offline`, which takes it for each unanswered offer to that target and removes the reporting path (`internal/peer/unanswered.go:38-43`). A report for an earlier frame (the earlier offer or one of its candidates) still on its way when the next offer leaves therefore counts against the new one. The back-off of at least one second makes this rare; a presence report can end the back-off sooner (`planning/flows/connect.md` step 16).
 - Status: open, accepted by the coordinator on 2026-11-20 with no contract change.
 
+### 2026-11-20 · deviation · Nothing resumes hosted checks after a node restart yet
+
+- Symptom: after a restart, a task at step `cloud_check` is not polled again, so it stays there until something else moves it (decision D3 of the host-contract audit).
+- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and `checks.local.at`, where the 60-minute limit counts from, but no code runs at node start yet to call it and then `WaitHostedChecks` for each.
+- Status: open. The node must call it at start; owner N-4, or HS-0 if it lands first.
+
+### 2026-11-20 · deviation · No receiver check or shared vector for a beacon yet
+
+- Symptom: `planning/contracts/envelope.md` section 3, checks 4 and 5, now gives a beacon (`planning/contracts/rendezvous.md` section 4) a third set of receiver checks: no `to`, and a two-minute window. The code and the vectors know two kinds only. `OpenSignal` requires `to`, and `OpenCommand` allows 24 hours. So neither reads a beacon as the contract says.
+- Cause: the rule was settled after B-02c and F-01d (#136). The identity code has the two kinds only: `internal/identity/envelope.go:30` and `:37`, and `web/src/lib/identity.ts:185-195`. `planning/contracts/vectors.md` section 3 lets `received` be `command` or `signal` only, and `internal/proto/testdata/crypto.json` has no beacon case.
+- Status: open. PR-2 adds a beacon case to `received` in `vectors.md` and `crypto.json`, and a third envelope kind in both identity implementations, before it reads beacons.
+
+### 2026-11-20 · limitation · `ReviewedMerge.GitHubRepo` is not filled from the group's repository yet
+
+- Symptom: the merge with a remote runs `gh pr merge <pr> --repo <owner>/<repo>` (`planning/contracts/local.md` section 7, row "merge, with a remote"), but no code sets `<owner>/<repo>` from the group's repository; an empty `GitHubRepo` would make the merge fail.
+- Cause: `ReviewedMerge.GitHubRepo` (`internal/host/merge.go`) is set by its caller, and no unit calls the merge yet. The claim that `--repo` makes gh skip every local step (worktree removal, local branch deletion) rests on the gh 2.102.0 source (`pkg/cmd/pr/merge/merge.go`: `CanDeleteLocalBranch = !cmd.Flags().Changed("repo")`), not on a run against GitHub or on older gh versions.
+- Status: open. The unit that wires the merge (HS-10 or N-4) sets `GitHubRepo` from the group's repository.
+
 ## Resolved
+
+### 2026-11-20 · bug · Go acceptance steps acted beyond their own scenario
+
+Found in the audit of the harness; each was reproduced before the fix (lines are those before it).
+- A failing step could end the whole suite: later scenarios and their After hooks did not run, godog printed no summary, go test said "subtest may have called FailNow on a parent test". Steps called `Fatal` on the suite's own test from a scenario's subtest (`features/node_update_test.go:98`, `:104`, `features/host_forge_test.go:26`).
+- `go test -tags acceptance -count=2 ./features/` failed with `open …/TestFeatures…/017/v0.3.1: no such file or directory`: the cache of release builds was a package variable that outlived the TempDir of the first run (`features/node_update_test.go:89`).
+- The fake node's socket stayed listening through every later scenario, and each node-update scenario left an HTTP server listening (five by the end): cleanups were registered with `f.t.Cleanup` (`features/cmd_local_test.go:38`, `:44`, `features/node_update_test.go:54`).
+- Under `go test -run` naming the two login-service scenarios, "Register" failed and "Remove" passed without doing anything: HOME was set in a subtest of the suite's test that `-run` skipped (`features/node_service_test.go:30`).
+- A scenario that changed a variable other than HOME, or the working directory, changed every later scenario: the guard of PR #121 checked HOME only and did not restore it (`features/acceptance_test.go:67-80`).
+- With `commit.gpgsign = true` in the global Git configuration, a host-check scenario failed with "gpg failed to sign the data": git ran with the user's and the system's configuration.
+- A step error X was printed as "after scenario hook failed: X, step error: X, X, step error: X": After hooks returned the step's error as their own (`features/identity_test.go:72`, `features/rendezvous_test.go:101`, `features/peer_test.go:61`).
+- Status: resolved on branch `test/audit-harness-ci`: steps return errors (the comment on `fixtures.t` states the rule); `afterScenario` undoes per scenario; the build cache is `fixtures.stamped`; the login steps set and restore the variables around each operation; after each scenario the suite compares every variable and the working directory with their state at its start, names what changed (never values) and restores it; `TestFeatures` sets `GIT_CONFIG_GLOBAL` to the null device and `GIT_CONFIG_NOSYSTEM`; the hooks return nil. One `Fatal` remains (open entry above).
+
+### 2026-11-20 · bug · The web acceptance file failed on a busy machine although its tests passed
+
+- Symptom: with every core busy, `features/web.spec.ts` failed 3 of 3 runs with "HookTimeoutError: Hook timed out in 10000ms" at `web/features/motion.ts:22`; all 213 tests passed.
+- Cause: `browser.close()` took 10.0 s under that load (20 to 60 ms idle), Vitest's default hook limit.
+- Status: resolved on branch `test/audit-harness-ci`: both browser hooks have 60 s; 3 of 3 loaded runs passed.
+
+### 2026-11-20 · deviation · CI gaps found in the audit of the workflows
+
+- Symptom: `pnpm/action-setup` (third party) and the `actions/*` were referenced by movable tags; `release.yml` restored pnpm and Go caches into the build of released files; `sudo ./netsim.test` had no time limit (a test binary run directly has none); CI never vetted code behind the `acceptance` tag and never compiled the macOS and Windows test files.
+- Status: resolved on branch `test/audit-harness-ci`: every action is pinned to the full commit its tag names today, the release job uses no cache, the netsim binary gets `-test.timeout=10m`, and `go vet` runs with the `acceptance` tag and for every cross-compile target.
+
+### 2026-11-20 · deviation · Two host check tests skipped themselves on Windows
+
+- Symptom: `TestChecksRequireBothGitDiffReads` and `TestCheckCancellationStopsForegroundPipeline` in `internal/host/checks_test.go` called `t.Skip` on Windows. `t.Skip(` is a listed directive under `[tamper]` in `.project-standard/gates.toml` with no exception, yet both merged with HS-5 (#94).
+- Cause: both tests need a POSIX shell (a fake `git` written as a shell script; a pipeline with a FIFO), and the author guarded them with a runtime skip. Neither CI nor the reviews of #94 ran the directive check.
+- Status: resolved. Both tests and their FIFO helper moved to `internal/host/checks_unix_test.go` under `//go:build !windows`, so they are not compiled where they cannot run; no listed directive remains in `cmd/`, `internal/` or `features/`.
 
 ### 2026-11-20 · bug · Wire types read seven things differently from the contracts
 
