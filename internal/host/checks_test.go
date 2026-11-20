@@ -68,7 +68,7 @@ func TestProjectChecksAndBothHardChecks(t *testing.T) {
 	checkTestFile(t, dir, "source.go", "a marked secret\n")
 	checkTestGit(t, dir, "add", ".")
 	checkTestGit(t, dir, "commit", "-m", "task")
-	commands := []string{"echo one > first", "exit 12", "git hash-object first"}
+	commands := []string{"echo one > first", "exit 12", "git hash-object first", "git switch -q base"}
 
 	// Use Git's own hash on the platform's shell output (LF or CRLF).
 	first := "one\n"
@@ -86,11 +86,26 @@ func TestProjectChecksAndBothHardChecks(t *testing.T) {
 		{Name: commands[0], OK: true},
 		{Name: commands[1], Detail: new("exit status 12")},
 		{Name: commands[2], OK: true, Detail: new(digest + "\n")},
+		{Name: commands[3], OK: true},
 		{Name: "secrets", Detail: new("secret detected")},
 		{Name: "tests", Detail: new("source changed without a test file")},
 	}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v (%v), want %#v", got, err, want)
+	}
+}
+
+func TestTurnDeadlineStillRunsBothHardChecks(t *testing.T) {
+	dir := checkTestRepo(t)
+	group := checkTestGroup("echo late")
+	group.Limits.TurnMinutes = 0
+	result, err := checkTestRunner().Run(t.Context(), dir, "base", group)
+	want := proto.ChecksBody{Stage: "local", Commit: checkTestGit(t, dir, "rev-parse", "HEAD"), Items: []proto.CheckItem{
+		{Name: "echo late", Detail: new(context.DeadlineExceeded.Error())},
+		{Name: "secrets", OK: true}, {Name: "tests", OK: true},
+	}}
+	if err != nil || !reflect.DeepEqual(result, want) {
+		t.Fatalf("deadline: %#v (%v), want %#v", result, err, want)
 	}
 }
 
@@ -146,7 +161,8 @@ func TestChecksRequireBothGitDiffReads(t *testing.T) {
 		t.Skip("POSIX git fixture")
 	}
 	dir := t.TempDir()
-	script := "#!/bin/sh\ncase \"$2\" in --name-only) echo missing >&2; exit 2;; esac\n"
+	t.Setenv("ComSpec", "windows-only")
+	script := "#!/bin/sh\ncase \"$2\" in --name-only) echo \"missing${ComSpec}\" >&2; exit 2;; esac\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -154,6 +170,20 @@ func TestChecksRequireBothGitDiffReads(t *testing.T) {
 	_, err := checkTestRunner().hardChecks(t.Context(), dir, "base...head")
 	if err == nil || err.Error() != "git diff: exit status 2: missing" {
 		t.Fatalf("name-only: %v", err)
+	}
+}
+
+func TestProjectCheckPlatformEnvironment(t *testing.T) {
+	command := `test -z "${ComSpec+x}" && echo ok`
+	line := "ok\n"
+	if runtime.GOOS == "windows" {
+		command, line = "if defined ComSpec echo ok", "ok\r\n"
+	} else {
+		t.Setenv("ComSpec", "windows-only")
+	}
+	want := proto.CheckItem{Name: command, OK: true, Detail: &line}
+	if got := runProjectCheck(t.Context(), t.TempDir(), command); !reflect.DeepEqual(got, want) {
+		t.Fatalf("environment probe: %#v, want %#v", got, want)
 	}
 }
 
