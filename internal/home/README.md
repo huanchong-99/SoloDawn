@@ -168,6 +168,8 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
 `ItemsPush`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+Thread rounds, queue jumps and the quiet-task timer take the names that start with `rnd`, their
+tests too, and their test functions start with `TestRounds`.
 
 ## The run loop
 
@@ -392,10 +394,45 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Rounds, jumps and quiet tasks
+
+`rounds.go` holds the `jump` command ([commands](../../planning/contracts/commands.md) 1.4, R-72),
+the `quiet` timer and its `After` hook ([task-machine](../../planning/contracts/task-machine.md)
+row 23), and the thread round and held-mention transitions (rows 13, 21 and 22, and section 4
+"Held by the round limit"; [messages](../../planning/contracts/messages.md) 2.11):
+
+- **`jump`.** Registered under `jump`. Refuses an AI signer (`c.Who.AI != ""`) with `forbidden`, a
+  missing `msg` with `not_found`, and any `msg` whose `by` is not `c.Who.Human` with `forbidden`.
+  Scans `c.Disk.Queued()` from newest to oldest for an unacknowledged `mention` item whose message
+  was written by `c.Who.Human` in the same thread (or in the main line when `msg` has no thread),
+  retires that item and queues its replacement with `Jump: true` and `NotBefore: 0`, or answers
+  `conflict` when none exists.
+- **`quiet` timer.** Registered under `Timers["quiet"]` and `After["quiet"]`. When the group has a
+  secretary, checks each task in sorted id order: if the task has had no thread message for at
+  least `limits.idle_notice_minutes` (measured from `thread.last.ts`, else `stats.started` when
+  non-zero, else `created`), has neither an unacknowledged `quiet` notice in `Disk.Queued()` nor
+  already notified the secretary in the current quiet period, and passes `Step` with `OnQuiet`
+  (`ByHome`: `active`, `wait == nil`, `step != "merge"`), it queues one `notice` (`code: "quiet"`)
+  for `group.secretary`. `After["quiet"]` records the task row as notified on `weak.Make(s)` once
+  the transaction commits, so a new thread message or any change to the task row resets the quiet
+  period without sharing state across groups ([issues](../../issues.md)).
+- **Rounds and held mentions.** Wraps every `post/*` entry and `task/resume` in `Commands` at
+  `init` (`rndWrap`). On a thread `post` by an AI that mentions an AI (in `mentions` or via a
+  queued `mention` item such as `call`), steps `OnMention` (row 21); when the round limit pauses
+  the task, writes the main-line `system` message `rounds_limit` under the first 16 bytes of the
+  SHA-256 of `SoloDawn rounds limit <n>` in base64url (`conflict` if already held on disk;
+  [issues](../../issues.md)) and queues `notice` (`code: "rounds_limit"`) naming it for the
+  secretary when the group has one. While a task's `wait.kind` is `rounds`, thread `mention` items
+  are held with `NotBefore = runNever` (`math.MaxInt64`), including any earlier unacknowledged
+  thread `mention` still in `Disk.Queued()`. When `wait` leaves `rounds` via a person's thread
+  `post/text` (row 22, passing `Pending` and deduplicating `IfNone` `review` items) or an admin's
+  `task/resume` (row 13), held thread `mention` items in `Disk.Queued()` are retired and re-queued
+  with `NotBefore = 0`.
+
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
-  files and the wiring of the node are separate units
+- The table of commands holds only the briefs and `jump`, and no node starts a loop yet: the other
+  command files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
@@ -435,3 +472,8 @@ while a task is paused and a reviewer named while it is paused.
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`rounds_test.go` and `rounds_internal_test.go` cover `jump`, the `quiet` timer, `After["quiet"]`,
+rows 21 and 22, and held-mention holding and release through `Commands.Apply`, `rndWrap` and
+`StartLoop`. `features/home_rounds.feature` holds acceptance tests A5.8, A5.11 (home half) and
+A5.16 over `StartLoop`.
