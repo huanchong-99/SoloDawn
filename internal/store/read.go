@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"math"
 )
 
 // Snapshot is a read transaction at Seq. Close it when done reading.
@@ -40,20 +41,30 @@ func (v *Snapshot) AfterSeqUpTo(after, upTo int64) ([]json.RawMessage, error) {
 	return v.rows("SELECT data FROM row WHERE g=? AND seq>? AND seq<=? ORDER BY seq", v.group, after, upTo)
 }
 
+// below is the pos bound of a page: rows with a lower pos, or all rows for
+// before 0, which asks for the newest page (no pos is 0).
+func below(before int64) int64 {
+	if before == 0 {
+		return math.MaxInt64
+	}
+	return before
+}
+
+// PageThread reads the main line (nil) or a task thread, newest first.
 func (v *Snapshot) PageThread(thread *string, before int64, limit int) ([]json.RawMessage, error) {
 	const selectMsg = "SELECT data FROM row WHERE g=? AND r='msg' AND pos<? AND "
 	const newest = " ORDER BY pos DESC LIMIT ?"
 	if thread == nil {
-		return v.rows(selectMsg+"in_main=1"+newest, v.group, before, limit)
+		return v.rows(selectMsg+"in_main=1"+newest, v.group, below(before), limit)
 	}
-	return v.rows(selectMsg+"thread=?"+newest, v.group, before, *thread, limit)
+	return v.rows(selectMsg+"thread=?"+newest, v.group, below(before), *thread, limit)
 }
 
-// PageKind reads notes ("note") or the review ledger ("review").
+// PageKind reads notes ("note") or the review ledger ("review"), newest first.
 func (v *Snapshot) PageKind(kind string, before int64, limit int) ([]json.RawMessage, error) {
 	return v.rows(`SELECT data FROM row WHERE g=? AND keep=1
 		AND r=CASE ? WHEN 'note' THEN 'note' WHEN 'review' THEN 'msg' END
-		AND pos<? ORDER BY pos DESC LIMIT ?`, v.group, kind, before, limit)
+		AND pos<? ORDER BY pos DESC LIMIT ?`, v.group, kind, below(before), limit)
 }
 
 func (v *Snapshot) rows(query string, args ...any) ([]json.RawMessage, error) {

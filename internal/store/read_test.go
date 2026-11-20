@@ -54,32 +54,54 @@ func TestPagesAndDelta(t *testing.T) {
 	put(t, s, "g", 10, msg("thread", 3, &thread, false, "text"))
 	put(t, s, "g", 10, msg("review", 4, &other, false, "review"))
 	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "note", 5), Group: "g"})
-	put(t, s, "g", 20, proto.GoneRow{RowHeader: header("msg", "erased", 6), Gone: true})
-	card.Seq = 7
+	put(t, s, "g", 10, msg("erased", 6, &thread, true, "text"))
+	put(t, s, "g", 20, proto.GoneRow{RowHeader: header("msg", "erased", 7), Gone: true})
+	card.Seq = 8
 	card.State = &proto.CardState{Status: "decided"}
 	put(t, s, "g", 20, card)
 	put(t, s, "other", 10, msg("elsewhere", 1, nil, true, "review"))
+	put(t, s, "other", 10, proto.NoteRow{RowHeader: header("note", "elsewhere-note", 2), Group: "other"})
 
 	v := snapshot(t, s, "g")
-	rows, err := v.AfterSeqUpTo(3, 6)
+	rows, err := v.AfterSeqUpTo(3, 7)
 	equal(t, ids(t, rows, err), []string{"review", "note", "erased"})
-	rows, err = v.AfterSeqUpTo(6, 7)
+	rows, err = v.AfterSeqUpTo(7, 8)
 	equal(t, ids(t, rows, err), []string{"card"})
 	var updated proto.MsgRow
 	check(t, json.Unmarshal(rows[0], &updated))
 	equal(t, updated, card)
-	rows, err = v.PageThread(nil, 8, 2)
-	equal(t, ids(t, rows, err), []string{"card", "main"})
-	rows, err = v.PageThread(nil, 2, 1)
-	equal(t, ids(t, rows, err), []string{"main"})
-	rows, err = v.PageThread(&thread, 8, 1)
-	equal(t, ids(t, rows, err), []string{"thread"})
-	rows, err = v.PageThread(&thread, 3, 10)
-	equal(t, ids(t, rows, err), []string{"card"})
-	rows, err = v.PageKind("review", 5, 10)
-	equal(t, ids(t, rows, err), []string{"review"})
-	rows, err = v.PageKind("note", 6, 10)
-	equal(t, ids(t, rows, err), []string{"note"})
+	for _, c := range []struct {
+		thread *string
+		before int64
+		limit  int
+		want   []string
+	}{
+		{nil, 0, 10, []string{"card", "main"}},
+		{nil, 9, 2, []string{"card", "main"}},
+		{nil, 2, 1, []string{"main"}},
+		{&thread, 0, 10, []string{"thread", "card"}},
+		{&thread, 9, 1, []string{"thread"}},
+		{&thread, 3, 10, []string{"card"}},
+	} {
+		rows, err = v.PageThread(c.thread, c.before, c.limit)
+		equal(t, ids(t, rows, err), c.want)
+	}
+	for _, c := range []struct {
+		kind   string
+		before int64
+		want   []string
+	}{
+		{"review", 0, []string{"review"}},
+		{"review", 5, []string{"review"}},
+		{"review", 4, []string{}},
+		{"note", 0, []string{"note"}},
+		{"note", 6, []string{"note"}},
+		{"note", 5, []string{}},
+		{"text", 0, []string{}},
+	} {
+		rows, err = v.PageKind(c.kind, c.before, 10)
+		equal(t, ids(t, rows, err), c.want)
+	}
 	rows, err = v.PageKind("note", 5, 10)
 	check(t, err)
 	b, err := json.Marshal(rows)

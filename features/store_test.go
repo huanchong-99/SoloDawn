@@ -76,6 +76,29 @@ func storeSteps(sc *godog.ScenarioContext) {
 		}
 		return expectCard(rows, card, 3, want)
 	})
+	sc.Step(`^the newest page of the main line holds the message, then the card$`, func() error {
+		v, err := s.Snapshot(card.Group)
+		if err != nil {
+			return err
+		}
+		defer v.Close()
+		rows, err := v.PageThread(nil, 0, 10)
+		if err != nil {
+			return err
+		}
+		var got []string
+		for _, row := range rows {
+			var h proto.RowHeader
+			if err := json.Unmarshal(row, &h); err != nil {
+				return err
+			}
+			got = append(got, h.ID)
+		}
+		if want := []string{"later", card.ID}; fmt.Sprint(got) != fmt.Sprint(want) {
+			return fmt.Errorf("newest page %v, want %v", got, want)
+		}
+		return nil
+	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
 		if s != nil {
 			return ctx, s.Close()
