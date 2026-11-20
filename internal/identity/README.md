@@ -73,8 +73,8 @@ connection, clock or database: every function works on the values it is given.
   byte that is not UTF-8 counts as U+FFFD, which is what `encoding/json` writes for it and what
   a browser's `TextEncoder` gives for a lone surrogate. `Verify` takes the role the other side
   must have: a message in the receiver's own role is its own message sent back. It also refuses a
-  `kind` that is neither `node` nor `browser`. The caller reads the message with `proto.Decode`
-  first, which is what makes `name` a string.
+  `t` that is not `pair` and a `kind` that is neither `node` nor `browser`. The caller reads the
+  message with `proto.Decode` first, which is what makes `name` a string.
 
 ## Shared test vectors
 

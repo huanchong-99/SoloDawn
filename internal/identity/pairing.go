@@ -65,11 +65,11 @@ func (s Secret) MAC(m proto.Pair) string {
 	return b64.EncodeToString(h.Sum(nil))
 }
 
-// Verify reports whether a received pair message is to be accepted: it has
-// the role the other side must have, its k is a device id, its kind is node or
-// browser, and its mac proves that its sender holds the secret and wrote the
-// other four. A message in the receiver's own role is its own message sent
-// back, and proves nothing.
+// Verify reports whether a received message is a pair message to be accepted:
+// its t is pair, it has the role the other side must have, its k is a device
+// id, its kind is node or browser, and its mac proves that its sender holds
+// the secret and wrote the other four. A message in the receiver's own role is
+// its own message sent back, and proves nothing.
 func (s Secret) Verify(m proto.Pair, role string) bool {
 	return m.Type == "pair" && m.Role == role && isDevice(m.Key) && (m.Kind == "node" || m.Kind == "browser") && hmac.Equal([]byte(m.MAC), []byte(s.MAC(m)))
 }
