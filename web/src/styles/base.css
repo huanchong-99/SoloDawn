@@ -681,7 +681,8 @@ kbd,
 /* 7 motion: what arrives. The states of single parts are with the parts. */
 /* A page arrives from the side its entry is on in the navigation (--dir, 1 for a later entry):
    from below or above beside the rail, from the right or left over the bottom bar of a phone.
-   Its parts follow one another, and its title in the top bar comes with them. */
+   Its parts follow one another, and its title in the top bar comes with them. Only the travel
+   of a part waits its turn: every part fades in from the first frame, so none is held unseen. */
 .app {
   --arrive: translateY(calc(var(--dir) * var(--travel)));
 }
@@ -692,18 +693,24 @@ kbd,
 }
 .page > *,
 .bar-title h1 {
-  animation: arrive var(--dur-3) var(--ease-out) backwards;
+  animation:
+    arrive var(--dur-3) var(--ease-out) backwards,
+    appear var(--dur-2) var(--ease-out);
 }
 .page > :nth-child(2) {
-  animation-delay: var(--stagger);
+  animation-delay: var(--stagger), 0s;
 }
 .page > :nth-child(n + 3) {
-  animation-delay: calc(2 * var(--stagger));
+  animation-delay: calc(2 * var(--stagger)), 0s;
 }
 @keyframes arrive {
   from {
-    opacity: 0;
     transform: var(--arrive);
+  }
+}
+@keyframes appear {
+  from {
+    opacity: 0;
   }
 }
 /* The glyph of a button that switches something turns in when it has switched. */

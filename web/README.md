@@ -116,7 +116,9 @@ development dependency, an IndexedDB for the tests.
   that changes on hover, press or focus is a layer under or around the part whose opacity changes.
   `route.dir` is the way the last page change went along the navigation (1, -1, or 0 within a
   page) and `--at` on the navigation and on a segmented control is the index of the current entry;
-  the styles turn them into the side a page arrives from and the place of the sliding mark.
+  the styles turn them into the side a page arrives from and the place of the sliding mark. The
+  parts of a page arrive one after another, but only their travel waits: all of them fade in
+  from the first frame, and a part whose animation does not run is seen in full.
   `choose(key, value)` changes a preference through `shift` of `src/lib/motion.ts`, which
   cross-fades the page where the browser has view transitions (Chrome and Edge, Safari 18,
   Firefox 144) and changes it at once elsewhere. The fade takes a picture of the old page only

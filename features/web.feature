@@ -80,6 +80,14 @@ Feature: Web client
     Then the mark of the theme is on option 3
     And the mark of the language is on option 2
 
+  Scenario: No part of an arriving page waits unseen
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client
+    When the address fragment becomes "#/settings"
+    Then one frame later part 2 of the page has not moved from where it arrives
+    And both parts have faded in as far as each other
+    And both parts are seen in full when no animation runs
+
   Scenario: The page cross-fades to a new theme in a browser with view transitions
     Given the browser supports Ed25519 in WebCrypto
     And the browser has view transitions

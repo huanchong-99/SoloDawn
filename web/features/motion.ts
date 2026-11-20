@@ -56,6 +56,42 @@ export function arrival(hash: string) {
   );
 }
 
+// Read the parts of the destination page one frame (16 ms) after they arrive, while the later
+// parts still wait their turn to move, and again when no animation runs.
+export function waitingParts(hash: string) {
+  return page.evaluate(
+    (hash) =>
+      new Promise<{ opacity: string; travel: string; still: string }[]>((resolve) => {
+        const previous = document.querySelector('main .page-head');
+        document.addEventListener('animationstart', function started(event) {
+          const target = event.target as HTMLElement;
+          if (target === previous || !target.matches('main .page-head')) return;
+          document.removeEventListener('animationstart', started);
+          const parts = [...target.parentElement!.children];
+          const animations = parts.flatMap((part) => part.getAnimations());
+          for (const animation of animations) {
+            animation.pause();
+            animation.currentTime = 16;
+          }
+          const waiting = parts.map((part) => {
+            const style = getComputedStyle(part);
+            const { e, f } = new DOMMatrix(style.transform);
+            return {
+              opacity: (+style.opacity).toFixed(2),
+              travel: (Math.abs(e) + Math.abs(f)).toFixed(2),
+            };
+          });
+          for (const animation of animations) animation.cancel();
+          resolve(
+            parts.map((part, i) => ({ ...waiting[i], still: getComputedStyle(part).opacity })),
+          );
+        });
+        location.hash = hash;
+      }),
+    hash,
+  );
+}
+
 export async function expectMark(selector: string, items: string, index: number) {
   const offset = await page.locator(selector).evaluate(
     async (group, { items, index }) => {

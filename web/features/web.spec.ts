@@ -255,6 +255,24 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     );
   });
 
+  Scenario('No part of an arriving page waits unseen', ({ Given, When, Then, And }) => {
+    let parts: Awaited<ReturnType<typeof motion.waitingParts>>;
+    Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+    And('the person opens the client', () => motion.open());
+    When('the address fragment becomes "#/settings"', async () => {
+      parts = await motion.waitingParts('#/settings');
+    });
+    Then('one frame later part 2 of the page has not moved from where it arrives', () => {
+      expect(parts.map((part) => part.travel)).toEqual(['8.63', '12.00']);
+    });
+    And('both parts have faded in as far as each other', () => {
+      expect(parts.map((part) => part.opacity)).toEqual(['0.42', '0.42']);
+    });
+    And('both parts are seen in full when no animation runs', () => {
+      expect(parts.map((part) => part.still)).toEqual(['1', '1']);
+    });
+  });
+
   Scenario(
     'The page cross-fades to a new theme in a browser with view transitions',
     ({ Given, When, Then, And }) => {
