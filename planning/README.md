@@ -145,7 +145,8 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/task-machine.md` | the one table of task transitions |
 | `contracts/drivers.md` | how each CLI is started, levels, turn format, instructions |
 | `contracts/local.md` | local interfaces: command line, MCP shim socket, Git commands, outbound secret check, self-update |
-| `steps/step-1.md` | step 1 scope, spikes, milestones, acceptance tests |
+| `steps/step-1.md` | step 1 scope, spikes, order of the milestones |
+| `steps/step-1-acceptance.md` | step 1 milestones M1 to M8 and their acceptance tests |
 | `steps/step-1-backend.md` | step 1 backend task list |
 | `steps/step-1-frontend.md` | step 1 frontend task list |
 | `steps/step-2-3.md` | outline of steps 2 and 3 |

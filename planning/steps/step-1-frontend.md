@@ -5,7 +5,8 @@ For the frontend implementers (local agents). Read first: `README.md`,
 `contracts/envelope.md`, `contracts/rendezvous.md`,
 `contracts/datachannel.md`, `contracts/rows.md`, `contracts/messages.md`,
 `contracts/commands.md`, the flows, and the design mock-ups with their
-design notes. Milestones and acceptance tests are in `steps/step-1.md`.
+design notes. Milestones and acceptance tests are in
+`steps/step-1-acceptance.md`.
 
 ## Working rules
 

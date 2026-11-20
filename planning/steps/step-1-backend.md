@@ -3,7 +3,7 @@
 For the backend implementer. Read first, in this order: `README.md`,
 `product-rules.md`, `architecture.md`, `sessions.md`, every file in
 `contracts/`, then the flow each task names. Milestones and acceptance tests
-are in `steps/step-1.md`.
+are in `steps/step-1-acceptance.md`.
 
 ## Working rules
 
@@ -63,7 +63,7 @@ are in `steps/step-1.md`.
 ## Tasks
 
 `→` means "depends on". "Done when" names the acceptance tests of
-`steps/step-1.md`, or the artefact that must exist.
+`steps/step-1-acceptance.md`, or the artefact that must exist.
 
 ### Foundation
 
