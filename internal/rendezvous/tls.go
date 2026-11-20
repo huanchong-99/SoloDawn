@@ -14,6 +14,9 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
+// SNI omits a fully qualified name's final dot. Preserve that dot for DNS.
+func tlsName(host string) string { return strings.ToLower(strings.TrimSuffix(host, ".")) }
+
 func (o Options) certificates() (*tls.Config, error) {
 	config := &tls.Config{MinVersion: tls.VersionTLS12}
 	if o.Cert != "" {
@@ -28,7 +31,7 @@ func (o Options) certificates() (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	manager := &autocert.Manager{Prompt: autocert.AcceptTOS, Cache: autocert.DirCache(filepath.Join(dir, "solodawn", "certs")), HostPolicy: autocert.HostWhitelist(o.Domain, o.TurnDomain)}
+	manager := &autocert.Manager{Prompt: autocert.AcceptTOS, Cache: autocert.DirCache(filepath.Join(dir, "solodawn", "certs")), HostPolicy: autocert.HostWhitelist(tlsName(o.Domain), tlsName(o.TurnDomain))}
 	config.GetCertificate = manager.GetCertificate
 	config.NextProtos = []string{"http/1.1", acme.ALPNProto}
 	return config, nil
@@ -91,7 +94,7 @@ func routeTLS(conn net.Conn, config *tls.Config, names map[string]*endpoint) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if c.HandshakeContext(ctx) == nil {
-		if e := names[strings.ToLower(c.ConnectionState().ServerName)]; e != nil {
+		if e := names[tlsName(c.ConnectionState().ServerName)]; e != nil {
 			e.deliver(c)
 			return
 		}

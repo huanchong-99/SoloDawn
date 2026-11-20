@@ -39,10 +39,11 @@ func TestStandaloneOptions(t *testing.T) {
 		{Options{Domain: "localhost"}, distinct}, {Options{Domain: "localhost", TurnDomain: "LOCALHOST"}, distinct},
 		{Options{Domain: "localhost.", TurnDomain: "localhost"}, distinct},
 		{Options{Domain: ".", NoRelay: true}, "TLS needs a hostname, not the DNS root"},
+		{Options{Domain: "localhost", TurnDomain: "."}, "TLS needs a hostname, not the DNS root"},
 		{Options{UDPPort: -1}, port}, {Options{UDPPort: 65536}, port},
 		{Options{QuotaMB: -1}, quota}, {Options{QuotaMB: 1 << 33}, quota},
 	} {
-		err := tc.o.configure()
+		err := tc.o.validate()
 		if tc.msg == "" {
 			if err != nil {
 				t.Fatal(tc.o, err)
@@ -51,9 +52,8 @@ func TestStandaloneOptions(t *testing.T) {
 			t.Fatal(tc.o, err)
 		}
 	}
-	o := Options{Domain: "Rv.Example.", TurnDomain: "Turn.Rv.Example."}
-	if err := o.configure(); err != nil || o.Domain != "rv.example" || o.TurnDomain != "turn.rv.example" {
-		t.Fatal(o, err)
+	if got := tlsName("Rv.Example."); got != "rv.example" {
+		t.Fatal(got)
 	}
 	for _, tc := range []struct {
 		o    Options
@@ -106,8 +106,8 @@ func TestStandaloneTLS(t *testing.T) {
 		host := o.Domain
 		if !noRelay {
 			o.Domain = "localhost"
-			o.TurnDomain = "turn.example.com"
-			host = o.TurnDomain
+			o.TurnDomain = "TURN.example.com."
+			host = "turn.example.com"
 		}
 		done := make(chan error, 1)
 		go func() { done <- o.serveICE(web, l) }()

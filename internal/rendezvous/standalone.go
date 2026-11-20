@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 )
 
 // Options names the endpoints of the standalone service, not a node's handler.
@@ -17,7 +16,7 @@ type Options struct {
 	NoRelay                               bool
 }
 
-func (o *Options) configure() error {
+func (o Options) validate() error {
 	if (o.Cert == "") != (o.Key == "") {
 		return errors.New("--cert and --key must be supplied together")
 	}
@@ -26,16 +25,6 @@ func (o *Options) configure() error {
 	}
 	if o.UDPPort < 0 || o.UDPPort > 65535 {
 		return errors.New("invalid --udp-port")
-	}
-	return o.configureNames()
-}
-
-func (o *Options) configureNames() error {
-	for _, name := range []*string{&o.Domain, &o.TurnDomain} {
-		if *name == "." {
-			return errors.New("TLS needs a hostname, not the DNS root")
-		}
-		*name = strings.ToLower(strings.TrimSuffix(*name, "."))
 	}
 	return o.validateNames()
 }
@@ -51,7 +40,10 @@ func (o Options) validateNames() error {
 }
 
 func (o Options) validateRelayName() error {
-	if !o.NoRelay && (o.TurnDomain == "" || o.Domain == o.TurnDomain) {
+	if o.Domain == "." || o.TurnDomain == "." {
+		return errors.New("TLS needs a hostname, not the DNS root")
+	}
+	if !o.NoRelay && (o.TurnDomain == "" || tlsName(o.Domain) == tlsName(o.TurnDomain)) {
 		return errors.New("relay needs a distinct --turn-domain")
 	}
 	return nil
@@ -68,7 +60,7 @@ func (o Options) address() string {
 }
 
 func (o Options) Serve(web fs.FS) error {
-	if err := o.configure(); err != nil {
+	if err := o.validate(); err != nil {
 		return err
 	}
 	l, err := net.Listen("tcp", o.address())
@@ -95,11 +87,11 @@ func (o Options) serveICE(web fs.FS, l net.Listener) error {
 	defer udp.Close()
 	httpEndpoint := newEndpoint(l.Addr())
 	defer httpEndpoint.Close()
-	names := map[string]*endpoint{o.Domain: httpEndpoint}
+	names := map[string]*endpoint{tlsName(o.Domain): httpEndpoint}
 	var turnListener net.Listener
 	if !o.NoRelay {
 		e := newEndpoint(l.Addr())
-		names[o.TurnDomain] = e
+		names[tlsName(o.TurnDomain)] = e
 		turnListener = turnStreams{e}
 	}
 	r, server, err := o.start(udp, turnListener, l.Addr().(*net.TCPAddr).Port)
