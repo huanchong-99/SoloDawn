@@ -63,11 +63,11 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   browser's connection within 1 second of holding the entry.
 - **A9.7** The fork vectors of `crypto.json` give the same log in Go and in
   the web client, in both orders of arrival: of two entries for one version,
-  the one signed by the device earlier in the log stays; the other and all
-  after it are dropped. End to end: Q's first device and a second, stolen one
-  revoke each other at one version. Whichever entry `P1`, `Q1` and each
-  browser saw first, all end with the second device revoked and the first
-  valid, and `P1` closes the second device's connections within 1 second.
+  the one signed by the device earlier in the log stays; the other is dropped,
+  with what no longer fits after it. End to end: Q's first device and a
+  second, stolen one revoke each other at one version. Whichever entry `P1`,
+  `Q1` and each browser saw first, all end with the second device revoked and
+  the first valid, and `P1` closes the second's connections within 1 second.
 
 ### Whose instructions (D-2, D-8; `contracts/step-2/confirm.md`)
 
@@ -292,7 +292,7 @@ The answers are silent on these; the contract of each group decides.
 | A9.4 | a person whose AI holds an unfinished task cannot be removed | `contracts/commands.md` 1.2, `member remove` |
 | A9.11 | a `review` item needs the owner's signature as an `assign` item does | D-2 says "an item" |
 | A9.14 | decided on 2026-11-20: for an AI on a team plan and a person not on its list, the owner is asked with the same card | D-2; D-8 names personal subscriptions only. For C2-1 |
-| A9.17 | decided: the owner's `act confirm` envelope, the `cause`, names the confirmed message, and that message's signer caused the task | D-1 with D-2; C2-1 defines it |
+| A9.17 | decided: an owner causes a task by confirming its brief, or by signing the message that leads their own AI to start it; a confirmed `confirm` card lets the AI take part and caps the level | D-1 with D-2; `contracts/step-2/authority.md` section 4 |
 | A9.20 | there is a terminal to watch only during a takeover | D-14, "the bridge of step 1" |
 | A9.23 | a secretary's node may post in a team group although no AI is a member of it | D-15 refuses `host.join` there |
 | A9.27 to A9.32 | decided: the new home is another node of the group's owner | D-7: the owner is the home's owner. For C2-6 |

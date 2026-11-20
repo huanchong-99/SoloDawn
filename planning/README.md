@@ -146,6 +146,7 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/task-machine.md` | the one table of task transitions |
 | `contracts/drivers.md` | how each CLI is started, levels, turn format, instructions |
 | `contracts/local.md` | local interfaces: command line, MCP shim socket, Git commands, outbound secret check, self-update |
+| `contracts/step-2/authority.md` | step 2: whose word a host accepts on someone else's home, the list its owner signs, the level cap, delegates, the fork rule of the device log (D-1, D-2, D-4, D-13) |
 | `contracts/step-2/people.md` | step 2: a second person in a group, the three roles, leaving and removal (D-7) |
 | `contracts/step-2/browser-trust.md` | step 2: what a browser checks before it shows who wrote or decided something (D-5, D-6) |
 | `contracts/step-2/confirm.md` | step 2: the owner's `confirm` card before an AI works for someone else, and the `information` label (D-8, D-9) |

@@ -21,7 +21,7 @@ it. The request is always a signed message (section 6).
 
 | `body.what` | The owner is asked to | The request is | Rules |
 | --- | --- | --- | --- |
-| `direct` | let the AI act on a message that mentions it, or take a role in a task | that message; for a role, the brief, or the message that led to a direct task | R-51, R-53 |
+| `direct` | let the AI act on a message that mentions it, or take a role in a task | that message; for a role, the task's request: the brief, or the `task` message of a task without one (`contracts/step-2/authority.md` section 6) | R-51, R-53 |
 | `ask` | let the AI answer a call | the `call` message | R-115 |
 | `watch` | let a person watch the AI's terminal | the card itself, which that person signs | R-81 |
 
@@ -30,8 +30,8 @@ it. The request is always a signed message (section 6).
 - **The word behind a request** is the person who signed it; for a message
   an AI wrote, that AI's owner (R-115). Behind a role in a task it is the
   person who confirmed the task's brief; for a task without a brief, the
-  word behind the message that led to it (`re` of `task start`), or, when
-  `re` is `null`, the owner of the AI that started it.
+  owner of the AI that started it, whose host signed the `task start`
+  (`contracts/step-2/authority.md` section 6).
 - That word **is enough** for an AI when the person is the AI's owner, or
   when the AI's `account` is `team` or `api_key` and the person is on its
   allow list (`contracts/step-2/authority.md`). For a `personal` account
@@ -91,7 +91,8 @@ The body has no optional field. The rest is in the message row
 | `mentions` | `[]`: `body.to` names who is asked | `[]` |
 
 Who asked is not in the body: it is the author of the request; for a role,
-the person in the brief's `state.by`.
+the person in the brief's `state.by`, or the owner of the AI that started
+a task without a brief.
 
 `watch`, one row for the `post` table of `contracts/commands.md` 1.3:
 
@@ -158,7 +159,8 @@ rest on the card: it names the request.
 - **Digest of a request**: the SHA-256 of the UTF-8 bytes of `body.ai`, a
   line feed, the request's `env.k`, a line feed and its `env.p`, in
   base64url (`contracts/envelope.md` section 1): 43 characters. The request
-  is the message `re` names; for `watch` it is the card's own `env`. With
+  is the message `re` names; for `watch` it is the card's own `env`. For a
+  `task` message, `env` here means `body.start`, its signed `task start`. With
   the AI in it, a confirmation for one AI of an owner cannot be used for
   another; with `k`, not for the same `p` signed by another person.
 - The owner's browser computes the digest from the request it shows, and
@@ -173,12 +175,13 @@ rest on the card: it names the request.
   as in step 1: a brief need not name an AI that a reassignment names.
 - A message id would not do: `n` is unique per signer only, so a home could
   swap in another member's message with the same `n`.
-- **A confirmation is not a brief confirmation.** `act confirm` on a brief
-  has no `arg`; on a `confirm` card it always has one. A host tells the two
-  apart from the signed bytes alone. That is what D-1 needs: the owner who
-  confirmed a brief caused its tasks; the owner who confirmed a `confirm`
-  card let the AI take part and caused nothing, and the task session's
-  level is capped accordingly (`contracts/step-2/authority.md`).
+- **A confirmation is not a brief confirmation.** Both carry `arg`: on a
+  brief it is the digest made with an empty text in place of `body.ai`, so
+  no AI's digest equals it (`contracts/step-2/authority.md` section 1). A
+  host tells the two apart from the signed bytes alone. That is what D-1
+  needs: the owner who confirmed a brief caused its tasks; the owner who
+  confirmed a `confirm` card let the AI take part and caused nothing, and
+  the task session's level is capped accordingly (section 4 there).
 - A confirmation delivers its message or call once: the host records the
   `act` it acted on (`contracts/envelope.md` section 3) and refuses a
   second `mention` with it. For a role it holds for the tasks of that
@@ -196,14 +199,11 @@ needs its owner's word**:
   step 1); else the `state.act` of the AI's confirmed `direct` card for
   that request. With neither, the item is not queued.
 - Row 2 asks nothing: the task's AI started it through its own host, which
-  knows what led to it. Its `assign` is queued as in step 1.
+  finds its own `task start` in the item. Its `assign` is queued as in
+  step 1.
 - The home writes the missing card when the role is given: at row 1 for
   every AI the brief names, tasks that start `queued` included; at row 11
   for the AI newly named.
-- A task that has neither a brief nor a leading message (origin `takeover`,
-  or `re` `null`) has no request an owner could confirm. A `task assign`
-  that names an AI for which the word behind the task is not enough
-  answers `forbidden`: a stated limit (section 10).
 - While the item of an `active` task is held back and the card is
   `pending`, the task's wait is `confirm`, with the card in `wait.msg` and
   `body.to` in `wait.who`: for the assignee at every step, for the reviewer
@@ -286,15 +286,11 @@ and the `act` with `arg`.
    a person".
 4. A listed person's message in the thread of a running task is
    `information`: R-52 governs there, R-53 outside it (section 8).
-5. A task with no request cannot go to an AI whose owner would have to
-   confirm (section 7): a stated limit.
+5. Replaced by `contracts/step-2/authority.md` section 6: every task has
+   a request, so its owner can be asked about any task.
 
 ## 11. Not verified
 
-- `contracts/step-2/authority.md` (the host's rule, the allow list, the
-  level) did not exist yet; this file leans on it.
-- That the host can be given the request: an `assign` or `review` item
-  carries one message row, which after a reassignment is not the brief.
-  Section 6 assumes the host then reads the brief from the home.
-- A brief removed by retention while a task from it is not final and is
-  reassigned: no digest can be made. Not designed.
+- Nothing here was run. How a host is given the request (`req` in the
+  item) and how long a request is kept (while a task from it is not final)
+  are settled in `contracts/step-2/authority.md` section 6.
