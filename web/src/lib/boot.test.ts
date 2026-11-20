@@ -1,6 +1,8 @@
-import { unmount } from 'svelte';
+import { IDBFactory } from 'fake-indexeddb';
+import { mount, unmount } from 'svelte';
+import App from '../App.svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { boot, canKeepEd25519Key, hasLightDark } from './boot';
+import { boot, canKeepEd25519Key, hasLightDark, type Browser } from './boot';
 
 type Call = (...args: unknown[]) => Promise<unknown>;
 
@@ -105,25 +107,55 @@ describe('boot', () => {
   let app: Record<string, never>;
   afterEach(() => unmount(app));
 
-  it('mounts the application', async () => {
-    app = await boot(document.body, fakeCrypto().crypto, withLightDark);
+  /** A browser with the test runtime's WebCrypto and a fresh, empty IndexedDB. */
+  const browser = (replace: Partial<Browser> = {}): Browser => ({
+    crypto,
+    css: withLightDark,
+    idb: () => new IDBFactory(),
+    storage: { persist: () => Promise.resolve(true) },
+    ...replace,
+  });
+  const notice = () => document.querySelector('h1')!.textContent;
+
+  it('mounts the application once the device key is kept', async () => {
+    const idb = new IDBFactory();
+    app = await boot(document.body, browser({ idb: () => idb }));
     expect(document.querySelector('nav')).not.toBeNull();
-    expect(document.querySelector('h1')!.textContent).toBe('Chats');
+    expect(notice()).toBe('Chats');
+    expect((await idb.databases()).map((d) => d.name)).toStrictEqual(['solodawn']);
   });
 
   it('mounts the upgrade notice when the key cannot be kept', async () => {
+    const idb = new IDBFactory();
     app = await boot(
       document.body,
-      fakeCrypto({ generateKey: notSupported }).crypto,
-      withLightDark,
+      browser({ crypto: fakeCrypto({ generateKey: notSupported }).crypto, idb: () => idb }),
     );
     expect(document.querySelector('nav')).toBeNull();
-    expect(document.querySelector('h1')!.textContent).toBe('This browser needs an update');
+    expect(notice()).toBe('This browser needs an update');
+    expect(await idb.databases()).toStrictEqual([]);
   });
 
   it('mounts the upgrade notice when CSS has no light-dark()', async () => {
-    app = await boot(document.body, fakeCrypto().crypto, withoutLightDark);
+    app = await boot(document.body, browser({ css: withoutLightDark }));
     expect(document.querySelector('nav')).toBeNull();
-    expect(document.querySelector('h1')!.textContent).toBe('This browser needs an update');
+    expect(notice()).toBe('This browser needs an update');
+  });
+
+  it('mounts the storage notice when the browser blocks site storage', async () => {
+    const idb = () => {
+      throw new DOMException('The operation is insecure.', 'SecurityError');
+    };
+    app = await boot(document.body, browser({ idb }));
+    expect(document.querySelector('nav')).toBeNull();
+    expect(notice()).toBe('Site storage is blocked');
+  });
+
+  it('fails when loading the device fails for another reason', async () => {
+    // The stand-in WebCrypto passes the browser check but cannot export the public key.
+    await expect(boot(document.body, browser({ crypto: fakeCrypto().crypto }))).rejects.toThrow(
+      TypeError,
+    );
+    app = mount(App, { target: document.body });
   });
 });
