@@ -1,0 +1,121 @@
+/* SoloDawn 设计令牌
+   写法：每个颜色一行，light-dark(浅色值, 深色值)。
+   主题切换只改 color-scheme：不设 data-theme 时跟随系统，
+   <html data-theme="light|dark"> 时强制。
+   浏览器基线：Chrome 123 / Safari 17.5 / Firefox 120。 */
+
+:root {
+  color-scheme: light dark;
+
+  /* ── 中性色：浅色是「晨光下的纸」，深色是「破晓前的墨蓝」 ── */
+  --bg: light-dark(#f6f4ef, #0c0f16); /* 页面底 */
+  --surface: light-dark(#ffffff, #141822); /* 卡片、面板 */
+  --surface-2: light-dark(#efece5, #1c212d); /* 内嵌块、悬停 */
+  --surface-3: light-dark(#e5e1d8, #262c3a); /* 按下、滑轨 */
+  --line: light-dark(#e2ded5, #272c39); /* 分隔线、卡片边 */
+  --line-strong: light-dark(#8c8982, #646c7e); /* 输入框边（对比度 ≥ 3:1） */
+  --text: light-dark(#171a21, #eceef3); /* 正文 */
+  --text-2: light-dark(#4a505c, #b3b9c6); /* 次要文字 */
+  --text-3: light-dark(#5f646f, #8e95a5); /* 辅助文字（仍 ≥ 4.5:1） */
+
+  /* ── 语义色：全系统只有五个角色 ── */
+  /* 天色：AI 正在干活、链接、键盘焦点 */
+  --sky: light-dark(#2a55d6, #8cabff);
+  --on-sky: light-dark(#ffffff, #0b1430);
+  /* 晨光：需要人来处理的事。全系统唯一的暖色 */
+  --dawn: light-dark(#f2a036, #f6b152); /* 填充 */
+  --on-dawn: #2a1a00; /* 填充上的字 */
+  --dawn-text: light-dark(#8a4b00, #f6b152); /* 写在普通底色上的晨光色文字 */
+  /* 通过 / 失败 */
+  --ok: light-dark(#146f44, #62cc91);
+  --on-ok: light-dark(#ffffff, #06210f);
+  --danger: light-dark(#b92e27, #ff857d);
+  --on-danger: light-dark(#ffffff, #2a0806);
+
+  /* 浅底色：由语义色和卡片色混出来，不单独定值 */
+  --sky-soft: color-mix(in srgb, var(--sky) 12%, var(--surface));
+  --dawn-soft: color-mix(in srgb, var(--dawn) 14%, var(--surface));
+  --ok-soft: color-mix(in srgb, var(--ok) 12%, var(--surface));
+  --danger-soft: color-mix(in srgb, var(--danger) 12%, var(--surface));
+
+  /* 品牌：破晓线。只用在标志和引导页的地平线，不做大面积渐变 */
+  --horizon: linear-gradient(
+    90deg,
+    transparent,
+    #4a5fe0 18%,
+    #c7609a 52%,
+    #f6b152 78%,
+    transparent
+  );
+
+  /* 终端：两套主题下都是深色 */
+  --term-bg: #0a0c11;
+  --term-fg: #d5d9e3;
+  --term-dim: #8089a0;
+  --term-green: #7bd88f;
+  --term-yellow: #f6b152;
+  --term-blue: #8cabff;
+  --term-red: #ff857d;
+  --term-line: #232733; /* 终端里的分隔线、按键边 */
+  --term-key: #161a23; /* 手机按键条的按键底色 */
+
+  /* ── 字体 ── */
+  --font-sans:
+    'Geist', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC',
+    'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  /* 字号阶梯 */
+  --fs-xs: 12px; /* 标签、时间、徽标 */
+  --fs-sm: 13px; /* 话题里的消息、卡片次要信息 */
+  --fs-md: 15px; /* 正文、主线消息 */
+  --fs-lg: 17px; /* 卡片标题、页面小标题 */
+  --fs-xl: 21px; /* 页面标题 */
+  --fs-2xl: 28px; /* 分区大标题 */
+  --fs-3xl: clamp(30px, 5.2vw, 46px); /* 引导页主标题 */
+  --lh-tight: 1.25;
+  --lh-body: 1.6; /* 中文正文行高 */
+
+  /* ── 间距：4px 为基准 ── */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  /* ── 圆角 ── */
+  --r-sm: 6px; /* 徽标、代码块 */
+  --r-md: 10px; /* 按钮、输入框 */
+  --r-lg: 14px; /* 卡片 */
+  --r-xl: 20px; /* 大面板、弹层 */
+  --r-full: 999px;
+
+  /* ── 阴影：卡片靠描边，只有浮层才有阴影 ── */
+  --shadow-pop:
+    0 8px 28px light-dark(rgb(23 26 33 / 0.14), rgb(0 0 0 / 0.55)), 0 0 0 1px var(--line);
+  --focus: 2px solid var(--sky); /* 键盘焦点描边，外扩 2px */
+
+  /* ── 动效：短、少、可关 ── */
+  --dur-1: 120ms; /* 悬停、按下 */
+  --dur-2: 200ms; /* 展开、切换 */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ── 布局 ── */
+  --rail-w: 64px; /* 电脑：左侧导航 */
+  --list-w: 300px; /* 电脑：群列表栏 */
+  --side-w: 340px; /* 电脑：右侧成员栏 */
+  --bar-h: 52px; /* 顶栏 */
+  --tab-h: 56px; /* 手机：底部导航 */
+  --measure: 760px; /* 聊天内容最大宽度 */
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}

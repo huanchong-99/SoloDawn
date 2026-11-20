@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0C0F16" />
+    <title>终端接管 · Claude Code — SoloDawn 样稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="base.css" />
+    <script src="base.js"></script>
+    <style>
+      .takeover-wrap {
+        display: grid;
+        height: 100%;
+        grid-template-columns: minmax(0, 1fr) var(--side-w);
+      }
+      .takeover-wrap > * {
+        min-height: 0;
+        min-width: 0;
+      }
+      .stage {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+      }
+      /* 接管横条：用反色，一眼看出现在是人在操作 */
+      .takeover {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        flex-wrap: wrap;
+        padding: 10px var(--sp-4);
+        background: var(--text);
+        color: var(--bg);
+        font-size: var(--fs-sm);
+      }
+      .takeover b {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 14px;
+      }
+      .takeover .sq {
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+        background: var(--dawn);
+      }
+      .takeover > span {
+        opacity: 0.82;
+      }
+      .keys {
+        display: flex;
+        gap: 6px;
+        padding: 8px var(--sp-3) calc(8px + env(safe-area-inset-bottom));
+        background: var(--term-bg);
+        border-top: 1px solid var(--term-line);
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .keys button {
+        flex: none;
+        min-width: 44px;
+        height: 36px;
+        padding: 0 10px;
+        border: 1px solid var(--term-line);
+        border-radius: var(--r-sm);
+        background: var(--term-key);
+        color: var(--term-fg);
+        font: 12px var(--font-mono);
+      }
+      .keys button:hover {
+        background: var(--term-line);
+      }
+      .info {
+        overflow: auto;
+        padding: var(--sp-4);
+        border-left: 1px solid var(--line);
+        background: var(--surface);
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-3);
+      }
+      .info > * {
+        flex: none;
+      }
+      .queue li {
+        display: flex;
+        gap: var(--sp-2);
+        padding: 8px 0;
+        font-size: var(--fs-sm);
+      }
+      .queue li + li {
+        border-top: 1px dashed var(--line);
+      }
+      @media (max-width: 640px) {
+        .takeover b {
+          flex: 1;
+        }
+        .takeover > .grow {
+          order: 3;
+          flex-basis: 100%;
+        }
+      }
+      @media (max-width: 1023px) {
+        .app > main {
+          overflow: auto;
+        }
+        .takeover-wrap {
+          display: block;
+          height: auto;
+        }
+        .stage {
+          height: calc(100dvh - var(--bar-h));
+        }
+        .info {
+          border-left: 0;
+          border-top: 1px solid var(--line);
+        }
+      }
+    </style>
+  </head>
+  <body class="app" data-page="terminal" data-nav="groups">
+    <a class="skip" href="#term">跳到终端</a>
+
+    <header class="bar">
+      <a class="icon-btn" href="chat.html" aria-label="回到群聊"
+        ><svg class="i"><use href="#i-back" /></svg
+      ></a>
+      <div class="bar-title">
+        <h1>Claude Code · <span data-en="Terminal">终端</span></h1>
+        <p>Alex的 MacBook · T-12 · task/12-conn-events</p>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="takeover-wrap">
+        <section class="stage" aria-label="终端">
+          <div class="takeover" role="status">
+            <b><i class="sq"></i><span data-en="Owner is driving">主人正在直接操作</span></b>
+            <span class="grow"
+              ><span
+                data-en="You took over 6 min ago. 2 messages from the secretary are queued until you hand back."
+                >你已接管 6 分钟。秘书发来的 2 条消息在排队，交还后送达。</span
+              ></span
+            >
+            <a class="btn btn-dawn" href="chat.html"><span data-en="Hand back">交还</span></a>
+          </div>
+
+          <!-- 嵌入的终端：正式版这里是 xterm.js，显示 AI 原本的命令行界面 -->
+          <pre
+            class="term"
+            id="term"
+            tabindex="0"
+            aria-label="Claude Code 的终端画面"
+          ><span class="d">~/solodawn/worktrees/task-12-conn-events</span> <span class="b">(task/12-conn-events)</span>
+
+<span class="d">&gt;</span> 补发事件改成：只有连接方式真的变了才发
+
+<span class="g">●</span> 我先看一下现在的切换回调。
+
+<span class="g">●</span> <b>Read</b>(node/conn/switch.go)
+  <span class="d">⎿  读了 142 行</span>
+
+<span class="g">●</span> <b>Update</b>(node/conn/switch.go)
+  <span class="d">⎿  改了 1 处，+3 −1</span>
+<span class="d">     86   func (s *Switcher) onDirectReady(p Path) {</span>
+<span class="r">     87 -     s.active = p</span>
+<span class="g">     87 +     if s.active.Kind == p.Kind { return }</span>
+<span class="g">     88 +     s.active = p</span>
+<span class="g">     89 +     s.emit(Event{Path: p.Kind, Limited: false})</span>
+<span class="d">     90   }</span>
+
+<span class="g">●</span> <b>Bash</b>(go test ./node/conn/ -run TestSwitchBack)
+  <span class="d">⎿  </span><span class="g">ok</span><span class="d">    solodawn/node/conn    0.412s</span>
+
+<span class="g">●</span> 改好了。只有连接方式真的变化时才发事件，<span class="y">TestSwitchBackEmits</span> 通过。
+
+<span class="d">────────────────────────────────────────────────────────</span>
+<span class="d">&gt;</span> /review<span class="cur"></span>
+<span class="d">────────────────────────────────────────────────────────</span>
+<span class="d">  ? 查看快捷键        工作区内自动执行 · 越界操作会来问你</span></pre>
+
+          <!-- 手机上没有这些键，补一排 -->
+          <div class="keys only-narrow" role="toolbar" aria-label="终端按键">
+            <button>Esc</button><button>Tab</button><button>Ctrl</button
+            ><button aria-label="上">↑</button><button aria-label="下">↓</button><button>/</button
+            ><button>@</button><button aria-label="回车">⏎</button>
+          </div>
+        </section>
+
+        <aside class="info" aria-label="接管说明">
+          <section class="card">
+            <header class="card-head">
+              <span class="kind" data-en="This session">这次接管</span>
+            </header>
+            <dl class="kv">
+              <dt>AI</dt>
+              <dd>
+                <span class="who"
+                  ><span class="av ai sm"
+                    ><svg><use href="#b-claude" /></svg></span
+                  >Claude Code</span
+                >
+              </dd>
+              <dt data-en="Task">任务</dt>
+              <dd>T-12 节点：上报连接方式变化</dd>
+              <dt data-en="Branch">分支</dt>
+              <dd><code>task/12-conn-events</code></dd>
+              <dt data-en="Session">会话</dt>
+              <dd>接着 AI 原来的那个会话</dd>
+              <dt data-en="Link">连接</dt>
+              <dd>
+                <span class="st" data-st="ok"><i></i>直连 · 4 ms</span>
+              </dd>
+            </dl>
+            <p class="hint">你在这里改的代码照常留在任务分支里，照常走检查、评审、合并。</p>
+          </section>
+
+          <section class="card">
+            <header class="card-head">
+              <span class="kind" data-en="Queued messages">排队中的消息</span
+              ><span class="badge count">2</span>
+            </header>
+            <ul class="queue">
+              <li>
+                <span class="av ai sec sm"
+                  ><svg><use href="#b-claude" /></svg></span
+                ><span class="grow"
+                  >评审意见第 2 条也请一并处理：<code>rtt_ms</code> 在中继时留空。<span
+                    class="muted"
+                  >
+                    11:36</span
+                  ></span
+                >
+              </li>
+              <li>
+                <span class="av ai sec sm"
+                  ><svg><use href="#b-claude" /></svg></span
+                ><span class="grow"
+                  >修完后直接 @Gemini 复评，不用等我。<span class="muted"> 11:39</span></span
+                >
+              </li>
+            </ul>
+            <p class="hint">
+              <svg class="i sm"><use href="#i-lock" /></svg>交还后按顺序送达
+            </p>
+          </section>
+
+          <section class="card">
+            <header class="card-head"><span class="kind" data-en="Watching">旁观</span></header>
+            <div class="row">
+              <span class="av" style="--h: 160">M</span
+              ><span class="grow"
+                >Mina 想旁观
+                <p class="muted" style="font-size: var(--fs-xs)">只能看，不能打字</p></span
+              ><button class="btn btn-sm">同意</button
+              ><button class="btn btn-sm btn-ghost">拒绝</button>
+            </div>
+          </section>
+
+          <p class="note">
+            <svg class="i sm"><use href="#i-eye" /></svg
+            ><span
+              >SoloDawn
+              不读取终端里的内容。交还时，会在任务话题里自动发一条摘要：你让它做了什么、改了哪些文件、提交了什么。</span
+            >
+          </p>
+          <p class="note" data-tone="dawn">
+            <svg class="i sm"><use href="#i-relay" /></svg
+            ><span
+              ><b>终端画面只走直连。</b
+              >这台电脑走中继时，「打开终端」会变灰，并提示先打通直连。</span
+            >
+          </p>
+        </aside>
+      </div>
+    </main>
+  </body>
+</html>

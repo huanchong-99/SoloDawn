@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0C0F16" />
+    <title>接入你的电脑 — SoloDawn 样稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="base.css" />
+    <script src="base.js"></script>
+    <style>
+      .top {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: var(--sp-3) var(--sp-5);
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text);
+        font-weight: 600;
+        font-size: var(--fs-lg);
+        letter-spacing: -0.02em;
+      }
+      .brand:hover {
+        text-decoration: none;
+      }
+      /* 破晓：页面顶部一道很淡的弧光，只在这一页出现 */
+      .hero {
+        position: relative;
+        overflow: clip;
+        padding: var(--sp-12) var(--sp-5) 76px;
+        text-align: center;
+      }
+      .hero::before {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: calc(100% - 52px);
+        width: 2400px;
+        height: 2400px;
+        translate: -50% 0;
+        border-radius: 50%;
+        border-top: 1px solid color-mix(in srgb, var(--dawn) 70%, transparent);
+        background: radial-gradient(
+          closest-side at 50% 0,
+          color-mix(in srgb, var(--dawn) 16%, transparent),
+          transparent 22%
+        );
+        mask-image: linear-gradient(90deg, transparent 36%, #000 46%, #000 54%, transparent 64%);
+        pointer-events: none;
+      }
+      .hero > * {
+        position: relative;
+      }
+      .hero h1 {
+        font-size: var(--fs-3xl);
+        letter-spacing: -0.03em;
+        max-width: 16em;
+        margin: var(--sp-4) auto var(--sp-3);
+        text-wrap: balance;
+      }
+      .hero p {
+        color: var(--text-2);
+        font-size: var(--fs-lg);
+        max-width: 34em;
+        margin: 0 auto;
+        text-wrap: pretty;
+      }
+      .wrap {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 0 var(--sp-5) var(--sp-16);
+        display: grid;
+        gap: var(--sp-5);
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+        align-items: start;
+      }
+      .wrap > div {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-5);
+        min-width: 0;
+      }
+      .prompt {
+        padding: 0;
+        gap: 0;
+        overflow: hidden;
+      }
+      .prompt > header {
+        padding: 10px 10px 10px var(--sp-4);
+        border-bottom: 1px solid var(--line);
+      }
+      .prompt pre {
+        padding: var(--sp-4);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-size: 13.5px;
+        line-height: 1.7;
+      }
+      .prompt footer {
+        padding: 10px var(--sp-4);
+        border-top: 1px solid var(--line);
+        background: var(--surface-2);
+      }
+      .howto {
+        counter-reset: n;
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-4);
+      }
+      .howto li {
+        counter-increment: n;
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr);
+        gap: var(--sp-3);
+      }
+      .howto li::before {
+        content: counter(n);
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 1px solid var(--line-strong);
+        font: 500 13px var(--font-mono);
+        color: var(--text-2);
+      }
+      .howto b {
+        display: block;
+      }
+      .howto span {
+        color: var(--text-2);
+        font-size: var(--fs-sm);
+      }
+      .link-steps li {
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr);
+        gap: var(--sp-2);
+        padding: 10px 0;
+        font-size: var(--fs-sm);
+      }
+      .link-steps li + li {
+        border-top: 1px solid var(--line);
+      }
+      .link-steps b {
+        display: block;
+        font-size: 14px;
+      }
+      .link-steps .i {
+        margin-top: 2px;
+      }
+      .link-steps .todo {
+        color: var(--text-3);
+      }
+      .spin {
+        width: 16px;
+        height: 16px;
+        margin: 3px 1px;
+        border-radius: 50%;
+        border: 2px solid var(--surface-3);
+        border-top-color: var(--sky);
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          rotate: 360deg;
+        }
+      }
+      .acct {
+        display: grid;
+        gap: var(--sp-2);
+      }
+      .acct label {
+        display: flex;
+        gap: var(--sp-3);
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        cursor: pointer;
+        font-size: var(--fs-sm);
+        color: var(--text-2);
+      }
+      .acct label:has(:checked) {
+        border-color: var(--sky);
+        background: var(--sky-soft);
+      }
+      .acct input {
+        margin-top: 4px;
+        accent-color: var(--sky);
+      }
+      .acct b {
+        display: block;
+        color: var(--text);
+        font-size: 14px;
+      }
+      .trust {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--sp-5);
+        padding-top: var(--sp-6);
+        border-top: 1px solid var(--line);
+        font-size: var(--fs-sm);
+        color: var(--text-2);
+      }
+      .trust b {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text);
+        margin-bottom: 2px;
+      }
+      @media (max-width: 860px) {
+        .wrap {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .trust {
+          grid-template-columns: minmax(0, 1fr);
+          gap: var(--sp-4);
+        }
+        .hero {
+          padding-top: var(--sp-8);
+        }
+        .hero p {
+          font-size: var(--fs-md);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#prompt">跳到提示词</a>
+
+    <header class="top">
+      <a class="brand grow" href="index.html"
+        ><svg class="logo-mark"><use href="#logo" /></svg>SoloDawn</a
+      >
+      <button class="icon-btn" data-act="lang" aria-label="Switch language / 切换语言">EN</button>
+      <button
+        class="icon-btn"
+        data-act="theme"
+        aria-label="切换深色 / 浅色"
+        data-en-label="Toggle theme"
+      >
+        <svg class="i"><use href="#i-moon" /></svg>
+      </button>
+      <a class="btn btn-sm only-wide" href="groups.html" data-en="I already have a node"
+        >我已经装过节点</a
+      >
+    </header>
+
+    <main>
+      <section class="hero">
+        <span class="badge" data-en="Step 1 of 2 · Connect a computer"
+          >第 1 步，共 2 步 · 接入一台电脑</span
+        >
+        <h1 data-en="Send one prompt to your AI. It sets up the rest.">
+          把这段话发给你的 AI，剩下的它来做
+        </h1>
+        <p
+          data-en="Each computer runs a small program called a node. Your AI coding assistant installs it, verifies it, and connects it. You only copy and paste."
+        >
+          每台电脑上要装一个叫「节点」的小程序。你的 AI
+          编程助手会自己下载、核对、启动并接入，你只需要复制、粘贴。
+        </p>
+      </section>
+
+      <div class="wrap">
+        <div>
+          <section class="card prompt" aria-labelledby="prompt-h">
+            <header class="row">
+              <h2
+                class="kind grow"
+                id="prompt-h"
+                style="font-size: var(--fs-sm)"
+                data-en="Prompt for your AI"
+              >
+                给 AI 的提示词
+              </h2>
+              <button class="btn btn-dawn" data-act="copy" data-from="#prompt">
+                <svg class="i sm"><use href="#i-copy" /></svg
+                ><span data-en="Copy prompt">复制提示词</span>
+              </button>
+            </header>
+            <pre
+              id="prompt"
+              tabindex="0"
+              data-en="Please connect this computer to SoloDawn.
+
+1. Read https://solodawn.example/install.md and follow it.
+2. Download the node program for this system, and verify its SHA-256 before you run it.
+3. Join with pairing code 7K2M-9QXD, then tell me how it went.
+
+Ask me before you install anything else or change system settings."
+            >
+请帮我把这台电脑接入 SoloDawn。
+
+1. 阅读 https://solodawn.example/install.md，按里面的步骤做。
+2. 下载适合本机系统的节点程序，核对 SHA-256 之后再运行。
+3. 用配对码 7K2M-9QXD 接入，完成后把结果告诉我。
+
+过程中如果要安装别的软件或者改系统设置，先问我。</pre>
+            <footer class="hint">
+              <svg class="i sm"><use href="#i-clock" /></svg
+              ><span data-en="The pairing code expires in 9 min 40 s and works once."
+                >配对码 9 分 40 秒后过期，只能用一次。</span
+              >
+            </footer>
+          </section>
+
+          <ol class="howto" aria-label="步骤">
+            <li>
+              <div>
+                <b data-en="Copy the prompt">复制提示词</b
+                ><span data-en="Use the button above.">点上面的按钮。</span>
+              </div>
+            </li>
+            <li>
+              <div>
+                <b data-en="Paste it to the AI on that computer">发给那台电脑上的 AI</b
+                ><span
+                  data-en="Claude Code, Codex, or any AI coding assistant that can run commands."
+                  >Claude Code、Codex，或者任何能运行命令的 AI 编程助手都行。</span
+                >
+              </div>
+            </li>
+            <li>
+              <div>
+                <b data-en="Your AI installs the node">AI 帮你装好节点</b
+                ><span
+                  data-en="It downloads the node, verifies the checksum, starts it and pairs it. It asks you before installing anything else."
+                  >它会下载节点、核对校验值、启动并配对。要装别的东西之前会先问你。</span
+                >
+              </div>
+            </li>
+            <li>
+              <div>
+                <b data-en="Come back here">回到这个页面</b
+                ><span
+                  data-en="The status on the right updates by itself. Then you can create your first group."
+                  >右边的连接状态会自己更新，接上以后就可以建第一个群。</span
+                >
+              </div>
+            </li>
+          </ol>
+        </div>
+
+        <div>
+          <section class="card" aria-labelledby="st-h">
+            <header class="card-head">
+              <h2
+                class="kind"
+                id="st-h"
+                style="font-size: var(--fs-sm)"
+                data-en="Connection status"
+              >
+                连接状态
+              </h2>
+              <span class="badge" data-tone="sky"
+                ><span class="st" data-st="linking"><i></i></span
+                ><span data-en="Connecting">正在接入</span></span
+              >
+            </header>
+            <ol class="link-steps" role="status" aria-live="polite">
+              <li>
+                <svg class="i" style="color: var(--ok)"><use href="#i-check" /></svg>
+                <div>
+                  <b data-en="Node is running">节点已启动</b
+                  ><span class="muted">Alex的 MacBook · macOS · v0.3.1</span>
+                </div>
+              </li>
+              <li>
+                <svg class="i" style="color: var(--ok)"><use href="#i-check" /></svg>
+                <div>
+                  <b data-en="Identity verified">身份已核对</b
+                  ><span class="muted"
+                    ><span data-en="Fingerprint">指纹</span> <code>3F9A 0C21 77BE</code></span
+                  >
+                </div>
+              </li>
+              <li>
+                <span class="spin" aria-hidden="true"></span>
+                <div>
+                  <b data-en="Opening a direct connection">正在建立直连</b
+                  ><span
+                    class="muted"
+                    data-en="Trying UDP, TCP and IPv6 at once. The first that works wins."
+                    >UDP、TCP、IPv6 同时试，哪条先通用哪条。</span
+                  >
+                </div>
+              </li>
+              <li class="todo">
+                <svg class="i"><use href="#i-plus" /></svg>
+                <div>
+                  <b data-en="Register the AIs on this computer">登记这台电脑上的 AI</b
+                  ><span data-en="Found: Claude Code">已发现：Claude Code</span>
+                </div>
+              </li>
+            </ol>
+            <p class="note">
+              <svg class="i sm"><use href="#i-info" /></svg
+              ><span
+                data-en="If a direct connection fails, a relay takes over (slower, limited data) while the node keeps trying."
+                >直连打不通也能用：先走中继（慢一些、流量有限），后台继续尝试直连。</span
+              >
+            </p>
+          </section>
+
+          <section class="card" aria-labelledby="acct-h">
+            <header class="card-head">
+              <h2
+                class="kind"
+                id="acct-h"
+                style="font-size: var(--fs-sm)"
+                data-en="How does Claude Code sign in?"
+              >
+                Claude Code 用的是哪种账号？
+              </h2>
+            </header>
+            <fieldset class="acct">
+              <legend class="sr">账号类型</legend>
+              <label
+                ><input type="radio" name="acct" checked /><span
+                  ><b data-en="Personal subscription">个人订阅</b
+                  ><span
+                    data-en="It only takes orders from you. Requests from teammates need your tap each time."
+                    >只听你的。同事找它帮忙，每次都要你点确认。</span
+                  ></span
+                ></label
+              >
+              <label
+                ><input type="radio" name="acct" /><span
+                  ><b data-en="Team plan">团队方案</b
+                  ><span data-en="You can let chosen teammates direct it."
+                    >可以授权指定的同事直接指挥。</span
+                  ></span
+                ></label
+              >
+              <label
+                ><input type="radio" name="acct" /><span
+                  ><b>API key</b
+                  ><span data-en="Same as team. Usage is billed to the key's owner."
+                    >同上。费用由 key 的主人承担。</span
+                  ></span
+                ></label
+              >
+            </fieldset>
+            <p
+              class="hint"
+              data-en="Not sure? Ask your AI to check how it is signed in. SoloDawn never reads your credentials."
+            >
+              拿不准？让你的 AI 自查登录方式再告诉你。SoloDawn 不读取任何账号凭证。
+            </p>
+          </section>
+        </div>
+
+        <ul class="trust">
+          <li>
+            <b
+              ><svg class="i sm"><use href="#i-home" /></svg
+              ><span data-en="Your data stays on your computers">数据只在你自己的电脑上</span></b
+            ><span
+              data-en="Chats and tasks live on the computer that hosts the group. Kept 90 days by default."
+              >聊天和任务存在「群的家」那台电脑上，默认保留 90 天。</span
+            >
+          </li>
+          <li>
+            <b
+              ><svg class="i sm"><use href="#i-direct" /></svg
+              ><span data-en="The server only introduces devices">服务器只帮两边找到对方</span></b
+            ><span data-en="It stores nothing. When it relays, it sees only encrypted data."
+              >它不存任何数据；走中继时也只看得到密文。</span
+            >
+          </li>
+          <li>
+            <b
+              ><svg class="i sm"><use href="#i-key" /></svg
+              ><span data-en="Open source, self-hostable">开源，可以自己部署</span></b
+            ><span data-en="Apache-2.0. The whole system works without our server."
+              >Apache-2.0。没有我们的服务器，整套系统照样能用。</span
+            >
+          </li>
+        </ul>
+      </div>
+    </main>
+  </body>
+</html>
