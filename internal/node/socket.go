@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -16,10 +17,7 @@ import (
 // parser from init under its first command-line word.
 var Subcommands = map[string]Subcommand{}
 
-type Subcommand struct {
-	Usage string
-	Run   func(args []string, stdout, stderr io.Writer) int
-}
+type Subcommand func(args []string, stdout, stderr io.Writer) int
 
 // ListenLocal creates the node's private directory and listens on its socket.
 func ListenLocal(dir string) (*net.UnixListener, error) {
@@ -50,49 +48,27 @@ type Command struct {
 	Name   *string `json:"name,omitempty"`
 }
 
-// ReadOpening consumes just the first JSON line. An MCP caller continues
-// reading its stream from the same buffered reader.
-func ReadOpening(r *bufio.Reader) (Command, string, error) {
-	line, err := r.ReadBytes('\n')
-	if err != nil {
-		return Command{}, "", err
-	}
-	var opener struct {
-		Cmd *string `json:"cmd,omitempty"`
-		MCP *string `json:"mcp,omitempty"`
-	}
-	if err := proto.Decode(line, &opener); err != nil {
-		return Command{}, "", err
-	}
-	if (opener.Cmd == nil) == (opener.MCP == nil) {
-		return Command{}, "", errors.New("expected one of cmd or mcp")
-	}
-	if opener.MCP != nil {
-		if *opener.MCP == "" {
-			return Command{}, "", errors.New("empty mcp token")
-		}
-		return Command{}, *opener.MCP, nil
-	}
-	return readCommand(*opener.Cmd, line)
+// Opening selects a command handler or an MCP session. The handler reads
+// its own command arguments from the complete opening line.
+type Opening struct {
+	Cmd string `json:"cmd,omitempty"`
+	MCP string `json:"mcp,omitempty"`
 }
 
-func readCommand(cmd string, line []byte) (Command, string, error) {
-	c := Command{Cmd: cmd}
-	switch cmd {
-	case "pair":
-		var fields struct {
-			Secret string `json:"secret"`
-			Name   string `json:"name"`
-		}
-		if err := proto.Decode(line, &fields); err != nil {
-			return Command{}, "", err
-		}
-		c.Secret, c.Name = fields.Secret, &fields.Name
-	case "status", "open", "pair-browser":
-	default:
-		return Command{}, "", errors.New("unknown local command")
+func ReadOpening(r *bufio.Reader) (Opening, []byte, error) {
+	line, err := r.ReadBytes('\n')
+	if err != nil {
+		return Opening{}, nil, err
 	}
-	return c, "", nil
+	var open Opening
+	if err := proto.Decode(line, &open); err != nil {
+		return Opening{}, nil, err
+	}
+	if (open.Cmd == "") == (open.MCP == "") {
+		return Opening{}, nil, errors.New("expected a command or an MCP token")
+	}
+	// The caller continues the MCP stream from r, including any buffered bytes.
+	return open, line, nil
 }
 
 // Run submits a command to the user's running node.
@@ -114,9 +90,7 @@ func (c Command) send(dir string, stdout io.Writer) error {
 }
 
 // The runtime assembly in node.go supplies the foreground entry point.
-var startNode = func(string, *net.UnixListener) error {
-	return errors.New("node runtime is unavailable")
-}
+var startNode func(string, *net.UnixListener) error
 
 // Foreground gives the node runtime its data directory and local listener.
 func Foreground() error {
@@ -129,6 +103,9 @@ func Foreground() error {
 		return err
 	}
 	defer l.Close()
+	if startNode == nil {
+		return errors.New("node runtime is unavailable")
+	}
 	return startNode(dir, l)
 }
 
@@ -139,43 +116,46 @@ func (c Command) exchange(conn io.ReadWriter, stdout io.Writer) error {
 	return readReplies(bufio.NewReader(conn), stdout)
 }
 
+type localReply struct {
+	Done  bool    `json:"done,omitempty"`
+	OK    bool    `json:"ok,omitempty"`
+	Error *string `json:"error,omitempty"`
+	Text  *string `json:"text,omitempty"`
+}
+
 func readReplies(r *bufio.Reader, stdout io.Writer) error {
 	for {
 		line, err := r.ReadBytes('\n')
 		if err != nil {
 			return err
 		}
-		var reply any
+		var reply localReply
 		if err := proto.Decode(line, &reply); err != nil {
 			return err
 		}
-		object, _ := reply.(map[string]any)
-		if _, terminal := object["done"]; terminal {
-			return completion(line)
+		if reply.Done {
+			return reply.completion()
 		}
-		if _, err := stdout.Write(line); err != nil {
+		if err := reply.print(stdout); err != nil {
 			return err
 		}
 	}
 }
 
-func completion(line []byte) error {
-	var result struct {
-		Done  bool    `json:"done"`
-		OK    bool    `json:"ok,omitempty"`
-		Error *string `json:"error,omitempty"`
+func (r localReply) print(stdout io.Writer) error {
+	if r.Text == nil {
+		return errors.New("expected text in the socket reply")
 	}
-	if err := proto.Decode(line, &result); err != nil {
-		return err
-	}
-	if !result.Done {
-		return errors.New("expected done to be true in the final socket reply")
-	}
-	if result.Error != nil {
-		return errors.New(*result.Error)
-	}
-	if !result.OK {
+	_, err := fmt.Fprintln(stdout, *r.Text)
+	return err
+}
+
+func (r localReply) completion() error {
+	if r.OK == (r.Error != nil) {
 		return errors.New("expected ok or error in the final socket reply")
+	}
+	if r.Error != nil {
+		return errors.New(*r.Error)
 	}
 	return nil
 }

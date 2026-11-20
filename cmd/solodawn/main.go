@@ -4,9 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"maps"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/huanchong-99/SoloDawn/internal/node"
@@ -17,19 +15,19 @@ func main() {
 }
 
 func init() {
-	node.Subcommands["rendezvous"] = node.Subcommand{Usage: "rendezvous [--listen address]", Run: func(args []string, _ io.Writer, stderr io.Writer) int {
+	node.Subcommands["rendezvous"] = func(args []string, _ io.Writer, stderr io.Writer) int {
 		return rendezvous(args, stderr, node.Rendezvous)
-	}}
-	node.Subcommands["pair"] = node.Subcommand{Usage: "pair <secret> [--name <label>]", Run: pair}
-	node.Subcommands["version"] = noArgs("version", func(stdout io.Writer) error {
+	}
+	node.Subcommands["pair"] = pair
+	node.Subcommands["version"] = noArgs(func(stdout io.Writer) error {
 		_, err := fmt.Fprintln(stdout, node.Version)
 		return err
 	})
-	node.Subcommands["node"] = noArgs("node", func(io.Writer) error {
+	node.Subcommands["node"] = noArgs(func(io.Writer) error {
 		return node.Foreground()
 	})
 	for _, cmd := range []string{"status", "pair-browser", "open"} {
-		node.Subcommands[cmd] = noArgs(cmd, node.Command{Cmd: cmd}.Run)
+		node.Subcommands[cmd] = noArgs(node.Command{Cmd: cmd}.Run)
 	}
 }
 
@@ -41,25 +39,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return usage(stderr)
 	}
-	return cmd.Run(args[1:], stdout, stderr)
+	return cmd(args[1:], stdout, stderr)
 }
 
 func usage(stderr io.Writer) int {
-	var forms []string
-	for _, name := range slices.Sorted(maps.Keys(node.Subcommands)) {
-		forms = append(forms, node.Subcommands[name].Usage)
-	}
-	fmt.Fprintln(stderr, "usage: solodawn "+strings.Join(forms, " | "))
+	fmt.Fprintln(stderr, "usage: solodawn <command> [arguments]")
 	return 2
 }
 
-func noArgs(name string, invoke func(io.Writer) error) node.Subcommand {
-	return node.Subcommand{Usage: name, Run: func(args []string, stdout, stderr io.Writer) int {
+func noArgs(invoke func(io.Writer) error) node.Subcommand {
+	return func(args []string, stdout, stderr io.Writer) int {
 		if len(args) != 0 {
 			return usage(stderr)
 		}
 		return result(invoke(stdout), stderr)
-	}}
+	}
 }
 
 func pair(args []string, stdout, stderr io.Writer) int {

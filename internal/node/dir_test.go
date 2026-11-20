@@ -24,11 +24,21 @@ func TestDataDirectory(t *testing.T) {
 		if err != nil || got != want {
 			t.Errorf("dataDir(%q) = %q, %v; want %q", tc.system, got, err, want)
 		}
-		if tc.system == runtime.GOOS {
-			if got, err := DataDir(); err != nil || got != want {
-				t.Errorf("DataDir() = %q, %v; want %q", got, err, want)
-			}
-		}
+
+	}
+}
+
+func TestNativeDataDirectory(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"HOME", "LocalAppData", "XDG_DATA_HOME", "USERPROFILE"} {
+		t.Setenv(name, root)
+	}
+	want, err := dataDir(runtime.GOOS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := DataDir(); got != want || err != nil {
+		t.Errorf("DataDir() = %q, %v; want %q", got, err, want)
 	}
 }
 
