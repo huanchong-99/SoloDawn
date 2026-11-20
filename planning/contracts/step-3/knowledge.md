@@ -151,16 +151,19 @@ Notes of this group:
 - Path events use fields path, rtt_ms, since, limited.
 ```
 
-- When it composes the turn, the host takes the name from the brief row,
-  which it reads for the goal and the criteria, and the text from `fetch`
-  `kind: preset`. So the text is the one of that moment, not of the
-  confirmation: a task that starts weeks later gets the current preset.
+- When it composes the turn, the host reads the brief row, named by the
+  task row's `brief`, with `fetch` `row` (`contracts/datachannel.md`
+  section 4), for the goal, the criteria and the preset's name, and the
+  text with `fetch` `kind: preset`. So the text is the one of that moment,
+  not of the confirmation: a task that starts weeks later gets the current
+  preset.
 - The text is included whole, outside the 8 KiB of the notes.
 - If the preset was forgotten since, the turn has one line in its place
   and the task goes on:
   `Style preset "Calm dashboard": deleted since the brief was proposed.`
-- No other turn carries it: no later turn of the task session, no review
-  turn, no turn of a group session.
+- A review turn of that task carries the name only, one line after the
+  pass score: `Style preset: "Calm dashboard"`. The reviewer reads the text
+  with `note_list` `type: preset`. No other turn carries the preset.
 - The preset is content, like the notes: the node checks nothing against
   it. Its authority is that of the `assign` item it is part of.
 
@@ -263,9 +266,12 @@ enters first turns: wrong, and silent. It answers `bad_request` to `fetch`
 with `kind: preset` or `kb`, and stores a brief with `preset` unchecked. So
 a client offers presets and the knowledge base, and a host lists `kb_put`,
 `kb_search` and the new arguments, only for a group whose home knows
-step 3. How they learn that is open (section 9, question 4).
+step 3: a home that answers `welcome` with `v` 2. Decided: one protocol
+step, `v` 2, covers every addition of steps 2 and 3. A client or host
+sends `hello` with `v` 2 and, answered `version`, again with `v` 1, and
+then offers nothing of steps 2 and 3. P-4 freezes it.
 
-## 9. Verified, not verified, left open
+## 9. Verified, not verified, decided
 
 `[verified]`, by a throwaway Go program against `modernc.org/sqlite`
 v1.46.2, not kept in the repository:
@@ -287,14 +293,7 @@ v1.46.2, not kept in the repository:
 - Search speed, and whether 16 KiB is enough for real presets.
 - Scripts without spaces outside section 6 (Thai, for one): not tried.
 
-Left open, for the coordinator:
-
-1. **How a host reads the brief row.** Step 1 does not say it for the goal
-   and the criteria either: `fetch` has no read by id, and an `assign` item
-   carries the `task` message, not the brief.
-2. **The reviewer.** By D-17 only the `assign` turn carries the preset. A
-   reviewer can read it with `note_list` but is not told its name.
-3. **"Preset choice in the brief card"** (unit U3-1). Here a person changes
-   the preset through `revise` only; the card shows it and offers no choice.
-4. **How a client learns that a home knows step 3**: a new protocol
-   version `v`, or a field of `welcome`.
+Decided by the coordinator on 2026-11-20: the read of one row by id
+(section 4.1, built by HM-3); the preset's name in the review turn;
+changes of preset through `revise` only, so U3-1 is "preset shown in the
+brief card; editor"; protocol step `v` 2 (section 8).
