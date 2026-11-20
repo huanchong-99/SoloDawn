@@ -5,9 +5,9 @@ command line, the local socket, where projects live, which Git commands run,
 the outbound secret check, self-update. How the CLIs are started and what a
 turn looks like is in `contracts/drivers.md`.
 
-Markers: `[verified]` observed in the driver experiments; `[documented]` in
-the vendor's documentation but not run by us; `[unverified]` an assumption
-that a spike must settle (`steps/step-1.md`).
+Markers: `[verified]` observed in the driver experiments or in a spike;
+`[documented]` in the vendor's documentation but not run by us;
+`[unverified]` an assumption that a spike must settle (`steps/step-1.md`).
 
 ## 1. Command line
 
@@ -46,16 +46,28 @@ in the group. `host.join` clones only if the folder does not exist yet.
 
 ## 3. Local socket
 
-A Unix domain socket at `sock`, mode 0600. `[unverified]` Unix sockets
-through Go on the supported Windows versions; spike S-5. One JSON line opens
-a connection:
+A Unix domain socket at `sock`, mode 0600. On Windows, where a mode does not
+limit who connects, the socket has instead a protected DACL with one entry:
+full access for the owner. The test there is that another account cannot
+connect.
+
+`[verified]` in spike S-5, on Windows Server 2022 with Go 1.26: a Go
+listener and a Go client exchange lines over a Unix socket at `sock`; closing
+the listener removes the file and the name can be bound again; `chmod 0600`
+changes neither the DACL nor the reported mode; with the protected DACL set
+on the socket right after binding, the owner connects and another local
+account, not an administrator, is refused with "access denied".
+`[unverified]` the other supported Windows versions.
+
+One JSON line opens a connection:
 
 - `{"mcp":"<session token>"}`: the rest of the connection is the MCP
   JSON-RPC stream of that session. The shim copies its stdin to the socket
   and the socket to its stdout and does nothing else.
 - `{"cmd":"pair","secret":"…","name":"…"}` and the other commands of section
-  1: the node answers with JSON lines, the last one
-  `{"done":true,"ok":true}` or `{"done":true,"error":"…"}`.
+  1: the node answers with JSON lines. Each line that the command prints
+  is one line `{"text":"…"}`; the last line is `{"done":true,"ok":true}` or
+  `{"done":true,"error":"…"}`.
 
 A session token is 16 random bytes created when the node starts a CLI
 process and forgotten when that process exits.
@@ -84,24 +96,25 @@ group has no remote.
 
 | When | Command |
 | --- | --- |
-| first AI of this node joins the group | `git clone <repo> projects/<group>/repo` |
+| first AI of this node joins the group | `git clone <repo> projects/<group>/repo`; when the HEAD of `<repo>` is not `<base>`, `git clone --branch <base> <repo> projects/<group>/repo`, so that the clone's checked-out branch is `<base>` |
 | a group session wakes (with a remote) | `git -C repo fetch origin`, `git -C repo merge --ff-only origin/<base>` |
 | task session created | with a remote `git -C repo fetch origin`; then `git -C repo worktree add ../<wt> -b <br> <base-ref>` |
 | task session created for a task taken over from another AI | with a remote: fetch, then `git -C repo worktree add ../<wt> -b <br> origin/<br>` if that branch exists there, else as for a new task. Without a remote: `git -C repo worktree add ../<wt> <br>` |
-| `push_branch` | `git -C <wt> push origin <br>`; never with a force option |
-| `run_checks` | refused unless `git -C <wt> status --porcelain` is empty. Then each entry of `group.checks`, through the system shell, in the worktree, stopped at `limits.turn_minutes`. The commit recorded is `git -C <wt> rev-parse HEAD` |
+| task session created for a task that returns to a node which still has the local branch `<br>` | with a remote: fetch, `git -C repo worktree add ../<wt> <br>` (the branch is reused, not created), then `git -C <wt> merge --ff-only origin/<br>`. If the branch has diverged, the worktree is removed again and the session fails with the output of Git. Without a remote: as the row above |
+| `push_branch` | `git -C <wt> push origin refs/heads/<br>:refs/heads/<br>`: the full ref on both sides, never a short name; never with a force option |
+| `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Then each entry of `group.checks`, through the system shell, in the worktree, stopped at `limits.turn_minutes`. The commit recorded is `git -C <wt> rev-parse HEAD` |
 | hard check: secrets | the patterns of section 8 over the added lines of `git diff <base-ref>...HEAD` |
-| hard check: tests | fails when the diff changes source files and no test file |
-| `submit_task` | refused unless the tree is clean and HEAD is the checked commit. With a remote: the push above, then `gh pr view <br> --json number,headRefOid`, or if there is none `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
+| hard check: tests | fails when the diff changes source files and no test file; what counts as each is below the table |
+| `submit_task` | refused unless the tree is clean, by the status command of `run_checks`, and HEAD is the checked commit. With a remote: the push above, then `gh pr list --head <br> --base <base> --state open --json number,headRefOid,url,state,baseRefName`. A pull request that is closed (merged included) or whose base is not `<base>` is never reused. If the list is empty: `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
 | hosted checks | every 30 s, one request: `gh pr view <pr> --json headRefOid,statusCheckRollup`. A result is reported only from an answer whose `headRefOid` is the submitted commit `[unverified]` that both fields come back in one answer; else `gh api` for the check runs of that commit |
 | review session created or reused | with a remote `git -C repo fetch origin`; first round `git -C repo worktree add --detach ../review/<num> <commit>`, later `git -C review/<num> checkout --detach <commit>`; then `git diff <base-ref>...<commit>` written to `review/<num>/.solodawn-review.diff` |
 | merge, with a remote | `gh pr merge <pr> --squash --delete-branch --match-head-commit <commit>` `[documented, round 1]` |
 | merge, no remote | only if `git -C repo rev-parse <br>` is `<commit>`: `git -C repo merge --squash <commit>` and a commit on `<base>` whose message names the task and the commit; on failure `git -C repo reset --merge` |
-| node restarts with a merge it took and did not report | no second attempt. It looks: `gh pr view <pr> --json state,mergeCommit`, or without a remote the last commit message on `<base>`. Merged: `task merged`. Not merged: `task conflict` |
+| node restarts with a merge it took and did not report | no second attempt. It looks: `gh pr view <pr> --json state,mergeCommit,headRefOid`, or without a remote the last commit message on `<base>`. Merged, and with a remote `headRefOid` is the reviewed commit: `task merged`. Merged with another head, or not merged: `task conflict` |
 | merge failed, or the head is not the reviewed commit | `task conflict` with the command's output |
-| task given to another AI | with a remote, first `git -C <wt> push origin <br>`; then as the next row |
+| task given to another AI | with a remote, first the push of `push_branch`; then as the next row |
 | task merged, cancelled, or given away | `git -C repo worktree remove ../<wt>`; the reviewer's node removes `review/<num>` |
-| hand-back facts | in the session's folder: `git rev-parse HEAD`, `git status --porcelain`, `git log <start>..HEAD --format='%h %s'`, `git diff --shortstat <start>` |
+| hand-back facts | in the session's folder: `git rev-parse HEAD`, `git status --porcelain --untracked-files=all`, `git log <start>..HEAD --format='%h %s'`, `git diff --shortstat <start>` |
 | statistics | `git diff --shortstat <base-ref>...<commit>` |
 
 - Checks are about a commit, so they need a clean tree: the commit that is
@@ -119,6 +132,21 @@ group has no remote.
   needs another variable sets it inside its own check command; a toolchain
   that needs a prepared environment (a Windows C or C++ build, for
   instance) is initialised by that command too.
+- **Hard check "tests"** uses two fixed lists; there is no setting. A
+  *test file* has a name that contains `_test.`, `.test.` or `.spec.` or
+  starts with `test_`, or lies in a folder named `tests` or `__tests__` at
+  any depth; these are matched with exact case, whatever the extension. A
+  *source file* is any other file whose last extension, in lower case, is
+  one of the list below: the languages whose test files these names cover
+  (Go, JavaScript and TypeScript, Python, PHP, Dart, Elixir).
+
+  ```
+  .cjs .cts .dart .ex .go .js .jsx .mjs .mts .php .py .ts .tsx
+  ```
+
+  A change to a file of any other type does not trigger the check: the
+  check neither fails nor passes because of it. Support for projects with
+  other conventions is a later option.
 - "Fake tests" has no command; it is a veto item in review.
 - Both hard checks always run (R-103). There is no setting to turn one off.
 
@@ -155,6 +183,12 @@ is not applied to what people type.
 - **Source**: the releases of this repository. Each release holds one file
   per target named `solodawn_<version>_<os>_<arch>` (with `.exe` on
   Windows) and one `SHA256SUMS`.
+- **Versions**: a release tag is `vMAJOR.MINOR.PATCH`, three decimal
+  numbers. `<version>` in a file name is the exact tag, `v` included:
+  `solodawn_v1.4.0_linux_amd64`. A release is newer when its three numbers,
+  compared as numbers from left to right, are higher than those of the
+  running binary. Pre-release tags, such as `v1.5.0-rc.1`, are ignored. The
+  release build stamps its tag into the binary as the version.
 - Once a day the node reads the latest release. If it is newer, the node
   downloads the file for its system, compares its SHA-256 with the line in
   `SHA256SUMS`, and replaces its own binary.
