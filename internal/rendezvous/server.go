@@ -56,6 +56,7 @@ type client struct {
 	out    chan []byte
 	id     string
 	watch  []string
+	rooms  map[string]*room // the rooms this connection is in
 	window [120]time.Time
 	next   int
 }
@@ -67,7 +68,7 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(maxBytes)
-	c := &client{conn: conn, out: make(chan []byte, 128)}
+	c := &client{conn: conn, out: make(chan []byte, 128), rooms: make(map[string]*room)}
 	go c.write()
 	defer close(c.out)
 	if !c.authenticate(s.wait) {

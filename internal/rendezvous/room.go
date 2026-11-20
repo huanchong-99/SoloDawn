@@ -20,13 +20,12 @@ func (s *server) roomFrame(c *client, m fields, kind string) bool {
 		return false
 	}
 	if kind == "join" {
-		s.join(c, id)
-		return true
+		return s.join(c, id)
 	}
 	if !m.object("data") {
 		return false
 	}
-	if r := s.rooms[id]; r != nil && r.members[c] {
+	if r := c.rooms[id]; r != nil {
 		r.forward(c, proto.RoomData{RoomID: proto.RoomID{Type: "room", Room: id}, Data: m["data"]})
 	}
 	return true
@@ -40,22 +39,38 @@ func (r *room) forward(sender *client, msg proto.RoomData) {
 	}
 }
 
-func (s *server) join(c *client, id string) {
+// maxRooms is how many rooms one connection may be in at a time.
+const maxRooms = 16
+
+// join reports false for a join of a room beyond maxRooms, which is bad input.
+// A room the connection is already in does not count again.
+func (s *server) join(c *client, id string) bool {
+	if len(c.rooms) == maxRooms && c.rooms[id] == nil {
+		return false
+	}
+	r := s.open(id)
+	if len(r.members) == 2 {
+		return true
+	}
+	r.members[c] = true
+	c.rooms[id] = r
+	if len(r.members) == 2 {
+		for member := range r.members {
+			member.send(proto.RoomID{Type: "joined", Room: id})
+		}
+	}
+	return true
+}
+
+// open returns the room of an id, creating it with its 15 minutes.
+func (s *server) open(id string) *room {
 	r := s.rooms[id]
 	if r == nil {
 		r = &room{members: make(map[*client]bool)}
 		s.rooms[id] = r
 		r.timer = time.AfterFunc(15*time.Minute, func() { s.expire(id, r) })
 	}
-	if len(r.members) == 2 {
-		return
-	}
-	r.members[c] = true
-	if len(r.members) == 2 {
-		for member := range r.members {
-			member.send(proto.RoomID{Type: "joined", Room: id})
-		}
-	}
+	return r
 }
 
 // A timer that fired while its room emptied was too late to stop, and the id
@@ -65,11 +80,15 @@ func (s *server) expire(id string, r *room) {
 	defer s.mu.Unlock()
 	if s.rooms[id] == r {
 		delete(s.rooms, id)
+		for member := range r.members {
+			delete(member.rooms, id)
+		}
 	}
 }
 
+// Each connection knows its rooms, so leaving does not scan every room.
 func (s *server) leaveRooms(c *client) {
-	for id, r := range s.rooms {
+	for id, r := range c.rooms {
 		delete(r.members, c)
 		if len(r.members) == 0 {
 			r.timer.Stop()

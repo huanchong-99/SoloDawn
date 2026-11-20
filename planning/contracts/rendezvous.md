@@ -78,7 +78,9 @@ server -> {"t":"ready","ice":[ … ],"ttl":3600}
 
 The server never reads `env` or `data`. A room id is the 32 lower-case hex
 characters of `contracts/envelope.md` section 6. Rooms disappear when empty
-or after 15 minutes.
+or after 15 minutes. A connection is in at most 16 rooms at a time: a `join`
+of a 17th is bad input and closes it; a room it is already in does not count
+again.
 
 ### 2.3 Signalling payloads (inside `env`)
 
