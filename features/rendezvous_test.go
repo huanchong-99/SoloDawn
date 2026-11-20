@@ -134,6 +134,9 @@ func rendezvousSteps(sc *godog.ScenarioContext, bin string) {
 	sc.Step(`^the `+device+` is told that the room is joined$`, func(name string) error {
 		return w.receiveFrame(name, proto.RoomID{Type: "joined", Room: rvSecret.Room()})
 	})
+	sc.Step(`^the `+device+` is told that the room is full$`, func(name string) error {
+		return w.receiveFrame(name, proto.RoomID{Type: "full", Room: rvSecret.Room()})
+	})
 	sc.Step(`^the `+device+` sends its pair message through the room$`, w.sendPair)
 	sc.Step(`^the `+device+` receives that room message$`, func(name string) error { return w.receive(name, string(w.sent)) })
 

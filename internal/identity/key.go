@@ -109,7 +109,9 @@ func deviceKey(id string) ([]byte, bool) {
 	return pub, ok && len(pub) == ed25519.PublicKeySize && !weak(pub)
 }
 
-func isDevice(id string) bool {
+// IsDevice reports whether a text is a device id (contracts/envelope.md
+// section 2): the canonical base64url spelling of 32 bytes that are no weak key.
+func IsDevice(id string) bool {
 	_, ok := deviceKey(id)
 	return ok
 }

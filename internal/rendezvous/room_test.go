@@ -2,6 +2,7 @@ package rendezvous
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 	"testing/synctest"
@@ -18,6 +19,7 @@ func TestRoomMembership(t *testing.T) {
 	id := identity.NewSecret().Room()
 	join := proto.RoomID{Type: "join", Room: id}
 	joined := proto.RoomID{Type: "joined", Room: id}
+	full := proto.RoomID{Type: "full", Room: id}
 	msg := proto.RoomData{RoomID: proto.RoomID{Type: "room", Room: id}, Data: json.RawMessage(`{"UnKnown":null,"x":9007199254740993}`)}
 	// An ice answer is an ordered barrier for requests on that socket.
 	barrier := func(cn *websocket.Conn) {
@@ -31,7 +33,11 @@ func TestRoomMembership(t *testing.T) {
 	send(t, b, join)
 	expect(t, b, joined)
 	expect(t, a, joined)
+	// A member that joins its full room again is told nothing; a third is.
+	send(t, b, join)
+	barrier(b)
 	send(t, c, join)
+	expect(t, c, full)
 	send(t, c, msg)
 	barrier(c)
 	send(t, a, msg)
@@ -64,6 +70,8 @@ func after(s *server, d time.Duration) map[*client]bool {
 	return nil
 }
 
+func newTestClient() *client { return &client{rooms: make(map[string]*room)} }
+
 func join(s *server, c *client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -73,7 +81,7 @@ func join(s *server, c *client) {
 func TestRoomLifetime(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := server{rooms: make(map[string]*room)}
-		a := &client{}
+		a := newTestClient()
 		join(&s, a)
 		if got := after(&s, 15*time.Minute-time.Nanosecond); !reflect.DeepEqual(got, map[*client]bool{a: true}) {
 			t.Fatalf("room before its 15 minutes: %v", got)
@@ -94,7 +102,7 @@ func TestRoomLifetime(t *testing.T) {
 func TestLateExpiryLeavesANewerRoom(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := server{rooms: make(map[string]*room)}
-		a, b := &client{}, &client{}
+		a, b := newTestClient(), newTestClient()
 		join(&s, a)
 		first := s.rooms["first"]
 		s.leaveRooms(a)
@@ -109,6 +117,49 @@ func TestLateExpiryLeavesANewerRoom(t *testing.T) {
 		}
 		if got := after(&s, time.Nanosecond); got != nil {
 			t.Fatalf("second room after 15 minutes: %v", got)
+		}
+	})
+}
+
+// A connection is in at most 16 rooms; a join of a 17th is bad input. A room
+// it is already in does not count again.
+func TestRoomsPerConnection(t *testing.T) {
+	c := login(t, fixture(t), key(1))
+	for i := range 16 {
+		send(t, c, proto.RoomID{Type: "join", Room: fmt.Sprintf("%032x", i)})
+	}
+	send(t, c, proto.RoomID{Type: "join", Room: fmt.Sprintf("%032x", 0)})
+	send(t, c, proto.RVFrame{Type: "ice"})
+	expect(t, c, proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600})
+	send(t, c, proto.RoomID{Type: "join", Room: fmt.Sprintf("%032x", 16)})
+	closed(t, c)
+}
+
+// A room that expires frees its place among the connection's 16.
+func TestExpiredRoomFreesItsPlace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := server{rooms: make(map[string]*room)}
+		a, b := newTestClient(), newTestClient()
+		joinAll := func(c *client, from, to int) bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			for i := from; i < to; i++ {
+				if !s.join(c, fmt.Sprintf("%032x", i)) {
+					return false
+				}
+			}
+			return true
+		}
+		if !joinAll(a, 0, 16) || !joinAll(b, 15, 16) || joinAll(a, 16, 17) {
+			t.Fatal("the 17th room was not refused")
+		}
+		time.Sleep(15 * time.Minute)
+		synctest.Wait()
+		if len(a.rooms) != 0 || len(b.rooms) != 0 || len(s.rooms) != 0 {
+			t.Fatalf("after expiry: %d, %d rooms of connections, %d of the server", len(a.rooms), len(b.rooms), len(s.rooms))
+		}
+		if !joinAll(a, 16, 32) {
+			t.Fatal("expired rooms still counted")
 		}
 	})
 }
