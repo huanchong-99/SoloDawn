@@ -103,7 +103,7 @@ confirmed, sent back, approved, denied or chose, all of this holds:
 | --- | --- |
 | envelope | `state.act` passes check 1 of `contracts/envelope.md` section 3; its payload is a JSON object in which `t` is `"act"`, `g` is the group and `msg` is the row's `id` |
 | action | `action` goes with `state.status`: `confirm` with `confirmed`, `revise` with `revise`, `approve` with `approved`, `deny` with `denied`, `choose` with `decided` |
-| what the person wrote | `text` equals `state.note` of a `revise`; `arg` equals `state.choice` and `text` equals `state.text` of a `decided` card; each absent on both sides or equal. On a `confirm` card, `arg` of a `confirm` is the digest this browser computes (`contracts/step-2/confirm.md` section 6) |
+| what the person wrote | `text` equals `state.note` of a `revise`; `arg` equals `state.choice` and `text` equals `state.text` of a `decided` card; each absent on both sides or equal. On a `confirm` card, `arg` of a `confirm` is the digest this browser computes (`contracts/step-2/confirm.md` section 6); on a brief, the digest of the brief (`contracts/step-2/authority.md` section 1) |
 | signer | the payload has no `as`; the member row of `state.by` has `kind: human`; the signer is valid in the log of that row's `user` |
 
 A `superseded` brief that still holds an `act` is checked by that `act`'s
@@ -135,9 +135,12 @@ Every other row is checked by section 3. So a message that names a member
 and has no `env` does not pass, nor does a card with `by: "system"`,
 except a `confirm` card with `body.what` `direct` or `ask`: it is judged by
 the request its `re` names, by section 3, and its `act` binds that request
-(`contracts/step-2/confirm.md` section 6; section 11, point 6). An
-`approval` card is presented under the secretary's name (R-42); the check
-is about its `by`, the AI that asked.
+(`contracts/step-2/confirm.md` section 6; section 11, point 6). A request
+that is a `task` message is judged by its `body.start`, a `task start` whose
+`id` is `body.task` and whose `as` is the member in the AI row of 3.3
+(`contracts/step-2/authority.md` section 6); the card shows its title and
+plan. An `approval` card is presented under the secretary's name (R-42);
+the check is about its `by`, the AI that asked.
 
 ## 6. Outcomes and the unverified mark
 
@@ -207,10 +210,10 @@ plan or an API key the owner can list who may direct it (R-53).
 
 ### 8.1 The first device (the limit of D-4)
 
-The rule is in `contracts/step-2/authority.md`: when two entries claim one
-version of a person's log, the one signed by the device that is earlier in
-the log wins on every receiver, and the other entry with everything after
-it is dropped.
+The rule is in `contracts/step-2/authority.md` section 7: when two entries
+claim one version of a person's log, the one signed by the device that is
+earlier in the log wins on every receiver; the other is dropped, with the
+entries after it that no longer fit.
 
 The limit, to be said in these words or plainer ones: **whoever holds the
 oldest device wins, so the first device must be kept safe.** The first
@@ -224,8 +227,9 @@ and no other device can undo it. SoloDawn cannot take a first device back.
 | onboarding, first run (`flows/pairing.md` A, step 10) | the browser writes entry 1 | this browser becomes the person's first device, and the limit above |
 | the device list of "my computers and AIs" | always | devices in the order of the log, oldest first; the first one named as the first device, with the limit |
 | the dialog that revokes a device | this browser is later in the log than the device to revoke | the revoke holds only while that older device signs nothing against it; revoke from an older device where the person has one. For the first device: it cannot be taken back at all |
+| the same dialog | this browser is earlier, and the revoke is written below the end of the log (that section, "Where a revoke is written") | the devices whose entries it drops, each to keep or not; those the revoked device added are not preselected |
 | "add a computer", "add a browser" | always | add one device at a time (`flows/pairing.md` B) |
-| a notice on the device list and in the page | the fork rule dropped entries of the viewer's own log that this browser held | which entries were dropped (device name, added or removed), which device signed the entry that won, and: if that was not the person's own doing, that device is in someone else's hands |
+| a notice on the device list and in the page | the fork rule dropped entries of the viewer's own log that this browser held | which entries were dropped (device name, added or removed), which device signed the entry that won, and: if that was not the person's own doing, that device is in someone else's hands. A device whose `add` was dropped can be added again from here |
 
 The notice stays until the person closes it. A browser whose own `add` was
 dropped is no device of the person any more and behaves as a revoked
@@ -291,10 +295,6 @@ The contract is written on the first answer of each point.
 
 ## 12. Not verified
 
-- `contracts/step-2/authority.md` did not exist yet: 8.1 follows D-4 as
-  the plan states it.
 - The signed fields were taken from `contracts/messages.md`, not compared
   with the golden files or with code.
 - How long the checks of a first read take in each baseline browser.
-- That a first device cannot be taken back follows from D-4 as written,
-  not from test vectors or from every case of `risks.md` K-4.

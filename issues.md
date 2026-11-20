@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · limitation · `tools.json` freezes JSON Schema keywords that the MCP SDK may write otherwise
+
+- Symptom: `internal/proto/testdata/tools.json` (#165, P-2) freezes each tool's `inputSchema` with a fixed set of keywords: `properties` always there, `{}` for a tool without arguments, `required` only when an argument must be given, and `"additionalProperties": false` (`planning/contracts/mcp-tools.md` section 5). The node's MCP server builds its tools with `github.com/modelcontextprotocol/go-sdk` v1.8.0 and `github.com/google/jsonschema-go`, and it is not shown that they write exactly these keywords: for example `properties: {}` for a struct without fields, or a `$schema` or `title` of their own.
+- Cause: the file was written from the contract, before any server code (`internal/proto/tools_test.go`, `toolLists`).
+- Status: open. HS-8 (the tool list test of the MCP server) and I-1 (the full list against `tools.json`) must check it, and normalise what the SDK writes or raise a change of the file.
+
+### 2026-11-20 · limitation · The `post` tool lists `handback` for a whole session, not for a hand-back turn
+
+- Symptom: `tools.json` lists `handback` among the kinds of `post` in every session a takeover can reach (the secretary's, review and task sessions), because a tool list is fixed per session, not per turn. `planning/contracts/mcp-tools.md` section 1 allows it only in a hand-back turn, so a model can call it in any turn of those sessions.
+- Cause: `tools/list` is read once per session (`internal/proto/tools_test.go`, `toolLists`; `planning/contracts/mcp-tools.md` section 5).
+- Status: open. The node refuses `post` with kind `handback` outside a hand-back turn, with `bad_request`: unit HS-9, through `Caller.Turn.Kind`.
+
 ### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
 
 - Symptom: after the sixth failed review a task is `failed` at step `review`. When an admin resumes or reassigns it, the reviewer is asked to review the same commit again, although that commit has just failed.
@@ -175,12 +187,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Effect: none on the protocol; envelopes and challenges have non-empty context prefixes. F-01c asserts WebKit's false result on RFC 8032 test 1 explicitly, separately from the protocol vectors.
 - Status: open, external.
 
-### 2026-11-20 · deviation · Web mock does not answer `host.info` or push `groups`
-
-- Symptom: F-02 in `planning/steps/step-1-frontend.md` asks for a mock that answers `hello`, `sync`, `fetch` and `host.info`; the settled plan (PR #58) adds that it pushes `groups`. `mockCtl` answers `hello`, `sync`, `fetch` and `cmd`, and pushes only `reset` and `rows`. `proto.ts` has no `host.info` type; it has a `Groups` type, written from the contract.
-- Cause: neither frame has a Go type or a wire example yet, and the mock answers from wire examples only (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:94-96`, `web/src/lib/proto.ts:372-377`). Both are frozen by unit P-2 (`planning/contracts/conventions.md` section 5; `planning/steps/parallel-plan-units.md` section 1), which also adds the mock answers for `host.info` and `groups`; B-10 named them before the parallel plan.
-- Status: open. `host.info` was left out by the coordinator's decision of 2026-11-20, until it has an example; the `groups` push was found in the review of PR #61 and not changed there.
-
 ### 2026-11-20 · limitation · Random ids are not checked in rows, most message bodies and the frames that read a group
 
 - Symptom: `contracts/conventions.md` section 2 makes any text that is no random id a wrong type in every field that holds one. `proto.Decode` and `decode` check it for `n` and `g` of a signed payload, which is what the envelope check reads (`contracts/envelope.md` section 3, check 3); for `conn` of a signalling payload, which a node drops otherwise (`internal/peer/signal.go:104-109`) and so does the browser (`web/src/lib/rendezvous.ts:175-180`); and, since unit P-1, for every id in the payload of a home or host command, in the payload of an inbox item, and for `g` of `inbox` and `ack`. Of the bodies a `post` carries, a review's is checked too: its `task` is refused when it is no id, because `ReviewSigned` is a type of P-1. The other bodies are not yet: `brief`, `approval`, `decision` and `call` take any text for the ids they hold (`requester`, `assignee`, `reviewer`, `replaces`, `task`, `ai`, `to`), although the `thread`, `re` and `mentions` around them are checked. Nor is a row (`g` of a row, `thread`, `re`, `task`, `mentions`, `assignee`, a row's own `id`), nor `g` of `sync`, `reset`, `rows` and `fetch`.
@@ -333,6 +339,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: below 768 px an open chat showed no top bar and no bottom navigation, because `web/src/routes/Groups.svelte` hid them with `.app:has(.groups.open)` in its own styles, and it read the group id from the address itself, because `route` carried only the page.
 - Cause: the shell had no place where a page says that it takes the whole screen, and the route table had no parameters.
 - Status: resolved in U-0 (#170): the route `chat` (`#/groups/<g>`) asks the shell for the whole screen on a phone (`full: 'phone'` in `web/src/lib/route.svelte.ts`, drawn by `.app[data-full='phone']` in `web/src/styles/base.css`), and `Groups.svelte` reads `params.g`. The title of the top bar from 768 px is the open entry of 2026-11-21.
+
+### 2026-11-20 · deviation · Web mock does not answer `host.info` or push `groups`
+
+- Symptom: F-02 in `planning/steps/step-1-frontend.md` asks for a mock that answers `hello`, `sync`, `fetch` and `host.info`; the settled plan (PR #58) adds that it pushes `groups`. `mockCtl` answers `hello`, `sync`, `fetch` and `cmd`, and pushes only `reset` and `rows`. `proto.ts` has no `host.info` type; it has a `Groups` type, written from the contract.
+- Cause: neither frame has a Go type or a wire example yet, and the mock answers from wire examples only (`web/src/lib/mock.ts:63-75`, `web/src/lib/proto.ts:94-96`, `web/src/lib/proto.ts:372-377`). Both are frozen by unit P-2 (`planning/contracts/conventions.md` section 5; `planning/steps/parallel-plan-units.md` section 1), which also adds the mock answers for `host.info` and `groups`; B-10 named them before the parallel plan.
+- Status: resolved in #165 (P-2): `host-info-answer.json` and `groups.json` exist with their Go types and schemas; `mockCtl` answers `host.info` and pushes `groups` before it answers a `group create` (`web/src/lib/mock.ts`, `mockCtl`).
 
 ### 2026-11-20 · bug · The local merge ran the project's Git hooks (review M5)
 

@@ -1,0 +1,23 @@
+{
+  "re": 10,
+  "ok": true,
+  "rows": [
+    {
+      "id": 412,
+      "ts": 1763599999000,
+      "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+      "ai": "claude",
+      "what": "approval",
+      "detail": "git push origin other-branch",
+      "by": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+      "result": "approved"
+    },
+    {
+      "id": 411,
+      "ts": 1763599999000,
+      "what": "setting",
+      "detail": "max_open 4",
+      "by": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
+    }
+  ]
+}
