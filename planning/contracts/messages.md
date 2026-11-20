@@ -14,7 +14,7 @@ these shapes.
 | `text` | main, thread | a person, or an AI | `{}` | `null` |
 | `progress` | thread | an AI | `{}` | `null` |
 | `question` | main, thread | an AI | `{}` | `null` |
-| `reply` | thread | an AI (`re` is the call) | `{}` | `null` |
+| `reply` | where its call is: thread, or main | an AI (`re` is the call) | `{}` | `null` |
 | `brief` | main | the secretary | 2.1 | 3.1 |
 | `task` | main | nobody: the home writes it | 2.2 | `null` |
 | `approval` | thread + main | an AI | 2.3 | 3.2 |

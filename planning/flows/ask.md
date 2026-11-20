@@ -13,9 +13,11 @@ home. NA and NB may be the same node; nothing below changes.
 2. NA sends `post` with `kind: call` in the thread of A's current task (the
    main line if A has no task), mentioning B, with `body.depth`. Depth is 1,
    or one more than the depth of the call A is answering in this turn.
-3. H checks depth ≤ `limits.ask_depth` (4) and the round limit of the
-   thread, stores the call with `state.status = waiting`, and queues a
-   `mention` item for B. Everyone watching the thread sees the call.
+3. H checks depth ≤ `limits.ask_depth` (4), counts the call as a round of
+   the thread (`contracts/task-machine.md` row 21), stores the call with
+   `state.status = waiting`, and queues a `mention` item for B, held while
+   the task waits for `rounds` (`contracts/task-machine.md` section 4).
+   Everyone watching the thread sees the call.
 4. NB delivers it to B as a turn, after B's current turn if B is working.
    The turn goes to B's session for that task if B is its assignee or
    reviewer, otherwise to B's group session, which is read only
