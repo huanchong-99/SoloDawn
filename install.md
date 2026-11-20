@@ -4,6 +4,9 @@ From the [SoloDawn releases](https://github.com/huanchong-99/SoloDawn/releases),
 download `SHA256SUMS` and the binary for your computer **from the same release**.
 Save both in an empty directory. Each binary is named
 `solodawn_<version>_<os>_<arch>`, with an extra `.exe` on Windows.
+`<version>` is the full stable release tag, including its leading `v`.
+For example, a Linux x86-64 binary for `v1.10.2` is named
+`solodawn_v1.10.2_linux_amd64`.
 
 | System | `<os>` | `<arch>` |
 | --- | --- | --- |
@@ -51,7 +54,8 @@ by its full path.
 
 ## Pair with the browser
 
-With the verified executable installed, use the pairing secret from the
+Run `solodawn version` and confirm it prints the tag you downloaded.
+Then use the pairing secret from the
 onboarding prompt within its ten-minute window. Replace the placeholders
 with that secret and a label for this computer.
 
