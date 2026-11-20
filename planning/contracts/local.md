@@ -89,7 +89,8 @@ is not signed in, the command fails and its error text is what the AI and
 the owner see (R-137, C-11).
 
 Names used below: `<wt>` is `wt/<num>-<slug>`; `<br>` is
-`task/<num>-<slug>`; `<base>` is the **name** of the base branch (for
+`task/<num>-<slug>`, where `<slug>` is the task row's `slug`;
+`<base>` is the **name** of the base branch (for
 example `main`); `<base-ref>` is what to branch from and diff against:
 `origin/<base>` with a remote, `<base>` without one. Nothing fetches when the
 group has no remote.
@@ -118,6 +119,21 @@ group has no remote.
 | hand-back facts | in the session's folder: `git rev-parse HEAD`, `git status --porcelain --untracked-files=all`, `git log <start>..HEAD --format='%h %s'`, `git diff --shortstat <start>` |
 | statistics | `git diff --shortstat <base-ref>...<commit>` |
 
+- **Slug.** The home writes `slug` into the task row once, when it creates
+  the task, and never changes it, so a later title edit renames no branch.
+  The home is its only producer; hosts read it from the row. From the
+  title: lower-case ASCII letters and digits are kept (upper-case ASCII
+  letters are lowered); every other run of characters becomes one `-`;
+  leading and trailing `-` are trimmed; the result is cut to 40 characters
+  and trimmed of `-` again; if nothing is left, it is `task`. Example:
+  "Node: report connection path changes" gives
+  `node-report-connection-path-changes`.
+- **An interrupted squash merge** (no remote), which a restart leaves
+  staged in `repo` while `<base>` does not yet record the merge, counts as
+  a failed merge. On restart, before anything else touches the clone, the
+  host runs `git -C repo reset --merge` under the same lock as merges; the
+  row on the restart above then reports `task conflict`. HS-7b implements
+  it.
 - Checks are about a commit, so they need a clean tree: the commit that is
   checked is the commit that is submitted, reviewed and merged
   (`contracts/task-machine.md` section 4).
