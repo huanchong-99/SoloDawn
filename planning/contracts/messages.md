@@ -1,0 +1,214 @@
+# Contract: message kinds, bodies and card states
+
+A message is a `msg` row (`contracts/rows.md` section 5). Its `kind` selects
+the shape of `body`, which never changes after creation, and of `state`,
+which is the only part that changes. Presence follows
+`contracts/conventions.md` section 2: every field below is always present
+unless marked optional.
+
+Frozen by B-01 slice (d): typed bodies and states in `internal/proto`, and
+one golden message row per kind, `row-msg-<kind>.json`.
+
+## 1. Kinds
+
+| `kind` | Where | Who writes | `body` | `state` |
+| --- | --- | --- | --- | --- |
+| `text` | main, thread | anyone | `{}` | `null` |
+| `progress` | thread | AI | `{}` | `null` |
+| `question` | main, thread | AI | `{}` | `null` |
+| `reply` | thread | AI (`re` is the call) | `{}` | `null` |
+| `brief` | main | secretary | 2.1 | 3.1 |
+| `task` | main | the home (`by` is `"system"`) | 2.2 | `null` |
+| `approval` | thread + main | the AI's host | 2.3 | 3.2 |
+| `decision` | main, or thread + main | an AI | 2.4 | 3.3 |
+| `summary` | thread + main | secretary, completed by the home | 2.5 | `null` |
+| `call` | thread, or main when the caller has no task | AI | 2.6 | 3.4 |
+| `report` | thread | AI, completed by its host | 2.7 | `null` |
+| `checks` | thread | the home | 2.8 | `null` |
+| `review` | thread | reviewer AI, completed by its host and the home | 2.9 | `null` |
+| `handback` | thread (main for the secretary) | the AI, completed by its host | 2.10 | `null` |
+| `system` | main, thread | the home | 2.11 | `null` |
+
+"Completed by" means the stored row's `body` holds more than the author's
+signed command did. The author's own bytes stay in `env`.
+
+Approval cards are written by the AI's host and presented in the main line
+under the secretary's name with a mention of the approvers (R-42). No AI
+turn is spent on presenting them.
+
+## 2. Bodies
+
+### 2.1 `brief`
+
+```json
+{"title":"Show the connection path; warn when relayed",
+ "goal":"…","criteria":["Indicator follows a path change within 1 s"],
+ "scope":{"in":["node events","web indicator"],"out":["the relay itself"]},
+ "tasks":[{"title":"Node: report path changes","assignee":"<member id>",
+           "reviewer":"<member id>","foundation":false,"depends":[]},
+          {"title":"Web: indicator and notice","assignee":"<member id>",
+           "reviewer":"<member id>","foundation":false,"depends":[0]}],
+ "pass":90,"requester":"<member id>","replaces":null}
+```
+
+| Field | Value |
+| --- | --- |
+| `criteria` | list of strings, at least one |
+| `scope` | `in` and `out`, both lists |
+| `tasks` | at least one entry; every field of an entry is always present |
+| `tasks[].depends` | list of **indexes** into `tasks`, each lower than the entry's own, so a cycle cannot be written |
+| `pass` | pass score of ordinary tasks; foundation tasks use the group's `pass_foundation` |
+| `replaces` | id of the brief this one replaces, or `null` |
+
+Assignee and reviewer are working AIs, not the secretary, and differ.
+Confirming the brief creates exactly these tasks; the task rows then carry
+`depends` as task ids (`contracts/rows.md` section 4).
+
+### 2.2 `task`
+
+`{"task":"<task id>"}`. The card is drawn from the task row.
+
+### 2.3 `approval`
+
+```json
+{"task":"<task id>","ai":"<member id>","tool":"Bash",
+ "command":"pnpm add -D @playwright/test\npnpm exec playwright install chromium",
+ "why":"Criteria 1 and 3 must be timed in a real browser.",
+ "category":"command","approvers":["<user id>"]}
+```
+
+| Field | Value |
+| --- | --- |
+| `command` | the request exactly as the CLI presented it |
+| `why` | optional: the justification the CLI attached |
+| `category` | `command`, `file`, `network`, `other`: the kind of request the CLI made, taken from the type of the request and never from the text of a command (C-10, `risks.md` Q-18). A display hint; it decides nothing |
+| `approvers` | user ids, at least one |
+
+The card's label is `category` plus `why`.
+
+### 2.4 `decision`
+
+```json
+{"task":"<task id>","question":"Where does the relay notice go?",
+ "context":"Both are about the same work.",
+ "options":[{"id":"A","label":"A line under the top bar","effect":"Most visible."},
+            {"id":"B","label":"Only on the indicator","effect":"Quiet; easy to miss."}],
+ "recommended":"B","to":["<user id>"]}
+```
+
+| Field | Value |
+| --- | --- |
+| `task` | optional: the task it is about |
+| `context` | optional |
+| `options` | list, empty when only free text is asked; every field of an option is always present |
+| `recommended` | optional: the `id` of an option |
+| `to` | user ids, at least one |
+
+A decision may be answered with an option, with free text, or both.
+
+### 2.5 `summary`
+
+`{"task":"<task id>","score":94,"rounds":2,"minutes":72,"added":318,"removed":42,"pr":28}`.
+`pr` is optional (absent without a remote). The secretary sends `{}`; the
+home fills every field from the task row.
+
+### 2.6 `call`
+
+`{"to":"<member id>","depth":1,"wait":true}`.
+
+### 2.7 `report`
+
+`{"commit":"9f2c1ab","files":4,"added":212,"removed":18,"pr":31}`. `pr` is
+optional. The AI sends `{}`; its host fills every field at `submit_task`.
+
+### 2.8 `checks`
+
+```json
+{"stage":"local","ok":true,"commit":"9f2c1ab",
+ "items":[{"name":"go test ./...","ok":true,"detail":"42 tests"}]}
+```
+
+`stage` is `local`, `cloud` or `merge`. `items[].detail` is optional. For
+`merge` there is one item, named `merge`, whose `detail` is the output of
+the failed merge.
+
+### 2.9 `review`
+
+```json
+{"task":"<task id>","num":12,"title":"Node: report connection path changes",
+ "commit":"9f2c1ab","round":1,"score":86,"pass":90,"ok":false,
+ "items":[{"text":"No event after switching back to direct","veto":false,
+           "file":"conn/switch.go","line":88}]}
+```
+
+`items[].file` and `items[].line` are optional. A `veto` item forces `score`
+0 (R-101). The reviewer sends `score` and `items`; its host adds `task` and
+`commit`; the home adds `num`, `title`, `round`, `pass` and `ok`, so that a
+ledger entry still reads well after its task row has been removed by
+retention.
+
+### 2.10 `handback`
+
+`{"files":["a.go"],"commits":[{"sha":"9f2c1ab","subject":"…"}],"added":40,"removed":3}`.
+The AI sends `{}`; its host fills every field from Git.
+
+### 2.11 `system`
+
+`{"code":"…", …}`. The client localises the text from `code` and the other
+fields. `turn_interrupted`, `session_replaced`, `login_invalid`,
+`cap_reached` and `rate_limited` are facts a host reported
+(`contracts/commands.md` 1.9); the others are written by the home itself.
+
+| `code` | Always present | Optional |
+| --- | --- | --- |
+| `rounds_limit` | `task`, `n` | — |
+| `turn_interrupted` | `ai`, `reason` (`crash`, `timeout`, `stop`) | `task`, `detail` |
+| `group_paused`, `group_resumed` | `by` | — |
+| `preempted` | `task`, `by` | — |
+| `cap_reached` | `ai`, `cap` (`day`, `task`) | `task` |
+| `rate_limited` | `ai`, `resets` | — |
+| `login_invalid` | `ai` (R-56) | `detail` |
+| `task_failed` | `task`, `reason` (`failures`, `review_rounds`) | — |
+| `task_merged` | `task`, `commit`, `merge_commit`; shown under the secretary's name (R-24) | — |
+| `no_secretary` | — | — |
+| `session_replaced` | `ai` (a new session took over from notes, R-123) | `task` |
+
+`ai` and `by` are member ids.
+
+## 3. Card states
+
+Only four kinds have a `state`; for every other kind it is `null`. `status`
+is always present; every other key is optional and appears as listed. `by`
+is the member id of the person who acted, `at` the time, `act` the signed
+`act` envelope that decided the card.
+
+### 3.1 `brief`
+
+| `status` | Other keys |
+| --- | --- |
+| `pending` | none |
+| `confirmed` | `by`, `at`, `act` |
+| `revise` | `by`, `at`, `act`; `note` when the person wrote one |
+| `superseded` | what the state held before it was replaced |
+
+### 3.2 `approval`
+
+| `status` | Other keys |
+| --- | --- |
+| `pending` | none |
+| `approved`, `denied` | `by`, `at`, `act` |
+| `expired`, `reassigned` | `at` |
+
+### 3.3 `decision`
+
+| `status` | Other keys |
+| --- | --- |
+| `pending` | none |
+| `decided` | `by`, `at`, `act`; `choice` (an option id) and `text`, at least one of the two |
+
+### 3.4 `call`
+
+| `status` | Other keys |
+| --- | --- |
+| `waiting` | none |
+| `answered` | `reply` (id of the reply message), `ms` (elapsed milliseconds) |

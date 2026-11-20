@@ -27,7 +27,10 @@ choosing on the TLS server name. Spike S-6 in `steps/step-1.md`.
 
 WebSocket, text frames, one JSON object per frame, at most 16 KiB per frame.
 The server closes a connection that sends a larger frame or more than 120
-frames in 10 seconds.
+frames in 10 seconds. Field presence follows `contracts/conventions.md`
+section 2: every field shown for a frame is always present. The frames are
+frozen, with golden files, by backend tasks B-06 (`quota` by B-07, the
+`beacon` payload of section 4 by B-09).
 
 ### 2.1 Handshake
 

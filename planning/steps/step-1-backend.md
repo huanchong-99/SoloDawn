@@ -34,7 +34,15 @@ are in `steps/step-1.md`.
   request.
 - Every task ships **one wire example and one observable test**: a golden
   JSON file under `internal/proto/testdata/` for what it puts on the wire,
-  and a test that fails without the task.
+  and a test that fails without the task. Which task freezes which shape
+  is the table in `contracts/conventions.md` section 5; the shape goes in
+  at the start of the pull request.
+- **Presence on the wire** follows `contracts/conventions.md` section 2. In
+  Go a nil slice and a nil `json.RawMessage` encode as `null`: every piece
+  of code that builds a row, a frame, a payload or a body (B-05, B-11,
+  B-12 and every later task that writes one) sets lists to an empty list
+  and objects to an empty object first. A test encodes a zero-valued row
+  of each type and fails on a `null` the contract does not allow.
 - Every pull request states what was **not** verified.
 - If something blocks you, say so at once in the pull request or its
   description. Do not work around a blocker silently.
@@ -49,7 +57,7 @@ are in `steps/step-1.md`.
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-00 | Scaffold: Go module; the layout of `architecture.md` section 8 with `cmd/solodawn` parsing arguments only and `internal/node` as the assembly package; a test that fails on an import outside the table of 8.2; `go vet` and tests in CI; cross-compile job for six targets with cgo off; Apache-2.0 licence file | — | CI green on an empty `solodawn version` |
-| B-01 | `internal/proto`, **frozen in three slices**, each with its golden files: (a) envelope, signalling payloads, `pair`, device-log entries, `hello`, `welcome`, `devlog`; (b) `sync`, `reset`, `rows`, `fetch`, `cmd` and its answers, every row type; (c) one confirmed task from brief to merge as a complete signed vector, with and without a remote, as `flows/trace-task.md` describes it: nothing abridged, every response with its request id | B-00 | round-trip tests pass; a test fails if a struct and its golden file disagree. Slice (a) before B-06, (b) before B-11, (c) before B-19 and only after the plan's round 3 |
+| B-01 | `internal/proto`, **frozen in slices**, each with its golden files: (a) envelope, the signalling payloads `offer`, `answer`, `ice`, `pair`, device-log entries, `hello`, `welcome`, `devlog` (done); (b) `sync`, `reset`, `rows`, `fetch`, `cmd` and its answers, every row type (done; one follow-up: `note` rows gain `pos`, `contracts/rows.md` section 6); (d) every message body and card state of `contracts/messages.md` as typed structs, with one golden `row-msg-<kind>.json` per kind and two `system` codes; (c) one confirmed task from brief to merge as a complete signed vector, with and without a remote, as `flows/trace-task.md` describes it: nothing abridged, every response with its request id | B-00 | round-trip tests pass; a test fails if a struct and its golden file disagree. Slice (a) before B-06, (b) before B-11, (d) before B-12 and as early as possible because the frontend's cards are built from it, (c) before B-19 |
 | B-02 | `internal/identity`: key creation and loading, envelope sign and verify, device-log apply and replay, fingerprint, the canonical bytes of the pairing secret, `mac` and room id; `testdata/crypto.json` with fixed vectors for the frontend | B-01a | unit tests cover every rule of `contracts/envelope.md` sections 3, 4, 6 |
 | B-03 | Spikes S-1, S-6, S-8, S-9 | B-00 | answers written in the pull request, which is not merged |
 | B-04 | Spikes S-2, S-3, S-4 on macOS; S-5 on Windows | B-00 | answers written in the pull request, which is not merged; the messages the real CLIs sent are kept as files for B-13 |
@@ -63,17 +71,17 @@ and B-11, and S-2, S-3, S-5 before B-13.
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
-| B-06 | `internal/rendezvous`, signalling: handshake, `to`/`from`, `watch`, rooms; static file handler; `solodawn rendezvous` | B-02, B-03 | A1.5 against a local instance |
-| B-07 | `internal/rendezvous`, relay: STUN and TURN, credentials, the daily byte quota counted on relayed data, `quota`; TLS by flags | B-06 | A1.7 |
+| B-06 | `internal/rendezvous`, signalling: first the WebSocket frames as structs in `internal/proto` with golden files (`challenge`, `auth`, `ready`, `ice` request and answer, `to`, `from`, `offline`, `watch`, `presence`, `join`, `joined`, `room`); then handshake, `to`/`from`, `watch`, rooms; static file handler; `solodawn rendezvous` | B-02, B-03 | A1.5 against a local instance |
+| B-07 | `internal/rendezvous`, relay: STUN and TURN, credentials, the daily byte quota counted on relayed data, `quota` (frame and golden file); TLS by flags | B-06 | A1.7 |
 | B-08 | `internal/peer`, connections: signalling client with fan-out of every payload over every path; pion setup per `contracts/rendezvous.md` section 5; acceptance hook; `ctl` framing with requests, responses and pushes; one inbound connection per client device; path classification from the selected pair; reconnect | B-06 | A1.3 up to "the path is `relay`" |
-| B-09 | `internal/peer`, paths: the relay-free probe and the move as a reconnect (or renomination, if S-1 says so); local-network beacon; remembered addresses; port mapping | B-07, B-08 | A1.3, A1.4 |
-| B-10 | `internal/node`, the assembly package: start-up and wiring; local socket; pairing with the bootstrap rule; `devlog` in both directions and forwarding; `hello`/`welcome`, `groups`; routing of `ctl` messages to the home and host surfaces; receipts for host commands; the node-level part of the host surface (`settings.set`, `pair.browser`, `host.info`). `cmd/solodawn`: `node`, `pair`, `pair-browser`, `open`, `status` as argument parsing | B-05, B-08 | A1.1, A1.2, A1.6, A1.8, A1.9 |
+| B-09 | `internal/peer`, paths: the relay-free probe and the move as a reconnect (or renomination, if S-1 says so); local-network beacon (payload and golden file); remembered addresses; port mapping | B-07, B-08 | A1.3, A1.4 |
+| B-10 | `internal/node`, the assembly package: start-up and wiring; local socket; pairing with the bootstrap rule; `devlog` in both directions and forwarding; `hello`/`welcome`, `groups` (frame and golden file, `host.info` likewise); routing of `ctl` messages to the home and host surfaces; receipts for host commands; the node-level part of the host surface (`settings.set`, `pair.browser`, `host.info`). `cmd/solodawn`: `node`, `pair`, `pair-browser`, `open`, `status` as argument parsing | B-05, B-08 | A1.1, A1.2, A1.6, A1.8, A1.9 |
 
 ### M2 home
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
-| B-11 | `internal/home`, reads: in-memory state per group with write-through; `sync` with the cut, `reset`, delta or cold content, pending cards; live pushes, `state_only`; `fetch` by `pos` and by `kind`, bounded by bytes; retention | B-10 | A2.2, A2.5, A2.6 |
+| B-11 | `internal/home`, reads: in-memory state per group with write-through; `sync` with the cut, `reset`, delta or cold content, pending cards; live pushes, `state_only`; `fetch` by `pos` and by `kind`, with `before: 0` for the newest page, bounded by bytes; retention | B-10 | A2.2, A2.5, A2.6 |
 | B-12 | `internal/home`, first mutations: `group`, `member` (with unique names and the secretary rules), `post` kind `text`, `note`, `forget` with `gone` markers; the principal checks of `contracts/commands.md`; receipts | B-11, B-09 | A2.1, A2.3, A2.4, A2.7 |
 
 ### M3 sessions

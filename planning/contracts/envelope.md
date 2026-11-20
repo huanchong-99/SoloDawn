@@ -169,8 +169,8 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   verify a human identity.
 - When the newcomer has been enrolled, the client side sends `hello` again
   and reads `owner: true` from the new `welcome`.
-- `internal/proto/testdata/crypto.json` holds a fixed secret with its room
-  id and both `mac` values, for the Go and the browser implementation.
+- The shared test vectors of section 8 pin the secret bytes, the room id
+  and both `mac` values.
 
 The code has 16 characters by decision (R-152, `risks.md` Q-2). Eight would
 need a password-authenticated key exchange, which is not added. Any text
@@ -182,3 +182,34 @@ that still shows an 8-character sample is out of date.
   signalling carries nothing secret.
 - No certificate authority, no accounts, no server-side identity.
 - No canonical JSON, no key rotation, no multi-signature.
+
+## 8. Shared test vectors
+
+`internal/proto/testdata/crypto.json`, produced by backend task B-02 and
+read by the Go tests and by the web client's tests. Both must pass every
+case. Its shape:
+
+```json
+{"keys":[{"name":"browser","seed":"<32 bytes>","device":"<device id>",
+          "fingerprint":"3F9A 0C21 77BE"}],
+ "envelopes":[{"name":"valid","p":"{\"t\":\"post\",…}","k":"<device id>",
+               "s":"<signature>","ok":true}],
+ "rendezvous":[{"nonce":"q0J…","k":"<device id>","s":"<signature>"}],
+ "pairing":[{"shown":"7K2M-9QXD-4F8T-WB3N","secret":"7K2M9QXD4F8TWB3N",
+             "room":"<32 hex digits>",
+             "a":{"device":"<device id>","mac":"<mac>"},
+             "b":{"device":"<device id>","mac":"<mac>"}}],
+ "devlogs":[{"name":"add, then revoke","user":"<user id>",
+             "entries":[{"env":{"p":"…","k":"…","s":"…"},"accept":true}],
+             "valid":["<device id>"]}]}
+```
+
+| Part | Meaning | Cases it must hold |
+| --- | --- | --- |
+| `keys` | `seed` is the 32-byte Ed25519 seed; `device` and `fingerprint` follow from it (section 2) | at least two keys |
+| `envelopes` | verifying `s` for `k` over `"solodawn/1\n"` + `p` gives `ok` | a valid one; the same with one byte of `p` changed; one signed by another key; one whose `p` holds non-ASCII text and escaped characters, to pin "the exact bytes" |
+| `rendezvous` | `s` is the signature over `"solodawn/rv/1\n"` + `nonce` (`contracts/rendezvous.md` 2.1) | one |
+| `pairing` | `shown` is the code as displayed, `secret` its canonical bytes as text; `room` and both `mac` values follow (section 6) | one |
+| `devlogs` | the entries are applied in order to an empty log of `user`; `accept` is what section 4 requires for each; `valid` is the set of valid devices afterwards, sorted | genesis and an add; an add by a device that is not in the log; a revoke; an add signed by a revoked device; a second add of a revoked key; a gap in `ver`; a second, different entry for a version already accepted; a first entry whose `dev` is not its signer |
+
+Every field is always present (`contracts/conventions.md` section 2).

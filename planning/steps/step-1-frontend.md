@@ -15,6 +15,11 @@ design notes. Milestones and acceptance tests are in `steps/step-1.md`.
 - Types come from the contracts. `web/src/lib/proto.ts` mirrors
   `internal/proto`; a test parses every golden file in
   `internal/proto/testdata/` and fails on an unknown or missing field.
+  Which fields are always there and which may be left out is
+  `contracts/conventions.md` section 2, with the optional fields listed in
+  `contracts/rows.md` and `contracts/messages.md`. A shape that has no
+  golden file yet (`conventions.md` section 5 says which task adds it) is
+  typed from the example and field table in its contract.
 - Validate only at boundaries: messages from a data channel or WebSocket,
   and what a person types. Components trust their props.
 - Least code. Svelte 5 runes for state; no state library; no component
@@ -48,7 +53,7 @@ web/src/components/…        cards, thread, member card, indicator, base parts
 | --- | --- | --- | --- |
 | F-00 | Scaffold: Vite, Svelte 5, TypeScript, with the build written to `internal/node/webdist/` (ignored by Git) and no Go file under `web/`; design tokens and base styles from the mock-ups; theme switch; Chinese and English message files; application shell (navigation, top bar, bottom bar on phones); hash routing for static hosting; web manifest; an upgrade notice shown instead of the application when the browser lacks Ed25519 in WebCrypto (C-9) | — | the shell renders at 375, 820, 1100, 1440 px in both themes and both languages |
 | F-01 | Spike S-7 (the exact minimum browser versions) and `identity.ts`, with WebCrypto only and no signature library: device key kept in IndexedDB; envelope sign and verify; device-log replay; fingerprint; pairing `mac` and room id | — | S-7 answered for the three baseline browsers; `identity.ts` passes the vectors of `testdata/crypto.json` (after B-02) |
-| F-02 | `proto.ts` and the golden-file test; `mock.ts`, a transport that answers `hello`, `sync`, `fetch`, `host.info` from golden files and accepts commands | B-01 | every golden file parses; components can be developed with no node |
+| F-02 | `proto.ts` and the strict golden-file test (presence by `contracts/conventions.md` section 2; an error answer is told by `err` and has no `t`); `mock.ts`, a transport that answers `hello`, `sync`, `fetch` (`before: 0` for the newest page), `host.info` from golden files, pushes `groups`, and accepts commands | B-01 | every golden file parses; components can be developed with no node |
 | F-03 | `rendezvous.ts` and `peer.ts`: handshake, signed offer and candidates on every signalling path, `ctl` requests and pushes, path classification from the browser's own connection statistics, reconnect with back-off, the relay-free probe and the move as a reconnect (close the old connection, `sync` from the last row applied), sending unanswered commands again | F-01, B-06, B-08, B-09 | A1.3 from the browser side |
 | F-04 | Onboarding page: prompt with the 16-character pairing secret in four groups (the mock-up's 8-character sample is out of date) and countdown, live pairing steps (the second `hello` once enrolled), fingerprint, account type per found CLI | F-03, B-10 | A1.1 |
 | F-05 | Connection indicator in the top bar with its four states; "my computers and AIs" page, part 1: computers, path, version, add a computer, add a browser, revoke a device | F-03, B-10 | A1.2, A1.6 |

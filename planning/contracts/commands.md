@@ -34,7 +34,16 @@ answered `ok` with the original link while that link is still valid, or
 `conflict`. A repeat never creates a new link or a new terminal.
 
 **Results.** Effects are read from rows. A few commands also answer with
-named fields, listed in the tables as "Result".
+named fields, listed in the tables as "Result"; an answer has only the
+result fields of its command.
+
+**Presence** follows `contracts/conventions.md` section 2. The fields a
+table lists for a command are all in its payload, except: where the table
+says "any of", only the ones being changed are sent; `as` is there only
+when a host signs for an AI; in `act`, `arg` and `text` are optional; in
+`task assign`, `assignee` and `reviewer` are each optional (at least one).
+A `post` always carries `kind`, `text`, `thread` (or `null`), `main`,
+`mentions`, `re` (or `null`) and `body` (`{}` for a kind without one).
 
 ## 1. Home commands
 

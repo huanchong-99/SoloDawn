@@ -9,10 +9,15 @@ Every row has:
 | `r` | row type: `group`, `member`, `device`, `task`, `msg`, `note` |
 | `id` | unique within its type and group |
 | `seq` | group sequence number at the row's last change |
-| `gone` | present and `true` only on a row that was removed on purpose; it then carries nothing else but `r`, `id`, `seq`. A client keeps it as a marker and shows nothing for it (`flows/sync.md` G) |
+| `gone` | optional: `true` on the marker of a row that was removed on purpose. A marker has `r`, `id`, `seq`, `gone` and nothing else. A client keeps it and shows nothing for it (`flows/sync.md` G) |
 
-Optional fields are omitted when empty. Ids of members, tasks and messages
-are random ids unless stated.
+**Presence** follows `contracts/conventions.md` section 2. Every field shown
+below is in every row of its type; an empty list is `[]`, an empty object
+`{}`, and a value marked "or `null`" is `null` when there is none. Only the
+fields listed as **optional** under each row type may be left out, and when
+they are there they are never `null`.
+
+Ids of members, tasks and messages are random ids unless stated.
 
 ## 1. `group`
 
@@ -32,7 +37,10 @@ are random ids unless stated.
 | `kind` | `project`; `team` from step 2 (no repository, no tasks) |
 | `forge` | `github` (through the `gh` CLI) or `none` (single machine, no remote) |
 | `checks` | the project's own check commands, run in the task worktree (R-103) |
-| `paused` | `null`, or `{"by":"<member id>","at":<time>}` after an emergency stop |
+| `paused` | `{"by":"<member id>","at":<time>}` after an emergency stop, or `null` |
+
+Optional: `secretary` (absent while the group has none); `repo` (absent only
+for a group without a repository, step 2).
 
 ## 2. `member`
 
@@ -64,7 +72,11 @@ AI:
 | `approvers` | user ids that may decide its approvals: the owner, plus delegates |
 | `state` | `working`, `waiting`, `dormant`, `takeover`, `paused`, `limited`, `offline` |
 | `path` | path between the AI's host and the home: `local` (same node), `lan`, `direct`, `relay` |
-| `usage` | whatever the CLI reports; every key optional: `window_pct`, `window_resets`, `day_cap_pct`, `spend_today`, `spend_cap`, `turns_today` |
+| `usage` | what the CLI reports. Always an object; `{}` when nothing was reported |
+
+Optional, AI only: `task` (absent when its state names no task); every key
+of `usage`: `window_pct`, `window_resets`, `day_cap_pct`, `spend_today`,
+`spend_cap`, `turns_today`. A person's row has no optional field.
 
 `state` and `task` describe the AI in this group as a whole. The host
 derives them from the AI's sessions: the session that is running a turn or
@@ -83,6 +95,9 @@ One row per accepted device-log entry of a person in the group.
  "op":"add","dev":"<device id>","kind":"node","name":"workstation",
  "env":{"p":"…","k":"…","s":"…"}}
 ```
+
+Optional: `kind` and `name`, which an `add` entry has and a `revoke` entry
+does not.
 
 ## 4. `task`
 
@@ -110,11 +125,27 @@ One row per accepted device-log entry of a person in the group.
 | `origin` | `brief` (from a confirmed brief), `direct` (R-71), `takeover` (R-83) |
 | `state` | `queued`, `active`, `paused`, `failed`, `merged`, `cancelled` |
 | `step` | `branch`, `local_check`, `cloud_check`, `review`, `merge`. The card draws six positions; "pull request" is done when `pr` is set (`contracts/task-machine.md` section 1) |
-| `commit` | the submitted commit: what hosted checks, the review and the merge are about |
-| `wait` | `null`, or `{"kind":…,"msg":"<msg id>","who":["<user id>"],"since":<time>}`: the latest reason the task is not moving |
+| `depends` | list of **task ids**: the tasks that must be merged before this one starts. (In a brief the same relation is written as indexes; the home turns them into ids when it creates the tasks.) |
+| `checks` | always an object; `{}` before the first check |
+| `wait` | `{"kind":…,"msg":"<msg id>","who":["<user id>"],"since":<time>}`, the latest reason the task is not moving, or `null` |
 | `wait.kind` | while `queued`: `depends`; while `active`: `approval`, `decision`, `reviewer`, `conflict`; while `paused`: `manual`, `rounds`, `preempted` |
 | `failures` | consecutive failures (R-63) |
 | `thread.rounds` | AI-to-AI exchanges since the last human message in the thread (R-60) |
+| `stats.ended` | the time the task finished, or `null` |
+
+Optional:
+
+| Field | Present |
+| --- | --- |
+| `brief` | when `origin` is `brief` |
+| `commit` | from the first submission: what hosted checks, the review and the merge are about |
+| `reviewer` | once one is named |
+| `branch` | once the branch exists |
+| `pr`, `pr_url` | after a submission, when the group has a remote |
+| `review` | after the first review |
+| `checks.local`, `checks.cloud` | after that check has run |
+| `thread.last` | when the thread has a message |
+| `wait.msg`, `wait.who` | when the wait is about a card, and about people |
 
 What the mock-up badges map to:
 
@@ -145,132 +176,32 @@ What the mock-up badges map to:
 | `thread` | task id, or `null` for a main-line message |
 | `main` | `true` if it also appears in the main line (cards raised from a thread) |
 | `by` | member id, or `"system"` for rows written by the home |
-| `text` | at most 16 KiB of UTF-8; plain text with Markdown code spans |
+| `text` | at most 16 KiB of UTF-8; plain text with Markdown code spans; `""` when the message is only a card |
 | `mentions` | member ids |
-| `re` | the message this one answers |
-| `body` | fixed after creation; shape depends on `kind` |
-| `state` | the only mutable part; changed by `act` commands and by the home. A decided card keeps the signed `act` that decided it in `state.act` |
-| `env` | the author's envelope; absent on `system` rows |
+| `re` | the message this one answers, or `null` |
+| `body` | always an object, fixed after creation; its shape depends on `kind`, and it is `{}` for kinds without one |
+| `state` | the only mutable part, changed by `act` commands and by the home; `null` for a message that is not a card. A decided card keeps the signed `act` that decided it in `state.act` |
+| `env` | the author's envelope |
 
-### Kinds
+Optional: `env`, absent on rows written by the home.
 
-| `kind` | Where | Who writes | `body` | `state` |
-| --- | --- | --- | --- | --- |
-| `text` | main, thread | anyone | — | — |
-| `brief` | main | secretary | brief body | `{status, by, at, note}`; status `pending`, `confirmed`, `revise`, `superseded` |
-| `task` | main | system | `{"task":"<task id>"}` (the card is drawn from the task row) | — |
-| `approval` | thread + main | the AI's host | approval body | `{status, by, at}`; status `pending`, `approved`, `denied`, `expired`, `reassigned` |
-| `decision` | main, or thread + main | an AI | decision body | `{status, choice, text, by, at}`; status `pending`, `decided` |
-| `summary` | thread + main | secretary | summary body, completed by the home | — |
-| `progress` | thread | AI | — | — |
-| `question` | main, thread | AI | — | — |
-| `call` | thread, or main when the caller has no task | AI | `{"to":"<member id>","depth":1,"wait":true}` | `{status, reply, ms}`; status `waiting`, `answered` |
-| `reply` | thread | AI | — (`re` is the call) | — |
-| `report` | thread | AI | `{"pr":31,"files":4,"added":212,"removed":18}` | — |
-| `checks` | thread | system | `{"stage":"local","ok":true,"items":[{"name":"go test ./...","ok":true,"detail":"42 tests"}]}`; `stage` is `local`, `cloud` or `merge` | — |
-| `review` | thread | reviewer AI | review body | — |
-| `handback` | thread (main for the secretary) | the AI, with facts its host adds to `body` | `{"files":["a.go"],"commits":[{"sha":"9f2c1ab","subject":"…"}],"added":40,"removed":3}` | — |
-| `system` | main, thread | system | `{"code":"…", …}` | — |
-
-Approval cards are written by the AI's host and presented in the main line
-under the secretary's name with a mention of the approvers (R-42). No AI
-turn is spent on presenting them.
-
-### Bodies
-
-Brief:
-
-```json
-{"title":"Show the connection path; warn when relayed",
- "goal":"…","criteria":["Indicator follows a path change within 1 s","…"],
- "scope":{"in":["node events","web indicator"],"out":["the relay itself"]},
- "tasks":[{"title":"Node: report path changes","assignee":"<member id>",
-           "reviewer":"<member id>","foundation":false,"depends":[]},
-          {"title":"Web: indicator and notice","assignee":"<member id>",
-           "reviewer":"<member id>","foundation":false,"depends":[]}],
- "pass":90,"requester":"<member id>","replaces":null}
-```
-
-`depends` holds indexes into `tasks`, each lower than the entry's own, so a
-cycle cannot be written. Assignee and reviewer are working AIs, not the
-secretary, and differ. Confirming the brief creates exactly these tasks.
-
-Approval:
-
-```json
-{"task":"t13…","ai":"<member id>","tool":"Bash",
- "command":"pnpm add -D @playwright/test\npnpm exec playwright install chromium",
- "why":"Criteria 1 and 3 must be timed in a real browser.",
- "category":"command","approvers":["<user id>"]}
-```
-
-`command` is the request exactly as the CLI presented it. `why` is the
-justification the CLI attached, if any. `category` is the kind of request
-the CLI made (`command`, `file`, `network`, `other`), taken from the type of
-the request and never from the text of a command (C-10, `risks.md` Q-18).
-It is a display hint and decides nothing. The card's label is this kind
-plus `why`.
-
-Decision:
-
-```json
-{"task":"t13…","question":"Where does the relay notice go?",
- "context":"Both are about the same work.",
- "options":[{"id":"A","label":"A line under the top bar","effect":"Most visible; always shown while relayed."},
-            {"id":"B","label":"Only on the indicator","effect":"Quiet; easy to miss."}],
- "recommended":"B","to":["<user id>"]}
-```
-
-A decision may be answered with an option, with free text, or both.
-
-Review:
-
-```json
-{"task":"t12…","num":12,"title":"Node: report connection path changes",
- "commit":"9f2c1ab","round":1,"score":86,"pass":90,"ok":false,
- "items":[{"text":"No event after switching back to direct","file":"conn/switch.go","line":88,"veto":false}]}
-```
-
-A `veto` item forces `score` 0 (R-101). The home adds `num` and `title`, so
-that a ledger entry still reads well after its task row has been removed by
-retention.
-
-Summary:
-
-```json
-{"task":"t9…","score":94,"rounds":2,"minutes":72,"added":318,"removed":42,"pr":28}
-```
-
-System codes (the client localises them). `turn_interrupted`,
-`session_replaced`, `login_invalid`, `cap_reached` and `rate_limited` are
-facts a host reported (`contracts/commands.md` 1.9); the others are written
-by the home itself:
-
-| `code` | Other fields |
-| --- | --- |
-| `rounds_limit` | `task`, `n` |
-| `turn_interrupted` | `ai`, `task`, `reason` (`crash`, `timeout`, `stop`), `detail` |
-| `group_paused`, `group_resumed` | `by` |
-| `preempted` | `task`, `by` |
-| `cap_reached` | `ai`, `cap` (`day`, `task`), `task` |
-| `rate_limited` | `ai`, `resets` |
-| `login_invalid` | `ai` (R-56) |
-| `task_failed` | `task`, `reason` |
-| `task_merged` | `task`, `commit`, `merge_commit`; shown under the secretary's name (R-24) |
-| `no_secretary` | — |
-| `session_replaced` | `ai` (a new session took over from notes, R-123) |
+The kinds, the body of each, and the states of cards are in
+`contracts/messages.md`.
 
 ## 6. `note`
 
 ```json
-{"r":"note","id":"n4…","seq":640,"g":"Qm1…","task":null,
+{"r":"note","id":"n4…","seq":640,"pos":640,"g":"Qm1…","task":null,
  "text":"Path events use fields path, rtt_ms, since, limited.",
  "by":"<member id>","ts":1763590000000}
 ```
 
+`task` is a task id or `null`. `pos` is the group sequence number when the
+note was created, as on a message: notes are listed and paged in `pos`
+order (`fetch` with `kind: note`). A note has no optional field.
+
 Notes are the group's long-term memory (R-102). They are not part of
 `sync`; a client reads them with `fetch`, and changes are pushed like any
-row. The ledger of scored points
-is the set of `review` messages; it needs no separate row. Notes and
-`review` messages are exempt from retention and stay until a person deletes
-them (`forget` in `contracts/commands.md`).
+row. The ledger of scored points is the set of `review` messages; it needs
+no separate row. Notes and `review` messages are exempt from retention and
+stay until a person deletes them (`forget` in `contracts/commands.md`).

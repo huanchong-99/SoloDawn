@@ -2,7 +2,7 @@
 
 Contracts: `contracts/drivers.md` (how levels map to CLI settings),
 `contracts/commands.md` (`post` kind `approval`, `act`),
-`contracts/rows.md` (approval body), `contracts/storage.md` (`approval`).
+`contracts/messages.md` (approval body), `contracts/storage.md` (`approval`).
 Rules: R-40 to R-43, R-136, R-137, R-139.
 
 Actors: the AI; S, its CLI session; N, its host node; H, the group home;
