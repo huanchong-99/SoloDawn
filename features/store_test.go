@@ -13,6 +13,12 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
+func init() {
+	stepSets["store"] = func(sc *godog.ScenarioContext, _ fixtures) {
+		storeSteps(sc)
+	}
+}
+
 func storeSteps(sc *godog.ScenarioContext) {
 	var s *store.Store
 	var card proto.MsgRow
