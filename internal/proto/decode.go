@@ -68,13 +68,7 @@ func Decode(data []byte, v any) error {
 func exact(value any) any {
 	switch value := value.(type) {
 	case map[string]any:
-		for name, member := range value {
-			if strings.ContainsFunc(name, foldsToLower) {
-				delete(value, name)
-			} else {
-				value[name] = exact(member)
-			}
-		}
+		exactMembers(value)
 	case []any:
 		for i, element := range value {
 			value[i] = exact(element)
@@ -85,6 +79,16 @@ func exact(value any) any {
 		}
 	}
 	return value
+}
+
+func exactMembers(object map[string]any) {
+	for name, member := range object {
+		if strings.ContainsFunc(name, foldsToLower) {
+			delete(object, name)
+		} else {
+			object[name] = exact(member)
+		}
+	}
 }
 
 // foldsToLower reports whether a character is matched to a lower-case ASCII
