@@ -4,13 +4,15 @@ import (
 	"errors"
 	"io/fs"
 	"net"
-	"net/http"
 	"strconv"
 )
 
 // Options names the endpoints of the standalone service, not a node's handler.
+// ACMEDirectory and ACMECA choose the ACME server of the automatic certificates
+// (Let's Encrypt when empty) and the roots its HTTPS is checked against.
 type Options struct {
 	Listen, Domain, TurnDomain, Cert, Key string
+	ACMEDirectory, ACMECA                 string
 	UDPPort                               int
 	QuotaMB                               int64
 	NoRelay                               bool
@@ -69,7 +71,7 @@ func (o Options) Serve(web fs.FS) error {
 // otherwise TLS signalling, STUN and, unless disabled, TURN.
 func (o Options) serve(web fs.FS, l net.Listener) error {
 	if o.Domain == "" {
-		return http.Serve(l, Handler(web))
+		return httpServer(Handler(web)).Serve(l)
 	}
 	return o.serveICE(web, l)
 }
@@ -99,6 +101,6 @@ func (o Options) serveICE(web fs.FS, l net.Listener) error {
 		return err
 	}
 	defer server.Close()
-	go httpsServer(r.handler(web)).Serve(httpEndpoint)
+	go httpServer(r.handler(web)).Serve(httpEndpoint)
 	return port.serve(l)
 }
