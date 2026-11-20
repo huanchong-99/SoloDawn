@@ -100,7 +100,7 @@ func (w *peersWorld) start(routes func(i int) []peer.Route) error {
 		}
 		w.cleanup = append(w.cleanup, func() { socks.Close(); db.Close() })
 		other := exampleKey([]string{"tablet", "node"}[i]).ID()
-		w.nodes[i] = peer.New(w.keys[i], socks, db, func(id string) bool { return id == other }, func(string) []peer.Route { return routes(i) }, func(c *peer.Connection) { w.accepted[i] <- c; w.serve(c, i) })
+		w.nodes[i] = peer.New(w.keys[i], socks, db, func(id string) bool { return id == other }, func(string) []peer.Route { return routes(i) }, func(c *peer.Connection) { w.accepted[i] <- c; w.serve(c, i) }, nil)
 	}
 	return nil
 }

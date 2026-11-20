@@ -108,8 +108,8 @@ func newPair(t *testing.T) *pair {
 	t.Cleanup(func() { dbA.Close() })
 	dbB, err := store.Open(f.path)
 	check(t, err)
-	f.a = New(a, sockets(t), dbA, func(id string) bool { return id == b.ID() }, func(string) []Route { return []Route{f.aMail.route()} }, func(c *Connection) { f.aOpened <- c })
-	f.b = New(b, sockets(t), dbB, func(id string) bool { return id == a.ID() }, func(string) []Route { return []Route{f.bMail.route()} }, func(c *Connection) { f.opened <- c })
+	f.a = New(a, sockets(t), dbA, func(id string) bool { return id == b.ID() }, func(string) []Route { return []Route{f.aMail.route()} }, func(c *Connection) { f.aOpened <- c }, nil)
+	f.b = New(b, sockets(t), dbB, func(id string) bool { return id == a.ID() }, func(string) []Route { return []Route{f.bMail.route()} }, func(c *Connection) { f.opened <- c }, nil)
 	f.a.now = func() time.Time { return time.UnixMilli(f.now.Load()) }
 	f.b.now = f.a.now
 	t.Cleanup(func() { f.b.db.Close() })
@@ -254,7 +254,7 @@ func TestRestartDoesNotForgetFutureOffer(t *testing.T) {
 	db, err := store.Open(f.path)
 	check(t, err)
 	prev := f.b
-	f.b = New(prev.key, sockets(t), db, prev.known, prev.paths, prev.inbound)
+	f.b = New(prev.key, sockets(t), db, prev.known, prev.paths, prev.inbound, prev.channels)
 	f.b.now = prev.now
 	f.now.Add(240000)
 	current := f.open(t, 0)

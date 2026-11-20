@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
+	"io"
 	"strings"
 	"time"
 
@@ -21,19 +21,7 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-type handedChannel struct {
-	conn  *peer.Connection
-	label string
-}
-
-// handedOver receives every channel of the family "test:", registered here
-// from init as a terminal or watch file registers its own.
-var handedOver = make(chan handedChannel, 4)
-
 func init() {
-	peer.Channels["test:"] = func(_ *peer.Peer, c *peer.Connection, dc *webrtc.DataChannel) {
-		handedOver <- handedChannel{c, dc.Label()}
-	}
 	stepSets["peer_dispatch"] = func(sc *godog.ScenarioContext, _ fixtures) { dispatchSteps(sc) }
 }
 
@@ -43,66 +31,63 @@ func init() {
 // refuses other addresses.
 type dispatchWorld struct {
 	ctx      context.Context
+	cleanup  func(func())
 	browser  identity.Key
 	node     identity.Key
 	peer     *peer.Peer
+	handed   chan *peer.Stream // what the node's own handler was given
+	stream   *peer.Stream
 	ice      []proto.ICEServer
 	accepted chan *peer.Connection
 	served   *peer.Connection
 	toPeer   chan proto.Envelope // the node's relay candidates, for the browser
 	pc       *webrtc.PeerConnection
-	ctl      *webrtc.DataChannel
+	channels map[string]*webrtc.DataChannel
 	opened   map[string]chan struct{}
 	closed   map[string]chan struct{}
-	cleanup  []func()
+	received chan []byte // messages the browser got on any channel but ctl
 }
 
 func dispatchSteps(sc *godog.ScenarioContext) {
-	w := &dispatchWorld{}
-	sc.After(func(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
-		for _, undo := range slices.Backward(w.cleanup) {
-			undo()
-		}
-		return ctx, err
-	})
-	sc.Step(`^a node with a test handler registered for the channel family "([^"]*)"$`, w.startNode)
+	w := &dispatchWorld{cleanup: afterScenario(sc)}
+	sc.Step(`^a node that hands channels of the family "([^"]*)" to a handler of its own$`, w.startNode)
 	sc.Step(`^a browser connected to the node through a relay on this machine$`, w.connect)
 	sc.Step(`^the browser opens the channels "([^"]*)" and "([^"]*)" beside ctl$`, w.openChannels)
-	sc.Step(`^the node hands "([^"]*)" to the handler with the browser's connection, and it opens$`, w.handed)
+	sc.Step(`^the node's handler gets "([^"]*)" as a stream of the browser's device$`, w.handedOver)
+	sc.Step(`^bytes cross that stream in both directions$`, w.crossing)
 	sc.Step(`^the node closes "([^"]*)"$`, func(label string) error { return w.wait(w.closed[label]) })
 	sc.Step(`^the node still reads the browser's hello on ctl$`, w.hello)
 }
 
 func (w *dispatchWorld) startNode(family string) error {
-	if peer.Channels[family] == nil {
-		return fmt.Errorf("nothing registered for %q", family)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	w.ctx = ctx
-	w.cleanup = append(w.cleanup, cancel)
+	w.cleanup(cancel)
 	// The relay of the peer steps: its sockets take datagrams only from relay sockets.
 	relay := &peersWorld{}
-	if err := relay.relayOnly(); err != nil {
+	err := relay.relayOnly()
+	for _, undo := range relay.cleanup {
+		w.cleanup(undo)
+	}
+	if err != nil {
 		return err
 	}
-	w.cleanup = append(w.cleanup, relay.cleanup...)
 	w.ice, w.browser, w.node = relay.relay, exampleKey("browser"), exampleKey("node")
-	w.accepted, w.toPeer = make(chan *peer.Connection, 1), make(chan proto.Envelope, 64)
+	w.accepted, w.toPeer, w.handed = make(chan *peer.Connection, 1), make(chan proto.Envelope, 64), make(chan *peer.Stream, 2)
 	socks, err := peer.Listen(0, 0)
 	if err != nil {
 		return err
 	}
 	db, err := store.Open(":memory:")
 	if err != nil {
+		socks.Close()
 		return err
 	}
-	w.cleanup = append(w.cleanup, func() { socks.Close(); db.Close() })
-	w.peer = peer.New(w.node, socks, db, func(id string) bool { return id == w.browser.ID() }, func(string) []peer.Route {
-		return []peer.Route{{ID: "local", Send: w.relayed, ICE: w.ice}}
-	}, func(c *peer.Connection) { w.accepted <- c })
-	for len(handedOver) > 0 {
-		<-handedOver
-	}
+	w.cleanup(func() { socks.Close(); db.Close() })
+	paths := func(string) []peer.Route { return []peer.Route{{ID: "local", Send: w.relayed, ICE: w.ice}} }
+	// The handler is this node's own, as node gives each of its peers the handlers of its host.
+	channels := peer.Channels{family: func(s *peer.Stream) { w.handed <- s }}
+	w.peer = peer.New(w.node, socks, db, func(id string) bool { return id == w.browser.ID() }, paths, func(c *peer.Connection) { w.accepted <- c }, channels)
 	return nil
 }
 
@@ -121,9 +106,9 @@ func (w *dispatchWorld) connect() error {
 	if err != nil {
 		return err
 	}
-	w.pc, w.opened, w.closed = pc, map[string]chan struct{}{}, map[string]chan struct{}{}
-	w.cleanup = append(w.cleanup, func() { pc.Close() })
-	if w.ctl, err = w.channel("ctl"); err != nil {
+	w.pc, w.channels, w.opened, w.closed, w.received = pc, map[string]*webrtc.DataChannel{}, map[string]chan struct{}{}, map[string]chan struct{}{}, make(chan []byte, 4)
+	w.cleanup(func() { pc.Close() })
+	if err := w.channel("ctl"); err != nil {
 		return err
 	}
 	conn := randomConn()
@@ -198,26 +183,24 @@ func (w *dispatchWorld) candidates() {
 	}
 }
 
-// channel opens a data channel from the browser and tracks its state.
-func (w *dispatchWorld) channel(label string) (*webrtc.DataChannel, error) {
+// channel opens a data channel from the browser and tracks it.
+func (w *dispatchWorld) channel(label string) error {
 	dc, err := w.pc.CreateDataChannel(label, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	opened, closed := make(chan struct{}), make(chan struct{})
-	w.opened[label], w.closed[label] = opened, closed
+	w.channels[label], w.opened[label], w.closed[label] = dc, opened, closed
 	dc.OnOpen(func() { close(opened) })
 	dc.OnClose(func() { close(closed) })
-	return dc, nil
+	if label != "ctl" {
+		dc.OnMessage(func(m webrtc.DataChannelMessage) { w.received <- m.Data })
+	}
+	return nil
 }
 
 func (w *dispatchWorld) openChannels(registered, unknown string) error {
-	for _, label := range []string{registered, unknown} {
-		if _, err := w.channel(label); err != nil {
-			return err
-		}
-	}
-	return nil
+	return errors.Join(w.channel(registered), w.channel(unknown))
 }
 
 func (w *dispatchWorld) wait(ch <-chan struct{}) error {
@@ -229,22 +212,56 @@ func (w *dispatchWorld) wait(ch <-chan struct{}) error {
 	}
 }
 
-func (w *dispatchWorld) handed(label string) error {
+func (w *dispatchWorld) handedOver(label string) error {
 	select {
 	case <-w.ctx.Done():
 		return w.ctx.Err()
-	case got := <-handedOver:
-		if got.label != label || got.conn != w.served || got.conn.Device != w.browser.ID() {
-			return fmt.Errorf("handed %q on another connection or for another device", got.label)
-		}
+	case w.stream = <-w.handed:
+	}
+	if w.stream.Label() != label || w.stream.Device() != w.browser.ID() {
+		return fmt.Errorf("handed %q of device %s", w.stream.Label(), w.stream.Device())
 	}
 	return w.wait(w.opened[label])
+}
+
+// crossing sends bytes from the browser to the handler's stream and back.
+func (w *dispatchWorld) crossing() error {
+	const in, out = "keys from the browser", "output of the node"
+	if err := w.channels[w.stream.Label()].Send([]byte(in)); err != nil {
+		return err
+	}
+	read := make(chan string, 1)
+	go func() {
+		b := make([]byte, len(in))
+		n, _ := io.ReadFull(w.stream, b)
+		read <- string(b[:n])
+	}()
+	select {
+	case <-w.ctx.Done():
+		return w.ctx.Err()
+	case got := <-read:
+		if got != in {
+			return fmt.Errorf("the stream read %q", got)
+		}
+	}
+	if _, err := w.stream.Write([]byte(out)); err != nil {
+		return err
+	}
+	select {
+	case <-w.ctx.Done():
+		return w.ctx.Err()
+	case got := <-w.received:
+		if string(got) != out {
+			return fmt.Errorf("the browser got %q", got)
+		}
+		return nil
+	}
 }
 
 // hello sends the first message of a session on ctl; the node reads it as sent.
 func (w *dispatchWorld) hello() error {
 	const hello = `{"t":"hello","id":1,"v":1,"kind":"browser","name":"phone browser","addrs":[]}`
-	if err := w.ctl.SendText(hello); err != nil {
+	if err := w.channels["ctl"].SendText(hello); err != nil {
 		return err
 	}
 	got, err := w.served.Read(w.ctx)

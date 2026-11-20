@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"maps"
 	"sync"
 	"time"
 
@@ -17,22 +18,25 @@ import (
 type link struct{ device, conn string }
 
 type Peer struct {
-	key     identity.Key
-	sockets *Sockets
-	db      *store.Store
-	known   func(string) bool
-	paths   func(string) []Route
-	inbound func(*Connection)
-	now     func() time.Time
-	mu      sync.Mutex // decisions and description/candidate application, never network writes
-	live    map[link]*Connection
-	slot    map[string]*Connection
-	early   map[link]*batch
-	retired map[link]int64
+	key      identity.Key
+	sockets  *Sockets
+	db       *store.Store
+	known    func(string) bool
+	paths    func(string) []Route
+	inbound  func(*Connection)
+	channels Channels
+	now      func() time.Time
+	mu       sync.Mutex // decisions and description/candidate application, never network writes
+	live     map[link]*Connection
+	slot     map[string]*Connection
+	early    map[link]*batch
+	retired  map[link]int64
 }
 
-func New(key identity.Key, sockets *Sockets, db *store.Store, known func(string) bool, paths func(string) []Route, inbound func(*Connection)) *Peer {
-	return &Peer{key: key, sockets: sockets, db: db, known: known, paths: paths, inbound: inbound, now: time.Now, live: make(map[link]*Connection), slot: make(map[string]*Connection), early: make(map[link]*batch), retired: make(map[link]int64)}
+// New keeps its own copy of channels: what the caller changes later does not
+// reach it.
+func New(key identity.Key, sockets *Sockets, db *store.Store, known func(string) bool, paths func(string) []Route, inbound func(*Connection), channels Channels) *Peer {
+	return &Peer{key: key, sockets: sockets, db: db, known: known, paths: paths, inbound: inbound, channels: maps.Clone(channels), now: time.Now, live: make(map[link]*Connection), slot: make(map[string]*Connection), early: make(map[link]*batch), retired: make(map[link]int64)}
 }
 func randomID() string {
 	var b [16]byte
