@@ -396,6 +396,26 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
   );
 
   Scenario(
+    'A browser without view transitions can read the rule for reduced motion',
+    ({ Given, When, Then }) => {
+      let rules: string[];
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      When('the person opens the client', async () => {
+        await motion.open();
+        rules = await motion.reducedMotionRules();
+      });
+      Then('the rule that stills every part names no picture of a cross-fade', () => {
+        expect(rules).toEqual([
+          '*, ::before, ::after',
+          '::view-transition-group(*)',
+          '::view-transition-old(*)',
+          '::view-transition-new(*)',
+        ]);
+      });
+    },
+  );
+
+  Scenario(
     'The theme changes at once when the system asks for reduced motion',
     ({ Given, When, Then, And }) => {
       let result: Awaited<ReturnType<typeof motion.reducedThemeChange>>;

@@ -95,17 +95,20 @@ kbd,
 ::selection {
   background: color-mix(in srgb, var(--sky) 30%, transparent);
 }
-/* The pictures of a page cross-fade are no element's ::before or ::after: they are named here,
-   so that a fade under way ends when the system starts to ask for reduced motion. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
-  *::after,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  /* The pictures of a page cross-fade are no element's ::before or ::after: they are named, so
+     that a fade under way ends when the system starts to ask for reduced motion. They have a
+     rule of their own: a browser without view transitions drops a rule that names them. */
   ::view-transition-group(*),
   ::view-transition-old(*),
   ::view-transition-new(*) {
     animation: none !important;
-    transition: none !important;
   }
 }
 

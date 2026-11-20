@@ -135,6 +135,17 @@ export async function underPointer() {
   return { logo, button, layer };
 }
 
+// The selectors of the rules that apply when the system asks for reduced motion.
+export function reducedMotionRules() {
+  return page.evaluate(() =>
+    [...document.styleSheets]
+      .flatMap((sheet) => [...sheet.cssRules])
+      .filter((rule) => (rule as CSSMediaRule).conditionText?.includes('reduced-motion: reduce'))
+      .flatMap((media) => [...(media as CSSMediaRule).cssRules])
+      .map((rule) => (rule as CSSStyleRule).selectorText),
+  );
+}
+
 export async function expectMark(selector: string, items: string, index: number) {
   const offset = await page.locator(selector).evaluate(
     async (group, { items, index }) => {

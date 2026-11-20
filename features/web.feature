@@ -132,6 +132,11 @@ Feature: Web client
     Then the picture of the old page is gone
     And the page uses the "dark" theme
 
+  Scenario: A browser without view transitions can read the rule for reduced motion
+    Given the browser supports Ed25519 in WebCrypto
+    When the person opens the client
+    Then the rule that stills every part names no picture of a cross-fade
+
   Scenario: The theme changes at once when the system asks for reduced motion
     Given the browser supports Ed25519 in WebCrypto
     And the browser has view transitions
