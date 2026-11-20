@@ -438,6 +438,7 @@ func messageVectors() []messageVector {
 	}
 	return []messageVector{
 		{"the other side's message", "b", string(secret), wire(sent), true},
+		{"another message type with the same pairing fields", "b", string(secret), with(func(m *proto.Pair) { m.Type = "hello" }), false},
 		{"the answer of the other side, read by the side that created the secret", "a", string(secret), wire(pairOf(secret, "b", node.id(), node.kind, node.name)), true},
 		{"name changed on the way, with the mac it had", "b", string(secret), with(func(m *proto.Pair) { m.Name = "laptop" }), false},
 		{"kind changed on the way, with the mac it had", "b", string(secret), with(func(m *proto.Pair) { m.Kind = "node" }), false},
