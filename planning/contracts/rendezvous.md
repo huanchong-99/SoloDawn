@@ -191,8 +191,17 @@ the review of section 5.1 measured. "Evidence n" is entry n of
   TCP signalling listener and the passive ICE-TCP listener. It publishes the
   external TCP signalling port in the signalling URL and each mapped ICE
   endpoint only for the socket it serves (section 5.1, point 8). pion's
-  address rewrite rule has no external-port field. S-8 verifies publication
-  and reachability when a router grants a different port `[unverified]`.
+  address rewrite rule has no external-port field. On start and on a network
+  change, the node tries NAT-PMP (`NewClientWithTimeout`, 2 s) on the default
+  gateway alongside UPnP IGD discovery (IGDv2 `WANIPConnection:2` first, then
+  IGDv1 `WANIPConnection:1` and `WANPPPConnection:1`), with 2 s per-call
+  timeouts; NAT-PMP wins when it answers, else IGD (`AddPortMapping` for the
+  internal port, falling back on 718 or 606 to `AddAnyPortMapping` on IGDv2 or
+  adjacent ports on IGDv1). No connection waits for mapping. Mappings ask for
+  a 7200 s lease, renew at half the granted lifetime suggesting the granted
+  port, republish when the external address or port changes, withdraw without
+  retry when discovery or renewal fails, and delete on close (lifetime 0 for
+  NAT-PMP, `DeletePortMapping` for IGD) `[verified, S-8]`.
 - Queries the `.local` names that browsers give instead of their host
   addresses (`SetICEMulticastDNSMode`, query only). A name that does not
   resolve is no obstacle: in S-1 the connections used the browser's
@@ -235,27 +244,38 @@ the review of section 5.1 measured. "Evidence n" is entry n of
    offers as a host. Simultaneous offers address different peer
    connections, so neither meets SDP glare. Sharing one `ctl` would need
    agreement on which connection survives and how both sessions resume.
-6. **Not chosen: a second fixed port for offering.** One configured UDP
-   port is kept. A second, shared offering port only separates the opposite
-   directions, and can give an ordinary connection and its probe the same
-   mux registration. A mapped port for ordinary offers, with private probe
-   sockets, is reconsidered if S-8 shows a material gain in reachability.
-7. **Hole punching** remains available; its success rate is not measured.
-   ICE checks compatible host, reflexive and relay candidates. A live NAT
-   mapping and a live local socket are two things, and either can outlive
-   the other (points 4 and 10). Two peers behind one NAT can use reachable
-   LAN host candidates; using each other's public mappings from inside it
-   requires hairpinning, and if LAN routing or client isolation also blocks
-   the host path, another working pair is needed. S-8 measures these, and
-   hole punching across different NATs on ephemeral offer sockets (evidence 7).
+6. **Not chosen: a second fixed port or mapping for offering.** One configured
+   UDP port is kept, and offering UDP sockets are not mapped in step 1. A
+   second, shared offering port only separates the opposite directions, and
+   can give an ordinary connection and its probe the same mux registration.
+   Mapping each offering socket helps in one topology only — neither router
+   admits the other's checks and only the offerer's router maps — where the
+   relay also connects, at the cost of a mapping request per offered
+   connection; when the answerer's router maps, it adds nothing
+   `[verified, S-8]`. This is revisited with the owner's router measurements.
+7. **Hole punching** remains available; its success rate on physical routers
+   is not measured. ICE checks compatible host, reflexive and relay
+   candidates. A live NAT mapping and a live local socket are two things, and
+   either can outlive the other (points 4 and 10). Two peers behind one NAT
+   can use reachable LAN host candidates; using each other's public mappings
+   from inside it requires hairpinning, and if LAN routing or client isolation
+   also blocks the host path, another working pair is needed. In simulation,
+   thirteen of the sixteen NAT pairs connected directly on ephemeral offer
+   sockets without port mapping, and the remaining three (symmetric against
+   port-restricted or symmetric) took the relay `[verified, S-8]` (evidence 7).
 8. **Port mapping.** A forward or mapping to 47800/UDP benefits answered
    connections (`risks.md` K-19). If the other direct UDP and IPv6 paths
    fail, a pion answerer can dial the passive TCP endpoint the offerer
    advertises: verified on Linux with only the offerer's listener reachable
-   `[verified, A.1]` (evidence 8). S-8 verifies the router mapping,
-   reachability from outside and publication of the external port the
-   router actually grants. A mapped-address rule applies only to the
-   candidates that mapping serves. TURN is used when no direct pair works.
+   `[verified, A.1]` (evidence 8). Against NET-1's gateway, mapping and
+   publishing the router's external address and granted port — answered
+   connections trickling UDP as `srflx` (`raddr` and `rport` set to the local
+   address and UDP port) and both roles trickling passive ICE-TCP as `host`
+   with `tcptype passive` (`issues.md`, pion `tcptype` limitation) — made all
+   sixteen NAT pairs connect directly, also when the router granted another
+   port than requested `[verified, S-8]`; physical routers await the owner's
+   run. A mapped-address rule applies only to the candidates that mapping
+   serves. TURN is used when no direct pair works.
 9. **Remembered addresses** are unaffected: signalling URLs, a mapped one
    included. ICE candidates are gathered anew for each connection, and an
    ephemeral ICE endpoint is never a remembered signalling address.

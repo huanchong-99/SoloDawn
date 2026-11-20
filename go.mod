@@ -7,7 +7,9 @@ require (
 	github.com/aymanbagabas/go-pty v0.2.3
 	github.com/coder/websocket v1.8.15
 	github.com/cucumber/godog v0.16.0
-	github.com/libp2p/go-nat v0.2.0
+	github.com/huin/goupnp v1.2.0
+	github.com/jackpal/go-nat-pmp v1.0.2
+	github.com/libp2p/go-netroute v0.2.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/pion/ice/v4 v4.4.8
 	github.com/pion/logging v0.2.4
@@ -31,10 +33,6 @@ require (
 	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
 	github.com/hashicorp/go-memdb v1.3.5 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
-	github.com/huin/goupnp v1.2.0 // indirect
-	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
-	github.com/koron/go-ssdp v0.0.4 // indirect
-	github.com/libp2p/go-netroute v0.2.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pion/datachannel v1.6.3 // indirect

@@ -281,8 +281,10 @@ func (p *Peer) create(k link, api *webrtc.API, paths []Route) (*Connection, erro
 	c := newConnection(pc, k.device)
 	c.candidates = p.take(k)
 	p.live[k] = c
+	var mapped sync.Once
 	pc.OnICECandidate(func(i *webrtc.ICECandidate) {
 		if i != nil {
+			mapped.Do(func() { p.startMapped(k, c, i.SDPMid, api == p.sockets.answer) })
 			msg := proto.ICECandidate{SignalHeader: p.header(k, "ice"), Candidate: i.ToJSON().Candidate, MID: i.SDPMid}
 			_ = broadcast(c.ctx, p.paths(k.device), k.device, p.sign(msg))
 		}

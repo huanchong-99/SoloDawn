@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/pion/ice/v4"
@@ -13,6 +14,8 @@ import (
 type Sockets struct {
 	udp           ice.UDPMux
 	tcp           ice.TCPMux
+	tcpPort       int
+	portmap       atomic.Pointer[PortMap]
 	offer, answer *webrtc.API
 }
 
@@ -35,7 +38,7 @@ func listen(udpPort int, tcpAddr string, engine webrtc.SettingEngine, opts ...ic
 		udp.Close()
 		return nil, err
 	}
-	s := &Sockets{udp: udp, tcp: webrtc.NewICETCPMux(nil, tcp, 8192)}
+	s := &Sockets{udp: udp, tcp: webrtc.NewICETCPMux(nil, tcp, 8192), tcpPort: tcp.Addr().(*net.TCPAddr).Port}
 	engine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4, webrtc.NetworkTypeUDP6, webrtc.NetworkTypeTCP4, webrtc.NetworkTypeTCP6})
 	engine.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryOnly)
 	engine.SetICETCPMux(s.tcp)
@@ -44,7 +47,9 @@ func listen(udpPort int, tcpAddr string, engine webrtc.SettingEngine, opts ...ic
 	s.answer = webrtc.NewAPI(webrtc.WithSettingEngine(engine))
 	return s, nil
 }
-func (s *Sockets) Close() error { return errors.Join(s.udp.Close(), s.tcp.Close()) }
+func (s *Sockets) Close() error {
+	return errors.Join(s.closePortMap(), s.udp.Close(), s.tcp.Close())
+}
 
 func iceConfig(paths []Route) webrtc.Configuration {
 	var servers []webrtc.ICEServer
