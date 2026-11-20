@@ -61,10 +61,12 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   offer and before the answer they belong to, each side holds them and
   applies them once the description is set: the connection opens, and no
   candidate is sent a second time.
-- **A1.12** A second tab of one browser, which has the same device key,
-  shows that SoloDawn is open in another tab and offers no connection.
-  After "Use here" in it, it connects, and the first tab closes its
-  connections and shows the notice (`flows/connect.md` F).
+- **A1.12** A second tab of one browser, which has the same device key, shows
+  that SoloDawn is open in another tab and offers no connection. After "Use
+  here" in it, it connects, and the first tab closes its connections and shows
+  the notice (`flows/connect.md` F). Run with a valid device ID beginning with
+  `-`. After takeover, a reconnect trigger in the first tab opens no
+  signalling or peer connection.
 - **A1.13** In a move as in A1.3, with `welcome` held back until C has
   seen the old connection close, C sends no new offer, and the move
   completes on `welcome` (`flows/connect.md` step 11).

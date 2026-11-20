@@ -181,15 +181,14 @@ inbound connection per device (`contracts/rendezvous.md` 2.3): two
 connected tabs would close each other's connection. So one tab connects.
 Nothing changes on the wire, and the node keeps close-first.
 
-- Before it offers any connection, the web client takes a Web Locks API
-  lock named after its device id. Only the tab that holds the lock
-  connects.
-- Every other tab of that origin shows that SoloDawn is open in another
-  tab, with a "Use here" button.
-- "Use here" requests the lock with `steal`. The tab that loses the lock
-  closes its connections and shows the same notice.
-- A `BroadcastChannel` may carry the notice between tabs.
-
+Before opening signalling or peer connections, a tab requests the exclusive
+Web Lock `solodawn-device-<device id>` with `ifAvailable: true`. It holds the
+lock for its active session. If the callback receives `null`, the tab stays
+disconnected and shows "SoloDawn is open in another tab" with a "Use here"
+button. "Use here" requests the same lock with `steal: true`. When the former
+holder's `request()` promise rejects with `AbortError`, it stops reconnects
+and probes, closes its signalling and peer connections, and shows the notice.
+It requests the lock again only on "Use here".
 Web Locks is within the browser baseline (`risks.md` Q-3): it is in Chrome
 from 69, Firefox from 96 and Safari from 15.4. Frontend task F-03
 implements this rule (`steps/step-1-frontend.md`).
