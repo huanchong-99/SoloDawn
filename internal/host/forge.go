@@ -37,23 +37,29 @@ func (f TaskForge) PushBranch(ctx context.Context) error {
 	return err
 }
 
-// Submit pushes a clean, checked task commit and returns its pull request number.
-func (f TaskForge) Submit(ctx context.Context, checkedCommit, base, title, summary string) (int, error) {
+// ForgePullRequest identifies the pull request reported with a submitted commit.
+type ForgePullRequest struct {
+	Number int
+	URL    string
+}
+
+// Submit pushes a clean, checked task commit and returns its open pull request.
+func (f TaskForge) Submit(ctx context.Context, checkedCommit, base, title, summary string) (*ForgePullRequest, error) {
 	if err := f.checkSubmission(ctx, checkedCommit); err != nil {
-		return 0, err
+		return nil, err
 	}
 	if err := f.PushBranch(ctx); err != nil {
-		return 0, err
+		return nil, err
 	}
-	view, err := f.command(ctx, "gh", "pr", "view", f.Branch, "--json", "number,headRefOid")
-	if err == nil {
-		return existingPR(view, checkedCommit)
+	pr, err := f.findPR(ctx, base, checkedCommit)
+	if pr != nil || err != nil {
+		return pr, err
 	}
-	exit, ok := errors.AsType[*exec.ExitError](err)
-	if !ok || strings.TrimSpace(string(exit.Stderr)) != fmt.Sprintf("no pull requests found for branch %q", f.Branch) {
-		return 0, err
+	out, err := f.command(ctx, "gh", "pr", "create", "--head", f.Branch, "--base", base, "--title", title, "--body", summary)
+	if err != nil {
+		return nil, err
 	}
-	return f.createPR(ctx, base, title, summary)
+	return forgePRFromURL(out)
 }
 
 func (f TaskForge) checkSubmission(ctx context.Context, commit string) error {
@@ -74,39 +80,64 @@ func (f TaskForge) checkSubmission(ctx context.Context, commit string) error {
 	return nil
 }
 
-func existingPR(view, commit string) (int, error) {
+func (f TaskForge) findPR(ctx context.Context, base, commit string) (*ForgePullRequest, error) {
+	view, err := f.command(ctx, "gh", "pr", "view", f.Branch, "--json", "number,headRefOid,url,state,baseRefName")
+	if err != nil {
+		exit, ok := errors.AsType[*exec.ExitError](err)
+		if ok && strings.TrimSpace(string(exit.Stderr)) == fmt.Sprintf("no pull requests found for branch %q", f.Branch) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return existingPR(view, base, commit)
+}
+
+func existingPR(view, base, commit string) (*ForgePullRequest, error) {
 	var pr struct {
-		Number     int
-		HeadRefOid string
+		ForgePullRequest
+		HeadRefOid, State, BaseRefName string
 	}
 	if err := json.Unmarshal([]byte(view), &pr); err != nil {
-		return 0, err
+		return nil, err
 	}
-	if pr.Number < 1 || pr.HeadRefOid != commit {
-		return 0, errors.New("expected a pull request for the checked commit")
+	switch pr.State {
+	case "CLOSED", "MERGED":
+		return nil, nil
+	case "OPEN":
+		if pr.BaseRefName == "" {
+			return nil, errors.New("missing pull request base")
+		}
+		if pr.BaseRefName != base {
+			return nil, nil
+		}
+	default:
+		return nil, fmt.Errorf("unknown pull request state %q", pr.State)
 	}
-	return pr.Number, nil
+	return pr.forCommit(pr.HeadRefOid, commit)
 }
 
-func (f TaskForge) createPR(ctx context.Context, base, title, summary string) (int, error) {
-	out, err := f.command(ctx, "gh", "pr", "create", "--head", f.Branch, "--base", base, "--title", title, "--body", summary)
+func (pr ForgePullRequest) forCommit(head, commit string) (*ForgePullRequest, error) {
+	result, err := forgePRFromURL(pr.URL)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return createdPRNumber(out)
+	if pr.Number != result.Number || head != commit {
+		return nil, errors.New("expected a pull request for the checked commit")
+	}
+	return result, nil
 }
 
-func createdPRNumber(out string) (int, error) {
+func forgePRFromURL(out string) (*ForgePullRequest, error) {
 	u, err := url.ParseRequestURI(out)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	dir, number := path.Split(u.Path)
 	n, err := strconv.Atoi(number)
 	if u.Host == "" || !strings.HasSuffix(dir, "/pull/") || err != nil || n < 1 {
-		return 0, fmt.Errorf("expected a pull request URL from gh, got %q", out)
+		return nil, fmt.Errorf("expected a pull request URL from gh, got %q", out)
 	}
-	return n, nil
+	return &ForgePullRequest{Number: n, URL: out}, nil
 }
 
 // WaitHostedChecks reads the head and checks together. Only a completed

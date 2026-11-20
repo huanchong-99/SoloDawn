@@ -119,7 +119,7 @@ func forgeRepo(t *testing.T) (TaskForge, string, string) {
 }
 
 func forgeView(branch string) []string {
-	return []string{"pr", "view", branch, "--json", "number,headRefOid"}
+	return []string{"pr", "view", branch, "--json", "number,headRefOid,url,state,baseRefName"}
 }
 
 func noForgePR(branch string) forgeAnswer {
@@ -128,16 +128,29 @@ func noForgePR(branch string) forgeAnswer {
 
 func TestSubmitForge(t *testing.T) {
 	f, remote, head := forgeRepo(t)
-	view := forgeAnswer{Stdout: fmt.Sprintf(`{"number":1,"headRefOid":%q}`, head)}
-	calls := fakeForgeGH(t, noForgePR(f.Branch), forgeAnswer{Stdout: "https://example.invalid/test/repo/pull/1\n"}, view)
+	url := "https://example.invalid/test/repo/pull/1"
+	view := forgeAnswer{Stdout: fmt.Sprintf(`{"number":1,"headRefOid":%q,"url":%q,"state":"OPEN","baseRefName":"base"}`, head, url)}
+	calls := fakeForgeGH(t, noForgePR(f.Branch), forgeAnswer{Stdout: url + "\n"}, view)
 	title, summary := "Task title", "summary with \"quotes\"\nand a second line"
 	for range 2 {
 		pr, err := f.Submit(t.Context(), head, "base", title, summary)
 		assertForge(t, err, nil)
-		assertForge(t, pr, 1)
+		assertForge(t, pr, &ForgePullRequest{Number: 1, URL: url})
 		assertForge(t, forgeGit(t, remote, "rev-parse", f.Branch), head)
 	}
 	calls(forgeView(f.Branch), []string{"pr", "create", "--head", f.Branch, "--base", "base", "--title", title, "--body", summary}, forgeView(f.Branch))
+}
+
+func TestSubmitForgeCreatesForIntendedBase(t *testing.T) {
+	f, _, head := forgeRepo(t)
+	for _, prior := range []string{`{"state":"CLOSED"}`, `{"state":"MERGED"}`, `{"state":"OPEN","baseRefName":"another"}`} {
+		url := "https://example.invalid/test/repo/pull/2"
+		calls := fakeForgeGH(t, forgeAnswer{Stdout: prior}, forgeAnswer{Stdout: url})
+		pr, err := f.Submit(t.Context(), head, "base", "t", "s")
+		assertForge(t, err, nil)
+		assertForge(t, pr, &ForgePullRequest{Number: 2, URL: url})
+		calls(forgeView(f.Branch), []string{"pr", "create", "--head", f.Branch, "--base", "base", "--title", "t", "--body", "s"})
+	}
 }
 
 func TestSubmitForgePreconditions(t *testing.T) {
@@ -146,7 +159,7 @@ func TestSubmitForgePreconditions(t *testing.T) {
 	submitError := func(commit string, want string) {
 		t.Helper()
 		pr, err := f.Submit(t.Context(), commit, "base", "title", "summary")
-		assertForge(t, pr, 0)
+		assertForge(t, pr, (*ForgePullRequest)(nil))
 		assertForge(t, err.Error(), want)
 	}
 	submitError("old", "task head differs from the checked commit")
@@ -163,7 +176,7 @@ func TestForgeSubmitCommandFailures(t *testing.T) {
 	prError := func() string {
 		t.Helper()
 		pr, err := f.Submit(t.Context(), head, "base", "title", "body")
-		assertForge(t, pr, 0)
+		assertForge(t, pr, (*ForgePullRequest)(nil))
 		return err.Error()
 	}
 	calls := fakeForgeGH(t, forgeAnswer{Stderr: "login required\n", Code: 1}, noForgePR(f.Branch), forgeAnswer{Stderr: "create denied\n", Code: 1})
@@ -184,20 +197,22 @@ func TestForgeGHCannotStart(t *testing.T) {
 	gh := mustForge(exec.LookPath("gh"))
 	forgeOK(os.WriteFile(gh, []byte("invalid executable"), 0700))
 	pr, err := f.Submit(t.Context(), head, "base", "t", "s")
-	assertForge(t, pr, 0)
+	assertForge(t, pr, (*ForgePullRequest)(nil))
 	assertForge(t, err != nil, true)
 	calls()
 }
 
 func TestForgePRReplies(t *testing.T) {
-	for _, view := range []string{"not JSON", `{"number":0,"headRefOid":"new"}`, `{"number":2,"headRefOid":"old"}`} {
-		pr, err := existingPR(view, "new")
-		assertForge(t, pr, 0)
+	for _, view := range []string{"not JSON", `{}`, `{"state":"OPEN"}`, `{"state":"OPEN","baseRefName":"base"}`,
+		`{"state":"OPEN","baseRefName":"base","url":"https://example.invalid/r/pull/1","number":2,"headRefOid":"new"}`,
+		`{"state":"OPEN","baseRefName":"base","url":"https://example.invalid/r/pull/1","number":1,"headRefOid":"old"}`} {
+		pr, err := existingPR(view, "base", "new")
+		assertForge(t, pr, (*ForgePullRequest)(nil))
 		assertForge(t, err != nil, true)
 	}
 	for _, out := range []string{"invalid", "/org/repo/pull/1", "https://example.invalid/issues/1", "https://example.invalid/pull/no", "https://example.invalid/pull/0"} {
-		pr, err := createdPRNumber(out)
-		assertForge(t, pr, 0)
+		pr, err := forgePRFromURL(out)
+		assertForge(t, pr, (*ForgePullRequest)(nil))
 		assertForge(t, err != nil, true)
 	}
 }
