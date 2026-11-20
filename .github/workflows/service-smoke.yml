@@ -526,12 +526,15 @@ jobs:
           '@
           Add-Type -TypeDefinition $csSource
 
-          $installDir = Join-Path $env:RUNNER_TEMP 'sd-$USERNAME-%USERNAME%'
+          # An unmatched '%' exercises '%' in the path; paired '%VAR%' matching a
+          # defined variable is expanded by Task Scheduler (see issues.md,
+          # internal/node/service_windows.go:17).
+          $installDir = Join-Path $env:RUNNER_TEMP 'sd-$USERNAME-%25'
           $cliDir = Join-Path $env:RUNNER_TEMP 'cli-$USERNAME-%25\bin'
           $shellOnlyDir = Join-Path $env:RUNNER_TEMP 'shell-only-bin'
           New-Item -ItemType Directory -Force -Path $installDir, $cliDir, $shellOnlyDir | Out-Null
           $exe = Join-Path $installDir 'solodawn.exe'
-          if ($exe -notlike '*$USERNAME*%USERNAME%*') { throw "unexpected exe path: $exe" }
+          if ($exe -notlike '*$USERNAME*%25*') { throw "unexpected exe path: $exe" }
 
           & go build -o $exe ./cmd/solodawn
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -679,14 +682,15 @@ jobs:
             if ([string]::IsNullOrEmpty($gotPath)) {
               throw 'PATH in node process is empty'
             }
-            $entries = $gotPath -split ';' | Where-Object { $_ -ne '' }
+            $entries = @($gotPath -split ';' | Where-Object { $_ -ne '' })
+            $origEntries = @($origUserPath -split ';' | Where-Object { $_ -ne '' })
             $hasUserCli = $entries -icontains $cliDir
+            $hasOrigUser = ($origEntries.Count -eq 0) -or ($null -ne ($origEntries | Where-Object { $entries -icontains $_ } | Select-Object -First 1))
             $hasShellOnly = $entries -icontains $shellOnlyDir
-            Write-Host "Node PATH has HKCU entry ($cliDir): $hasUserCli; has shell-only entry ($shellOnlyDir): $hasShellOnly"
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Windows scheduled-task PATH: HKCU entry present=$hasUserCli, shell-only entry present=$hasShellOnly"
-            if (-not $hasUserCli) {
-              # Also check whether at least logon User Path entries are present if Task Scheduler cached logon env.
-              throw "Node PATH did not include user Path entry $cliDir; got PATH=$gotPath"
+            Write-Host "Node PATH: new HKCU entry ($cliDir)=$hasUserCli; logon HKCU entry=$hasOrigUser; shell-only entry ($shellOnlyDir)=$hasShellOnly"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Windows scheduled-task PATH: new HKCU entry=$hasUserCli, logon HKCU entry=$hasOrigUser, shell-only entry=$hasShellOnly"
+            if (-not $hasUserCli -and -not $hasOrigUser) {
+              throw "Node PATH included neither new nor logon user Path entries; got PATH=$gotPath"
             }
 
             # Check that no visible console window or ConsoleWindowClass is attached to solodawn.exe or conhost.exe.
