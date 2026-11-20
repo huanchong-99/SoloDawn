@@ -363,19 +363,42 @@ describe('rendezvous frames', () => {
 });
 
 describe('decode', () => {
-  const frames = [
-    'welcome',
-    'synced',
-    'fetched',
-    'cmd-ok',
-    'cmd-pair-link',
-    'cmd-error',
-    'host-info-answer',
-    'audit-answer',
+  /** Each answer example, and the type of the request it answers. */
+  const answers: [string, p.RequestType][] = [
+    ['welcome', 'hello'],
+    ['synced', 'sync'],
+    ['fetched', 'fetch'],
+    ['cmd-ok', 'cmd'],
+    ['cmd-started', 'cmd'],
+    ['cmd-reviewed', 'cmd'],
+    ['cmd-pair-link', 'cmd'],
+    ['host-info-answer', 'host.info'],
+    ['audit-answer', 'audit'],
   ];
   const pushes = ['rows', 'reset', 'devlog', 'groups', 'host-info-push'];
 
-  it.each([...frames, ...pushes])('reads the %s frame', (name) => {
+  it('has an answer example for every request type', () => {
+    expect([...new Set(answers.map(([, t]) => t))].toSorted()).toEqual(
+      Object.keys(p.AnswerOf).toSorted(),
+    );
+  });
+
+  it.each(answers)('reads %s as the answer to %s', (name, t) => {
+    expect(p.decodeAnswer(t, goldens[name])).toStrictEqual(JSON.parse(goldens[name]));
+    expect(schemaOf[name]).toBe(p.AnswerOf[t]);
+  });
+
+  it.each(Object.keys(p.AnswerOf) as p.RequestType[])(
+    'reads an error as the answer to %s, whatever else it holds',
+    (t) => {
+      const error = JSON.parse(goldens['cmd-error']);
+      expect(p.decodeAnswer(t, goldens['cmd-error'])).toStrictEqual(error);
+      const text = JSON.stringify({ ...error, ok: true, t: 'welcome' });
+      expect(p.decodeAnswer(t, text)).toStrictEqual(error);
+    },
+  );
+
+  it.each([...pushes, 'cmd-error'])('reads the %s frame, which needs no request', (name) => {
     expect(p.decode(p.Frame, goldens[name])).toStrictEqual(JSON.parse(goldens[name]));
   });
 
@@ -392,43 +415,56 @@ describe('decode', () => {
     expect(() => p.decode(p.Frame, '{"t":"groups","groups":[{"g":"Qm1"}]}')).toThrow(v.ValiError);
   });
 
-  it('tells the answer to host.info from its push by re', () => {
+  it('reads host.info as an answer by its request, and as a push without one', () => {
     const answer = JSON.parse(goldens['host-info-answer']);
     const push = JSON.parse(goldens['host-info-push']);
-    expect(v.is(p.HostInfo, push)).toBe(false);
-    expect(v.parse(p.Frame, push)).toStrictEqual(push);
-    expect(v.parse(p.Frame, answer)).toStrictEqual(answer);
-    // An answer that its schema refuses is not read as a push.
-    expect(() => v.parse(p.Frame, { ...answer, ok: false })).toThrow(v.ValiError);
+    expect(p.decode(p.Frame, goldens['host-info-push'])).toStrictEqual(push);
+    expect(() => p.decodeAnswer('host.info', goldens['host-info-push'])).toThrow(v.ValiError);
+    expect(() => p.decodeAnswer('host.info', JSON.stringify({ ...answer, ok: false }))).toThrow(
+      v.ValiError,
+    );
   });
 
-  it('refuses an audit answer with a row it cannot read, not reading it as a cmd answer', () => {
+  // Read by the request they answer, the answers to cmd and audit ignore what they do not read,
+  // as Go does (contracts/conventions.md section 2).
+  it('ignores in a cmd answer the members it does not read, rows and t included', () => {
+    for (const extra of [{ rows: null }, { rows: [{ ts: 1 }] }, { t: 'audit' }, { t: null }]) {
+      const text = JSON.stringify({ re: 4, ok: true, ...extra });
+      expect(p.decodeAnswer('cmd', text), text).toStrictEqual({ re: 4, ok: true });
+    }
+  });
+
+  it('refuses an audit answer whose rows it cannot read', () => {
     const answer = JSON.parse(goldens['audit-answer']);
-    expect(() => v.parse(p.Frame, { ...answer, rows: [{ ts: 1 }] })).toThrow(v.ValiError);
-    expect(() => v.parse(p.Frame, { ...answer, rows: 'none' })).toThrow(v.ValiError);
+    for (const rows of [[{ ts: 1 }], 'none', null, [null]]) {
+      const text = JSON.stringify({ ...answer, rows });
+      expect(() => p.decodeAnswer('audit', text), text).toThrow(v.ValiError);
+    }
+    expect(() => p.decodeAnswer('audit', goldens['cmd-ok'])).toThrow(v.ValiError);
   });
 
-  // An answer without t is one to cmd; one with t is read by the schema its t names.
-  it.each(['welcome', 'synced', 'fetched'])(
-    'refuses a %s answer without one of its fields',
-    (name) => {
-      const keys = Object.keys(JSON.parse(goldens[name])).filter((key) => key !== 't');
-      for (const key of keys) {
-        const missing = JSON.parse(goldens[name]);
-        delete missing[key];
-        expect(() => p.decode(p.Frame, JSON.stringify(missing)), `without ${key}`).toThrow(
-          v.ValiError,
-        );
+  it.each(answers)('refuses %s, the answer to %s, without one of its fields', (name, t) => {
+    for (const key of Object.keys(JSON.parse(goldens[name]))) {
+      const missing = JSON.parse(goldens[name]);
+      delete missing[key];
+      const read = () => p.decodeAnswer(t, JSON.stringify(missing));
+      if (schemaOf[name] === p.CmdResult && !['re', 'ok'].includes(key)) {
+        expect(read, `without ${key}`).not.toThrow();
+      } else {
+        expect(read, `without ${key}`).toThrow(v.ValiError);
       }
-    },
-  );
+    }
+  });
 
   it('reads a node version as the release tag it was built from (contracts/local.md)', () => {
     expect(p.decode(p.Welcome, goldens.welcome).version).toMatch(/^v\d+\.\d+\.\d+$/);
   });
 
-  it('refuses a frame a node does not send', () => {
+  it('refuses a frame a node does not send, and an answer as a push', () => {
     expect(() => p.decode(p.Frame, goldens.hello)).toThrow(v.ValiError);
+    for (const name of ['welcome', 'synced', 'fetched', 'cmd-ok', 'audit-answer']) {
+      expect(() => p.decode(p.Frame, goldens[name]), name).toThrow(v.ValiError);
+    }
   });
 
   it('refuses text that is not JSON', () => {
@@ -631,6 +667,16 @@ describe('mock connection', () => {
     const ctl = mockCtl((push) => seen.push(push.t));
     const synced = await ctl.request({ t: 'sync', g: 'g', since: 0, state_only: false });
     expect([...seen, synced]).toEqual(['reset', 'rows', { ...JSON.parse(goldens.synced), re: 1 }]);
+  });
+
+  it('answers audit with the example, typed by the request', async () => {
+    const ctl = mockCtl(() => {});
+    const answer: p.AuditAnswer | p.ErrorResponse = await ctl.request({
+      t: 'audit',
+      before: 0,
+      limit: 50,
+    });
+    expect(answer).toStrictEqual({ ...JSON.parse(goldens['audit-answer']), re: 1 });
   });
 
   it('answers host.info with the example, numbered', async () => {

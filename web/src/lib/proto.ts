@@ -1128,35 +1128,27 @@ export type ToolLists = v.InferOutput<typeof ToolLists>;
 
 // The ctl channel (datachannel.md section 2)
 
-/** The answers to `cmd` and to `audit`, which have no `t`: a frame with a `t` is read by the schema
- *  it names, and refused when that schema refuses it (contracts/conventions.md section 3). A frame
- *  with `rows` is an audit answer, and refused when that schema refuses it. */
-const AuditFrame = v.object({ t: v.optional(v.never()), ...AuditAnswer.entries });
-const HostInfoPushFrame = v.object({ re: v.optional(v.never()), ...HostInfoPush.entries });
-const CmdAnswer = v.object({
-  t: v.optional(v.never()),
-  rows: v.optional(v.never()),
-  ...CmdResult.entries,
-});
-
-/** Every frame a client can receive on `ctl`: a response (it has `re`) or a push. The answer to
- *  `host.info` comes before its push, which is the same object without `re` and `ok`. */
-export const Frame = v.union([
-  Welcome,
-  Synced,
-  Fetched,
-  HostInfo,
-  AuditFrame,
-  CmdAnswer,
-  ErrorResponse,
-  Rows,
-  Reset,
-  Devlog,
-  Groups,
-  HostInfoPushFrame,
-]);
+/** What a client can receive on `ctl` without asking: every push, which has no `re`, and the
+ *  error answer. A frame with `re` is the answer to a request: read it with `decodeAnswer`, by the
+ *  type of the request whose `id` it names. */
+export const Frame = v.union([ErrorResponse, Rows, Reset, Devlog, Groups, HostInfoPush]);
 export type Frame = v.InferOutput<typeof Frame>;
 export type Push = Rows | Reset | Devlog | Groups | HostInfoPush;
+
+/** The schema of the answer to each request, by the request's `t`. An answer is read with the
+ *  schema of the request it answers, not by what it holds: the answers to `cmd` and `audit` have no
+ *  `t`, and like any frame each ignores the members it does not read (contracts/conventions.md
+ *  sections 2 and 3). */
+export const AnswerOf = {
+  hello: Welcome,
+  sync: Synced,
+  fetch: Fetched,
+  cmd: CmdResult,
+  'host.info': HostInfo,
+  audit: AuditAnswer,
+} as const;
+export type RequestType = keyof typeof AnswerOf;
+export type AnswerTo<T extends RequestType> = v.InferOutput<(typeof AnswerOf)[T]>;
 
 /** The one place where received JSON text becomes a typed value. Throws when the text is not
  *  JSON or does not match the schema; everything after it trusts the type. */
@@ -1164,16 +1156,34 @@ export function decode<S extends v.GenericSchema>(schema: S, text: string): v.In
   return v.parse(schema, JSON.parse(text));
 }
 
+/** Reads a frame that has `re` as the answer to a request of type `t`. A frame with `err` is the
+ *  error answer, whatever else it holds (contracts/conventions.md section 3); any other is read
+ *  with `AnswerOf[t]`. Throws as `decode` does. */
+export function decodeAnswer<T extends RequestType>(
+  t: T,
+  text: string,
+): AnswerTo<T> | ErrorResponse {
+  const value: unknown = JSON.parse(text);
+  const error = typeof value === 'object' && value !== null && 'err' in value;
+  return v.parse(error ? ErrorResponse : AnswerOf[t], value) as AnswerTo<T> | ErrorResponse;
+}
+
 /** A request as its sender writes it; the connection numbers it. */
 type Ask<R> = Omit<R, 'id'>;
 
-/** A `ctl` connection: each request is answered by the response that names its id in `re`, or
- *  by an error. Pushes go to the handler given when the connection was made. Implemented by
- *  `mock.ts`, and by the real connection later. */
+/** A `ctl` connection. It numbers each request with a new `id` and keeps the request's `t` under
+ *  that id. A frame with `re` is the answer to the request of that id: it is read with
+ *  `decodeAnswer(t, text)`, settles that request, and the id is forgotten. A frame without `re` is
+ *  read with `Frame` and goes to the push handler given when the connection was made. Every request
+ *  type has an overload, so its answer is typed. Implemented by `mock.ts`, and by the real
+ *  connection later. */
 export interface Ctl {
-  request(req: Ask<Hello>): Promise<Welcome | ErrorResponse>;
-  request(req: Ask<Sync>): Promise<Synced | ErrorResponse>;
-  request(req: Ask<FetchThread> | Ask<FetchKind> | Ask<FetchRow>): Promise<Fetched | ErrorResponse>;
-  request(req: Ask<Cmd>): Promise<CmdResult | ErrorResponse>;
-  request(req: Ask<HostInfoRequest>): Promise<HostInfo | ErrorResponse>;
+  request(req: Ask<Hello>): Promise<AnswerTo<'hello'> | ErrorResponse>;
+  request(req: Ask<Sync>): Promise<AnswerTo<'sync'> | ErrorResponse>;
+  request(
+    req: Ask<FetchThread> | Ask<FetchKind> | Ask<FetchRow>,
+  ): Promise<AnswerTo<'fetch'> | ErrorResponse>;
+  request(req: Ask<Cmd>): Promise<AnswerTo<'cmd'> | ErrorResponse>;
+  request(req: Ask<HostInfoRequest>): Promise<AnswerTo<'host.info'> | ErrorResponse>;
+  request(req: Ask<Audit>): Promise<AnswerTo<'audit'> | ErrorResponse>;
 }

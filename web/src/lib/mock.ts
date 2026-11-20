@@ -181,13 +181,15 @@ export const schemaOf: Record<string, GenericSchema> = {
   welcome: p.Welcome,
 };
 
+/** The example that answers each request. */
 const answers = {
   hello: 'welcome',
   sync: 'synced',
   fetch: 'fetched',
   cmd: 'cmd-ok',
   'host.info': 'host-info-answer',
-} as const;
+  audit: 'audit-answer',
+} as const satisfies Record<p.RequestType, string>;
 
 /** Whether a command creates a group, after which a node pushes the list of groups again. */
 function createsGroup(env: p.Envelope) {
@@ -196,20 +198,21 @@ function createsGroup(env: p.Envelope) {
 }
 
 /** A connection to a node that knows the examples' one group and is the owner's: it answers
- *  `host.info`. `sync` pushes `reset` and `rows`, then answers `synced`; every command is accepted,
- *  and a `group create` pushes `groups` before its answer. Frames pass through `decode` as real
- *  ones do. */
+ *  `host.info` and `audit`. `sync` pushes `reset` and `rows`, then answers `synced`; every command
+ *  is accepted, and a `group create` pushes `groups` before its answer. Frames are read as real
+ *  ones are: answers with `decodeAnswer`, pushes with `Frame`. */
 export function mockCtl(onpush: (push: p.Push) => void): p.Ctl {
   let id = 0;
   return {
     async request(req: { t: keyof typeof answers; env?: p.Envelope }) {
       id += 1;
+      const push = (name: string) => onpush(p.decode(p.Frame, goldens[name]) as p.Push);
       if (req.t === 'sync') {
-        onpush(p.decode(p.Reset, goldens.reset));
-        onpush(p.decode(p.Rows, goldens.rows));
+        push('reset');
+        push('rows');
       }
-      if (req.t === 'cmd' && createsGroup(req.env!)) onpush(p.decode(p.Groups, goldens.groups));
-      return { ...p.decode(p.Frame, goldens[answers[req.t]]), re: id };
+      if (req.t === 'cmd' && createsGroup(req.env!)) push('groups');
+      return { ...p.decodeAnswer(req.t, goldens[answers[req.t]]), re: id };
     },
   } as p.Ctl;
 }
