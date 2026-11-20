@@ -89,6 +89,22 @@ func hostSeamSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the host moves the (task|group) session from "([^"]+)" to "([^"]+)"$`, func(kind, from, to string) {
 		moved = h.Sessions.Move(keys[kind], host.State(from), host.State(to))
 	})
+	sc.Step(`^the host records a takeover and moves the task session from "([^"]+)" to "([^"]+)" in one transaction$`, func(from, to string) {
+		moved = h.Sessions.Write(func(tx *host.Tx) error {
+			if _, err := h.Audit(tx.Tx, host.AuditRow{Group: "g1", Agent: "claude", What: host.AuditTakeover}); err != nil {
+				return err
+			}
+			return tx.Move(keys["task"], host.State(from), host.State(to))
+		})
+	})
+	sc.Step(`^the audit record holds (\d+) rows$`, func(want int) error {
+		var got int
+		err := db.Write(func(tx *store.Tx) error { return tx.QueryRow("SELECT count(*) FROM audit").Scan(&got) })
+		if err != nil || got != want {
+			return fmt.Errorf("the audit record holds %d rows (%v), want %d", got, err, want)
+		}
+		return nil
+	})
 	sc.Step(`^the move ends with "([^"]*)"$`, func(want string) error {
 		got := "ok"
 		if moved != nil {

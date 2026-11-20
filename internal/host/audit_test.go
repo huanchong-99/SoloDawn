@@ -90,7 +90,7 @@ func TestAuditCommitsWithItsTransaction(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
 	failed := h.Store.Write(func(tx *store.Tx) error {
 		if written, err := h.Audit(tx, AuditRow{What: AuditMerge, Detail: "t12 9f2c1ab"}); err != nil || !written {
-			t.Fatalf("got %v and %v", written, err)
+			t.Errorf("got %v and %v", written, err)
 		}
 		_, err := tx.Exec("INSERT INTO no_such_table VALUES(1)")
 		return err
@@ -102,7 +102,7 @@ func TestAuditCommitsWithItsTransaction(t *testing.T) {
 	err := h.Store.Write(func(tx *store.Tx) error {
 		written, err := h.Audit(tx, AuditRow{What: AuditMerge})
 		if written {
-			t.Fatal("a row that could not be stored counts as written")
+			t.Error("a row that could not be stored counts as written")
 		}
 		return err
 	})

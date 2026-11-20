@@ -324,10 +324,9 @@ func TestSessionTable(t *testing.T) {
 		t.Fatalf("stored %+v, want %+v", saved, h.Sessions.All())
 	}
 
-	// Update keeps the key, the state and the time of its last change.
+	// Update writes what its caller changed and nothing else.
 	err := h.Sessions.Update(seamGroup, func(s *Session) {
 		s.CLISession, s.TakeoverAt, s.Secretary = "8d1f", "c0ffee1", true
-		s.SessionKey, s.State, s.LastActive = seamTask, Working, 1
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +340,7 @@ func TestSessionTable(t *testing.T) {
 	if got, _ := h.Sessions.Get(seamTask); got != full {
 		t.Fatalf("an update of one session changed another: %+v", got)
 	}
-	seamCode(t, h.Sessions.Update(SessionKey{Group: "g9"}, func(*Session) { t.Fatal("no session to change") }), "not_found")
+	seamCode(t, h.Sessions.Update(SessionKey{Group: "g9"}, func(*Session) { t.Error("no session to change") }), "not_found")
 
 	if err := h.Sessions.End(seamGroup); err != nil {
 		t.Fatal(err)
@@ -351,6 +350,10 @@ func TestSessionTable(t *testing.T) {
 	}
 	if _, saved := seamHost(t, db); len(saved) != 4 || saved[0] != full {
 		t.Fatalf("stored %+v after the end of one session", saved)
+	}
+	// A session that is not there has ended already.
+	if err := h.Sessions.End(seamGroup); err != nil || len(h.Sessions.All()) != 4 {
+		t.Fatalf("got %v and %d sessions", err, len(h.Sessions.All()))
 	}
 }
 
@@ -406,8 +409,10 @@ func TestSessionTableThatCannotBeLoaded(t *testing.T) {
 func TestSessionTokens(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
 	seamIn(t, h.Sessions, seamTask, Dormant)
+	seamIn(t, h.Sessions, seamGroup, Dormant)
 	structured := h.Sessions.Admit(seamTask, 2, false)
 	terminal := h.Sessions.Admit(seamTask, 3, true)
+	other := h.Sessions.Admit(seamGroup, 1, false)
 	if raw, err := base64.RawURLEncoding.DecodeString(structured); err != nil || len(raw) != 16 || structured == terminal {
 		t.Fatalf("tokens %q and %q, want two different tokens of 16 random bytes", structured, terminal)
 	}
@@ -436,5 +441,164 @@ func TestSessionTokens(t *testing.T) {
 	}
 	if _, ok := h.Sessions.Caller(terminal); ok {
 		t.Fatal("the token of an ended session names a caller")
+	}
+	// The process of the old session has no part in one made later for the
+	// same key, and the end of one session leaves the tokens of the others.
+	seamIn(t, h.Sessions, seamTask, Dormant)
+	if c, ok := h.Sessions.Caller(terminal); ok {
+		t.Fatalf("the token of an ended session names the session made after it: %+v", c)
+	}
+	if c, ok := h.Sessions.Caller(other); !ok || c.SessionKey != seamGroup || c.Level != 1 {
+		t.Fatalf("got %+v, want the group session, whose token was not touched", c)
+	}
+}
+
+// The tools of a turn go by what the host noted about it.
+func TestCallerCarriesTheTurn(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	seamIn(t, h.Sessions, seamTask, Dormant)
+	seamIn(t, h.Sessions, seamGroup, Dormant)
+	token, other := h.Sessions.Admit(seamTask, 2, false), h.Sessions.Admit(seamGroup, 1, false)
+	if c, _ := h.Sessions.Caller(token); c.Turn != (Turn{}) {
+		t.Fatalf("got %+v before any turn", c.Turn)
+	}
+	h.Sessions.SetTurn(seamTask, Turn{Thread: "t12", Depth: 2})
+	h.Sessions.SetTurn(seamGroup, Turn{Jump: true})
+	h.Sessions.SetTurn(seamTask, Turn{N: 40, Thread: "t12", Handback: true})
+	if c, _ := h.Sessions.Caller(token); c.Turn != (Turn{N: 3, Thread: "t12", Handback: true}) {
+		t.Fatalf("got %+v, want the third turn of this run, a hand-back in the thread of t12", c.Turn)
+	}
+	if c, _ := h.Sessions.Caller(other); c.Turn != (Turn{N: 2, Jump: true}) {
+		t.Fatalf("got %+v, want the second turn of this run", c.Turn)
+	}
+	// A session made later for the same key starts without a turn.
+	if err := h.Sessions.End(seamTask); err != nil {
+		t.Fatal(err)
+	}
+	seamIn(t, h.Sessions, seamTask, Dormant)
+	if c, ok := h.Sessions.Caller(h.Sessions.Admit(seamTask, 2, false)); !ok || c.Turn != (Turn{}) {
+		t.Fatalf("got %+v, want no turn for a new session", c.Turn)
+	}
+}
+
+func TestOpenCallsAreCountedPerSession(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	if h.Sessions.Calls(seamTask) != 0 {
+		t.Fatal("a call is open before any began")
+	}
+	first, second, other := h.Sessions.Calling(seamTask), h.Sessions.Calling(seamTask), h.Sessions.Calling(seamGroup)
+	if got := h.Sessions.Calls(seamTask); got != 2 {
+		t.Fatalf("%d calls are open, want 2", got)
+	}
+	first()
+	if got := h.Sessions.Calls(seamTask); got != 1 {
+		t.Fatalf("%d calls are open, want 1", got)
+	}
+	second()
+	other()
+	if h.Sessions.Calls(seamTask) != 0 || h.Sessions.Calls(seamGroup) != 0 {
+		t.Fatal("a call is open after all ended")
+	}
+}
+
+// A takeover's audit row and its change of state commit together, or neither
+// does (contracts/storage.md section 3).
+func TestSessionChangesCommitWithTheirTransaction(t *testing.T) {
+	db := seamStore(t)
+	h, _ := seamHost(t, db)
+	seamIn(t, h.Sessions, seamTask, Waiting)
+	seamIn(t, h.Sessions, seamGroup, Dormant)
+	token := h.Sessions.Admit(seamGroup, 1, false)
+	h.Sessions.SetTurn(seamGroup, Turn{Thread: "t12"})
+	left := h.Sessions.All()
+	takeover := AuditRow{Group: "g1", Agent: "claude", What: AuditTakeover, Detail: "t12", By: "owner-device"}
+
+	err := h.Sessions.Write(func(tx *Tx) error {
+		if written, err := h.Audit(tx.Tx, takeover); err != nil || !written {
+			t.Errorf("got %v and %v", written, err)
+		}
+		// Each change is in the table as soon as it is made, for whoever
+		// reads the table inside the transaction.
+		if err := tx.Create(seamSession(seamReview)); err != nil {
+			t.Error(err)
+		}
+		if err := tx.Update(seamTask, func(s *Session) { s.TakeoverAt = "9f2c1ab" }); err != nil {
+			t.Error(err)
+		}
+		if err := tx.End(seamGroup); err != nil {
+			t.Error(err)
+		}
+		if _, ok := h.Sessions.Caller(token); ok || len(h.Sessions.All()) != 2 {
+			t.Error("an ended session is still in the table inside the transaction")
+		}
+		// The session is waiting, so this takeover is refused, and with it
+		// all of the transaction.
+		return tx.Move(seamTask, Dormant, Takeover)
+	})
+	seamCode(t, err, "conflict")
+	if got := h.Sessions.All(); !reflect.DeepEqual(got, left) {
+		t.Fatalf("after the refused transaction the table holds %+v, want %+v", got, left)
+	}
+	if c, ok := h.Sessions.Caller(token); !ok || c.Turn != (Turn{N: 1, Thread: "t12"}) {
+		t.Fatalf("got %+v, want the token and the turn the refused end took away", c)
+	}
+	if record := seamRecord(t, h); record != "" {
+		t.Fatalf("the audit row of the refused takeover was kept: %q", record)
+	}
+	if _, saved := seamHost(t, db); !reflect.DeepEqual(saved, left) {
+		t.Fatalf("stored %+v, want %+v", saved, left)
+	}
+
+	h, _ = seamHost(t, db)
+	err = h.Sessions.Write(func(tx *Tx) error {
+		if _, err := h.Audit(tx.Tx, takeover); err != nil {
+			return err
+		}
+		return tx.Move(seamTask, Dormant, Takeover)
+	})
+	if err != nil || seamState(t, h.Sessions, seamTask) != Takeover {
+		t.Fatalf("got %v and %s", err, seamState(t, h.Sessions, seamTask))
+	}
+	if record := seamRecord(t, h); record != "1763600000000|g1|claude|takeover|-|-|t12|owner-device|-" {
+		t.Fatalf("got the audit record %q", record)
+	}
+	if _, saved := seamHost(t, db); saved[1].State != Takeover {
+		t.Fatalf("stored %+v, want the task session in takeover", saved[1])
+	}
+}
+
+// One lock order: no change waits for the store's writer while it holds the
+// table's lock, so the table can be read inside any transaction of the store.
+func TestSessionTableIsReadInsideATransaction(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	seamIn(t, h.Sessions, seamTask, Dormant)
+	token := h.Sessions.Admit(seamTask, 2, false)
+	finished := make(chan error, 2)
+	go func() {
+		finished <- h.Store.Write(func(*store.Tx) error {
+			// A change made meanwhile waits for this transaction to end.
+			go func() { finished <- h.Sessions.Move(seamTask, Dormant, Working) }()
+			time.Sleep(50 * time.Millisecond)
+			if _, ok := h.Sessions.Get(seamTask); !ok || len(h.Sessions.All()) != 1 {
+				t.Error("the table could not be read")
+			}
+			if c, ok := h.Sessions.Caller(token); !ok || c.State != Dormant {
+				t.Errorf("got %+v, want the session before the change that waits", c)
+			}
+			return nil
+		})
+	}()
+	for range 2 {
+		select {
+		case err := <-finished:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("a reader of the table and a change of it wait for each other")
+		}
+	}
+	if seamState(t, h.Sessions, seamTask) != Working {
+		t.Fatal("the change that waited was not made")
 	}
 }

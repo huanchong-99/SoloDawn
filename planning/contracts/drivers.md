@@ -28,9 +28,12 @@ own default model.
 start for it (`cli_session` is `NULL`, `contracts/storage.md` section 3).
 Claude Code takes its id from the node: at the first start the node makes a
 UUID and passes it with `--session-id`. Codex issues the thread id itself.
-In both cases the node stores the id once that start has reported it, and a
-start with a stored id is a resume. A first start that fails before then
-leaves no id, and the next start is a first start again.
+After a structured first start the node stores the id once that start has
+reported it; a first start that fails before then leaves no id, and the
+next start is a first start again. A first start in the terminal (1.3,
+Claude Code only) reports nothing, because the node does not read terminal
+bytes (R-85): the node stores the id it passed as it starts the CLI. A start
+with a stored id is a resume.
 
 ### 1.1 Claude Code, structured
 
@@ -50,7 +53,11 @@ claude -p --verbose
 
 - `<file>` is a temporary MCP configuration with one server: command
   `solodawn`, arguments `mcp --token <t>`. Every start reads the file it is
-  given, so after a resume the token of that start is the one in force.
+  given, so after a resume the token of that start is the one in force. The
+  command is the node's own: each node gives its drivers the command line
+  that reaches itself, so that two nodes on one machine do not answer each
+  other's CLIs. The same holds for the two `-c mcp_servers.solodawn`
+  settings of 1.2.
 - `--allowedTools mcp__solodawn` is needed at every level: without it each
   call of the node's own tools goes to `approve` first.
 - `--setting-sources user` keeps project settings and hooks out (R-45), and

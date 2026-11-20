@@ -3,10 +3,13 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"maps"
+	"math"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/identity"
@@ -49,8 +52,61 @@ func TestHostKeepsWhatItIsGiven(t *testing.T) {
 	if err != nil || len(saved) != 0 {
 		t.Fatalf("got %v and %v", saved, err)
 	}
-	if h.Store != db || h.Key.ID() != key.ID() || h.Now().UnixMilli() != seamStart || h.Sessions == nil {
+	if h.Store != db || h.Key.ID() != key.ID() || h.Now().UnixMilli() != seamStart || h.Sessions == nil || h.Rows == nil {
 		t.Fatalf("got %+v", h)
+	}
+	// What node sets after New is for the units to use: nothing here reads it.
+	if h.Connect != nil || h.Shim != nil {
+		t.Fatalf("a new host has a connect hook or a shim: %v", h.Shim)
+	}
+}
+
+// seamPanic returns what run panics with, "" when it does not.
+func seamPanic(run func()) (message string) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			message = recovered.(string)
+		}
+	}()
+	run()
+	return ""
+}
+
+func TestAKeyIsRegisteredOnce(t *testing.T) {
+	table := map[string]int{}
+	Register(table, "post", 1)
+	Register(table, "ask", 2)
+	if got := seamPanic(func() { Register(table, "post", 3) }); got != "host: post is registered twice" {
+		t.Fatalf("a second registration of a key panicked with %q", got)
+	}
+	if want := map[string]int{"post": 1, "ask": 2}; !maps.Equal(table, want) {
+		t.Fatalf("got %v, want %v", table, want)
+	}
+}
+
+type seamRuntime struct{ Runtime }
+
+func TestAHookIsProvidedOnce(t *testing.T) {
+	var deliver func(h *Host, group, member string)
+	var runner Runtime
+	delivered := 0
+	Provide(&deliver, func(*Host, string, string) { delivered++ })
+	Provide(&runner, Runtime(seamRuntime{}))
+	deliver(nil, "g1", "m7")
+	if delivered != 1 || runner != (seamRuntime{}) {
+		t.Fatalf("the hooks hold %v after %d calls, not what was provided", runner, delivered)
+	}
+	for _, second := range []func(){
+		func() { Provide(&deliver, func(*Host, string, string) { delivered += 10 }) },
+		func() { Provide(&runner, Runtime(nil)) },
+	} {
+		if got := seamPanic(second); got != "host: a hook is provided twice" {
+			t.Fatalf("a second provider panicked with %q", got)
+		}
+	}
+	deliver(nil, "g1", "m7")
+	if delivered != 2 {
+		t.Fatal("a second provider replaced the first")
 	}
 }
 
@@ -94,6 +150,28 @@ func TestHomeIsTheOpenConnectionOfThatDevice(t *testing.T) {
 	}
 }
 
+func TestAttachTellsTheUnitsInTheOrderOfTheirNames(t *testing.T) {
+	before := Attached
+	t.Cleanup(func() { Attached = before })
+	h, _ := seamHost(t, seamStore(t))
+	home := newSeamHome("")
+	var told []string
+	tell := func(name string) func(*Host, string) {
+		return func(got *Host, device string) {
+			// The connection is there for whoever is told of it.
+			if attached, ok := got.Home(device); got != h || !ok || attached != home {
+				t.Errorf("%s was told of %s before it was attached", name, device)
+			}
+			told = append(told, name+" "+device)
+		}
+	}
+	Attached = map[string]func(*Host, string){"sync": tell("sync"), "delivery": tell("delivery"), "join": tell("join")}
+	h.Attach("home-device", home)
+	if want := []string{"delivery home-device", "join home-device", "sync home-device"}; !slices.Equal(told, want) {
+		t.Fatalf("got %v, want %v", told, want)
+	}
+}
+
 func TestCommandIsSignedSentAndAnswered(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
 	const payload = `{"t":"post","n":"AAAAAAAAAAAAAAAAAAAAAA","ts":1763600000000,"g":"AAAAAAAAAAAAAAAAAAAAAQ","as":"m7","text":"<done> & pushed"}`
@@ -132,6 +210,127 @@ func TestCommandIsSignedSentAndAnswered(t *testing.T) {
 	}
 	if len(home.asked) != 3 {
 		t.Fatalf("%d requests were sent, want 3", len(home.asked))
+	}
+}
+
+func TestCommandThatDoesNotFitACtlMessageIsNotSent(t *testing.T) {
+	// A frame is counted as a connection encodes it: without HTML escaping,
+	// without a line end.
+	if got := frameSize(proto.Request{Type: "<&>", ID: 7}); got != len(`{"t":"<&>","id":7}`) {
+		t.Fatalf("got %d bytes", got)
+	}
+	h, _ := seamHost(t, seamStore(t))
+	home := newSeamHome(`{"re":41,"ok":true}`)
+	h.Attach("home-device", home)
+	// The id of a request is not known before it is sent, so the longest counts.
+	empty := frameSize(proto.Cmd{Request: proto.Request{Type: "cmd", ID: math.MaxInt64}, Env: seamKey().Sign("")})
+	fits := strings.Repeat("a", 61_440-empty)
+	if _, err := h.Command(t.Context(), "home-device", fits); err != nil || len(home.asked) != 1 {
+		t.Fatalf("a command of exactly 60 KiB as a frame: %v, %d sent", err, len(home.asked))
+	}
+	answer, err := h.Command(t.Context(), "home-device", fits+"a")
+	if answer != nil || err == nil || err.Error() != "bad_request: the command takes 61441 bytes as a ctl message, and the limit is 61440" {
+		t.Fatalf("got %s and %v", answer, err)
+	}
+	if len(home.asked) != 1 {
+		t.Fatal("a command that does not fit was sent")
+	}
+}
+
+func TestAnItemGoesToTheCallThatWaitsForIt(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	item := json.RawMessage(`{"env":{"p":"{}","k":"home-device","s":""}}`)
+	if waited, err := h.Hand("call-1", item); waited || err != nil {
+		t.Fatalf("got %v and %v when nothing waits", waited, err)
+	}
+	var taken []string
+	refusal := errors.New("the cause is not signed by an approver")
+	done := h.Await("call-1", func(got json.RawMessage) error {
+		// Whoever takes an item may use the host's connections.
+		h.Home("home-device")
+		taken = append(taken, "call-1 "+string(got))
+		return nil
+	})
+	h.Await("card-9", func(json.RawMessage) error { return refusal })
+	if waited, err := h.Hand("call-1", item); !waited || err != nil {
+		t.Fatalf("got %v and %v, want the item taken", waited, err)
+	}
+	if waited, err := h.Hand("card-9", item); !waited || err != refusal {
+		t.Fatalf("got %v and %v, want the item refused by its receiver", waited, err)
+	}
+	if waited, _ := h.Hand("call-2", item); waited {
+		t.Fatal("an item went to a call that waits for another message")
+	}
+	done()
+	if waited, err := h.Hand("call-1", item); waited || err != nil {
+		t.Fatalf("got %v and %v after the wait ended", waited, err)
+	}
+	if waited, _ := h.Hand("card-9", item); !waited {
+		t.Fatal("the end of one wait ended another")
+	}
+	// A second receiver for an id takes the place of the first.
+	h.Await("card-9", func(json.RawMessage) error { taken = append(taken, "card-9"); return nil })
+	if waited, err := h.Hand("card-9", item); !waited || err != nil {
+		t.Fatalf("got %v and %v from the receiver that replaced the first", waited, err)
+	}
+	if want := []string{"call-1 " + string(item), "card-9"}; !slices.Equal(taken, want) {
+		t.Fatalf("got %v, want %v", taken, want)
+	}
+}
+
+func TestRowsOfAGroup(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	if _, ok := h.Rows.Get("g1", "task", "t12"); ok || len(h.Rows.Of("g1", "task")) != 0 {
+		t.Fatal("a new host holds rows")
+	}
+	h.Rows.Put("g1", "task", "t9", json.RawMessage(`{"r":"task","id":"t9","seq":4}`))
+	h.Rows.Put("g1", "task", "t12", json.RawMessage(`{"r":"task","id":"t12","seq":5}`))
+	h.Rows.Put("g1", "member", "t12", json.RawMessage(`{"r":"member","id":"t12","seq":6}`))
+	h.Rows.Put("g2", "task", "t12", json.RawMessage(`{"r":"task","id":"t12","seq":2}`))
+	h.Rows.Put("g1", "task", "t12", json.RawMessage(`{"r":"task","id":"t12","seq":7}`))
+	if row, ok := h.Rows.Get("g1", "task", "t12"); !ok || string(row) != `{"r":"task","id":"t12","seq":7}` {
+		t.Fatalf("got %s, want the row put last", row)
+	}
+	texts := func(rows []json.RawMessage) (out []string) {
+		for _, row := range rows {
+			out = append(out, string(row))
+		}
+		return out
+	}
+	if got, want := texts(h.Rows.Of("g1", "task")), []string{`{"r":"task","id":"t12","seq":7}`, `{"r":"task","id":"t9","seq":4}`}; !slices.Equal(got, want) {
+		t.Fatalf("got %v, want the task rows of g1 in the order of their ids: %v", got, want)
+	}
+	h.Rows.Reset("g1")
+	if _, ok := h.Rows.Get("g1", "member", "t12"); ok || len(h.Rows.Of("g1", "task")) != 0 {
+		t.Fatal("a reset left rows of the group")
+	}
+	if got := texts(h.Rows.Of("g2", "task")); !slices.Equal(got, []string{`{"r":"task","id":"t12","seq":2}`}) {
+		t.Fatalf("a reset of one group changed another: %v", got)
+	}
+}
+
+func TestReportTellsEveryListener(t *testing.T) {
+	before := Listeners
+	t.Cleanup(func() { Listeners = before })
+	h, _ := seamHost(t, seamStore(t))
+	type heard struct {
+		name string
+		h    *Host
+		key  SessionKey
+		e    Event
+	}
+	var got []heard
+	listen := func(name string) func(*Host, SessionKey, Event) {
+		return func(h *Host, key SessionKey, e Event) { got = append(got, heard{name, h, key, e}) }
+	}
+	Listeners = map[string]func(*Host, SessionKey, Event){"runtime": listen("runtime"), "approvals": listen("approvals")}
+	asked := Event{Kind: Asked, Ask: &Ask{ID: "7", Tool: "commandExecution", Category: "command", Command: "git push"}}
+	h.Report(seamTask, asked)
+	h.Report(seamGroup, Event{Kind: TurnBegan})
+	want := []heard{{"approvals", h, seamTask, asked}, {"runtime", h, seamTask, asked},
+		{"approvals", h, seamGroup, Event{Kind: TurnBegan}}, {"runtime", h, seamGroup, Event{Kind: TurnBegan}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
 

@@ -6,11 +6,15 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"maps"
+	"math"
 	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -25,7 +29,9 @@ type Link interface {
 	// Send writes a push, or the answer to a request.
 	Send(frame any) error
 	// Path is "direct" or "relay" (flows/connect.md step 8), "local" on the
-	// local link, and "" while no path is selected.
+	// local link, and "" while no path is selected. The host reports the path
+	// to a home in member status (contracts/commands.md 1.2), and refuses a
+	// takeover unless the owner's is direct.
 	Path() string
 	// PathChanged is signalled whenever Path may have changed.
 	PathChanged() <-chan struct{}
@@ -70,10 +76,23 @@ type Host struct {
 	Store    *store.Store
 	Key      identity.Key
 	Sessions *Sessions
+	Rows     *Rows
 	Now      func() time.Time
-	mu       sync.Mutex
-	homes    map[string]Home
-	parts    sync.Map
+	// Connect has node keep a connection to the home with that device id
+	// open, again after every loss, until ctx ends; it returns at once. node
+	// sets it, and calls Attach for each connection that opens. For a home on
+	// this node the connection is the local link.
+	Connect func(ctx context.Context, device string)
+	// Shim is the command line that starts this node's MCP shim, without the
+	// token (contracts/local.md section 1). node sets it, so that the CLIs of
+	// two nodes in one process reach each their own node.
+	Shim []string
+
+	mu      sync.Mutex
+	homes   map[string]Home
+	waiting sync.Mutex // held while an item is handed over, so not h.mu
+	waits   map[string]func(item json.RawMessage) error
+	parts   sync.Map
 }
 
 // New loads the session table as the node starts (sessions.md section 2).
@@ -84,7 +103,9 @@ func New(db *store.Store, key identity.Key, now func() time.Time) (h *Host, save
 	if err != nil {
 		return nil, nil, err
 	}
-	return &Host{Store: db, Key: key, Sessions: sessions, Now: now, homes: map[string]Home{}}, saved, nil
+	h = &Host{Store: db, Key: key, Sessions: sessions, Rows: &Rows{rows: map[rowKey]json.RawMessage{}}, Now: now,
+		homes: map[string]Home{}, waits: map[string]func(json.RawMessage) error{}}
+	return h, saved, nil
 }
 
 // Part returns what one unit keeps for this host: one value per type, made
@@ -94,13 +115,50 @@ func Part[T any](h *Host) *T {
 	return part.(*T)
 }
 
+// Register adds an entry to one of the tables of this file, from the init of
+// the file that provides it. A key has one entry: a second one panics, so
+// that two units cannot both claim a tool, a frame or a command.
+func Register[V any](table map[string]V, key string, entry V) {
+	if _, taken := table[key]; taken {
+		panic("host: " + key + " is registered twice")
+	}
+	table[key] = entry
+}
+
+// Provide sets one of the hooks of this file, from the init of the file that
+// implements it. A hook has one provider: a second one panics.
+func Provide[F any](hook *F, provided F) {
+	if !reflect.ValueOf(hook).Elem().IsNil() {
+		panic("host: a hook is provided twice")
+	}
+	*hook = provided
+}
+
+// inOrder returns the entries of a table in the order of their keys.
+func inOrder[V any](table map[string]V) []V {
+	entries := make([]V, 0, len(table))
+	for _, key := range slices.Sorted(maps.Keys(table)) {
+		entries = append(entries, table[key])
+	}
+	return entries
+}
+
+// Attached holds what is to happen each time a connection to a home opens,
+// such as reading the state of the groups homed there. Each entry has the
+// name of its unit; Attach calls them in the order of their names. home is
+// the device id of the home.
+var Attached = map[string]func(h *Host, home string){}
+
 // Attach makes home the connection to the home with that device id, in place
 // of an earlier one. node calls it for each connection it opens to a home, and
 // with the local link for a home on this node.
 func (h *Host) Attach(device string, home Home) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.homes[device] = home
+	h.mu.Unlock()
+	for _, attached := range inOrder(Attached) {
+		attached(h, device)
+	}
 }
 
 // Home returns the connection to the home with that device id while it is
@@ -120,11 +178,16 @@ func (h *Host) Home(device string) (Home, bool) {
 	}
 }
 
+// ctlLimit is the size of a ctl message at most (contracts/conventions.md
+// section 4).
+const ctlLimit = 61_440
+
 // Command signs payload, the JSON text of a command, with the node's key and
 // sends it to the home with that device id (contracts/datachannel.md section
 // 5). It returns the home's answer when the command was accepted, the home's
 // error as an *Error when it was refused, and home_unreachable when no answer
-// came (flows/agent-turn.md F).
+// came (flows/agent-turn.md F). A command too large for a ctl message is not
+// sent: it fails with bad_request, which names the limit and the size.
 func (h *Host) Command(ctx context.Context, device, payload string) (json.RawMessage, error) {
 	unreachable := &Error{"home_unreachable", "the home of that group is not connected"}
 	home, ok := h.Home(device)
@@ -132,9 +195,13 @@ func (h *Host) Command(ctx context.Context, device, payload string) (json.RawMes
 		return nil, unreachable
 	}
 	env := h.Key.Sign(payload)
-	answer, err := home.Request(ctx, func(id int64) any {
+	frame := func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
-	})
+	}
+	if size := frameSize(frame(math.MaxInt64)); size > ctlLimit {
+		return nil, &Error{"bad_request", fmt.Sprintf("the command takes %d bytes as a ctl message, and the limit is %d", size, ctlLimit)}
+	}
+	answer, err := home.Request(ctx, frame)
 	if err != nil {
 		return nil, unreachable
 	}
@@ -145,9 +212,100 @@ func (h *Host) Command(ctx context.Context, device, payload string) (json.RawMes
 	return answer, nil
 }
 
+// frameSize is the size of a frame as a connection encodes it: JSON without
+// HTML escaping (contracts/conventions.md section 4). The frames of this
+// package always encode.
+func frameSize(frame any) int {
+	var text bytes.Buffer
+	encoder := json.NewEncoder(&text)
+	encoder.SetEscapeHTML(false)
+	encoder.Encode(frame)
+	return text.Len() - 1 // without the line end the encoder adds
+}
+
+// Await makes take the receiver of the item that answers the message with
+// that id while a tool call waits for it: the reply to a call whose ask is
+// open, the decision of an approval the CLI is waiting on. Such an item is
+// not a turn (flows/agent-turn.md A). take refuses an item by its error, and
+// must not call Await, Hand or done itself. done ends the wait: from its
+// return on, take is not called. An id has one receiver: a second Await for
+// it replaces the first.
+func (h *Host) Await(id string, take func(item json.RawMessage) error) (done func()) {
+	h.waiting.Lock()
+	defer h.waiting.Unlock()
+	h.waits[id] = take
+	return func() {
+		h.waiting.Lock()
+		defer h.waiting.Unlock()
+		delete(h.waits, id)
+	}
+}
+
+// Hand gives an item to the tool call that waits for the answer to the
+// message with that id. Delivery calls it before it queues a reply or a
+// decided item, with the item as the home sent it. waited is false when
+// nothing waits: the item then takes its turn in the queue. Otherwise err
+// says whether the receiver took the item or refused it.
+func (h *Host) Hand(id string, item json.RawMessage) (waited bool, err error) {
+	h.waiting.Lock()
+	defer h.waiting.Unlock()
+	take, waited := h.waits[id]
+	if !waited {
+		return false, nil
+	}
+	return true, take(item)
+}
+
+type rowKey struct{ group, kind, id string }
+
+// Rows is the host's copy of the state rows of the groups its AIs are in:
+// the group, member, device and task rows a home sends for a sync with
+// state_only (contracts/datachannel.md section 4). The unit that handles
+// rows and reset keeps it, by the rules of that section; every unit reads
+// it. A row is the JSON text the home sent.
+type Rows struct {
+	mu   sync.Mutex
+	rows map[rowKey]json.RawMessage
+}
+
+// Put stores a row of a group under its type r and its id, in place of the
+// one held.
+func (c *Rows) Put(group, r, id string, row json.RawMessage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.rows[rowKey{group, r, id}] = row
+}
+
+// Reset drops every row of a group.
+func (c *Rows) Reset(group string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	maps.DeleteFunc(c.rows, func(key rowKey, _ json.RawMessage) bool { return key.group == group })
+}
+
+// Get returns one row of a group.
+func (c *Rows) Get(group, r, id string) (json.RawMessage, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	row, ok := c.rows[rowKey{group, r, id}]
+	return row, ok
+}
+
+// Of returns the rows of one type of a group, in the order of their ids.
+func (c *Rows) Of(group, r string) []json.RawMessage {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	byID := map[string]json.RawMessage{}
+	for key, row := range c.rows {
+		if key.group == group && key.kind == r {
+			byID[key.id] = row
+		}
+	}
+	return inOrder(byID)
+}
+
 // Pushes holds the handler of each kind of frame a home pushes to a host, by
-// the frame's t: "inbox", "rows", "reset". The file that handles a kind
-// registers it from its init. home is the device id of the home.
+// the frame's t: "inbox", "rows", "reset". home is the device id of the home.
 var Pushes = map[string]func(h *Host, home string, frame json.RawMessage){}
 
 // Push hands a frame that a home pushed to the handler of its kind. node
@@ -169,8 +327,7 @@ func (h *Host) Push(home string, frame json.RawMessage) {
 // Surface holds what the host answers on the host surface
 // (contracts/datachannel.md section 7), by t: the t of a request or a push
 // ("audit", "pty.resize"), or the t of a host command's payload
-// ("takeover.start", contracts/commands.md section 2). The file that handles
-// one registers it from its init.
+// ("takeover.start", contracts/commands.md section 2).
 //
 // node calls a handler only for a device of the owner, by: for a command,
 // after the envelope checks and the receipt lookup, with the payload as data;
@@ -179,8 +336,31 @@ func (h *Host) Push(home string, frame json.RawMessage) {
 // error with internal.
 var Surface = map[string]func(ctx context.Context, h *Host, from Owner, by string, data json.RawMessage) (any, error){}
 
+// A Tool is one MCP tool of the server named solodawn
+// (contracts/mcp-tools.md).
+type Tool struct {
+	Description string
+	Schema      json.RawMessage // the JSON Schema of its arguments
+	// For says whether the tool is listed to a caller; nil lists it to all.
+	For func(c Caller) bool
+	// Call runs the tool. Its result is encoded as the JSON of the one text
+	// block; an *Error is answered as its text, any other error as internal.
+	Call func(ctx context.Context, h *Host, c Caller, args json.RawMessage) (any, error)
+}
+
+// Tools holds every tool by name.
+var Tools = map[string]Tool{}
+
+// ToolsFor returns the tools the server lists to a caller. A tool it does not
+// list to a caller is not called for that caller either. The server brackets
+// each call with Sessions.Calling.
+func ToolsFor(c Caller) map[string]Tool {
+	listed := maps.Clone(Tools)
+	maps.DeleteFunc(listed, func(_ string, tool Tool) bool { return tool.For != nil && !tool.For(c) })
+	return listed
+}
+
 // Drivers holds the driver of each CLI by its agent name: "claude", "codex".
-// A driver's file registers it from its init.
 var Drivers = map[string]Driver{}
 
 // A Driver starts one vendor's CLI (contracts/drivers.md section 1).
@@ -190,8 +370,9 @@ type Driver interface {
 	Start(ctx context.Context, l Launch) (Process, error)
 	// Interactive returns the command line that opens the session in a
 	// terminal, for a takeover (contracts/drivers.md 1.3), and the session
-	// id it names. It fails where the CLI cannot open in a terminal a
-	// session that has had no turn.
+	// id it names, which the caller stores: a terminal reports nothing. It
+	// fails where the CLI cannot open in a terminal a session that has had
+	// no turn.
 	Interactive(l Launch) (argv []string, session string, err error)
 }
 
@@ -200,7 +381,7 @@ type Launch struct {
 	Folder       string        // the session's working folder, an absolute path
 	Session      string        // the CLI's session or thread id; "" before the first start
 	Level        int           // 1, 2 or 3 (contracts/drivers.md section 1)
-	Token        string        // the session token of this start, for the MCP shim
+	Shim         []string      // the command line of the MCP server of this start: Host.Shim, then --token and the session token
 	Instructions string        // the text of the session kind (contracts/drivers.md section 4)
 	RepoConfig   bool          // load the repository's own AI configuration (R-45)
 	ToolTimeout  time.Duration // how long a call of one of the node's tools may last
@@ -223,7 +404,7 @@ type Process interface {
 	Close() error
 }
 
-// An EventKind names what a CLI process reported.
+// An EventKind names what happened in the CLI process of a session.
 type EventKind string
 
 const (
@@ -231,14 +412,15 @@ const (
 	Active       EventKind = "active"        // the CLI sent something; a silent turn is one without it (contracts/drivers.md 1.2)
 	Asked        EventKind = "asked"         // a permission request: Ask, to be answered with Process.Answer
 	Used         EventKind = "used"          // usage figures outside a turn's end: Usage
+	TurnBegan    EventKind = "turn_began"    // a turn was written; reported by the runtime, not by a driver
 	TurnEnded    EventKind = "turn_ended"    // the turn ended: Status and Usage
 	RateLimited  EventKind = "rate_limited"  // the vendor's rate limit was reached: Resets
 	LoginInvalid EventKind = "login_invalid" // sign-in is not usable in this mode (R-56): Text
 	NoSession    EventKind = "no_session"    // the CLI cannot resume the session id: Text
 )
 
-// An Event is one report of a CLI process. Only the fields its kind names
-// are set.
+// An Event is one report about the CLI process of a session. Only the fields
+// its kind names are set.
 type Event struct {
 	Kind    EventKind
 	Session string // Ready
@@ -261,7 +443,7 @@ type Usage struct {
 // take (flows/approval.md A). Tool, Category, Command and Why are the fields
 // of the approval card (contracts/messages.md 2.3), not yet shortened.
 type Ask struct {
-	ID       string          // names the request in Process.Answer; new on every attempt
+	ID       string          // names the request in Runtime.Answer; new on every attempt
 	Tool     string          // what the CLI names
 	Category string          // command, file, network or other
 	Command  string          // the request as the CLI presented it
@@ -269,25 +451,51 @@ type Ask struct {
 	Input    json.RawMessage // what the digest of the approval record covers (flows/approval.md step 5)
 }
 
-// A Tool is one MCP tool of the server named solodawn
-// (contracts/mcp-tools.md).
-type Tool struct {
-	Description string
-	Schema      json.RawMessage // the JSON Schema of its arguments
-	// For says whether the tool is listed to a caller; nil lists it to all.
-	For func(c Caller) bool
-	// Call runs the tool. Its result is encoded as the JSON of the one text
-	// block; an *Error is answered as its text, any other error as internal.
-	Call func(ctx context.Context, h *Host, c Caller, args json.RawMessage) (any, error)
+// Listeners are told every event of every session's CLI. Each has the name
+// of its unit; Report calls them in the order of their names.
+var Listeners = map[string]func(h *Host, key SessionKey, e Event){}
+
+// Report tells the listeners an event of the CLI of a session. The runtime
+// calls it for each event it reads from Process.Events, in their order, and
+// for TurnBegan. A listener returns at once; what takes time it starts on a
+// goroutine of its own.
+func (h *Host) Report(key SessionKey, e Event) {
+	for _, listen := range inOrder(Listeners) {
+		listen(h, key, e)
+	}
 }
 
-// Tools holds every tool by name. A tool's file registers it from its init.
-var Tools = map[string]Tool{}
-
-// ToolsFor returns the tools the server lists to a caller. A tool it does not
-// list to a caller is not called for that caller either.
-func ToolsFor(c Caller) map[string]Tool {
-	listed := maps.Clone(Tools)
-	maps.DeleteFunc(listed, func(_ string, tool Tool) bool { return tool.For != nil && !tool.For(c) })
-	return listed
+// The Runtime owns the CLI processes of the sessions. The session runtime
+// provides Runner; delivery, the approval handler and the takeover call it.
+type Runtime interface {
+	// Turn gives a session one turn. It starts the session's CLI when the
+	// session is dormant, as a resume when the CLI has a session id; notes
+	// turn with Sessions.SetTurn; writes text; and reports TurnBegan. It
+	// returns once the turn is written. With turn.Jump it first interrupts
+	// the turn the AI is running in the group (flows/agent-turn.md C). When
+	// the turn has ended, the runtime reports TurnEnded and calls Deliver.
+	Turn(ctx context.Context, h *Host, key SessionKey, text string, turn Turn) error
+	// Answer allows or declines a permission request that the CLI of a
+	// session made: the event Asked.
+	Answer(h *Host, key SessionKey, ask string, allow bool) error
 }
+
+// The hooks through which the units of the session runtime call each other.
+// Each is set with Provide. A test of a unit that calls one sets a fake.
+var (
+	// Runner is the session runtime.
+	Runner Runtime
+	// Deliver gives an AI in a group its next turn, when items are held for
+	// it and nothing holds them any more (flows/agent-turn.md step 10).
+	// Delivery provides it. The runtime calls it when a turn of the AI has
+	// ended, and whoever lifts a hold calls it too.
+	Deliver func(h *Host, group, member string)
+	// Instructions returns the instructions a session is started with, by
+	// its kind (contracts/drivers.md section 4).
+	Instructions func(s Session) string
+	// Compose makes one turn of the items a session is given, in their
+	// order: its text (contracts/drivers.md section 3) and what the host
+	// notes about it. An item is one element of the items of an inbox frame,
+	// as the home sent it (contracts/datachannel.md section 6).
+	Compose func(h *Host, s Session, items []json.RawMessage) (text string, turn Turn, err error)
+)

@@ -50,6 +50,17 @@ Feature: Host sessions
     Then the move ends with "busy: another session of this AI in the group is working or taken over"
     And the host holds the group session as "dormant"
 
+  Scenario Outline: A takeover's audit row is kept only with its change of state
+    Given a host whose AI has a "<state>" task session
+    When the host records a takeover and moves the task session from "dormant" to "takeover" in one transaction
+    Then the move ends with "<outcome>"
+    And the audit record holds <rows> rows
+
+    Examples:
+      | state   | outcome                                                              | rows |
+      | dormant | ok                                                                   | 1    |
+      | waiting | conflict: the session is waiting: no change from dormant to takeover | 0    |
+
   Scenario Outline: A tool is listed only to the sessions it is for
     Given a host whose AI has a "dormant" task session
     And a tool "seam_checks" that is for task sessions above level 1

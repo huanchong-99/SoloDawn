@@ -242,6 +242,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the seam of the host (HS-0, #159) has no hook on a change of the session table (`internal/host/session.go:82`); which changes matter depends on what `host.info` is built from, which is N-3's.
 - Status: open. N-3 decides whether it needs a notice or reads the table again, and asks the owner of `internal/host/session.go` for the hook if it does (coordinator, 2026-11-20).
 
+### 2026-11-20 · limitation · A commit that fails leaves the session table ahead of the store
+
+- Symptom: not observed. If the store fails to commit a transaction whose function succeeded (an I/O error at `COMMIT`), the session table in memory keeps the changes the store lost, until the node restarts and reads the table again.
+- Cause: `Sessions.Write` puts a change into memory inside the transaction and takes it out again only when the transaction's function returns an error (`internal/host/session.go`, `Write`). The store reports a failed commit only after the next transaction may have started (`internal/store/store.go:76-86`, `:88-92`), and has no hook that runs before it.
+- Status: open, accepted for step 1. A store hook that runs on the writer after a failed commit would close it.
+
 ## Resolved
 
 ### 2026-11-20 · bug · The signalling client could set off the rendezvous's own limits
