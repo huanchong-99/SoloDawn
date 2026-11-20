@@ -207,22 +207,30 @@ func TestChecksRecognizeTestFilenamesAndDirectories(t *testing.T) {
 		"mytests/view.ts", "testsuffix/foo_tested.go", "test_dir/source.rs", "view.test.ts/entry.js",
 		"tests", "foo.spec", "test.py", "Tests/a.py", "test-fixture.py", "before.go\nafter.txt",
 	} {
-		err := checkTestFiles("ui/a.SVELTE\x00" + name + "\x00")
+		err := checkTestFiles("ui/a.TS\x00" + name + "\x00")
 		if err == nil || err.Error() != "source changed without a test file" {
 			t.Errorf("non-test %q: got %v", name, err)
 		}
 	}
 }
 
-func TestChecksOnlyCountCodeExtensionsAsSource(t *testing.T) {
-	if err := checkTestFiles("docs/a.md\x00icon.png\x00package.json\x00Makefile\x00before.go\nafter.txt\x00"); err != nil {
-		t.Errorf("non-code files: %v", err)
+func TestChecksOnlyCountTheContractExtensionsAsSource(t *testing.T) {
+	sources := strings.Fields(".cjs .cts .dart .ex .go .js .jsx .mjs .mts .php .py .ts .tsx")
+	if !slices.Equal(checkCodeExtensions, sources) {
+		t.Fatalf("extensions %q, want %q", checkCodeExtensions, sources)
 	}
-	for _, name := range []string{"native/one.CPP", "src/a b\nc.py", "web/a.tsx", "src/thing.go"} {
+	for _, name := range []string{"lib/a.cjs", "a.CTS", "app/main.dart", "lib/x.ex", "src/a b\nc.py", "a.js", "v.jsx",
+		"m.mjs", "m.mts", "index.php", "web/a.tsx", "web/a.ts", "src/thing.txt.go"} {
 		err := checkTestFiles(name + "\x00notes.md\x00")
 		if err == nil || err.Error() != "source changed without a test file" {
 			t.Errorf("source %q: got %v", name, err)
 		}
+	}
+	others := "docs/a.md\x00icon.png\x00package.json\x00Makefile\x00before.go\nafter.txt\x00ui/a.svelte\x00" +
+		"native/one.cpp\x00lib.rs\x00App.java\x00run.sh\x00style.css\x00page.html\x00x.rb\x00a.c\x00a.h\x00" +
+		"Main.kt\x00View.swift\x00C.vue\x00exs.exs\x00types.pyi\x00src/thing.go.txt\x00"
+	if err := checkTestFiles(others); err != nil {
+		t.Errorf("other file types: %v", err)
 	}
 }
 
@@ -274,7 +282,10 @@ func TestCheckCancellationStopsForegroundPipeline(t *testing.T) {
 	defer cancel()
 	dir := t.TempDir()
 	fifo := checkTestFIFO(t, dir)
-	check := "(echo ready > ready; sleep 30; echo late) | cat"
+	// Ready is signalled after the last fork, so the group kill finds every
+	// process; stderr is closed so a shell's "Killed" notice, printed while
+	// the kill reaches the group, is not part of the result.
+	check := "exec 2>/dev/null; (sleep 30 & echo ready > ready; wait) | cat"
 	done := make(chan proto.CheckItem, 1)
 	go func() { done <- runProjectCheck(ctx, dir, check) }()
 	data, err := os.ReadFile(fifo)
@@ -285,7 +296,7 @@ func TestCheckCancellationStopsForegroundPipeline(t *testing.T) {
 	cancel()
 	want := proto.CheckItem{Name: check, Detail: new("signal: killed")}
 	if got := <-done; !reflect.DeepEqual(got, want) {
-		t.Fatalf("cancelled check: %#v, want %#v", got, want)
+		t.Fatalf("cancelled check: %q %v %q, want %q", got.Name, got.OK, *got.Detail, *want.Detail)
 	}
 	if time.Since(start) >= time.Second {
 		t.Fatal("pipeline kept the output pipe open after cancellation")

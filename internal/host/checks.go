@@ -68,7 +68,7 @@ func checkGit(ctx context.Context, dir string, args ...string) (string, error) {
 }
 
 func cleanCheckHead(ctx context.Context, dir string) (string, error) {
-	status, err := checkGit(ctx, dir, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
+	status, err := checkGit(ctx, dir, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return "", err
 	}
@@ -182,12 +182,8 @@ func (r CheckRunner) checkAddedLines(patch string) error {
 	return nil
 }
 
-var checkCodeExtensions = strings.Fields(`
-	.asm .bash .bat .c .cc .cjs .clj .cljc .cljs .cmd .cpp .cs .css .cts .cxx
-	.dart .erl .ex .exs .fs .fsi .fsx .go .h .hh .hpp .hrl .htm .html .hxx
-	.java .js .jsx .kt .kts .less .lua .m .mjs .mm .mts .php .pl .pm .ps1
-	.py .pyi .r .rb .rs .s .sass .scala .scss .sh .sql .svelte .swift
-	.ts .tsx .vb .vue .zsh`)
+// The source files of the "tests" hard check (local.md section 7).
+var checkCodeExtensions = strings.Fields(".cjs .cts .dart .ex .go .js .jsx .mjs .mts .php .py .ts .tsx")
 
 func isCheckTestFile(name string) bool {
 	dir, file := path.Split(name)
