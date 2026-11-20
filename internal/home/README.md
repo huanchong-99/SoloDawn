@@ -38,6 +38,7 @@ time, and the reads and receipts of a transaction, and returns what to write.
 | run a timer or a handler | `s.Seal(f(s, disk, now, …))` inside a transaction, then write and `s.Commit(result)` as for a command |
 | finish any result | after `s.Commit(result)`, every hook of `After`, on the goroutine of the group |
 | know whether a device may use the home surface of a group | `s.Serves(device)` |
+| move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
 
 ## Contract
@@ -150,7 +151,41 @@ drops the transaction and answers `internal`.
 **One package, many files.** Every unit of the home adds files to this package, so an unexported
 name is taken for all of them. The seam takes `wireRow`, `typedRow`, `rowLimit`, `cardLimit`,
 `rowFits`, `sizeLimit`, `refused`, `repeated`, `addOnce`, `keyCreate` and `keySelector`. Its tests
-are in package `home_test` and use only what is exported.
+are in package `home_test` and use only what is exported. The task machine takes the names that
+start with `task`, `step`, `wait`, `item` and `states`, and `workItems`, `byAssignee` and
+`byReviewer`; its tests take the names that start with `mc` and `machine`.
+
+## The task machine
+
+`machine.go` holds the table of [the task machine](../../planning/contracts/task-machine.md) as one
+function, `Step(task, event)`: one `proto.TaskRow` and one `Event` in, the row as the event leaves
+it and its `Effects` out. It is pure and reads no other row, no `State` and no `Disk`. Every
+function that moves a task calls it and adds nothing to its rules.
+
+- **The event.** `Kind` names the row of the table (`OnPause`, `OnSubmitted`, …). `By` is the
+  sender as the function has established it from `c.Who`: `ByHost` for the host of the task's
+  assignee, `BySecretary`, `ByAdmin`, `ByPerson`, `ByAI` for a working AI and never for the
+  secretary, `ByHome` for a timer or for what follows from another task's row. `Member` is the
+  `as` of the command; the machine itself sees whether that AI is the task's assignee or reviewer.
+  `Now`, `Limits` and `Remote` come from the command and the group row. `Pending` is the task's
+  pending cards, oldest first: every row that sets or clears a card wait reads it.
+- **The effects**, in the order to apply them. `Retire` selects queued items of the task to
+  withdraw; an empty field selects every value. `Items` are the items to queue. Each is a
+  `TaskItem`, which the function completes into an `Item`: the task, the message and the cause its
+  row names, the pull request, and the secretary as the AI of a `notice`. A `review` item with
+  `IfNone` is queued only if none is queued for that AI and commit. `Cards` says what the task's
+  pending cards become. `System` is the code of the system message to write, in the main line when
+  `Main` is set and in the task's thread otherwise.
+- **A refusal** is a `TaskRefusal`; its text is the code of the answer: `conflict`, `paused` or
+  `forbidden`. The row comes back unchanged.
+- **Other tasks.** One call moves one row. After `OnMerged` the function sends `OnReleased` to each
+  queued task that depends on the merged one, with `Blocked` set while another of its dependencies
+  is not merged. After `OnCancel` it sends `OnOrphaned` to each queued task that depends on the
+  cancelled one. For `group resume` it sends `OnGroupResume` to every task.
+- **Left to the function.** The checks its row makes on a card or on the group; the fields a
+  command only copies into the row (`branch`, `pr`, `pr_url`, `stats.added`, `stats.removed`,
+  `thread.count`, `thread.last`); the bodies of the messages; for row 23, the timer and telling the
+  secretary once per quiet period. The machine sets `stats.ended`.
 
 ## Known limitations
 
@@ -171,3 +206,8 @@ fakes of `Receipts`, `Disk` and `Write` in the test files and one test on an in-
 ([acceptance](../../planning/steps/step-1-acceptance.md)); its steps apply a command of their own
 to a store in memory, because no command file exists yet. The choices behind the seam are in
 [the decision record](../../docs/decisions/implemented/architecture/2026-11-20-home-command-seam.md).
+
+`machine_test.go` has a case for every row of the task machine, for every rule of its section 2
+and for the refusals, and covers every statement of `machine.go`. `features/home_machine.feature`
+holds acceptance test A5.18 at step `merge` and the two points of the third review, a card decided
+while a task is paused and a reviewer named while it is paused.

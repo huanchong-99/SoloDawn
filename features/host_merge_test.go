@@ -52,7 +52,8 @@ func hostMergeSteps(sc *godog.ScenarioContext, f fixtures) {
 	})
 	sc.Step(`^the host reports the conflict as Git words it$`, func() error {
 		// Git's text differs between versions: repeat the squash, then undo it.
-		want, err := hostMergeFailure(m.Repo, "merge", "--squash", "--", m.Commit)
+		hooks := "core.hooksPath=" + filepath.Join(m.Repo, ".git", "solodawn-no-hooks")
+		want, err := hostMergeFailure(m.Repo, "-c", hooks, "merge", "--squash", "--", m.Commit)
 		if err != nil {
 			return err
 		}
@@ -90,7 +91,7 @@ func hostMergeSteps(sc *godog.ScenarioContext, f fixtures) {
 		return hostMergeVerify(m.Repo, squash, "rev-parse", "base")
 	})
 	sc.Step(`^the host reports that the base does not record this merge$`, func() error {
-		return hostMergeWant(result, host.MergeResult{Conflict: "last commit on base does not record Merge task t7 at " + m.Commit})
+		return hostMergeWant(result, host.MergeResult{Conflict: "no commit on base records Merge task t7 at " + m.Commit})
 	})
 }
 

@@ -40,7 +40,8 @@ export class Paging {
   more = $state(true);
   /** A page is on its way. */
   busy = $state(false);
-  /** The home refused a page: no other is asked for until the group is read again. */
+  /** The home refused a page, or the read of the group: no other is asked for until the group is
+   *  read again. */
   failed = $state(false);
 
   /** Whether a page can be asked for now. */
@@ -156,7 +157,12 @@ export class Group {
     const answer = await ctl
       .request({ t: 'sync', g: this.g, since: this.cursor, state_only: false })
       .catch(lost);
-    if (answer.err || this.#late(read, ctl)) return;
+    if (this.#late(read, ctl)) return;
+    if (answer.err) {
+      // Nothing can page the group until a read succeeds: the top says so, not that it loads.
+      this.paging().failed = true;
+      return;
+    }
     this.cursor = answer.seq;
     this.#live = true;
     this.#paging = new Map();
