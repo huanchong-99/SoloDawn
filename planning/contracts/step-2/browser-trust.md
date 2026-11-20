@@ -105,7 +105,7 @@ confirmed, sent back, approved, denied or chose, all of this holds:
 | --- | --- |
 | envelope | `state.act` passes check 1 of `contracts/envelope.md` section 3; its payload is a JSON object in which `t` is `"act"`, `g` is the group and `msg` is the row's `id` |
 | action | `action` goes with `state.status`: `confirm` with `confirmed`, `revise` with `revise`, `approve` with `approved`, `deny` with `denied`, `choose` with `decided` |
-| what the person wrote | `text` equals `state.note` of a `revise`; `arg` equals `state.choice` and `text` equals `state.text` of a `decided` card; each absent on both sides or equal |
+| what the person wrote | `text` equals `state.note` of a `revise`; `arg` equals `state.choice` and `text` equals `state.text` of a `decided` card; each absent on both sides or equal. On a `confirm` card, `arg` of a `confirm` is the digest this browser computes (`contracts/step-2/confirm.md` section 6) |
 | signer | the payload has no `as`; the member row of `state.by` has `kind: human`; the signer is valid in the log of that row's `user` |
 
 A `superseded` brief that still holds an `act` is checked by that `act`'s
@@ -134,11 +134,12 @@ The group info says once whose computer the home is (8.2).
 A row is the home's only when its `by` is `"system"` and its `kind` is
 `task`, `checks` or `system`: these have no `state` and nothing to act on.
 Every other row is checked by section 3. So a message that names a member
-and has no `env` does not pass, and neither does a card with
-`by: "system"`: no card of step 1 is the home's, and none can be acted on
-unchecked (section 11, point 6, for the `confirm` card). An `approval`
-card is presented under the secretary's name (R-42); the check is about
-its `by`, the AI that asked.
+and has no `env` does not pass, nor does a card with `by: "system"`,
+except a `confirm` card with `body.what` `direct` or `ask`: it is judged by
+the request its `re` names, by section 3, and its `act` binds that request
+(`contracts/step-2/confirm.md` section 6; section 11, point 6). An
+`approval` card is presented under the secretary's name (R-42); the check
+is about its `by`, the AI that asked.
 
 ## 6. Outcomes and the unverified mark
 
@@ -175,7 +176,7 @@ The check ends at the first line that applies:
 | cannot be checked | this browser does not have what it needs to check it |
 
 - **A card can be acted on from this browser only when its author is
-  verified.** Otherwise its actions are replaced by the sentence of the
+  verified**; a `direct` or `ask` card, when its request is. Otherwise its actions are replaced by the sentence of the
   mark: an `act` names only the id of a card, so acting on content that
   did not pass would sign for something not seen (section 11, point 3).
 
@@ -285,7 +286,7 @@ The contract is written on the first answer of each point.
 | 3 | A card whose author carries the mark cannot be acted on from this browser | the actions stay, with a warning |
 | 4 | Section 4: `state.act` is checked before the browser names who decided a card | D-5 speaks only of "the envelope of a row": the author alone is checked |
 | 5 | 8.2: the fingerprint of a person's user id on their member card, the only thing added to a step 1 screen beyond the mark and the texts | no fingerprint; limit 1 stays without a remedy |
-| 6 | A card with `by: "system"` does not pass and cannot be acted on. If `contracts/step-2/confirm.md` has the home write the `confirm` card, that file must name the signed message the card is about, which this browser checks by section 3 before the owner can act, and the `act` should name that message | a card the home wrote is acted on unchecked: the owner signs for a card id the home chose, whatever was shown |
+| 6 | A card with `by: "system"` does not pass and cannot be acted on, except a `direct` or `ask` `confirm` card: `contracts/step-2/confirm.md` has the home write it, names the signed request in `re`, which this browser checks by section 3 before the owner can act, and binds the `act` to that request by its digest | a card the home wrote is acted on unchecked: the owner signs for a card id the home chose, whatever was shown |
 
 ## 12. Not verified
 
