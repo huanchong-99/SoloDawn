@@ -100,7 +100,7 @@ F-01c; they are expected to merge during wave 1.
 | 2 | 0:45 | P-2, HM-1 to HM-17, HS-1, HS-2, HS-8 to HS-15, HS-16a, HS-19, HS-21, N-1, N-2, PR-0, RV-1, W-3, E-0, U-1, U-3, U-4, U-7 to U-10, U-14, U-15, S-8 | 47 |
 | 3 | 1:30 | P-3, HS-3, HS-16b, HS-17, HS-18, HS-20, N-3, N-4, PR-1, PR-2, PR-3, I-1, I-3, U-2, U-5, U-6, U-11, U-12, U-13 | 19 |
 | 4 | 2:15 | P-4, N-8, I-2, I-4, I-5, I-6, I-7, I-8, U-16; step 3: T3-1 | 10 |
-| 5 | 3:00 | I-9 (E-M1 to E-M8, eight units), I-10; step 2: T2-1 to T2-13, U2-1 to U2-4; step 3: P-5, the first driver of T3-2 to T3-4 | 29 |
+| 5 | 3:00 | I-9 (E-M1 to E-M8, eight units), I-10; step 2: T2-1 to T2-13, U2-1 to U2-4; step 3: P-5, the first driver of T3-2 and T3-3 | 29 |
 | 6 | 3:45 | I-11 on three systems, I2-1, T3-5, T3-6, U3-1, U3-2, the next driver, fixes found by waves 4 and 5 | 9 + fixes |
 | 7 | 4:30 | second pass of I-11 after fixes; I2-2, I3-1; the owner's live list (section 6) | 5 + owner |
 
@@ -153,7 +153,7 @@ checklist item for the owner at the end.
 | A clean machine of each system, with a reboot | A8.1 | Devin Linux, macOS and Windows machines: install, pair, restart the service; a reboot is replaced by stopping and starting the login session where the machine allows | one real reboot per system |
 | Web Push through the vendors' services | A8.3 | a local push service endpoint in the test; the pushed content is inspected there | desktop Chrome and Android Chrome once |
 | Windows | S-5, N-5, HS-19 (ConPTY), I-11 | a Devin Windows machine covers all four | none |
-| Accounts for step 3 CLIs | T3-2 to T3-4 | terms and capabilities are desk research; the driver is built against captures made with an API key if the owner provides one, otherwise against the documented protocol and marked unverified | one key per CLI |
+| Accounts for step 3 CLIs | T3-2, T3-3 | terms and capabilities are desk research; the driver is built against captures made with an API key if the owner provides one, otherwise against the documented protocol and marked unverified | one key per CLI |
 
 ## 7. Decisions and open points
 

@@ -37,7 +37,8 @@
       <fieldset class="seg" style:--at={langs.indexOf(prefs.lang)}>
         <legend class="sr">{t('settings.lang')}</legend>
         {#each langs as lang (lang)}
-          <label>
+          <!-- Each language is named in itself, so a screen reader speaks it in that language. -->
+          <label {lang}>
             <input
               type="radio"
               name="lang"
