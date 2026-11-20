@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
@@ -27,7 +28,8 @@ type Connection struct {
 	next        int64
 	waiting     map[int64]chan json.RawMessage
 	answer      *proto.Envelope
-	pending     *answerWait
+	pending     map[string]bool // see waitForAnswer
+	deadline    *time.Timer
 	candidates  *batch
 }
 
@@ -63,8 +65,8 @@ func (c *Connection) bind(dc *webrtc.DataChannel, onOpen func(*Connection)) {
 	dc.OnClose(func() { go c.Close() })
 	dc.OnOpen(func() { close(c.ready); onOpen(c) })
 	dc.OnMessage(func(m webrtc.DataChannelMessage) {
-		if !m.IsString || c.deliver(m.Data) != nil {
-			go c.Close()
+		if m.IsString { // a binary message on ctl is dropped
+			c.deliver(m.Data)
 		}
 	})
 }
@@ -75,22 +77,39 @@ type framing struct {
 	Re   *int64  `json:"re,omitempty"`
 }
 
-func (c *Connection) deliver(data []byte) error {
+// deliver routes a response to its request and queues a request or push for
+// Read. Anything else is refused; the connection stays open
+// (contracts/datachannel.md section 2).
+func (c *Connection) deliver(data []byte) {
 	f, err := readFraming(data)
-	if err != nil {
-		return err
+	if err == nil && f.Re != nil {
+		c.response(*f.Re, f, data)
+		return
 	}
-	if f.Re != nil {
-		return c.response(*f.Re, f, data)
+	if err != nil || f.Type == nil {
+		c.refuse(data)
+		return
 	}
-	if f.Type == nil {
-		return errors.New("missing ctl type")
-	}
+	c.queue(data)
+}
+
+// queue holds a request or push until Read takes it.
+func (c *Connection) queue(data []byte) {
 	select {
 	case c.incoming <- data:
 	case <-c.Done():
 	}
-	return nil
+}
+
+// refuse answers bad_request to a message that carries a request id and
+// drops any other.
+func (c *Connection) refuse(data []byte) {
+	var r struct {
+		ID *int64 `json:"id,omitempty"`
+	}
+	if proto.Decode(data, &r) == nil && r.ID != nil {
+		c.Send(proto.ErrorResponse{Re: *r.ID, Err: proto.WireError{Code: "bad_request", Message: "the message is not a ctl frame of the contract"}})
+	}
 }
 func readFraming(data []byte) (f framing, err error) {
 	if len(data) > ctlLimit || !utf8.Valid(data) {
@@ -99,20 +118,20 @@ func readFraming(data []byte) (f framing, err error) {
 	err = proto.Decode(data, &f)
 	return f, err
 }
-func (c *Connection) response(id int64, f framing, data []byte) error {
-	if f.ID != nil {
-		return errors.New("both id and re on ctl")
-	}
-	if err := validResult(f.Type, data); err != nil {
-		return err
+
+// response hands a valid response to the request waiting for it; one that
+// also carries an id, or no valid result, is refused.
+func (c *Connection) response(re int64, f framing, data []byte) {
+	if f.ID != nil || validResult(f.Type, data) != nil {
+		c.refuse(data)
+		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if ch := c.waiting[id]; ch != nil {
-		delete(c.waiting, id)
+	if ch := c.waiting[re]; ch != nil {
+		delete(c.waiting, re)
 		ch <- data
 	}
-	return nil
 }
 func validResult(kind *string, data []byte) error {
 	var fields struct {

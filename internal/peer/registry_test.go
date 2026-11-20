@@ -115,8 +115,9 @@ func TestProbeOfferKind(t *testing.T) {
 	}
 	calls := make(chan call, 2)
 	answer := f.b.sign(proto.Answer{SignalHeader: f.b.header(k, "answer"), SDP: "probe answer"})
-	offerKinds["probe"] = func(p *Peer, k link, desc webrtc.SessionDescription) (*proto.Envelope, error) {
+	offerKinds["probe"] = func(p *Peer, k link, desc webrtc.SessionDescription, paths []Route) (*proto.Envelope, error) {
 		eq(t, p, f.b)
+		eq(t, len(paths), 1)
 		calls <- call{k, desc}
 		return &answer, nil
 	}
