@@ -25,6 +25,12 @@ func readWireExample(name string, v any) error {
 	return json.Unmarshal(b, v)
 }
 
+func init() {
+	stepSets["proto"] = func(sc *godog.ScenarioContext, _ fixtures) {
+		protocolSteps(sc)
+	}
+}
+
 func protocolSteps(sc *godog.ScenarioContext) {
 	approvalSteps(sc)
 	var forwarded []byte
