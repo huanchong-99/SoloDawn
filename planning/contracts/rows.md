@@ -117,7 +117,7 @@ does not.
 | Field | Values |
 | --- | --- |
 | `num` | per-group counter, shown as `T-12` |
-| `slug` | the task's name in its branch `task/<num>-<slug>` and its worktree: 1 to 40 characters of `a` to `z`, `0` to `9` and `-`, made from `title` by the rule of `contracts/local.md` section 7. The home writes it once, when it creates the task, and never changes it; hosts read it from here. Frozen in code by P-1 |
+| `slug` | the task's name in its branch `task/<num>-<slug>` and its worktree: 1 to 40 characters of `a` to `z`, `0` to `9` and `-`, made from `title` by the rule of `contracts/local.md` section 7. The home writes it once, when it creates the task, and never changes it; hosts read it from here. A reader refuses a task row whose `slug` is any other text, a copy of the row beside an inbox item included, so that none reaches a path or a branch name. In code: `proto.MakeSlug` and the type `proto.Slug`, and `Slug` in `web/src/lib/proto.ts` |
 | `origin` | `brief` (from a confirmed brief), `direct` (R-71), `takeover` (R-83) |
 | `state` | `queued`, `active`, `paused`, `failed`, `merged`, `cancelled` |
 | `step` | `branch`, `local_check`, `cloud_check`, `review`, `merge`. The card draws six positions; "pull request" is done when `pr` is set (`contracts/task-machine.md` section 1) |
