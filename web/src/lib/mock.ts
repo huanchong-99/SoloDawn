@@ -66,8 +66,8 @@ export function mockCtl(onpush: (push: p.Push) => void): p.Ctl {
     async request(req: { t: keyof typeof answers }) {
       id += 1;
       if (req.t === 'sync') {
-        onpush(p.decode(p.Frame, goldens.reset) as p.Push);
-        onpush(p.decode(p.Frame, goldens.rows) as p.Push);
+        onpush(p.decode(p.Reset, goldens.reset));
+        onpush(p.decode(p.Rows, goldens.rows));
       }
       return { ...p.decode(p.Frame, goldens[answers[req.t]]), re: id };
     },
