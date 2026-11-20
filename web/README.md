@@ -16,9 +16,10 @@ interface adds its parts, the web manifest and the notices for browsers that can
 client or that block its storage; this browser's device
 key with signed envelopes, the device log and pairing; the wire types with their decoding; a
 mock connection that answers from the node's wire examples; the row cache of every group with the
-lists drawn from it; the group list with its create-group dialog; and the main line of a group's
-chat with its composer. Nothing yet connects to a node: until the browser's connections are
-wired into the shell, a development server shows the one group of the wire examples.
+lists drawn from it; the group list with its create-group dialog; the main line of a group's
+chat with its composer; and the connection code, signalling and connections to nodes. No screen
+connects to a node yet: until the browser's connections are wired into the shell, a development
+server shows the one group of the wire examples.
 
 The interface mockups are in `design/`. They are the visual reference for the interface: implement
 screens to match them, and add the motion they leave out.
@@ -253,6 +254,64 @@ file in `src/routes/`. It edits neither the shell nor another area:
   that directory `@testdata` and lets Vite read it (`server.fs.allow`). Stryker runs the tests in
   a copy of `web/` under `.stryker-tmp/`; there the name still points at the repository's
   directory.
+- **Connections.** `connect(options)` in `src/lib/peer.ts` is the offering side of
+  `planning/flows/connect.md` sections A and C, as `internal/peer` is the node's. Only the tab
+  that holds the device's lock calls it (`tablock.ts`), and closes the session when it loses the
+  lock. It needs the signalling URLs, the device, `known` and the browser's name.
+  - **Signalling.** One `rendezvous.ts` client per URL, so that a path opens again by itself:
+    after 1, 2, 4 … 60 seconds, from 1 second again after 60 seconds signed in, and at once on
+    the window's `online` event. Each path gets the watch list (the nodes that have a peer, 64 at
+    most) when it opens and whenever the list changes, and is asked for fresh ICE servers at half
+    their `ttl`, then every 10 seconds until they come. `heard(url, frame)` gets every frame of
+    every path and `session.send(url, frame)` sends a `join` or `room` on one: that is all this
+    module knows of pairing.
+  - **A peer.** `session.peer(node, listen, onpath)` keeps one connection to a node. It offers on
+    the paths that are signed in (none: the attempt has failed), with one `ctl` channel and a new
+    `conn`; the offer and each candidate are signed and sent on every such path, and no end of
+    candidates is sent. An offer without an answer after 10 seconds, or reported offline by every
+    path it went out on (a path that closes counts), is retired, and its late answer ignored. The
+    first copy of the answer is used. A candidate of the node waits for the answer and is applied
+    once, 64 at most for a connection; one for a connection the browser did not offer is dropped,
+    as a browser answers none. When `ctl` opens the peer says `hello`; a refusal, an unreadable
+    `welcome` or 10 seconds without one closes the connection. A `hello` refused with `version`
+    or `forbidden` also stops the peer: the requests still waiting reject, a listener from
+    `listen()` hears `refused(code)`, when it has one, and that node is offered nothing more until
+    a new peer is made for it. After any
+    other failure or a loss (`ctl` closed, the connection `failed`) it offers again after 1, 2,
+    4 … 60 seconds, from 1 second again only after `ctl` stayed open for 60 seconds, and at once
+    when a path reports the node present or the window gets `online`.
+  - **Listeners.** `listen()` is called for each connection the node has welcomed and returns
+    what hears it: `online(ctl, welcome)`, `push(frame)`, `offline()`. A `Home.connect` of the
+    group caches is one. `ctl` is the peer itself, the same for every connection.
+  - **Requests.** `peer.request` numbers a request per connection, keeps its type under that
+    number and resolves with the response that names it, read with `decodeAnswer` of `proto.ts`
+    as the answer to a request of that type or as an error of the node; `peer.ts` holds no answer
+    shape of its own. It rejects, and never invents an answer of the node: with
+    `connection lost` while no connection serves, when the peer closes, and for a `sync` whose
+    connection is lost (the listener reads again from its cursor at `online`); with
+    `unreadable answer` for a response `decodeAnswer` refuses; with a `RangeError` for a request
+    over 60 KiB. Every other request whose connection is lost is sent again after the next `welcome`,
+    after the listener's own `sync` requests, in the order first made. The group caches word a
+    rejection as `lost`; that code is theirs, not the connection's.
+  - **What arrives on `ctl`.** A message with an `id` is a request, which a browser never
+    serves: `bad_request`. A message with `re` is a response; one that names no waiting request
+    is dropped. Anything else is a push when `Frame` reads it and is dropped when not. `ctl` stays
+    open through all of it.
+  - **Path.** `onpath` gets `{ kind, rtt, since }` when `ctl` opens and every second after, and
+    `undefined` while no pair is selected or no connection serves. `kind` is `relay` when either
+    candidate of the selected pair is a relay candidate and `direct` otherwise; the pair is the
+    one the transport statistics name, or the one marked `selected` where there are none.
+  - **For the probe and the move** (`move.ts`, unit W-3): `peer.dial(probe)` offers a connection
+    that is not the peer's own, a probe without TURN entries; `connection.opened`, `closed`,
+    `hello()` and `request()` drive it; `peer.adopt(connection, welcome)` makes it the one that
+    serves and closes every other connection the peer dialled; `peer.hold()` keeps a loss from
+    starting a reconnect until its release, which counts once. `peer.channel(label)` opens a data
+    channel beside `ctl` (the terminal).
+  - **Closing.** `peer.close()` and `session.close()` close every connection a peer dialled,
+    probes included. A closed peer stays closed: `dial` throws, and `adopt` closes the connection
+    it is handed, so a welcome that comes after the tab lost its lock connects nothing. A live
+    peer does not adopt a connection that is already gone (`connection.gone`): the one that
+    serves stays.
 - **Fonts.** Geist and Geist Mono 1.9.2, one variable `woff2` each, are served from
   `public/fonts/` with their licence (OFL-1.1); the page requests nothing from a third party. A
   browser downloads a face only when text uses it and shows the system fonts until it arrives.
@@ -401,6 +460,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/motion.ts`         | `spring`, the curve of `--spring`; `shift`, the page cross-fade |
 | `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface           |
 | `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`                 |
+| `src/lib/rendezvous.ts`     | signalling client: sign-in, pacing, the receiver's checks       |
+| `src/lib/peer.ts`           | signalling paths, connections to nodes, `ctl`, path, reconnect  |
+| `features/peer-fakes.ts`    | a peer connection and its channels for the tests of `peer.ts`   |
 | `src/lib/groups.svelte.ts`  | `Home`, `Group`: row caches, cursor, paging, lists, commands    |
 | `src/lib/compose.ts`        | mention being typed, mentions and parts of a text, row size     |
 | `src/lib/when.ts`           | times in the reader's language; messages by day                 |
@@ -442,8 +504,10 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   (`issues.md`).
 - Safari deletes the site's storage, and with it the device key, after seven days of use without
   a visit, unless the client was added to the home screen (`issues.md`).
-- Nothing yet stores a device log or uses the device key beyond `boot`; the connection code
-  (F-03) and onboarding (F-04) will.
+- Nothing yet stores a device log or uses the device key beyond `boot`; the wiring of the
+  connection code (`peer.ts`) into the application and onboarding (F-04) will.
+- `peer.ts` has run against fakes only. No browser has opened a connection with it, and how each
+  browser's statistics name the selected pair is not verified; unit I-8 runs the three browsers.
 - The manifest has an SVG icon only and there is no service worker yet.
 - No page has a connection to a node yet, so the built client lists no group. A development
   server (`pnpm dev`) shows the one group of the wire examples, unless the address has `?nomock`;
@@ -463,6 +527,10 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 
 - Unit tests sit beside the modules (`src/**/*.test.ts`); `../features/web.feature` is the
   acceptance feature. `stryker.config.json` breaks below a mutation score of 100.
+- `src/lib/peer.test.ts` runs `peer.ts` against a fake `RTCPeerConnection` and fake signalling
+  clients, with the clock in the test's hands. `../features/web_peer.feature` is the browser half
+  of A1.11 (`planning/steps/step-1-acceptance.md`) and one reconnect, through the real
+  `rendezvous.ts` with signed envelopes; its steps are `features/peer.spec.ts`.
 - The shell was checked in headless Chrome at 375, 820, 1100 and 1440 px in both themes and both
   languages on every page (no element wider than the viewport) on 2026-11-20. It has not been
   opened on a real phone, in Safari or in Firefox.
