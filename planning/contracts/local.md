@@ -23,8 +23,10 @@ Markers: `[verified]` observed in the driver experiments or in a spike;
 | `solodawn mcp --token <t>` | the MCP shim; started by a CLI, not by people |
 | `solodawn version` | prints the version |
 
-Every command except `node`, `rendezvous` and `mcp` talks to the running node
-through the local socket and exits non-zero with one line of text on failure.
+`version` prints the version of its own binary and needs no running node
+(`install.md` runs it before pairing). Every other command except `node`,
+`rendezvous` and `mcp` talks to the running node through the local socket
+and exits non-zero with one line of text on failure.
 
 ## 2. Data directory
 
@@ -97,8 +99,11 @@ Names used below: `<wt>` is `wt/<num>-<slug>`; `<br>` is
 `task/<num>-<slug>`, where `<slug>` is the task row's `slug`;
 `<base>` is the **name** of the base branch (for
 example `main`); `<base-ref>` is what to branch from and diff against:
-`origin/<base>` with a remote, `<base>` without one. Nothing fetches when the
-group has no remote.
+`origin/<base>` with a remote, `<base>` without one; `<start>` is the commit
+noted when a takeover started (`flows/takeover.md` step 5). A group has a
+remote when its `forge` is `github`, and none when it is `none`
+(`contracts/rows.md` section 1). Nothing fetches when the group has no
+remote.
 
 | When | Command |
 | --- | --- |
@@ -111,7 +116,7 @@ group has no remote.
 | `run_checks` | refused unless `git -C <wt> status --porcelain --untracked-files=all` is empty: untracked files always show, whatever the user's Git configuration. Then each entry of `group.checks`, in order, through the system shell, in the worktree. `limits.turn_minutes` limits the whole run of these entries together, not each command. The commit recorded is `git -C <wt> rev-parse HEAD` |
 | hard check: secrets | the patterns of section 8 over the added lines of `git diff <base-ref>...HEAD` |
 | hard check: tests | fails when the diff changes source files and no test file; what counts as each is below the table |
-| `submit_task` | refused unless the tree is clean, by the status command of `run_checks`, and HEAD is the checked commit. With a remote: the push above, then `gh pr list --head <br> --base <base> --state open --json number,headRefOid,url,state,baseRefName`. A pull request that is closed (merged included) or whose base is not `<base>` is never reused. If the list is empty: `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
+| `submit_task` | refused unless the tree is clean, by the status command of `run_checks`, and both HEAD and `<br>` are the commit of the last `run_checks`, which passed. With a remote: the push above, then `gh pr list --head <br> --base <base> --state open --json number,headRefOid,url,state,baseRefName`. A pull request that is closed (merged included) or whose base is not `<base>` is never reused. If the list is empty: `gh pr create --head <br> --base <base> --title <task title> --body <summary>` |
 | hosted checks | every 30 s, one request: `gh pr view <pr> --json headRefOid,statusCheckRollup`. A result is reported only from an answer whose `headRefOid` is the submitted commit `[unverified]` that both fields come back in one answer; else `gh api` for the check runs of that commit |
 | review session created or reused | with a remote `git -C repo fetch origin`; first round `git -C repo worktree add --detach ../review/<num> <commit>`, later `git -C review/<num> checkout --detach <commit>`; then `git diff <base-ref>...<commit>` written to `review/<num>/.solodawn-review.diff` |
 | merge, with a remote | `gh pr merge <pr> --squash --delete-branch --match-head-commit <commit>` `[documented, round 1]` |
@@ -192,7 +197,7 @@ Patterns:
   | --- | --- | --- | --- |
   | Anthropic API key | `sk-ant-` | 32 of `A-Za-z0-9_-` | [Claude docs][ak] |
   | OpenAI API keys, project keys included | `sk-` (`sk-proj-` for a project key) | 32 of `A-Za-z0-9_-` | [OpenAPI spec][oa], [Cookbook][op] |
-  | GitHub personal access token (classic) | `ghp_` | 36 of `A-Za-z0-9` | [GitHub docs][gh]; the length as HS-6 has it |
+  | GitHub personal access token (classic) | `ghp_` | 36 of `A-Za-z0-9_` | [GitHub docs][gh], [changelog][ghc]: `A-Za-z0-9_`, and lengths will grow |
   | GitHub fine-grained personal access token | `github_pat_` | 30 of `A-Za-z0-9_` | [GitHub docs][gh] |
   | GitHub OAuth, user, installation and refresh tokens | `gho_`, `ghu_`, `ghs_`, `ghr_` | 30 of `A-Za-z0-9_.-` | [GitHub docs][gh] |
   | AWS access key id | `AKIA`, `ASIA` | 16 of `A-Z0-9` | as HS-6 has it |
@@ -246,3 +251,4 @@ no special trust: it pairs like any browser (`solodawn open`).
 [oa]: https://github.com/openai/openai-openapi/blob/manual_spec/openapi.yaml
 [op]: https://developers.openai.com/cookbook/examples/agents_sdk/context_personalization
 [gh]: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github
+[ghc]: https://github.blog/changelog/2021-03-04-authentication-token-format-updates/

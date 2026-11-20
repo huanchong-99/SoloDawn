@@ -92,12 +92,16 @@ development dependency, an IndexedDB for the tests.
   last of a repeated name, integers as safe integers by value, no `null`, and `n` and `g` as
   random ids. Signing is left to WebCrypto, so in Safari two signatures of one payload differ.
 - **Preferences.** `prefs.theme` is `auto`, `light` or `dark`; `prefs.lang` is `zh-CN` or `en`.
-  A first visit follows the system theme and the browser language (any `zh` locale opens Chinese).
-  Every change is written to `<html data-theme lang>` and to `localStorage` (`sd-theme`,
-  `sd-lang`). A stored value the client does not know, from another version for instance, is
-  ignored. When the browser blocks site storage, the client opens with the defaults and applies
-  changes without remembering them. `tokens.css` turns `data-theme` into `color-scheme`; every
-  colour is a `light-dark()` pair.
+  Until the person changes a setting, the client follows the system theme and the browser
+  language (any `zh` locale opens Chinese) on every visit: nothing is stored on load.
+  `localStorage` (`sd-theme`, `sd-lang`) gets a value only when the person changes that setting,
+  on the settings page or with a top-bar button. The preferences are always written to
+  `<html data-theme lang>`. A stored value the client does not know, from another version for
+  instance, is ignored. When the browser blocks site storage, the client opens with the defaults
+  and applies changes without remembering them. `tokens.css` turns `data-theme` into
+  `color-scheme`; every colour is a `light-dark()` pair. The browser's own bar
+  (`<meta name="theme-color">`) takes the colour `index.html` gives the theme shown, so a chosen
+  theme wins over the system scheme; the manifest colours stay fixed.
 - **Wire types.** `src/lib/proto.ts` mirrors `internal/proto`: one `valibot` schema per message,
   with its TypeScript type inferred under the same name. An unknown field is dropped, as Go's
   `encoding/json` does, so a node that adds a field does not break an older client; a missing
@@ -124,7 +128,10 @@ development dependency, an IndexedDB for the tests.
   `src/messages/en.json` and is read with `t(key)`; a test fails when the key sets differ. Chat
   content is never translated. The options of the language choice are named in their own
   language in both files and carry its `lang`, so a screen reader speaks each in its language
-  (WCAG 2.2 SC 3.1.2).
+  (WCAG 2.2 SC 3.1.2). The language button of the top bar has no `aria-label`: its name is its
+  visible text (`bar.lang.other`, marked with the language it names) followed by a visually
+  hidden "Switch language / 切换语言", each half in its own language from its own file
+  (`textIn`), so speech input can use the visible text (SC 2.5.3).
 - **Motion.** No animation library is bundled: CSS transitions and keyframes move the parts, the
   browser's View Transitions cross-fade the page, and `svelte/motion` reads the system setting.
   The tokens are in `tokens.css` beside the others: four durations (`--dur-1` 120 ms hover and
@@ -177,6 +184,10 @@ development dependency, an IndexedDB for the tests.
 
 Below 768 px the navigation is the bottom bar and the theme and language buttons of the top bar
 are hidden; both choices are on the settings page at every width.
+
+Under forced colours (Windows contrast themes) the system drops the sliding marks of the
+navigation and of the segmented controls; the current entry and the chosen option are then drawn
+in `Highlight` and `HighlightText` instead (`base.css` section 8).
 
 ## Known limitations
 

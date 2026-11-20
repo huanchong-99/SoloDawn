@@ -74,7 +74,9 @@ function go(hash: string) {
 }
 
 function press(label: string) {
-  const button = document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)!;
+  const button = [...document.querySelectorAll('button')].find((b) =>
+    (b.getAttribute('aria-label') ?? b.textContent!).includes(label),
+  )!;
   button.focus();
   button.click();
   svelte.flushSync();
@@ -223,11 +225,55 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       expect(document.documentElement.lang).toBe('en');
     });
     And('the focused language button announces "Language: English"', () => {
-      expect(document.activeElement?.getAttribute('aria-label')).toBe('Switch language / 切换语言');
+      expect(document.activeElement?.textContent).toBe('中 Switch language / 切换语言');
       expect(texts('[role=status]')).toEqual(['Language: English']);
       expect(document.title).toBe('Chats · SoloDawn');
     });
   });
+
+  Scenario(
+    'The language button is named by its visible text, each part in its own language',
+    ({ Given, Then, And }) => {
+      let button: Awaited<ReturnType<typeof motion.languageButton>>;
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the person opens the client', async () => {
+        await motion.open();
+        button = await motion.languageButton();
+      });
+      Then('the language button is named "EN Switch language / 切换语言"', () => {
+        expect(button.snapshot).toBe('- button "EN Switch language / 切换语言"');
+      });
+      And('its parts are "EN" in "en", "Switch language" in "en" and "切换语言" in "zh-CN"', () => {
+        expect(button.parts).toEqual([
+          ['EN', 'en'],
+          ['Switch language', 'en'],
+          ['切换语言', 'zh-CN'],
+        ]);
+      });
+    },
+  );
+
+  Scenario(
+    'Under forced colours the chosen options and the current page are marked in system colours',
+    ({ Given, Then, And }) => {
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the system forces its colours', motion.forceColors);
+      And('the person opens the client at "#/settings"', () => motion.open('#/settings'));
+      Then(
+        'the chosen theme, the chosen language and the current page have the system highlight',
+        async () => {
+          expect(await motion.highlighted()).toEqual([
+            [true, false, false],
+            [true, false],
+            [false, false, true],
+          ]);
+        },
+      );
+      And('the current page keeps it under the pointer', async () => {
+        expect(await motion.coveredUnderPointer()).toBe(false);
+      });
+    },
+  );
 
   Scenario(
     'The mark of the current page moves to the entry that is opened',
@@ -295,7 +341,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
         ['电脑和 AI', '1'],
         ['设置', '1'],
         ['切换深色 / 浅色', '1'],
-        ['Switch language / 切换语言', '1'],
+        ['EN Switch language / 切换语言', '1'],
         ['跟随系统', '1'],
       ]);
     });

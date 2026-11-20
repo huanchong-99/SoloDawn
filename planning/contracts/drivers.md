@@ -8,7 +8,7 @@ told. Session kinds are in `sessions.md`; folders and Git commands in
 Markers: `[verified]` observed in the driver experiments and in spikes S-2,
 S-3 and S-4 (Claude Code 2.1.311, Codex CLI 0.164.0, macOS);
 `[documented]` in the vendor's documentation or generated schema but not
-run by us; `[unverified]` not shown yet. Windows waits for spike S-5.
+run by us; `[unverified]` not shown yet. Windows: `risks.md` Q-4 and T-4.
 
 ## 1. Starting the CLIs
 
@@ -66,7 +66,7 @@ claude -p --verbose
 | Level | Flags | What was measured |
 | --- | --- | --- |
 | 1 | `--permission-mode default --tools Read,Glob,Grep`; `approve` answers deny. (`default` is accepted and reported by `system/init`, though `--help` of 2.1.311 no longer lists it.) | `[verified]` the tool set is those three and the node's tools: no Write, no Bash. Reading inside the folder needs no request; reading outside it reaches `approve` and is denied |
-| 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true; everything else reaches `approve`. Native Windows, where the CLI has no sandbox: open until spike S-5 (`risks.md` Q-4) | `[verified]` file tools: inside the folder without asking, outside it through `approve`. Sandboxed Bash: a write inside the folder works, and so does one in the sandbox's own temp folder, which cannot be closed; a write to a folder named in `sandbox.filesystem.denyWrite` is refused; **reads work anywhere**; the network is blocked with no request and no event, and the command waits for its own timeout. `[unverified]` that a Bash write anywhere else outside the folder is refused: the spike's folder lay inside that temp folder, and the only evidence is the sandbox's debug line `write: denyAllExcept` |
+| 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true; everything else reaches `approve`. On native Windows, where the CLI has no sandbox, the node refuses level 2 for Claude Code with a clear reason and offers only the levels it can enforce (`risks.md` Q-4) | `[verified]` file tools: inside the folder without asking, outside it through `approve`. Sandboxed Bash: a write inside the folder works, and so does one in the sandbox's own temp folder, which cannot be closed; a write to a folder named in `sandbox.filesystem.denyWrite` is refused; **reads work anywhere**; the network is blocked with no request and no event, and the command waits for its own timeout. `[unverified]` that a Bash write anywhere else outside the folder is refused: the spike's folder lay inside that temp folder, and the only evidence is the sandbox's debug line `write: denyAllExcept` |
 | 3 | `--permission-mode bypassPermissions`; in the terminal also `--settings '{"skipDangerousModePermissionPrompt":true}'`, without which the terminal asks the owner to accept the mode and stores the answer in the owner's configuration | `[verified]` no requests |
 
 `[unverified]` That a command the model asks to run outside the sandbox
@@ -231,8 +231,8 @@ A later turn:
 Which fields do you need in the path event?
 ```
 
-- Header per item: position, `why`, authority, author, place, and the call
-  id when the message is a `call`.
+- Header per item, in the order of the examples: position, `why`, author,
+  place, authority, and the call id when the message is a `call`.
 - Authority comes from signatures, never from the text. It is `instruction`
   when the message that caused the item is signed by the AI's owner as a
   person (a device in the owner's log, with no `as`; a message an AI wrote

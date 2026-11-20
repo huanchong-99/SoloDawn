@@ -19,6 +19,8 @@ beforeEach(() => {
     get matches() {
       return query === '(prefers-color-scheme: dark)' && systemDark;
     },
+    addEventListener() {},
+    removeEventListener() {},
   }));
 });
 
@@ -63,19 +65,57 @@ describe('remembered choices', () => {
     expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
   });
 
+  it('writes nothing to this browser until the person changes a setting', async () => {
+    const { flushSync } = await load();
+    flushSync();
+    expect(localStorage.length).toBe(0);
+  });
+
   it('writes a change to <html> and to this browser', async () => {
-    const { prefs, flushSync } = await load();
+    const { choose, flushSync, toggleLang, toggleTheme } = await load();
     expect(document.documentElement.dataset.theme).toBe('auto');
     expect(document.documentElement.lang).toBe('en');
 
-    prefs.theme = 'light';
-    prefs.lang = 'zh-CN';
+    choose('theme', 'light');
+    choose('lang', 'zh-CN');
     flushSync();
 
     expect(document.documentElement.dataset.theme).toBe('light');
     expect(document.documentElement.lang).toBe('zh-CN');
     expect(localStorage.getItem('sd-theme')).toBe('light');
     expect(localStorage.getItem('sd-lang')).toBe('zh-CN');
+
+    toggleTheme();
+    toggleLang();
+    expect(localStorage.getItem('sd-theme')).toBe('dark');
+    expect(localStorage.getItem('sd-lang')).toBe('en');
+  });
+});
+
+describe('the colour of the browser bar', () => {
+  // index.html gives one colour for each system scheme.
+  beforeEach(() => {
+    document.head.innerHTML =
+      '<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">' +
+      '<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141822">';
+  });
+  afterEach(() => {
+    document.head.innerHTML = '';
+  });
+  const bars = () =>
+    [...document.querySelectorAll('meta[name=theme-color]')].map((m) => m.getAttribute('content'));
+
+  it.each([
+    ['auto', false, '#ffffff'],
+    ['auto', true, '#141822'],
+    ['dark', false, '#141822'],
+    ['light', true, '#ffffff'],
+  ] as const)('is, for %s with system dark %s, %s', async (theme, system, color) => {
+    systemDark = system;
+    const { choose, flushSync } = await load();
+    choose('theme', theme);
+    flushSync();
+    expect(bars()).toEqual([color, color]);
   });
 });
 
@@ -175,9 +215,9 @@ describe('a browser that blocks site storage', () => {
   });
 
   it('applies a change without remembering it', async () => {
-    const { prefs, flushSync } = await load();
-    prefs.theme = 'dark';
-    prefs.lang = 'zh-CN';
+    const { choose, flushSync } = await load();
+    choose('theme', 'dark');
+    choose('lang', 'zh-CN');
     flushSync();
     expect(document.documentElement.dataset.theme).toBe('dark');
     expect(document.documentElement.lang).toBe('zh-CN');

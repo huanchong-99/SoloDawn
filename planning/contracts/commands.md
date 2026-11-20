@@ -48,6 +48,7 @@ ones:
 - in `member status`: `task` (the AI is on no task) and `event` (there is
   no fact to report);
 - in `task submitted`: `pr` and `pr_url` (the group has no remote);
+- in `push`: either `sub`, `vapid` and `on`, or `off` alone (1.7);
 - in `takeover.start`: `task`.
 
 A `post` always carries `kind`, `text`, `thread` (or `null`), `main`,
@@ -137,7 +138,7 @@ When each is allowed, and what it does, is `contracts/task-machine.md`.
 
 | `op` | Fields | By | Result |
 | --- | --- | --- | --- |
-| `start` | `id`, `title`, `plan`, `re`, `origin` (`direct`, `takeover`) | an AI | `num` |
+| `start` | `id`, `title`, `plan`, `re`, `origin` (`direct`, `takeover`) | a working AI, not the secretary | `num` |
 | `branch` | `id`, `branch` | host of the assignee | — |
 | `checked` | `id`, `ok`, `items`, `commit` | host of the assignee | — |
 | `submitted` | `id`, `commit`, `pr`, `pr_url`, `stats` | host of the assignee | — |
@@ -150,6 +151,9 @@ When each is allowed, and what it does, is `contracts/task-machine.md`.
 | `pause` | `id` | the secretary, or an admin | — |
 | `resume` | `id` | the secretary, or an admin (for a `failed` task an admin only); the host of the assignee, for its own pre-empted task | — |
 | `cancel` | `id` | the secretary, or an admin (at step `merge` an admin only); the host of the assignee when `origin` is `takeover` | — |
+
+`items` of `checked` and `cloud` has the shape of `items` in a `checks`
+body (`contracts/messages.md` 2.8), which the home writes from it.
 
 ### 1.6 `note` and `forget`
 
@@ -253,7 +257,7 @@ authority is the item's signature (`contracts/datachannel.md` section 6).
 | `reviewed` | assignee | a review did not pass |
 | `checks` | assignee | hosted checks failed |
 | `reply` | caller | its call was answered |
-| `decided` | the asking AI | an approval or a decision was decided |
+| `decided` | the asking AI; for a decision about a task, also its assignee | an approval or a decision was decided |
 | `confirmed` | secretary | a brief was confirmed or sent back |
 | `resume` | assignee | a paused task continues; a group resumes |
 | `notice` | secretary | the cases of task-machine section 5; a hand-back summary; an AI limited |
