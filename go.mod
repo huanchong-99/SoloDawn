@@ -9,6 +9,7 @@ require (
 	github.com/cucumber/godog v0.16.0
 	github.com/libp2p/go-nat v0.2.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	golang.org/x/sys v0.44.0
 	modernc.org/sqlite v1.46.2
 )
 
@@ -40,7 +41,6 @@ require (
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

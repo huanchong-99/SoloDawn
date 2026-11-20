@@ -25,16 +25,18 @@ func localCommandSteps(sc *godog.ScenarioContext, f fixtures) {
 	var stdout, stderr bytes.Buffer
 	fingerprint := exampleKey("node").Fingerprint()
 	sc.Step(`^a local node socket that reports its device fingerprint$`, func() error {
+		// macOS limits a socket path to 103 bytes, and its temporary directory is deep.
+		base, data := os.TempDir(), ""
+		if runtime.GOOS == "darwin" {
+			base, data = "/tmp", filepath.Join("Library", "Application Support")
+		}
 		var err error
-		root, err = os.MkdirTemp("", "sd-")
+		root, err = os.MkdirTemp(base, "sd")
 		if err != nil {
 			return err
 		}
 		f.t.Cleanup(func() { os.RemoveAll(root) })
-		data := root
-		if runtime.GOOS == "darwin" {
-			data = filepath.Join(root, "Library", "Application Support")
-		}
+		data = filepath.Join(root, data)
 		l, err := node.ListenLocal(filepath.Join(data, "solodawn"))
 		if err != nil {
 			return err

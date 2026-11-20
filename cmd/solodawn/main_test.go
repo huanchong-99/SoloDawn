@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -84,9 +85,19 @@ func TestForegroundFailure(t *testing.T) {
 	}
 }
 
+// testDataDir points the data directory at a short temporary root: macOS
+// limits a socket path to 103 bytes, and its temporary directory is deep.
 func testDataDir(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	base := os.TempDir()
+	if runtime.GOOS == "darwin" {
+		base = "/tmp"
+	}
+	root, err := os.MkdirTemp(base, "sd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
 	for _, name := range []string{"LocalAppData", "HOME", "XDG_DATA_HOME"} {
 		t.Setenv(name, root)
 	}
@@ -105,6 +116,24 @@ func testListener(t *testing.T, dir string) *net.UnixListener {
 	}
 	t.Cleanup(func() { l.Close() })
 	return l
+}
+
+func TestNodeErrorIsOneLine(t *testing.T) {
+	l := testListener(t, testDataDir(t))
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		bufio.NewReader(conn).ReadString('\n')
+		fmt.Fprintln(conn, `{"text":"partial"}`)
+		fmt.Fprintln(conn, `{"done":true,"error":"first\r\nsecond\nthird"}`)
+	}()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"status"}, &stdout, &stderr); code != 1 || stdout.String() != "partial\n" || stderr.String() != "first  second third\n" {
+		t.Fatalf("status: exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
 }
 
 func replyToCommand(l *net.UnixListener) <-chan string {

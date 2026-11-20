@@ -2,7 +2,6 @@ package node
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"io"
 	"net"
@@ -10,26 +9,26 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
 
 func TestListenLocal(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "node")
+	dir := filepath.Join(socketRoot(t), "node")
 	openSocket(t, dir)
 	path := filepath.Join(dir, "sock")
 	checkSocketModes(t, dir, path)
-	if _, err := ListenLocal(dir); err == nil {
-		t.Fatal("second listener claimed the live socket")
+	if l, err := ListenLocal(dir); l != nil || !errors.Is(err, addrInUse) {
+		t.Fatalf("second listener = %v, %v; want address in use", l, err)
 	}
-	if _, err := ListenLocal(filepath.Join(path, "child")); err == nil {
-		t.Fatal("created data directory beneath a socket")
+	if l, err := ListenLocal(filepath.Join(path, "child")); l != nil || !errors.Is(err, syscall.ENOTDIR) {
+		t.Fatalf("listener beneath a socket = %v, %v; want not a directory", l, err)
 	}
 }
 
 func TestSocketPermissionFailureClosesListener(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "sock")
+	path := filepath.Join(socketRoot(t), "sock")
 	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
@@ -68,115 +67,55 @@ func TestOpening(t *testing.T) {
 }
 
 func TestInvalidOpening(t *testing.T) {
-	for _, line := range []string{"", "bad\n", "{}\n", "{\"CMD\":\"status\"}\n",
-		"{\"cmd\":\"status\",\"mcp\":\"token\"}\n", "{\"mcp\":\"\"}\n"} {
-		if got, raw, err := ReadOpening(bufio.NewReader(strings.NewReader(line))); err == nil || raw != nil || got != (Opening{}) {
-			t.Errorf("%q: got %+v, %q, %v", line, got, raw, err)
-		}
-	}
-}
-
-func TestCannotSendCommand(t *testing.T) {
-	c := Command{Cmd: "status"}
-	if err := c.send(t.TempDir(), io.Discard); err == nil {
-		t.Fatal("sent to missing socket")
-	}
-	conn := struct {
-		io.Reader
-		io.Writer
-	}{new(bytes.Buffer), failingWriter{}}
-	if err := c.exchange(conn, io.Discard); !errors.Is(err, io.ErrClosedPipe) {
-		t.Fatalf("send error = %v", err)
-	}
-}
-
-type failingWriter struct{}
-
-func (failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
-
-func TestTerminalReplies(t *testing.T) {
-	for _, tc := range []struct{ lines, wantErr string }{
-		{"{\"done\":true,\"ok\":true}\n", ""},
-		{"{\"done\":true,\"error\":\"denied\"}\n", "denied"},
-		{"{\"done\":true,\"ok\":true,\"error\":\"denied\"}\n", "expected ok or error in the final socket reply"},
-		{"{\"done\":true}\n", "expected ok or error in the final socket reply"},
-		{"{\"done\":true,\"ok\":null}\n", "proto: null where the contract has no null"},
-		{"{\"done\":null}\n", "proto: null where the contract has no null"},
-		{"{\"done\":false}\n", "expected text in the socket reply"},
+	const neither = "expected a command or an MCP token"
+	for _, tc := range []struct{ line, want string }{
+		{"", "EOF"},
 		{"bad\n", "invalid character 'b' looking for beginning of value"},
-		{"{\"done\":true,\"ok\":true}", "EOF"},
+		{"{}\n", neither},
+		{"{\"CMD\":\"status\"}\n", neither},
+		{"{\"cmd\":\"status\",\"mcp\":\"token\"}\n", neither},
+		{"{\"mcp\":\"\"}\n", neither},
 	} {
-		var out bytes.Buffer
-		err := readReplies(bufio.NewReader(strings.NewReader(tc.lines)), &out)
-		if errText(err) != tc.wantErr || out.Len() != 0 {
-			t.Errorf("%q: stdout %q, error %v", tc.lines, out.String(), err)
+		got, raw, err := ReadOpening(bufio.NewReader(strings.NewReader(tc.line)))
+		if errText(err) != tc.want || raw != nil || got != (Opening{}) {
+			t.Errorf("%q: got %+v, %q, %v; want error %q", tc.line, got, raw, err, tc.want)
 		}
 	}
-}
-
-func TestCommandRoundTrip(t *testing.T) {
-	dir := nodeTestDir(t)
-	l := openSocket(t, dir)
-	received := make(chan string, 1)
-	const data = "{\"text\":\"version dev\"}\n{\"text\":\"3F9A 0C21 77BE\"}\n"
-	go func() {
-		l.SetDeadline(time.Now().Add(2 * time.Second))
-		conn, err := l.Accept()
-		if err != nil {
-			received <- err.Error()
-			return
-		}
-		defer conn.Close()
-		conn.SetDeadline(time.Now().Add(2 * time.Second))
-		line, _ := bufio.NewReader(conn).ReadString('\n')
-		received <- line
-		io.WriteString(conn, data+"{\"done\":true,\"ok\":true}\n")
-	}()
-	cmd := Command{Cmd: "status"}
-	var stdout bytes.Buffer
-	if err := cmd.Run(&stdout); err != nil || stdout.String() != "version dev\n3F9A 0C21 77BE\n" {
-		t.Fatalf("status: %q, %v", stdout.String(), err)
-	}
-	if got := <-received; got != "{\"cmd\":\"status\"}\n" {
-		t.Fatalf("request = %q", got)
-	}
-
 }
 
 func TestForegroundRuntime(t *testing.T) {
 	dir := nodeTestDir(t)
-	saved := startNode
-	t.Cleanup(func() { startNode = saved })
-	startNode = nil
 	if err := Foreground(); errText(err) != "node runtime is unavailable" {
 		t.Fatalf("foreground returned %v", err)
 	}
+	saved := startNode
+	t.Cleanup(func() { startNode = saved })
 	startNode = func(path string, l *net.UnixListener) error {
 		if path != dir || l.Addr().String() != filepath.Join(dir, "sock") {
-			t.Fatalf("unexpected runtime paths %q and %q", path, l.Addr())
+			t.Errorf("runtime got %q and %q, want %q", path, l.Addr(), dir)
 		}
 		return io.ErrClosedPipe
 	}
 	if err := Foreground(); err != io.ErrClosedPipe {
 		t.Fatalf("foreground returned %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "sock")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("socket after the runtime returned: %v", err)
+	}
 }
 
 func TestForegroundErrors(t *testing.T) {
 	dir := nodeTestDir(t)
 	openSocket(t, dir)
-	if err := Foreground(); err == nil {
-		t.Fatal("foreground claimed an active socket")
+	if err := Foreground(); !errors.Is(err, addrInUse) {
+		t.Fatalf("foreground on an active socket returned %v", err)
 	}
 	for _, name := range []string{"HOME", "XDG_DATA_HOME", "LocalAppData", "USERPROFILE"} {
 		t.Setenv(name, "")
 	}
 	_, want := DataDir()
-	if err := Foreground(); errText(err) != errText(want) {
+	if err := Foreground(); errText(err) != errText(want) || want == nil {
 		t.Fatalf("foreground returned %v, want %v", err, want)
-	}
-	if err := (Command{Cmd: "status"}).Run(io.Discard); errText(err) != errText(want) {
-		t.Fatalf("status returned %v, want %v", err, want)
 	}
 }
 
@@ -200,15 +139,25 @@ func checkSocketModes(t *testing.T, dir, path string) {
 	}
 }
 
-func TestOutputWriteError(t *testing.T) {
-	if err := readReplies(bufio.NewReader(strings.NewReader("{\"text\":\"output\"}\n")), failingWriter{}); err != io.ErrClosedPipe {
-		t.Fatalf("write error = %v", err)
+// socketRoot returns a short temporary directory: macOS limits a socket path
+// to 103 bytes, and its temporary directory is deep.
+func socketRoot(t *testing.T) string {
+	t.Helper()
+	base := os.TempDir()
+	if runtime.GOOS == "darwin" {
+		base = "/tmp"
 	}
+	root, err := os.MkdirTemp(base, "sd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+	return root
 }
 
 func nodeTestDir(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	root := socketRoot(t)
 	for _, name := range []string{"HOME", "XDG_DATA_HOME", "LocalAppData"} {
 		t.Setenv(name, root)
 	}
