@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"syscall"
@@ -205,4 +206,57 @@ func openSocket(t *testing.T, dir string) *net.UnixListener {
 	}
 	t.Cleanup(func() { l.Close() })
 	return l
+}
+
+func TestMalformedOpeningGetsOneErrorLine(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	done := make(chan error, 1)
+	go func() {
+		_, _, _, err := AcceptOpening(server)
+		done <- err
+	}()
+	client.SetDeadline(time.Now().Add(2 * time.Second))
+	io.WriteString(client, "{}\n")
+	reply, err := io.ReadAll(client)
+	if string(reply) != "{\"done\":true,\"error\":\"expected a command or an MCP token\"}\n" || err != nil {
+		t.Fatalf("reply %q, %v", reply, err)
+	}
+	if err := <-done; errText(err) != "expected a command or an MCP token" {
+		t.Fatalf("AcceptOpening returned %v", err)
+	}
+}
+
+func TestOpeningKeepsTheConnection(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	go io.WriteString(client, "{\"mcp\":\"token\"}\nstream")
+	server.SetDeadline(time.Now().Add(2 * time.Second))
+	open, line, r, err := AcceptOpening(server)
+	if open != (Opening{MCP: "token"}) || string(line) != "{\"mcp\":\"token\"}\n" || err != nil {
+		t.Fatalf("opening %+v, %q, %v", open, line, err)
+	}
+	if rest := make([]byte, 6); func() bool { _, err := io.ReadFull(r, rest); return err != nil || string(rest) != "stream" }() {
+		t.Fatalf("stream after the opening = %q", rest)
+	}
+}
+
+func TestReadPair(t *testing.T) {
+	configured := []string{"https://configured.example"}
+	for _, tc := range []struct {
+		line, owner string
+		want        PairRequest
+		err         string
+	}{
+		{`{"cmd":"pair","secret":"s","name":"laptop"}`, "", PairRequest{Secret: "s", Name: "laptop", Rendezvous: configured}, ""},
+		{`{"cmd":"pair","secret":"s","name":"laptop","rendezvous":"https://rv.example"}`, "", PairRequest{Secret: "s", Name: "laptop", Rendezvous: []string{"https://rv.example"}}, ""},
+		{`{"cmd":"pair","secret":"s","name":"laptop"}`, "user-1", PairRequest{}, "this node already has an owner; to add a browser, run solodawn pair-browser"},
+		{`{"cmd":"pair","secret":"s"}`, "", PairRequest{}, "proto: a field that is always present is missing"},
+	} {
+		got, err := ReadPair([]byte(tc.line), tc.owner, configured)
+		if !reflect.DeepEqual(got, tc.want) || errText(err) != tc.err {
+			t.Errorf("%s with owner %q: got %+v, %v; want %+v, %q", tc.line, tc.owner, got, err, tc.want, tc.err)
+		}
+	}
 }
