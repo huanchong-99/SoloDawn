@@ -13,9 +13,10 @@ const challengeContext = 'solodawn/rv/1\n';
 
 export const utf8 = (text: string) => new TextEncoder().encode(text);
 
-/** base64url without padding, as the wire carries binary values. */
+/** base64url without padding, as the wire carries binary values. The bytes are not spread into
+ *  one call: decode encodes what it is sent, and arguments by the hundred thousand overflow. */
 export const encode = (bytes: Uint8Array) =>
-  btoa(String.fromCharCode(...bytes))
+  btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(''))
     .replaceAll('+', '-')
     .replaceAll('/', '_')
     .replaceAll('=', '');

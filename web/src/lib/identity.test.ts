@@ -50,6 +50,13 @@ describe('encode and decode', () => {
   ])('decode refuses %s', (_, text) => {
     expect(decode(text)).toBeNull();
   });
+
+  it('read a text of any length: a k as long as a frame is refused, not an error', async () => {
+    const long = 'A'.repeat(400_000);
+    expect(decode(long)).toHaveLength(300_000);
+    expect(encode(new Uint8Array(300_000))).toBe(long);
+    expect(await verify(crypto, long, 'x', long)).toBe(false);
+  });
 });
 
 describe('Device', () => {
