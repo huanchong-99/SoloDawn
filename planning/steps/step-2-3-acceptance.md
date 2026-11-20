@@ -42,7 +42,7 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   `invite` by a `member` is answered `forbidden`.
 - **A9.3** P makes Q `admin`: `group set` and `invite` by Q succeed. Back to
   `member`, both are answered `forbidden`. A second `owner`, a change of the
-  owner's role, and `member set role` by a `member` are refused.
+  owner's role, and `member set` with `role` by anyone but P are refused.
 - **A9.4** P removes Q. Q's connections to `P1` close within 1 second and the
   next attempt is refused; Q's browser no longer lists the group; the rows of
   Q and of Q's AIs are `gone` markers. While an AI of Q is assignee or
@@ -249,18 +249,19 @@ If spike S-9 shows a clear benefit, its tests are written with its plan.
 ### More CLIs (D-16; `contracts/step-3/drivers.md`)
 
 - **A10.1** Every driver declares the capability table; Claude Code and Codex
-  declare all of it, and A9.40 still holds. For each capability, a fake CLI
-  that lacks it: the feature the table names for it is not offered in the
-  browser and its command is refused, and A3.1 passes. Without takeover: the
-  AI card has no "open terminal" and `takeover.start` is refused.
+  declare the values of section 8 of that contract, and A9.40 still holds.
+  With a declaration made up in the test that lacks each value in turn, each
+  switch of its section 5 holds, A3.1 passes, and in the browser what is
+  switched off is not offered. On native Windows, `perm.set` level 2 for
+  Claude Code is refused and the browser offers no level 2 (`risks.md` Q-4).
 - **A10.2** For a CLI whose terms allow API keys only, `agent.set` takes
   `api_key`; any other type is refused, and the browser offers none (R-54).
 - **A10.3** For each CLI added, the M3, M4 and M7 tests of step 1 that are not
   `live` pass with its fake CLI, except those of a feature its table switches
   off. The fake's message shapes are copied from captures of the real program;
-  without them, the pull request and the AI card say "unverified".
+  until A10.4 has run, its level tables carry `[unverified]`.
 - **A10.4** For each CLI added: A3.8, the second half of A4.1, A4.10, A7.1 and
-  A7.8 with the real program. (`live`)
+  A7.8 with the real program, except those its table switches off. (`live`)
 
 ### Style presets (D-17; `contracts/step-3/knowledge.md`)
 
