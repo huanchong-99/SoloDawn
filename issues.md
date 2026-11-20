@@ -36,11 +36,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the contract lists the post's checks without saying which of them are about the group when the brief is confirmed. `(*State).briefStill` (`internal/home/cmd_brief.go:243`) makes the others again: the shape of the body, the requester a member, every assignee and reviewer a working AI. That an entry's assignee is not its reviewer is made again by the task machine's role rule, which `Step` answers `conflict` (`internal/home/machine.go:253`).
 - Status: open, decided by unit HM-8 on 2026-11-21. The contract should say that the `replaces` check is the post's only.
 
-### 2026-11-21 · deviation · The tasks of a confirmed brief have ids that follow from the act, not random ones
+### 2026-11-21 · deviation · Derived member and task ids where the home creates rows without a client id
 
-- Symptom: `planning/contracts/rows.md` says that the ids of tasks and messages are random ids. The home gives the task of entry `i` of a confirmed brief, and its `task` message, the id made of the first 16 bytes of the SHA-256 of `SoloDawn brief task <n of the act> <i>`.
-- Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `briefTaskID` (`internal/home/cmd_brief.go:286`). The id has the form of a random id, and nobody knows it before the act arrives, because the act's `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:272`).
-- Status: open, decided by unit HM-8 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivation can go.
+- Symptom: `planning/contracts/rows.md` says that the ids of members, tasks and messages are random ids. The home gives the owner's `member` row in `group create` the first 16 bytes of the SHA-256 of `SoloDawn group owner <n>`, and the task of entry `i` of a confirmed brief (with its `task` message) the first 16 bytes of the SHA-256 of `SoloDawn brief task <n of the act> <i>`.
+- Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `grpOwnerID` (`internal/home/cmd_group.go:89`) and `briefTaskID` (`internal/home/cmd_brief.go:286`). Each id has the form of a random id, and nobody knows it before the command arrives, because `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:272`).
+- Status: open, decided by units HM-8 and HM-5 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivations can go.
 
 ### 2026-11-21 · limitation · A queued task's `stats.started` is the time its brief was confirmed
 
@@ -241,11 +241,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `TaskRow.Branch` and `TaskBranch.Branch` are plain strings (`internal/proto/task.go`, `internal/proto/command.go`). Giving the field a type of its own changes `internal/host`, which unit P-1 does not own; and whether the home must refuse a `task branch` whose `branch` is not `task/<num>-<slug>` is not in `contracts/commands.md` 1.5.
 - Status: open. Decided by the coordinator on 2026-11-20: hosts build the branch from `num` and `slug` only, and the home refuses any other `branch`. The host side (`internal/host/forge.go`, `HostedChecksToResume`) goes to the owner of the host forge after P-1 and pull request 156 merge; the home side is unit HM-9.
 
-### 2026-11-20 · deviation · A `set` that changes nothing and a `task assign` without a role are not refused yet
+### 2026-11-20 · deviation · A `task assign` without a role is not refused yet
 
-- Symptom: `contracts/commands.md` gives `group set` and `member set` "any of" their fields, and `task assign` at least one of `assignee` and `reviewer`. A `group set` with no field, a `member set` with nothing but `id`, and a `task assign` with neither role are read by `proto.Decode` and by the web client's schemas, and nothing refuses them yet.
-- Cause: each of those fields is optional by itself (`GroupSet`, `MemberSet`, `TaskAssign` in `internal/proto/command.go`; the schemas of the same names in `web/src/lib/proto.ts`), and "at least one" is a rule across fields, which the wire types do not state. The command functions of the home are not written yet.
-- Status: open. Decided by the coordinator on 2026-11-20, and now in `contracts/commands.md` (the list of optional fields): the home answers `bad_request`. Unit HM-9 does it for `task assign`, unit HM-5 for `group set`; `member set` is the same case in HM-5's file.
+- Symptom: `contracts/commands.md` gives `group set` and `member set` "any of" their fields, and `task assign` at least one of `assignee` and `reviewer`. A `task assign` with neither role is read by `proto.Decode` and by the web client's schema, and nothing refuses it yet (`group set` with no field and `member set` with nothing but `id` are now refused).
+- Cause: each of those fields is optional by itself (`GroupSet`, `MemberSet`, `TaskAssign` in `internal/proto/command.go`; the schemas of the same names in `web/src/lib/proto.ts`), and "at least one" is a rule across fields, which the wire types do not state. `cmd_task.go` of the home is not written yet.
+- Status: open for `task assign` (unit HM-9); resolved for `group set` and `member set` in unit HM-5 (`grpSetValid` in `internal/home/cmd_group.go:110`, `memSetValid` in `internal/home/cmd_member.go:137`), which answer `bad_request` as `contracts/commands.md` specifies.
 
 ### 2026-11-20 · limitation · The shared wire test does not show where one reader is stricter about a text
 
