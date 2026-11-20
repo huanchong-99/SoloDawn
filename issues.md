@@ -6,6 +6,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · deviation · CI and release builds use Go 1.26.0, eleven patch releases behind
+
+- Symptom: every CI job, and the six binaries of `.github/workflows/release.yml`, build with Go 1.26.0 (Backend run 44697108086: "Setup go version spec 1.26.0"). The newest 1.26 release is 1.26.11, so released binaries would lack the standard-library security fixes of 1.26.1 to 1.26.11.
+- Cause: `go.mod:3` says `go 1.26.0`, and `actions/setup-go` v5.6.0 takes the `go` line as an exact version; it does not read a `toolchain` line (v6 does).
+- Status: open; needs a decision: a `toolchain go1.26.11` line in `go.mod` with setup-go v6, or `go-version: 1.26.x` with `check-latest: true` in the workflows.
+
+### 2026-11-20 · bug · The Git helper of the host-check steps can still end the whole suite
+
+- Symptom: when its Git command fails, the remaining scenarios do not run and go test reports "subtest may have called FailNow on a parent test" (reproduced with commit signing in the global Git configuration: 8 of 70 scenarios ran).
+- Cause: `features/host_checks_test.go:36` calls `f.t.Fatalf` on the suite's test from a scenario; see the resolved entry "A failing step could end the whole Go acceptance suite". The file was left out of the audit fixes because it belonged to another fix at the time.
+- Status: open. Return the error from the step, as `features/host_forge_test.go` does.
+
+### 2026-11-20 · limitation · Rendezvous steps reserve a port by closing it
+
+- Symptom: not observed. The steps listen on 127.0.0.1:0, close the listener and give its port to `solodawn rendezvous`; another process can bind the port in between, and `rvListening` would take that process for the rendezvous.
+- Cause: `features/rendezvous_test.go:162-169` and `features/relay_test.go:89-94`; the command cannot take a listener or report the port it chose.
+- Status: open, until the command can listen on port 0 and print its address.
+
+### 2026-11-20 · limitation · Three web unit tests time out on a fully busy machine
+
+- Symptom: with 14 busy loops on 12 cores, `web/src/main.test.ts:4`, `web/src/lib/motion.test.ts:29` and `web/src/lib/prefs.test.ts:26` exceeded Vitest's 5 s test limit; one idle run right after `pnpm install` also failed two tests in two files (output not kept). CI passed.
+- Cause: each is the first test of its file to import the client's modules afresh inside the test, so their transformation counts against the test's limit.
+- Status: open; the gate can fail spuriously while other work loads the machine.
+
 ### 2026-11-20 · limitation · Fake CLIs lack invalid-login and exhausted-limit captures
 
 - Symptom: neither scripted CLI covers an invalid-login startup error or an exhausted rate limit.
@@ -59,6 +83,59 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted by the coordinator on 2026-11-20 with no code change. Revisit if the library changes, or if the server ever acts on a frame beyond forwarding it.
 
 ## Resolved
+
+### 2026-11-20 · bug · A failing step could end the whole Go acceptance suite
+
+- Symptom: `go test -tags acceptance -count=2 ./features/` ran the suite once, then stopped at the first node-update scenario of the second run: the scenarios after it did not run, their After hooks neither, godog printed no summary, and go test reported "subtest may have called FailNow on a parent test".
+- Cause: godog runs each scenario as a subtest of `TestFeatures`; steps called `Fatal` on the suite's own test (`features/node_update_test.go:98`, `:104` and `features/host_forge_test.go:26` before the fix), which from the subtest's goroutine ends the parent test.
+- Status: resolved on branch `test/audit-harness-ci`: these steps return errors, and the comment of `fixtures.t` states the rule. One helper remains (open entry above).
+
+### 2026-11-20 · bug · go test -count=2 failed in the node-update scenarios
+
+- Symptom: the second run failed with `open …/TestFeatures4075543788/017/v0.3.1: no such file or directory`.
+- Cause: the cache of release builds was a package variable (`features/node_update_test.go:89` before the fix) and outlived the TempDir of the run that filled it.
+- Status: resolved on branch `test/audit-harness-ci`: the cache is `fixtures.stamped`, one per run; `-count=2` passes 70 of 70 scenarios twice.
+
+### 2026-11-20 · bug · A scenario's listener and servers lived until the suite ended
+
+- Symptom: after "Status prints the fingerprint reported by the running node" the fake node kept its socket listening through every later scenario, and each node-update scenario left an HTTP server listening, five by the end (lsof of the test process after each scenario).
+- Cause: the steps registered their cleanup on the suite's test (`f.t.Cleanup` in `features/cmd_local_test.go:38`, `:44` and `features/node_update_test.go:54` before the fix).
+- Status: resolved on branch `test/audit-harness-ci`: `afterScenario` (`features/acceptance_test.go`) undoes them in the scenario's After hook; no scenario now ends with a socket or TCP listener of the test process.
+
+### 2026-11-20 · bug · The login-service scenarios did nothing under go test -run
+
+- Symptom: `go test -tags acceptance -run 'TestFeatures/Remove_an_installed_login_service|TestFeatures/Register_the_node_at_login' ./features/` failed "Register" (got false, want true) and passed "Remove" without installing or removing anything.
+- Cause: the steps set HOME inside a subtest of the suite's test (`features/node_service_test.go:30` before the fix); `-run` matched no `login_profile` subtest, so go test skipped it, the operation with it, and returned success.
+- Status: resolved on branch `test/audit-harness-ci`: the two variables are set and restored around each operation.
+
+### 2026-11-20 · bug · A scenario's other changes to the process reached later scenarios
+
+- Symptom: a scenario that set a variable other than HOME, or changed the working directory, left it for every later scenario; the guard of PR #121 checked HOME only and did not restore it, so later scenarios failed as well.
+- Cause: `features/acceptance_test.go:67-80` before the fix.
+- Status: resolved on branch `test/audit-harness-ci`: after each scenario the suite compares every variable and the working directory with the state at its start, fails the scenario naming what changed (not the values) and restores it; godog's own variables are read after it sets them.
+
+### 2026-11-20 · bug · A developer's Git configuration reached the acceptance suite
+
+- Symptom: with `commit.gpgsign = true` in the global Git configuration, "Uncommitted changes prevent any project check from starting" failed with "gpg failed to sign the data". CI has no such configuration.
+- Cause: the steps and `internal/host` run git with the user's and the system's configuration.
+- Status: resolved on branch `test/audit-harness-ci`: `TestFeatures` sets `GIT_CONFIG_GLOBAL` to the null device and `GIT_CONFIG_NOSYSTEM`; the suite passes with that configuration.
+
+### 2026-11-20 · bug · A failed step was reported three times as an After hook failure
+
+- Symptom: a step error X appeared as "after scenario hook failed: X, step error: X, X, step error: X".
+- Cause: the After hooks of the identity and rendezvous steps, registered for every scenario, returned the error they were given (`features/identity_test.go:72`, `features/rendezvous_test.go:101` before the fix), which godog takes for the hook's own.
+- Status: resolved on branch `test/audit-harness-ci`.
+
+### 2026-11-20 · bug · The web acceptance file failed on a busy machine although its tests passed
+
+- Symptom: with every core busy, `features/web.spec.ts` failed 3 of 3 runs with "HookTimeoutError: Hook timed out in 10000ms" at `web/features/motion.ts:22`; all 213 tests passed.
+- Cause: `browser.close()` took 10.0 s under that load (20 to 60 ms idle), Vitest's default hook limit.
+- Status: resolved on branch `test/audit-harness-ci`: both browser hooks have 60 s; 3 of 3 loaded runs passed.
+
+### 2026-11-20 · deviation · CI gaps found in the audit of the workflows
+
+- Symptom: `pnpm/action-setup` (third party) and the `actions/*` were referenced by movable tags; `release.yml` restored pnpm and Go caches into the build of released files; `sudo ./netsim.test` had no time limit (a test binary run directly has none); CI never vetted code behind the `acceptance` tag and never compiled the macOS and Windows test files.
+- Status: resolved on branch `test/audit-harness-ci`: every action is pinned to the full commit its tag names today, the release job uses no cache, the netsim binary gets `-test.timeout=10m`, and `go vet` runs with the `acceptance` tag and for every cross-compile target.
 
 ### 2026-11-20 · bug · Web device log refused the entry it held when `p` carried a lone surrogate
 
