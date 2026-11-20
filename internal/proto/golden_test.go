@@ -65,6 +65,13 @@ func golden[T any](t *testing.T, name string, want T) {
 		if err := json.Unmarshal(data, &got); err != nil {
 			t.Fatal(err)
 		}
+		// Every example is read by the function that reads the wire: none lacks
+		// a field its type says is always there, or holds a null it has no place
+		// for. Compared as JSON values, because a row kept as JSON is spaced anew.
+		var read T
+		if err := Decode(data, &read); err != nil || !reflect.DeepEqual(jsonValue(t, wireJSON(t, read)), jsonValue(t, encoded)) {
+			t.Fatalf("Decode read %+v, %v\nwant        %s", read, err, encoded)
+		}
 		if roundTrip := wireJSON(t, got); !reflect.DeepEqual(jsonValue(t, roundTrip), jsonValue(t, encoded)) {
 			t.Fatalf("round trip %s\nwant       %s", roundTrip, encoded)
 		}

@@ -41,6 +41,12 @@ func TestParseSecretGivesTheCanonicalBytes(t *testing.T) {
 		"a line end":          "7K2M-9QXD-4F8T-WB3N\n",
 		"a line end inside":   "7K2M-9QXD\n4F8T-WB3",
 		"an underscore":       "7K2M_9QXD4F8TWB3N",
+		// Characters that a general upper-casing turns into letters of the alphabet.
+		"a long s for an S":     "7K2M-9QXD-4F8T-WB3" + string(rune(0x17f)),
+		"a sharp s for two S":   "7K2M-9QXD-4F8T-WB" + string(rune(0xdf)),
+		"a Kelvin sign for a K": "7" + string(rune(0x212a)) + "2M-9QXD-4F8T-WB3N",
+		"a dotless i":           "7K2M-9QXD-4F8T-WB3" + string(rune(0x131)),
+		"a full-width digit":    "7K2M-9QXD-4F8T-WB3" + string(rune(0xff17)),
 	} {
 		s, err := ParseSecret(text)
 		if s != "" || err == nil || err.Error() != refusal {
@@ -102,6 +108,7 @@ func TestVerifyPair(t *testing.T) {
 		return proto.Pair{Type: "pair", Key: device, Kind: "node", Name: "workstation", Role: role, MAC: mac}
 	}
 	other := testKey("node").ID()
+	weakKey := b64.EncodeToString(weakValues()[2])
 	for what, c := range map[string]struct {
 		m    proto.Pair
 		role string
@@ -113,6 +120,10 @@ func TestVerifyPair(t *testing.T) {
 		"the other side's own message sent back to it":  {pair("b", rfcDevice, macB), "a", false},
 		"the creator's mac under the other role":        {pair("b", rfcDevice, macA), "b", false},
 		"the mac of another device":                     {pair("a", other, macA), "a", false},
+		"a k that is no device id, with its mac":        {pair("a", "workstation", s.MAC("a", "workstation")), "a", false},
+		"a k in another spelling, with its mac":         {pair("a", respelled(rfcDevice), s.MAC("a", respelled(rfcDevice))), "a", false},
+		"a weak key as k, with its mac":                 {pair("a", weakKey, s.MAC("a", weakKey)), "a", false},
+		"no k, with its mac":                            {pair("a", "", s.MAC("a", "")), "a", false},
 		"a mac made with another secret":                {pair("a", rfcDevice, Secret("7K2M9QXD4F8TWB3M").MAC("a", rfcDevice)), "a", false},
 		"no mac":                                        {pair("a", rfcDevice, ""), "a", false},
 		"a mac cut short":                               {pair("a", rfcDevice, macA[:42]), "a", false},

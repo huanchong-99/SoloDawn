@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -84,10 +85,13 @@ func (k Key) sign(text string) string {
 	return b64.EncodeToString(ed25519.Sign(ed25519.PrivateKey(k), []byte(text)))
 }
 
+// verify is check 1 of contracts/envelope.md section 3: device is a device id,
+// s is a 64-byte signature in its canonical spelling that does not begin with
+// a weak value, and it verifies for the device over text.
 func verify(device, text, s string) bool {
-	pub, okKey := decode(device)
+	pub, okKey := deviceKey(device)
 	sig, okSig := decode(s)
-	return okKey && okSig && len(pub) == ed25519.PublicKeySize && ed25519.Verify(pub, []byte(text), sig)
+	return okKey && okSig && len(sig) == ed25519.SignatureSize && !weak(sig[:32]) && ed25519.Verify(pub, []byte(text), sig)
 }
 
 // decode reads a base64url value from the wire in its one canonical spelling.
@@ -98,8 +102,36 @@ func decode(s string) ([]byte, bool) {
 	return b, err == nil && b64.EncodeToString(b) == s
 }
 
-// isDevice reports whether id is a device id: a public key in its canonical spelling.
-func isDevice(id string) bool {
+// deviceKey returns the public key that a device id spells. A text that is
+// not a device id is never used as a key.
+func deviceKey(id string) ([]byte, bool) {
 	pub, ok := decode(id)
-	return ok && len(pub) == ed25519.PublicKeySize
+	return pub, ok && len(pub) == ed25519.PublicKeySize && !weak(pub)
+}
+
+func isDevice(id string) bool {
+	_, ok := deviceKey(id)
+	return ok
+}
+
+// The encodings of the points of small order, with the highest bit of the last
+// byte cleared (contracts/envelope.md section 2). Under such a key a signature
+// can be made without any private key, and Ed25519 libraries differ on whether
+// they verify it: crypto/ed25519 does. So these bytes are compared here, before
+// the library is asked, for a public key and for the first half of a signature.
+var smallOrder = map[string]bool{
+	"0000000000000000000000000000000000000000000000000000000000000000": true,
+	"0100000000000000000000000000000000000000000000000000000000000000": true,
+	"26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05": true,
+	"c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a": true,
+	"ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f": true,
+	"edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f": true,
+	"eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f": true,
+}
+
+// weak reports whether 32 bytes are one of the fourteen weak values.
+func weak(point []byte) bool {
+	low := [32]byte(point)
+	low[31] &= 0x7f
+	return smallOrder[hex.EncodeToString(low[:])]
 }
