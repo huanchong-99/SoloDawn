@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -73,6 +74,8 @@ type entryVector struct {
 	Accept bool           `json:"accept"`
 }
 
+var lowerHex32 = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
 func yes(env proto.Envelope) entryVector { return entryVector{env, true} }
 func no(env proto.Envelope) entryVector  { return entryVector{env, false} }
 
@@ -129,12 +132,23 @@ func cryptoVectors() vectors {
 	nonce := testID("challenge")
 	v.Rendezvous = []challengeVector{{nonce, node.id(), node.key.SignChallenge(nonce)}}
 
-	secret := Secret("7K2M9QXD4F8TWB3N")
-	v.Pairing = []pairingVector{{
-		Shown: "7K2M-9QXD-4F8T-WB3N", Secret: string(secret), Room: secret.Room(),
-		A: pairSide{browser.id(), secret.MAC("a", browser.id())},
-		B: pairSide{node.id(), secret.MAC("b", node.id())},
-	}}
+	// shown is what a person copied: the canonical bytes are its upper case
+	// without the hyphens. The first is the code as a device displays it.
+	for _, c := range []struct {
+		shown, secret string
+		a, b          device
+	}{
+		{"7K2M-9QXD-4F8T-WB3N", "7K2M9QXD4F8TWB3N", browser, node},
+		{"0h1j-8kmn-pqrs-tvwz", "0H1J8KMNPQRSTVWZ", node, tablet},
+		{"9ZY8XW7VT6SR5QPN", "9ZY8XW7VT6SR5QPN", node, browser},
+	} {
+		secret := Secret(c.secret)
+		v.Pairing = append(v.Pairing, pairingVector{
+			Shown: c.shown, Secret: c.secret, Room: secret.Room(),
+			A: pairSide{c.a.id(), secret.MAC("a", c.a.id())},
+			B: pairSide{c.b.id(), secret.MAC("b", c.b.id())},
+		})
+	}
 
 	genesis, addNode := add(browser, 1, browser), add(browser, 2, node)
 	tampered := add(browser, 2, node)
@@ -211,11 +225,12 @@ func TestCryptoVectorsHold(t *testing.T) {
 	if err := dec.Decode(&v); err != nil {
 		t.Fatal(err)
 	}
-	if len(v.Keys) < 2 || len(v.Envelopes) < 4 || len(v.Rendezvous) < 1 || len(v.Pairing) < 1 || len(v.Devlogs) < 8 {
+	if len(v.Keys) < 2 || len(v.Envelopes) < 4 || len(v.Rendezvous) < 1 || len(v.Pairing) < 3 || len(v.Devlogs) < 8 {
 		t.Fatalf("section 8 asks for more cases: %d keys, %d envelopes, %d rendezvous, %d pairing, %d devlogs",
 			len(v.Keys), len(v.Envelopes), len(v.Rendezvous), len(v.Pairing), len(v.Devlogs))
 	}
 
+	keys := map[string]Key{}
 	for _, c := range v.Keys {
 		seed, err := b64.DecodeString(c.Seed)
 		if err != nil || len(seed) != ed25519.SeedSize {
@@ -225,6 +240,7 @@ func TestCryptoVectorsHold(t *testing.T) {
 		if k.ID() != c.Device || k.Fingerprint() != c.Fingerprint {
 			t.Errorf("key %s: device %s, fingerprint %s", c.Name, k.ID(), k.Fingerprint())
 		}
+		keys[c.Device] = k
 	}
 
 	for _, c := range v.Envelopes {
@@ -232,18 +248,33 @@ func TestCryptoVectorsHold(t *testing.T) {
 		if c.OK && err != nil || !c.OK && err != BadSig {
 			t.Errorf("envelope %q: OpenCommand gave %v, ok is %v", c.Name, err, c.OK)
 		}
+		// Ed25519 signatures are deterministic: signing p again with the seed of k gives s itself.
+		k, listed := keys[c.Key]
+		if !listed {
+			t.Fatalf("envelope %q: k is not one of the keys", c.Name)
+		}
+		if again := k.Sign(c.Payload); (again == c.Envelope) != c.OK {
+			t.Errorf("envelope %q: signing p with the seed of k gives s %q, ok is %v", c.Name, again.Signature, c.OK)
+		}
 	}
 
 	for _, c := range v.Rendezvous {
 		if !VerifyChallenge(c.Key, c.Nonce, c.Signature) || VerifyChallenge(c.Key, c.Nonce+"A", c.Signature) {
 			t.Errorf("rendezvous nonce %q: the answer does not verify for it alone", c.Nonce)
 		}
+		// The nonce is signed as the text in the frame, not as the bytes it encodes.
+		if k, listed := keys[c.Key]; !listed || k.SignChallenge(c.Nonce) != c.Signature {
+			t.Errorf("rendezvous nonce %q: signing it with the seed of k does not give s", c.Nonce)
+		}
 	}
 
 	for _, c := range v.Pairing {
 		s, err := ParseSecret(c.Shown)
-		if err != nil || string(s) != c.Secret || s.String() != c.Shown || s.Room() != c.Room {
+		if err != nil || string(s) != c.Secret || s.Room() != c.Room {
 			t.Errorf("pairing %s: secret %q, room %q, %v", c.Shown, s, s.Room(), err)
+		}
+		if c.Secret != strings.ReplaceAll(strings.ToUpper(c.Shown), "-", "") || !lowerHex32.MatchString(c.Room) {
+			t.Errorf("pairing %s: secret %q is not its upper case without hyphens, or room %q is not 32 lower-case hex digits", c.Shown, c.Secret, c.Room)
 		}
 		if s.MAC("a", c.A.Device) != c.A.MAC || s.MAC("b", c.B.Device) != c.B.MAC {
 			t.Errorf("pairing %s: mac a %q, mac b %q", c.Shown, s.MAC("a", c.A.Device), s.MAC("b", c.B.Device))

@@ -89,6 +89,32 @@
         "device": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
         "mac": "cNQ1caBMtcBsH9U0heIhPu_kZW7kJyEykfmGRGoGNeA"
       }
+    },
+    {
+      "shown": "0h1j-8kmn-pqrs-tvwz",
+      "secret": "0H1J8KMNPQRSTVWZ",
+      "room": "87dbaf9c1efb8663726eaf270656e4f7",
+      "a": {
+        "device": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+        "mac": "01Wen_9VnAR-agdEYD1P-UkghQCRzFVdhJrjCzkdbBg"
+      },
+      "b": {
+        "device": "Uf0smnF_JZaPezkT98YFrtcqsk7qcy0S63F2cBmzXew",
+        "mac": "kRnkg0iYJGs9CiviIPnGDCr_-IoZYI7btxbq5v0Z4PM"
+      }
+    },
+    {
+      "shown": "9ZY8XW7VT6SR5QPN",
+      "secret": "9ZY8XW7VT6SR5QPN",
+      "room": "349a2c2f8f38fd71287e7dcea52e1dd3",
+      "a": {
+        "device": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+        "mac": "allpisKHEKYbI3ORTUPrf6HzJUAKO-G-fEXlg-hg620"
+      },
+      "b": {
+        "device": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+        "mac": "EOnBJyWAMaKtQQPQ8DVDrYY1qCohJl76VdZcz7YvGx4"
+      }
     }
   ],
   "devlogs": [
