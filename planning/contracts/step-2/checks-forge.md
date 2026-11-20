@@ -252,24 +252,27 @@ replace the forge commands of that section; everything else there stays.
   the next `submit_task` runs `open` again, and the forge program's
   refusal is what the AI and the owner see.
 
-## 7. Checks in a sandbox (open, spike S-10)
+## 7. Checks in a sandbox (D-12, spike S-10)
 
-Not decided here: open until spike S-10 reports (D-12; `risks.md` Q-19).
+S-10 `[verified]`: Linux bubblewrap ran a Go build and test and 988 web
+tests and blocked private files, host paths, host ports and the network.
+macOS `sandbox-exec` (deprecated by Apple) works in part; see below.
 
-- The spike must show **both** on each system: compatibility (one real
-  offline build and test, with its subprocesses, uses the checkout, the
-  toolchain and scratch space) and isolation (other user data stays
-  unreadable, writes and network outside stay denied). One without the
-  other does not pass.
-- Candidates: bubblewrap on Linux; `sandbox-exec` or the vendor's
-  sandbox runtime on macOS. Windows is a stated limit.
-- Where S-10 passes, checks run inside that sandbox. Where it fails, and
-  on Windows, checks run unsandboxed as in step 1, with the owner's
-  acceptance of section 1; the prompt says so.
-- The answer of S-10 is written into this section before code unit T2-12
-  starts; until then nothing here is built on. Whether forge templates
-  run inside the sandbox is part of that answer: they need the network
-  and the owner's sign-in, which a check does not.
+- **Where.** Linux: `bwrap --unshare-all`. macOS: `sandbox-exec`, whose
+  profile grants write to `/dev/null`. Only the worktree is writable.
+- **Loopback.** Linux: the private network namespace, so a check may
+  listen on `localhost`. macOS has none, and allowing `localhost` would
+  expose the host's services: blocked, and a check that needs a port fails.
+- **The check strings run unchanged** (HS-5, `contracts/local.md` section
+  7): the sandbox wraps the process that runs them and needs no rewrite.
+- **Dependencies** are installed inside the sandbox, offline from the
+  lockfile, where the toolchain allows. An install outside it runs
+  postinstall scripts unconfined; the prompt of section 3 says so.
+- **Fail closed.** If the sandbox cannot start (AppArmor can block user
+  namespaces on Ubuntu 24.04), `run_checks` runs nothing and says why.
+- **Windows** has no sandbox, a stated limit: checks run as in step 1,
+  under the acceptance of section 1, and the prompt says so.
+- Not decided: whether forge templates (network, sign-in) run inside it.
 
 ## 8. Open points
 
@@ -277,24 +280,21 @@ Unit P-4 freezes the shapes of sections 2 to 5; code is T2-9 (acceptance
 and the gate), T2-8 (templates) and T2-12 (sandbox).
 
 1. **Needs the coordinator.** C-11 (`architecture.md` section 1) and
-   R-137 say that for the forge the node runs only `git` and `gh`. A
-   template for another forge names another program. This file reads the
-   constraint as "only the forge programs the owner installed and signed
-   in, and only through a list the owner accepted; never a token, never
-   a forge API called by the node itself". The wording of C-11 and R-137
-   needs that widening for step 2, or D-10 cannot be built.
+   R-137 let the node run only `git` and `gh` for the forge; a template
+   names another program. Read here as "only forge programs the owner
+   installed and signed in, through a list the owner accepted; never a
+   token or a forge API called by the node". C-11 and R-137 need that
+   widening for step 2, or D-10 cannot be built.
 2. Every group asks once per machine, also a group of one person on one
-   machine: step 1's flow gets one prompt longer. An exception would
-   need a signed group row.
+   machine. An exception would need a signed group row.
 
 ## 9. Not verified
 
 - No forge program was run. `gh pr create` and `gh pr checks` are cited
-  from their documentation; for every other program, whether `open`
-  prints a URL and which exit statuses `checks` gives is unknown.
+  from their documentation; for other programs, whether `open` prints a
+  URL and which exit statuses `checks` gives is unknown.
 - How Go starts a program from an argument list on Windows, and what it
   does with `.cmd` and `.bat` files.
 - That a held `merge` item and a wait `accept` at step `merge` fit every
   case of the "point of no return" rule; only the contract was read.
-- The hash was computed with one implementation (Python), not with the
-  Go node or a browser.
+- The hash was computed with Python only, not the Go node or a browser.
