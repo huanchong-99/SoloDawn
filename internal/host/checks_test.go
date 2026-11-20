@@ -68,7 +68,8 @@ func TestProjectChecksAndBothHardChecks(t *testing.T) {
 	checkTestFile(t, dir, "source.go", "a marked secret\n")
 	checkTestGit(t, dir, "add", ".")
 	checkTestGit(t, dir, "commit", "-m", "task")
-	commands := []string{"echo one > first", "exit 12", "git hash-object first", "git switch -q base"}
+	checkTestFile(t, dir, ".git/info/exclude", "first\n")
+	commands := []string{"echo one > first", "exit 12", "git hash-object first"}
 
 	// Use Git's own hash on the platform's shell output (LF or CRLF).
 	first := "one\n"
@@ -86,12 +87,34 @@ func TestProjectChecksAndBothHardChecks(t *testing.T) {
 		{Name: commands[0], OK: true},
 		{Name: commands[1], Detail: new("exit status 12")},
 		{Name: commands[2], OK: true, Detail: new(digest + "\n")},
-		{Name: commands[3], OK: true},
 		{Name: "secrets", Detail: new("secret detected")},
 		{Name: "tests", Detail: new("source changed without a test file")},
 	}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v (%v), want %#v", got, err, want)
+	}
+}
+
+func TestChecksStopOnTreeOrCommitChange(t *testing.T) {
+	for _, tc := range []struct{ command, detail string }{
+		{"echo changed > guide", ErrDirtyCheckTree.Error()},
+		{"git switch -q base", "conflict: HEAD changed during checks"},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			dir := checkTestRepo(t)
+			checkTestGit(t, dir, "commit", "--allow-empty", "-m", "task head")
+			head := checkTestGit(t, dir, "rev-parse", "HEAD")
+			got, err := checkTestRunner().Run(t.Context(), dir, "base", checkTestGroup(tc.command, "echo ran > marker"))
+			want := proto.ChecksBody{Stage: "local", Commit: head, Items: []proto.CheckItem{
+				{Name: tc.command, Detail: &tc.detail}, {Name: "secrets", OK: true}, {Name: "tests", OK: true},
+			}}
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("tree changed: %#v (%v), want %#v", got, err, want)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "marker")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("later check ran: %v", err)
+			}
+		})
 	}
 }
 

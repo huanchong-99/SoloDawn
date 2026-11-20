@@ -35,11 +35,7 @@ func (r CheckRunner) Run(ctx context.Context, worktree, baseRef string, group pr
 		return proto.ChecksBody{}, err
 	}
 	result := proto.ChecksBody{Stage: "local", Commit: head, OK: true}
-	checkCtx, cancel := context.WithTimeout(ctx, time.Duration(group.Limits.TurnMinutes)*time.Minute)
-	defer cancel()
-	for _, command := range group.Checks {
-		result.Items = append(result.Items, runProjectCheck(checkCtx, worktree, command))
-	}
+	result.Items = runGroupChecks(ctx, worktree, head, group)
 	hard, err := r.hardChecks(ctx, worktree, baseRef+"..."+head)
 	if err != nil {
 		return proto.ChecksBody{}, err
@@ -49,6 +45,24 @@ func (r CheckRunner) Run(ctx context.Context, worktree, baseRef string, group pr
 		result.OK = result.OK && item.OK
 	}
 	return result, nil
+}
+
+func runGroupChecks(ctx context.Context, dir, head string, group proto.GroupRow) []proto.CheckItem {
+	checkCtx, cancel := context.WithTimeout(ctx, time.Duration(group.Limits.TurnMinutes)*time.Minute)
+	defer cancel()
+	var items []proto.CheckItem
+	for _, command := range group.Checks {
+		item := runProjectCheck(checkCtx, dir, command)
+		current, err := cleanCheckHead(ctx, dir)
+		if err != nil {
+			return append(items, checkedItem(command, err))
+		}
+		if current != head {
+			return append(items, checkedItem(command, errors.New("conflict: HEAD changed during checks")))
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func checkGit(ctx context.Context, dir string, args ...string) (string, error) {
