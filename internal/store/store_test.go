@@ -29,6 +29,7 @@ func openDB(t *testing.T, path string) *Store {
 	s, err := Open(path)
 	check(t, err)
 	t.Cleanup(func() { check(t, s.Close()) })
+	equal(t, s.db.Stats().InUse, 0)
 	return s
 }
 
@@ -44,6 +45,7 @@ func TestSchemaAndReopen(t *testing.T) {
 	s, err := Open(path)
 	check(t, err)
 	equal(t, scalar[string](t, s.db, "PRAGMA journal_mode"), "wal")
+	equal(t, s.db.Stats().MaxOpenConnections, 0)
 	equal(t, scalar[int](t, s.db, "PRAGMA user_version"), 1)
 	equal(t, scalar[string](t, s.db, `SELECT group_concat(name,',' ORDER BY name) FROM pragma_table_list
 		WHERE name NOT LIKE 'sqlite_%' AND strict=1`), "agent,approval,audit,device_log,grp,inbox,peer,perm,push_sub,receipt,row,session,setting,usage")
@@ -54,6 +56,18 @@ func TestSchemaAndReopen(t *testing.T) {
 	check(t, s.Close())
 	s = openDB(t, path)
 	equal(t, scalar[string](t, s.db, "SELECT value FROM setting WHERE key='name'"), "test")
+}
+
+func TestMemoryStoreUsesOneConnection(t *testing.T) {
+	s := openDB(t, ":memory:")
+	equal(t, s.db.Stats().MaxOpenConnections, 1)
+}
+
+func TestClosedDBMigration(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	check(t, err)
+	check(t, db.Close())
+	equal(t, migrate(db, []string{schema}).Error(), "sql: database is closed")
 }
 
 func TestMigrationsAreOrderedAndAtomic(t *testing.T) {

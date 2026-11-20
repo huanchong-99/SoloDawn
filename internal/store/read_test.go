@@ -90,6 +90,7 @@ func TestPagesAndDelta(t *testing.T) {
 
 func TestSnapshotPinsReplacedRow(t *testing.T) {
 	s := openDB(t, filepath.Join(t.TempDir(), "node.db"))
+	equal(t, s.db.Stats().MaxOpenConnections, 0)
 	set := func(text string) {
 		check(t, s.Write(func(tx *Tx) error {
 			seq, err := tx.NextSeq("g")

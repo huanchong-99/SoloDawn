@@ -55,9 +55,10 @@ func migrate(db *sql.DB, migrations []string) error {
 	if version < 0 || version > len(migrations) {
 		return fmt.Errorf("unsupported store schema version %d", version)
 	}
-	for i, migration := range migrations[version:] {
+	for _, migration := range migrations[version:] {
+		version++
 		err := transaction(db, func(tx *Tx) error {
-			_, err := tx.Exec(migration + fmt.Sprintf("; PRAGMA user_version=%d", version+i+1))
+			_, err := tx.Exec(migration + fmt.Sprintf("; PRAGMA user_version=%d", version))
 			return err
 		})
 		if err != nil {
