@@ -22,7 +22,7 @@ already live in a task's worktree, so the rule is:
 ## B. Taking over
 
 1. O taps "open terminal" on the card of one of their own AIs. The button is
-   disabled when the path from B to N is `relay`.
+   disabled unless B's path to N is `direct` (`flows/connect.md` step 8).
 2. B sends the signed host command `takeover.start` to N.
 3. N checks the signer is its owner and picks S (section A). If the AI is
    running a turn in this group, N interrupts it and waits for its end.
@@ -80,6 +80,7 @@ terminal as well, so there are no changed files to report.
 | --- | --- |
 | the interactive CLI cannot start or resume the session | N answers `takeover.start` with the CLI's error text and returns to the structured state |
 | the pseudo-terminal process exits by itself (O typed the CLI's exit command) | same as step 12 |
+| the path of B or of N becomes `relay` during takeover | that end closes the `pty` channel (`flows/connect.md` step 9): same as step 12 |
 | N restarts during takeover | on start, a session recorded as `takeover` is treated as handed back from step 14 |
 
 ## F. What spike S-4 showed, and what is still open

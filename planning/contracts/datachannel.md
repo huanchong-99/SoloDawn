@@ -60,11 +60,12 @@ Node to client:
   the whole list again, each entry shaped as in `welcome`:
   `{"t":"groups","groups":[{"g":"Qm1…","name":"Website","seq":812}]}`.
   The list is `[]` when the peer may read no group here.
-- A node keeps one inbound connection per client device. A new offer from
-  a device that has one closes the older one; a probe lives beside it until
-  its own `hello` (`contracts/rendezvous.md` 2.3). Nothing is carried over:
-  the client reads again with `sync`. A connection the node itself opened
-  as a client of that device's home is separate and unaffected.
+- A node keeps one inbound connection per client device. On first
+  application of a valid ordinary offer it closes that signer's previous
+  inbound connection and any pending inbound probe before it starts the
+  new checks; a copy or a replay closes nothing, and a probe's first valid
+  `hello` promotes it (`contracts/rendezvous.md` 2.3). Nothing is carried
+  over: the client reads again with `sync`.
 - A `hello` on a connection that has already had one is answered with a
   fresh `welcome`. A client sends it again when pairing has put it in the
   owner's log, and reads `owner: true` from the answer.
@@ -263,8 +264,8 @@ level of its task sessions, and `queued` counts held items.
   labelled `pty:<g>:<member>`. Each message is a chunk of raw bytes. The
   host stops reading from the pseudo-terminal while the channel's send
   buffer is above 1 MiB. The channel closing, for any reason, is hand-back.
-- The host refuses `takeover.start` with `relay` when the pair its own
-  stack selected for this connection is relayed.
+- The host refuses `takeover.start` with `relay` and closes an open `pty`
+  channel unless its own path is `direct` (`flows/connect.md` steps 8, 9).
 
 ## 8. What a node accepts from whom
 

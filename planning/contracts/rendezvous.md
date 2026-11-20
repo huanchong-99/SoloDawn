@@ -85,30 +85,47 @@ or after 15 minutes.
 Rules:
 
 - **Who offers.** The client side always offers: a browser to a node
-  (pairing included), a host to a home. Homes never offer. There is no glare
-  handling because there is no glare.
+  (pairing included), a host to a home. A home never offers. Every
+  connection has one offerer, so there is no glare to handle (section
+  5.1, point 5).
 - **Fan-out.** The offering side sends its offer and its candidates on
   every signalling path it has for the target (section 4). The answering
   side sends its answer on every path on which a copy of the offer arrives,
-  and its candidates on every path. Everything is told apart by sender and
-  `conn`; a copy of something already handled is ignored. No path is ever
-  "the" path, so nothing depends on which copy arrived first.
+  and its candidates on every path. Everything is told apart by
+  authenticated sender and `conn`. No path is ever "the" path, so nothing
+  depends on which copy arrived first.
 - **Two directions.** Two nodes may each be a client of the other (each
   hosts an AI in a group homed on the other). Each offers its own
-  connection; the two do not replace each other, and they never use the
-  same pair of UDP ports (section 5.1).
-- **Trickle.** An offer or an answer is sent as soon as it exists, and
-  candidates follow as `ice` payloads. Nobody waits for gathering to end:
-  with one STUN server that did not answer, a complete offer was ready 11
-  to 40 seconds after the first candidate `[verified, S-1]`.
+  connection under its own `conn`, and neither replaces the other
+  (section 5.1, points 3 and 5).
+- **Trickle.** Each side sends its local description as soon as it is set
+  and trickles its candidates as `ice` payloads on every path. Nobody
+  waits for gathering to end (evidence 12 says what waiting cost). A
+  candidate can arrive before its description: the receiver holds early
+  candidates by authenticated sender and `conn` until the corresponding
+  remote description is set. It deduplicates individual candidates and
+  discards those for retired connections.
 - **Acceptance.** The receiver applies an offer only if the envelope passes
   the checks in `contracts/envelope.md` section 3. Anything else is dropped
   without an answer.
-- **One inbound connection per device.** When a node applies an offer that
-  is not a probe, it first closes the inbound connection it still holds
-  from that device, if any. A probe is the exception: it lives beside the
-  connection it is meant to replace, which is closed when the probe's
-  `hello` arrives (`flows/connect.md` B). Section 5.1, point 4, says why.
+- **Once only.** A node remembers every (signer, `conn`) it has processed,
+  also after that connection has closed, for at least the freshness
+  window: two minutes plus the allowed clock skew, so until two minutes
+  after the offer's `ts` (`contracts/envelope.md` section 3, check 5). A
+  remembered offer is never processed again and never closes anything, so
+  a replayed old offer cannot close a live connection. A copy for the
+  current `conn` only repeats the answer, on the path the copy came by.
+  Copies for a superseded connection are ignored while their envelopes
+  can still pass that check.
+- **One inbound connection per device.** A restart or an expired NAT
+  mapping can make a new offerer appear at an endpoint still registered to
+  an old connection (section 5.1, point 4). On first application of a
+  valid ordinary offer, one that is not a probe, the node closes that
+  signer's previous inbound connection and any pending inbound probe
+  before it starts the new checks. It serialises this decision per signer
+  and leaves alone the connection it offered to that device itself. A
+  probe stays pending beside the current inbound connection until its
+  first valid `hello` promotes it (section 5.1, point 10).
 - The offer creates one data channel labelled `ctl`, ordered and reliable.
 
 ## 3. Relay
@@ -138,10 +155,10 @@ A node keeps, per known device, a short list of signalling addresses:
    The datagram is a signed envelope with payload
    `{"t":"beacon","n":"…","ts":…,"port":47800}`. A node that recognises the
    signer records `ws://<source address>:<port>/rv` for that device.
-2. **Remembered**: every address at which signalling to that device last
-   succeeded, and the addresses the device itself reported in its `hello`
-   (`contracts/datachannel.md`), including port mappings it obtained from
-   the router.
+2. **Remembered**: every signalling URL at which that device was last
+   reached, and the URLs the device itself reported in its `hello`
+   (`contracts/datachannel.md`), a mapped one included. ICE endpoints are
+   not remembered (section 5.1, point 9).
 3. **Rendezvous**: the configured rendezvous URLs. The official one is the
    default; a self-hoster replaces or adds to the list.
 
@@ -155,107 +172,119 @@ rendezvous a browser can use: it is the same handler. See `risks.md` K-2.
 ## 5. ICE configuration
 
 Node (pion). `[verified, S-1]` marks what spike S-1 showed with pion 4.2
-and with Chromium, Firefox and WPE WebKit on Linux. WPE WebKit is not
-Safari. Port mapping waits for spike S-8.
+and with Chromium, Firefox and WPE WebKit on Linux, `[verified, A.1]` what
+the review of section 5.1 measured. "Evidence n" is entry n of
+`contracts/rendezvous-evidence.md`, which also lists what is unverified.
 
-- **Answering.** UDP on one fixed port (default 47800), shared by every
-  connection the node answers (`SetICEUDPMux`), and an ICE-TCP passive
-  listener on 47801 (`SetICETCPMux`) `[verified, S-1]`.
-- **Offering.** Each connection the node offers has UDP sockets of its
-  own, on ports the system picks, and never uses the fixed UDP port
-  (section 5.1) `[verified, S-1]`. It lists the passive TCP port like any
-  other connection.
+- **UDP.** As section 5.1, point 3, says. The configured port (default
+  47800) is given to pion with `SetICEUDPMux`, one mux for each local
+  address `[verified, S-1 and A.1]`.
+- **TCP.** An ICE-TCP passive listener on 47801 (`SetICETCPMux`), for the
+  connections a node answers and for those it offers `[verified, S-1]`.
 - IPv4 and IPv6 host candidates, server-reflexive through STUN, relay
   through TURN.
-- Asks the router (UPnP, NAT-PMP) to map 47800/udp, 47800/tcp and 47801/tcp,
-  and advertises mapped addresses as candidates
-  (`SetICEAddressRewriteRules`) and as signalling addresses. Obtaining the
-  mapping is the node's own work; pion only publishes it `[unverified]`.
+- Asks the router (UPnP, NAT-PMP) to map 47800/udp, 47800/tcp and
+  47801/tcp, and publishes the address and port the router granted as
+  candidates and as signalling addresses (section 5.1, point 8). That is
+  the node's own work: `SetICEAddressRewriteRules` rewrites an address
+  and has no field for an external port `[unverified]`, spike S-8.
 - Queries the `.local` names that browsers give instead of their host
   addresses (`SetICEMulticastDNSMode`, query only). A name that does not
   resolve is no obstacle: in S-1 the connections used the browser's
   address as its checks showed it (peer-reflexive) `[verified, S-1]`.
-- A `probe` connection is created with STUN only, no TURN. The probe
-  stays: when a direct path returned under a live relayed connection,
-  Chromium and WPE WebKit moved to it by themselves within 5 seconds and
-  Firefox was still relayed after 30, with pion's opt-in renomination on
-  or off `[verified, S-1]`.
+- Both ends create a `probe` connection without TURN. The probe stays:
+  when a direct path returned under a live relayed connection, Chromium
+  and WPE WebKit moved to it by themselves within 5 seconds and Firefox
+  was still relayed after 30, with pion's opt-in renomination on or off
+  `[verified, S-1]`.
 
 ### 5.1 Ports: why a node offers from sockets of its own
 
-1. **What was seen** (S-1; two pion nodes, each using UDP 47800 for every
-   connection). A to B was open and echoing. B then opened its own
-   connection to A. Both connections chose the pair 47800 and 47800, and
-   from then on A to B received nothing, while B to A worked. With one
-   change, the offering side on a port of its own, both connections
-   answered all four alternating echoes.
-2. **Why.** On a shared UDP socket only STUN packets say which connection
-   they belong to. DTLS, and all data inside it, does not, so a shared
-   socket can tell its connections apart by the remote address and port
-   alone, and pion does that (`udp_mux.go`, pion/ice 4.4.2). One shared
-   socket therefore serves one connection per remote address and port.
-   Two connections between the same two fixed ports are the same pair at
-   both ends, and the later one takes the address.
-3. **Rule.** A node uses its fixed UDP port only for the connections it
-   answers. A connection it offers has sockets of its own. Browsers
-   already work this way.
-4. **What follows.** On a node's fixed port every connection now comes from
-   a different remote address and port: each offered connection has its
-   own sockets, and a NAT never gives two sockets one mapping towards one
-   destination. That covers the two directions between two nodes, a probe
-   beside the relayed connection it replaces, and a reconnect while the
-   peer still holds the old connection. No message changes.
-   One case is left. A node that restarts may be given the port it had
-   before, and a NAT may give a new socket the port it gave the old one,
-   while the answering node still holds the old connection: the shared
-   socket then hands the new connection's packets to the old one, and the
-   new one is late by 25 to 30 seconds, until the old one times out. That
-   is why an offer that is not a probe closes the device's old inbound
-   connection at once (2.3). A probe needs no such rule: its sockets are
-   opened while those of the connection it replaces are still open, so
-   their ports, and their mappings on a NAT, differ.
-5. **Not chosen: one connection per pair of nodes, used both ways.** It
-   changes who owns a connection. Today the side that offers is the
-   client: it sends `hello`, reads, sends commands, reconnects and probes;
-   homes never offer, and there is no glare. A shared connection makes both
-   ends client and server on one `ctl`, and each of those rules then needs
-   a tie-break, two simultaneous offers included.
-6. **Not chosen: a second fixed port for offering.** It would keep the
-   offering side's mapped port useful (point 8). But connections would
-   again share a socket on the offering side, where a probe and the
-   connection it replaces go to the same peer; it adds a port to open and
-   to map; and it was not measured.
-7. **Hole punching** is unchanged in kind: the answering side offers the
-   candidates of its fixed port, the offering side those of its new
-   sockets. That is what a browser does, and what S-1 measured with the
-   three browsers of section 5. Between two nodes behind real NATs it is
-   `[unverified]`: the bench of S-1 had no NAT.
-8. **Port mapping.** The mapping of 47800/udp now helps only the
-   connections a node answers; a node that offers is not reached on its
-   mapped UDP port. When the offering node is the one with an open port,
-   what is left is TCP to its 47801, which it still lists, provided that
-   pion on the answering side dials it `[unverified]`; then the relay
-   (`risks.md` K-19). Spike S-8 measures this.
-9. **Remembered addresses** are signalling addresses and do not change.
-10. **The relay-free probe** is an offered connection: it has sockets of
-    its own and cannot collide with the connection it replaces. S-1 showed
-    both open together and echoing, with each of those browsers.
+1. **What was seen** `[verified, S-1]`. With both nodes using UDP 47800
+   for all connections, A to B echoed before B to A opened. Both selected
+   the pair 47800 and 47800. A to B then missed both five-second echoes,
+   and B to A answered both. With only the offerers changed to private
+   UDP sockets, all four alternating echoes matched.
+2. **Why: the last registration wins.** Each underlying pion UDP mux maps
+   an observed remote IP and port to one ICE connection. For an unknown
+   endpoint, the USERNAME of a STUN request can identify the local ICE
+   username fragment. For a known endpoint the existing map wins, also for
+   incoming STUN. A write to that endpoint can transfer the registration.
+   DTLS and SCTP traffic then follows the registered owner (evidence 2).
+3. **Rule.** On each eligible local IPv4 or IPv6 address, a node reserves
+   its configured UDP port for the host candidates of the connections it
+   answers. Each connection it offers gathers its UDP candidates on
+   sockets of its own, with ports the system assigns. Both roles may use
+   the passive TCP listener. STUN and TURN candidates describe the sockets
+   or allocations that produced them. A browser controls its own socket
+   allocation. Concurrent offers: `[verified, A.1]` (evidence 3).
+4. **Reconnecting: close first.** A restart or an expired NAT mapping can
+   make a new offerer appear at an endpoint still registered to an old
+   connection. How long recovery takes depends on which candidates can be
+   checked; no figure is promised (evidence 4). Hence "One inbound
+   connection per device" in section 2.3. Three cases lie outside it:
+   - An answering node that restarts clears its own mux.
+   - A NAT can recycle an endpoint to a different device. Same-signer
+     teardown cannot clear that old registration, and closing connections
+     by public IP would disconnect unrelated peers.
+   - Two browser tabs that share one device key share the ordinary
+     inbound slot under this policy (`risks.md` K-23).
+5. **Not chosen: one connection per pair of nodes, used both ways.** Each
+   direction has its own `conn` and one offering client that owns `hello`,
+   commands, reconnect and probing. A node can answer as a home while it
+   offers as a host. Offers made at the same moment address different
+   peer connections, so neither meets SDP glare. Sharing one `ctl` would
+   require agreement on which connection survives simultaneous offers and
+   on how both client sessions resume on it.
+6. **Not chosen: a second fixed port for offering.** One configured UDP
+   port is kept. A second, shared offering port separates the opposite
+   directions and nothing more: it can give an ordinary connection and
+   its probe the same mux registration. A mapped port for ordinary
+   offers, with private probe sockets, is reconsidered if S-8 shows a
+   material gain in reachability.
+7. **Hole punching** remains available; its success rate is not measured.
+   ICE checks compatible host, reflexive and relay candidates. A live NAT
+   mapping and a live local socket are two things, and either can outlive
+   the other (points 4 and 10). Two peers behind the same NAT can use
+   reachable LAN host candidates; using each other's public mappings from
+   inside that NAT requires hairpinning. If LAN routing or client
+   isolation prevents the host path and hairpinning fails, another
+   working pair is required. S-8 measures these cases, and hole punching
+   across different NATs with ephemeral offering sockets (evidence 7).
+8. **Port mapping.** A forward or mapping to 47800/UDP benefits answered
+   connections. If the other direct UDP and IPv6 paths fail, a pion
+   answerer can dial the passive TCP endpoint the offerer advertises:
+   verified on Linux with only the offerer's listener reachable
+   `[verified, A.1]` (evidence 8). S-8 verifies the router mapping,
+   reachability from outside and publication of the actual external port,
+   also when a router grants another port than the one asked for. A
+   mapped-address rule applies only to the candidates that mapping
+   serves. TURN is used when no direct pair works. TCP simultaneous open
+   remains S-9 (`risks.md` K-19).
+9. **Remembered addresses** are unaffected. A node remembers reachable
+   signalling URLs, a mapped signalling URL included when there is one.
+   ICE candidates are gathered anew for each connection, and an ephemeral
+   ICE endpoint is never a remembered signalling address.
+10. **The relay-free probe** stays make-before-break. Both ends omit TURN
+    on a probe, and a node keeps one pending probe beside the current
+    inbound connection. A probe can still fail where a direct path
+    exists: failed direct checks of the old connection may still own an
+    endpoint that is later assigned to the probe `[verified, A.1]`
+    (evidence 10). The old connection therefore keeps serving until the
+    node has accepted `hello` on the probe; the order is in
+    `flows/connect.md` B.
 
 Browser: `RTCPeerConnection` with the `ice` list from `ready`; a `probe`
 connection drops the TURN entry.
 
-What ICE gives without more code: all candidate pairs are checked in
-parallel and the best working pair is used (R-131).
+What ICE gives without more code: it checks compatible pairs as they
+become available and nominates a working pair. A higher-priority path
+discovered later may require a probe to take effect (R-131).
 
-Step 1 offers these direct paths, all tried together: UDP hole punching,
-IPv6, and TCP to a port that the other node has open, forwarded, or mapped
-on its router. The relay on port 443 is the last resort (R-131).
-
-Two nodes that are both behind NAT with UDP blocked, and no mapped or
-forwarded port on either side, have no direct TCP path in step 1: that
-would need TCP simultaneous open, which pion does not perform
-`[unverified]`. Spike S-9 measures what it would gain; it is built in step
-3 only if the gain is clear (`risks.md` Q-1).
+Which direct paths step 1 tries together, with the relay on port 443 as
+the last resort, is R-131. TCP simultaneous open is not among them: pion
+does not perform it `[unverified]`, and spike S-9 measures what it would
+gain (`risks.md` Q-1).
 
 ## 6. Self-hosting
 

@@ -4,7 +4,7 @@ Status: **plan converged after three review rounds; implementation
 started.**
 
 Three review rounds are answered in `reviews/`; the last ended with "ready
-to start". The coordinator has settled Q-1 to Q-25 (`risks.md`). Next:
+to start". The coordinator has settled Q-1 to Q-26 (`risks.md`). Next:
 
 1. Work proceeds by `steps/step-1.md`: the backend by
    `steps/step-1-backend.md`, starting with B-00; the frontend by
@@ -134,6 +134,7 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/envelope.md` | identities, signed envelope, device log |
 | `contracts/vectors.md` | the shared test vectors that hold the Go node and the web client to `contracts/envelope.md` |
 | `contracts/rendezvous.md` | WebSocket signalling protocol, STUN and relay |
+| `contracts/rendezvous-evidence.md` | what spike S-1 and the A.1 design review measured for the ICE rules, the sources read, and what is not verified |
 | `contracts/datachannel.md` | data-channel protocol: channels, framing, session, reading, inbox, terminal |
 | `contracts/conventions.md` | rules for everything on the wire: which fields are always present, requests and answers, sizes, and which task freezes which shape |
 | `contracts/rows.md` | the rows a home pushes: group, member, device, task, message, note |
