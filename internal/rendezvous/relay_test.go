@@ -144,10 +144,19 @@ func TestGenerator(t *testing.T) {
 		t.Fatal("wrong public address family")
 	}
 	g.public = []net.IP{v4}
-	if c, a, err := g.AllocatePacketConn(turn.AllocateListenerConfig{Network: "udp6"}); c != nil || a != nil || err.Error() != "no relay address for requested address family" {
+	if c, a, err := g.AllocatePacketConn(turn.AllocateListenerConfig{Network: "udp6"}); c != nil || a != nil || err.Error() != "no unambiguous relay address for requested address family" {
 		t.Fatalf("IPv6: %v, %v, %v", c, a, err)
 	}
 	g.bind = net.IPv4(127, 0, 0, 1)
+	g.public = append(g.public, g.bind)
+	if got := g.publicIP("udp4"); !got.Equal(g.bind) {
+		t.Fatal(got)
+	}
+	g.bind = net.ParseIP("127.0.0.2")
+	if got := g.publicIP("udp4"); got != nil {
+		t.Fatal(got)
+	}
+	g.public = []net.IP{v4}
 	if c, a, err := g.AllocatePacketConn(turn.AllocateListenerConfig{Network: "udp4", RequestedPort: -1}); c != nil || a != nil || err == nil {
 		t.Fatalf("invalid port: %v, %v, %v", c, a, err)
 	}

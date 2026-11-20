@@ -100,7 +100,7 @@ func (g *generator) events() turn.EventHandler {
 func (g *generator) AllocatePacketConn(c turn.AllocateListenerConfig) (net.PacketConn, net.Addr, error) {
 	ip := g.publicIP(c.Network)
 	if ip == nil {
-		return nil, nil, errors.New("no relay address for requested address family")
+		return nil, nil, errors.New("no unambiguous relay address for requested address family")
 	}
 	conn, err := net.ListenPacket(c.Network, net.JoinHostPort(g.bind.String(), strconv.Itoa(c.RequestedPort)))
 	if err != nil {
@@ -113,10 +113,18 @@ func (g *generator) AllocatePacketConn(c turn.AllocateListenerConfig) (net.Packe
 func (*generator) Validate() error { return nil } // Addresses were resolved at startup.
 
 func (g *generator) publicIP(network string) net.IP {
+	var matches []net.IP
 	for _, ip := range g.public {
-		if (network == "udp4") == (ip.To4() != nil) {
+		if (network == "udp4") != (ip.To4() != nil) {
+			continue
+		}
+		if ip.Equal(g.bind) {
 			return ip
 		}
+		matches = append(matches, ip)
+	}
+	if len(matches) == 1 {
+		return matches[0]
 	}
 	return nil
 }
