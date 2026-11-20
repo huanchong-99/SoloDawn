@@ -1,3 +1,4 @@
+@web
 Feature: Web client
   The web client is one responsive page that a node and the rendezvous serve as static files.
   It opens in the person's language and theme, moves between its pages by the address fragment,

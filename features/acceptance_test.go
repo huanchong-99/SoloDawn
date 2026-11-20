@@ -13,7 +13,7 @@ import (
 	"github.com/cucumber/godog"
 )
 
-// TestFeatures runs the CLI and protocol scenarios in this directory.
+// TestFeatures runs every scenario in this directory except @web; the vitest-cucumber suite under web/ runs those.
 func TestFeatures(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "solodawn.exe")
 	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/solodawn").CombinedOutput(); err != nil {
@@ -41,7 +41,7 @@ func TestFeatures(t *testing.T) {
 				return nil
 			})
 		},
-		Options: &godog.Options{Format: "pretty", Paths: []string{"."}, Strict: true, TestingT: t},
+		Options: &godog.Options{Format: "pretty", Paths: []string{"."}, Tags: "~@web", Strict: true, TestingT: t},
 	}
 	if suite.Run() != 0 {
 		t.Fatal("acceptance scenarios failed")
