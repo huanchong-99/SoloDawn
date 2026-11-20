@@ -102,7 +102,7 @@ func (m ReviewedMerge) Inspect(ctx context.Context) (MergeResult, error) {
 	if m.PR != 0 {
 		return m.inspectPR(ctx)
 	}
-	last, err := m.run(ctx, "git", "log", "-1", "--format=%H%n%B", "refs/heads/"+m.Base, "--")
+	last, err := m.run(ctx, "git", "log", "-1", "--no-show-signature", "--format=%H%n%B", "refs/heads/"+m.Base, "--")
 	if err != nil {
 		return MergeResult{}, err
 	}

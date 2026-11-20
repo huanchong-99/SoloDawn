@@ -153,6 +153,24 @@ func TestMergeChangeAlreadyOnBase(t *testing.T) {
 	mergeEqual(t, mergeGit(t, m.Repo, "log", "-1", "--format=%P%n%B"), base+"\nMerge task t7 at "+m.Commit)
 }
 
+func TestInspectSignedLocalMerge(t *testing.T) {
+	m := mergeFixture(t)
+	_, err := m.Apply(t.Context())
+	mergeOK(t, err)
+	// Include a signature header without requiring a local signing key.
+	// With log.showSignature, Git includes its verification diagnostics.
+	raw := mergeGit(t, m.Repo, "cat-file", "commit", "HEAD")
+	signed := strings.Replace(raw, "\n\n", "\ngpgsig -----BEGIN PGP SIGNATURE-----\n fixture\n -----END PGP SIGNATURE-----\n\n", 1)
+	dir := t.TempDir()
+	mergeFile(t, dir, "signed", signed+"\n")
+	oid := mergeGit(t, m.Repo, "hash-object", "-w", "-t", "commit", filepath.Join(dir, "signed"))
+	mergeGit(t, m.Repo, "update-ref", "refs/heads/base", oid)
+	mergeGit(t, m.Repo, "config", "log.showSignature", "true")
+	result, err := m.Inspect(t.Context())
+	mergeOK(t, err)
+	mergeEqual(t, result, host.MergeResult{MergeCommit: oid})
+}
+
 func TestMergeMissingRefs(t *testing.T) {
 	m := mergeFixture(t)
 	m.Branch = "absent"
