@@ -108,15 +108,13 @@ Rules:
 - **Acceptance.** The receiver applies an offer only if the envelope passes
   the checks in `contracts/envelope.md` section 3. Anything else is dropped
   without an answer.
-- **Once only.** A node remembers every (signer, `conn`) it has processed,
-  also after that connection has closed, for at least the freshness
-  window: two minutes plus the allowed clock skew, so until two minutes
-  after the offer's `ts` (`contracts/envelope.md` section 3, check 5). A
-  remembered offer is never processed again and never closes anything, so
-  a replayed old offer cannot close a live connection. A copy for the
-  current `conn` only repeats the answer, on the path the copy came by.
-  Copies for a superseded connection are ignored while their envelopes
-  can still pass that check.
+- **Once only.** Remember each processed (signer, `conn`) until the receiver's
+  clock is strictly later than the offer's `ts + 120000` milliseconds,
+  including after the connection closes. An answering-node restart does not
+  shorten that interval. A remembered offer never starts checks or closes
+  anything. For a live connection or a pending probe, return the same answer
+  on the path that delivered the copy, once the answer is available. Ignore
+  copies for retired connections.
 - **One inbound connection per device.** A restart or an expired NAT
   mapping can make a new offerer appear at an endpoint still registered to
   an old connection (section 5.1, point 4). On first application of a

@@ -52,11 +52,14 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
 - **A1.9** `pair.browser` sent again with the same nonce returns the same
   link while the link is valid and `conflict` after it was used or expired.
 - **A1.10** An old offer of a device, sent to the node again inside the
-  freshness window after a newer connection from that device has opened,
-  is not processed and closes nothing: no connection is created for it,
-  and the live connection keeps answering `host.info`. A copy of the offer
-  for the current `conn` gets the same answer again, on the path it came
-  by, and nothing else happens (`contracts/rendezvous.md` 2.3).
+  freshness window after a newer connection from that device has opened, is
+  not processed and closes nothing: no connection is created for it, and the
+  live connection keeps answering `host.info`. A copy of the offer for the
+  current `conn` gets the same answer again, on the path it came by, and
+  nothing else happens (`contracts/rendezvous.md` 2.3). Repeat with a
+  future-dated offer that passed check 5 on receipt. At exactly `ts + 120000`,
+  replaying the retired offer still leaves the newer connection answering
+  `host.info`.
 - **A1.11** With a test rendezvous that delivers candidates before the
   offer and before the answer they belong to, each side holds them and
   applies them once the description is set: the connection opens, and no
