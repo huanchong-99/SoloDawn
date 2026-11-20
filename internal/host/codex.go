@@ -4,16 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -73,22 +70,22 @@ func (codexDriver) Start(ctx context.Context, l Launch) (Process, error) {
 	attrs := new(syscall.SysProcAttr)
 	cmd := codexCommand(ctx, l.Folder, append([]string{"app-server"}, flags...), runtime.GOOS == "windows", reflect.ValueOf(attrs).Elem())
 	cmd.SysProcAttr = attrs
-	stdin, _ := cmd.StdinPipe()
-	stdout, _ := cmd.StdoutPipe()
-	if err := cmd.Start(); err != nil {
+	stdin, stdout, err := startCodexCmd(cmd)
+	if err != nil {
 		return nil, err
 	}
 	kill := killCheckTree(cmd)
 	p := &codexProcess{
-		launch:   l,
-		sandbox:  sandbox,
-		approval: approval,
-		stdin:    stdin,
-		events:   make(chan Event, 16),
-		ready:    make(chan struct{}),
-		nextID:   3,
-		asks:     map[string]json.RawMessage{},
-		files:    map[string]codexFileItem{},
+		launch:    l,
+		sandbox:   sandbox,
+		approval:  approval,
+		startedNs: time.Now().UnixNano(),
+		stdin:     stdin,
+		events:    make(chan Event, 16),
+		ready:     make(chan struct{}),
+		nextID:    3,
+		asks:      map[string]json.RawMessage{},
+		files:     map[string]codexFileItem{},
 	}
 	p.send(codexRPCRequest{
 		ID:     1,
@@ -96,17 +93,32 @@ func (codexDriver) Start(ctx context.Context, l Launch) (Process, error) {
 		Params: map[string]any{"clientInfo": map[string]string{"name": "solodawn", "version": "1"}},
 	})
 	go p.readLoop(stdout, func() {
+		stdout.Close()
 		cmd.Wait()
 		kill()
 	})
 	return p, nil
 }
 
+func startCodexCmd(cmd *exec.Cmd) (stdin, stdout *os.File, err error) {
+	inR, inW, _ := os.Pipe()
+	outR, outW, _ := os.Pipe()
+	cmd.Stdin, cmd.Stdout = inR, outW
+	err = cmd.Start()
+	inR.Close()
+	outW.Close()
+	if err != nil {
+		inW.Close()
+		outR.Close()
+	}
+	return inW, outR, err
+}
+
 func codexBaseFlags(l Launch) ([]string, error) {
 	if len(l.Shim) == 0 || l.Shim[0] == "" {
 		return nil, errors.New("codex: missing MCP shim command")
 	}
-	timeout := strconv.FormatInt(int64(l.ToolTimeout.Seconds()), 10)
+	timeout := fmt.Sprintf("%d", int64(l.ToolTimeout.Seconds()))
 	return []string{
 		"-c", "mcp_servers.solodawn.command=" + string(codexJSON(l.Shim[0])),
 		"-c", "mcp_servers.solodawn.args=" + string(codexJSON(l.Shim[1:])),
@@ -147,40 +159,44 @@ func codexThreadConfig(l Launch) map[string]any {
 // termination on Windows.
 func codexCommand(ctx context.Context, dir string, args []string, windows bool, fields reflect.Value) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "codex", args...)
-	cmd.Dir = dir
-	cmd.WaitDelay = time.Second
+	cmd.Dir, cmd.WaitDelay = dir, time.Second
 	if windows {
-		cmd.Cancel = func() error {
-			return exec.Command("taskkill.exe", "/f", "/t", "/pid", strconv.Itoa(cmd.Process.Pid)).Run()
-		}
+		cmd.Cancel = func() error { return cancelCodexWindows(cmd.Process.Pid) }
 		return cmd
 	}
 	fields.FieldByName("Setpgid").SetBool(true)
-	cmd.Cancel = func() error {
-		group, _ := os.FindProcess(-cmd.Process.Pid)
-		return group.Kill()
-	}
+	cmd.Cancel = func() error { return cancelCodexUnix(cmd.Process.Pid) }
 	return cmd
 }
 
+func cancelCodexWindows(pid int) error {
+	return exec.Command("taskkill.exe", "/f", "/t", "/pid", fmt.Sprint(pid)).Run()
+}
+
+func cancelCodexUnix(pid int) error {
+	proc, _ := os.FindProcess(-pid)
+	return proc.Kill()
+}
+
 func codexJSON(v any) []byte {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.Encode(v)
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	var raw bytes.Buffer
+	encoder := json.NewEncoder(&raw)
+	encoder.SetEscapeHTML(false)
+	encoder.Encode(v)
+	return bytes.TrimSuffix(raw.Bytes(), []byte("\n"))
 }
 
 // codexProcess drives one running codex app-server child.
 // wmu guards stdin and closed; mu guards protocol, turn, approval and usage
 // state. The two locks are never nested.
 type codexProcess struct {
-	launch   Launch
-	sandbox  string
-	approval string
+	launch    Launch
+	sandbox   string
+	approval  string
+	startedNs int64
 
 	wmu    sync.Mutex
-	stdin  io.WriteCloser
+	stdin  *os.File
 	closed bool
 
 	// events is written only by readLoop and read only by the caller of Start.
@@ -335,7 +351,7 @@ func (p *codexProcess) Answer(ask string, allow bool) error {
 	return p.send(codexRPCResult{ID: rawID, Result: map[string]string{"decision": decision}})
 }
 
-func (p *codexProcess) readLoop(stdout io.Reader, wait func()) {
+func (p *codexProcess) readLoop(stdout *os.File, wait func()) {
 	defer close(p.events)
 	defer wait()
 	defer p.finishReady("", errCodexClosed)
@@ -737,7 +753,7 @@ func (p *codexProcess) lookupFileItem(itemID string) codexFileItem {
 }
 
 func (p *codexProcess) registerAsk(rawID json.RawMessage, tool, category, command, why string, input json.RawMessage) *Ask {
-	id := rand.Text()
+	id := fmt.Sprintf("%x:%s", p.startedNs, rawID)
 	p.mu.Lock()
 	p.asks[id] = rawID
 	p.mu.Unlock()
