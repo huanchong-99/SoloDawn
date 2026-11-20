@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags: ['*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build the embedded web client and include the installation guide
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          cp ../install.md ../internal/node/webdist/
+
+      - name: Build release binaries
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          mkdir dist
+          for os in linux darwin windows; do
+            suffix=
+            if [[ "$os" == windows ]]; then suffix=.exe; fi
+            for arch in amd64 arm64; do
+              asset="solodawn_${GITHUB_REF_NAME}_${os}_${arch}${suffix}"
+              GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags='-s -w' -o "dist/$asset" ./cmd/solodawn
+            done
+          done
+
+      - name: Checksum the six binaries
+        working-directory: dist
+        run: sha256sum solodawn_* > SHA256SUMS
+
+      - name: Publish the tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create --verify-tag --generate-notes -- "$GITHUB_REF_NAME" dist/* install.md

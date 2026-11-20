@@ -1,0 +1,63 @@
+# Install and pair SoloDawn
+
+From the [SoloDawn releases](https://github.com/huanchong-99/SoloDawn/releases),
+download `SHA256SUMS` and the binary for your computer **from the same release**.
+Save both in an empty directory. Each binary is named
+`solodawn_<version>_<os>_<arch>`, with an extra `.exe` on Windows.
+
+| System | `<os>` | `<arch>` |
+| --- | --- | --- |
+| Linux | `linux` | `amd64` for x86-64, `arm64` for AArch64 |
+| macOS | `darwin` | `amd64` for Intel, `arm64` for Apple silicon |
+| Windows | `windows` | `amd64` for x64, `arm64` for ARM64 |
+
+## Verify and install
+
+In the download directory, set `asset` to the downloaded binary's filename.
+The commands below check the SHA-256 digest and filename against the manifest
+before installing the executable.
+
+**Linux and macOS** (Bash or Zsh)
+
+```sh
+asset='REPLACE_WITH_BINARY_FILENAME'
+if [ "$(uname -s)" = Darwin ]; then
+  shasum -a 256 "$asset"
+else
+  sha256sum "$asset"
+fi | grep -Fxf SHA256SUMS &&
+  mkdir -p "$HOME/.local/bin" &&
+  install -m 755 "$asset" "$HOME/.local/bin/solodawn"
+```
+
+On success the matching line appears. Add `$HOME/.local/bin` to your
+`PATH` if needed.
+
+**Windows** (PowerShell)
+
+```powershell
+$asset = 'REPLACE_WITH_BINARY_FILENAME.exe'
+$digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset -ErrorAction Stop).Hash
+if ((Get-Content -LiteralPath SHA256SUMS -ErrorAction Stop) -notcontains "$digest  $asset") {
+    throw "SHA256SUMS has no matching digest and filename"
+}
+$bin = Join-Path $env:LOCALAPPDATA 'Programs\SoloDawn'
+New-Item -ItemType Directory -Force -Path $bin | Out-Null
+Copy-Item -LiteralPath $asset -Destination (Join-Path $bin 'solodawn.exe')
+```
+
+Add the installation directory to your user `Path` or run the executable
+by its full path.
+
+## Pair with the browser
+
+With the verified executable installed, use the pairing secret from the
+onboarding prompt within its ten-minute window. Replace the placeholders
+with that secret and a label for this computer.
+
+```text
+solodawn pair <secret> --name "<label>"
+```
+
+Check the pairing result against the device label and fingerprint shown
+in the browser.
