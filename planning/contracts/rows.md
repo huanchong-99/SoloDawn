@@ -74,10 +74,8 @@ Optional, AI only: `task` (absent when its state names no task); every key
 of `usage`: `window_pct`, `window_resets`, `day_cap_pct`, `spend_today`,
 `spend_cap`, `turns_today`. A person's row has no optional field.
 
-`state` and `task` describe the AI in this group as a whole. The host
-derives them from the AI's sessions: the session that is running a turn or
-is taken over, otherwise `waiting` if any session is open, otherwise
-`dormant` (`sessions.md`).
+`state` and `task` describe the AI in this group as a whole, derived by the
+host as `sessions.md` section 3 says.
 
 `[unverified]` Which usage figures each CLI exposes in structured mode.
 Spikes S-2 and S-3 record them; the card shows what exists.
@@ -108,7 +106,7 @@ does not.
  "branch":"task/12-node-report-connection-path-changes","pr":31,"pr_url":"https://…/pull/31",
  "checks":{"local":{"ok":true,"at":1763598000000,"commit":"9f2c1ab"},
            "cloud":{"ok":true,"at":1763598300000,"commit":"9f2c1ab"}},
- "review":{"round":1,"score":86,"ok":false,"by":"<member id>","commit":"9f2c1ab","at":1763598900000},
+ "review":{"round":1,"failed":1,"score":86,"ok":false,"by":"<member id>","commit":"9f2c1ab","at":1763598900000},
  "wait":null,"failures":0,
  "thread":{"count":7,"rounds":3,
            "last":{"by":"<member id>","kind":"progress","text":"Adding the event after switch-back","ts":1763599000000}},
@@ -128,6 +126,7 @@ does not.
 | `wait` | `{"kind":…,"msg":"<msg id>","who":["<user id>"],"since":<time>}`, the latest reason the task is not moving, or `null` |
 | `wait.kind` | while `queued`: `depends`; while `active`: `approval`, `decision`, `reviewer`, `conflict`; while `paused`: `manual`, `rounds`, `preempted` |
 | `failures` | consecutive failures (R-63) |
+| `review.failed` | failed reviews since the task was created or a person last resumed or reassigned it from `failed`; the stop of R-63 counts it (`contracts/task-machine.md` row 7) |
 | `thread.rounds` | AI-to-AI exchanges since the last human message in the thread (R-60) |
 | `thread.last.text` | a preview: at most the first 200 characters of that message's text. A long message is cut here, never refused because of it |
 | `stats.ended` | the time the task finished, or `null` |
@@ -137,27 +136,33 @@ Optional:
 | Field | Present |
 | --- | --- |
 | `brief` | when `origin` is `brief` |
+| `plan` | when `origin` is `direct` or `takeover` and the `plan` of `task start` is not empty: that plan |
 | `commit` | from the first submission: what hosted checks, the review and the merge are about |
 | `reviewer` | once one is named |
 | `branch` | once the branch exists |
 | `pr`, `pr_url` | after a submission, when the group has a remote |
-| `review` | after the first review |
+| `review` | after the first review; `review.failed` counts from 0 before it |
 | `checks.local`, `checks.cloud` | after that check has run |
 | `thread.last` | when the thread has a message |
 | `wait.msg`, `wait.who` | when the wait is about a card, and about people |
 
-What the mock-up badges map to:
+What the mock-up badges map to. A task shows one badge: the first row,
+from the top, whose condition holds.
 
 | Badge | Condition |
 | --- | --- |
-| queued | `state = queued` |
-| in progress | `state = active`, `wait = null` |
-| waiting for your approval / for someone's approval | `wait.kind = approval`, viewer in `wait.who` or not |
-| sent back by review | `state = active`, `review.ok = false` |
-| stopped after failures | `state = failed` |
 | merged | `state = merged` |
+| cancelled | `state = cancelled` |
+| stopped after failures | `state = failed` |
 | owner is operating directly | the assignee's member row has `state = takeover` and `task` = this task |
 | paused | `state = paused` |
+| queued | `state = queued` |
+| waiting for your approval / for someone's approval | `wait.kind = approval`, viewer in `wait.who` or not |
+| waiting for your decision / for someone's decision | `wait.kind = decision`, viewer in `wait.who` or not |
+| waiting for a reviewer | `wait.kind = reviewer` |
+| merge conflict | `wait.kind = conflict` |
+| sent back by review | `state = active`, `review.ok = false` |
+| in progress | `state = active` |
 
 ## 5. `msg`
 

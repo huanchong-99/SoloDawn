@@ -45,7 +45,8 @@ has no `env`.
 
 An `approval` is posted by the AI's host on its own, when the CLI asks for
 permission; no AI turn is spent on it. It is presented in the main line
-under the secretary's name with a mention of the approvers (R-42).
+under the secretary's name, and the host sets its `mentions` to the member
+ids of the people in `body.approvers` (R-42).
 
 ## 2. Bodies
 
@@ -68,7 +69,7 @@ under the secretary's name with a mention of the approvers (R-42).
 | `scope` | `in` and `out`, both lists |
 | `tasks` | at least one entry; every field of an entry is always present |
 | `tasks[].depends` | list of **indexes** into `tasks`, each lower than the entry's own, so a cycle cannot be written |
-| `pass` | pass score of ordinary tasks; foundation tasks use the group's `pass_foundation` |
+| `pass` | pass score of ordinary tasks, which the secretary's host fills from `group.pass` (it is no tool argument); foundation tasks use the group's `pass_foundation` |
 | `replaces` | id of the brief this one replaces, or `null` |
 
 Assignee and reviewer are working AIs, not the secretary, and differ.
@@ -139,7 +140,9 @@ read the rest of it (`risks.md` K-21).
 | `recommended` | optional: the `id` of an option |
 | `to` | user ids, at least one |
 
-A decision may be answered with an option, with free text, or both.
+A decision with options is answered with one of them, with or without free
+text; one whose `options` is empty, with free text (`contracts/commands.md`
+1.4).
 
 Signed: every field. Added by the home: nothing.
 
@@ -221,10 +224,10 @@ row lists below, except `ai`, which the home adds.
 
 | `code` | From | Always present | Optional |
 | --- | --- | --- | --- |
-| `rounds_limit` | home | `task`, `n` | — |
+| `rounds_limit` | home | `task`, `n` (the limit that was reached, `limits.rounds`) | — |
 | `turn_interrupted` | host | `ai`, `reason` (`crash`, `timeout`, `stop`) | `task`, `detail` |
 | `group_paused`, `group_resumed` | home | `by` | — |
-| `preempted` | home | `task`, `by` | — |
+| `preempted` | home | `task`, `by` (the author of the `msg` named by `task preempted`, whose jump interrupted the task) | — |
 | `cap_reached` | host | `ai`, `cap` (`day`, `task`) | `task` |
 | `rate_limited` | host | `ai`, `resets` | — |
 | `login_invalid` | host | `ai` (R-56) | `detail` |
@@ -268,6 +271,7 @@ therefore adds less than 4 KiB to a card's row.
 | --- | --- |
 | `pending` | none |
 | `decided` | `by`, `at`, `act`; `choice` (an option id) and `text`, at least one of the two |
+| `expired` | `at`: the task it names was merged or cancelled while it was pending |
 
 ### 3.4 `call`
 
