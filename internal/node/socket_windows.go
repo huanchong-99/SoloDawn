@@ -6,6 +6,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+const connRefused = windows.WSAECONNREFUSED
+
 // ownerOnly replaces the socket's inherited DACL with a protected one that
 // grants the current user, and nobody else, full access. An AF_UNIX socket
 // file is a reparse point and opens only with FILE_FLAG_OPEN_REPARSE_POINT.

@@ -8,8 +8,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const addrInUse = windows.WSAEADDRINUSE
-
 func TestSocketDACLIsOwnerOnly(t *testing.T) {
 	dir := socketRoot(t)
 	openSocket(t, dir)

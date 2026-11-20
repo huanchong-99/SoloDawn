@@ -19,11 +19,40 @@ func TestListenLocal(t *testing.T) {
 	openSocket(t, dir)
 	path := filepath.Join(dir, "sock")
 	checkSocketModes(t, dir, path)
-	if l, err := ListenLocal(dir); l != nil || !errors.Is(err, addrInUse) {
-		t.Fatalf("second listener = %v, %v; want address in use", l, err)
+	if l, err := ListenLocal(dir); l != nil || err != errRunning {
+		t.Fatalf("second listener = %v, %v; want %v", l, err, errRunning)
 	}
 	if l, err := ListenLocal(filepath.Join(path, "child")); l != nil || !errors.Is(err, syscall.ENOTDIR) {
 		t.Fatalf("listener beneath a socket = %v, %v; want not a directory", l, err)
+	}
+}
+
+func TestStaleSocketIsReplaced(t *testing.T) {
+	dir := socketRoot(t)
+	path := filepath.Join(dir, "sock")
+	stale, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.SetUnlinkOnClose(false)
+	stale.Close()
+	l := openSocket(t, dir)
+	if l.Addr().String() != path {
+		t.Fatalf("listener on %q, want %q", l.Addr(), path)
+	}
+	checkSocketModes(t, dir, path)
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatalf("dial the new socket: %v", err)
+	}
+	conn.Close()
+}
+
+func TestBindFailure(t *testing.T) {
+	dir := filepath.Join(socketRoot(t), strings.Repeat("d", 110))
+	var bind *net.OpError
+	if l, err := ListenLocal(dir); l != nil || !errors.As(err, &bind) || bind.Op != "listen" {
+		t.Fatalf("listener on a path beyond the socket limit = %v, %v; want a listen error", l, err)
 	}
 }
 
@@ -107,7 +136,7 @@ func TestForegroundRuntime(t *testing.T) {
 func TestForegroundErrors(t *testing.T) {
 	dir := nodeTestDir(t)
 	openSocket(t, dir)
-	if err := Foreground(); !errors.Is(err, addrInUse) {
+	if err := Foreground(); err != errRunning {
 		t.Fatalf("foreground on an active socket returned %v", err)
 	}
 	for _, name := range []string{"HOME", "XDG_DATA_HOME", "LocalAppData", "USERPROFILE"} {

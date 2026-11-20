@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -69,18 +68,10 @@ func TestLocalArgumentsReachTheSocket(t *testing.T) {
 	}
 }
 
-func TestForegroundFailure(t *testing.T) {
-	dir := testDataDir(t)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, "sock")
-	if err := os.WriteFile(path, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+func TestNodeAlreadyRunning(t *testing.T) {
+	testListener(t, testDataDir(t))
 	var stdout, stderr bytes.Buffer
-	_, want := net.Listen("unix", path)
-	if code := run([]string{"node"}, &stdout, &stderr); code != 1 || stdout.Len() != 0 || stderr.String() != want.Error()+"\n" {
+	if code := run([]string{"node"}, &stdout, &stderr); code != 1 || stdout.Len() != 0 || stderr.String() != "a node is already running\n" {
 		t.Fatalf("node: exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 }
