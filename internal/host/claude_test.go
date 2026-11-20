@@ -415,6 +415,13 @@ func TestClaudeDriverWithFakeCLI(t *testing.T) {
 	t.Run("ContextCancelKillsProcessTree", testClaudeContextCancelKillsTree)
 }
 
+func claudeTestStartLevel() int {
+	if runtime.GOOS == "windows" {
+		return 1
+	}
+	return 2
+}
+
 func testClaudeApprovalAndResume(t *testing.T) {
 	tempDir := setClaudeTempDir(t)
 	logFile := filepath.Join(t.TempDir(), "lifecycle.log")
@@ -426,7 +433,7 @@ func testClaudeApprovalAndResume(t *testing.T) {
 
 	proc, err := Drivers["claude"].Start(t.Context(), Launch{
 		Folder:       t.TempDir(),
-		Level:        2,
+		Level:        claudeTestStartLevel(),
 		Shim:         shim,
 		Instructions: "Follow rules.",
 	})

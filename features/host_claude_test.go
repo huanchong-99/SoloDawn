@@ -83,9 +83,6 @@ func (s *claudeAcceptanceState) prepareDir() {
 	s.dir = s.t.TempDir()
 	s.logPath = filepath.Join(s.dir, "lifecycle.log")
 	s.setEnv("SOLODAWN_FAKECLI_LOG", s.logPath)
-	s.setEnv("TMPDIR", s.dir)
-	s.setEnv("TMP", s.dir)
-	s.setEnv("TEMP", s.dir)
 }
 
 func (s *claudeAcceptanceState) writeScript(name, steps string) error {
